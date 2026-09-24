@@ -13,3 +13,5 @@ coverage/
 playwright-report/
 test-results/
 *.tsbuildinfo
+.env.local
+.env.*.local
