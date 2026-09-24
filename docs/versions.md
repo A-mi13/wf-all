@@ -13,6 +13,14 @@
 | Next.js / React | 16.3.6 / 19.3.0 | `apps/web/package.json`, catalog (`pnpm-workspace.yaml`) |
 | Vite / Vitest | 8.3.1 / 5.0.1 | catalog (`pnpm-workspace.yaml`) |
 | Playwright | 1.63.0 | `apps/web/package.json` |
+| TypeScript | 6.0.3 (приложения, пакеты) / 5.9.3 (генератор) | catalog и `catalogs.contracts` (`pnpm-workspace.yaml`); почему не 7 — в исключениях |
+| ESLint / typescript-eslint / eslint-plugin-boundaries | 9.39.5 / 8.70.1 / 7.2.0 | catalog; boundaries — `packages/config/package.json` |
+| Prettier | 3.9.9 | catalog (`pnpm-workspace.yaml`) |
+| openapi-typescript / openapi-fetch | 7.13.0 / 0.17.0 | `contracts/package.json` / `apps/{web,admin}/package.json` |
+| next-intl / use-intl | 4.14.7 / 4.14.7 | `apps/web/package.json` / `apps/admin/package.json` |
+| MSW | 2.15.0 | `apps/{web,admin}/package.json` |
+| GitHub Actions: checkout / setup-go / pnpm action-setup | 7.0.1 / 7.0.0 / 6.1.0 | полный SHA в `.github/workflows/*.yml`; плавающий тег `pnpm/action-setup@v6` указывал на 6.0.10 без поддержки pnpm 12 |
+| Flutter / Dart | фиксируется в wf-native | в репо wf-native проекта Flutter пока нет — версии появятся с мобильной спекой |
 | chi / pgx | 5.3.2 / 5.11.0 | `backend/go.mod` |
 | oapi-codegen / sqlc | 2.8.0 / 1.31.1 | `backend/tools/go.mod` |
 | River | 0.47.0 | `backend/go.mod` (рантайм-библиотека воркера), CLI — `backend/tools/go.mod` |
