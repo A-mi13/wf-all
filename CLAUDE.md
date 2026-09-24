@@ -35,10 +35,10 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - `apps/web/AGENTS.md` и `apps/web/CLAUDE.md` пишет `next dev` — не удалять и не править.
 
 ## Git policy
-- Коммит — одна строка по-русски, без тела и Co-Authored-By. Пуш — только по команде пользователя; `push --force` — никогда.
+- В этом проекте коммитить по ходу работы разрешено (пользователь, 24.09.2026); формат коммита, пуш и запреты — по глобальному CLAUDE.md.
 - В папке параллельно работают другие агенты: коммитить только свои пути — `git add <пути> && git commit -m "…" -- <пути>`.
 - Никогда: `git add -A` / `git add .` / `git commit -a`, `git stash`, `git reset`, `git clean`, `git checkout -- .`.
-- lefthook pre-commit (prettier, gofmt, gitleaks) не обходить через `--no-verify`.
+- pre-commit (lefthook): prettier и gofmt сами дописывают правки в коммит, gitleaks останавливает коммит с секретом.
 
 ## Naming
 - Технический слаг — `wf` (Go-модуль `wf/backend`, npm `@wf/*`, префикс CSS `--wf-*`). Бренд не финален («ГДЕФУТБОЛ» в дизайне, WhereFootball в доках) — только в локалях и конфиге, не в идентификаторах.
