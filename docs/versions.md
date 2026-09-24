@@ -34,5 +34,7 @@
 - pnpm по умолчанию не ставит версии младше суток (`minimumReleaseAge`) — это защита, не баг.
 - sqlc разбирает грамматику PostgreSQL 17: синтаксис PG18 в SQL не используем.
 - Глобальный pnpm должен быть ≥ 10.34.5, иначе он не переключается на 12 по `packageManager`.
-- pnpm 12 при запуске скриптов (`pnpm --filter X test`) может сам доустанавливать воркспейс —
-  не запускать такие команды параллельно с `pnpm install`.
+- pnpm 12 по умолчанию сам доустанавливает воркспейс при `pnpm run`/`pnpm exec`. У нас
+  `verifyDepsBeforeRun: error` (`pnpm-workspace.yaml`): устаревший `node_modules` — ошибка
+  `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`, чинится одним `pnpm install`. Сам `pnpm install`
+  параллельно ни с чем не запускать. Хук pre-commit зовёт `node_modules/.bin/prettier` без pnpm.

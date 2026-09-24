@@ -21,6 +21,11 @@ catalogs:
   contracts:
     typescript: 5.9.3
 
+# pnpm run/exec не доустанавливают зависимости молча (по умолчанию — install):
+# несколько агентов и хук pre-commit запускают pnpm параллельно, и неявные установки
+# гонялись бы в node_modules. Устаревший node_modules — громкая ошибка, чинится явным pnpm install.
+verifyDepsBeforeRun: error
+
 # pnpm 12: пакет со скриптом установки, которого нет в списке, роняет install.
 allowBuilds:
   lefthook: true
