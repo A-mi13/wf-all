@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Обёртка, чтобы не добавлять .tools/bin в PATH руками.
+exec "$(dirname "$0")/.tools/bin/task" "$@"

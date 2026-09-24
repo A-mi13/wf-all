@@ -1,0 +1,567 @@
+<x-dc>
+<helmet>
+
+<style>
+body { margin: 0; font-family: 'Manrope', system-ui, sans-serif; background: #0B0F0D; }
+a { color: #C6F24E; }
+a:hover { color: #D9FA85; }
+button, input, select, textarea { font-family: inherit; color: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, input:focus-visible { outline: 2px solid #C6F24E; outline-offset: 2px; }
+::placeholder { color: #6E7B73; opacity: 1; }
+</style>
+</helmet>
+<div style="width: 1260px; height: 1110px; box-sizing: border-box; background: #0B0F0D; color: #EAF2EC; padding: 30px 34px; display: flex; flex-direction: column; gap: 16px;">
+
+  <div style="display: flex; align-items: flex-end; gap: 20px;">
+    <div style="flex-grow: 1;">
+      <div style="font-family: 'Oswald', sans-serif; font-size: 28px; font-weight: 600; letter-spacing: 0.4px;">АРХЕТИПЫ ДВОРОВОГО ФУТБОЛА</div>
+      <div style="margin-top: 5px; font-size: 13px; font-weight: 500; color: #93A399; line-height: 1.45; max-width: 800px;">Собственный пак вместо карикатур на реальных игроков: их изображение — чужое право, и продавать его за подписку нельзя. Бесплатно даём два безликих силуэта — их видно ниже. Всё, что с характером — каска, вратарские перчатки, свисток, дреды, конопушки, пацан на плече, клубная форма с золотом — покупается за очки или зарабатывается достижением. У каждого архетипа ещё и свой фон: ворота у вратаря, кирпич у Стенки, тактическая доска у Тренера, карты у Джокера, кубки у Золотого мяча. Человек платит не «за ещё одну картинку», а за то, чтобы в составе его узнавали.</div>
+    </div>
+    <div style="flex-shrink: 0; display: flex; gap: 8px;">
+      <div style="padding: 6px 11px; border-radius: 7px; background: #1F2A23; color: #7E8C83; font-size: 11px; font-weight: 700;">по умолчанию · 2</div>
+      <div style="padding: 6px 11px; border-radius: 7px; background: #2C4434; color: #C6F24E; font-size: 11px; font-weight: 700;">за очки · 14</div>
+      <div style="padding: 6px 11px; border-radius: 7px; background: #2E2418; color: #E8B858; font-size: 11px; font-weight: 700;">за достижение · 7</div>
+    </div>
+  </div>
+
+
+  <div style="display: flex; gap: 18px; align-items: center; padding: 14px 18px; border-radius: 14px; background: #10150F; border: 1px dashed #2C382F;">
+    <div style="display: flex; gap: 14px; flex-shrink: 0;">
+
+      <div style="text-align: center;">
+        <svg width="96" height="96" sc-camel-view-box="0 0 96 96" aria-hidden="true">
+          <circle cx="48" cy="48" r="48" fill="#161D19"></circle>
+          <path d="M48 96 a48 48 0 0 0 48 -48 h-96 a48 48 0 0 0 48 48 z" fill="#1B241F"></path>
+          <path d="M41 63 h14 v13 q-7 5 -14 0 z" fill="#333F39"></path>
+          <path d="M13 96 q1 -17 15 -23 l12 -5 h16 l12 5 q14 6 15 23 z" fill="#3A4741"></path>
+          <ellipse cx="25" cy="48" rx="4.6" ry="6.6" fill="#3A4741"></ellipse>
+          <ellipse cx="71" cy="48" rx="4.6" ry="6.6" fill="#3A4741"></ellipse>
+          <path d="M25 44 a23 24 0 0 1 46 0 v7 q0 14 -14 20 q-9 6 -18 0 q-14 -6 -14 -20 z" fill="#3A4741"></path>
+        </svg>
+        <div style="font-size: 11px; font-weight: 800; color: #C3D0C7; margin-top: 5px;">Силуэт</div>
+        <div style="font-size: 10px; font-weight: 600; color: #6E7B73; margin-top: 2px;">ставится сам</div>
+      </div>
+
+      <div style="text-align: center;">
+        <svg width="96" height="96" sc-camel-view-box="0 0 96 96" aria-hidden="true">
+          <circle cx="48" cy="48" r="48" fill="#161D19"></circle>
+          <path d="M48 96 a48 48 0 0 0 48 -48 h-96 a48 48 0 0 0 48 48 z" fill="#1B241F"></path>
+          <path d="M41 63 h14 v13 q-7 5 -14 0 z" fill="#9C7E63"></path>
+          <path d="M13 96 q1 -17 15 -23 l12 -5 h16 l12 5 q14 6 15 23 z" fill="#3D473F"></path>
+          <path d="M40 68 l8 11 l8 -11 l-4 -2 q-4 3 -8 0 z" fill="#2F372F"></path>
+          <ellipse cx="25" cy="48" rx="4.6" ry="6.6" fill="#BC9877"></ellipse>
+          <ellipse cx="71" cy="48" rx="4.6" ry="6.6" fill="#BC9877"></ellipse>
+          <path d="M25 44 a23 24 0 0 1 46 0 v7 q0 14 -14 20 q-9 6 -18 0 q-14 -6 -14 -20 z" fill="#BC9877"></path>
+          <circle cx="39.5" cy="48" r="2.4" fill="#3A2C22"></circle>
+          <circle cx="56.5" cy="48" r="2.4" fill="#3A2C22"></circle>
+          <path d="M43 61 h10" stroke="#7A5A46" stroke-width="2.2" fill="none" stroke-linecap="round"></path>
+        </svg>
+        <div style="font-size: 11px; font-weight: 800; color: #C3D0C7; margin-top: 5px;">Новичок</div>
+        <div style="font-size: 10px; font-weight: 600; color: #6E7B73; margin-top: 2px;">ставится сам</div>
+      </div>
+
+    </div>
+    <div style="font-size: 12.5px; font-weight: 500; color: #93A399; line-height: 1.5;"><span style="color: #EAF2EC; font-weight: 800;">Это всё, что даётся бесплатно.</span> Два безликих силуэта, без причёски, без вещи, без цвета формы — их специально не за что любить. В ленте из десяти человек такой аватар не запоминается, и это и есть причина открыть остальные двадцать один. Ни один бесплатный аватар никогда не получит деталь: как только у «силуэта» появится хоть каска, платить станет не за что.</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; flex-grow: 1;">
+
+    <sc-for list="{{list}}" as="a" hint-placeholder-count="20">
+      <div style="padding: 12px 8px 11px 8px; border-radius: 16px; background: {{a.cardBg}}; border: 1px solid {{a.cardBorder}}; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+        <svg width="112" height="112" sc-camel-view-box="0 0 96 96" aria-hidden="true">
+
+          <circle cx="48" cy="48" r="48" fill="{{a.bg}}"></circle>
+          <path d="M48 96 a48 48 0 0 0 48 -48 h-96 a48 48 0 0 0 48 48 z" fill="{{a.bg2}}"></path>
+          <clipPath id="{{a.clipId}}"><circle cx="48" cy="48" r="48"></circle></clipPath>
+          <g clip-path="url(#{{a.clipId}})">
+            <sc-if value="{{a.m_factory}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><rect x="0" y="30" width="14" height="66"></rect><rect x="17" y="44" width="9" height="52"></rect><rect x="82" y="38" width="12" height="58"></rect></g><g fill="{{a.mf2}}"><circle cx="7" cy="22" r="9"></circle><circle cx="20" cy="11" r="7"></circle><circle cx="88" cy="26" r="8"></circle><circle cx="76" cy="14" r="5"></circle></g></sc-if>
+            <sc-if value="{{a.m_grid}}" hint-placeholder-val="{{ false }}"><g stroke="{{a.mf}}" stroke-width="1.7"><path d="M0 6 h96"></path><path d="M0 18 h96"></path><path d="M0 30 h96"></path><path d="M0 42 h96"></path><path d="M0 54 h96"></path><path d="M0 66 h96"></path><path d="M0 78 h96"></path><path d="M0 90 h96"></path><path d="M6 0 v96"></path><path d="M18 0 v96"></path><path d="M30 0 v96"></path><path d="M42 0 v96"></path><path d="M54 0 v96"></path><path d="M66 0 v96"></path><path d="M78 0 v96"></path><path d="M90 0 v96"></path></g></sc-if>
+            <sc-if value="{{a.m_bricks}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><rect x="-6" y="2" width="22" height="10" rx="1.5"></rect><rect x="18" y="2" width="22" height="10" rx="1.5"></rect><rect x="42" y="2" width="22" height="10" rx="1.5"></rect><rect x="66" y="2" width="22" height="10" rx="1.5"></rect><rect x="90" y="2" width="22" height="10" rx="1.5"></rect><rect x="6" y="14" width="22" height="10" rx="1.5"></rect><rect x="30" y="14" width="22" height="10" rx="1.5"></rect><rect x="54" y="14" width="22" height="10" rx="1.5"></rect><rect x="78" y="14" width="22" height="10" rx="1.5"></rect><rect x="102" y="14" width="22" height="10" rx="1.5"></rect><rect x="-6" y="26" width="22" height="10" rx="1.5"></rect><rect x="18" y="26" width="22" height="10" rx="1.5"></rect><rect x="42" y="26" width="22" height="10" rx="1.5"></rect><rect x="66" y="26" width="22" height="10" rx="1.5"></rect><rect x="90" y="26" width="22" height="10" rx="1.5"></rect><rect x="6" y="38" width="22" height="10" rx="1.5"></rect><rect x="30" y="38" width="22" height="10" rx="1.5"></rect><rect x="54" y="38" width="22" height="10" rx="1.5"></rect><rect x="78" y="38" width="22" height="10" rx="1.5"></rect><rect x="102" y="38" width="22" height="10" rx="1.5"></rect><rect x="-6" y="50" width="22" height="10" rx="1.5"></rect><rect x="18" y="50" width="22" height="10" rx="1.5"></rect><rect x="42" y="50" width="22" height="10" rx="1.5"></rect><rect x="66" y="50" width="22" height="10" rx="1.5"></rect><rect x="90" y="50" width="22" height="10" rx="1.5"></rect><rect x="6" y="62" width="22" height="10" rx="1.5"></rect><rect x="30" y="62" width="22" height="10" rx="1.5"></rect><rect x="54" y="62" width="22" height="10" rx="1.5"></rect><rect x="78" y="62" width="22" height="10" rx="1.5"></rect><rect x="102" y="62" width="22" height="10" rx="1.5"></rect><rect x="-6" y="74" width="22" height="10" rx="1.5"></rect><rect x="18" y="74" width="22" height="10" rx="1.5"></rect><rect x="42" y="74" width="22" height="10" rx="1.5"></rect><rect x="66" y="74" width="22" height="10" rx="1.5"></rect><rect x="90" y="74" width="22" height="10" rx="1.5"></rect><rect x="6" y="86" width="22" height="10" rx="1.5"></rect><rect x="30" y="86" width="22" height="10" rx="1.5"></rect><rect x="54" y="86" width="22" height="10" rx="1.5"></rect><rect x="78" y="86" width="22" height="10" rx="1.5"></rect><rect x="102" y="86" width="22" height="10" rx="1.5"></rect></g></sc-if>
+            <sc-if value="{{a.m_goal}}" hint-placeholder-val="{{ false }}"><path d="M6 92 V30 h84 v62" fill="none" stroke="{{a.mf}}" stroke-width="3.4"></path><g stroke="{{a.mf2}}" stroke-width="1.4"><path d="M14 30 v54"></path><path d="M22 30 v54"></path><path d="M30 30 v54"></path><path d="M38 30 v54"></path><path d="M46 30 v54"></path><path d="M54 30 v54"></path><path d="M62 30 v54"></path><path d="M70 30 v54"></path><path d="M78 30 v54"></path><path d="M86 30 v54"></path><path d="M6 38 h84"></path><path d="M6 46 h84"></path><path d="M6 54 h84"></path><path d="M6 62 h84"></path><path d="M6 70 h84"></path><path d="M6 78 h84"></path></g></sc-if>
+            <sc-if value="{{a.m_tactics}}" hint-placeholder-val="{{ false }}"><rect x="4" y="10" width="88" height="74" rx="5" fill="none" stroke="{{a.mf}}" stroke-width="2.4"></rect><path d="M48 10 v74" stroke="{{a.mf2}}" stroke-width="1.8"></path><circle cx="48" cy="47" r="14" fill="none" stroke="{{a.mf2}}" stroke-width="1.8"></circle><rect x="4" y="32" width="11" height="30" fill="none" stroke="{{a.mf2}}" stroke-width="1.8"></rect><rect x="81" y="32" width="11" height="30" fill="none" stroke="{{a.mf2}}" stroke-width="1.8"></rect><g fill="{{a.mf}}"><circle cx="22" cy="24" r="3.6"></circle><circle cx="22" cy="70" r="3.6"></circle><circle cx="74" cy="24" r="3.6"></circle><circle cx="74" cy="70" r="3.6"></circle></g><path d="M26 24 q16 9 26 -3" fill="none" stroke="{{a.mf}}" stroke-width="1.8" stroke-dasharray="3.5 3.5"></path></sc-if>
+            <sc-if value="{{a.m_mesh}}" hint-placeholder-val="{{ false }}"><g stroke="{{a.mf}}" stroke-width="1.5"><path d="M-96 0 L0 96"></path><path d="M-82 0 L14 96"></path><path d="M-68 0 L28 96"></path><path d="M-54 0 L42 96"></path><path d="M-40 0 L56 96"></path><path d="M-26 0 L70 96"></path><path d="M-12 0 L84 96"></path><path d="M2 0 L98 96"></path><path d="M16 0 L112 96"></path><path d="M30 0 L126 96"></path><path d="M44 0 L140 96"></path><path d="M58 0 L154 96"></path><path d="M72 0 L168 96"></path><path d="M86 0 L182 96"></path><path d="M0 0 L-96 96"></path><path d="M14 0 L-82 96"></path><path d="M28 0 L-68 96"></path><path d="M42 0 L-54 96"></path><path d="M56 0 L-40 96"></path><path d="M70 0 L-26 96"></path><path d="M84 0 L-12 96"></path><path d="M98 0 L2 96"></path><path d="M112 0 L16 96"></path><path d="M126 0 L30 96"></path><path d="M140 0 L44 96"></path><path d="M154 0 L58 96"></path><path d="M168 0 L72 96"></path><path d="M182 0 L86 96"></path></g></sc-if>
+            <sc-if value="{{a.m_bottles}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><path d="M1 96 V34 q0 -5 4.5 -7.5 V17 h8 v9.5 q4.5 2.5 4.5 7.5 v62 z"></path><path d="M79 96 V46 q0 -4.5 4 -6.8 V29 h7 v10.2 q4 2.3 4 6.8 v50 z"></path></g><g fill="{{a.mf2}}"><rect x="2" y="42" width="15" height="11" rx="2"></rect><rect x="80" y="54" width="13" height="9" rx="2"></rect></g></sc-if>
+            <sc-if value="{{a.m_bubbles}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><circle cx="13" cy="22" r="11"></circle><circle cx="84" cy="16" r="7"></circle><circle cx="90" cy="52" r="13"></circle><circle cx="6" cy="60" r="8"></circle><circle cx="30" cy="6" r="5.5"></circle></g></sc-if>
+            <sc-if value="{{a.m_speed}}" hint-placeholder-val="{{ false }}"><g stroke="{{a.mf}}" stroke-width="5" stroke-linecap="round"><path d="M1 16 h28M-2 30 h18M3 44 h24M-1 58 h16M5 72 h26"></path></g><g stroke="{{a.mf2}}" stroke-width="4" stroke-linecap="round"><path d="M72 22 h22M80 38 h16M70 64 h24"></path></g></sc-if>
+            <sc-if value="{{a.m_pennants}}" hint-placeholder-val="{{ false }}"><path d="M0 8 q48 13 96 0" fill="none" stroke="{{a.mf2}}" stroke-width="2"></path><g fill="{{a.mf}}"><path d="M6 10 h14 l-7 15 z"></path><path d="M25 16 h14 l-7 15 z"></path><path d="M57 16 h14 l-7 15 z"></path><path d="M76 10 h14 l-7 15 z"></path></g></sc-if>
+            <sc-if value="{{a.m_sun}}" hint-placeholder-val="{{ false }}"><circle cx="67" cy="29" r="13" fill="{{a.mf}}"></circle><g stroke="{{a.mf}}" stroke-width="3.4" stroke-linecap="round"><path d="M67 11 v4.5M85 29 h-4.5M67 47 v-4.5M49 29 h4.5M54.5 16.5 l3.2 3.2M79.5 16.5 l-3.2 3.2M54.5 41.5 l3.2 -3.2M79.5 41.5 l-3.2 -3.2"></path></g></sc-if>
+            <sc-if value="{{a.m_gym}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><rect x="7" y="16" width="8" height="22" rx="3"></rect><rect x="16" y="23" width="14" height="8" rx="2"></rect><rect x="31" y="16" width="8" height="22" rx="3"></rect><rect x="59" y="46" width="8" height="22" rx="3"></rect><rect x="68" y="53" width="13" height="8" rx="2"></rect><rect x="82" y="46" width="8" height="22" rx="3"></rect></g></sc-if>
+            <sc-if value="{{a.m_plaid}}" hint-placeholder-val="{{ false }}"><g stroke="{{a.mf}}" stroke-width="8"><path d="M9 0v96M37 0v96M65 0v96M93 0v96"></path><path d="M0 9h96M0 37h96M0 65h96M0 93h96"></path></g></sc-if>
+            <sc-if value="{{a.m_books}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><rect x="0" y="4" width="9" height="34" rx="1.5"></rect><rect x="11" y="12" width="7" height="26" rx="1.5"></rect><rect x="20" y="0" width="10" height="38" rx="1.5"></rect><rect x="66" y="8" width="9" height="30" rx="1.5"></rect><rect x="77" y="2" width="7" height="36" rx="1.5"></rect><rect x="86" y="14" width="9" height="24" rx="1.5"></rect></g><g fill="{{a.mf2}}"><rect x="-2" y="38" width="34" height="4.5" rx="1"></rect><rect x="64" y="38" width="34" height="4.5" rx="1"></rect></g></sc-if>
+            <sc-if value="{{a.m_candy}}" hint-placeholder-val="{{ false }}"><g stroke="{{a.mf2}}" stroke-width="2.4" stroke-linecap="round"><path d="M16 27 l6 12M80 33 l-6 11M22 60 l5 9"></path></g><g fill="{{a.mf}}"><circle cx="15" cy="20" r="9.5"></circle><circle cx="81" cy="26" r="8"></circle><circle cx="21" cy="53" r="7"></circle></g><g fill="none" stroke="{{a.mf2}}" stroke-width="1.8" stroke-linecap="round"><path d="M15 15 a5 5 0 0 1 4.5 5 a3 3 0 0 1 -3 3"></path><path d="M81 22 a4 4 0 0 1 3.6 4"></path></g></sc-if>
+            <sc-if value="{{a.m_equalizer}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><rect x="0" y="-4" width="8" height="44" rx="4"></rect><rect x="11" y="-4" width="8" height="60" rx="4"></rect><rect x="22" y="-4" width="8" height="32" rx="4"></rect><rect x="66" y="-4" width="8" height="52" rx="4"></rect><rect x="77" y="-4" width="8" height="36" rx="4"></rect><rect x="88" y="-4" width="8" height="64" rx="4"></rect></g></sc-if>
+            <sc-if value="{{a.m_shield}}" hint-placeholder-val="{{ false }}"><path d="M48 0 L92 15 v33 q0 28 -44 48 Q4 76 4 48 V15 z" fill="{{a.mf}}"></path><path d="M48 10 L82 22 v26 q0 22 -34 40 Q14 70 14 48 V22 z" fill="none" stroke="{{a.mf2}}" stroke-width="2.6"></path></sc-if>
+            <sc-if value="{{a.m_stars}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><path d="M14.0 10.0 l1.8 4.5 4.8 0.6 -3.6 3.3 1.2 4.8 -4.2 -2.5 -4.2 2.5 1.2 -4.8 z"></path><path d="M82.0 7.0 l1.5 3.8 4.0 0.5 -3.0 2.8 1.0 4.0 -3.5 -2.1 -3.5 2.1 1.0 -4.0 z"></path><path d="M90.0 37.0 l2.1 5.2 5.6 0.7 -4.2 3.9 1.4 5.6 -4.9 -2.9 -4.9 2.9 1.4 -5.6 z"></path><path d="M8.0 43.0 l1.5 3.8 4.0 0.5 -3.0 2.8 1.0 4.0 -3.5 -2.1 -3.5 2.1 1.0 -4.0 z"></path><path d="M22.0 72.0 l1.2 3.0 3.2 0.4 -2.4 2.2 0.8 3.2 -2.8 -1.7 -2.8 1.7 0.8 -3.2 z"></path><path d="M74.0 72.5 l1.6 4.1 4.4 0.6 -3.3 3.0 1.1 4.4 -3.8 -2.3 -3.8 2.3 1.1 -4.4 z"></path></g></sc-if>
+            <sc-if value="{{a.m_cards}}" hint-placeholder-val="{{ false }}"><g transform="rotate(-16 15 32)"><rect x="-1" y="8" width="31" height="48" rx="4" fill="{{a.mf}}"></rect><text x="14.5" y="40" text-anchor="middle" font-family="Oswald, sans-serif" font-size="23" font-weight="700" fill="{{a.mf2}}">J</text></g><g transform="rotate(16 81 32)"><rect x="66" y="8" width="31" height="48" rx="4" fill="{{a.mf}}"></rect><text x="81.5" y="40" text-anchor="middle" font-family="Oswald, sans-serif" font-size="23" font-weight="700" fill="{{a.mf2}}">J</text></g></sc-if>
+            <sc-if value="{{a.m_trophies}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf}}"><path d="M6 16 h24 v11 q0 12 -12 14 Q6 39 6 27 z"></path><path d="M14 42 h8 v7 h8 v5 H6 v-5 h8 z"></path><path d="M6 18 q-6 0 -6 -6 h6 z"></path><path d="M30 18 q6 0 6 -6 h-6 z"></path><circle cx="79" cy="32" r="11"></circle><path d="M72 10 l7 13 7 -13 -4.5 -2.5 -2.5 4 -2.5 -4 z"></path></g><circle cx="79" cy="32" r="5.5" fill="{{a.mf2}}"></circle></sc-if>
+            <sc-if value="{{a.m_floodlights}}" hint-placeholder-val="{{ false }}"><g fill="{{a.mf2}}" opacity="0.9"><path d="M23 26 L-2 74 h46 z"></path><path d="M73 26 L52 74 h46 z"></path></g><g fill="{{a.mf}}"><rect x="11" y="6" width="24" height="14" rx="2.5"></rect><rect x="21" y="20" width="4.5" height="12"></rect><rect x="61" y="6" width="24" height="14" rx="2.5"></rect><rect x="71" y="20" width="4.5" height="12"></rect></g><g fill="{{a.mf2}}"><circle cx="17.5" cy="13" r="2.6"></circle><circle cx="28.5" cy="13" r="2.6"></circle><circle cx="67.5" cy="13" r="2.6"></circle><circle cx="78.5" cy="13" r="2.6"></circle></g></sc-if>
+
+          <sc-if value="{{a.hairBack}}" hint-placeholder-val="{{ false }}">
+            <path d="M20 46 q2 -32 28 -32 t28 32 v28 q-7 -5 -9 -21 q-5 -11 -19 -11 t-19 11 q-2 16 -9 21 z" fill="{{a.hairDark}}"></path>
+          </sc-if>
+
+          <sc-if value="{{a.dreads}}" hint-placeholder-val="{{ false }}">
+            <g fill="{{a.hair}}">
+              <path d="M31 24 q-14 24 -13 52 q4.5 4 10 1 q-3 -28 12 -52 z"></path>
+              <path d="M22 26 q-14 20 -14 44 q4.5 4 9.5 1 q-1 -24 13 -44 z"></path>
+              <path d="M14 34 q-10 15 -10 31 q4 3.5 8.5 0.5 q-1.5 -16 9 -31 z"></path>
+              <path d="M65 24 q14 24 13 52 q-4.5 4 -10 1 q3 -28 -12 -52 z"></path>
+              <path d="M74 26 q14 20 14 44 q-4.5 4 -9.5 1 q1 -24 -13 -44 z"></path>
+              <path d="M82 34 q10 15 10 31 q-4 3.5 -8.5 0.5 q1.5 -16 -9 -31 z"></path>
+            </g>
+            <g stroke="{{a.hairDark}}" stroke-width="1.3" opacity="0.6" fill="none">
+              <path d="M25 40 q5 1 8 -2M22 54 q5 1 9 -2M20 68 q5 1 9 -2"></path>
+              <path d="M15 44 q5 1 8 -2M12 58 q5 1 8 -2"></path>
+              <path d="M71 40 q-5 1 -8 -2M74 54 q-5 1 -9 -2M76 68 q-5 1 -9 -2"></path>
+              <path d="M81 44 q-5 1 -8 -2M84 58 q-5 1 -8 -2"></path>
+            </g>
+            <rect x="17.5" y="58" width="9.5" height="3.8" rx="1.9" fill="#C6F24E" transform="rotate(-14 22 60)"></rect>
+            <rect x="69" y="64" width="9.5" height="3.8" rx="1.9" fill="#E8B858" transform="rotate(14 74 66)"></rect>
+          </sc-if>
+
+          <path d="M41 63 h14 v13 q-7 5 -14 0 z" fill="{{a.skinDark}}"></path>
+
+          <path d="M13 96 q1 -17 15 -23 l12 -5 h16 l12 5 q14 6 15 23 z" fill="{{a.shirt}}"></path>
+          <path d="M13 96 q1 -17 15 -23 l4 2 q-12 7 -13 21 z" fill="{{a.shirtLight}}"></path>
+          <path d="M83 96 q-1 -17 -15 -23 l-4 2 q12 7 13 21 z" fill="{{a.shirtLight}}"></path>
+          <path d="M40 68 l8 11 l8 -11 l-4 -2 q-4 3 -8 0 z" fill="{{a.shirtDark}}"></path>
+          <sc-if value="{{a.polo}}" hint-placeholder-val="{{ false }}">
+            <path d="M15 96 q2 -15 14 -20 l3.4 1.6 q-12 6 -13.4 18.4 z" fill="#E8B858"></path>
+            <path d="M81 96 q-2 -15 -14 -20 l-3.4 1.6 q12 6 13.4 18.4 z" fill="#E8B858"></path>
+            <path d="M40 67 l8 13 l8 -13 l3.2 1.6 l-11.2 18 l-11.2 -18 z" fill="#E8B858"></path>
+            <path d="M40 67 l-7.5 4.6 l10 7.4 l5.5 -6.8 z" fill="#E8B858"></path>
+            <path d="M56 67 l7.5 4.6 l-10 7.4 l-5.5 -6.8 z" fill="#E8B858"></path>
+            <path d="M48 86 v10" stroke="#B8893C" stroke-width="1.5"></path>
+            <path d="M62 82 l6.5 -2.2 l6.5 2.2 v6.5 q0 5.5 -6.5 8.5 q-6.5 -3 -6.5 -8.5 z" fill="#E8B858" stroke="#B8893C" stroke-width="1" stroke-linejoin="round"></path>
+            <path d="M68.5 84.5 l1.3 2.7 3 0.4 -2.2 2.1 0.5 3 -2.6 -1.4 -2.6 1.4 0.5 -3 -2.2 -2.1 3 -0.4 z" fill="#8A6520"></path>
+            <path d="M68.5 72.5 l1.3 2.6 2.9 0.4 -2.1 2 0.5 2.9 -2.6 -1.4 -2.6 1.4 0.5 -2.9 -2.1 -2 2.9 -0.4 z" fill="#E8B858"></path>
+          </sc-if>
+          <text x="48" y="94" text-anchor="middle" font-family="Oswald, sans-serif" font-size="13" font-weight="700" fill="{{a.shirtLight}}">{{a.num}}</text>
+
+          <sc-if value="{{a.arm}}" hint-placeholder-val="{{ false }}">
+            <path d="M14 89 q7 -10 15 -13 l4 6.5 q-8 3 -14 12 z" fill="#E8B858"></path>
+            <path d="M16.5 88.5 q6 -8 13 -11" stroke="#B8893C" stroke-width="1" fill="none" opacity="0.7"></path>
+            <text x="23" y="87" text-anchor="middle" font-family="Oswald, sans-serif" font-size="7.5" font-weight="700" fill="#6B5116" transform="rotate(-30 23 87)">C</text>
+          </sc-if>
+          <sc-if value="{{a.star}}" hint-placeholder-val="{{ false }}">
+            <path d="M29 83 l1.9 3.8 4.2 0.6 -3 3 0.7 4.2 -3.8 -2 -3.8 2 0.7 -4.2 -3 -3 4.2 -0.6 z" fill="#E8B858"></path>
+          </sc-if>
+          <sc-if value="{{a.chain}}" hint-placeholder-val="{{ false }}">
+            <path d="M39 79 q9 9 18 0" stroke="#E8B858" stroke-width="2.4" fill="none" stroke-linecap="round"></path>
+            <circle cx="48" cy="86" r="2.6" fill="#E8B858"></circle>
+            <circle cx="48" cy="86" r="1" fill="#8A6520"></circle>
+          </sc-if>
+
+
+
+          <sc-if value="{{a.whistle}}" hint-placeholder-val="{{ false }}">
+            <path d="M38 73 q10 14 21 5" fill="none" stroke="#D8E0DA" stroke-width="1.7" stroke-linecap="round"></path>
+            <g transform="rotate(-10 62 81)">
+              <path d="M56 75 h9 a5.5 5.5 0 0 1 0 11 h-9 z" fill="#D8E0DA" stroke="#9AA6A0" stroke-width="0.9" stroke-linejoin="round"></path>
+              <rect x="48.5" y="77" width="8" height="6" rx="2" fill="#D8E0DA" stroke="#9AA6A0" stroke-width="0.9"></rect>
+              <circle cx="62" cy="80.5" r="1.7" fill="#5E6B64"></circle>
+              <path d="M56 75 v11" stroke="#9AA6A0" stroke-width="0.8" opacity="0.7"></path>
+            </g>
+          </sc-if>
+
+
+          <sc-if value="{{a.kid}}" hint-placeholder-val="{{ false }}">
+            <path d="M8 96 q1 -11 10 -14 l7 -2.5 h10 l7 2.5 q9 3 10 14 z" fill="#3C5468"></path>
+            <path d="M26 74 h8 v6 q-4 3 -8 0 z" fill="{{a.kidSkinDark}}"></path>
+            <path d="M19 72 a11 11.5 0 0 1 22 0 v4 q0 7 -6.5 10 q-4.5 3 -9 0 q-6.5 -3 -6.5 -10 z" fill="{{a.kidSkin}}"></path>
+            <ellipse cx="18.6" cy="74" rx="2.4" ry="3.4" fill="{{a.kidSkin}}"></ellipse>
+            <ellipse cx="41.4" cy="74" rx="2.4" ry="3.4" fill="{{a.kidSkin}}"></ellipse>
+            <path d="M19 73 q0 -15 11 -15 t11 15 q-2 -5 -3 -7 q-8 4 -15 1 q-3 0 -4 6 z" fill="{{a.kidHair}}"></path>
+            <circle cx="25.5" cy="74" r="1.7" fill="#241A14"></circle>
+            <circle cx="34.5" cy="74" r="1.7" fill="#241A14"></circle>
+            <circle cx="24.9" cy="73.3" r="0.6" fill="#FFFFFF"></circle>
+            <circle cx="33.9" cy="73.3" r="0.6" fill="#FFFFFF"></circle>
+            <path d="M26.5 80 q3.5 3 7 0" stroke="#5A3326" stroke-width="1.6" fill="none" stroke-linecap="round"></path>
+          </sc-if>
+
+          <ellipse cx="25" cy="48" rx="4.6" ry="6.6" fill="{{a.skin}}"></ellipse>
+          <ellipse cx="71" cy="48" rx="4.6" ry="6.6" fill="{{a.skin}}"></ellipse>
+          <path d="M25 45 q2 3 0 6" stroke="{{a.skinDark}}" stroke-width="1.3" fill="none" stroke-linecap="round"></path>
+          <path d="M71 45 q-2 3 0 6" stroke="{{a.skinDark}}" stroke-width="1.3" fill="none" stroke-linecap="round"></path>
+          <sc-if value="{{a.earring}}" hint-placeholder-val="{{ false }}">
+            <circle cx="24" cy="55" r="2.4" fill="none" stroke="#E8B858" stroke-width="1.8"></circle>
+          </sc-if>
+
+          <path d="M25 44 a23 24 0 0 1 46 0 v7 q0 14 -14 20 q-9 6 -18 0 q-14 -6 -14 -20 z" fill="{{a.skin}}"></path>
+
+          <sc-if value="{{a.stubble}}" hint-placeholder-val="{{ false }}">
+            <path d="M28 54 q-1 11 11 18 q9 7 18 0 q12 -7 11 -18 q-2 5 -7 7 q-4 2 -5 -3 q-8 -3 -16 0 q-1 5 -5 3 q-5 -2 -7 -7 z" fill="{{a.skinInk}}" opacity="0.28"></path>
+          </sc-if>
+          <sc-if value="{{a.beardShort}}" hint-placeholder-val="{{ false }}">
+            <path d="M28 54 q-1 11 11 18 q9 7 18 0 q12 -7 11 -18 q-2 5 -7 7 q-4 2 -5 -3 q-8 -3 -16 0 q-1 5 -5 3 q-5 -2 -7 -7 z" fill="{{a.hair}}"></path>
+            <path d="M41 60.8 q7 -3.2 14 0 q-7 5.4 -14 0 z" fill="{{a.lip}}"></path>
+          </sc-if>
+          <sc-if value="{{a.beardLong}}" hint-placeholder-val="{{ false }}">
+            <path d="M28 54 q-1 18 11 26 q9 9 18 0 q12 -8 11 -26 q-2 5 -7 7 q-4 2 -5 -3 q-8 -3 -16 0 q-1 5 -5 3 q-5 -2 -7 -7 z" fill="{{a.hair}}"></path>
+            <path d="M40 80 q8 7 16 0 q-5 9 -16 0 z" fill="{{a.hairDark}}" opacity="0.5"></path>
+            <path d="M41.5 60.8 q6.5 -3 13 0 q-6.5 5.2 -13 0 z" fill="{{a.lip}}"></path>
+          </sc-if>
+
+          <path d="M48 49 v5.5 q-3.2 2 -0.5 3.4" stroke="{{a.skinDark}}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+
+          <sc-if value="{{a.moustache}}" hint-placeholder-val="{{ false }}">
+            <path d="M38.5 56.2 q9.5 -4 19 0 q-4.5 4.6 -9.5 4.6 t-9.5 -4.6 z" fill="{{a.hairMoust}}"></path>
+          </sc-if>
+
+          <sc-if value="{{a.mSmile}}" hint-placeholder-val="{{ true }}">
+            <path d="M42 61 q6 5.5 12 0" stroke="#5A3326" stroke-width="2.3" fill="none" stroke-linecap="round"></path>
+          </sc-if>
+          <sc-if value="{{a.mSmirk}}" hint-placeholder-val="{{ false }}">
+            <path d="M42 62 q6 4 12 -2" stroke="#5A3326" stroke-width="2.3" fill="none" stroke-linecap="round"></path>
+          </sc-if>
+          <sc-if value="{{a.mFlat}}" hint-placeholder-val="{{ false }}">
+            <path d="M43 62 h10" stroke="#5A3326" stroke-width="2.3" fill="none" stroke-linecap="round"></path>
+          </sc-if>
+
+          <sc-if value="{{a.freckles}}" hint-placeholder-val="{{ false }}">
+            <g fill="{{a.skinInk}}" opacity="0.55">
+              <circle cx="33" cy="52" r="1.2"></circle><circle cx="37.5" cy="55.5" r="1"></circle><circle cx="30.5" cy="56.5" r="1"></circle>
+              <circle cx="63" cy="52" r="1.2"></circle><circle cx="58.5" cy="55.5" r="1"></circle><circle cx="65.5" cy="56.5" r="1"></circle>
+            </g>
+          </sc-if>
+
+          <path d="M34 {{a.browY}} q6 -3.5 11 -1" stroke="{{a.hairDark}}" stroke-width="2.8" fill="none" stroke-linecap="round"></path>
+          <path d="M62 {{a.browY}} q-6 -3.5 -11 -1" stroke="{{a.hairDark}}" stroke-width="2.8" fill="none" stroke-linecap="round"></path>
+
+          <ellipse cx="39" cy="48" rx="4.3" ry="3.5" fill="#FFFFFF" opacity="0.94"></ellipse>
+          <ellipse cx="57" cy="48" rx="4.3" ry="3.5" fill="#FFFFFF" opacity="0.94"></ellipse>
+          <circle cx="39.6" cy="48.2" r="2.5" fill="#241A14"></circle>
+          <circle cx="57.6" cy="48.2" r="2.5" fill="#241A14"></circle>
+          <circle cx="38.5" cy="47" r="0.95" fill="#FFFFFF"></circle>
+          <circle cx="56.5" cy="47" r="0.95" fill="#FFFFFF"></circle>
+          <sc-if value="{{a.wink}}" hint-placeholder-val="{{ false }}">
+            <ellipse cx="39" cy="48" rx="5.2" ry="4.6" fill="{{a.skin}}"></ellipse>
+            <path d="M34.4 47.5 q4.6 4.5 9.2 0" fill="none" stroke="#241A14" stroke-width="2.3" stroke-linecap="round"></path>
+          </sc-if>
+
+          <sc-if value="{{a.short}}" hint-placeholder-val="{{ true }}">
+            <path d="M24 47 q-1 -30 24 -30 t24 30 q-3 -9 -6 -14 q-15 7 -31 2 q-8 -2 -11 12 z" fill="{{a.hair}}"></path>
+            <path d="M33 26 q11 -7 22 -2" stroke="{{a.hairLight}}" stroke-width="3" fill="none" stroke-linecap="round"></path>
+          </sc-if>
+          <sc-if value="{{a.fade}}" hint-placeholder-val="{{ false }}">
+            <path d="M25 44 q0 -29 23 -29 t23 29 q-3 -11 -7 -16 q-14 6 -28 2 q-7 -1 -11 14 z" fill="{{a.hairLight}}"></path>
+            <path d="M27 31 q2 -17 21 -17 t21 17 q-4 -7 -8 -10 q-13 5 -26 1 q-5 -1 -8 9 z" fill="{{a.hair}}"></path>
+            <path d="M27 31 q21 -5 42 0" fill="none" stroke="{{a.hair}}" stroke-width="1.6" opacity="0.8"></path>
+          </sc-if>
+          <sc-if value="{{a.buzz}}" hint-placeholder-val="{{ false }}">
+            <path d="M25 45 q0 -26 23 -26 t23 26 q-5 -12 -23 -12 t-23 12 z" fill="{{a.hair}}"></path>
+            <path d="M34 28 q13 -6 25 1" stroke="{{a.hairLight}}" stroke-width="2.4" fill="none" stroke-linecap="round" opacity="0.8"></path>
+          </sc-if>
+          <sc-if value="{{a.quiff}}" hint-placeholder-val="{{ false }}">
+            <path d="M24 46 q-1 -24 18 -28 q6 -8 14 -3 q14 6 16 31 q-4 -12 -10 -16 q-16 6 -30 0 q-6 3 -8 16 z" fill="{{a.hair}}"></path>
+            <path d="M38 19 q8 -5 15 1 q-8 0 -15 -1 z" fill="{{a.hairLight}}"></path>
+            <path d="M34 25 q10 -6 21 -1" stroke="{{a.hairLight}}" stroke-width="2.6" fill="none" stroke-linecap="round"></path>
+          </sc-if>
+          <sc-if value="{{a.curly}}" hint-placeholder-val="{{ false }}">
+            <g fill="{{a.hair}}">
+              <circle cx="29" cy="36" r="9.5"></circle>
+              <circle cx="36" cy="25" r="10"></circle>
+              <circle cx="48" cy="20" r="10.5"></circle>
+              <circle cx="60" cy="25" r="10"></circle>
+              <circle cx="67" cy="36" r="9.5"></circle>
+            </g>
+            <g fill="{{a.hairLight}}" opacity="0.7">
+              <circle cx="41" cy="22" r="3"></circle>
+              <circle cx="55" cy="23" r="2.4"></circle>
+              <circle cx="31" cy="32" r="2.2"></circle>
+            </g>
+          </sc-if>
+          <sc-if value="{{a.mohawk}}" hint-placeholder-val="{{ false }}">
+            <path d="M25 45 q0 -26 23 -26 t23 26 q-5 -12 -23 -12 t-23 12 z" fill="{{a.hairDark}}" opacity="0.5"></path>
+            <path d="M39 38 q1 -24 9 -32 q8 8 9 32 q-4 -6 -9 -6 t-9 6 z" fill="{{a.hair}}"></path>
+            <path d="M43 12 q5 -6 10 0 q-5 -2 -10 0 z" fill="{{a.hairLight}}" opacity="0.8"></path>
+            <path d="M44 9 q4 -5 8 0 q-4 -2 -8 0 z" fill="{{a.hair}}"></path>
+            <path d="M47.2 10 q0.8 -2 1.6 0 q-0.4 12 -0.8 16 q-0.4 -4 -0.8 -16 z" fill="{{a.hairLight}}" opacity="0.7"></path>
+          </sc-if>
+          <sc-if value="{{a.dreadTop}}" hint-placeholder-val="{{ false }}">
+            <path d="M22 44 q-1 -32 26 -32 t26 32 q-3 -12 -7 -17 q-16 8 -33 2 q-8 -2 -12 15 z" fill="{{a.hair}}"></path>
+            <g stroke="{{a.hairDark}}" stroke-width="1.2" opacity="0.6"><path d="M30 22 q18 -7 35 6M27 30 q20 -8 40 3"></path></g>
+          </sc-if>
+          <sc-if value="{{a.bald}}" hint-placeholder-val="{{ false }}">
+            <path d="M27 40 q5 -13 21 -13 t21 13 q-9 -7 -21 -7 t-21 7 z" fill="{{a.skinDark}}" opacity="0.32"></path>
+            <path d="M35 28 q9 -5 17 -1" stroke="#FFFFFF" stroke-width="2.6" fill="none" stroke-linecap="round" opacity="0.24"></path>
+          </sc-if>
+          <sc-if value="{{a.band}}" hint-placeholder-val="{{ false }}">
+            <path d="M24 47 q-1 -30 24 -30 t24 30 q-3 -9 -6 -14 q-15 7 -31 2 q-8 -2 -11 12 z" fill="{{a.hair}}"></path>
+            <path d="M25 37 q23 -10 46 0 v8 q-23 -10 -46 0 z" fill="#C6F24E"></path>
+            <path d="M25 41 q23 -10 46 0" stroke="#0B0F0D" stroke-width="1.2" fill="none" opacity="0.3"></path>
+          </sc-if>
+          <sc-if value="{{a.cap}}" hint-placeholder-val="{{ false }}">
+            <path d="M23 35 q0 -24 25 -24 t25 24 z" fill="{{a.hair}}"></path>
+            <path d="M48 11.5 q-12 1.5 -17.5 13 q7.5 -8 17.5 -8.5 z" fill="{{a.hairLight}}" opacity="0.4"></path>
+            <g fill="none" stroke="{{a.hairDark}}" stroke-width="1.3" opacity="0.7">
+              <path d="M48 12 V33"></path>
+              <path d="M36.5 34 q-1 -14 11.5 -22"></path>
+              <path d="M59.5 34 q1 -14 -11.5 -22"></path>
+            </g>
+            <circle cx="48" cy="12" r="2.4" fill="{{a.hairLight}}"></circle>
+            <path d="M23.5 31.5 q24.5 -4.5 49 0 v4 q-24.5 -4.5 -49 0 z" fill="{{a.hairDark}}"></path>
+            <path d="M20 35 q28 -6.5 56 0 q-1 5 -5 6 q-23 -5 -46 0 q-4 -1 -5 -6 z" fill="{{a.hairDark}}"></path>
+            <path d="M24 36.2 q24 -5 48 0" fill="none" stroke="{{a.hairLight}}" stroke-width="1.3" opacity="0.55" stroke-linecap="round"></path>
+          </sc-if>
+          <sc-if value="{{a.helmet}}" hint-placeholder-val="{{ false }}">
+            <path d="M25 28 q0 -25 23 -25 t23 25 z" fill="#E8B858"></path>
+            <path d="M48 3 v25" stroke="#C79A3C" stroke-width="2.6"></path>
+            <path d="M36 28 q0 -17 12 -24" fill="none" stroke="#C79A3C" stroke-width="1.8" opacity="0.75"></path>
+            <path d="M60 28 q0 -17 -12 -24" fill="none" stroke="#C79A3C" stroke-width="1.8" opacity="0.75"></path>
+            <path d="M34 9 q14 -5 28 3" fill="none" stroke="#F5DFA6" stroke-width="2.6" stroke-linecap="round" opacity="0.55"></path>
+            <path d="M22 28 q26 4.5 52 0 v4.5 q-26 4.5 -52 0 z" fill="#C79A3C"></path>
+            <path d="M22 28 q26 4.5 52 0" fill="none" stroke="#B8893C" stroke-width="1" opacity="0.85"></path>
+          </sc-if>
+
+          <sc-if value="{{a.glasses}}" hint-placeholder-val="{{ false }}">
+            <g fill="#8FB4C9" opacity="0.24">
+              <rect x="30" y="42" width="17" height="12" rx="5"></rect>
+              <rect x="49" y="42" width="17" height="12" rx="5"></rect>
+            </g>
+            <g stroke="#1B1410" stroke-width="2.2" fill="none">
+              <rect x="30" y="42" width="17" height="12" rx="5"></rect>
+              <rect x="49" y="42" width="17" height="12" rx="5"></rect>
+              <path d="M47 47 h2"></path>
+              <path d="M30 46 l-6 1"></path>
+              <path d="M66 46 l6 1"></path>
+            </g>
+          </sc-if>
+          <sc-if value="{{a.tapedGlasses}}" hint-placeholder-val="{{ false }}">
+            <rect x="27.4" y="42.6" width="5" height="9" rx="1.3" fill="#EADFC8" stroke="#BCA97F" stroke-width="0.8" transform="rotate(-8 29.9 47)"></rect>
+            <g stroke="#BCA97F" stroke-width="0.7" opacity="0.85" transform="rotate(-8 29.9 47)"><path d="M27.4 45.4 h5M27.4 48.6 h5"></path></g>
+          </sc-if>
+
+          <sc-if value="{{a.plaster}}" hint-placeholder-val="{{ false }}">
+            <g transform="rotate(-22 63 57)">
+              <rect x="56" y="53.8" width="14" height="6.6" rx="2.6" fill="#EADFC8" stroke="#BCA97F" stroke-width="0.9"></rect>
+              <path d="M61 53.8 v6.6M65 53.8 v6.6" stroke="#BCA97F" stroke-width="0.8" opacity="0.8"></path>
+              <g fill="#BCA97F" opacity="0.8"><circle cx="63" cy="55.6" r="0.6"></circle><circle cx="63" cy="58.6" r="0.6"></circle></g>
+            </g>
+          </sc-if>
+          <sc-if value="{{a.scar}}" hint-placeholder-val="{{ false }}">
+            <path d="M62 34 l3.5 10" stroke="{{a.skinInk}}" stroke-width="1.7" stroke-linecap="round" opacity="0.75"></path>
+            <path d="M61 37.5 h5M62.8 41.5 h5" stroke="{{a.skinInk}}" stroke-width="1.3" stroke-linecap="round" opacity="0.75"></path>
+          </sc-if>
+          <sc-if value="{{a.pen}}" hint-placeholder-val="{{ false }}">
+            <g transform="rotate(18 76 36)">
+              <rect x="72.6" y="22" width="6.8" height="15" fill="#E8B858"></rect>
+              <path d="M72.6 22 h6.8 v-3.6 h-6.8 z" fill="#D98C6A"></path>
+              <path d="M72.6 18.4 h6.8 v-2.2 h-6.8 z" fill="#B9C4BC"></path>
+              <path d="M72.6 37 h6.8 l-3.4 6 z" fill="#F0DCB6"></path>
+              <path d="M74.6 40.5 l1.4 2.5 l1.4 -2.5 z" fill="#2E2E2E"></path>
+              <path d="M76 22 v15" stroke="#C79A3C" stroke-width="0.9" opacity="0.7"></path>
+            </g>
+          </sc-if>
+          <sc-if value="{{a.bubble}}" hint-placeholder-val="{{ false }}">
+            <path d="M54 62 q4 1 6 2" stroke="#F2A0BC" stroke-width="2.6" fill="none" stroke-linecap="round"></path>
+            <circle cx="67" cy="66" r="8.5" fill="#F2A0BC" stroke="#D2708F" stroke-width="1.2"></circle>
+            <path d="M62.5 62.5 q3 -2.5 6.5 -1" fill="none" stroke="#FFD9E4" stroke-width="1.8" stroke-linecap="round" opacity="0.9"></path>
+          </sc-if>
+          <sc-if value="{{a.lollipop}}" hint-placeholder-val="{{ false }}">
+            <path d="M55.5 62 l5 3.5" stroke="#E6EFE8" stroke-width="1.7" stroke-linecap="round"></path>
+            <circle cx="65" cy="69" r="4.6" fill="#F97066" stroke="#C25248" stroke-width="1.1"></circle>
+            <path d="M63.2 67.4 q1.8 -1 3.4 0.6" fill="none" stroke="#FFD9D4" stroke-width="1.1" stroke-linecap="round" opacity="0.9"></path>
+          </sc-if>
+          <sc-if value="{{a.sweat}}" hint-placeholder-val="{{ false }}">
+            <path d="M75 30 q0 -6 3.5 -9.5 q3.5 3.5 3.5 9.5 a3.5 3.5 0 0 1 -7 0 z" fill="#8FB4C9"></path>
+            <path d="M77.6 27.5 a2 2 0 0 0 0.6 2.4" fill="none" stroke="#DCEAF2" stroke-width="0.9" stroke-linecap="round"></path>
+            <g stroke="#8FB4C9" stroke-width="2.2" stroke-linecap="round" opacity="0.55"><path d="M7 42 h8M5 51 h6M9 60 h7"></path></g>
+          </sc-if>
+          <sc-if value="{{a.gloves}}" hint-placeholder-val="{{ false }}">
+            <g fill="#C6F24E" stroke="#6F8A2A" stroke-width="1.2" stroke-linejoin="round">
+              <g>
+                <rect x="7.4" y="49" width="3.8" height="10" rx="1.9"></rect>
+                <rect x="11.4" y="46.4" width="3.8" height="12" rx="1.9"></rect>
+                <rect x="15.4" y="46.8" width="3.8" height="12" rx="1.9"></rect>
+                <rect x="19.4" y="49.4" width="3.8" height="10" rx="1.9"></rect>
+                <rect x="21.4" y="57.4" width="4.4" height="9.6" rx="2.2" transform="rotate(28 23.6 62.2)"></rect>
+                <path d="M7 57 h16.4 v10 q0 5 -5 5 h-6.4 q-5 0 -5 -5 z"></path>
+                <rect x="7.6" y="70" width="15.2" height="6.4" rx="2.2" fill="#8FAE34"></rect>
+                <path d="M10.5 62 h9.4" fill="none" stroke-width="1" opacity="0.7"></path>
+              </g>
+              <g transform="translate(96 0) scale(-1 1)">
+                <rect x="7.4" y="49" width="3.8" height="10" rx="1.9"></rect>
+                <rect x="11.4" y="46.4" width="3.8" height="12" rx="1.9"></rect>
+                <rect x="15.4" y="46.8" width="3.8" height="12" rx="1.9"></rect>
+                <rect x="19.4" y="49.4" width="3.8" height="10" rx="1.9"></rect>
+                <rect x="21.4" y="57.4" width="4.4" height="9.6" rx="2.2" transform="rotate(28 23.6 62.2)"></rect>
+                <path d="M7 57 h16.4 v10 q0 5 -5 5 h-6.4 q-5 0 -5 -5 z"></path>
+                <rect x="7.6" y="70" width="15.2" height="6.4" rx="2.2" fill="#8FAE34"></rect>
+                <path d="M10.5 62 h9.4" fill="none" stroke-width="1" opacity="0.7"></path>
+              </g>
+            </g>
+          </sc-if>
+          </g>
+          <sc-if value="{{a.ring}}" hint-placeholder-val="{{ false }}">
+            <circle cx="48" cy="48" r="45" fill="none" stroke="#E8B858" stroke-width="2.5" opacity="0.85"></circle>
+          </sc-if>
+          <sc-if value="{{a.ball}}" hint-placeholder-val="{{ false }}">
+            <circle cx="73" cy="77" r="9" fill="#E8B858" stroke="#B8893C" stroke-width="1.6"></circle>
+            <polygon points="73,72.1 77.2,75.1 75.6,80.1 70.4,80.1 68.8,75.1" fill="#8A6520"></polygon>
+            <g stroke="#8A6520" stroke-width="1.2"><path d="M73 72.1 V68.4M77.2 75.1 l3.8 -2.2M75.6 80.1 l2.3 3.9M70.4 80.1 l-2.3 3.9M68.8 75.1 l-3.8 -2.2"></path></g>
+          </sc-if>
+        </svg>
+        <div style="font-size: 11.5px; font-weight: 800; color: #EAF2EC; margin-top: 5px; line-height: 1.25;">{{a.name}}</div>
+        <div style="font-size: 10px; font-weight: 600; color: #7E8C83; margin-top: 2px; line-height: 1.3;">{{a.detail}}</div>
+        <div style="font-size: 10px; font-weight: 700; color: {{a.tagColor}}; margin-top: 3px;">{{a.tag}}</div>
+      </div>
+    </sc-for>
+
+  </div>
+
+  <div style="display: flex; gap: 22px; align-items: center; padding: 13px 16px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+    <div style="display: flex; align-items: flex-end; gap: 14px; flex-shrink: 0;">
+      <sc-for list="{{scale}}" as="s" hint-placeholder-count="4">
+        <div style="text-align: center;">
+          <svg width="{{s.px}}" height="{{s.px}}" sc-camel-view-box="0 0 96 96" aria-hidden="true">
+            <circle cx="48" cy="48" r="48" fill="#1B241F"></circle>
+            <path d="M48 96 a48 48 0 0 0 48 -48 h-96 a48 48 0 0 0 48 48 z" fill="#212C25"></path>
+            <path d="M41 63 h14 v13 q-7 5 -14 0 z" fill="#C98F5F"></path>
+            <path d="M13 96 q1 -17 15 -23 l12 -5 h16 l12 5 q14 6 15 23 z" fill="#243B2E"></path>
+            <path d="M40 68 l8 11 l8 -11 l-4 -2 q-4 3 -8 0 z" fill="#1A2A20"></path>
+            <ellipse cx="25" cy="48" rx="4.6" ry="6.6" fill="#E0AC80"></ellipse>
+            <ellipse cx="71" cy="48" rx="4.6" ry="6.6" fill="#E0AC80"></ellipse>
+            <path d="M25 44 a23 24 0 0 1 46 0 v7 q0 14 -14 20 q-9 6 -18 0 q-14 -6 -14 -20 z" fill="#E0AC80"></path>
+            <path d="M34 42 q6 -3.5 11 -1" stroke="#1A120C" stroke-width="2.8" fill="none" stroke-linecap="round"></path>
+            <path d="M62 42 q-6 -3.5 -11 -1" stroke="#1A120C" stroke-width="2.8" fill="none" stroke-linecap="round"></path>
+            <ellipse cx="39" cy="48" rx="4.3" ry="3.5" fill="#FFFFFF" opacity="0.94"></ellipse>
+            <ellipse cx="57" cy="48" rx="4.3" ry="3.5" fill="#FFFFFF" opacity="0.94"></ellipse>
+            <circle cx="39.6" cy="48.2" r="2.5" fill="#241A14"></circle>
+            <circle cx="57.6" cy="48.2" r="2.5" fill="#241A14"></circle>
+            <path d="M48 49 v5.5 q-3.2 2 -0.5 3.4" stroke="#A9714A" stroke-width="2" fill="none" stroke-linecap="round"></path>
+            <path d="M42 61 q6 5.5 12 0" stroke="#5A3326" stroke-width="2.3" fill="none" stroke-linecap="round"></path>
+            <path d="M24 47 q-1 -30 24 -30 t24 30 q-3 -9 -6 -14 q-15 7 -31 2 q-8 -2 -11 12 z" fill="#221A13"></path>
+          </svg>
+          <div style="font-size: 9px; font-weight: 700; color: #7E8C83; margin-top: 3px;">{{s.px}}</div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size: 12px; font-weight: 500; color: #93A399; line-height: 1.45;">Аватар живёт в четырёх размерах: 24 в строке состава, 32 в комментарии, 44 в карточке матча, 72 в профиле. На 24 исчезают брови, блик в глазу и номер на футболке — остаются силуэт причёски и цвет формы, поэтому в паке нет двух архетипов с одинаковой парой «силуэт + цвет». Фирменная вещь всегда лежит либо на макушке, либо по краю круга — то есть выживает и на 32.</div>
+  </div>
+
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;$preview&quot;:{&quot;width&quot;:1260,&quot;height&quot;:1110}}">
+class Component extends DCLogic {
+  renderVals() {
+    const shade = (hex, amt) => {
+      const n = parseInt(hex.slice(1), 16);
+      const cl = (v) => Math.max(0, Math.min(255, Math.round(v)));
+      const r = cl(((n >> 16) & 255) + amt);
+      const g = cl(((n >> 8) & 255) + amt);
+      const b = cl((n & 255) + amt);
+      return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    };
+
+    const S = { light: '#F0C9A6', mid: '#E0AC80', tan: '#C98F5F', dark: '#9A6440', deep: '#7A4A2E' };
+
+    const MAP = {
+      beardShort: ['short', 'beardShort', 'moustache'],
+      glassesShort: ['short', 'glasses'],
+      buzz: ['buzz'],
+      band: ['band'],
+      cap: ['cap'],
+      mohawk: ['mohawk'],
+      baldBeard: ['bald', 'beardShort', 'moustache'],
+      curly: ['curly'],
+      beardLong: ['short', 'beardLong', 'moustache'],
+      beardLongShort: ['short', 'beardLong', 'moustache'],
+      quiff: ['quiff'],
+      bald: ['bald'],
+      glassesLong: ['hairBack', 'short', 'glasses'],
+      glassesGrey: ['short', 'glasses', 'beardShort', 'moustache'],
+      dreads: ['dreads', 'dreadTop'],
+      capBeard: ['cap', 'beardShort', 'moustache'],
+      fade: ['fade']
+    };
+
+    // name, skin, hair, style, shirt, tag, number, extras, detail
+    const raw = [
+      ['Дядя с завода', S.tan, '#8E9A93', 'beardShort', '#2C3A30', 'за очки', '9', 'helmet', 'каска со смены'],
+      ['Студент-технарь', S.light, '#3A2A1C', 'glassesShort', '#33455C', 'за очки', '7', 'pen', 'карандаш за ухом'],
+      ['Стенка', S.dark, '#221A13', 'buzz', '#3B2F2A', 'за очки', '4', 'plaster', 'пластырь на скуле'],
+      ['Вратарь в свитере', S.mid, '#6B4B2E', 'band', '#6B3A5C', 'за очки', '1', 'gloves', 'вратарские перчатки'],
+      ['Тренер', S.tan, '#2C3A30', 'cap', '#243B2E', 'за очки', '12', 'whistle', 'свисток на шнурке'],
+      ['Дворовый', S.mid, '#221A13', 'mohawk', '#2E3A4A', 'за очки', '10', 'earring', 'ирокез и серьга'],
+      ['Батя', S.tan, '#4A4A46', 'baldBeard', '#3A3A38', 'достижение', '6', 'kid,chain', 'пацан на плече'],
+      ['Кудрявый', S.deep, '#221A13', 'curly', '#4A2E3A', 'за очки', '11', 'bubble', 'пузырь из жвачки'],
+      ['Скорость', S.light, '#C9A24A', 'band', '#1F3B4A', 'за очки', '7', 'sweat', 'капля и линии скорости'],
+      ['Ветеран', S.tan, '#9BA3A0', 'beardLong', '#2A3A44', 'достижение', '5', 'scar', 'шрам над бровью'],
+      ['Рыжий', S.light, '#C2552A', 'quiff', '#3A2E22', 'за очки', '8', 'freckles', 'конопушки'],
+      ['Лысый', S.dark, '#221A13', 'bald', '#2C3A30', 'за очки', '3', 'stubble', 'щетина'],
+      ['Борода', S.mid, '#4E3A24', 'beardLongShort', '#44331F', 'за очки', '2', 'earring', 'борода лопатой'],
+      ['Очкарик', S.light, '#6B4B2E', 'glassesLong', '#2E3A4A', 'за очки', '14', 'tapedGlasses', 'очки на изоленте'],
+      ['Малой', S.light, '#3A2A1C', 'buzz', '#3B4A2E', 'за очки', '17', 'lollipop', 'чупа-чупс'],
+      ['Дреды', S.deep, '#2A1A12', 'dreads', '#3A2E4A', 'за очки', '20', '', 'дреды с бусинами'],
+      ['Капитан', S.mid, '#221A13', 'capBeard', '#243B2E', 'достижение', '10', 'arm,whistle', 'повязка и свисток'],
+      ['Легенда', S.tan, '#9BA3A0', 'glassesGrey', '#4A3A1F', 'достижение', '7', 'chain,star', 'цепь и звезда'],
+      ['Джокер', S.deep, '#C2552A', 'curly', '#4A2E3A', 'достижение', '21', 'wink', 'подмигивает'],
+      ['Золотой мяч', S.mid, '#C9A24A', 'quiff', '#4A3A1F', 'достижение', '9', 'ring,ball', 'золотой мяч и кант'],
+      ['Профи', S.light, '#2A2622', 'fade', '#16233A', 'достижение', '10', 'polo', 'клубная форма с золотом']
+    ];
+
+    const PROPS = ['helmet', 'gloves', 'whistle', 'freckles', 'plaster', 'scar', 'earring', 'chain',
+      'lollipop', 'bubble', 'pen', 'sweat', 'wink', 'star', 'ball',
+      'tapedGlasses', 'arm', 'ring', 'stubble', 'kid', 'polo'];
+
+    const MOTIFS = ['factory', 'grid', 'bricks', 'goal', 'tactics', 'mesh', 'bottles', 'bubbles', 'speed', 'pennants', 'sun', 'gym', 'plaid', 'books', 'candy', 'equalizer', 'shield', 'stars', 'cards', 'trophies', 'floodlights'];
+    const MOTIF = ['factory', 'grid', 'bricks', 'goal', 'tactics', 'mesh', 'bottles', 'bubbles', 'speed', 'pennants', 'sun', 'gym', 'plaid', 'books', 'candy', 'equalizer', 'shield', 'stars', 'cards', 'trophies', 'floodlights'];
+
+    return {
+      scale: [{ px: 24 }, { px: 32 }, { px: 44 }, { px: 72 }],
+      list: raw.map((r, i) => {
+        const [name, skin, hair, style, shirt, tag, num, extras, detail] = r;
+        const ex = extras.split(',');
+        const parts = MAP[style];
+        const m = i % 3;
+        const motif = MOTIF[i];
+        const o = {
+          clipId: 'avm' + i,
+          mf: tag === 'достижение' ? '#3B331F' : '#2E3D34',
+          mf2: tag === 'достижение' ? '#2F2A19' : '#26332B',
+          name: name,
+          detail: detail,
+          num: num,
+          tag: tag,
+          skin: skin,
+          skinDark: shade(skin, -38),
+          skinInk: shade(skin, -78),
+          lip: shade(skin, -30),
+          hairMoust: shade(hair, 20),
+          kidSkin: shade(skin, 14),
+          kidSkinDark: shade(skin, -26),
+          kidHair: shade(hair, hair === '#4A4A46' ? -14 : 0) === '#3c3c38' ? '#5C3A22' : '#5C3A22',
+          hair: hair,
+          hairDark: shade(hair, -26),
+          hairLight: shade(hair, 42),
+          shirt: shirt,
+          shirtDark: shade(shirt, -22),
+          shirtLight: shade(shirt, 30),
+          bg: '#1B241F',
+          bg2: '#212C25',
+          browY: 41 + (i % 2),
+          tagColor: tag === 'за очки' ? '#C6F24E' : '#E8B858',
+          cardBg: tag === 'достижение' ? '#181B14' : '#141A17',
+          cardBorder: tag === 'достижение' ? '#4A3A1F' : '#253329',
+          mSmile: m === 0,
+          mSmirk: m === 1,
+          mFlat: m === 2
+        };
+        ['short', 'buzz', 'quiff', 'curly', 'mohawk', 'dreads', 'dreadTop', 'cap', 'band', 'bald', 'fade',
+         'hairBack', 'beardShort', 'beardLong', 'glasses', 'moustache'].forEach((k) => {
+          o[k] = parts.indexOf(k) !== -1;
+        });
+        PROPS.forEach((k) => { o[k] = ex.indexOf(k) !== -1; });
+        MOTIFS.forEach((k) => { o['m_' + k] = motif === k; });
+        if (o.polo) { o.mSmile = false; o.mFlat = false; o.mSmirk = true; }
+
+        if (o.helmet) { o.short = false; o.buzz = false; }
+        return o;
+      })
+    };
+  }
+}
+</script>

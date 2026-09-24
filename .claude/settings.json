@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "expo@claude-plugins-official": false,
+    "figma@claude-plugins-official": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@wf/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gen:web": "openapi-typescript openapi/public.yaml -o ../apps/web/src/api/gen/public.d.ts",
+    "gen:admin": "openapi-typescript openapi/admin.yaml -o ../apps/admin/src/api/gen/admin.d.ts",
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "catalog:contracts",
+    "yaml": "2.9.1"
+  }
+}

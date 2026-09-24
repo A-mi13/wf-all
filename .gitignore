@@ -1,8 +1,18 @@
 # экспорт дизайн-канваса (5.7 МБ) — не в git, исходники экранов будут в design/screens
 design/_export/
-docs/WhereFootball — экраны приложения.html
 
 # окружение и инструменты
 .env
 .tools/
+.task/
 node_modules/
+
+# сборки фронтов
+.next/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.env.local
+.env.*.local

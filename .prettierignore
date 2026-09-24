@@ -1,0 +1,11 @@
+# Генерированное и документы не форматируем
+pnpm-lock.yaml
+**/src/api/gen/**
+packages/tokens/tokens.css
+packages/tokens/tokens.ts
+**/.next/**
+**/dist/**
+design/
+docs/
+product/
+*.md

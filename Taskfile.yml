@@ -1,0 +1,112 @@
+# Единая точка входа. Логика проверок живёт в Taskfile частей,
+# здесь только подключение и сценарии «первый запуск / разработка / CI».
+version: '3'
+
+output: prefixed
+
+# Отсутствующие файлы пропускаются; setup создаёт их из .env.example.
+dotenv: ['backend/.env', 'deploy/dev/.env']
+
+vars:
+  TOOLS: '{{.ROOT_DIR}}/.tools/bin'
+
+includes:
+  backend: { taskfile: ./backend/Taskfile.yml, dir: ./backend }
+  admin: { taskfile: ./apps/admin/Taskfile.yml, dir: ./apps/admin }
+  web: { taskfile: ./apps/web/Taskfile.yml, dir: ./apps/web }
+
+tasks:
+  infra:up:
+    desc: Запустить локальный Postgres (.tools/pg)
+    cmds: ['bash scripts/pg.sh start']
+
+  infra:down:
+    desc: Остановить локальный Postgres (данные в .tools/pg/data сохраняются)
+    cmds: ['bash scripts/pg.sh stop']
+
+  mail:
+    desc: Mailpit — письма с кодами входа (UI :18025, SMTP :11025)
+    cmds: ['{{.TOOLS}}/mailpit --listen 127.0.0.1:18025 --smtp 127.0.0.1:11025']
+
+  setup:
+    desc: Первый запуск после scripts/bootstrap.sh
+    cmds:
+      - test -f backend/.env || cp backend/.env.example backend/.env
+      - test -f apps/web/.env.local || cp apps/web/.env.example apps/web/.env.local
+      - test -f apps/admin/.env.local || cp apps/admin/.env.example apps/admin/.env.local
+      # до pg.sh init: порт кластера берётся из WF_PG_PORT этого файла
+      - test -f deploy/dev/.env || cp deploy/dev/.env.example deploy/dev/.env
+      - pnpm install
+      - bash scripts/pg.sh install
+      - bash scripts/pg.sh init
+      - task: infra:up
+      # отдельный процесс: dotenv читается при старте task, а backend/.env мог только что появиться
+      - '{{.TOOLS}}/task backend:db:migrate'
+
+  gen:
+    desc: Вся кодогенерация
+    cmds:
+      - task: backend:gen
+      - pnpm --filter @wf/contracts gen:web
+      - pnpm --filter @wf/contracts gen:admin
+      - pnpm --filter @wf/tokens build
+
+  dev:
+    desc: Всё разом — Postgres, миграции, api :8080, admin-api :8081, worker, веб :3000, админка :5173, Mailpit :18025
+    preconditions:
+      - sh: test -f backend/.env
+        msg: 'нет backend/.env — сначала ./task setup'
+    cmds:
+      - task: infra:up
+      # отдельный процесс: миграции видят свежий backend/.env и не гоняются с запуском api
+      - '{{.TOOLS}}/task backend:db:migrate'
+      - task: dev:services
+
+  dev:services:
+    internal: true
+    deps: [mail, backend:dev:api, backend:dev:admin, backend:dev:worker, dev:fronts]
+
+  dev:fronts:
+    internal: true
+    # один процесс pnpm на оба фронта: два параллельных pnpm 12 гоняются в node_modules
+    cmds: ['pnpm --parallel --filter @wf/web --filter @wf/admin dev']
+
+  test:
+    desc: Все тесты всех частей
+    cmds:
+      - task: packages:ci
+      - task: backend:test
+      - task: admin:test
+      - task: web:test
+
+  packages:ci:
+    desc: Тесты, typecheck и линт границ общих пакетов и контрактов
+    cmds:
+      - pnpm --filter @wf/config --filter @wf/tokens --filter @wf/i18n --filter @wf/contracts test
+      - pnpm --filter @wf/i18n typecheck
+      # пакеты не импортируют приложения — корневой eslint.config.mjs
+      - pnpm run lint:packages
+
+  design:test:
+    desc: Тест извлечения экранов из экспорта канваса
+    # через pnpm — чтобы работал Node из devEngines, а не предустановленный на раннере
+    cmds: ['pnpm run design:test']
+
+  secrets:
+    desc: gitleaks по истории репозитория
+    cmds: ['{{.TOOLS}}/gitleaks git --redact --verbose']
+
+  workflows:
+    desc: actionlint по .github/workflows
+    cmds: ['{{.TOOLS}}/actionlint']
+
+  ci:
+    desc: Всё, что проверяет CI, — локально
+    cmds:
+      - task: secrets
+      - task: workflows
+      - task: packages:ci
+      - task: design:test
+      - task: backend:ci
+      - task: admin:ci
+      - task: web:ci

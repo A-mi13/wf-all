@@ -50,9 +50,8 @@ F:\ideas\wherefootball\                 репо wf-all
 │  ├─ openapi/public.yaml               API приложений и веба
 │  ├─ openapi/admin.yaml                отдельный контракт admin-api
 │  ├─ tokens/tokens.json                токены из макета «Токены»
-│  ├─ scripts/                          генерация TS-клиентов в приложения
-│  ├─ package.json                      openapi-typescript + свой typescript 5.9.3
-│  └─ Taskfile.yml
+│  ├─ test/                             тесты контрактов (node --test)
+│  └─ package.json                      openapi-typescript + свой typescript 5.9.3; скрипты gen:web, gen:admin, test
 ├─ apps/
 │  ├─ web/                              Next.js
 │  │  ├─ src/api/gen/                   клиент из public.yaml (коммитится)
@@ -64,7 +63,6 @@ F:\ideas\wherefootball\                 репо wf-all
 │  ├─ tokens/                           @wf/tokens: tokens.css + tokens.ts из contracts/tokens/tokens.json
 │  └─ i18n/                             @wf/i18n: fallback en→ru, проверка совпадения ключей
 ├─ deploy/dev/
-│  ├─ compose.yml                       Postgres 18 + PostGIS 3.6, Mailpit
 │  └─ initdb/*.sql                      роли migrator/api/admin/worker, расширения в template1, база wf
 ├─ design/
 │  ├─ screens/*.dc.html                 18 экранов из экспорта канваса (без битых @font-face)
@@ -75,7 +73,7 @@ F:\ideas\wherefootball\                 репо wf-all
 ├─ Taskfile.yml                         только includes частей + setup/dev/ci
 ├─ package.json  pnpm-workspace.yaml    packageManager pnpm@12.6.0, devEngines.runtime node 26
 ├─ lefthook.yml  .editorconfig  .gitattributes  .gitignore
-├─ .github/workflows/{backend,web,admin,contracts}.yml
+├─ .github/workflows/{backend,web,admin,packages,repo}.yml
 └─ CLAUDE.md  README.md
 ```
 
@@ -100,9 +98,10 @@ F:\ideas\wherefootball\                 репо wf-all
 - Источник истины — `contracts/`. Код генерируется из YAML, не наоборот.
 - Go: oapi-codegen (chi strict server) с `embedded-spec` — спека вшита в бинарник, в рантайме
   нет путей к файлам. Она же используется валидатором ответов в тестах.
-- TS: `contracts/scripts` запускает openapi-typescript (со своим TypeScript 5.9.3 — у генератора
+- TS: скрипты `gen:web`/`gen:admin` в `contracts/package.json` запускают openapi-typescript (со своим TypeScript 5.9.3 — у генератора
   peer `typescript ^5.x`) и пишет результат в `apps/*/src/api/gen`. Рантайм-клиент — openapi-fetch.
-- Весь сгенерированный код коммитится. `task ci` выполняет `task gen` и `git diff --exit-code`.
+- Весь сгенерированный код коммитится. `task ci` выполняет `task gen` и падает, если `git status` по
+  сгенерированным каталогам не пуст (`diff` не видит новые неотслеживаемые файлы).
 - Ошибки — `application/problem+json` (RFC 9457) со стабильным полем `code`
   (`match.slot_taken`). Клиенты переводят по коду; сервер не шлёт человеческих текстов.
 - Контракты самодостаточные: общие схемы (`Problem`) продублированы в `public.yaml` и `admin.yaml`,
@@ -141,8 +140,10 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
   fnm не ставим. Глобальный pnpm 10.33 не умеет переключаться на 12 (исправлено в 10.34.5) —
   глобальный pnpm обновляется внутри 10.x с разрешения пользователя. `scripts/bootstrap.sh` ставит в `.tools/bin` (в `.gitignore`) go-task,
   golangci-lint и gitleaks фиксированных версий через `GOBIN=... go install`.
-- **Инфраструктура** — `deploy/dev/compose.yml`: `postgis/postgis:18-3.6`, именованный том
-  на `/var/lib/postgresql` (в образе PG18 путь данных изменился), Mailpit для писем с кодами.
+- **Инфраструктура без Docker** (на машине разработчика Docker/WSL не работает): `scripts/pg.sh`
+  разворачивает PostgreSQL 18.6 + PostGIS 3.6.2 из официальных zip-архивов в `.tools/pg` (без прав
+  администратора и службы, системный PostgreSQL не затрагивается), Mailpit собирается из Go в `.tools/bin`.
+  Docker — только в CI (service container `postgis/postgis:18-3.6`) и на сервере.
   Valkey в каркас не входит — идемпотентность и очередь River живут в Postgres; добавим
   в спеке бэкенда, если понадобится.
 - **Роли БД с первого дня:** `migrator` (владелец схемы), `api`, `admin`, `worker` с раздельными
@@ -155,7 +156,7 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
 
 | Команда | Что делает |
 | --- | --- |
-| `task setup` | pnpm install, compose up, миграции, роли |
+| `task setup` | pnpm install, `scripts/pg.sh install/init`, запуск базы, миграции |
 | `task dev` | api, admin-api, worker, веб, админка параллельно, лог с префиксами |
 | `task gen` | Go-сервер, TS-клиенты, tokens.css, sqlc |
 | `task test` / `task lint` | все части; точечно — `task backend:test`, `task admin:test` |
@@ -200,10 +201,17 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
   `core.autocrlf=true`). Скрипты БД пишутся в `.sql`, не в `.sh`.
 - Go: golangci-lint v2, gofmt/goimports.
 - Фронты: ESLint 9 (flat config) + Prettier + eslint-plugin-boundaries.
-- lefthook (npm-пакет в корне): pre-commit — форматирование изменённых файлов и gitleaks.
+- lefthook (npm-пакет в корне): pre-commit — проверка форматирования изменённых файлов (без правок:
+  `git commit -- <пути>` работает во временном индексе) и gitleaks.
   Тяжёлые проверки — в `task ci`, не в хуках.
-- GitHub Actions: `backend.yml`, `web.yml`, `admin.yml`, `contracts.yml` с фильтрами по путям.
-  Каждый workflow только вызывает `task <часть>:ci` — логика проверок не дублируется в YAML.
+- GitHub Actions: `backend.yml`, `web.yml`, `admin.yml`, `packages.yml` с фильтрами по путям и
+  `repo.yml` (gitleaks по истории, actionlint). Каждый workflow только вызывает `task <часть>:ci` —
+  логика проверок не дублируется в YAML.
+
+  > Принятая замена (после каркаса): отдельных `contracts/Taskfile.yml`, `contracts/scripts/` и
+  > `contracts.yml` нет. Контракты проверяются вместе с общими пакетами: `packages:ci` в корневом
+  > `Taskfile.yml` (тесты `@wf/contracts`, `@wf/config`, `@wf/tokens`, `@wf/i18n`, typecheck и линт
+  > границ пакетов) и workflow `packages.yml`; генерация — скрипты в `contracts/package.json`.
 - `pnpm-workspace.yaml`: `allowBuilds` для пакетов со скриптами установки (lefthook, esbuild,
   unrs-resolver, msw, @parcel/watcher). pnpm по умолчанию не ставит версии младше суток —
   оставляем как защиту от атак через свежие пакеты.

@@ -1,0 +1,25 @@
+{
+  "name": "wf",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "26.10.0",
+      "onFail": "download"
+    }
+  },
+  "scripts": {
+    "format": "prettier --write --ignore-unknown .",
+    "design:test": "node --test \"design/tools/*.test.mjs\"",
+    "lint:packages": "eslint packages"
+  },
+  "prettier": "@wf/config/prettier",
+  "devDependencies": {
+    "@wf/config": "workspace:*",
+    "eslint": "catalog:",
+    "lefthook": "2.1.14",
+    "prettier": "catalog:",
+    "typescript-eslint": "catalog:"
+  }
+}

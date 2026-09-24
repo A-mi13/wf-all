@@ -1,0 +1,61 @@
+# Цели бэкенда. Вызываются из корня как backend:<цель>; dotenv (backend/.env) грузит корневой Taskfile.
+version: '3'
+
+vars:
+  TOOLS: '{{.ROOT_DIR}}/.tools/bin'
+  GOTOOL: go tool -modfile=tools/go.mod
+
+tasks:
+  gen:
+    desc: Кодогенерация бэкенда (sqlc, oapi-codegen)
+    cmds:
+      - '{{.GOTOOL}} sqlc generate'
+      - '{{.GOTOOL}} oapi-codegen -config internal/httpapi/public/oapi-codegen.yaml ../contracts/openapi/public.yaml'
+      - '{{.GOTOOL}} oapi-codegen -config internal/httpapi/admin/oapi-codegen.yaml ../contracts/openapi/admin.yaml'
+
+  gen:check:
+    desc: Сгенерированный код совпадает с контрактами и SQL
+    cmds:
+      - task: gen
+      # git status, а не git diff: diff не видит новых неотслеживаемых файлов
+      # (новый пакет sqlc, новый *.gen.go). Работает во встроенном shell go-task (mvdan/sh) и в CI.
+      - |
+        if [ -n "$(git status --porcelain -- . ../contracts)" ]; then
+          echo "gen:check: после кодогенерации рабочее дерево расходится с закоммиченным:"
+          git status --short -- . ../contracts
+          exit 1
+        fi
+
+  lint:
+    desc: golangci-lint
+    cmds:
+      - '{{.TOOLS}}/golangci-lint run ./...'
+
+  test:
+    desc: Все тесты бэкенда (нужен Postgres — ./task infra:up). Цикл TDD — ./task backend:test:watch
+    # Без sources намеренно: иначе ./task ci пропускает тесты как up-to-date.
+    cmds:
+      - go test ./... -count=1
+
+  test:watch:
+    desc: Цикл TDD — перезапуск тестов бэкенда при изменении Go, SQL и go.mod
+    watch: true
+    sources: ['**/*.go', 'migrations/*.sql', 'sqlc.yaml', 'go.mod', 'go.sum']
+    cmds:
+      - go test ./... -count=1
+
+  ci:
+    desc: Всё, что проверяет CI для бэкенда
+    cmds:
+      - task: gen:check
+      - task: lint
+      - task: test
+
+  db:migrate: { desc: Накатить миграции, cmds: ['go run ./cmd/migrate up'] }
+  db:status: { desc: Статус миграций, cmds: ['go run ./cmd/migrate status'] }
+  db:reset:
+    { desc: Откатить всё и накатить заново (только dev), cmds: ['go run ./cmd/migrate reset'] }
+
+  dev:api: { desc: Публичный API, cmds: ['go run ./cmd/api'] }
+  dev:admin: { desc: API админки, cmds: ['go run ./cmd/admin-api'] }
+  dev:worker: { desc: Worker, cmds: ['go run ./cmd/worker'] }

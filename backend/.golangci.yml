@@ -1,0 +1,42 @@
+version: '2'
+run:
+  relative-path-mode: cfg
+linters:
+  default: standard
+  enable:
+    [
+      bodyclose,
+      depguard,
+      errorlint,
+      gosec,
+      misspell,
+      nilerr,
+      noctx,
+      revive,
+      sqlclosecheck,
+      unconvert,
+      usestdlibvars,
+    ]
+  settings:
+    depguard:
+      rules:
+        # Быстрый сигнал в редакторе. Главный страж — internal/archtest: он ловит транзитивные
+        # зависимости и ЛЮБОЙ сегмент admin (internal/<модуль>/admin). depguard так не умеет:
+        # deny.pkg сравнивается только по префиксу (или точно, с "$"), глобы — лишь в files.
+        public-api-no-admin:
+          list-mode: lax
+          # глоб "**/cmd/api/**" — проверено: "**/cmd/api/**/*.go" не матчит файлы прямо в cmd/api
+          files: ['**/cmd/api/**', '**/cmd/worker/**', '**/internal/httpapi/public/**']
+          deny:
+            - pkg: wf/backend/internal/httpapi/admin
+              desc: публичные бинарники не зависят от админки
+            - pkg: wf/backend/cmd/admin-api
+              desc: публичные бинарники не зависят от админки
+  exclusions:
+    generated: lax
+    presets: [comments, std-error-handling]
+formatters:
+  enable: [gofmt, goimports]
+  settings:
+    goimports:
+      local-prefixes: [wf/backend]

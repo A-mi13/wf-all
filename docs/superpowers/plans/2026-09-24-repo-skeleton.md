@@ -41,7 +41,7 @@ tools/lint/go.mod               пин golangci-lint (отдельно: свой
 scripts/bootstrap.sh            первая команда на чистой машине
 scripts/doctor.sh               проверка версий окружения (тест для Task 1–2)
 task                            обёртка: exec .tools/bin/task
-deploy/dev/compose.yml          postgis 18-3.6 + mailpit
+scripts/pg.sh                   локальный PostgreSQL 18.6 + PostGIS 3.6.2 из zip в .tools/pg
 deploy/dev/initdb/20_wf.sql     роли, расширения в template1, база wf
 backend/go.mod, backend/tools/go.mod
 backend/migrations/*.sql + embed.go
@@ -99,6 +99,7 @@ if [[ "$what" == tools || "$what" == all ]]; then
   check golangci-lint 2.14.0 "$(.tools/bin/golangci-lint version 2>&1)"
   check gitleaks 8.30.1 "$(.tools/bin/gitleaks version 2>&1)"
   check actionlint 1.7.12 "$(.tools/bin/actionlint -version 2>&1)"
+  check mailpit 1.31.2 "$(.tools/bin/mailpit version 2>&1)"
 fi
 exit $fail
 ```
@@ -215,12 +216,12 @@ git commit -m "Корень pnpm-workspace: pnpm 12, Node 26, проверка �
 
 **Interfaces:**
 - Consumes: `scripts/doctor.sh tools` (Task 1).
-- Produces: `.tools/bin/{task,gitleaks,actionlint,golangci-lint}`; `./task <цель>` — обёртка; `scripts/bootstrap.sh` — ставит всё без глобальных изменений.
+- Produces: `.tools/bin/{task,gitleaks,actionlint,golangci-lint,mailpit}`; `./task <цель>` — обёртка; `scripts/bootstrap.sh` — ставит всё без глобальных изменений.
 
 - [ ] **Step 1: Запустить проверку — должна упасть**
 
 Run: `bash scripts/doctor.sh tools`
-Expected: четыре `FAIL` (бинарников нет).
+Expected: пять `FAIL` (бинарников нет).
 
 - [ ] **Step 2: Модули с пинами**
 
@@ -229,7 +230,7 @@ mkdir -p tools/lint
 cd tools && go mod init wf/tools && go mod edit -go=1.27 -toolchain=go1.27.1 \
   && go get -tool github.com/go-task/task/v3/cmd/task@v3.53.1 \
   && go get -tool github.com/zricethezav/gitleaks/v8@v8.30.1 \
-  && go get -tool github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 && cd ..
+  && go get -tool github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 \n  && go get -tool github.com/axllent/mailpit@v1.31.2 && cd ..
 cd tools/lint && go mod init wf/tools/lint && go mod edit -go=1.27 -toolchain=go1.27.1 \
   && go get -tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 && cd ../..
 ```
@@ -248,7 +249,7 @@ mkdir -p "$BIN"
 go -C tools build -o "$BIN/" \
   github.com/go-task/task/v3/cmd/task \
   github.com/zricethezav/gitleaks/v8 \
-  github.com/rhysd/actionlint/cmd/actionlint
+  github.com/rhysd/actionlint/cmd/actionlint \n  github.com/axllent/mailpit
 go -C tools/lint build -o "$BIN/" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 pnpm install
 echo "Готово. Дальше: ./task setup"
@@ -266,7 +267,7 @@ Run: `chmod +x scripts/bootstrap.sh scripts/doctor.sh task && git update-index -
 - [ ] **Step 4: Запустить bootstrap и проверку**
 
 Run: `bash scripts/bootstrap.sh && bash scripts/doctor.sh tools`
-Expected: четыре `ok`. Если формат вывода версии у инструмента другой — поправить ожидание в `doctor.sh`, не версию.
+Expected: пять `ok`. Если формат вывода версии у инструмента другой — поправить ожидание в `doctor.sh`, не версию.
 
 - [ ] **Step 5: Коммит**
 
@@ -276,49 +277,28 @@ git update-index --chmod=+x scripts/bootstrap.sh scripts/doctor.sh task
 git commit -m "Инструменты в .tools/bin по пинам, bootstrap и обёртка task"
 ```
 
-### Task 3: Dev-инфраструктура: PostgreSQL 18 + PostGIS, Mailpit, роли
+### Task 3: Dev-инфраструктура: переносимый PostgreSQL 18 + PostGIS, роли
+
+Docker на машине разработчика не работает (WSL), системный PostgreSQL 18.1 (служба на :5432) — без PostGIS и с неизвестным паролем суперпользователя. Поэтому — свой кластер из официальных zip-архивов в `.tools/pg/`, без прав администратора и без службы. Системный PostgreSQL не трогать. Docker остаётся только в CI (service container) и на сервере.
 
 **Files:**
-- Create: `deploy/dev/compose.yml`, `deploy/dev/initdb/20_wf.sql`, `deploy/dev/.env.example`
+- Create: `scripts/pg.sh`, `deploy/dev/initdb/20_wf.sql`, `deploy/dev/.env.example`
 
 **Interfaces:**
-- Produces: Postgres на `localhost:${WF_PG_PORT:-15432}`, суперпользователь `postgres/postgres` (только dev и тесты); роли `migrator`, `api`, `admin`, `worker` (пароль = имя, только dev); база `wf` (владелец `migrator`); расширения `btree_gist, unaccent, citext, postgis` в `template1` — наследуются всеми новыми базами, включая клоны pgtestdb. Mailpit: UI `localhost:18025`, SMTP `localhost:11025`.
+- Produces:
+  - `bash scripts/pg.sh install` — скачать и распаковать PostgreSQL 18.6-2 (EDB, zip) и PostGIS 3.6.2 (OSGeo, zip) в `.tools/pg/pgsql`, с проверкой контрольных сумм; повторный запуск — no-op;
+  - `bash scripts/pg.sh init` — `initdb` в `.tools/pg/data` (UTF8, суперпользователь `postgres`, trust только для 127.0.0.1), затем `deploy/dev/initdb/20_wf.sql`; если кластер уже есть — no-op;
+  - `bash scripts/pg.sh start | stop | status` — `pg_ctl` на `127.0.0.1:${WF_PG_PORT:-15432}`, лог `.tools/pg/postgres.log`;
+  - `bash scripts/pg.sh psql [args]` — psql к этому кластеру суперпользователем;
+  - после `init`: роли `migrator`, `api`, `admin`, `worker` (пароль = имя, только dev); база `wf` (владелец `migrator`); расширения `btree_gist, unaccent, citext, postgis` в `template1` — наследуются всеми новыми базами, включая клоны pgtestdb.
+- Суперпользователь `postgres/postgres`, порт 15432 — как ждут `dbtest` (Task 4) и `backend/.env.example` (Task 12). При trust-аутентификации пароль не проверяется, но в URL допустим.
 
-- [ ] **Step 1: Проверка до реализации — должна упасть**
+- [ ] **Step 1: Проверка до реализации — падает**
 
-Run: `docker compose -f deploy/dev/compose.yml ps`
-Expected: ошибка «no such file» — инфраструктуры нет.
+Run: `bash scripts/pg.sh status`
+Expected: `No such file or directory` — скрипта нет.
 
-- [ ] **Step 2: compose и init**
-
-```yaml
-# deploy/dev/compose.yml
-# Только локальная разработка и тесты. Пароли здесь не секрет.
-name: wf-dev
-services:
-  db:
-    image: postgis/postgis:18-3.6
-    environment:
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "${WF_PG_PORT:-15432}:5432"
-    volumes:
-      # В образе PG18 данные лежат в /var/lib/postgresql/18/docker — монтируем родителя.
-      - pgdata:/var/lib/postgresql
-      - ./initdb/20_wf.sql:/docker-entrypoint-initdb.d/20_wf.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d wf"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-  mail:
-    image: axllent/mailpit:v1.31.2
-    ports:
-      - "${WF_MAIL_UI_PORT:-18025}:8025"
-      - "${WF_MAIL_SMTP_PORT:-11025}:1025"
-volumes:
-  pgdata:
-```
+- [ ] **Step 2: SQL начальной настройки**
 
 ```sql
 -- deploy/dev/initdb/20_wf.sql
@@ -350,27 +330,126 @@ ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
 ```
 
 ```ini
-# deploy/dev/.env.example — порты можно переопределить, если заняты
+# deploy/dev/.env.example — порт можно переопределить, если занят (Hyper-V резервирует блоки)
 WF_PG_PORT=15432
-WF_MAIL_UI_PORT=18025
-WF_MAIL_SMTP_PORT=11025
 ```
 
-- [ ] **Step 3: Поднять и проверить**
-
-Run: `docker compose -f deploy/dev/compose.yml up -d --wait`
-Затем: `docker compose -f deploy/dev/compose.yml exec -T db psql -U postgres -d wf -tAc "select string_agg(rolname, ',' order by rolname) from pg_roles where rolname in ('migrator','api','admin','worker'); select string_agg(extname, ',' order by extname) from pg_extension; select version();"`
-Expected: `admin,api,migrator,worker`, затем строка с `btree_gist,citext,plpgsql,postgis,unaccent`, затем `PostgreSQL 18.6`.
-Если порт 15432 занят (Hyper-V) — задать `WF_PG_PORT` в `deploy/dev/.env` и повторить.
-
-- [ ] **Step 4: Коммит**
+- [ ] **Step 3: Скрипт кластера**
 
 ```bash
-git add deploy/dev
-git commit -m "Dev-инфраструктура: PostgreSQL 18 + PostGIS, Mailpit, роли"
+#!/usr/bin/env bash
+# scripts/pg.sh — локальный PostgreSQL 18 + PostGIS без Docker и без прав администратора.
+# Кластер живёт в .tools/pg (в .gitignore); системный PostgreSQL не затрагивается.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PG_VERSION=18.6-2
+POSTGIS_VERSION=3.6.2
+PG_URL="https://get.enterprisedb.com/postgresql/postgresql-${PG_VERSION}-windows-x64-binaries.zip"
+POSTGIS_URL="https://download.osgeo.org/postgis/windows/pg18/postgis-bundle-pg18-${POSTGIS_VERSION}x64.zip"
+# SHA256 архивов закрепляются при первой загрузке (Step 4) — дальше скачанное сверяется с ними.
+PG_SHA256=""
+POSTGIS_SHA256=""
+
+ROOT="$PWD/.tools/pg"
+BIN="$ROOT/pgsql/bin"
+DATA="$ROOT/data"
+PORT="${WF_PG_PORT:-15432}"
+
+die() { echo "pg.sh: $*" >&2; exit 1; }
+
+require_windows() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) die "скрипт для Windows. На Linux/macOS — системный PostgreSQL 18 + PostGIS на порту $PORT (как в CI)." ;;
+  esac
+}
+
+fetch() { # url, файл, ожидаемый sha256 (пусто — только напечатать)
+  [ -f "$2" ] || curl -fL --retry 3 -o "$2" "$1"
+  local got; got=$(sha256sum "$2" | cut -d' ' -f1)
+  if [ -z "$3" ]; then
+    echo "SHA256 $(basename "$2"): $got — закрепи в scripts/pg.sh"
+  elif [ "$got" != "$3" ]; then
+    rm -f "$2"; die "контрольная сумма $(basename "$2") не совпала"
+  fi
+}
+
+install() {
+  require_windows
+  if [ -x "$BIN/postgres.exe" ] && [ -f "$ROOT/pgsql/share/extension/postgis.control" ]; then
+    echo "уже установлено: $("$BIN/postgres" --version)"; return
+  fi
+  mkdir -p "$ROOT/dl"
+  fetch "$PG_URL" "$ROOT/dl/pg.zip" "$PG_SHA256"
+  fetch "$POSTGIS_URL" "$ROOT/dl/postgis.zip" "$POSTGIS_SHA256"
+  unzip -q -o "$ROOT/dl/pg.zip" -d "$ROOT"            # → $ROOT/pgsql
+  unzip -q -o "$ROOT/dl/postgis.zip" -d "$ROOT/dl/postgis"
+  # Бандл PostGIS: один каталог верхнего уровня с bin/ lib/ share/ … — копируем поверх pgsql.
+  cp -r "$ROOT/dl/postgis"/*/. "$ROOT/pgsql/"
+  "$BIN/postgres" --version
+}
+
+init() {
+  require_windows
+  [ -x "$BIN/initdb.exe" ] || die "сначала: bash scripts/pg.sh install"
+  if [ -f "$DATA/PG_VERSION" ]; then echo "кластер уже есть: $DATA"; return; fi
+  "$BIN/initdb" -D "$DATA" -U postgres -A trust -E UTF8 \
+    --locale-provider=builtin --builtin-locale=C.UTF-8 --locale=C >/dev/null
+  printf "\nlisten_addresses = '127.0.0.1'\nport = %s\n" "$PORT" >> "$DATA/postgresql.conf"
+  start
+  "$BIN/psql" -h 127.0.0.1 -p "$PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 -q \
+    -f deploy/dev/initdb/20_wf.sql
+  echo "кластер готов: 127.0.0.1:$PORT, база wf"
+}
+
+start() {
+  require_windows
+  if "$BIN/pg_ctl" -D "$DATA" status >/dev/null 2>&1; then echo "уже запущен на :$PORT"; return; fi
+  "$BIN/pg_ctl" -D "$DATA" -l "$ROOT/postgres.log" -o "-p $PORT" -w start >/dev/null
+  echo "запущен на 127.0.0.1:$PORT (лог: .tools/pg/postgres.log)"
+}
+
+stop() { require_windows; "$BIN/pg_ctl" -D "$DATA" -m fast -w stop; }
+status() { require_windows; "$BIN/pg_ctl" -D "$DATA" status; }
+psql_() { require_windows; "$BIN/psql" -h 127.0.0.1 -p "$PORT" -U postgres "$@"; }
+
+case "${1:-}" in
+  install) install ;;
+  init) init ;;
+  start) start ;;
+  stop) stop ;;
+  status) status ;;
+  psql) shift; psql_ "$@" ;;
+  *) die "команды: install | init | start | stop | status | psql" ;;
+esac
+```
+
+Run: `chmod +x scripts/pg.sh`
+
+- [ ] **Step 4: Установка и закрепление контрольных сумм**
+
+Run: `bash scripts/pg.sh install`
+Expected: скачаны оба архива (~340 МБ и ~120 МБ), напечатаны две строки `SHA256 …: <хэш> — закрепи`, затем `postgres (PostgreSQL) 18.6`.
+Сверить PostGIS с опубликованным MD5: `curl -s https://download.osgeo.org/postgis/windows/pg18/postgis-bundle-pg18-3.6.2x64.zip.md5` и `md5sum .tools/pg/dl/postgis.zip` — должны совпасть; иначе СТОП.
+Вписать оба SHA256 в `PG_SHA256` и `POSTGIS_SHA256` и перезапустить `bash scripts/pg.sh install` → `уже установлено: postgres (PostgreSQL) 18.6`.
+Если раскладка бандла PostGIS другая (нет одного каталога верхнего уровня) — поправить строку `cp` под фактическую; критерий — `ls .tools/pg/pgsql/share/extension/postgis.control` существует.
+
+- [ ] **Step 5: Кластер и проверка**
+
+Run: `bash scripts/pg.sh init && bash scripts/pg.sh psql -d wf -tAc "select string_agg(rolname, ',' order by rolname) from pg_roles where rolname in ('migrator','api','admin','worker'); select string_agg(extname, ',' order by extname) from pg_extension; select version(); select lower('МОСКВА');"`
+Expected: `admin,api,migrator,worker`; `btree_gist,citext,plpgsql,postgis,unaccent`; строка с `PostgreSQL 18.6`; `москва` (кириллица в нижнем регистре — `normalize_text()` из миграций на это опирается).
+Затем `bash scripts/pg.sh stop && bash scripts/pg.sh status` → `no server running`; `bash scripts/pg.sh start` → `запущен`.
+Если порт 15432 занят — задать `WF_PG_PORT` в окружении и повторить; в отчёт — какой порт выбран.
+
+- [ ] **Step 6: Коммит**
+
+```bash
+git add scripts/pg.sh deploy/dev && git commit -m "Локальный PostgreSQL 18 + PostGIS без Docker, роли" -- scripts/pg.sh deploy/dev
 ```
 
 ---
+
 ## Фаза 1. Бэкенд
 
 ### Task 4: Go-модуль, миграции в backend/, тестовая база и тест наката на PG18
@@ -602,7 +681,7 @@ func Up(ctx context.Context, db *sql.DB) error {
 Run: `cd backend && go mod tidy && go test ./internal/platform/... -count=1 ; cd ..`
 Expected: PASS обоих пакетов.
 Если `TestMigrationsRoundTrip` падает на конкретной миграции — СТОП: это находка «миграции не совместимы с PG18» (п. 17.3 спеки). Показать пользователю ошибку, не править SQL молча.
-Проверка понятной ошибки: `docker compose -f deploy/dev/compose.yml stop db && (cd backend && go test ./internal/platform/migrate -count=1)` → FAIL с текстом `Postgres недоступен на localhost:15432 — запусти ./task infra:up`; затем `docker compose -f deploy/dev/compose.yml start db`.
+Проверка понятной ошибки: `bash scripts/pg.sh stop && (cd backend && go test ./internal/platform/migrate -count=1)` → FAIL с текстом `Postgres недоступен на localhost:15432 — запусти ./task infra:up`; затем `bash scripts/pg.sh start`.
 
 - [ ] **Step 6: Коммит**
 
@@ -2483,7 +2562,7 @@ Expected: gen без изменений (`git diff` пуст), lint `0 issues`, 
 
 Run: `set -a && . backend/.env && set +a && (cd backend && go run ./cmd/migrate up && go run ./cmd/migrate status | tail -3)`
 Expected: миграции накатились ролью `migrator`, статус `applied` до `0016_river_v7.sql`.
-Затем: `docker compose -f deploy/dev/compose.yml exec -T db psql "postgres://api:api@localhost:5432/wf" -tAc "select count(*) from feature_flags"`
+Затем: `.tools/pg/pgsql/bin/psql "postgresql://api:api@127.0.0.1:15432/wf" -tAc "select count(*) from feature_flags"`
 Expected: число > 0 (права по умолчанию сработали). Ошибка `permission denied` — находка для initdb, чинить там.
 
 - [ ] **Step 5: Коммит**
@@ -2753,7 +2832,7 @@ for (const name of ['public', 'admin']) {
   "scripts": {
     "gen:web": "openapi-typescript openapi/public.yaml -o ../apps/web/src/api/gen/public.d.ts",
     "gen:admin": "openapi-typescript openapi/admin.yaml -o ../apps/admin/src/api/gen/admin.d.ts",
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "openapi-typescript": "7.13.0",
@@ -2860,7 +2939,7 @@ test('закоммиченные файлы совпадают с tokens.json', 
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   }
 }
 ```
@@ -4022,7 +4101,7 @@ git commit -m "Веб: Next.js, next-intl, статус сервиса, smoke-т
 
 **Interfaces:**
 - Consumes: Taskfile частей (Task 12, 16, 17), `@wf/*` пакеты (Task 13–15), `.tools/bin/*` (Task 2).
-- Produces: `./task setup | dev | gen | test | ci | infra:up | infra:down | secrets | workflows | packages:ci | design:test`; git-хук pre-commit; workflow на каждую часть, каждый вызывает `./task <часть>:ci`.
+- Produces: `./task setup | dev | gen | test | ci | infra:up | infra:down | mail | secrets | workflows | packages:ci | design:test`; git-хук pre-commit; workflow на каждую часть, каждый вызывает `./task <часть>:ci`.
 
 - [ ] **Step 1: Проверка до реализации — падает**
 
@@ -4043,7 +4122,6 @@ dotenv: ['backend/.env', 'deploy/dev/.env']
 
 vars:
   TOOLS: '{{.ROOT_DIR}}/.tools/bin'
-  COMPOSE: docker compose -f deploy/dev/compose.yml
 
 includes:
   backend: { taskfile: ./backend/Taskfile.yml, dir: ./backend }
@@ -4052,12 +4130,16 @@ includes:
 
 tasks:
   infra:up:
-    desc: Поднять Postgres и Mailpit
-    cmds: ['{{.COMPOSE}} up -d --wait']
+    desc: Запустить локальный Postgres (.tools/pg)
+    cmds: ['bash scripts/pg.sh start']
 
   infra:down:
-    desc: Остановить инфраструктуру (данные в томе сохраняются)
-    cmds: ['{{.COMPOSE}} down']
+    desc: Остановить локальный Postgres (данные в .tools/pg/data сохраняются)
+    cmds: ['bash scripts/pg.sh stop']
+
+  mail:
+    desc: Mailpit — письма с кодами входа (UI :18025, SMTP :11025)
+    cmds: ['{{.TOOLS}}/mailpit --listen 127.0.0.1:18025 --smtp 127.0.0.1:11025']
 
   setup:
     desc: Первый запуск после scripts/bootstrap.sh
@@ -4065,6 +4147,8 @@ tasks:
       - test -f backend/.env || cp backend/.env.example backend/.env
       - test -f apps/web/.env.local || cp apps/web/.env.example apps/web/.env.local
       - pnpm install
+      - bash scripts/pg.sh install
+      - bash scripts/pg.sh init
       - task: infra:up
       # отдельный процесс: dotenv читается при старте task, а backend/.env мог только что появиться
       - '{{.TOOLS}}/task backend:db:migrate'
@@ -4078,8 +4162,8 @@ tasks:
       - pnpm --filter @wf/tokens build
 
   dev:
-    desc: api :8080, admin-api :8081, worker, веб :3000, админка :5173
-    deps: [backend:dev:api, backend:dev:admin, backend:dev:worker, web:dev, admin:dev]
+    desc: api :8080, admin-api :8081, worker, веб :3000, админка :5173, Mailpit :18025 (Postgres — ./task infra:up)
+    deps: [mail, backend:dev:api, backend:dev:admin, backend:dev:worker, web:dev, admin:dev]
 
   test:
     desc: Все тесты всех частей
@@ -4097,7 +4181,7 @@ tasks:
 
   design:test:
     desc: Тест извлечения экранов из экспорта канваса
-    cmds: ['node --test design/tools/']
+    cmds: ['node --test "design/tools/*.test.mjs"']
 
   secrets:
     desc: gitleaks по истории репозитория
@@ -4400,7 +4484,7 @@ test('имя файла — номер и название', () => {
 });
 ```
 
-Run: `node --test design/tools/`
+Run: `node --test "design/tools/*.test.mjs"`
 Expected: FAIL — `Cannot find module './extract-export.mjs'`.
 
 - [ ] **Step 2: Скрипт**
@@ -4462,7 +4546,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
 - [ ] **Step 3: Тест — PASS; извлечь настоящие экраны**
 
-Run: `node --test design/tools/`
+Run: `node --test "design/tools/*.test.mjs"`
 Expected: PASS обоих тестов.
 
 ```bash
@@ -4517,14 +4601,14 @@ Expected: список мест со старыми путями и версия
 | Go | 1.27.1 | `toolchain` в `backend/go.mod`, `tools/go.mod` |
 | Node.js | 26.10.0 | `devEngines.runtime` в корневом `package.json` |
 | pnpm | 12.6.0 | `packageManager` |
-| PostgreSQL / PostGIS | 18.6 / 3.6 | `deploy/dev/compose.yml`, CI |
+| PostgreSQL / PostGIS | 18.6 / 3.6.2 | `scripts/pg.sh` (локально, zip), `postgis/postgis:18-3.6` в CI |
 | Next.js / React | 16.3.6 / 19.3.0 | `apps/web/package.json`, catalog |
 | Vite / Vitest | 8.3.1 / 5.0.1 | catalog |
 | Playwright | 1.63.0 | `apps/web/package.json` |
 | chi / pgx | 5.3.2 / 5.11.0 | `backend/go.mod` |
 | oapi-codegen / sqlc / River | 2.8.0 / 1.31.1 / 0.47.0 | `backend/tools/go.mod` |
 | goose / pgtestdb / kin-openapi | 3.28.0 / 0.1.1 / 0.149.0 | `backend/go.mod` |
-| go-task / gitleaks / actionlint | 3.53.1 / 8.30.1 / 1.7.12 | `tools/go.mod` |
+| go-task / gitleaks / actionlint / Mailpit | 3.53.1 / 8.30.1 / 1.7.12 / 1.31.2 | `tools/go.mod` |
 | golangci-lint | 2.14.0 | `tools/lint/go.mod` |
 | lefthook | 2.1.14 | корневой `package.json` |
 
@@ -4619,7 +4703,7 @@ Expected: список мест со старыми путями и версия
 
 - [ ] **Step 3: Правки существующих документов**
 
-- `README.md`: таблицу «Три пакета» заменить на раскладку `backend/ contracts/ apps/ packages/ deploy/ design/ docs/ product/`; раздел «Состояние» — «каркас готов: `scripts/bootstrap.sh` → `./task setup` → `./task dev`; `./task ci` — все проверки»; добавить раздел «Если порт занят» с командой `netsh int ipv4 set dynamicport tcp start=49152 num=16384` (от администратора) и переменными `WF_PG_PORT` и др. из `deploy/dev/.env.example`.
+- `README.md`: таблицу «Три пакета» заменить на раскладку `backend/ contracts/ apps/ packages/ deploy/ design/ docs/ product/`; раздел «Состояние» — «каркас готов: `scripts/bootstrap.sh` → `./task setup` → `./task dev`; `./task ci` — все проверки»; добавить раздел «База без Docker»: `scripts/pg.sh install|init|start|stop`, кластер в `.tools/pg`, системный PostgreSQL не используется; и раздел «Если порт занят» с командой `netsh int ipv4 set dynamicport tcp start=49152 num=16384` (от администратора) и переменными `WF_PG_PORT` и др. из `deploy/dev/.env.example`.
 - `docs/02-архитектура.md`: блок «Структура репозитория» — пути с префиксами `backend/`, плюс `contracts/`, `apps/`, `packages/`; в таблице стека «PostgreSQL 17+» → «PostgreSQL 18»; «goose или atlas» → «goose (библиотекой, `cmd/migrate`)».
 - `backend/migrations/README.md`: «PostgreSQL 16+» → «PostgreSQL 18 (sqlc разбирает грамматику 17 — синтаксис 18 не использовать)»; блок наката — `./task backend:db:migrate` вместо `goose -dir`; в «Порядок» дописать `0011–0016_river_v2..v7.sql — схема очереди River, по файлу на версию`.
 - `design/README.md`: раздел «Макеты» — ссылка на канвас `https://claude.ai/code/artifact/185013b0-1b61-4c89-92b1-64064cb9754c`, исходники экранов в `design/screens/`, обновление — экспорт HTML в `design/_export/` и `node design/tools/extract-export.mjs "<файл>" design/screens`.
@@ -4715,7 +4799,7 @@ cd F:/ideas/wf-native && git commit -m "Каркас репозитория: о�
 
 **Files:**
 - Rewrite: `CLAUDE.md` (≤ 80 строк)
-- Create: `.claude/rules/backend.md`, `.claude/rules/frontend.md`, `.claude/rules/contracts.md`, `.claude/settings.json`
+- Create: `.claude/rules/backend.md`, `.claude/rules/frontend.md`, `.claude/rules/contracts.md`, `.claude/rules/env.md`, `.claude/settings.json`
 - Create (только если есть материал — критерий ниже): `.claude/skills/<имя>/SKILL.md`
 - Modify: `C:\Users\user\.claude\projects\F--ideas-wherefootball\memory\MEMORY.md` (≤ 50 строк)
 
@@ -4791,7 +4875,22 @@ paths: ["contracts/**"]
 - `tokens.json` → `pnpm --filter @wf/tokens build`.
 ```
 
-Проверить, что каждый glob матчит существующие файлы: `ls backend/cmd/api/main.go apps/admin/src/App.tsx packages/i18n/src/index.ts contracts/openapi/public.yaml`.
+```markdown
+---
+paths: ["backend/internal/platform/config/**", "backend/cmd/**", "apps/*/src/**", "apps/*/*.config.*", "deploy/**", "scripts/**"]
+---
+<!-- .claude/rules/env.md -->
+# Переменные окружения — добавлять сразу
+- Нужен новый ключ → в ТОМ ЖЕ коммите: поле в `backend/internal/platform/config` (префикс бинарника,
+  default или `required`), строка с комментарием в нужном `.env.example`, рабочее значение в локальном
+  `backend/.env` / `apps/web/.env.local` (они в .gitignore).
+- Инструменты не пишут `.env*` (глобальный deny). В этом проекте пользователь разрешил писать их скриптом:
+  .sh в scratchpad → `bash <скрипт>` → коммит только `.env.example` через `git commit -- <пути>`.
+- Секреты — только плейсхолдеры в `.env.example`; значения не коммитить и не выводить в отчёты.
+- Во фронт-сборку попадают только публичные значения (`VITE_*`, `NEXT_PUBLIC_*`).
+```
+
+Проверить, что каждый glob матчит существующие файлы: `ls backend/cmd/api/main.go apps/admin/src/App.tsx packages/i18n/src/index.ts contracts/openapi/public.yaml backend/internal/platform/config/config.go deploy/dev/.env.example`.
 
 - [ ] **Step 4: Skills — только при наличии материала**
 

@@ -1,0 +1,866 @@
+<x-dc>
+<helmet>
+
+<style>
+body { margin: 0; font-family: 'Manrope', system-ui, sans-serif; background: #0B0F0D; }
+button { -webkit-tap-highlight-color: transparent; font-family: inherit; color: inherit; }
+button:focus-visible { outline: 2px solid #C6F24E; outline-offset: 2px; }
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #0B0F0D; color: #EAF2EC; overflow: hidden; position: relative;">
+
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column;">
+  <sc-if value="{{notLogin}}" hint-placeholder-val="{{ true }}">
+  <div style="flex-shrink: 0; height: 56px; box-sizing: border-box; padding: 0 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #1B241F;">
+    <sc-if value="{{hasBack}}" hint-placeholder-val="{{ false }}">
+      <button type="button" sc-camel-on-click="{{back}}" style="flex-shrink: 0; width: 32px; height: 32px; margin-left: -6px; border-radius: 999px; background: none; border: 0; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+        <svg width="18" height="18" sc-camel-view-box="0 0 24 24" fill="none" stroke="#EAF2EC" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5 L8 12 L15 19"></path></svg>
+      </button>
+    </sc-if>
+    <div style="flex-grow: 1; min-width: 0;">
+      <div style="font-family: 'Oswald', sans-serif; font-size: 18px; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{hTitle}}</div>
+      <div style="margin-top: 1px; font-size: 11px; font-weight: 600; color: #6E7B73; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{hSub}}</div>
+    </div>
+    <button type="button" sc-camel-on-click="{{go.search}}" style="flex-shrink: 0; width: 34px; height: 34px; border-radius: 11px; background: #141A17; border: 1px solid #253329; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+      <svg width="15" height="15" sc-camel-view-box="0 0 24 24" fill="none" stroke="#93A399" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.6"></circle><path d="M15.8 15.8 L20.4 20.4"></path></svg>
+    </button>
+    <button type="button" sc-camel-on-click="{{go.more}}" style="flex-shrink: 0; width: 34px; height: 34px; border-radius: 999px; background: #1B241F; border: 1px solid #253329; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #C3D0C7; cursor: pointer;">МК</button>
+  </div>
+
+  </sc-if>
+  <sc-if value="{{offline}}" hint-placeholder-val="{{ false }}">
+    <div style="flex-shrink: 0; padding: 9px 16px; background: #2A2113; display: flex; align-items: center; gap: 9px;">
+      <span style="flex-shrink: 0; width: 6px; height: 6px; border-radius: 999px; background: #E8B858;"></span>
+      <span style="flex-grow: 1; font-size: 11.5px; font-weight: 700; color: #E8B858;">Нет сети. Решения не отправятся, показываем последнее загруженное.</span>
+    </div>
+  </sc-if>
+
+  <div style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column;">
+<sc-if value="{{s.queue}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-shrink: 0; display: flex; align-items: center; gap: 8px;">
+  <button type="button" sc-camel-on-click="{{fType}}" style="flex-grow: 1; min-width: 0; height: 38px; border-radius: 11px; background: #141A17; border: 1px solid {{fBorder}}; display: flex; align-items: center; gap: 8px; padding: 0 11px; cursor: text;">
+    <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{fIcon}}" stroke-width="2.4" stroke-linecap="round" style="flex-shrink:0;" aria-hidden="true"><circle cx="11" cy="11" r="6.6"></circle><path d="M15.8 15.8 L20.4 20.4"></path></svg>
+    <span style="flex-grow: 1; min-width: 0; text-align: left; font-size: 12.5px; font-weight: {{fWeight}}; color: {{fColor}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{fText}}</span>
+  </button>
+  <button type="button" sc-camel-on-click="{{fMore}}" style="flex-shrink: 0; width: 38px; height: 38px; border-radius: 11px; background: {{fMoreBg}}; border: 1px solid {{fMoreBorder}}; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+    <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{fMoreColor}}" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3 6 H21 M6.5 12 H17.5 M10 18 H14"></path></svg>
+  </button>
+</div>
+
+<div style="flex-shrink: 0; margin-top: 9px; display: flex; gap: 7px; overflow: hidden;">
+  <sc-for list="{{fChips}}" as="c" hint-placeholder-count="4">
+    <button type="button" sc-camel-on-click="{{c.pick}}" style="flex-shrink: 0; height: 30px; padding: 0 12px; border-radius: 999px; background: {{c.bg}}; border: 1px solid {{c.border}}; color: {{c.color}}; font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer;">{{c.t}}</button>
+  </sc-for>
+</div>
+
+<sc-if value="{{fMoreOpen}}" hint-placeholder-val="{{ false }}">
+  <div style="flex-shrink: 0; margin-top: 9px; padding: 11px 12px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+    <sc-for list="{{fGroups}}" as="g" hint-placeholder-count="2">
+      <div style="margin-bottom: 9px;">
+        <div style="font-size: 9.5px; font-weight: 800; color: #6E7B73; letter-spacing: 0.6px;">{{g.t}}</div>
+        <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px;">
+          <sc-for list="{{g.opts}}" as="o" hint-placeholder-count="3">
+            <button type="button" sc-camel-on-click="{{o.pick}}" style="padding: 5px 9px; border-radius: 999px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 11px; font-weight: 700; cursor: pointer;">{{o.t}}</button>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</sc-if>
+
+<div style="flex-shrink: 0; margin-top: 9px; margin-bottom: 2px; display: flex; align-items: center; gap: 10px;">
+  <span style="flex-grow: 1; font-size: 11px; font-weight: 700; color: {{fCountColor}};">{{fCount}}</span>
+  <sc-if value="{{fDirty}}" hint-placeholder-val="{{ false }}">
+    <button type="button" sc-camel-on-click="{{fReset}}" style="padding: 0; background: none; border: 0; color: #C6F24E; font-size: 11px; font-weight: 800; cursor: pointer;">Сбросить</button>
+  </sc-if>
+</div>
+
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; margin-top: 6px;">
+  <sc-for list="{{qRows}}" as="r" hint-placeholder-count="5">
+    <button type="button" sc-camel-on-click="{{r.open}}" style="width: 100%; margin-bottom: 8px; padding: 12px 13px; border-radius: 14px; background: #141A17; border: 1px solid {{r.border}}; display: flex; align-items: center; gap: 11px; text-align: left; cursor: pointer;">
+      <span style="flex-shrink: 0; width: 34px; height: 34px; border-radius: 11px; background: {{r.icoBg}}; display: flex; align-items: center; justify-content: center;">
+        <svg width="17" height="17" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{r.icoColor}}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{r.icon}}"></path></svg>
+      </span>
+      <span style="flex-grow: 1; min-width: 0;">
+        <span style="display: block; font-size: 13.5px; font-weight: 700; color: #EAF2EC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.t}}</span>
+        <span style="display: block; margin-top: 2px; font-size: 11.5px; font-weight: 500; color: #6E7B73; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.sub}}</span>
+      </span>
+      <span style="flex-shrink: 0; padding: 4px 8px; border-radius: 8px; background: {{r.chipBg}}; color: {{r.chipColor}}; font-size: 10px; font-weight: 800; white-space: nowrap;">{{r.chip}}</span>
+    </button>
+  </sc-for>
+</div>
+</div></sc-if>
+<sc-if value="{{s.empty}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 40px;">
+  <div style="width: 74px; height: 74px; border-radius: 999px; background: #16241C; border: 1px solid #2C4434; display: flex; align-items: center; justify-content: center;">
+    <svg width="34" height="34" sc-camel-view-box="0 0 24 24" fill="none" stroke="#C6F24E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.4 L9.6 17 L19 7.4"></path></svg>
+  </div>
+  <div style="margin-top: 18px; font-family: 'Oswald', sans-serif; font-size: 22px; font-weight: 600;">Очередь пуста</div>
+  <div style="margin-top: 8px; max-width: 280px; text-align: center; font-size: 13px; font-weight: 500; color: #93A399; line-height: 1.55;">Все заявки разобраны. Новые придут пушем — можно закрывать телефон.</div>
+  <button type="button" sc-camel-on-click="{{go.log}}" style="margin-top: 18px; height: 44px; padding: 0 20px; border-radius: 12px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 13px; font-weight: 800; cursor: pointer;">Посмотреть журнал</button>
+</div>
+</div></sc-if>
+<sc-if value="{{s.card}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column;">
+  <div style="flex-shrink: 0; padding: 14px; border-radius: 16px; background: #141A17; border: 1px solid #253329;">
+    <div style="display: flex; align-items: center; gap: 11px;">
+      <span style="flex-shrink: 0; width: 42px; height: 42px; border-radius: 999px; background: #1B241F; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: #C3D0C7;">{{cIni}}</span>
+      <span style="flex-grow: 1; min-width: 0;">
+        <span style="display: block; font-family: 'Oswald', sans-serif; font-size: 19px; font-weight: 600;">{{cName}}</span>
+        <span style="display: block; margin-top: 2px; font-size: 11.5px; font-weight: 600; color: #6E7B73;">{{cSub}}</span>
+      </span>
+      <span style="flex-shrink: 0; padding: 5px 9px; border-radius: 8px; background: #2A2113; color: #E8B858; font-size: 10px; font-weight: 800;">{{cAge}}</span>
+    </div>
+    <div style="margin-top: 13px; display: flex; flex-direction: column; gap: 8px;">
+      <sc-for list="{{cChecks}}" as="x" hint-placeholder-count="4">
+        <div style="display: flex; align-items: center; gap: 9px;">
+          <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{x.color}}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;" aria-hidden="true"><path d="{{x.icon}}"></path></svg>
+          <span style="flex-grow: 1; font-size: 12.5px; font-weight: 600; color: #C3D0C7;">{{x.t}}</span>
+          <span style="flex-shrink: 0; font-size: 12px; font-weight: 800; color: {{x.color}};">{{x.v}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="flex-shrink: 0; margin-top: 10px; padding: 13px 14px; border-radius: 16px; background: #141A17; border: 1px solid #253329;">
+    <div style="font-size: 10px; font-weight: 800; color: #6E7B73; letter-spacing: 0.5px;">{{cReasonT}}</div>
+    <div style="margin-top: 9px; display: flex; flex-wrap: wrap; gap: 6px;">
+      <sc-for list="{{cReasons}}" as="r" hint-placeholder-count="4">
+        <button type="button" sc-camel-on-click="{{r.pick}}" style="padding: 7px 11px; border-radius: 999px; background: {{r.bg}}; border: 1px solid {{r.border}}; color: {{r.color}}; font-size: 11.5px; font-weight: 700; cursor: pointer;">{{r.t}}</button>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <div style="flex-shrink: 0; padding-bottom: 14px;">
+    <div style="font-size: 11px; font-weight: 500; color: #6E7B73; line-height: 1.5;">{{cState}}</div>
+    <button type="button" sc-camel-on-click="{{cOk}}" style="width: 100%; margin-top: 10px; height: 50px; border-radius: 14px; background: #C6F24E; border: 0; color: #0B0F0D; font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; letter-spacing: 0.4px; cursor: pointer;">{{cOkT}}</button>
+    <div style="margin-top: 8px; display: flex; gap: 8px;">
+      <button type="button" sc-camel-on-click="{{cNo}}" style="flex-grow: 1; height: 44px; border-radius: 12px; background: transparent; border: 1px solid #5A3733; color: #F97066; font-size: 12.5px; font-weight: 800; cursor: pointer;">Отклонить</button>
+      <button type="button" sc-camel-on-click="{{cCall}}" style="flex-grow: 1; height: 44px; border-radius: 12px; background: transparent; border: 1px solid #253329; color: #C3D0C7; font-size: 12.5px; font-weight: 800; cursor: pointer;">{{cCallT}}</button>
+    </div>
+  </div>
+</div>
+</div></sc-if>
+<sc-if value="{{s.alerts}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-shrink: 0; display: flex; gap: 7px;">
+  <sc-for list="{{aTabs}}" as="t" hint-placeholder-count="2">
+    <button type="button" sc-camel-on-click="{{t.pick}}" style="flex-grow: 1; height: 36px; border-radius: 11px; background: {{t.bg}}; border: 1px solid {{t.border}}; color: {{t.color}}; font-size: 12.5px; font-weight: 800; cursor: pointer;">{{t.t}}</button>
+  </sc-for>
+</div>
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; margin-top: 11px;">
+  <sc-for list="{{aRows}}" as="r" hint-placeholder-count="4">
+    <button type="button" sc-camel-on-click="{{r.open}}" style="width: 100%; margin-bottom: 8px; padding: 13px; border-radius: 14px; background: #141A17; border: 1px solid {{r.border}}; display: block; text-align: left; cursor: pointer;">
+      <span style="display: flex; align-items: center; gap: 9px;">
+        <span style="flex-grow: 1; min-width: 0; font-size: 13.5px; font-weight: 700; color: #EAF2EC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.t}}</span>
+        <span style="flex-shrink: 0; font-size: 10.5px; font-weight: 800; color: {{r.slaColor}};">{{r.sla}}</span>
+      </span>
+      <span style="display: block; margin-top: 4px; font-size: 11.5px; font-weight: 500; color: #6E7B73;">{{r.sub}}</span>
+      <span style="display: block; margin-top: 8px; padding: 9px 10px; border-radius: 10px; background: #0E130F; font-size: 11.5px; font-weight: 500; color: #C3D0C7; line-height: 1.45;">{{r.quote}}</span>
+    </button>
+  </sc-for>
+</div>
+</div></sc-if>
+<sc-if value="{{s.search}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-shrink: 0; height: 42px; border-radius: 12px; background: #141A17; border: 1px solid {{gBorder}}; display: flex; align-items: center; gap: 9px; padding: 0 12px;">
+  <svg width="15" height="15" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{gIcon}}" stroke-width="2.4" stroke-linecap="round" style="flex-shrink:0;" aria-hidden="true"><circle cx="11" cy="11" r="6.6"></circle><path d="M15.8 15.8 L20.4 20.4"></path></svg>
+  <button type="button" sc-camel-on-click="{{gType}}" style="flex-grow: 1; min-width: 0; padding: 0; background: none; border: 0; text-align: left; font-size: 13.5px; font-weight: {{gWeight}}; color: {{gColor}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text;">{{gText}}</button>
+  <sc-if value="{{gHas}}" hint-placeholder-val="{{ false }}">
+    <button type="button" sc-camel-on-click="{{gClear}}" style="flex-shrink: 0; width: 19px; height: 19px; border-radius: 999px; background: #253329; border: 0; color: #93A399; font-size: 12px; font-weight: 800; line-height: 1; cursor: pointer;">×</button>
+  </sc-if>
+</div>
+
+<div style="flex-shrink: 0; margin-top: 9px; display: flex; gap: 6px; overflow: hidden;">
+  <sc-for list="{{gTabs}}" as="t" hint-placeholder-count="5">
+    <button type="button" sc-camel-on-click="{{t.pick}}" style="flex-shrink: 0; height: 30px; padding: 0 10px; border-radius: 999px; background: {{t.bg}}; border: 1px solid {{t.border}}; color: {{t.color}}; font-size: 11.5px; font-weight: 700; white-space: nowrap; cursor: pointer;">{{t.t}}</button>
+  </sc-for>
+</div>
+
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; margin-top: 11px;">
+  <sc-if value="{{gEmpty}}" hint-placeholder-val="{{ false }}">
+    <div style="padding: 26px 10px; text-align: center;">
+      <div style="font-family: 'Oswald', sans-serif; font-size: 17px; font-weight: 600;">Ничего не нашлось</div>
+      <div style="margin-top: 6px; font-size: 12px; font-weight: 500; color: #93A399; line-height: 1.5;">Ищем по нику, почте, телефону, номеру матча, площадке, команде и номеру записи в журнале.</div>
+      <button type="button" sc-camel-on-click="{{go.log}}" style="margin-top: 13px; height: 40px; padding: 0 16px; border-radius: 11px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 12.5px; font-weight: 800; cursor: pointer;">Искать в журнале</button>
+    </div>
+  </sc-if>
+  <sc-for list="{{gGroups}}" as="g" hint-placeholder-count="3">
+    <div style="margin-bottom: 4px;">
+      <div style="padding: 6px 2px 5px 2px; font-size: 9.5px; font-weight: 800; color: #6E7B73; letter-spacing: 0.6px;">{{g.t}}</div>
+      <sc-for list="{{g.items}}" as="r" hint-placeholder-count="3">
+        <button type="button" sc-camel-on-click="{{r.go}}" style="width: 100%; margin-bottom: 6px; padding: 10px 11px; border-radius: 12px; background: #141A17; border: 1px solid #253329; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer;">
+          <span style="flex-shrink: 0; width: 28px; height: 28px; border-radius: 9px; background: #1B241F; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #93A399;">{{r.ico}}</span>
+          <span style="flex-grow: 1; min-width: 0;">
+            <span style="display: block; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.t}}</span>
+            <span style="display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: #6E7B73; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.sub}}</span>
+          </span>
+          <span style="flex-shrink: 0; font-size: 10px; font-weight: 800; color: {{r.metaColor}};">{{r.meta}}</span>
+        </button>
+      </sc-for>
+    </div>
+  </sc-for>
+</div>
+</div></sc-if>
+<sc-if value="{{s.anom}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-shrink: 0; display: flex; align-items: center; gap: 8px;">
+  <button type="button" sc-camel-on-click="{{fType}}" style="flex-grow: 1; min-width: 0; height: 38px; border-radius: 11px; background: #141A17; border: 1px solid {{fBorder}}; display: flex; align-items: center; gap: 8px; padding: 0 11px; cursor: text;">
+    <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{fIcon}}" stroke-width="2.4" stroke-linecap="round" style="flex-shrink:0;" aria-hidden="true"><circle cx="11" cy="11" r="6.6"></circle><path d="M15.8 15.8 L20.4 20.4"></path></svg>
+    <span style="flex-grow: 1; min-width: 0; text-align: left; font-size: 12.5px; font-weight: {{fWeight}}; color: {{fColor}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{fText}}</span>
+  </button>
+  <button type="button" sc-camel-on-click="{{fMore}}" style="flex-shrink: 0; width: 38px; height: 38px; border-radius: 11px; background: {{fMoreBg}}; border: 1px solid {{fMoreBorder}}; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+    <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{fMoreColor}}" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3 6 H21 M6.5 12 H17.5 M10 18 H14"></path></svg>
+  </button>
+</div>
+
+<div style="flex-shrink: 0; margin-top: 9px; display: flex; gap: 7px; overflow: hidden;">
+  <sc-for list="{{fChips}}" as="c" hint-placeholder-count="4">
+    <button type="button" sc-camel-on-click="{{c.pick}}" style="flex-shrink: 0; height: 30px; padding: 0 12px; border-radius: 999px; background: {{c.bg}}; border: 1px solid {{c.border}}; color: {{c.color}}; font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer;">{{c.t}}</button>
+  </sc-for>
+</div>
+
+<sc-if value="{{fMoreOpen}}" hint-placeholder-val="{{ false }}">
+  <div style="flex-shrink: 0; margin-top: 9px; padding: 11px 12px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+    <sc-for list="{{fGroups}}" as="g" hint-placeholder-count="2">
+      <div style="margin-bottom: 9px;">
+        <div style="font-size: 9.5px; font-weight: 800; color: #6E7B73; letter-spacing: 0.6px;">{{g.t}}</div>
+        <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px;">
+          <sc-for list="{{g.opts}}" as="o" hint-placeholder-count="3">
+            <button type="button" sc-camel-on-click="{{o.pick}}" style="padding: 5px 9px; border-radius: 999px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 11px; font-weight: 700; cursor: pointer;">{{o.t}}</button>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</sc-if>
+
+<div style="flex-shrink: 0; margin-top: 9px; margin-bottom: 2px; display: flex; align-items: center; gap: 10px;">
+  <span style="flex-grow: 1; font-size: 11px; font-weight: 700; color: {{fCountColor}};">{{fCount}}</span>
+  <sc-if value="{{fDirty}}" hint-placeholder-val="{{ false }}">
+    <button type="button" sc-camel-on-click="{{fReset}}" style="padding: 0; background: none; border: 0; color: #C6F24E; font-size: 11px; font-weight: 800; cursor: pointer;">Сбросить</button>
+  </sc-if>
+</div>
+
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; margin-top: 6px;">
+  <sc-for list="{{anRows}}" as="r" hint-placeholder-count="4">
+    <div style="margin-bottom: 8px; padding: 13px; border-radius: 14px; background: #141A17; border: 1px solid {{r.border}};">
+      <div style="display: flex; align-items: center; gap: 9px;">
+        <span style="flex-grow: 1; min-width: 0; font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.t}}</span>
+        <span style="flex-shrink: 0; padding: 4px 8px; border-radius: 8px; background: {{r.riskBg}}; color: {{r.riskColor}}; font-size: 10px; font-weight: 800;">{{r.risk}}</span>
+      </div>
+      <div style="margin-top: 4px; font-size: 11.5px; font-weight: 500; color: #6E7B73;">{{r.sub}}</div>
+      <div style="margin-top: 9px; display: flex; gap: 7px;">
+        <button type="button" sc-camel-on-click="{{r.ok}}" style="flex-grow: 1; height: 38px; border-radius: 11px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 12px; font-weight: 800; cursor: pointer;">Всё в порядке</button>
+        <button type="button" sc-camel-on-click="{{r.kill}}" style="flex-grow: 1; height: 38px; border-radius: 11px; background: transparent; border: 1px solid #5A3733; color: #F97066; font-size: 12px; font-weight: 800; cursor: pointer;">Аннулировать</button>
+      </div>
+    </div>
+  </sc-for>
+</div>
+</div></sc-if>
+<sc-if value="{{s.more}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-grow: 1; min-height: 0; overflow: hidden;">
+  <div style="padding: 14px; border-radius: 16px; background: #141A17; border: 1px solid #253329; display: flex; align-items: center; gap: 12px;">
+    <span style="flex-shrink: 0; width: 44px; height: 44px; border-radius: 999px; background: #1B241F; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; color: #C3D0C7;">МК</span>
+    <span style="flex-grow: 1; min-width: 0;">
+      <span style="display: block; font-size: 14.5px; font-weight: 800;">Мария К.</span>
+      <span style="display: block; margin-top: 2px; font-size: 11.5px; font-weight: 600; color: #6E7B73;">модератор · Ставрополь · 2ФА включена</span>
+    </span>
+  </div>
+
+  <div style="margin-top: 10px; border-radius: 16px; background: #141A17; border: 1px solid #253329; overflow: hidden;">
+    <sc-for list="{{menu}}" as="m" hint-placeholder-count="7">
+      <button type="button" sc-camel-on-click="{{m.go}}" style="width: 100%; padding: 13px 14px; background: none; border: 0; border-bottom: 1px solid #1B241F; display: flex; align-items: center; gap: 11px; text-align: left; cursor: pointer;">
+        <svg width="16" height="16" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{m.color}}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;" aria-hidden="true"><path d="{{m.icon}}"></path></svg>
+        <span style="flex-grow: 1; min-width: 0; font-size: 13.5px; font-weight: 700; color: {{m.color}};">{{m.t}}</span>
+        <sc-if value="{{m.hasCount}}" hint-placeholder-val="{{ true }}">
+          <span style="flex-shrink: 0; padding: 2px 7px; border-radius: 999px; background: #1F2A23; color: #93A399; font-size: 10px; font-weight: 800;">{{m.count}}</span>
+        </sc-if>
+        <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="#3B5241" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;" aria-hidden="true"><path d="M9 5 L16 12 L9 19"></path></svg>
+      </button>
+    </sc-for>
+  </div>
+<div style="flex-shrink: 0; margin-top: 12px; padding: 11px 13px; border-radius: 12px; background: #171E19;"><div style="font-size: 11.5px; font-weight: 500; color: #93A399; line-height: 1.5;">В телефоне закрыты опасные действия: вечная блокировка, выдача прав и открытие города делаются только с компьютера. Телефон — чтобы разобрать очередь в дороге, а не чтобы принимать решения, которые нельзя откатить.</div></div>
+</div>
+</div></sc-if>
+<sc-if value="{{s.user}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column;">
+  <div style="flex-shrink: 0; padding: 14px; border-radius: 16px; background: #141A17; border: 1px solid #253329;">
+    <div style="font-family: 'Oswald', sans-serif; font-size: 20px; font-weight: 600;">vitya_s</div>
+    <div style="margin-top: 3px; font-size: 12px; font-weight: 600; color: #6E7B73;">Витя С. · Ставрополь · 37 матчей · 3 жалобы</div>
+    <div style="margin-top: 12px; display: flex; gap: 7px;">
+      <sc-for list="{{uTerms}}" as="t" hint-placeholder-count="4">
+        <button type="button" sc-camel-on-click="{{t.pick}}" style="flex-grow: 1; height: 36px; border-radius: 10px; background: {{t.bg}}; border: 1px solid {{t.border}}; color: {{t.color}}; font-size: 11.5px; font-weight: 700; cursor: pointer;">{{t.t}}</button>
+      </sc-for>
+    </div>
+    <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px;">
+      <sc-for list="{{uScope}}" as="x" hint-placeholder-count="4">
+        <button type="button" sc-camel-on-click="{{x.toggle}}" style="padding: 9px 11px; border-radius: 10px; background: {{x.bg}}; border: 1px solid {{x.border}}; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer;">
+          <span style="flex-shrink: 0; width: 16px; height: 16px; border-radius: 5px; background: {{x.boxBg}}; border: {{x.boxBorder}};"></span>
+          <span style="flex-grow: 1; font-size: 12.5px; font-weight: 700; color: {{x.color}};">{{x.t}}</span>
+        </button>
+      </sc-for>
+    </div>
+  </div>
+  <div style="flex-grow: 1;"></div>
+  <div style="flex-shrink: 0; padding-bottom: 14px;">
+    <div style="font-size: 11px; font-weight: 500; color: #6E7B73; line-height: 1.5;">Игрок увидит причину, срок и кто решил. Вечная блокировка с телефона недоступна — она требует второго администратора.</div>
+    <button type="button" sc-camel-on-click="{{uSan}}" style="width: 100%; margin-top: 10px; height: 50px; border-radius: 14px; background: #F97066; border: 0; color: #0B0F0D; font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer;">ОГРАНИЧИТЬ НА {{uTermT}}</button>
+  </div>
+</div>
+</div></sc-if>
+<sc-if value="{{s.log}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 14px 16px 0 16px; display: flex; flex-direction: column;">
+<div style="flex-shrink: 0; display: flex; align-items: center; gap: 8px;">
+  <button type="button" sc-camel-on-click="{{fType}}" style="flex-grow: 1; min-width: 0; height: 38px; border-radius: 11px; background: #141A17; border: 1px solid {{fBorder}}; display: flex; align-items: center; gap: 8px; padding: 0 11px; cursor: text;">
+    <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{fIcon}}" stroke-width="2.4" stroke-linecap="round" style="flex-shrink:0;" aria-hidden="true"><circle cx="11" cy="11" r="6.6"></circle><path d="M15.8 15.8 L20.4 20.4"></path></svg>
+    <span style="flex-grow: 1; min-width: 0; text-align: left; font-size: 12.5px; font-weight: {{fWeight}}; color: {{fColor}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{fText}}</span>
+  </button>
+  <button type="button" sc-camel-on-click="{{fMore}}" style="flex-shrink: 0; width: 38px; height: 38px; border-radius: 11px; background: {{fMoreBg}}; border: 1px solid {{fMoreBorder}}; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+    <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{fMoreColor}}" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3 6 H21 M6.5 12 H17.5 M10 18 H14"></path></svg>
+  </button>
+</div>
+
+<div style="flex-shrink: 0; margin-top: 9px; display: flex; gap: 7px; overflow: hidden;">
+  <sc-for list="{{fChips}}" as="c" hint-placeholder-count="4">
+    <button type="button" sc-camel-on-click="{{c.pick}}" style="flex-shrink: 0; height: 30px; padding: 0 12px; border-radius: 999px; background: {{c.bg}}; border: 1px solid {{c.border}}; color: {{c.color}}; font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer;">{{c.t}}</button>
+  </sc-for>
+</div>
+
+<sc-if value="{{fMoreOpen}}" hint-placeholder-val="{{ false }}">
+  <div style="flex-shrink: 0; margin-top: 9px; padding: 11px 12px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+    <sc-for list="{{fGroups}}" as="g" hint-placeholder-count="2">
+      <div style="margin-bottom: 9px;">
+        <div style="font-size: 9.5px; font-weight: 800; color: #6E7B73; letter-spacing: 0.6px;">{{g.t}}</div>
+        <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px;">
+          <sc-for list="{{g.opts}}" as="o" hint-placeholder-count="3">
+            <button type="button" sc-camel-on-click="{{o.pick}}" style="padding: 5px 9px; border-radius: 999px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 11px; font-weight: 700; cursor: pointer;">{{o.t}}</button>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</sc-if>
+
+<div style="flex-shrink: 0; margin-top: 9px; margin-bottom: 2px; display: flex; align-items: center; gap: 10px;">
+  <span style="flex-grow: 1; font-size: 11px; font-weight: 700; color: {{fCountColor}};">{{fCount}}</span>
+  <sc-if value="{{fDirty}}" hint-placeholder-val="{{ false }}">
+    <button type="button" sc-camel-on-click="{{fReset}}" style="padding: 0; background: none; border: 0; color: #C6F24E; font-size: 11px; font-weight: 800; cursor: pointer;">Сбросить</button>
+  </sc-if>
+</div>
+
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; margin-top: 6px;">
+  <sc-for list="{{lRows}}" as="l" hint-placeholder-count="6">
+    <div style="margin-bottom: 7px; padding: 11px 13px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="flex-shrink: 0; padding: 3px 7px; border-radius: 6px; background: {{l.tagBg}}; color: {{l.tagColor}}; font-size: 9.5px; font-weight: 800;">{{l.tag}}</span>
+        <span style="flex-grow: 1; font-size: 11px; font-weight: 700; color: #93A399;">{{l.who}}</span>
+        <span style="flex-shrink: 0; font-size: 10.5px; font-weight: 600; color: #4F5C55;">{{l.when}}</span>
+      </div>
+      <div style="margin-top: 6px; font-size: 12px; font-weight: 500; color: #C3D0C7; line-height: 1.45;">{{l.t}}</div>
+    </div>
+  </sc-for>
+</div>
+</div></sc-if>
+<sc-if value="{{s.login}}" hint-placeholder-val="{{ false }}"><div style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column;">
+<div style="position: absolute; left: 0; top: 0; width: 390px; height: 844px; z-index: 5; box-sizing: border-box; background: #0B0F0D; padding: 64px 24px 30px 24px; display: flex; flex-direction: column;">
+  <div style="font-family: 'Oswald', sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 3px; color: #C6F24E;">ГДЕФУТБОЛ</div>
+  <div style="margin-top: 10px; font-family: 'Oswald', sans-serif; font-size: 30px; font-weight: 600; line-height: 1.05;">ВХОД<br>АДМИНИСТРАТОРА</div>
+  <div style="margin-top: 10px; font-size: 13px; font-weight: 500; color: #93A399; line-height: 1.55;">Отдельный вход, аккаунт игрока сюда не подходит. Код из приложения-аутентификатора обязателен и в телефоне.</div>
+  <div style="margin-top: 24px; font-size: 11.5px; font-weight: 800; color: #93A399;">Рабочая почта</div>
+  <div style="margin-top: 7px; height: 48px; border-radius: 12px; background: #141A17; border: 1px solid #253329; display: flex; align-items: center; padding: 0 14px; font-size: 14px; font-weight: 600;">maria.k@gdefutbol.ru</div>
+  <div style="margin-top: 16px; font-size: 11.5px; font-weight: 800; color: #93A399;">Код второго фактора</div>
+  <div style="margin-top: 7px; display: flex; gap: 7px;">
+    <sc-for list="{{loginCode}}" as="c" hint-placeholder-count="6">
+      <div style="flex-grow: 1; height: 52px; border-radius: 12px; background: #141A17; border: 1px solid {{c.border}}; display: flex; align-items: center; justify-content: center; font-family: 'Oswald', sans-serif; font-size: 22px; font-weight: 600;">{{c.v}}</div>
+    </sc-for>
+  </div>
+  <div style="flex-grow: 1;"></div>
+  <div style="font-size: 11.5px; font-weight: 500; color: #6E7B73; line-height: 1.5;">После 20 минут без действий код спросят снова. Каждый вход пишется в журнал.</div>
+  <button type="button" sc-camel-on-click="{{loginAct}}" style="width: 100%; margin-top: 14px; height: 52px; border-radius: 14px; background: #C6F24E; border: 0; color: #0B0F0D; font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer;">{{loginBtn}}</button>
+</div>
+</div></sc-if>
+  </div>
+
+  <sc-if value="{{notLogin}}" hint-placeholder-val="{{ true }}">
+  <div style="flex-shrink: 0; height: 86px; box-sizing: border-box; padding: 8px 6px 22px 6px; background: #0E130F; border-top: 1px solid #1B241F; display: flex;">
+    <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+      <button type="button" sc-camel-on-click="{{t.go}}" style="flex-grow: 1; flex-basis: 0; min-width: 0; padding: 0; background: none; border: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; position: relative;">
+        <span style="position: relative; width: 30px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 9px; background: {{t.bg}};">
+          <svg width="19" height="19" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{t.color}}" stroke-width="{{t.sw}}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{t.icon}}"></path></svg>
+          <sc-if value="{{t.hasBadge}}" hint-placeholder-val="{{ true }}">
+            <span style="position: absolute; top: -3px; right: -5px; min-width: 16px; height: 16px; box-sizing: border-box; padding: 0 4px; border-radius: 999px; background: {{t.badgeBg}}; border: 2px solid #0E130F; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #0B0F0D;">{{t.badge}}</span>
+          </sc-if>
+        </span>
+        <span style="font-size: 10px; font-weight: {{t.weight}}; color: {{t.color}}; white-space: nowrap;">{{t.t}}</span>
+      </button>
+    </sc-for>
+  </div>
+  </sc-if>
+</div>
+
+<sc-if value="{{sheet}}" hint-placeholder-val="{{ false }}">
+  <div style="position: absolute; left: 0; top: 0; width: 390px; height: 844px; background: rgba(6,9,7,0.72);">
+    <button type="button" sc-camel-on-click="{{sheetNo}}" style="position: absolute; left: 0; top: 0; width: 390px; height: 844px; background: none; border: 0; cursor: default;" aria-label="Закрыть"></button>
+    <div style="position: absolute; left: 0; bottom: 0; width: 390px; box-sizing: border-box; padding: 18px 16px 30px 16px; border-radius: 22px 22px 0 0; background: #111714; border-top: 1px solid #5A3733;">
+      <div style="width: 38px; height: 4px; margin: 0 auto 14px auto; border-radius: 999px; background: #2C3831;"></div>
+      <div style="font-family: 'Oswald', sans-serif; font-size: 20px; font-weight: 600; color: #F2B4AE;">Аннулировать протокол?</div>
+      <div style="margin-top: 7px; font-size: 12.5px; font-weight: 500; color: #C3D0C7; line-height: 1.55;">Матч 4c1e · Поле за гаражами. Это действие затрагивает людей, которые ни в чём не виноваты.</div>
+      <div style="margin-top: 13px; display: flex; flex-direction: column; gap: 6px;">
+        <sc-for list="{{sheetList}}" as="x" hint-placeholder-count="3">
+          <div style="display: flex; align-items: flex-start; gap: 8px;">
+            <span style="flex-shrink: 0; margin-top: 6px; width: 4px; height: 4px; border-radius: 999px; background: #F97066;"></span>
+            <span style="flex-grow: 1; font-size: 12px; font-weight: 600; color: #C3D0C7; line-height: 1.5;">{{x.t}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="margin-top: 15px; font-size: 10px; font-weight: 800; color: #6E7B73; letter-spacing: 0.5px;">ВВЕДИ СЛОВО «АННУЛИРОВАТЬ»</div>
+      <button type="button" sc-camel-on-click="{{sheetType}}" style="width: 100%; margin-top: 7px; height: 46px; border-radius: 12px; background: #0E130F; border: 1px solid {{sheetBorder}}; text-align: left; padding: 0 14px; font-size: 14px; font-weight: 700; color: {{sheetColor}}; cursor: text;">{{sheetVal}}</button>
+      <button type="button" sc-camel-on-click="{{sheetYes}}" style="width: 100%; margin-top: 12px; height: 50px; border-radius: 14px; background: {{sheetBtnBg}}; border: 0; color: {{sheetBtnColor}}; font-size: 14px; font-weight: 800; cursor: {{sheetCursor}};">Аннулировать протокол</button>
+      <button type="button" sc-camel-on-click="{{sheetNo}}" style="width: 100%; margin-top: 8px; height: 46px; border-radius: 12px; background: transparent; border: 1px solid #253329; color: #C3D0C7; font-size: 13px; font-weight: 800; cursor: pointer;">Отмена</button>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{toast}}" hint-placeholder-val="{{ false }}">
+  <div style="position: absolute; left: 16px; right: 16px; bottom: 100px; padding: 12px 14px; border-radius: 13px; background: {{toastBg}}; border: 1px solid {{toastBorder}}; display: flex; align-items: center; gap: 10px; box-shadow: 0 14px 34px rgba(0,0,0,0.5);">
+    <svg width="16" height="16" sc-camel-view-box="0 0 24 24" fill="none" stroke="{{toastColor}}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;" aria-hidden="true"><path d="{{toastIcon}}"></path></svg>
+    <span style="flex-grow: 1; font-size: 12.5px; font-weight: 700; color: {{toastColor}}; line-height: 1.35;">{{toastText}}</span>
+    <button type="button" sc-camel-on-click="{{toastHide}}" style="flex-shrink: 0; padding: 0; background: none; border: 0; color: #EAF2EC; font-size: 12px; font-weight: 800; cursor: pointer;">{{toastAct}}</button>
+  </div>
+</sc-if>
+
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:844}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      screen: 'queue', prev: 'queue', cardKind: 'cap', cardRow: 0, loginStep: 0,
+      fq: {}, fc: {}, fmore: false,
+      gq: 0, gtab: 0,
+      reason: 0, done: '',
+      uTerm: 1, uScope: [true, true, false, false],
+      aTab: 0, toast: 0, sheet: false, sheetStep: 0, offline: false
+    };
+  }
+
+  renderVals() {
+    const st = this.state;
+    const names = ['login', 'queue', 'empty', 'card', 'alerts', 'search', 'anom', 'more', 'user', 'log'];
+    const s = {};
+    const go = {};
+    names.forEach((n) => {
+      s[n] = st.screen === n;
+      go[n] = () => this.setState({ screen: n, prev: st.screen, fmore: false });
+    });
+
+    const OKI = 'M5 12.4 L9.6 17 L19 7.4';
+    const NOI = 'M6 6 L18 18 M18 6 L6 18';
+    const I = {
+      list: 'M4 7 H20 M4 12 H20 M4 17 H14',
+      bell: 'M6 10 A6 6 0 0 1 18 10 V15 L20 18 H4 L6 15 Z M10 18 A2 2 0 0 0 14 18',
+      find: 'M11 4.4 A6.6 6.6 0 1 0 11 17.6 A6.6 6.6 0 1 0 11 4.4 M15.8 15.8 L20.4 20.4',
+      shield: 'M12 3 L19.5 6 V12 C19.5 16.4 16.4 19.6 12 21 C7.6 19.6 4.5 16.4 4.5 12 V6 Z M12 8.5 V13 M12 15.6 V15.8',
+      dots: 'M5 12 H5.01 M12 12 H12.01 M19 12 H19.01',
+      cap: 'M5 8 L9 5 L12 7 L15 5 L19 8 L17.6 16 H6.4 Z',
+      pitch: 'M4 7 H20 V17 H4 Z M12 7 V17 M4 10 H7 V14 H4 M20 10 H17 V14 H20',
+      chat: 'M4 6 H20 V16 H12 L7 19.5 V16 H4 Z',
+      money: 'M12 5 V19 M8.5 8.4 H13.6 A2.6 2.6 0 0 1 13.6 13.6 H10.4 A2.6 2.6 0 0 0 10.4 18.8 H15.5',
+      user: 'M12 11.4 A3.6 3.6 0 1 0 12 4.2 A3.6 3.6 0 1 0 12 11.4 M5 20 C5 16.4 8.2 14.2 12 14.2 C15.8 14.2 19 16.4 19 20',
+      city: 'M4 20 V9 L10 6 V20 M10 20 V11 L20 7.5 V20 M13.5 20 V15.5 H16.5 V20',
+      flag: 'M6 4 V21 M6 5 H17 L15 9 L17 13 H6',
+      book: 'M5 5 H12 A3 3 0 0 1 15 8 V20 A2.4 2.4 0 0 0 12.6 18 H5 Z M19 5 H15.4 A2.4 2.4 0 0 0 13 7.4',
+      key: 'M14.5 4.5 A4.5 4.5 0 1 1 10.4 11.4 L4 17.8 V20 H6.6 L8 18.6 H10 V16.6 H12 L13.6 15',
+      out: 'M14 5 H18.4 V19 H14 M11 8.4 L14.6 12 L11 15.6 M14.6 12 H4.6'
+    };
+
+    // ---------- вкладки ----------
+    const TABS = [
+      ['queue', 'Очередь', I.list, 7, '#C6F24E'],
+      ['alerts', 'Сигналы', I.bell, 5, '#F97066'],
+      ['search', 'Поиск', I.find, 0, ''],
+      ['anom', 'Аномалии', I.shield, 4, '#E8B858'],
+      ['more', 'Ещё', I.dots, 0, '']
+    ];
+    const GROUP = { login: '', queue: 'queue', empty: 'queue', card: 'queue', alerts: 'alerts', search: 'search', anom: 'anom', more: 'more', user: 'more', log: 'more' };
+    const cur = GROUP[st.screen];
+    const tabs = TABS.map((t) => {
+      const on = cur === t[0];
+      return {
+        t: t[1], icon: t[2], hasBadge: t[3] > 0, badge: String(t[3]), badgeBg: t[4],
+        color: on ? '#C6F24E' : '#6E7B73',
+        bg: on ? '#16241C' : 'transparent',
+        sw: on ? '2.6' : '2.1',
+        weight: on ? '800' : '600',
+        go: () => this.setState({ screen: t[0], prev: st.screen, fmore: false })
+      };
+    });
+
+    // ---------- шапка ----------
+    const HEAD = {
+      queue: ['Очередь', '12 задач · 1 просрочена', false],
+      empty: ['Очередь', 'всё разобрано', false],
+      card: [st.cardKind === 'pitch' ? 'Новая площадка' : 'Заявка капитана', (st.cardKind === 'pitch' ? 'ждёт ' : 'подана ') + ['давно', '5 часов назад', '3 часа', 'давно', '6 часов', 'вчера'][st.cardRow], true],
+      login: ['', '', false],
+      alerts: ['Сигналы', 'жалобы и споры по меткам', false],
+      search: ['Поиск', 'по всей базе', false],
+      anom: ['Аномалии', '4 матча на проверке', false],
+      more: ['Ещё', 'разделы и доступ', false],
+      user: ['Санкция', 'vitya_s · Ставрополь', true],
+      log: ['Журнал действий', 'записи не удаляются', true]
+    };
+    const h = HEAD[st.screen] || ['', '', false];
+
+    // ---------- фильтр списка ----------
+    const FDEF = {
+      queue: ['ник, площадка, номер', 'ром', ['Все', 'Горит', 'Капитаны', 'Площадки'],
+        [['ГОРОД', ['Ставрополь', 'Пятигорск', 'Невинномысск']], ['СРОК', ['горит', 'сутки', 'дольше']]]],
+      anom: ['матч или капитан', 'школа', ['Все', 'Высокий', 'Средний'],
+        [['ПРИЗНАК', ['много голов', 'быстрый протокол']], ['КОГДА', ['вчера', 'неделя']]]],
+      log: ['кто, что, номер записи', 'vitya_s', ['Все', 'Санкции', 'Данные', 'Флаги'],
+        [['КТО', ['Мария К.', 'Игорь Л.']], ['КОГДА', ['сегодня', 'вчера']]]]
+    };
+    const SC = st.screen;
+    const fd = FDEF[SC] || ['', '', [], []];
+    const FQ = st.fq[SC] || '';
+    const FC = st.fc[SC] || 0;
+    const setF = (o) => {
+      const fq = Object.assign({}, st.fq);
+      const fc = Object.assign({}, st.fc);
+      if (o.q !== undefined) fq[SC] = o.q;
+      if (o.c !== undefined) fc[SC] = o.c;
+      return this.setState({ fq: fq, fc: fc });
+    };
+    const match = (str) => !FQ || String(str).toLowerCase().indexOf(FQ.toLowerCase()) >= 0;
+
+    // ---------- очередь ----------
+    const Q = [
+      ['cap', 'Роман Ш.', 'заявка капитана · 41 матч', 'просрочено', 1],
+      ['cap', 'Алексей Т.', 'заявка капитана · 84 матча', '5 часов', 2],
+      ['pitch', 'Коробка на Ленина 14', 'дубль в 120 м · Дима К.', '3 часа', 3],
+      ['comp', 'Счёт не сходится', 'жалоба на матч 8f31', 'просрочено', 1],
+      ['pitch', 'Школьный стадион №3', 'нет фото · Роман Ш.', '6 часов', 3],
+      ['cap', 'Виктор М.', 'заявка капитана · 7 матчей', 'вчера', 2]
+    ];
+    const QI = {
+      cap: [I.cap, '#2A2113', '#E8B858'],
+      pitch: [I.pitch, '#1F2A23', '#93A399'],
+      comp: [I.chat, '#2A1614', '#F97066']
+    };
+    const qAll = Q.filter((r) => match(r[1] + ' ' + r[2]))
+      .filter((r) => FC === 0 || (FC === 1 && r[3] === 'просрочено') || (FC === 2 && r[0] === 'cap') || (FC === 3 && r[0] === 'pitch'));
+    const qRows = qAll.map((r) => ({
+      t: r[1], sub: r[2], chip: r[3],
+      icon: QI[r[0]][0], icoBg: QI[r[0]][1], icoColor: QI[r[0]][2],
+      border: r[3] === 'просрочено' ? '#5A3733' : '#253329',
+      chipBg: r[3] === 'просрочено' ? '#2A1614' : '#1F2A23',
+      chipColor: r[3] === 'просрочено' ? '#F97066' : '#93A399',
+      open: () => (r[0] === 'comp'
+        ? this.setState({ screen: 'alerts', aTab: 0, prev: 'queue' })
+        : this.setState({ screen: 'card', cardKind: r[0], cardRow: Q.indexOf(r), prev: 'queue', done: '' }))
+    }));
+
+    // ---------- карточка ----------
+    const QR = Q[st.cardRow] || Q[0];
+    const PITCHC = st.cardKind === 'pitch';
+    const CARD = PITCHC ? {
+      pitch: true, ini: 'П', name: QR[1], sub: QR[2] + ' · Ставрополь', chip: QR[2].indexOf('дубль') >= 0 ? 'дубль?' : 'нет фото',
+      checks: [
+        { t: 'Адрес на карте', v: 'найден', color: '#4ADE80', icon: OKI },
+        { t: 'Фото', v: QR[2].indexOf('фото') >= 0 ? 'нет' : 'есть', color: QR[2].indexOf('фото') >= 0 ? '#F97066' : '#4ADE80', icon: QR[2].indexOf('фото') >= 0 ? NOI : OKI },
+        { t: 'Площадки рядом', v: QR[2].indexOf('дубль') >= 0 ? 'в 120 м' : 'нет', color: QR[2].indexOf('дубль') >= 0 ? '#E8B858' : '#4ADE80', icon: QR[2].indexOf('дубль') >= 0 ? NOI : OKI },
+        { t: 'Кто добавил', v: QR[2].split(' · ')[1] || '—', color: '#93A399', icon: OKI }
+      ]
+    } : {
+      pitch: false, ini: QR[1].split(' ').map((w) => w.charAt(0)).join('').slice(0, 2), name: QR[1],
+      sub: 'Ставрополь · ' + QR[2].replace('заявка капитана · ', ''), chip: '18+',
+      checks: [
+        { t: 'Возраст 18+', v: 'подтверждён', color: '#4ADE80', icon: OKI },
+        { t: 'Телефон подтверждён', v: '+7 962 ···· 41', color: '#4ADE80', icon: OKI },
+        { t: 'Сыграно матчей', v: QR[2].replace(/\D+/g, ' ').trim().split(' ')[0] || '—', color: parseInt(QR[2].replace(/\D+/g, ''), 10) >= 20 ? '#4ADE80' : '#F97066', icon: parseInt(QR[2].replace(/\D+/g, ''), 10) >= 20 ? OKI : NOI },
+        { t: 'Жалобы и санкции', v: 'нет', color: '#4ADE80', icon: OKI }
+      ]
+    };
+    const CR = PITCHC ? ['Дубль', 'Нет адреса', 'Нет фото', 'Это не площадка'] : ['Мало матчей', 'Нет телефона', 'Есть жалобы', 'Подозрение на фейк'];
+    const cReasons = CR.map((t, i) => ({
+      t: t,
+      bg: st.reason === i ? '#2A1614' : '#1B241F',
+      border: st.reason === i ? '#5A3733' : '#253329',
+      color: st.reason === i ? '#F97066' : '#C3D0C7',
+      pick: () => this.setState({ reason: i })
+    }));
+
+    // ---------- сигналы ----------
+    const ATABS = ['Жалобы 3', 'Споры 2'].map((t, i) => ({
+      t: t,
+      bg: st.aTab === i ? '#C6F24E' : '#141A17',
+      border: st.aTab === i ? '#C6F24E' : '#253329',
+      color: st.aTab === i ? '#0B0F0D' : '#C3D0C7',
+      pick: () => this.setState({ aTab: i })
+    }));
+    const AR = st.aTab === 0 ? [
+      ['Грубая игра и угрозы', 'на Витю С. · от Алексея Т.', 'осталось 6 ч', false, 'Толкнул в спину после свистка, потом обещал «встретить после матча». Видео приложил.'],
+      ['Счёт не сходится', 'на матч 8f31 · от Димы К.', 'просрочена', true, 'В протоколе 6:4, по факту было 6:6. Капитан не отвечает третий день.'],
+      ['Площадки не существует', 'на «Поле за гаражами» · от Романа Ш.', 'осталось 31 ч', false, 'Приехали на адрес — там стройка. Площадку кто-то выдумал.']
+    ] : [
+      ['ALEX_STV оспаривает метку', 'капитан Алексей Т. · 375 ₽ · матч 8f31', '2 ч назад', false, 'Отдал наличными сразу после матча, у раздевалки. Рядом стояли Дима и Серёга.'],
+      ['kirill_07 оспаривает метку', 'капитан Роман Ш. · 250 ₽ · Школа №7', 'вчера', false, 'Перевёл на карту вечером, скрин приложил. Капитан говорит, что не видел.']
+    ];
+    const aRows = AR.map((r) => ({
+      t: r[0], sub: r[1], sla: r[2], quote: r[4],
+      slaColor: r[3] ? '#F97066' : '#93A399',
+      border: r[3] ? '#5A3733' : '#253329',
+      open: () => this.setState({ screen: 'user', prev: 'alerts' })
+    }));
+
+    // ---------- поиск ----------
+    const GQ = ['', 'ро', 'коробка', 'щщщ'][st.gq];
+    const GIDX = [
+      ['ИГРОКИ', 'users', [
+        ['roman_sh', 'Роман Ш. · Ставрополь · заявка на капитана', 'заявка', '#E8B858', 'card'],
+        ['ALEX_STV', 'Алексей Т. · Ставрополь · 84 матча', 'активен', '#93A399', 'user'],
+        ['vitya_s', 'Витя С. · Ставрополь · 3 жалобы', 'ограничен', '#F97066', 'user']
+      ]],
+      ['МАТЧИ', 'matches', [
+        ['Матч 4c1e · За гаражами', 'вчера 20:00 · 5×5 · помечен', 'проверка', '#F97066', 'anom'],
+        ['Матч 8f31 · Коробка у 25 школы', '5 марта · 6×6 · спор по метке', 'спор', '#E8B858', 'alerts']
+      ]],
+      ['ПЛОЩАДКИ', 'pitches', [
+        ['Коробка на Ленина 14', 'дубль в 120 м · на модерации', 'модерация', '#E8B858', 'queue'],
+        ['Коробка у 25 школы', 'Ставрополь · 47 матчей', 'живая', '#C6F24E', 'queue']
+      ]],
+      ['ЖУРНАЛ', 'log', [
+        ['act_9f18', 'сегодня 20:12 · Мария К. · ограничение 7 дней', 'санкция', '#F97066', 'log']
+      ]]
+    ];
+    const GT = [['Всё', ''], ['Игроки', 'users'], ['Матчи', 'matches'], ['Поля', 'pitches'], ['Журнал', 'log']];
+    const gKey = GT[st.gtab][1];
+    const gGroups = GIDX.filter((g) => !gKey || g[1] === gKey).map((g) => ({
+      t: g[0],
+      items: g[2].filter((r) => !GQ || (r[0] + ' ' + r[1]).toLowerCase().indexOf(GQ.toLowerCase()) >= 0)
+        .map((r) => ({
+          t: r[0], sub: r[1], meta: r[2], metaColor: r[3], ico: g[0].charAt(0),
+          go: () => this.setState({ screen: r[4], prev: 'search' })
+        }))
+    })).filter((g) => g.items.length > 0);
+
+    // ---------- аномалии ----------
+    const AN = [
+      ['Матч 4c1e · За гаражами', 'Северный · 43 гола в матче 5×5', 'высокий'],
+      ['Матч 91af · Школа №7', 'Юность · протокол закрыт за 2 минуты', 'высокий'],
+      ['Матч 2b70 · Коробка 25 шк.', 'Заводские · тот же состав 6 матчей', 'средний'],
+      ['Матч 55d2 · Манеж', 'Смена · все голы у одного игрока', 'средний']
+    ];
+    const anAll = AN.filter((r) => match(r[0] + ' ' + r[1]))
+      .filter((r) => FC === 0 || (FC === 1 && r[2] === 'высокий') || (FC === 2 && r[2] === 'средний'));
+    const anRows = anAll.map((r) => ({
+      t: r[0], sub: r[1], risk: r[2],
+      riskBg: r[2] === 'высокий' ? '#2A1614' : '#2A2113',
+      riskColor: r[2] === 'высокий' ? '#F97066' : '#E8B858',
+      border: r[2] === 'высокий' ? '#5A3733' : '#253329',
+      ok: () => this.setState({ toast: 1 }),
+      kill: () => this.setState({ sheet: true, sheetStep: 0 })
+    }));
+
+    // ---------- ещё ----------
+    const MENU = [
+      ['Пользователи', I.user, 'user', 0],
+      ['Города и запуск', I.city, '', 0],
+      ['Флаги функций', I.flag, '', 0],
+      ['Журнал действий', I.book, 'log', 0],
+      ['Роли и доступ', I.key, '', 0],
+      ['Мой доступ и 2ФА', I.key, '', 0],
+      ['Состояния для фронта', I.list, 'empty', 0],
+      ['Выйти', I.out, 'login', 0]
+    ];
+    const menu = MENU.map((m) => ({
+      t: m[0], icon: m[1], hasCount: m[3] > 0, count: String(m[3]),
+      color: m[0] === 'Выйти' ? '#F97066' : '#EAF2EC',
+      go: () => (m[2] ? this.setState({ screen: m[2], prev: 'more' }) : this.setState({ toast: 2 }))
+    }));
+
+    // ---------- санкция ----------
+    const TERMS = ['3 дня', '7 дней', '30 дней', 'навсегда'];
+    const uTerms = TERMS.map((t, i) => ({
+      t: t,
+      bg: st.uTerm === i ? '#C6F24E' : '#1B241F',
+      border: st.uTerm === i ? '#C6F24E' : '#253329',
+      color: st.uTerm === i ? '#0B0F0D' : (i === 3 ? '#4F5C55' : '#C3D0C7'),
+      pick: () => (i === 3 ? this.setState({ toast: 3 }) : this.setState({ uTerm: i }))
+    }));
+    const SCOPE = ['Бронировать позиции', 'Писать в обсуждениях', 'Создавать матчи', 'Записываться на матчи'];
+    const uScope = SCOPE.map((t, i) => ({
+      t: t,
+      bg: st.uScope[i] ? '#2A1614' : '#0E130F',
+      border: st.uScope[i] ? '#5A3733' : '#253329',
+      boxBg: st.uScope[i] ? '#F97066' : 'transparent',
+      boxBorder: st.uScope[i] ? '0' : '2px solid #3B5241',
+      color: st.uScope[i] ? '#F2B4AE' : '#93A399',
+      toggle: () => {
+        const a = st.uScope.slice();
+        a[i] = !a[i];
+        return this.setState({ uScope: a });
+      }
+    }));
+
+    // ---------- журнал ----------
+    const LOG = [
+      ['сегодня, 20:41', 'Мария К.', 'решение', 'Одобрена заявка капитана: Алексей Т.', 'ok'],
+      ['сегодня, 20:12', 'Мария К.', 'санкция', 'Ограничение 7 дней: vitya_s, грубая игра', 'bad'],
+      ['сегодня, 19:44', 'Мария К.', 'просмотр', 'Открыта карточка пользователя kirill_07', 'grey'],
+      ['вчера, 22:15', 'Игорь Л.', 'аннулирование', 'Аннулирован протокол матча 4c1e', 'bad'],
+      ['вчера, 17:30', 'Мария К.', 'спор', 'Отметка о долге снята: ALEX_STV', 'ok'],
+      ['вчера, 12:02', 'Игорь Л.', 'флаг', 'Включены вызовы между командами: Пятигорск', 'grey']
+    ];
+    const LT = { ok: ['#1E2A17', '#C6F24E'], bad: ['#2A1614', '#F97066'], grey: ['#1F2A23', '#93A399'] };
+    const lAll = LOG.filter((l) => match(l[1] + ' ' + l[2] + ' ' + l[3]))
+      .filter((l) => FC === 0
+        || (FC === 1 && (l[2] === 'санкция' || l[2] === 'аннулирование'))
+        || (FC === 2 && (l[2] === 'просмотр' || l[2] === 'решение' || l[2] === 'спор'))
+        || (FC === 3 && l[2] === 'флаг'));
+    const lRows = lAll.map((l) => ({
+      when: l[0].split(', ')[1], who: l[1], tag: l[2], t: l[3],
+      tagBg: LT[l[4]][0], tagColor: LT[l[4]][1]
+    }));
+
+    const TOT = { queue: [qAll.length, Q.length], anom: [anAll.length, AN.length], log: [lAll.length, LOG.length] };
+    const tot = TOT[SC] || [0, 0];
+    const dirty = !!FQ || FC > 0;
+
+    const TOASTS = [
+      null,
+      ['#16241C', '#2C4434', '#C6F24E', OKI, 'Помечено как проверенное', 'Отменить'],
+      ['#1F2A23', '#253329', '#93A399', 'M12 7 V13 M12 16.6 V16.8', 'Этот раздел открывается только с компьютера', 'Ок'],
+      ['#2A1614', '#5A3733', '#F97066', 'M12 7 V13 M12 16.6 V16.8', 'Вечная блокировка требует второго администратора', 'Ок'],
+      ['#16241C', '#2C4434', '#C6F24E', OKI, 'Одобрено. Игрок может создать команду', 'Отменить'],
+      ['#2A1614', '#5A3733', '#F97066', 'M12 7 V13 M12 16.6 V16.8', 'Отклонено. Автор получил причину', 'Отменить'],
+      ['#1F2A23', '#253329', '#93A399', 'M12 7 V13 M12 16.6 V16.8', 'Запрошен видеозвонок — заявка остаётся в очереди', 'Ок'],
+      ['#16241C', '#2C4434', '#C6F24E', OKI, 'Площадка опубликована', 'Отменить'],
+      ['#16241C', '#2C4434', '#C6F24E', OKI, 'Объединено с существующей площадкой', 'Отменить'],
+      ['#2A1614', '#5A3733', '#F97066', 'M12 7 V13 M12 16.6 V16.8', 'Ограничение наложено. Игрок видит причину и срок', 'Отменить'],
+      ['#2A1614', '#5A3733', '#F97066', 'M12 7 V13 M12 16.6 V16.8', 'Протокол аннулирован. Участники уведомлены', 'Ок']
+    ];
+    const tst = TOASTS[st.toast] || TOASTS[1];
+    const SV = ['', 'аннул', 'АННУЛИРОВАТЬ'];
+    const sOk = st.sheetStep === 2;
+
+    return {
+      s: s,
+      go: go,
+      tabs: tabs,
+      hTitle: h[0],
+      hSub: h[1],
+      hasBack: h[2],
+      back: () => this.setState({ screen: st.prev || 'queue' }),
+      offline: st.offline,
+
+      fText: FQ || fd[0],
+      fWeight: FQ ? '700' : '500',
+      fColor: FQ ? '#EAF2EC' : '#6E7B73',
+      fBorder: FQ ? '#3B5241' : '#253329',
+      fIcon: FQ ? '#C6F24E' : '#6E7B73',
+      fType: () => setF({ q: FQ ? '' : fd[1] }),
+      fChips: fd[2].map((t, i) => ({
+        t: t,
+        bg: FC === i ? '#C6F24E' : '#141A17',
+        border: FC === i ? '#C6F24E' : '#253329',
+        color: FC === i ? '#0B0F0D' : '#C3D0C7',
+        pick: () => setF({ c: i })
+      })),
+      fMore: () => this.setState({ fmore: !st.fmore }),
+      fMoreOpen: st.fmore,
+      fMoreBg: st.fmore ? '#1B241F' : '#141A17',
+      fMoreBorder: st.fmore ? '#3B5241' : '#253329',
+      fMoreColor: st.fmore ? '#C6F24E' : '#6E7B73',
+      fGroups: fd[3].map((g) => ({
+        t: g[0],
+        opts: g[1].map((o) => ({ t: o, pick: () => this.setState({ toast: 2 }) }))
+      })),
+      fCount: dirty ? ('Показано ' + tot[0] + ' из ' + tot[1]) : ('Всего ' + tot[1]),
+      fCountColor: dirty ? '#C6F24E' : '#6E7B73',
+      fDirty: dirty,
+      fReset: () => setF({ q: '', c: 0 }),
+
+      qRows: qRows,
+
+      cIni: CARD.ini,
+      cName: CARD.name,
+      cSub: CARD.sub,
+      cAge: CARD.chip,
+      cChecks: CARD.checks,
+      cReasons: cReasons,
+      cReasonT: CARD.pitch ? 'ПРИЧИНА ОТКАЗА ПЛОЩАДКЕ' : 'ПРИЧИНА ОТКАЗА',
+      cOkT: CARD.pitch ? 'ОПУБЛИКОВАТЬ' : 'ОДОБРИТЬ',
+      cCallT: CARD.pitch ? 'Объединить' : 'Видеозвонок',
+      cOk: () => this.setState({ done: 'ok', screen: 'queue', toast: CARD.pitch ? 7 : 4 }),
+      cNo: () => this.setState({ done: 'no', screen: 'queue', toast: 5 }),
+      cCall: () => (CARD.pitch ? this.setState({ done: 'merge', screen: 'queue', toast: 8 }) : this.setState({ done: 'call', toast: 6 })),
+      cState: st.done === 'no'
+        ? 'Отклонено с причиной «' + CR[st.reason] + '». Подать заявку снова можно через 30 дней.'
+        : 'Решение видно игроку целиком: и одобрение, и отказ с причиной. Молчаливых отказов у нас нет.',
+
+      aTabs: ATABS,
+      aRows: aRows,
+
+      gText: GQ || 'Игрок, матч, площадка, номер записи',
+      gWeight: GQ ? '700' : '500',
+      gColor: GQ ? '#EAF2EC' : '#4F5C55',
+      gBorder: GQ ? '#3B5241' : '#253329',
+      gIcon: GQ ? '#C6F24E' : '#6E7B73',
+      gHas: !!GQ,
+      gType: () => this.setState({ gq: (st.gq + 1) % 4 }),
+      gClear: () => this.setState({ gq: 0 }),
+      gTabs: GT.map((t, i) => ({
+        t: t[0],
+        bg: st.gtab === i ? '#C6F24E' : '#141A17',
+        border: st.gtab === i ? '#C6F24E' : '#253329',
+        color: st.gtab === i ? '#0B0F0D' : '#C3D0C7',
+        pick: () => this.setState({ gtab: i })
+      })),
+      gGroups: gGroups,
+      gEmpty: gGroups.length === 0,
+
+      anRows: anRows,
+      menu: menu,
+
+      uTerms: uTerms,
+      uScope: uScope,
+      uTermT: TERMS[st.uTerm].toUpperCase(),
+      uSan: () => this.setState({ toast: 9 }),
+
+      lRows: lRows,
+
+      toast: st.toast > 0,
+      toastBg: tst[0],
+      toastBorder: tst[1],
+      toastColor: tst[2],
+      toastIcon: tst[3],
+      toastText: tst[4],
+      toastAct: tst[5],
+      toastHide: () => this.setState({ toast: 0 }),
+
+      sheet: st.sheet,
+      sheetList: [
+        { t: 'У 4 игроков снимутся 43 гола и 12 пасов' },
+        { t: 'Команда получит отметку в паспорте на 90 дней' },
+        { t: 'Запись в журнале останется навсегда' }
+      ],
+      sheetVal: SV[st.sheetStep] || 'набери слово',
+      sheetColor: SV[st.sheetStep] ? '#EAF2EC' : '#4F5C55',
+      sheetBorder: sOk ? '#5A3733' : '#253329',
+      sheetType: () => this.setState({ sheetStep: (st.sheetStep + 1) % 3 }),
+      sheetBtnBg: sOk ? '#F97066' : '#1B241F',
+      sheetBtnColor: sOk ? '#0B0F0D' : '#4F5C55',
+      sheetCursor: sOk ? 'pointer' : 'not-allowed',
+      sheetNo: () => this.setState({ sheet: false, sheetStep: 0 }),
+      sheetYes: () => (sOk ? this.setState({ sheet: false, sheetStep: 0, toast: 10 }) : null),
+      isLogin: st.screen === 'login',
+      notLogin: st.screen !== 'login',
+      loginCode: ['4', '9', '2', st.loginStep > 0 ? '7' : '', st.loginStep > 0 ? '1' : '', st.loginStep > 0 ? '5' : ''].map((v) => ({ v: v, border: v ? '#3B5241' : '#253329' })),
+      loginBtn: st.loginStep > 0 ? 'ВОЙТИ' : 'ВВЕСТИ КОД',
+      loginAct: () => (st.loginStep > 0 ? this.setState({ screen: 'queue', loginStep: 0 }) : this.setState({ loginStep: 1 }))
+    };
+  }
+}
+</script>
