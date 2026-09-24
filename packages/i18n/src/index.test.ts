@@ -34,3 +34,13 @@ describe('diffKeys', () => {
     });
   });
 });
+
+describe('security', () => {
+  test('ключ __proto__ — обычный ключ, прототип не подменяется', () => {
+    const over = JSON.parse('{"__proto__": {"x": "y"}, "title": "T"}');
+    const out = withFallback({ title: 'Админка' }, over);
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(true);
+    expect(out.title).toBe('T');
+  });
+});

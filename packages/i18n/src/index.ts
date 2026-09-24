@@ -1,4 +1,3 @@
-// packages/i18n/src/index.ts
 // Общая логика локализации веба и админки.
 // use-intl считает "" найденным сообщением, поэтому наивный merge ru+en показал бы пустоту.
 
@@ -10,10 +9,11 @@ export function withFallback(base: Messages, over: Messages): Messages {
   const out: Messages = { ...base };
   for (const [key, value] of Object.entries(over)) {
     if (typeof value === 'string') {
-      if (value !== '') out[key] = value;
+      if (value !== '') Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
     } else {
       const b = base[key];
-      out[key] = withFallback(isGroup(b) ? b : {}, value);
+      const merged = withFallback(isGroup(b) ? b : {}, value);
+      Object.defineProperty(out, key, { value: merged, enumerable: true, writable: true, configurable: true });
     }
   }
   return out;
