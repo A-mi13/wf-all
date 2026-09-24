@@ -12,7 +12,7 @@ import (
 // Ловит сломанные Down-секции и несовместимость с текущей версией PostgreSQL.
 func TestMigrationsRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	p, err := migrate.NewProvider(dbtest.New(t))
+	p, err := migrate.NewProvider(dbtest.New(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

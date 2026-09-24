@@ -4,6 +4,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
@@ -11,19 +12,25 @@ import (
 	"wf/backend/migrations"
 )
 
-func NewProvider(db *sql.DB) (*goose.Provider, error) {
+// NewProvider собирает провайдер goose. log != nil — goose пишет о каждой
+// миграции в этот логгер (как остальные бинарники, через logx); nil — молча.
+func NewProvider(db *sql.DB, log *slog.Logger) (*goose.Provider, error) {
 	locker, err := lock.NewPostgresSessionLocker()
 	if err != nil {
 		return nil, err
 	}
-	return goose.NewProvider(goose.DialectPostgres, db, migrations.FS,
+	opts := []goose.ProviderOption{
 		goose.WithSessionLocker(locker),       // два инстанса не накатят одновременно
 		goose.WithDisableGlobalRegistry(true), // только SQL-миграции
-	)
+	}
+	if log != nil {
+		opts = append(opts, goose.WithSlog(log), goose.WithVerbose(true))
+	}
+	return goose.NewProvider(goose.DialectPostgres, db, migrations.FS, opts...)
 }
 
 func Up(ctx context.Context, db *sql.DB) error {
-	p, err := NewProvider(db)
+	p, err := NewProvider(db, nil)
 	if err != nil {
 		return err
 	}

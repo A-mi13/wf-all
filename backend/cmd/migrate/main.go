@@ -10,19 +10,20 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"wf/backend/internal/platform/config"
+	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/migrate"
 )
 
 const usage = "up | down | status | reset"
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Environ(), os.Stdout); err != nil {
+	if err := run(context.Background(), os.Args[1:], os.Environ(), os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "migrate:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args, environ []string, out io.Writer) error {
+func run(ctx context.Context, args, environ []string, out, logOut io.Writer) error {
 	if len(args) != 1 {
 		return fmt.Errorf("нужна одна команда: %s", usage)
 	}
@@ -35,6 +36,7 @@ func run(ctx context.Context, args, environ []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	log := logx.New(logOut, cfg.Log).With("service", "migrate")
 	// Разбираем строку сами и один раз: sql.Open разбирает её лениво, и ошибка
 	// разбора со строкой внутри всплывала бы из goose (см. parseURL).
 	connCfg, err := parseURL(cfg.DB.URL)
@@ -49,7 +51,7 @@ func run(ctx context.Context, args, environ []string, out io.Writer) error {
 	}
 	db := stdlib.OpenDB(*connCfg)
 	defer db.Close()
-	p, err := migrate.NewProvider(db)
+	p, err := migrate.NewProvider(db, log)
 	if err != nil {
 		return err
 	}
