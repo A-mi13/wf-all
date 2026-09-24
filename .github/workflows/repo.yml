@@ -1,0 +1,21 @@
+# секреты по всей истории и валидность самих workflow
+name: repo
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: '**/go.sum'
+      - run: |
+          mkdir -p .tools/bin
+          go -C tools build -o ../.tools/bin/ github.com/go-task/task/v3/cmd/task github.com/zricethezav/gitleaks/v8 github.com/rhysd/actionlint/cmd/actionlint
+      - run: ./task secrets workflows

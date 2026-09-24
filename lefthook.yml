@@ -1,0 +1,13 @@
+# Быстрые проверки на коммите. Тяжёлое — в ./task ci.
+pre-commit:
+  jobs:
+    - name: prettier
+      glob: '*.{ts,tsx,js,mjs,json,css,yml,yaml}'
+      run: pnpm exec prettier --write --ignore-unknown {staged_files}
+      stage_fixed: true
+    - name: gofmt
+      glob: '*.go'
+      run: gofmt -w {staged_files}
+      stage_fixed: true
+    - name: gitleaks
+      run: .tools/bin/gitleaks git --pre-commit --redact --staged --verbose

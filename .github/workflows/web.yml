@@ -1,0 +1,28 @@
+name: web
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'contracts/openapi/public.yaml'
+      - 'contracts/tokens/**'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/web.yml'
+  pull_request:
+    paths: *paths
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: '**/go.sum'
+      - uses: pnpm/action-setup@v6
+      - run: bash scripts/bootstrap.sh
+      - run: pnpm --filter @wf/web exec playwright install --with-deps chromium
+      - run: ./task web:ci
+        env:
+          CI: 'true'

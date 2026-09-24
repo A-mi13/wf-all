@@ -1,0 +1,24 @@
+name: packages
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'packages/**'
+      - 'contracts/**'
+      - 'design/tools/**'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/packages.yml'
+  pull_request:
+    paths: *paths
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: '**/go.sum'
+      - uses: pnpm/action-setup@v6
+      - run: bash scripts/bootstrap.sh
+      - run: ./task packages:ci design:test

@@ -3,7 +3,11 @@
   "private": true,
   "packageManager": "pnpm@12.6.0",
   "devEngines": {
-    "runtime": { "name": "node", "version": "26.10.0", "onFail": "download" }
+    "runtime": {
+      "name": "node",
+      "version": "26.10.0",
+      "onFail": "download"
+    }
   },
   "scripts": {
     "format": "prettier --write --ignore-unknown ."
@@ -11,6 +15,7 @@
   "prettier": "@wf/config/prettier",
   "devDependencies": {
     "@wf/config": "workspace:*",
+    "lefthook": "2.1.14",
     "prettier": "catalog:"
   }
 }
