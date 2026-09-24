@@ -1,0 +1,21 @@
+version: '3'
+tasks:
+  gen: { desc: Типы клиента из public.yaml, cmds: ['pnpm gen'] }
+  gen:check:
+    desc: Типы клиента совпадают с public.yaml
+    cmds: ['pnpm gen', 'git diff --exit-code -- src/api/gen']
+  dev: { desc: Dev-сервер веба (:3000), cmds: ['pnpm dev'] }
+  test: { desc: Тесты веба (Vitest), cmds: ['pnpm test'] }
+  e2e: { desc: Smoke в браузере (Playwright), cmds: ['pnpm e2e'] }
+  lint: { cmds: ['pnpm lint'] }
+  typecheck: { cmds: ['pnpm typecheck'] }
+  build: { cmds: ['pnpm build'] }
+  ci:
+    desc: Всё, что проверяет CI для веба
+    cmds:
+      - task: gen:check
+      - task: typecheck
+      - task: lint
+      - task: test
+      - task: build
+      - task: e2e

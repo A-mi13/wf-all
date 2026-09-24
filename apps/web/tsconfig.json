@@ -1,0 +1,11 @@
+{
+  "extends": "@wf/config/tsconfig/react.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowJs": false,
+    "incremental": true,
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["next-env.d.ts", "src", ".next/types/**/*.ts", "next.config.ts"],
+  "exclude": ["node_modules", "e2e"]
+}
