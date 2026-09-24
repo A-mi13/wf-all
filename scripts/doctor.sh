@@ -17,9 +17,7 @@ fi
 if [[ "$what" == tools || "$what" == all ]]; then
   check task 3.53.1 "$(.tools/bin/task --version 2>&1)"
   check golangci-lint 2.14.0 "$(.tools/bin/golangci-lint version 2>&1)"
-  # gitleaks v8.30.1 не встраивает версию без ldflags при обычной сборке —
-  # ждём плейсхолдер из его же исходников (version/version.go), пин версии в tools/go.mod остаётся 8.30.1.
-  check gitleaks "version is set by build process" "$(.tools/bin/gitleaks version 2>&1)"
+  check gitleaks 8.30.1 "$(.tools/bin/gitleaks version 2>&1)"
   check actionlint 1.7.12 "$(.tools/bin/actionlint -version 2>&1)"
   check mailpit 1.31.2 "$(.tools/bin/mailpit version 2>&1)"
 fi
