@@ -33,6 +33,9 @@ tasks:
     cmds:
       - test -f backend/.env || cp backend/.env.example backend/.env
       - test -f apps/web/.env.local || cp apps/web/.env.example apps/web/.env.local
+      - test -f apps/admin/.env.local || cp apps/admin/.env.example apps/admin/.env.local
+      # до pg.sh init: порт кластера берётся из WF_PG_PORT этого файла
+      - test -f deploy/dev/.env || cp deploy/dev/.env.example deploy/dev/.env
       - pnpm install
       - bash scripts/pg.sh install
       - bash scripts/pg.sh init

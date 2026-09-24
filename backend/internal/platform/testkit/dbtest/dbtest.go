@@ -26,11 +26,13 @@ func env(key, def string) string {
 }
 
 // Config — подключение суперпользователем: тестам нужно CREATE DATABASE.
+// Порт: WF_TEST_PG_PORT → WF_PG_PORT (порт dev-базы из deploy/dev/.env, его подставляет
+// корневой Taskfile) → 15432.
 func Config() pgtestdb.Config {
 	return pgtestdb.Config{
 		DriverName: "pgx",
 		Host:       env("WF_TEST_PG_HOST", "localhost"),
-		Port:       env("WF_TEST_PG_PORT", "15432"),
+		Port:       env("WF_TEST_PG_PORT", env("WF_PG_PORT", "15432")),
 		User:       env("WF_TEST_PG_USER", "postgres"),
 		Password:   env("WF_TEST_PG_PASSWORD", "postgres"),
 		Database:   "postgres",
@@ -53,7 +55,9 @@ func requireServer(t testing.TB, c pgtestdb.Config) {
 	dialer := net.Dialer{Timeout: 2 * time.Second}
 	conn, err := dialer.DialContext(context.Background(), "tcp", net.JoinHostPort(c.Host, c.Port))
 	if err != nil {
-		t.Fatalf("Postgres недоступен на %s:%s — запусти ./task infra:up (%v)", c.Host, c.Port, err)
+		t.Fatalf("Postgres недоступен на %s (порт: WF_TEST_PG_PORT → WF_PG_PORT → 15432) — "+
+			"запусти ./task infra:up или проверь, что порт совпадает с WF_PG_PORT в deploy/dev/.env (%v)",
+			net.JoinHostPort(c.Host, c.Port), err)
 	}
 	_ = conn.Close()
 }

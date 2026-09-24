@@ -7,7 +7,7 @@ paths:
 # Фронты
 
 - Приложения не импортируют друг друга; общее — только `@wf/*` из `packages/` (eslint-plugin-boundaries). Пакеты не импортируют приложения — корневой `eslint.config.mjs`, `pnpm run lint:packages` в `packages:ci`. Клиент админского API — только в `apps/admin`.
-- Клиент API — через `ApiProvider`/`useApi`; адрес — тот же origin (`/v1` проксирует dev-сервер: rewrites в `next.config.ts`, `server.proxy` в `vite.config.ts`).
+- Клиент API — через `ApiProvider`/`useApi`; адрес — тот же origin (`/v1` проксирует dev-сервер: rewrites в `next.config.ts` → `WF_API_ORIGIN`, `server.proxy` в `vite.config.ts` → `WF_ADMIN_API_ORIGIN`; серверные, без `VITE_`/`NEXT_PUBLIC_`).
 - Цвета, отступы, шрифты — только CSS-переменные `--wf-*` из `@wf/tokens`; `tokens.css` сгенерирован, руками не править.
 - Строки в компонентах — только через `useTranslations`; новый ключ — сразу в `ru.json` и `en.json`.
 - Тест компонента — `renderWithProviders` (`src/test/render.tsx`) + MSW-моки из `src/test/server.ts`.

@@ -73,7 +73,8 @@ PostgreSQL + PostGIS из официальных zip-архивов прямо �
 ```
 scripts/pg.sh install   # скачать и распаковать (один раз, сверяет SHA256)
 scripts/pg.sh init      # создать кластер в .tools/pg/data (один раз)
-scripts/pg.sh start     # поднять на порту WF_PG_PORT (по умолчанию 15432)
+scripts/pg.sh start     # поднять на порту WF_PG_PORT (окружение → deploy/dev/.env → 15432)
+scripts/pg.sh port      # какой порт возьмёт скрипт
 scripts/pg.sh stop      # остановить, данные остаются
 ```
 
@@ -94,16 +95,21 @@ PostgreSQL + PostGIS на том же порту (Docker — только в CI 
 netsh int ipv4 set dynamicport tcp start=49152 num=16384
 ```
 
-Все порты каркаса — ниже 49152. Где каждый меняется:
+Все порты каркаса — ниже 49152. Одной переменной меняется не каждый: ниже — все места,
+которые надо поправить вместе (локальные файлы создаёт `./task setup` из `.env.example`).
+CI поднимает свою базу на 15432 (`.github/workflows/backend.yml`) и от этих правок не зависит.
 
-| Сервис | Порт | Где менять |
+| Сервис | Порт | Где менять — все места |
 | --- | --- | --- |
-| Postgres | 15432 | `WF_PG_PORT` в `deploy/dev/.env` |
-| Mailpit UI / SMTP | 18025 / 11025 | задача `mail` в корневом `Taskfile.yml` |
-| api | 8080 | `API_HTTP_ADDR` в `backend/.env` |
-| admin-api | 8081 | `ADMIN_HTTP_ADDR` в `backend/.env` |
-| веб (Next.js) | 3000 | скрипт `dev` в `apps/web/package.json` |
+| Postgres | 15432 | `WF_PG_PORT` в `deploy/dev/.env` — его читают `scripts/pg.sh` (и напрямую, и через task) и тесты бэкенда (`WF_TEST_PG_PORT` → `WF_PG_PORT` → 15432; `WF_PG_PORT` в окружение подставляет корневой Taskfile, при голом `go test` задать самому); **плюс** порт в четырёх `*_DATABASE_URL` в `backend/.env` |
+| api | 8080 | `API_HTTP_ADDR` в `backend/.env` **и** `WF_API_ORIGIN` в `apps/web/.env.local` (куда Next проксирует `/v1`) |
+| admin-api | 8081 | `ADMIN_HTTP_ADDR` в `backend/.env` **и** `WF_ADMIN_API_ORIGIN` в `apps/admin/.env.local` (куда Vite проксирует `/v1`) |
+| веб (Next.js) | 3000 | скрипты `dev` и `start` в `apps/web/package.json` **и** `baseURL`/`webServer.url` в `apps/web/playwright.config.ts` |
 | админка (Vite) | 5173 | `server.port` в `apps/admin/vite.config.ts` |
+| Mailpit UI / SMTP | 18025 / 11025 | литералы в задаче `mail` корневого `Taskfile.yml` |
+
+Порты в описаниях задач (`./task --list`) и в таблице адресов выше — справочные, их при
+смене порта править не обязательно.
 
 ## Переменные окружения
 
@@ -113,7 +119,7 @@ netsh int ipv4 set dynamicport tcp start=49152 num=16384
 Секреты — только плейсхолдерами, в `.env.example` их не бывает настоящими. Корневого `.env`
 нет: у каждой части свой `.env.example` (`backend/`, `apps/web/`, `apps/admin/`,
 `deploy/dev/`), локальный файл рядом с ним не коммитится (`backend/.env`,
-`apps/web/.env.local`, `deploy/dev/.env`).
+`apps/web/.env.local`, `apps/admin/.env.local`, `deploy/dev/.env`) — их создаёт `./task setup`.
 
 ## Про исходный документ
 

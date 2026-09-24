@@ -15,9 +15,23 @@ POSTGIS_SHA256="0f41241cc536f7404dda43fd2a3f20ffe1fa1d71a8d4f6341428cd25931bf419
 ROOT="$PWD/.tools/pg"
 BIN="$ROOT/pgsql/bin"
 DATA="$ROOT/data"
-PORT="${WF_PG_PORT:-15432}"
 
 die() { echo "pg.sh: $*" >&2; exit 1; }
+
+# Порт: WF_PG_PORT из окружения (так его передаёт корневой Taskfile) → из deploy/dev/.env →
+# 15432. Файл не source-ится: берётся только строка WF_PG_PORT=, значение — только цифры.
+dev_env_port() {
+  local f=deploy/dev/.env v
+  [ -f "$f" ] || return 0
+  v=$(grep -E '^[[:space:]]*(export[[:space:]]+)?WF_PG_PORT=' "$f" | tail -n 1 | cut -d= -f2- | tr -d '\r' || true)
+  v=${v%%#*}                          # комментарий в конце строки
+  v=$(printf '%s' "$v" | tr -d " \t\"'")
+  [ -z "$v" ] && return 0
+  case "$v" in *[!0-9]*) die "WF_PG_PORT в $f — не число" ;; esac
+  printf '%s' "$v"
+}
+PORT="${WF_PG_PORT:-$(dev_env_port)}"
+PORT="${PORT:-15432}"
 
 require_windows() {
   case "$(uname -s)" in
@@ -82,5 +96,6 @@ case "${1:-}" in
   stop) stop ;;
   status) status ;;
   psql) shift; psql_ "$@" ;;
-  *) die "команды: install | init | start | stop | status | psql" ;;
+  port) echo "$PORT" ;;
+  *) die "команды: install | init | start | stop | status | psql | port" ;;
 esac

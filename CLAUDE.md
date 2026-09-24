@@ -48,5 +48,5 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - Тесты гонять самому после правок: `./task backend:test` (нужен Postgres), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`.
 - `./task ci` включает lint/typecheck/build — как и они, только по просьбе (глобальный CLAUDE.md).
 - Кодогенерация — `./task gen`; сгенерированное коммитится (`gen:check` в CI сверяет).
-- Локальный Postgres 18 + PostGIS без Docker: `bash scripts/pg.sh install|init|start|stop|status|psql` → 127.0.0.1:15432 (`.tools/pg`).
+- Локальный Postgres 18 + PostGIS без Docker: `bash scripts/pg.sh install|init|start|stop|status|psql|port` → 127.0.0.1:`WF_PG_PORT` из `deploy/dev/.env` (по умолчанию 15432, `.tools/pg`).
 - `node --test` — только с глобом в кавычках: `node --test "dir/*.test.mjs"` (каталог на этой Node не сканируется).
