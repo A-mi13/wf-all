@@ -27,3 +27,14 @@ func TestUnknownCommand(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// reset не должен даже пытаться подключиться к нелокальной БД: хост
+// db.prod.example.internal недостижим — если бы проверка происходила после
+// sql.Open/подключения, тест бы завис или упал по таймауту, а не сразу.
+func TestResetRefusesNonLocalHost(t *testing.T) {
+	env := []string{"MIGRATOR_DATABASE_URL=postgres://x@db.prod.example.internal:5432/wf"}
+	err := run(context.Background(), []string{"reset"}, env, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "reset запрещён") || !strings.Contains(err.Error(), "db.prod.example.internal") {
+		t.Fatalf("err = %v", err)
+	}
+}

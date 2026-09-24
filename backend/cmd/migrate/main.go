@@ -36,6 +36,12 @@ func run(ctx context.Context, args, environ []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if args[0] == "reset" {
+		// reset стирает все данные — проверяем локальность хоста ДО подключения к БД.
+		if err := localOnly(cfg.DB.URL); err != nil {
+			return err
+		}
+	}
 	db, err := sql.Open("pgx", cfg.DB.URL)
 	if err != nil {
 		return err
