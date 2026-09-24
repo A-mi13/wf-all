@@ -17,7 +17,14 @@ tasks:
     desc: Сгенерированный код совпадает с контрактами и SQL
     cmds:
       - task: gen
-      - git diff --exit-code -- . ../contracts
+      # git status, а не git diff: diff не видит новых неотслеживаемых файлов
+      # (новый пакет sqlc, новый *.gen.go). Работает во встроенном shell go-task (mvdan/sh) и в CI.
+      - |
+        if [ -n "$(git status --porcelain -- . ../contracts)" ]; then
+          echo "gen:check: после кодогенерации рабочее дерево расходится с закоммиченным:"
+          git status --short -- . ../contracts
+          exit 1
+        fi
 
   lint:
     desc: golangci-lint
@@ -39,7 +46,8 @@ tasks:
 
   db:migrate: { desc: Накатить миграции, cmds: ['go run ./cmd/migrate up'] }
   db:status: { desc: Статус миграций, cmds: ['go run ./cmd/migrate status'] }
-  db:reset: { desc: Откатить всё и накатить заново (только dev), cmds: ['go run ./cmd/migrate reset'] }
+  db:reset:
+    { desc: Откатить всё и накатить заново (только dev), cmds: ['go run ./cmd/migrate reset'] }
 
   dev:api: { desc: Публичный API, cmds: ['go run ./cmd/api'] }
   dev:admin: { desc: API админки, cmds: ['go run ./cmd/admin-api'] }
