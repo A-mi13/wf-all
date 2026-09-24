@@ -19,7 +19,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate}`, `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
 - `contracts/` — OpenAPI (`public.yaml`, `admin.yaml`) и `tokens/tokens.json` — источник истины
 - `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`
-- `deploy/dev/` — роли и расширения БД; `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`
+- `deploy/dev/` — роли и расширения БД; `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
 - `design/` — бриф, `screens/*.dc.html`, `tools/extract-export.mjs`; `product/` — «почему так»
 - Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`
 - Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`)
@@ -38,7 +38,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - В этом проекте коммитить по ходу работы разрешено (пользователь, 24.09.2026); формат коммита, пуш и запреты — по глобальному CLAUDE.md.
 - В папке параллельно работают другие агенты: коммитить только свои пути — `git add <пути> && git commit -m "…" -- <пути>`.
 - Никогда: `git add -A` / `git add .` / `git commit -a`, `git stash`, `git reset`, `git clean`, `git checkout -- .`.
-- pre-commit (lefthook): prettier и gofmt сами дописывают правки в коммит, gitleaks останавливает коммит с секретом.
+- pre-commit (lefthook) только проверяет: неотформатированное (prettier, gofmt) и секреты (gitleaks) отклоняют коммит, команда исправления — в сообщении хука.
 
 ## Naming
 - Технический слаг — `wf` (Go-модуль `wf/backend`, npm `@wf/*`, префикс CSS `--wf-*`). Бренд не финален («ГДЕФУТБОЛ» в дизайне, WhereFootball в доках) — только в локалях и конфиге, не в идентификаторах.

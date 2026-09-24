@@ -1,14 +1,14 @@
 # Быстрые проверки на коммите. Тяжёлое — в ./task ci.
+# Хуки только проверяют и ничего не правят: в этом репо коммитят `git commit -- <пути>`,
+# git при этом работает во временном индексе, и правка файлов хуком (stage_fixed) оставляла
+# реальный индекс с версией до форматирования (статус MM).
 pre-commit:
   jobs:
     - name: prettier
       glob: '*.{ts,tsx,js,mjs,json,css,yml,yaml}'
-      # напрямую, без pnpm exec: хуки параллельных коммитов не запускают pnpm (и его проверку установки)
-      run: node_modules/.bin/prettier --write --ignore-unknown {staged_files}
-      stage_fixed: true
+      run: bash scripts/check-format.sh prettier {staged_files}
     - name: gofmt
       glob: '*.go'
-      run: gofmt -w {staged_files}
-      stage_fixed: true
+      run: bash scripts/check-format.sh gofmt {staged_files}
     - name: gitleaks
       run: .tools/bin/gitleaks git --pre-commit --redact --staged --verbose

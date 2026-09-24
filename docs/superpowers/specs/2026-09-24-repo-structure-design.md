@@ -201,7 +201,8 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
   `core.autocrlf=true`). Скрипты БД пишутся в `.sql`, не в `.sh`.
 - Go: golangci-lint v2, gofmt/goimports.
 - Фронты: ESLint 9 (flat config) + Prettier + eslint-plugin-boundaries.
-- lefthook (npm-пакет в корне): pre-commit — форматирование изменённых файлов и gitleaks.
+- lefthook (npm-пакет в корне): pre-commit — проверка форматирования изменённых файлов (без правок:
+  `git commit -- <пути>` работает во временном индексе) и gitleaks.
   Тяжёлые проверки — в `task ci`, не в хуках.
 - GitHub Actions: `backend.yml`, `web.yml`, `admin.yml`, `packages.yml` с фильтрами по путям и
   `repo.yml` (gitleaks по истории, actionlint). Каждый workflow только вызывает `task <часть>:ci` —
