@@ -4,6 +4,7 @@ design/_export/
 # окружение и инструменты
 .env
 .tools/
+.task/
 node_modules/
 
 # сборки фронтов
