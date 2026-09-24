@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,7 @@ import (
 func TestHealthMatchesContract(t *testing.T) {
 	v := apitest.New(t, admin.GetSpec)
 	rec := v.Do(t, admin.NewHandler(slog.New(slog.DiscardHandler)),
-		httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+		httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}

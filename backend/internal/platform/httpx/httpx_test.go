@@ -29,8 +29,8 @@ func decodeProblem(t *testing.T, rec *httptest.ResponseRecorder) httpx.Problem {
 
 func TestUnknownRouteIsProblem(t *testing.T) {
 	rec := httptest.NewRecorder()
-	httpx.NewRouter(quiet()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
-	if p := decodeProblem(t, rec); rec.Code != 404 || p.Code != "http.not_found" || p.Status != 404 {
+	httpx.NewRouter(quiet()).ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope", nil))
+	if p := decodeProblem(t, rec); rec.Code != http.StatusNotFound || p.Code != "http.not_found" || p.Status != http.StatusNotFound {
 		t.Fatalf("got %d %+v", rec.Code, p)
 	}
 }
@@ -39,8 +39,8 @@ func TestWrongMethodIsProblem(t *testing.T) {
 	r := httpx.NewRouter(quiet())
 	r.Get("/x", func(http.ResponseWriter, *http.Request) {})
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/x", nil))
-	if p := decodeProblem(t, rec); rec.Code != 405 || p.Code != "http.method_not_allowed" {
+	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil))
+	if p := decodeProblem(t, rec); rec.Code != http.StatusMethodNotAllowed || p.Code != "http.method_not_allowed" {
 		t.Fatalf("got %d %+v", rec.Code, p)
 	}
 }
@@ -48,22 +48,22 @@ func TestWrongMethodIsProblem(t *testing.T) {
 func TestPanicIsProblemAndServerSurvives(t *testing.T) {
 	r := httpx.NewRouter(quiet())
 	r.Get("/boom", func(http.ResponseWriter, *http.Request) { panic("бум") })
-	r.Get("/ok", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
+	r.Get("/ok", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/boom", nil))
-	if p := decodeProblem(t, rec); rec.Code != 500 || p.Code != "internal" {
+	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/boom", nil))
+	if p := decodeProblem(t, rec); rec.Code != http.StatusInternalServerError || p.Code != "internal" {
 		t.Fatalf("got %d %+v", rec.Code, p)
 	}
 	rec = httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ok", nil))
-	if rec.Code != 204 {
+	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ok", nil))
+	if rec.Code != http.StatusNoContent {
 		t.Fatalf("после паники: %d", rec.Code)
 	}
 }
 
 func TestProblemCarriesRequestID(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/nope", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope", nil)
 	req.Header.Set("X-Request-Id", "req-42")
 	rec := httptest.NewRecorder()
 	httpx.NewRouter(quiet()).ServeHTTP(rec, req)
@@ -76,14 +76,15 @@ func TestRecovererWorksOnEmptyRouter(t *testing.T) {
 	r := httpx.NewRouter(quiet())
 	r.NotFound(func(http.ResponseWriter, *http.Request) { panic("бум") })
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
-	if p := decodeProblem(t, rec); rec.Code != 500 || p.Code != "internal" {
+	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope", nil))
+	if p := decodeProblem(t, rec); rec.Code != http.StatusInternalServerError || p.Code != "internal" {
 		t.Fatalf("got %d %+v", rec.Code, p)
 	}
 }
 
 func TestServeStopsGracefullyOnCancel(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

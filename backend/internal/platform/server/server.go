@@ -31,7 +31,8 @@ func RunHTTP(ctx context.Context, name string, c HTTPConfig, logOut io.Writer,
 		return err
 	}
 	defer pool.Close()
-	ln, err := net.Listen("tcp", c.HTTP.Addr)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", c.HTTP.Addr)
 	if err != nil {
 		return err
 	}

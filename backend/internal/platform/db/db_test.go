@@ -21,7 +21,7 @@ func TestOpenPingsDatabase(t *testing.T) {
 }
 
 func TestOpenFailsFastOnUnreachableDB(t *testing.T) {
-	_, err := db.Open(context.Background(), config.DB{
+	_, err := db.Open(context.Background(), config.DB{ //nolint:gosec // фиктивные тестовые креды, не боевой секрет
 		URL: "postgres://x:x@127.0.0.1:1/wf?sslmode=disable&connect_timeout=1", MaxConns: 1,
 	})
 	if err == nil {

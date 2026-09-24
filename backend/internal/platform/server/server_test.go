@@ -19,7 +19,8 @@ import (
 // freeAddr — свободный локальный адрес для теста.
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,10 +38,10 @@ func TestRunHTTPServesAndStops(t *testing.T) {
 			HTTP: config.HTTP{Addr: addr, ShutdownTimeout: time.Second},
 			DB:   config.DB{URL: url, MaxConns: 2},
 		}, io.Discard, func(_ *slog.Logger, _ *pgxpool.Pool) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 		})
 	}()
-	waitStatus(t, "http://"+addr+"/", 204)
+	waitStatus(t, "http://"+addr+"/", http.StatusNoContent)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("RunHTTP: %v", err)
@@ -50,9 +51,13 @@ func TestRunHTTPServesAndStops(t *testing.T) {
 func waitStatus(t *testing.T, url string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for time.Now().Before(deadline) {
-		if resp, err := http.Get(url); err == nil { //nolint:noctx // тестовый опрос
-			resp.Body.Close()
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			_ = resp.Body.Close()
 			if resp.StatusCode == want {
 				return
 			}

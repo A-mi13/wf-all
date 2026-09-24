@@ -50,7 +50,8 @@ func migrator() pgtestdb.Migrator {
 // requireServer падает с понятным советом, если Postgres не запущен.
 func requireServer(t testing.TB, c pgtestdb.Config) {
 	t.Helper()
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(c.Host, c.Port), 2*time.Second)
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "tcp", net.JoinHostPort(c.Host, c.Port))
 	if err != nil {
 		t.Fatalf("Postgres недоступен на %s:%s — запусти ./task infra:up (%v)", c.Host, c.Port, err)
 	}

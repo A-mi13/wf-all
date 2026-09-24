@@ -2,6 +2,7 @@
 package archtest
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"strings"
@@ -13,7 +14,7 @@ import (
 func TestPublicAPIDoesNotDependOnAdmin(t *testing.T) {
 	forbidden := []string{"wf/backend/internal/httpapi/admin", "wf/backend/cmd/admin-api"}
 	for _, goos := range []string{"linux", "windows"} {
-		cmd := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", "./cmd/api")
+		cmd := exec.CommandContext(context.Background(), "go", "list", "-deps", "-f", "{{.ImportPath}}", "./cmd/api")
 		cmd.Dir = "../.." // корень модуля backend
 		cmd.Env = append(cmd.Environ(), "GOOS="+goos, "CGO_ENABLED=0")
 		out, err := cmd.Output()
