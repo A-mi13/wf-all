@@ -4799,7 +4799,7 @@ cd F:/ideas/wf-native && git commit -m "Каркас репозитория: о�
 
 **Files:**
 - Rewrite: `CLAUDE.md` (≤ 80 строк)
-- Create: `.claude/rules/backend.md`, `.claude/rules/frontend.md`, `.claude/rules/contracts.md`, `.claude/settings.json`
+- Create: `.claude/rules/backend.md`, `.claude/rules/frontend.md`, `.claude/rules/contracts.md`, `.claude/rules/env.md`, `.claude/settings.json`
 - Create (только если есть материал — критерий ниже): `.claude/skills/<имя>/SKILL.md`
 - Modify: `C:\Users\user\.claude\projects\F--ideas-wherefootball\memory\MEMORY.md` (≤ 50 строк)
 
@@ -4875,7 +4875,22 @@ paths: ["contracts/**"]
 - `tokens.json` → `pnpm --filter @wf/tokens build`.
 ```
 
-Проверить, что каждый glob матчит существующие файлы: `ls backend/cmd/api/main.go apps/admin/src/App.tsx packages/i18n/src/index.ts contracts/openapi/public.yaml`.
+```markdown
+---
+paths: ["backend/internal/platform/config/**", "backend/cmd/**", "apps/*/src/**", "apps/*/*.config.*", "deploy/**", "scripts/**"]
+---
+<!-- .claude/rules/env.md -->
+# Переменные окружения — добавлять сразу
+- Нужен новый ключ → в ТОМ ЖЕ коммите: поле в `backend/internal/platform/config` (префикс бинарника,
+  default или `required`), строка с комментарием в нужном `.env.example`, рабочее значение в локальном
+  `backend/.env` / `apps/web/.env.local` (они в .gitignore).
+- Инструменты не пишут `.env*` (глобальный deny). В этом проекте пользователь разрешил писать их скриптом:
+  .sh в scratchpad → `bash <скрипт>` → коммит только `.env.example` через `git commit -- <пути>`.
+- Секреты — только плейсхолдеры в `.env.example`; значения не коммитить и не выводить в отчёты.
+- Во фронт-сборку попадают только публичные значения (`VITE_*`, `NEXT_PUBLIC_*`).
+```
+
+Проверить, что каждый glob матчит существующие файлы: `ls backend/cmd/api/main.go apps/admin/src/App.tsx packages/i18n/src/index.ts contracts/openapi/public.yaml backend/internal/platform/config/config.go deploy/dev/.env.example`.
 
 - [ ] **Step 4: Skills — только при наличии материала**
 
