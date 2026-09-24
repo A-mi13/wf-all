@@ -64,7 +64,6 @@ F:\ideas\wherefootball\                 репо wf-all
 │  ├─ tokens/                           @wf/tokens: tokens.css + tokens.ts из contracts/tokens/tokens.json
 │  └─ i18n/                             @wf/i18n: fallback en→ru, проверка совпадения ключей
 ├─ deploy/dev/
-│  ├─ compose.yml                       Postgres 18 + PostGIS 3.6, Mailpit
 │  └─ initdb/*.sql                      роли migrator/api/admin/worker, расширения в template1, база wf
 ├─ design/
 │  ├─ screens/*.dc.html                 18 экранов из экспорта канваса (без битых @font-face)
@@ -141,8 +140,10 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
   fnm не ставим. Глобальный pnpm 10.33 не умеет переключаться на 12 (исправлено в 10.34.5) —
   глобальный pnpm обновляется внутри 10.x с разрешения пользователя. `scripts/bootstrap.sh` ставит в `.tools/bin` (в `.gitignore`) go-task,
   golangci-lint и gitleaks фиксированных версий через `GOBIN=... go install`.
-- **Инфраструктура** — `deploy/dev/compose.yml`: `postgis/postgis:18-3.6`, именованный том
-  на `/var/lib/postgresql` (в образе PG18 путь данных изменился), Mailpit для писем с кодами.
+- **Инфраструктура без Docker** (на машине разработчика Docker/WSL не работает): `scripts/pg.sh`
+  разворачивает PostgreSQL 18.6 + PostGIS 3.6.2 из официальных zip-архивов в `.tools/pg` (без прав
+  администратора и службы, системный PostgreSQL не затрагивается), Mailpit собирается из Go в `.tools/bin`.
+  Docker — только в CI (service container `postgis/postgis:18-3.6`) и на сервере.
   Valkey в каркас не входит — идемпотентность и очередь River живут в Postgres; добавим
   в спеке бэкенда, если понадобится.
 - **Роли БД с первого дня:** `migrator` (владелец схемы), `api`, `admin`, `worker` с раздельными
@@ -155,7 +156,7 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
 
 | Команда | Что делает |
 | --- | --- |
-| `task setup` | pnpm install, compose up, миграции, роли |
+| `task setup` | pnpm install, `scripts/pg.sh install/init`, запуск базы, миграции |
 | `task dev` | api, admin-api, worker, веб, админка параллельно, лог с префиксами |
 | `task gen` | Go-сервер, TS-клиенты, tokens.css, sqlc |
 | `task test` / `task lint` | все части; точечно — `task backend:test`, `task admin:test` |
