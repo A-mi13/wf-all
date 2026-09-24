@@ -72,6 +72,16 @@ func TestProblemCarriesRequestID(t *testing.T) {
 	}
 }
 
+func TestRecovererWorksOnEmptyRouter(t *testing.T) {
+	r := httpx.NewRouter(quiet())
+	r.NotFound(func(http.ResponseWriter, *http.Request) { panic("бум") })
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
+	if p := decodeProblem(t, rec); rec.Code != 500 || p.Code != "internal" {
+		t.Fatalf("got %d %+v", rec.Code, p)
+	}
+}
+
 func TestServeStopsGracefullyOnCancel(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
