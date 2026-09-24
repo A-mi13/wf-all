@@ -1,0 +1,113 @@
+<x-dc>
+<helmet>
+
+<style>
+body { margin: 0; font-family: 'Manrope', system-ui, sans-serif; background: #0B0F0D; }
+a { color: #C6F24E; }
+a:hover { color: #D9FA85; }
+button, input, select, textarea { font-family: inherit; color: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, input:focus-visible { outline: 2px solid #C6F24E; outline-offset: 2px; }
+::placeholder { color: #6E7B73; opacity: 1; }
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #0B0F0D; color: #EAF2EC; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="padding: 18px 16px 12px 16px; display: flex; align-items: center; gap: 12px;">
+    <a href="Main.dc.html" aria-label="Закрыть" style="width: 38px; height: 38px; border-radius: 999px; background: #141A17; border: 1px solid #253329; display: flex; align-items: center; justify-content: center;">
+      <svg width="17" height="17" sc-camel-view-box="0 0 24 24" fill="none" stroke="#EAF2EC" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.2 5.8 L5.8 18.2 M5.8 5.8 L18.2 18.2"></path></svg>
+    </a>
+    <span style="font-family: 'Oswald', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 0.4px;">НОВЫЙ МАТЧ</span>
+  </div>
+
+  <div style="padding: 0 16px 14px 16px;">
+    <div style="font-size: 12px; font-weight: 600; color: #93A399; margin-bottom: 8px;">Повторить</div>
+    <div style="display: flex; gap: 8px;">
+      <button type="button" style="flex-grow: 1; padding: 12px 14px; border-radius: 12px; background: #2C4434; border: 1px solid #C6F24E; text-align: left; cursor: pointer;">
+        <div style="font-size: 13px; font-weight: 700; color: #EAF2EC;">Как в прошлый четверг</div>
+        <div style="font-size: 11px; font-weight: 500; color: #A9C0AE; margin-top: 2px;">Факел · 20:00 · 5×5</div>
+      </button>
+      <button type="button" aria-label="Создать с нуля" style="flex-shrink: 0; width: 52px; border-radius: 12px; background: #141A17; border: 1px solid #253329; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+        <svg width="20" height="20" sc-camel-view-box="0 0 24 24" fill="none" stroke="#93A399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5 V19.5 M4.5 12 H19.5"></path></svg>
+      </button>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1; padding: 0 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden;">
+
+    <div style="padding: 14px; border-radius: 14px; background: #141A17; border: 1px solid #253329;">
+      <label for="pitch" style="display: block; font-size: 12px; font-weight: 600; color: #93A399; margin-bottom: 6px;">Поле</label>
+      <input id="pitch" type="text" value="Манеж «Факел», Промышленный" style="width: 100%; box-sizing: border-box; background: none; border: 0; padding: 0; color: #EAF2EC; font-family: 'Manrope', sans-serif; font-size: 16px; font-weight: 700;">
+    </div>
+
+    <div style="display: flex; gap: 10px;">
+      <div style="flex-grow: 1; padding: 14px; border-radius: 14px; background: #141A17; border: 1px solid #253329;">
+        <label for="date" style="display: block; font-size: 12px; font-weight: 600; color: #93A399; margin-bottom: 6px;">Дата</label>
+        <input id="date" type="text" value="чт, 4 марта" style="width: 100%; box-sizing: border-box; background: none; border: 0; padding: 0; color: #EAF2EC; font-family: 'Manrope', sans-serif; font-size: 16px; font-weight: 700;">
+      </div>
+      <div style="flex-grow: 1; padding: 14px; border-radius: 14px; background: #141A17; border: 1px solid #253329;">
+        <label for="time" style="display: block; font-size: 12px; font-weight: 600; color: #93A399; margin-bottom: 6px;">Время</label>
+        <input id="time" type="text" value="20:00 – 22:00" style="width: 100%; box-sizing: border-box; background: none; border: 0; padding: 0; color: #EAF2EC; font-family: 'Manrope', sans-serif; font-size: 16px; font-weight: 700;">
+      </div>
+    </div>
+
+    <div style="padding: 14px; border-radius: 14px; background: #141A17; border: 1px solid #253329;">
+      <div style="font-size: 12px; font-weight: 600; color: #93A399; margin-bottom: 10px;">Формат</div>
+      <div style="display: flex; gap: 8px;">
+        <button type="button" style="flex-grow: 1; padding: 10px 0; border-radius: 10px; background: #C6F24E; border: 0; color: #0B0F0D; font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer;">5×5</button>
+        <button type="button" style="flex-grow: 1; padding: 10px 0; border-radius: 10px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer;">6×6</button>
+        <button type="button" style="flex-grow: 1; padding: 10px 0; border-radius: 10px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer;">8×8</button>
+        <button type="button" style="flex-grow: 1; padding: 10px 0; border-radius: 10px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer;">11×11</button>
+      </div>
+    </div>
+
+    <div style="padding: 16px; border-radius: 14px; background: #16241C; border: 1px solid #2C4434;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="flex-grow: 1;">
+          <label for="price" style="display: block; font-size: 12px; font-weight: 600; color: #A9C0AE; margin-bottom: 6px;">Цена за час</label>
+          <input id="price" type="text" value="3 000 ₽" style="width: 100%; box-sizing: border-box; background: none; border: 0; padding: 0; color: #EAF2EC; font-family: 'Oswald', sans-serif; font-size: 22px; font-weight: 600;">
+        </div>
+        <div style="color: #5E7266; font-size: 20px; font-weight: 600;">×</div>
+        <div style="flex-grow: 1;">
+          <label for="hours" style="display: block; font-size: 12px; font-weight: 600; color: #A9C0AE; margin-bottom: 6px;">Часов</label>
+          <input id="hours" type="text" value="2" style="width: 100%; box-sizing: border-box; background: none; border: 0; padding: 0; color: #EAF2EC; font-family: 'Oswald', sans-serif; font-size: 22px; font-weight: 600;">
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid #2C4434; display: flex; align-items: flex-end;">
+        <div style="flex-grow: 1;">
+          <div style="font-size: 12px; font-weight: 600; color: #A9C0AE;">6 000 ₽ на 20 человек</div>
+          <div style="font-family: 'Oswald', sans-serif; font-size: 32px; font-weight: 600; color: #C6F24E; line-height: 1.05; margin-top: 2px;">300 ₽</div>
+        </div>
+        <div style="font-size: 12px; font-weight: 600; color: #A9C0AE; padding-bottom: 6px;">с человека</div>
+      </div>
+
+      <div style="margin-top: 12px; display: flex; align-items: center; gap: 10px;">
+        <div style="width: 44px; height: 26px; border-radius: 999px; background: #2C4434; position: relative; flex-shrink: 0;">
+          <div style="position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 999px; background: #7E8C83;"></div>
+        </div>
+        <span style="font-size: 13px; font-weight: 600; color: #A9C0AE;">Бесплатный матч</span>
+      </div>
+    </div>
+
+    <div style="padding: 12px 14px; border-radius: 12px; background: #171E19; display: flex; gap: 9px; align-items: flex-start;">
+      <svg width="15" height="15" sc-camel-view-box="0 0 24 24" fill="none" stroke="#93A399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 16.6 V11.4"></path><path d="M12 8.2 h0.01"></path></svg>
+      <span style="font-size: 12px; font-weight: 500; color: #93A399; line-height: 1.45;">Деньги собираются вне приложения. Мы только считаем и напоминаем, кому сколько взять.</span>
+    </div>
+
+  </div>
+
+  <div style="flex-shrink: 0; padding: 12px 16px 26px 16px; background: #0E130F; border-top: 1px solid #1B241F;">
+    <button type="button" style="width: 100%; height: 54px; border-radius: 14px; background: #C6F24E; border: 0; color: #0B0F0D; font-family: 'Oswald', sans-serif; font-size: 19px; font-weight: 600; letter-spacing: 0.6px; cursor: pointer;">СОЗДАТЬ И ПОЗВАТЬ</button>
+  </div>
+
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#C6F24E&quot;,&quot;options&quot;:[&quot;#C6F24E&quot;,&quot;#4ADE80&quot;,&quot;#38BDF8&quot;,&quot;#F97066&quot;]},&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:844}}">
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#C6F24E' };
+  }
+}
+</script>

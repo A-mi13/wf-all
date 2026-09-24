@@ -1,0 +1,213 @@
+<x-dc>
+<helmet>
+
+<style>
+body { margin: 0; font-family: 'Manrope', system-ui, sans-serif; background: #0B0F0D; }
+a { color: #C6F24E; }
+a:hover { color: #D9FA85; }
+button, input, select, textarea { font-family: inherit; color: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, input:focus-visible { outline: 2px solid #C6F24E; outline-offset: 2px; }
+::placeholder { color: #6E7B73; opacity: 1; }
+</style>
+</helmet>
+<div style="width: 1200px; height: 900px; box-sizing: border-box; background: #0B0F0D; color: #EAF2EC; padding: 32px 36px; display: flex; flex-direction: column; gap: 22px;">
+
+  <div>
+    <div style="font-family: 'Oswald', sans-serif; font-size: 28px; font-weight: 600; letter-spacing: 0.4px;">КОМПОНЕНТЫ</div>
+    <div style="margin-top: 5px; font-size: 13px; font-weight: 500; color: #93A399;">Каждый элемент показан во всех состояниях, которые реально встретятся. Состояние ошибки и пустое состояние — не остаток, а половина работы.</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 30px; flex-grow: 1;">
+
+    <div style="display: flex; flex-direction: column; gap: 18px;">
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">ПОЛЯ ВВОДА</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="padding: 12px 14px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+            <label for="c1" style="display: block; font-size: 11px; font-weight: 600; color: #93A399; margin-bottom: 4px;">Название команды</label>
+            <input id="c1" type="text" value="Быки" style="width: 100%; box-sizing: border-box; background: none; border: 0; padding: 0; color: #EAF2EC; font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700;">
+          </div>
+          <div style="padding: 12px 14px; border-radius: 12px; background: #141A17; border: 1px solid #C6F24E;">
+            <label for="c2" style="display: block; font-size: 11px; font-weight: 600; color: #C6F24E; margin-bottom: 4px;">В фокусе</label>
+            <input id="c2" type="text" value="Торнадо" style="width: 100%; box-sizing: border-box; background: none; border: 0; padding: 0; color: #EAF2EC; font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700;">
+          </div>
+          <div style="padding: 12px 14px; border-radius: 12px; background: #1A1210; border: 1px solid #5A3733;">
+            <label for="c3" style="display: block; font-size: 11px; font-weight: 600; color: #F97066; margin-bottom: 4px;">Название команды</label>
+            <input id="c3" type="text" value="Быки" style="width: 100%; box-sizing: border-box; background: none; border: 0; padding: 0; color: #EAF2EC; font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700;">
+            <div style="font-size: 11px; font-weight: 600; color: #F97066; margin-top: 6px;">В Ставрополе уже есть команда с таким названием</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">ВЫПАДАЮЩИЙ СПИСОК</div>
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <div style="flex-grow: 1; display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+            <span style="flex-grow: 1; font-size: 14px; font-weight: 700;">Ставрополь</span>
+            <svg width="16" height="16" sc-camel-view-box="0 0 24 24" fill="none" stroke="#93A399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 9 L12 15.8 L19.5 9"></path></svg>
+          </div>
+          <div style="flex-grow: 1; border-radius: 12px; background: #1B241F; border: 1px solid #C6F24E; overflow: hidden;">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-bottom: 1px solid #253329;">
+              <span style="flex-grow: 1; font-size: 14px; font-weight: 700;">Ставрополь</span>
+              <svg width="16" height="16" sc-camel-view-box="0 0 24 24" fill="none" stroke="#C6F24E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 15 L12 8.2 L19.5 15"></path></svg>
+            </div>
+            <div style="padding: 11px 14px; background: #2C4434; display: flex; align-items: center; gap: 8px;">
+              <span style="flex-grow: 1; font-size: 13px; font-weight: 700;">Ставрополь</span>
+              <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="#C6F24E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.4 L9.6 17.5 L19.5 6.8"></path></svg>
+            </div>
+            <div style="padding: 11px 14px; font-size: 13px; font-weight: 600; color: #C3D0C7;">Михайловск</div>
+            <div style="padding: 11px 14px; font-size: 13px; font-weight: 600; color: #C3D0C7;">Невинномысск</div>
+            <div style="padding: 11px 14px; font-size: 13px; font-weight: 500; color: #6E7B73;">Пятигорск · скоро</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">СЕГМЕНТЫ И ТАБЫ</div>
+        <div style="display: flex; gap: 6px; padding: 4px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+          <div style="flex-grow: 1; padding: 8px 0; border-radius: 9px; background: #C6F24E; color: #0B0F0D; font-size: 13px; font-weight: 700; text-align: center;">Бомбардиры</div>
+          <div style="flex-grow: 1; padding: 8px 0; border-radius: 9px; color: #C3D0C7; font-size: 13px; font-weight: 600; text-align: center;">Команды</div>
+          <div style="flex-grow: 1; padding: 8px 0; border-radius: 9px; color: #C3D0C7; font-size: 13px; font-weight: 600; text-align: center;">Районы</div>
+        </div>
+        <div style="margin-top: 10px; display: flex; gap: 20px; border-bottom: 1px solid #1B241F;">
+          <div style="padding-bottom: 9px; border-bottom: 2px solid #C6F24E; font-size: 14px; font-weight: 700; color: #EAF2EC;">Состав</div>
+          <div style="padding-bottom: 9px; font-size: 14px; font-weight: 600; color: #7E8C83;">История</div>
+          <div style="padding-bottom: 9px; font-size: 14px; font-weight: 600; color: #7E8C83;">Статистика</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 18px;">
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">ПЕРЕКЛЮЧАТЕЛИ И ВЫБОР</div>
+        <div style="display: flex; gap: 22px; align-items: center; flex-wrap: wrap;">
+          <div style="width: 46px; height: 27px; border-radius: 999px; background: #C6F24E; position: relative;">
+            <div style="position: absolute; left: 22px; top: 3px; width: 21px; height: 21px; border-radius: 999px; background: #0B0F0D;"></div>
+          </div>
+          <div style="width: 46px; height: 27px; border-radius: 999px; background: #2C4434; position: relative;">
+            <div style="position: absolute; left: 3px; top: 3px; width: 21px; height: 21px; border-radius: 999px; background: #7E8C83;"></div>
+          </div>
+          <div style="width: 24px; height: 24px; border-radius: 7px; background: #C6F24E; display: flex; align-items: center; justify-content: center;">
+            <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="#0B0F0D" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.4 L9.6 17.5 L19.5 6.8"></path></svg>
+          </div>
+          <div style="width: 24px; height: 24px; border-radius: 7px; border: 2px solid #3B5241; box-sizing: border-box;"></div>
+          <div style="width: 24px; height: 24px; border-radius: 999px; border: 2px solid #C6F24E; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">
+            <div style="width: 11px; height: 11px; border-radius: 999px; background: #C6F24E;"></div>
+          </div>
+          <div style="width: 24px; height: 24px; border-radius: 999px; border: 2px solid #3B5241; box-sizing: border-box;"></div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">СТРОКА СПИСКА</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+            <svg width="38" height="38" sc-camel-view-box="0 0 96 96" style="display:block;border-radius:999px;flex-shrink:0;" aria-hidden="true"><circle cx="48" cy="48" r="48" fill="#1B241F"></circle><path d="M48 96 a48 48 0 0 0 48 -48 h-96 a48 48 0 0 0 48 48 z" fill="#212a25"></path><path d="M41 63 h14 v13 q-7 5 -14 0 z" fill="#ba865a"></path><path d="M13 96 q1 -17 15 -23 l12 -5 h16 l12 5 q14 6 15 23 z" fill="#6B3A5C"></path><path d="M13 96 q1 -17 15 -23 l4 2 q-12 7 -13 21 z" fill="#89587a"></path><path d="M83 96 q-1 -17 -15 -23 l-4 2 q12 7 13 21 z" fill="#89587a"></path><path d="M40 68 l8 11 l8 -11 l-4 -2 q-4 3 -8 0 z" fill="#552446"></path><ellipse cx="25" cy="48" rx="4.6" ry="6.6" fill="#E0AC80"></ellipse><ellipse cx="71" cy="48" rx="4.6" ry="6.6" fill="#E0AC80"></ellipse><path d="M25 44 a23 24 0 0 1 46 0 v7 q0 14 -14 20 q-9 6 -18 0 q-14 -6 -14 -20 z" fill="#E0AC80"></path><path d="M34 42 q6 -3.5 11 -1" stroke="#513114" stroke-width="2.8" fill="none" stroke-linecap="round"></path><path d="M62 42 q-6 -3.5 -11 -1" stroke="#513114" stroke-width="2.8" fill="none" stroke-linecap="round"></path><ellipse cx="39" cy="48" rx="4.3" ry="3.5" fill="#FFFFFF" opacity="0.94"></ellipse><ellipse cx="57" cy="48" rx="4.3" ry="3.5" fill="#FFFFFF" opacity="0.94"></ellipse><circle cx="39.6" cy="48.2" r="2.5" fill="#241A14"></circle><circle cx="57.6" cy="48.2" r="2.5" fill="#241A14"></circle><path d="M48 49 v5.5 q-3.2 2 -0.5 3.4" stroke="#ba865a" stroke-width="2" fill="none" stroke-linecap="round"></path><path d="M42 61 q6 5.5 12 0" stroke="#5A3326" stroke-width="2.3" fill="none" stroke-linecap="round"></path><path d="M24 47 q-1 -30 24 -30 t24 30 q-3 -9 -6 -14 q-15 7 -31 2 q-8 -2 -11 12 z" fill="#6B4B2E"></path><path d="M25 37 q23 -10 46 0 v8 q-23 -10 -46 0 z" fill="#C6F24E"></path></svg>
+            <div style="flex-grow: 1;">
+              <div style="font-size: 14px; font-weight: 700;">Миша</div>
+              <div style="font-size: 11px; font-weight: 500; color: #4ADE80;">19 из 20 — приезжает</div>
+            </div>
+            <svg width="16" height="16" sc-camel-view-box="0 0 24 24" fill="none" stroke="#7E8C83" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5 L15.8 12 L9 19.5"></path></svg>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px; background: #141A17; border: 1px solid #253329;">
+            <svg width="38" height="38" sc-camel-view-box="0 0 96 96" style="display:block;border-radius:999px;flex-shrink:0;" aria-hidden="true"><circle cx="48" cy="48" r="48" fill="#1B241F"></circle><path d="M48 96 a48 48 0 0 0 48 -48 h-96 a48 48 0 0 0 48 48 z" fill="#212a25"></path><path d="M41 63 h14 v13 q-7 5 -14 0 z" fill="#caa380"></path><path d="M13 96 q1 -17 15 -23 l12 -5 h16 l12 5 q14 6 15 23 z" fill="#3A2E22"></path><path d="M13 96 q1 -17 15 -23 l4 2 q-12 7 -13 21 z" fill="#584c40"></path><path d="M83 96 q-1 -17 -15 -23 l-4 2 q12 7 13 21 z" fill="#584c40"></path><path d="M40 68 l8 11 l8 -11 l-4 -2 q-4 3 -8 0 z" fill="#24180c"></path><ellipse cx="25" cy="48" rx="4.6" ry="6.6" fill="#F0C9A6"></ellipse><ellipse cx="71" cy="48" rx="4.6" ry="6.6" fill="#F0C9A6"></ellipse><path d="M25 44 a23 24 0 0 1 46 0 v7 q0 14 -14 20 q-9 6 -18 0 q-14 -6 -14 -20 z" fill="#F0C9A6"></path><path d="M34 42 q6 -3.5 11 -1" stroke="#a83b10" stroke-width="2.8" fill="none" stroke-linecap="round"></path><path d="M62 42 q-6 -3.5 -11 -1" stroke="#a83b10" stroke-width="2.8" fill="none" stroke-linecap="round"></path><ellipse cx="39" cy="48" rx="4.3" ry="3.5" fill="#FFFFFF" opacity="0.94"></ellipse><ellipse cx="57" cy="48" rx="4.3" ry="3.5" fill="#FFFFFF" opacity="0.94"></ellipse><circle cx="39.6" cy="48.2" r="2.5" fill="#241A14"></circle><circle cx="57.6" cy="48.2" r="2.5" fill="#241A14"></circle><path d="M48 49 v5.5 q-3.2 2 -0.5 3.4" stroke="#caa380" stroke-width="2" fill="none" stroke-linecap="round"></path><path d="M42 61 q6 5.5 12 0" stroke="#5A3326" stroke-width="2.3" fill="none" stroke-linecap="round"></path><path d="M24 46 q-1 -24 18 -28 q6 -8 14 -3 q14 6 16 31 q-4 -12 -10 -16 q-16 6 -30 0 q-6 3 -8 16 z" fill="#C2552A"></path><path d="M38 19 q8 -5 15 1 q-8 0 -15 -1 z" fill="#ec7f54"></path></svg>
+            <div style="flex-grow: 1;">
+              <div style="font-size: 14px; font-weight: 700;">Вова</div>
+              <div style="font-size: 11px; font-weight: 500; color: #E8B858;">Новичок · пока без статистики</div>
+            </div>
+            <div style="padding: 4px 9px; border-radius: 6px; background: #1F2A23; color: #C3D0C7; font-size: 11px; font-weight: 700;">Новичок</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">ЗАГРУЗКА</div>
+        <div style="padding: 13px 14px; border-radius: 12px; background: #141A17; border: 1px solid #253329; display: flex; align-items: center; gap: 12px;">
+          <div style="width: 38px; height: 38px; border-radius: 999px; background: #1F2A23;"></div>
+          <div style="flex-grow: 1;">
+            <div style="width: 60%; height: 11px; border-radius: 5px; background: #1F2A23;"></div>
+            <div style="width: 38%; height: 9px; border-radius: 5px; background: #1A211C; margin-top: 7px;"></div>
+          </div>
+          <div style="width: 44px; height: 20px; border-radius: 5px; background: #1F2A23;"></div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">ПУСТОЕ СОСТОЯНИЕ</div>
+        <div style="padding: 22px 18px; border-radius: 14px; background: #141A17; border: 1px dashed #2C4434; text-align: center;">
+          <div style="width: 52px; height: 52px; margin: 0 auto 12px auto; border-radius: 14px; background: #16241C; border: 2px solid #2C4434; box-sizing: border-box; position: relative;">
+            <div style="position: absolute; left: 0; top: 24px; width: 48px; height: 2px; background: #2C4434;"></div>
+            <div style="position: absolute; left: 18px; top: 18px; width: 12px; height: 12px; border-radius: 999px; background: #C6F24E;"></div>
+          </div>
+          <div style="font-size: 14px; font-weight: 700;">На этой неделе пусто</div>
+          <div style="font-size: 12px; font-weight: 500; color: #93A399; margin-top: 5px;">Брось вызов — соперник найдётся за вечер</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 18px;">
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">ШИТ СНИЗУ</div>
+        <div style="border-radius: 20px 20px 12px 12px; background: #141A17; border: 1px solid #253329; padding: 14px 16px 16px 16px;">
+          <div style="width: 38px; height: 4px; border-radius: 999px; background: #2C4434; margin: 0 auto 14px auto;"></div>
+          <div style="font-size: 15px; font-weight: 700;">Фильтры</div>
+          <div style="display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap;">
+            <span style="padding: 7px 12px; border-radius: 8px; background: #C6F24E; color: #0B0F0D; font-size: 12px; font-weight: 700;">5×5</span>
+            <span style="padding: 7px 12px; border-radius: 8px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 12px; font-weight: 600;">6×6</span>
+            <span style="padding: 7px 12px; border-radius: 8px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 12px; font-weight: 600;">8×8</span>
+            <span style="padding: 7px 12px; border-radius: 8px; background: #1B241F; border: 1px solid #253329; color: #C3D0C7; font-size: 12px; font-weight: 600;">До 400 ₽</span>
+          </div>
+          <button type="button" style="width: 100%; height: 44px; margin-top: 14px; border-radius: 12px; background: #C6F24E; border: 0; color: #0B0F0D; font-family: 'Oswald', sans-serif; font-size: 16px; font-weight: 600; letter-spacing: 0.4px; cursor: pointer;">ПОКАЗАТЬ 12 МАТЧЕЙ</button>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">УВЕДОМЛЕНИЯ В ЭКРАНЕ</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #16241C; border: 1px solid #2C4434;">
+            <svg width="17" height="17" sc-camel-view-box="0 0 24 24" fill="none" stroke="#4ADE80" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.4 L9.6 17.5 L19.5 6.8"></path></svg>
+            <span style="flex-grow: 1; font-size: 13px; font-weight: 600;">Ты в составе на четверг</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #1A1210; border: 1px solid #5A3733;">
+            <svg width="17" height="17" sc-camel-view-box="0 0 24 24" fill="none" stroke="#F97066" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.4 V13"></path><path d="M12 16.4 h0.01"></path></svg>
+            <span style="flex-grow: 1; font-size: 13px; font-weight: 600;">Матч отменён: поле занято</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #1C1710; border: 1px solid #4A3A1C;">
+            <svg width="17" height="17" sc-camel-view-box="0 0 48 48" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="27" r="14" stroke="#E8B858" stroke-width="2.4"></circle><g stroke="#E8B858" stroke-width="1.5"><path d="M24 14.4 L24 16.6"></path><path d="M36.6 27 L34.4 27"></path><path d="M24 39.6 L24 37.4"></path><path d="M11.4 27 L13.6 27"></path></g><rect x="20.5" y="7.5" width="7" height="5" rx="1.6" stroke="#E8B858" stroke-width="2.2"></rect><path d="M34 17.6 L37 14.6" stroke="#E8B858" stroke-width="2.4"></path><path d="M24 27 V18.5" stroke="#E8B858" stroke-width="2.6"></path><path d="M24 27 l5.5 4" stroke="#E8B858" stroke-width="2.6"></path><circle cx="24" cy="27" r="1.7" fill="#E8B858" stroke="none"></circle></svg>
+            <span style="flex-grow: 1; font-size: 13px; font-weight: 600;">Осталось 2 места, начало через 3 часа</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size: 11px; font-weight: 700; color: #93A399; letter-spacing: 0.4px; margin-bottom: 10px;">ПОДТВЕРЖДЕНИЕ</div>
+        <div style="padding: 18px; border-radius: 16px; background: #141A17; border: 1px solid #253329;">
+          <div style="font-family: 'Oswald', sans-serif; font-size: 18px; font-weight: 600; letter-spacing: 0.3px;">ОТМЕНИТЬ МАТЧ?</div>
+          <div style="font-size: 12px; font-weight: 500; color: #93A399; margin-top: 7px; line-height: 1.45;">7 человек получат уведомление. Отмена попадёт в паспорт команды.</div>
+          <div style="display: flex; gap: 8px; margin-top: 14px;">
+            <button type="button" style="flex-grow: 1; height: 42px; border-radius: 11px; background: #1B241F; border: 1px solid #253329; color: #EAF2EC; font-size: 13px; font-weight: 700; cursor: pointer;">Не надо</button>
+            <button type="button" style="flex-grow: 1; height: 42px; border-radius: 11px; background: #F97066; border: 0; color: #1A0E0C; font-size: 13px; font-weight: 700; cursor: pointer;">Отменить</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#C6F24E&quot;,&quot;options&quot;:[&quot;#C6F24E&quot;,&quot;#4ADE80&quot;,&quot;#38BDF8&quot;,&quot;#F97066&quot;]},&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#C6F24E' };
+  }
+}
+</script>
