@@ -1,0 +1,29 @@
+packages:
+  - apps/*
+  - packages/*
+  - contracts
+
+# Общие версии. Две версии TypeScript: приложения на 6.0.3,
+# генератор клиентов (openapi-typescript, peer ^5.x) — на 5.9.3.
+catalog:
+  typescript: 6.0.3
+  react: 19.3.0
+  react-dom: 19.3.0
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
+  '@types/node': 26.6.2
+  vitest: 5.0.1
+  vite: 8.3.1
+  eslint: 9.39.5
+  prettier: 3.9.9
+catalogs:
+  contracts:
+    typescript: 5.9.3
+
+# pnpm 12: пакет со скриптом установки, которого нет в списке, роняет install.
+allowBuilds:
+  lefthook: true
+  msw: false
+  '@parcel/watcher': false
+  '@swc/core': false
+  unrs-resolver: false

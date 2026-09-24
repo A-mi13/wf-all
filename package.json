@@ -1,0 +1,11 @@
+{
+  "name": "wf",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "devEngines": {
+    "runtime": { "name": "node", "version": "26.10.0", "onFail": "download" }
+  },
+  "scripts": {
+    "format": "prettier --write --ignore-unknown ."
+  }
+}

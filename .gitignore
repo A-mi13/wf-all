@@ -6,3 +6,11 @@ docs/WhereFootball — экраны приложения.html
 .env
 .tools/
 node_modules/
+
+# сборки фронтов
+.next/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
