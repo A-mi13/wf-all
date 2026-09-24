@@ -39,7 +39,7 @@ F:\ideas\wherefootball\                 репо wf-all
 ├─ backend/                             Go, module wf/backend
 │  ├─ go.mod                            go 1.27, toolchain go1.27.1
 │  ├─ tools/go.mod                      goose, sqlc, oapi-codegen, river CLI — отдельно от графа бэкенда
-│  ├─ cmd/api  cmd/admin-api  cmd/worker
+│  ├─ cmd/api  cmd/admin-api  cmd/worker  cmd/migrate
 │  ├─ internal/{identity,geo,teams,matches,stats,reputation,economy,notify,moderation,platform}
 │  ├─ internal/httpapi/public/gen       сгенерировано из contracts/openapi/public.yaml
 │  ├─ internal/httpapi/admin/gen        сгенерировано из contracts/openapi/admin.yaml
@@ -50,21 +50,22 @@ F:\ideas\wherefootball\                 репо wf-all
 │  ├─ openapi/public.yaml               API приложений и веба
 │  ├─ openapi/admin.yaml                отдельный контракт admin-api
 │  ├─ tokens/tokens.json                токены из макета «Токены»
-│  ├─ scripts/                          генерация TS-клиентов и tokens.css в приложения
+│  ├─ scripts/                          генерация TS-клиентов в приложения
 │  ├─ package.json                      openapi-typescript + свой typescript 5.9.3
 │  └─ Taskfile.yml
 ├─ apps/
 │  ├─ web/                              Next.js
 │  │  ├─ src/api/gen/                   клиент из public.yaml (коммитится)
-│  │  ├─ src/styles/tokens.css          из tokens.json (коммитится)
 │  │  ├─ messages/{ru,en}.json
 │  │  └─ Taskfile.yml  .env.example  package.json (engines)
 │  └─ admin/                            React + Vite, та же раскладка, клиент из admin.yaml
-├─ packages/
-│  └─ config/                           @wf/config: базовые tsconfig, eslint, prettier. Бизнес-логики нет
+├─ packages/                           общий код фронтов: у каждого пакета ≥2 потребителя, бизнес-логики нет
+│  ├─ config/                           @wf/config: базовые tsconfig, eslint (границы), prettier
+│  ├─ tokens/                           @wf/tokens: tokens.css + tokens.ts из contracts/tokens/tokens.json
+│  └─ i18n/                             @wf/i18n: fallback en→ru, проверка совпадения ключей
 ├─ deploy/dev/
 │  ├─ compose.yml                       Postgres 18 + PostGIS 3.6, Mailpit
-│  └─ initdb/*.sql                      роли migrator/api/admin/worker, базы wf, wf_test
+│  └─ initdb/*.sql                      роли migrator/api/admin/worker, расширения в template1, база wf
 ├─ design/
 │  ├─ screens/*.dc.html                 18 экранов из экспорта канваса (без битых @font-face)
 │  ├─ tools/extract-export.mjs          повторное извлечение при обновлении макетов
@@ -80,7 +81,7 @@ F:\ideas\wherefootball\                 репо wf-all
 
 ## 4. Границы
 
-1. `apps/web` и `apps/admin` не импортируют друг друга. Общие у них только `@wf/config`.
+1. `apps/web` и `apps/admin` не импортируют друг друга. Общее у них — только пакеты `@wf/*` из `packages/`.
 2. Клиент админского API существует только внутри `apps/admin` — веб физически не может
    подтянуть админские ручки в публичный бандл.
 3. `packages/*` не импортируют `apps/*` и не содержат бизнес-логики.
@@ -103,6 +104,9 @@ F:\ideas\wherefootball\                 репо wf-all
 - Весь сгенерированный код коммитится. `task ci` выполняет `task gen` и `git diff --exit-code`.
 - Ошибки — `application/problem+json` (RFC 9457) со стабильным полем `code`
   (`match.slot_taken`). Клиенты переводят по коду; сервер не шлёт человеческих текстов.
+- Контракты самодостаточные: общие схемы (`Problem`) продублированы в `public.yaml` и `admin.yaml`,
+  тест в `contracts/` падает, если они разошлись. Общий файл связал бы версии контрактов,
+  а публичный версионируется тегами, админский — нет.
 - Пути с `/v1`. Релизы публичного контракта — тег `contracts-vX.Y.Z` (только `public.yaml`).
   Админскому контракту теги не нужны: его единственный потребитель в этом же репо.
 - Гейт ломающих изменений (oasdiff) включается, когда у публичного контракта появится
@@ -114,16 +118,17 @@ F:\ideas\wherefootball\                 репо wf-all
 Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `elevated #141A17`, `pitch #16241C`,
 `border #253329`, `accent #C6F24E`, `success #4ADE80`, `warning #E8B858`, `danger #F97066`,
 `text #EAF2EC`, `muted #93A399`; кнопка 48 / радиус 14; шаг отступов 4. Тёмная тема основная,
-светлая производная. Скрипт в `contracts/scripts` генерирует `tokens.css` (CSS-переменные)
-в каждое приложение. Style Dictionary не используем — для одного JSON это лишний слой.
+светлая производная (на этапе каркаса — только тёмная). Скрипт пакета `@wf/tokens` генерирует
+`tokens.css` (CSS-переменные `--wf-*`) и `tokens.ts`; веб и админка импортируют пакет. Style Dictionary не используем — для одного JSON это лишний слой.
 `design/03-токены.md` обновляется: «один шрифт» устарел, источник значений — `tokens.json`.
 
 ## 7. Локализация
 
 - Формат сообщений ICU, файлы `apps/*/messages/{ru,en}.json`.
 - Веб — next-intl, админка — use-intl (ядро next-intl): одинаковый API в обоих приложениях.
-- `en` содержит те же ключи, что `ru`; пустое значение отдаётся как `ru`. Тест в каждом
-  приложении падает, если наборы ключей расходятся.
+- `en` содержит те же ключи, что `ru`; пустое значение отдаётся как `ru` — функция `withFallback`
+  из `@wf/i18n` (use-intl не считает `""` отсутствующим сообщением, наивный merge затёр бы `ru`).
+  Тест в каждом приложении падает, если наборы ключей расходятся (`diffKeys` из `@wf/i18n`).
 - Переключателя языка нет. Язык берётся из настроек, по умолчанию `ru`.
 - Тексты пушей и писем — у бэкенда, по `users.locale` (спека бэкенда).
 
@@ -132,7 +137,8 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
 - **Установка без глобальных изменений.** Go — `toolchain go1.27.1` в `go.mod` (GOTOOLCHAIN=auto
   скачает сам). pnpm — поле `packageManager`. Node 26 — `devEngines.runtime` в `package.json`
   (pnpm скачает Node для проекта; глобальный Node 24 через nvm-windows не трогаем).
-  fnm не ставим. `scripts/bootstrap.sh` ставит в `.tools/bin` (в `.gitignore`) go-task,
+  fnm не ставим. Глобальный pnpm 10.33 не умеет переключаться на 12 (исправлено в 10.34.5) —
+  глобальный pnpm обновляется внутри 10.x с разрешения пользователя. `scripts/bootstrap.sh` ставит в `.tools/bin` (в `.gitignore`) go-task,
   golangci-lint и gitleaks фиксированных версий через `GOBIN=... go install`.
 - **Инфраструктура** — `deploy/dev/compose.yml`: `postgis/postgis:18-3.6`, именованный том
   на `/var/lib/postgresql` (в образе PG18 путь данных изменился), Mailpit для писем с кодами.
@@ -153,7 +159,7 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
 | `task gen` | Go-сервер, TS-клиенты, tokens.css, sqlc |
 | `task test` / `task lint` | все части; точечно — `task backend:test`, `task admin:test` |
 | `task ci` | всё, что делает CI; именно это означает «CI проходит локально» |
-| `task db:migrate` / `task db:reset` | goose против dev-базы |
+| `task db:migrate` / `task db:reset` | `cmd/migrate` (goose как библиотека) против dev-базы |
 
   Каждое приложение запускается и без Taskfile (`go run ./cmd/api`, `pnpm dev`).
 - **Dev-хосты:** админка на `admin.localhost`, куки админки и приложения с разными именами —
@@ -180,8 +186,8 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
 | Фронты, сеть | MSW, моки типизированы из контракта | мок до экрана |
 | Next, серверные компоненты | Playwright (Vitest их не рендерит) | smoke-сценарий |
 
-**Тестовая база:** база-шаблон `wf_template` мигрируется один раз, каждый тестовый пакет
-получает свой клон `CREATE DATABASE … TEMPLATE` (паттерн pgtestdb). Так `go test ./...`
+**Тестовая база:** pgtestdb мигрирует базу-шаблон один раз на весь прогон (advisory-lock),
+каждый тест получает свой клон `CREATE DATABASE … TEMPLATE` (~10 мс) и удаляет его в Cleanup. Так `go test ./...`
 безопасно гоняет пакеты параллельно, а тесты гонок и `EXCLUDE` работают с настоящими коммитами.
 Код доступа к БД принимает интерфейс `DBTX`.
 
