@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"wf/backend/internal/platform/config"
@@ -27,4 +28,28 @@ func TestOpenFailsFastOnUnreachableDB(t *testing.T) {
 	if err == nil {
 		t.Fatal("ждали ошибку подключения")
 	}
+}
+
+// Битая строка подключения не должна утекать в ошибку (а значит, в логи):
+// pgx маскирует пароль «best effort», и хвосты вида "PW" после пробела,
+// '@' в пароле или незакрытая кавычка проходят в текст ошибки как есть.
+func TestOpenDoesNotLeakPasswordOnParseError(t *testing.T) {
+	for _, url := range malformedURLsWithPassword {
+		_, err := db.Open(context.Background(), config.DB{URL: url, MaxConns: 1})
+		if err == nil {
+			t.Fatalf("Open(%q): ждали ошибку разбора", url)
+		}
+		for _, secret := range []string{"S3cr3t", "PW"} {
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("Open(%q): ошибка содержит %q: %v", url, secret, err)
+			}
+		}
+	}
+}
+
+// Строки, на которых pgx.ParseConfig падает и частично выводит пароль.
+var malformedURLsWithPassword = []string{
+	"host=127.0.0.1 password=S3cr3t PW dbname=wf",
+	"postgres://u:S3cr3t@PW@host:bad/db",
+	"host=127.0.0.1 password='S3cr3t PW dbname=wf",
 }

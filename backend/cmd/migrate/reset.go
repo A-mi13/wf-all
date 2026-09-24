@@ -1,22 +1,33 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// localOnly отказывает, если connection string ведёт не на локальный хост.
-// reset (DownTo(0) + Up) стирает все данные — без этой проверки его можно
-// случайно направить на прод. Разбор строки — через pgx.ParseConfig, а не
-// вручную: он уже умеет multi-host (host1,host2,...) и IPv6-литералы в
-// скобках, и это тот же парсер, что реально подключается к БД.
-func localOnly(databaseURL string) error {
+// errUnparsableURL — ошибка разбора MIGRATOR_DATABASE_URL. Исходную ошибку pgx
+// не заворачиваем: она цитирует строку, а пароль маскирует лишь «best effort»
+// (хвост после пробела в пароле, '@' в пароле, незакрытая кавычка — утекают).
+var errUnparsableURL = errors.New("MIGRATOR_DATABASE_URL: строка подключения не разбирается (значение не выводится)")
+
+// parseURL разбирает строку подключения один раз — для проверки localOnly и
+// для самого подключения. Тот же парсер, что реально подключается к БД: он
+// уже умеет multi-host (host1,host2,...) и IPv6-литералы в скобках.
+func parseURL(databaseURL string) (*pgx.ConnConfig, error) {
 	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
-		return fmt.Errorf("разбор MIGRATOR_DATABASE_URL: %w", err)
+		return nil, errUnparsableURL
 	}
+	return cfg, nil
+}
+
+// localOnly отказывает, если конфиг подключения ведёт не на локальный хост.
+// reset (DownTo(0) + Up) стирает все данные — без этой проверки его можно
+// случайно направить на прод. Unix-сокет тоже отвергается (консервативно).
+func localOnly(cfg *pgx.ConnConfig) error {
 	hosts := []string{cfg.Host}
 	for _, fb := range cfg.Fallbacks {
 		hosts = append(hosts, fb.Host)

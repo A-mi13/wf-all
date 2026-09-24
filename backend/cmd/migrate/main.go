@@ -3,12 +3,11 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"os"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/migrate"
@@ -36,16 +35,19 @@ func run(ctx context.Context, args, environ []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if args[0] == "reset" {
-		// reset стирает все данные — проверяем локальность хоста ДО подключения к БД.
-		if err := localOnly(cfg.DB.URL); err != nil {
-			return err
-		}
-	}
-	db, err := sql.Open("pgx", cfg.DB.URL)
+	// Разбираем строку сами и один раз: sql.Open разбирает её лениво, и ошибка
+	// разбора со строкой внутри всплывала бы из goose (см. parseURL).
+	connCfg, err := parseURL(cfg.DB.URL)
 	if err != nil {
 		return err
 	}
+	if args[0] == "reset" {
+		// reset стирает все данные — проверяем локальность хоста ДО подключения к БД.
+		if err := localOnly(connCfg); err != nil {
+			return err
+		}
+	}
+	db := stdlib.OpenDB(*connCfg)
 	defer db.Close()
 	p, err := migrate.NewProvider(db)
 	if err != nil {

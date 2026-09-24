@@ -38,3 +38,27 @@ func TestResetRefusesNonLocalHost(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// Битая строка подключения с паролем не должна утекать в ошибку ни одной
+// команды: для up/down/status строку раньше лениво разбирали sql.Open/goose,
+// и pgx цитировал её с маскировкой пароля лишь «best effort».
+func TestMalformedURLDoesNotLeakPassword(t *testing.T) {
+	urls := []string{
+		"host=127.0.0.1 password=S3cr3t PW dbname=wf",
+		"postgres://u:S3cr3t@PW@host:bad/db",
+		"host=127.0.0.1 password='S3cr3t PW dbname=wf",
+	}
+	for _, cmd := range []string{"up", "down", "status", "reset"} {
+		for _, url := range urls {
+			err := run(context.Background(), []string{cmd}, []string{"MIGRATOR_DATABASE_URL=" + url}, &bytes.Buffer{})
+			if err == nil {
+				t.Fatalf("%s с %q: ждали ошибку разбора", cmd, url)
+			}
+			for _, secret := range []string{"S3cr3t", "PW"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Errorf("%s с %q: ошибка содержит %q: %v", cmd, url, secret, err)
+				}
+			}
+		}
+	}
+}
