@@ -49,8 +49,24 @@ tasks:
       - pnpm --filter @wf/tokens build
 
   dev:
-    desc: api :8080, admin-api :8081, worker, веб :3000, админка :5173, Mailpit :18025 (Postgres — ./task infra:up)
-    deps: [mail, backend:dev:api, backend:dev:admin, backend:dev:worker, web:dev, admin:dev]
+    desc: Всё разом — Postgres, миграции, api :8080, admin-api :8081, worker, веб :3000, админка :5173, Mailpit :18025
+    preconditions:
+      - sh: test -f backend/.env
+        msg: 'нет backend/.env — сначала ./task setup'
+    cmds:
+      - task: infra:up
+      # отдельный процесс: миграции видят свежий backend/.env и не гоняются с запуском api
+      - '{{.TOOLS}}/task backend:db:migrate'
+      - task: dev:services
+
+  dev:services:
+    internal: true
+    deps: [mail, backend:dev:api, backend:dev:admin, backend:dev:worker, dev:fronts]
+
+  dev:fronts:
+    internal: true
+    # один процесс pnpm на оба фронта: два параллельных pnpm 12 гоняются в node_modules
+    cmds: ['pnpm --parallel --filter @wf/web --filter @wf/admin dev']
 
   test:
     desc: Все тесты всех частей
