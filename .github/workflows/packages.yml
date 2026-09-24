@@ -7,6 +7,9 @@ on:
       - 'contracts/**'
       - 'design/tools/**'
       - 'pnpm-workspace.yaml'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'Taskfile.yml'
       - '.github/workflows/packages.yml'
   pull_request:
     paths: *paths

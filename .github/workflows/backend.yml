@@ -8,6 +8,8 @@ on:
       - 'tools/**'
       - 'scripts/**'
       - 'Taskfile.yml'
+      - 'package.json'
+      - 'deploy/dev/initdb/**'
       - '.github/workflows/backend.yml'
   pull_request:
     paths: *paths

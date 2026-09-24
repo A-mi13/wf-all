@@ -68,7 +68,8 @@ tasks:
 
   design:test:
     desc: Тест извлечения экранов из экспорта канваса
-    cmds: ['node --test "design/tools/*.test.mjs"']
+    # через pnpm — чтобы работал Node из devEngines, а не предустановленный на раннере
+    cmds: ['pnpm run design:test']
 
   secrets:
     desc: gitleaks по истории репозитория

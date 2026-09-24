@@ -10,7 +10,8 @@
     }
   },
   "scripts": {
-    "format": "prettier --write --ignore-unknown ."
+    "format": "prettier --write --ignore-unknown .",
+    "design:test": "node --test \"design/tools/*.test.mjs\""
   },
   "prettier": "@wf/config/prettier",
   "devDependencies": {

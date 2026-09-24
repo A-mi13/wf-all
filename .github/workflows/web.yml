@@ -8,6 +8,9 @@ on:
       - 'contracts/openapi/public.yaml'
       - 'contracts/tokens/**'
       - 'pnpm-workspace.yaml'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'Taskfile.yml'
       - '.github/workflows/web.yml'
   pull_request:
     paths: *paths
