@@ -1,4 +1,3 @@
--- deploy/dev/initdb/20_wf.sql
 -- Роли по бинарникам: ошибки прав всплывают в dev, а не на проде.
 -- Точные права — в спеке бэкенда; здесь только каркас.
 CREATE ROLE migrator LOGIN PASSWORD 'migrator';

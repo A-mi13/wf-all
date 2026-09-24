@@ -1,4 +1,3 @@
-// backend/internal/platform/db/db_test.go
 package db_test
 
 import (

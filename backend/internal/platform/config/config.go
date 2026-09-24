@@ -1,4 +1,3 @@
-// backend/internal/platform/config/config.go
 // Package config — типизированный конфиг бинарников из окружения.
 // Каждый бинарник читает только свой префикс и получает только свои настройки.
 package config

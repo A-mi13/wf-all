@@ -1,4 +1,3 @@
-// backend/internal/platform/logx/logx.go
 // Package logx — единая настройка slog для всех бинарников.
 package logx
 

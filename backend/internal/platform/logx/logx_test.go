@@ -1,4 +1,3 @@
-// backend/internal/platform/logx/logx_test.go
 package logx_test
 
 import (

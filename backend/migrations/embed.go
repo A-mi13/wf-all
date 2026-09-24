@@ -1,4 +1,3 @@
-// backend/migrations/embed.go
 // Package migrations вшивает SQL-миграции в бинарники и тесты.
 package migrations
 

@@ -1,4 +1,3 @@
-// backend/internal/platform/testkit/dbtest/dbtest.go
 // Package dbtest выдаёт каждому тесту свою чистую базу — клон мигрированного шаблона.
 // pgtestdb мигрирует шаблон один раз на весь прогон (advisory-lock), клон ~10 мс.
 package dbtest

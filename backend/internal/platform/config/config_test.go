@@ -1,4 +1,3 @@
-// backend/internal/platform/config/config_test.go
 package config_test
 
 import (

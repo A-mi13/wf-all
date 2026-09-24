@@ -1,4 +1,3 @@
-// backend/internal/platform/migrate/migrate.go
 // Package migrate накатывает вшитые миграции goose — без CLI, из любого бинарника и теста.
 package migrate
 

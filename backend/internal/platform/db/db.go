@@ -1,4 +1,3 @@
-// backend/internal/platform/db/db.go
 // Package db открывает пул pgx по конфигу. Пинг на старте: недоступная база — ошибка сразу.
 package db
 

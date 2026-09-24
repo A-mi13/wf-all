@@ -1,4 +1,3 @@
-// backend/internal/platform/migrate/migrate_test.go
 package migrate_test
 
 import (
