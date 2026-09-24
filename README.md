@@ -75,12 +75,12 @@ PostgreSQL + PostGIS на том же порту (Docker — только в CI 
 netsh int ipv4 set dynamicport tcp start=49152 num=16384
 ```
 
-Все порты каркаса — ниже 49152 и настраиваются через окружение:
+Все порты каркаса — ниже 49152. Где каждый меняется:
 
 | Сервис | Порт | Где менять |
 | --- | --- | --- |
 | Postgres | 15432 | `WF_PG_PORT` в `deploy/dev/.env` |
-| Mailpit UI / SMTP | 18025 / 11025 | `deploy/dev/.env` |
+| Mailpit UI / SMTP | 18025 / 11025 | задача `mail` в корневом `Taskfile.yml` |
 | api | 8080 | `API_HTTP_ADDR` в `backend/.env` |
 | admin-api | 8081 | `ADMIN_HTTP_ADDR` в `backend/.env` |
 | веб (Next.js) | 3000 | скрипт `dev` в `apps/web/package.json` |
