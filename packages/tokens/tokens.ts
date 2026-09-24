@@ -1,0 +1,92 @@
+// Сгенерировано из contracts/tokens/tokens.json — не править руками.
+export const tokens = {
+  "color": {
+    "bg": "#0B0F0D",
+    "bg-elevated": "#141A17",
+    "pitch": "#16241C",
+    "border": "#253329",
+    "border-strong": "#3B5241",
+    "text": "#EAF2EC",
+    "text-secondary": "#C3D0C7",
+    "text-muted": "#93A399",
+    "text-subtle": "#7E8C83",
+    "text-disabled": "#5E7266",
+    "text-inverse": "#0B0F0D",
+    "accent": "#C6F24E",
+    "accent-hover": "#D9FA85",
+    "success": "#4ADE80",
+    "warning": "#E8B858",
+    "danger": "#F97066",
+    "slot-empty": "#1B241F",
+    "slot-filled": "#2A3B2E"
+  },
+  "font": {
+    "display": "'Oswald', sans-serif",
+    "body": "'Manrope', system-ui, sans-serif"
+  },
+  "text": {
+    "3xl": [
+      32,
+      36
+    ],
+    "2xl": [
+      24,
+      30
+    ],
+    "xl": [
+      20,
+      28
+    ],
+    "lg": [
+      18,
+      26
+    ],
+    "base": [
+      16,
+      24
+    ],
+    "sm": [
+      14,
+      20
+    ],
+    "xs": [
+      12,
+      16
+    ]
+  },
+  "space": {
+    "1": 4,
+    "2": 8,
+    "3": 12,
+    "4": 16,
+    "5": 20,
+    "6": 24,
+    "8": 32,
+    "10": 40,
+    "12": 48,
+    "16": 64
+  },
+  "radius": {
+    "sm": 8,
+    "md": 12,
+    "button": 14,
+    "lg": 16,
+    "xl": 24,
+    "full": 9999
+  },
+  "size": {
+    "touch-min": 44,
+    "control": 48,
+    "avatar-sm": 32,
+    "avatar-md": 48,
+    "avatar-lg": 96,
+    "slot": 56,
+    "bar": 8
+  },
+  "duration": {
+    "fast": 120,
+    "base": 200,
+    "slow": 400
+  },
+  "ease": "cubic-bezier(0.2, 0, 0, 1)"
+} as const;
