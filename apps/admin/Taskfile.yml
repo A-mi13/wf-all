@@ -3,7 +3,10 @@ tasks:
   gen: { desc: Типы клиента из admin.yaml, cmds: ['pnpm gen'] }
   gen:check:
     desc: Типы клиента совпадают с admin.yaml
-    cmds: ['pnpm gen', 'git diff --exit-code -- src/api/gen']
+    cmds:
+      - pnpm gen
+      # status, а не diff: diff не видит новые неотслеживаемые файлы
+      - test -z "$(git status --porcelain -- src/api/gen)" || { git status --short -- src/api/gen; echo 'src/api/gen расходится с контрактом — закоммитить результат pnpm gen'; exit 1; }
   dev: { desc: Dev-сервер админки (:5173), cmds: ['pnpm dev'] }
   test: { desc: Тесты админки, cmds: ['pnpm test'] }
   lint: { cmds: ['pnpm lint'] }
