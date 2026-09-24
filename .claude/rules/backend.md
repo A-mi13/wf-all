@@ -8,7 +8,9 @@ paths:
 - Перед изменением схемы читать `backend/migrations/README.md` (порядок миграций, решения, полная таблица гарантий).
 - sqlc разбирает грамматику PostgreSQL 17: синтаксис PG18 в миграциях и запросах не использовать.
 - Новый модуль: `internal/<модуль>/`, SQL в `internal/<модуль>/queries/`, новый элемент списка `sql` в `backend/sqlc.yaml` со своими `queries`/`out` и обязательно `omit_unused_structs: true`.
-- Общее — только в `internal/platform/*`. Модули общаются через интерфейсы верхнего уровня и события outbox; в чужие таблицы и пакеты модулей не ходить (`internal/archtest`, depguard).
+- Общее — только в `internal/platform/*`. Модули общаются через интерфейсы верхнего уровня и события outbox; в чужие таблицы и пакеты модулей не ходить. Страж границ модулей — в спеке бэкенда; сейчас автоматически проверяется только граница админки.
+- Граница админки: `cmd/api` и `cmd/worker` не тянут (и транзитивно) ни один пакет `wf/backend/...` с сегментом пути `admin` и `cmd/admin-api` — `internal/archtest`. Админские сценарии модуля — в `internal/<модуль>/admin`, страж их увидит. depguard дублирует только прямые импорты `internal/httpapi/admin` и `cmd/admin-api`: пакеты он сравнивает по префиксу, «любой сегмент» не выразит.
+- Цикл TDD — `./task backend:test:watch`; `./task backend:test` всегда прогоняет заново.
 - Тесты с БД — `internal/platform/testkit/dbtest` (клон базы на тест); HTTP — `testkit/apitest` (проверка по контракту).
 - Ошибки клиенту — `httpx.WriteProblem` с кодом `<модуль>.<ошибка>`; клиенты переводят по `code`, `title` — техническая сводка, не для показа.
 - Возраст не хранится: дата рождения + `age_years()`; пороги — поля `countries.min_signup_age` и `countries.age_of_majority`, не константы.
