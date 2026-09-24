@@ -2832,7 +2832,7 @@ for (const name of ['public', 'admin']) {
   "scripts": {
     "gen:web": "openapi-typescript openapi/public.yaml -o ../apps/web/src/api/gen/public.d.ts",
     "gen:admin": "openapi-typescript openapi/admin.yaml -o ../apps/admin/src/api/gen/admin.d.ts",
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "openapi-typescript": "7.13.0",
@@ -2939,7 +2939,7 @@ test('закоммиченные файлы совпадают с tokens.json', 
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   }
 }
 ```
@@ -4181,7 +4181,7 @@ tasks:
 
   design:test:
     desc: Тест извлечения экранов из экспорта канваса
-    cmds: ['node --test design/tools/']
+    cmds: ['node --test "design/tools/*.test.mjs"']
 
   secrets:
     desc: gitleaks по истории репозитория
@@ -4484,7 +4484,7 @@ test('имя файла — номер и название', () => {
 });
 ```
 
-Run: `node --test design/tools/`
+Run: `node --test "design/tools/*.test.mjs"`
 Expected: FAIL — `Cannot find module './extract-export.mjs'`.
 
 - [ ] **Step 2: Скрипт**
@@ -4546,7 +4546,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
 - [ ] **Step 3: Тест — PASS; извлечь настоящие экраны**
 
-Run: `node --test design/tools/`
+Run: `node --test "design/tools/*.test.mjs"`
 Expected: PASS обоих тестов.
 
 ```bash
