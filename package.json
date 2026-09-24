@@ -7,5 +7,10 @@
   },
   "scripts": {
     "format": "prettier --write --ignore-unknown ."
+  },
+  "prettier": "@wf/config/prettier",
+  "devDependencies": {
+    "@wf/config": "workspace:*",
+    "prettier": "catalog:"
   }
 }

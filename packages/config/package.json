@@ -1,0 +1,26 @@
+{
+  "name": "@wf/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/react.json": "./tsconfig/react.json",
+    "./eslint": "./eslint/boundaries.js",
+    "./prettier": "./prettier.json"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "eslint-plugin-boundaries": "7.2.0",
+    "eslint-import-resolver-typescript": "4.4.5"
+  },
+  "peerDependencies": {
+    "eslint": "^9.39.5"
+  },
+  "devDependencies": {
+    "eslint": "catalog:",
+    "vitest": "catalog:"
+  }
+}
