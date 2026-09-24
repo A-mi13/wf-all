@@ -50,9 +50,8 @@ F:\ideas\wherefootball\                 репо wf-all
 │  ├─ openapi/public.yaml               API приложений и веба
 │  ├─ openapi/admin.yaml                отдельный контракт admin-api
 │  ├─ tokens/tokens.json                токены из макета «Токены»
-│  ├─ scripts/                          генерация TS-клиентов в приложения
-│  ├─ package.json                      openapi-typescript + свой typescript 5.9.3
-│  └─ Taskfile.yml
+│  ├─ test/                             тесты контрактов (node --test)
+│  └─ package.json                      openapi-typescript + свой typescript 5.9.3; скрипты gen:web, gen:admin, test
 ├─ apps/
 │  ├─ web/                              Next.js
 │  │  ├─ src/api/gen/                   клиент из public.yaml (коммитится)
@@ -74,7 +73,7 @@ F:\ideas\wherefootball\                 репо wf-all
 ├─ Taskfile.yml                         только includes частей + setup/dev/ci
 ├─ package.json  pnpm-workspace.yaml    packageManager pnpm@12.6.0, devEngines.runtime node 26
 ├─ lefthook.yml  .editorconfig  .gitattributes  .gitignore
-├─ .github/workflows/{backend,web,admin,contracts}.yml
+├─ .github/workflows/{backend,web,admin,packages,repo}.yml
 └─ CLAUDE.md  README.md
 ```
 
@@ -99,9 +98,10 @@ F:\ideas\wherefootball\                 репо wf-all
 - Источник истины — `contracts/`. Код генерируется из YAML, не наоборот.
 - Go: oapi-codegen (chi strict server) с `embedded-spec` — спека вшита в бинарник, в рантайме
   нет путей к файлам. Она же используется валидатором ответов в тестах.
-- TS: `contracts/scripts` запускает openapi-typescript (со своим TypeScript 5.9.3 — у генератора
+- TS: скрипты `gen:web`/`gen:admin` в `contracts/package.json` запускают openapi-typescript (со своим TypeScript 5.9.3 — у генератора
   peer `typescript ^5.x`) и пишет результат в `apps/*/src/api/gen`. Рантайм-клиент — openapi-fetch.
-- Весь сгенерированный код коммитится. `task ci` выполняет `task gen` и `git diff --exit-code`.
+- Весь сгенерированный код коммитится. `task ci` выполняет `task gen` и падает, если `git status` по
+  сгенерированным каталогам не пуст (`diff` не видит новые неотслеживаемые файлы).
 - Ошибки — `application/problem+json` (RFC 9457) со стабильным полем `code`
   (`match.slot_taken`). Клиенты переводят по коду; сервер не шлёт человеческих текстов.
 - Контракты самодостаточные: общие схемы (`Problem`) продублированы в `public.yaml` и `admin.yaml`,
@@ -203,8 +203,14 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
 - Фронты: ESLint 9 (flat config) + Prettier + eslint-plugin-boundaries.
 - lefthook (npm-пакет в корне): pre-commit — форматирование изменённых файлов и gitleaks.
   Тяжёлые проверки — в `task ci`, не в хуках.
-- GitHub Actions: `backend.yml`, `web.yml`, `admin.yml`, `contracts.yml` с фильтрами по путям.
-  Каждый workflow только вызывает `task <часть>:ci` — логика проверок не дублируется в YAML.
+- GitHub Actions: `backend.yml`, `web.yml`, `admin.yml`, `packages.yml` с фильтрами по путям и
+  `repo.yml` (gitleaks по истории, actionlint). Каждый workflow только вызывает `task <часть>:ci` —
+  логика проверок не дублируется в YAML.
+
+  > Принятая замена (после каркаса): отдельных `contracts/Taskfile.yml`, `contracts/scripts/` и
+  > `contracts.yml` нет. Контракты проверяются вместе с общими пакетами: `packages:ci` в корневом
+  > `Taskfile.yml` (тесты `@wf/contracts`, `@wf/config`, `@wf/tokens`, `@wf/i18n`, typecheck и линт
+  > границ пакетов) и workflow `packages.yml`; генерация — скрипты в `contracts/package.json`.
 - `pnpm-workspace.yaml`: `allowBuilds` для пакетов со скриптами установки (lefthook, esbuild,
   unrs-resolver, msw, @parcel/watcher). pnpm по умолчанию не ставит версии младше суток —
   оставляем как защиту от атак через свежие пакеты.
