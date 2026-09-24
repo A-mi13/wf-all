@@ -1,0 +1,7 @@
+package: admin
+output: internal/httpapi/admin/api.gen.go
+generate:
+  models: true
+  chi-server: true
+  strict-server: true
+  embedded-spec: true
