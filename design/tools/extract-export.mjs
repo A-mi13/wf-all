@@ -8,10 +8,14 @@ import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 // Берём ПОСЛЕДНЕЕ вхождение: та же строка встречается в JS загрузчика бандла.
-export function readBlock(html, type) {
+// required=true — бросить понятную ошибку, если блока нет (иначе вызывающий сам решает).
+export function readBlock(html, type, required = false) {
   const open = `<script type="__bundler/${type}">`;
   const i = html.lastIndexOf(open);
-  if (i < 0) return null;
+  if (i < 0) {
+    if (required) throw new Error(`не найден блок __bundler/${type} — это не HTML-экспорт дизайн-канваса?`);
+    return null;
+  }
   const start = i + open.length;
   return html.slice(start, html.indexOf('</script>', start));
 }
@@ -28,12 +32,15 @@ function decode(entry) {
 }
 
 export function extractBoards(html) {
-  const manifest = JSON.parse(readBlock(html, 'manifest'));
-  const template = JSON.parse(readBlock(html, 'template'));
+  const manifest = JSON.parse(readBlock(html, 'manifest', true));
+  const template = JSON.parse(readBlock(html, 'template', true));
   const re = /about:blank#([0-9a-f-]{36})" title="([^"]*)" width="(\d+)" height="(\d+)"/g;
   return [...template.matchAll(re)].map(([, id, title, width, height]) => {
-    const inner = JSON.parse(readBlock(decode(manifest[id]), 'template'));
-    const markup = inner.slice(inner.indexOf('<x-dc>'), inner.lastIndexOf('</x-dc>') + '</x-dc>'.length);
+    const inner = JSON.parse(readBlock(decode(manifest[id]), 'template', true));
+    const markupStart = inner.indexOf('<x-dc>');
+    const markupEnd = inner.lastIndexOf('</x-dc>');
+    if (markupStart < 0 || markupEnd < 0) throw new Error(`у артборда «${title}» не найден <x-dc> — повреждён экспорт?`);
+    const markup = inner.slice(markupStart, markupEnd + '</x-dc>'.length);
     const logic = inner.match(/<script type="text\/x-dc"[\s\S]*?<\/script>/)?.[0] ?? '';
     return { title, width: Number(width), height: Number(height), source: `${stripFonts(markup)}\n\n${logic}\n` };
   });
