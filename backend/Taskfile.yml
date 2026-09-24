@@ -32,8 +32,15 @@ tasks:
       - '{{.TOOLS}}/golangci-lint run ./...'
 
   test:
-    desc: Все тесты бэкенда (нужен Postgres — ./task infra:up). Цикл TDD — ./task backend:test --watch
-    sources: ['**/*.go', 'migrations/*.sql', 'sqlc.yaml']
+    desc: Все тесты бэкенда (нужен Postgres — ./task infra:up). Цикл TDD — ./task backend:test:watch
+    # Без sources намеренно: иначе ./task ci пропускает тесты как up-to-date.
+    cmds:
+      - go test ./... -count=1
+
+  test:watch:
+    desc: Цикл TDD — перезапуск тестов бэкенда при изменении Go, SQL и go.mod
+    watch: true
+    sources: ['**/*.go', 'migrations/*.sql', 'sqlc.yaml', 'go.mod', 'go.sum']
     cmds:
       - go test ./... -count=1
 
