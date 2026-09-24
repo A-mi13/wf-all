@@ -17,6 +17,9 @@ sql:
         sql_package: pgx/v5
         emit_interface: true
         emit_pointers_for_null_types: true
+        # только структуры таблиц/enum, реально используемые запросами пакета —
+        # иначе models.go тянет всю схему (~2400 строк на один запрос).
+        omit_unused_structs: true
         overrides:
           - db_type: geography
             go_type: string
