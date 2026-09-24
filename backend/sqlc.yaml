@@ -1,0 +1,25 @@
+# sqlc разбирает грамматику PostgreSQL 17: синтаксис PG18 в миграциях и запросах не используем.
+# Новый модуль = новый элемент списка sql со своими queries/ и out.
+#
+# Риск из ревью Task 5 (sqlc может споткнуться на SQL River из 0011-0016 —
+# `DO $body$ ... $body$ LANGUAGE plpgsql`, `ALTER TYPE ... ADD VALUE`) проверен
+# и не подтвердился: sqlc 1.31.1 разбирает весь каталог migrations/ без ошибок.
+# Явный список файлов 0001-0010 не потребовался.
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations/
+    queries: internal/platform/flags/queries/
+    gen:
+      go:
+        package: flagsdb
+        out: internal/platform/flags/flagsdb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: geography
+            go_type: string
+          - db_type: geography
+            nullable: true
+            go_type: { type: string, pointer: true }
