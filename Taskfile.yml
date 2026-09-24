@@ -77,10 +77,12 @@ tasks:
       - task: web:test
 
   packages:ci:
-    desc: Тесты общих пакетов и контрактов
+    desc: Тесты, typecheck и линт границ общих пакетов и контрактов
     cmds:
       - pnpm --filter @wf/config --filter @wf/tokens --filter @wf/i18n --filter @wf/contracts test
       - pnpm --filter @wf/i18n typecheck
+      # пакеты не импортируют приложения — корневой eslint.config.mjs
+      - pnpm run lint:packages
 
   design:test:
     desc: Тест извлечения экранов из экспорта канваса
