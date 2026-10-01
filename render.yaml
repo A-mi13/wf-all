@@ -11,9 +11,9 @@ services:
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     # На бесплатном тарифе нет preDeployCommand — миграции накатываются перед стартом API в том
-    # же контейнере (goose держит блокировку, двойного наката не будет). На сервере migrate —
-    # отдельный разовый запуск перед обновлением.
-    dockerCommand: /bin/sh -c 'set -e; migrate up; exec api'
+    # же контейнере сценарием из образа (backend/Dockerfile). На сервере migrate — отдельный
+    # разовый запуск перед обновлением.
+    dockerCommand: migrate-then-api
     healthCheckPath: /v1/health
     autoDeployTrigger: checksPass
     buildFilter:
@@ -23,6 +23,9 @@ services:
     envVars:
       - key: API_HTTP_ADDR
         value: 0.0.0.0:10000
+      # Swagger UI на /docs — справочник и ручная проверка для клиентов dev-стенда
+      - key: API_DOCS_ENABLED
+        value: 'true'
       - key: API_LOG_FORMAT
         value: json
       - key: MIGRATOR_LOG_FORMAT

@@ -17,7 +17,7 @@ import (
 
 func TestHealthMatchesContract(t *testing.T) {
 	v := apitest.New(t, oapi.GetSpec)
-	h, err := public.NewHandler(slog.New(slog.DiscardHandler))
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestOperationsImplementedByTaggedModule(t *testing.T) {
 
 // Валидатор пропускает маршрут не из контракта — 404 отвечает роутер в формате Problem.
 func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
-	h, err := public.NewHandler(slog.New(slog.DiscardHandler))
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
 // Страж проводки: лимит тела и валидатор стоят в цепочке хендлера — тело больше
 // httpx.MaxBodyBytes отвергается до strict-хендлера, даже у операции без тела.
 func TestOversizedBodyIsRejected(t *testing.T) {
-	h, err := public.NewHandler(slog.New(slog.DiscardHandler))
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,5 +87,36 @@ func TestPlatformCodesDocumented(t *testing.T) {
 	}
 	for _, msg := range v {
 		t.Error(msg)
+	}
+}
+
+// Swagger (/docs) — только по флагу: без него маршрута нет, ответ — обычный 404 Problem.
+// С флагом контракт отдаётся ровно тот, что вшит в бинарник.
+func TestDocsOnlyWhenEnabled(t *testing.T) {
+	get := func(h http.Handler, path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
+		return rec
+	}
+	off, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := get(off, "/docs"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"http.not_found"`) {
+		t.Fatalf("без флага: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	on, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{Docs: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := get(on, "/docs"); rec.Code != http.StatusOK {
+		t.Fatalf("/docs: status = %d", rec.Code)
+	}
+	want, err := oapi.GetSpecJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := get(on, "/docs/openapi.json"); rec.Code != http.StatusOK || rec.Body.String() != string(want) {
+		t.Fatalf("/docs/openapi.json: status = %d", rec.Code)
 	}
 }

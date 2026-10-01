@@ -18,6 +18,15 @@ FROM alpine:3.24.2
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -H -u 10001 wf
 COPY --from=build /out/ /app/
+# migrate-then-api — для хостинга без отдельного шага миграций (Render free, render.yaml): goose
+# держит блокировку, двойного наката не будет. Команда контейнера на Render не проходит через
+# shell (`sh -c '…'` там ломается), поэтому сценарий лежит в образе.
+COPY --chmod=0755 <<'EOF' /app/migrate-then-api
+#!/bin/sh
+set -e
+migrate up
+exec api
+EOF
 ENV PATH=/app:$PATH
 USER wf
 CMD ["api"]

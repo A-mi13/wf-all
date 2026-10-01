@@ -29,6 +29,7 @@
 | golangci-lint | 2.14.0 | `tools/lint/go.mod` |
 | lefthook | 2.1.14 | корневой `package.json` |
 | Образы Docker: golang / alpine | 1.27.1-alpine3.24 / 3.24.2 | `backend/Dockerfile` |
+| Swagger UI (swagger-ui-dist, jsDelivr + SRI) | 5.33.1 | `SwaggerUIVersion` и хэши в `backend/internal/platform/apidocs/apidocs.go` |
 | Redocly CLI | 2.57.0 | `contracts/package.json` (сборка бандлов контракта) |
 | oasdiff | 1.32.1 | `tools/oasdiff/go.mod` (отдельный модуль, см. ловушки) |
 | go-pgquery (pg_query в wasm) | v0.0.0-20250409022910-10ac41983c07 | `backend/go.mod` — та же версия, что у sqlc в `backend/tools/go.mod` |

@@ -11,7 +11,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Проверка живости сервиса */
+        /**
+         * Проверка живости сервиса
+         * @description Отвечает 200, пока процесс жив и принимает запросы; база данных не проверяется.
+         *     Без аутентификации. Используется хостингом для health check; клиентам — чтобы
+         *     разбудить dev-стенд после простоя (первый запрос может идти до минуты).
+         */
         get: operations["getHealth"];
         put?: never;
         post?: never;
@@ -25,24 +30,58 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Ошибка по RFC 9457. Решение принимается по code, тексты — для разработчика */
         Problem: {
+            /**
+             * @description Тип проблемы по RFC 9457; сейчас всегда about:blank — смысл несёт code
+             * @example about:blank
+             */
             type: string;
+            /**
+             * @description Техническая сводка — текст HTTP-статуса; пользователю не показывать
+             * @example Bad Request
+             */
             title: string;
+            /**
+             * @description HTTP-статус ответа, продублированный в теле
+             * @example 400
+             */
             status: number;
-            /** @description Стабильный машинный код ошибки; клиенты переводят текст по нему */
+            /**
+             * @description Стабильный машинный код ошибки; клиенты переводят текст по нему
+             * @example validation.failed
+             */
             code: string;
+            /**
+             * @description Уточнение для разработчика; приходит не всегда, пользователю не показывать
+             * @example Тело запроса не разбирается как JSON
+             */
             detail?: string;
+            /**
+             * @description Id запроса — по нему запрос находится в логах сервера
+             * @example wf-api-7d9f/Yx3kQp1bZt-000042
+             */
             request_id?: string;
             /** @description Ошибки по полям — только у validation.failed */
             errors?: {
-                /** @description body.<путь через точку>, query.<имя>, path.<имя> или header.<имя> */
+                /**
+                 * @description body.<путь через точку>, query.<имя>, path.<имя> или header.<имя>
+                 * @example body.name
+                 */
                 field: string;
-                /** @description Нарушенное правило схемы: required, minLength, maximum, enum, format… */
+                /**
+                 * @description Нарушенное правило схемы: required, minLength, maximum, enum, format…
+                 * @example minLength
+                 */
                 code: string;
             }[];
         };
+        /** @description Состояние сервиса */
         Health: {
-            /** @enum {string} */
+            /**
+             * @description Всегда ok — иначе сервис не ответил бы
+             * @enum {string}
+             */
             status: "ok";
         };
     };
@@ -58,7 +97,10 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды */
+        /**
+         * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+         * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+         */
         IdempotencyKey: string;
     };
     requestBodies: never;

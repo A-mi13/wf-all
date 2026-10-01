@@ -1,8 +1,10 @@
 Health:
   type: object
+  description: Состояние сервиса
   required: [status]
   additionalProperties: false
   properties:
     status:
       type: string
+      description: Всегда ok — иначе сервис не ответил бы
       enum: [ok]
