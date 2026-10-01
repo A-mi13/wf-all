@@ -39,9 +39,10 @@ func (DeliverArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: QueueEvents, MaxAttempts: 20, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
-// DeliverWorker — задача River: доставляет одно событие одному подписчику ровно один раз
-// (отметка event_inbox в транзакции обработчика) и, для LatestState, без отката к устаревшей
-// версии агрегата (курсор event_cursors под блокировкой строки).
+// DeliverWorker — задача River: доставляет одно событие одному подписчику; эффект — ровно один
+// раз (обработчик может выполниться повторно, отметка event_inbox и изменения обработчика
+// коммитятся вместе) и, для LatestState, без отката к устаревшей версии агрегата (курсор
+// event_cursors под блокировкой строки).
 type DeliverWorker struct {
 	river.WorkerDefaults[DeliverArgs]
 	pool db.TxStarter

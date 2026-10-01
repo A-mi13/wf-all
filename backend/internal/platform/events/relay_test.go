@@ -198,7 +198,7 @@ func TestRunSurvivesListenerDrop(t *testing.T) {
 	waitFor(t, "обрыв слушателя", 5*time.Second, func() bool {
 		var killed int
 		_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM (SELECT pg_terminate_backend(pid)
-			FROM pg_stat_activity WHERE query = 'LISTEN `+events.Channel+`' AND pid <> pg_backend_pid()) k`).Scan(&killed)
+			FROM pg_stat_activity WHERE query = 'LISTEN `+events.Channel+`' AND datname = current_database() AND pid <> pg_backend_pid()) k`).Scan(&killed)
 		return killed > 0
 	})
 	publish(t, pool, joined(id.New(), 1))

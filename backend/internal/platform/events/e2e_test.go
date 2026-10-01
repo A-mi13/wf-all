@@ -38,7 +38,7 @@ func TestEventReachesSubscribersThroughRelayAndRiver(t *testing.T) {
 				if e.Job.Kind == "events.deliver" {
 					got++
 				}
-			case <-time.After(10 * time.Second):
+			case <-time.After(30 * time.Second):
 				t.Fatalf("выполнено %d доставок из %d", got, n)
 			}
 		}

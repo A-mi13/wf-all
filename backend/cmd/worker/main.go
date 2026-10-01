@@ -73,8 +73,12 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	log.Info("воркер запущен", "queues", cfg.Queues)
 	<-ctx.Done()
 	wg.Wait() // relay больше не ставит задачи
-	return queue.Stop(context.Background(), client, 30*time.Second)
+	return queue.Stop(context.Background(), client, softStopTimeout)
 }
+
+// softStopTimeout — мягкая остановка River; вместе с жёсткой (5 с в queue.Stop) укладывается в
+// 30 с между SIGTERM и SIGKILL (Render).
+const softStopTimeout = 25 * time.Second
 
 const usage = "без аргументов — воркер; events replay --type <модуль>.<факт> --subscriber <модуль>.<имя> --since <RFC 3339>"
 
