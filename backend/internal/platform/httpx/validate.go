@@ -15,6 +15,16 @@ import (
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 )
 
+// Форматы, которые kin-openapi по умолчанию не проверяет (из коробки — byte, date, date-time,
+// int32, int64): без них uuid/email из контракта проходили бы валидатор, а падали бы в биндинге
+// oapi-codegen. Регистрация глобальная: в kin-openapi v0.149 валидаторы уровня документа или
+// Options.SchemaValidationOptions доходят только до тела, ValidateParameter их не передаёт.
+// Запись в карту — только здесь, в init; дальше она лишь читается.
+func init() {
+	openapi3.DefineStringFormatValidator("uuid", openapi3.NewRegexpFormatValidator(openapi3.FormatOfStringForUUIDOfRFC9562))
+	openapi3.DefineStringFormatValidator("email", openapi3.NewRegexpFormatValidator(openapi3.FormatOfStringForEmail))
+}
+
 // MaxBodyBytes — лимит тела запроса по умолчанию: JSON API больших тел не ждёт (спека §6.1).
 const MaxBodyBytes = 1 << 20
 
@@ -23,7 +33,11 @@ const MaxBodyBytes = 1 << 20
 func LimitBody(n int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.Body = http.MaxBytesReader(w, r.Body, n)
+			// nil — запрос собран руками (сервер всегда даёт хотя бы http.NoBody):
+			// MaxBytesReader поверх nil паникует при чтении
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, n)
+			}
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -95,14 +109,23 @@ func fieldErrors(err error) ([]FieldError, bool) {
 		if !ok {
 			return nil, false
 		}
-		if _, ok := errors.AsType[*openapi3filter.ParseError](re.Err); ok {
-			return nil, false
-		}
 		prefix := "body"
 		if re.Parameter != nil {
 			prefix = re.Parameter.In + "." + re.Parameter.Name
 		}
-		if errors.Is(re.Err, openapi3filter.ErrInvalidRequired) {
+		_, parseErr := errors.AsType[*openapi3filter.ParseError](re.Err)
+		switch {
+		case parseErr && re.Parameter == nil:
+			return nil, false // тело не разбирается как JSON — это не про поле
+		case parseErr:
+			// параметр не приводится к типу схемы (limit=abc) — как type в теле
+			out = append(out, FieldError{Field: prefix, Code: "type"})
+			continue
+		case errors.Is(re.Err, openapi3filter.ErrInvalidEmptyValue):
+			// параметр без значения (?limit=), а allowEmptyValue в контракте нет
+			out = append(out, FieldError{Field: prefix, Code: "empty"})
+			continue
+		case errors.Is(re.Err, openapi3filter.ErrInvalidRequired):
 			out = append(out, FieldError{Field: prefix, Code: "required"})
 			continue
 		}

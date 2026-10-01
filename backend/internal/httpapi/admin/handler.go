@@ -20,9 +20,15 @@ func NewHandler(log *slog.Logger) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	requestErr := httpx.RequestErrorHandler(log)
 	strict := oapi.NewStrictHandlerWithOptions(Server{}, nil, oapi.StrictHTTPServerOptions{
-		RequestErrorHandlerFunc:  httpx.RequestErrorHandler,
+		RequestErrorHandlerFunc:  requestErr,
 		ResponseErrorHandlerFunc: httpx.ResponseErrorHandler(log),
 	})
-	return oapi.HandlerFromMux(strict, httpx.NewRouter(log, httpx.LimitBody(httpx.MaxBodyBytes), validate)), nil
+	// ErrorHandlerFunc — ошибки биндинга параметров в chi-обёртке; по умолчанию oapi-codegen
+	// отвечает text/plain с текстом ошибки
+	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
+		BaseRouter:       httpx.NewRouter(log, httpx.LimitBody(httpx.MaxBodyBytes), validate),
+		ErrorHandlerFunc: requestErr,
+	}), nil
 }

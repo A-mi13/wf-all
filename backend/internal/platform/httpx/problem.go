@@ -49,9 +49,15 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p Problem) {
 	_ = json.NewEncoder(w).Encode(p)
 }
 
-// RequestErrorHandler — невалидный запрос в strict-сервере oapi-codegen.
-func RequestErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	WriteProblem(w, r, http.StatusBadRequest, "request.invalid", err.Error())
+// RequestErrorHandler — запрос не разобрал сгенерированный код oapi-codegen (биндинг
+// параметров в chi-обёртке, декодирование тела в strict-сервере). Обычно до него не доходит:
+// ValidateRequests отвечает раньше. Текст ошибки раскрывает устройство сервера — он в лог,
+// клиенту — только код.
+func RequestErrorHandler(log *slog.Logger) func(http.ResponseWriter, *http.Request, error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		log.InfoContext(r.Context(), "request error", "err", err, "request_id", middleware.GetReqID(r.Context()))
+		WriteProblem(w, r, http.StatusBadRequest, "request.invalid", "")
+	}
 }
 
 // ResponseErrorHandler — хендлер вернул ошибку. Детали — в лог, клиенту — только код.

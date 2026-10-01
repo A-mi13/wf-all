@@ -22,6 +22,7 @@ paths:
   /things:
     post:
       operationId: createThing
+      security: [{bearer: []}]
       parameters:
         - name: Idempotency-Key
           in: header
@@ -33,6 +34,9 @@ paths:
         - name: sort
           in: query
           schema: {type: string, default: name}
+        - name: id
+          in: query
+          schema: {type: string, format: uuid}
       requestBody:
         required: true
         content:
@@ -44,8 +48,12 @@ paths:
                 name: {type: string, minLength: 2}
                 kind: {type: string, enum: [a, b]}
                 note: {type: string, default: x}
+                contact: {type: string, format: email}
       responses:
         "204": {description: ok}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
 `
 
 // validated — лимит тела и валидация по thingsSpec поверх next.
@@ -96,6 +104,20 @@ func TestValidateRequests(t *testing.T) {
 			errs: []httpx.FieldError{{Field: "header.Idempotency-Key", Code: "required"}}},
 		{name: "query больше максимума", body: okBody, query: "limit=500", status: 400, code: "validation.failed",
 			errs: []httpx.FieldError{{Field: "query.limit", Code: "maximum"}}},
+		// у операции security: [bearer], а Authorization нет — аутентификация отдельный слой
+		{name: "без Authorization запрос доходит до хендлера", body: okBody, status: 204},
+		{name: "query не того типа", body: okBody, query: "limit=abc", status: 400, code: "validation.failed",
+			errs: []httpx.FieldError{{Field: "query.limit", Code: "type"}}},
+		{name: "пустой query", body: okBody, query: "limit=", status: 400, code: "validation.failed",
+			errs: []httpx.FieldError{{Field: "query.limit", Code: "empty"}}},
+		{name: "тип в query не стирает нарушения тела", body: `{"name":"a","kind":"a"}`, query: "limit=abc", status: 400, code: "validation.failed",
+			errs: []httpx.FieldError{{Field: "body.name", Code: "minLength"}, {Field: "query.limit", Code: "type"}}},
+		{name: "uuid не по формату", body: okBody, query: "id=abc", status: 400, code: "validation.failed",
+			errs: []httpx.FieldError{{Field: "query.id", Code: "format"}}},
+		{name: "валидный uuid доходит до хендлера", body: okBody, query: "id=00000000-0000-7000-8000-000000000000", status: 204},
+		{name: "email не по формату", body: `{"name":"ab","kind":"a","contact":"nope"}`, status: 400, code: "validation.failed",
+			errs: []httpx.FieldError{{Field: "body.contact", Code: "format"}}},
+		{name: "валидный email доходит до хендлера", body: `{"name":"ab","kind":"a","contact":"a@b.c"}`, status: 204},
 		{name: "битый JSON", body: `{`, status: 400, code: "request.invalid"},
 		{name: "неверный Content-Type", body: okBody, contentType: "text/plain", status: 400, code: "request.invalid"},
 		{name: "тело больше лимита", body: `{"name":"` + strings.Repeat("a", 80) + `","kind":"a"}`, status: 413, code: "request.too_large"},
@@ -171,5 +193,25 @@ func TestValidateRequestsDoesNotRewriteRequest(t *testing.T) {
 	}
 	if gotBody != body || gotQuery != "" || gotLen != int64(len(body)) {
 		t.Fatalf("запрос переписан: body = %q query = %q content-length = %d", gotBody, gotQuery, gotLen)
+	}
+}
+
+// Запрос без тела (Body == nil — так собирают запросы руками и в тестах): LimitBody его не
+// оборачивает, валидатор отвечает про обязательное тело, а не паникой.
+func TestValidateRequestsNilBody(t *testing.T) {
+	h, _ := handler(t)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/things", nil)
+	req.Body = nil
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", strings.Repeat("k", 16))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var p httpx.Problem
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatalf("тело не JSON: %s", rec.Body.String())
+	}
+	want := []httpx.FieldError{{Field: "body", Code: "required"}}
+	if rec.Code != http.StatusBadRequest || p.Code != "validation.failed" || !reflect.DeepEqual(p.Errors, want) {
+		t.Fatalf("status = %d code = %q errors = %+v", rec.Code, p.Code, p.Errors)
 	}
 }
