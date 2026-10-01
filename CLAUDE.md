@@ -17,7 +17,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 
 ## File structure
 - `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate}`, `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
-- `contracts/` — OpenAPI (`public.yaml`, `admin.yaml`) и `tokens/tokens.json` — источник истины
+- `contracts/` — OpenAPI: исходники `openapi/{public,admin}/` по модулям, бандлы `public.yaml`, `admin.yaml` (сгенерированы) — источник истины; `tokens/tokens.json`
 - `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`
 - `deploy/dev/` — роли и расширения БД; `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
 - `design/` — бриф, `screens/*.dc.html`, `tools/extract-export.mjs`; `product/` — «почему так»
