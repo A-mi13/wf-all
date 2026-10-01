@@ -8,7 +8,7 @@ import (
 )
 
 func TestMaskHidesPersonalData(t *testing.T) {
-	in := map[string]any{
+	in := map[string]any{ //nolint:gosec // поддельные ПД и «секреты» — вход теста маскирования
 		"nickname":      "Kolya",
 		"email":         "ivan.petrov@mail.ru",
 		"contact_phone": "+79181234567",
