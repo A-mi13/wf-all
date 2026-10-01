@@ -17,6 +17,9 @@ type Log struct {
 type HTTP struct {
 	Addr            string        `env:"HTTP_ADDR,required"`
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
+	// DocsEnabled — Swagger UI и контракт на /docs (internal/platform/apidocs): dev-стенд и
+	// локальная разработка; на проде выключен.
+	DocsEnabled bool `env:"DOCS_ENABLED" envDefault:"false"`
 }
 
 type DB struct {

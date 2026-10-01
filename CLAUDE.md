@@ -13,7 +13,8 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 5. Мутирующие запросы принимают `Idempotency-Key` (кроме анонимных: регистрация, вход, коды); события пишутся в `outbox` в той же транзакции, что и данные (спека бэкенда §6.4–6.5).
 6. Строки UI, включая админку, — только в `apps/*/messages/{ru,en}.json`; тексты писем и пушей — в `backend/locales/{ru,en}.json`; `en` с теми же ключами (`@wf/i18n`, тесты локалей).
 7. TDD: сначала падающий тест, потом код — бэк и фронт; страж проверяется подсадкой бага (`docs/04-принципы-архитектуры.md`).
-8. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
+8. Ручка создана или изменена → в том же коммите контракт с полным описанием и примерами всего (`.claude/rules/contracts.md`, страж `contracts/src/docs.mjs`); Swagger — `/docs` при `*_DOCS_ENABLED=true`.
+9. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
 
 ## File structure
 - `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate}`, `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`

@@ -9,6 +9,28 @@ openapi: 3.0.3
 info:
   title: WF public API
   version: 0.1.0
+  description: |
+    Публичный API приложений (iOS, Android) и веба. Операции с замком требуют заголовок
+    `Authorization: Bearer <access-токен>`; операции без замка — анонимные.
+
+    Общие правила для всех операций:
+
+    - **Ошибки** — `application/problem+json` (RFC 9457, схема `Problem`). Клиент решает
+      по полю `code` и переводит текст по нему; `title` и `detail` — для разработчика, не
+      для показа. Коды, общие для всех операций: `internal`, `request.invalid`,
+      `request.too_large`, `validation.failed` (со списком полей в `errors`),
+      `http.not_found`, `http.method_not_allowed`. Свои коды операции — в её описании.
+    - **Idempotency-Key** — обязательный заголовок мутирующих операций: новый ключ (UUID) на
+      каждое действие пользователя, тот же ключ при повторе после обрыва сети — действие не
+      выполнится дважды.
+    - **Время** — ISO 8601 в UTC (`2026-10-01T17:00:00Z`); местное время матча считается по
+      таймзоне города или поля.
+    - **Деньги** — целое число в минорных единицах (копейки) плюс код валюты ISO 4217.
+    - **Тело запроса** — не больше 1 МиБ.
+    - Поле `request_id` в ошибке — назовите его, сообщая о проблеме: по нему находится запрос в логах.
+tags:
+  - name: platform
+    description: Служебные операции платформы — живость сервиса и подобное, не продуктовые сценарии
 # Аутентификация по умолчанию; анонимная операция объявляет `security: []`.
 security:
   - bearer: []
@@ -32,6 +54,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: Access-токен (JWT) из входа в приложение; в Swagger — кнопка Authorize
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -42,6 +65,7 @@ components:
         type: string
         minLength: 16
         maxLength: 128
+      example: 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
   responses:
     Problem:
       description: Ошибка в формате RFC 9457
@@ -52,21 +76,33 @@ components:
   schemas:
     Problem:
       type: object
+      description: Ошибка по RFC 9457. Решение принимается по code, тексты — для разработчика
       required: [type, title, status, code]
       properties:
         type:
           type: string
+          description: Тип проблемы по RFC 9457; сейчас всегда about:blank — смысл несёт code
+          example: about:blank
         title:
           type: string
+          description: Техническая сводка — текст HTTP-статуса; пользователю не показывать
+          example: Bad Request
         status:
           type: integer
+          description: HTTP-статус ответа, продублированный в теле
+          example: 400
         code:
           type: string
           description: Стабильный машинный код ошибки; клиенты переводят текст по нему
+          example: validation.failed
         detail:
           type: string
+          description: Уточнение для разработчика; приходит не всегда, пользователю не показывать
+          example: Тело запроса не разбирается как JSON
         request_id:
           type: string
+          description: Id запроса — по нему запрос находится в логах сервера
+          example: wf-api-7d9f/Yx3kQp1bZt-000042
         errors:
           type: array
           description: Ошибки по полям — только у validation.failed
@@ -78,8 +114,10 @@ components:
               field:
                 type: string
                 description: 'body.<путь через точку>, query.<имя>, path.<имя> или header.<имя>'
+                example: body.name
               code:
                 type: string
                 description: 'Нарушенное правило схемы: required, minLength, maximum, enum, format…'
+                example: minLength
     Health:
       $ref: './platform/schemas.yaml#/Health'

@@ -23,6 +23,25 @@ func TestLoadAPIWithDefaults(t *testing.T) {
 	if c.DB.MaxConns != 10 || c.Log.Level != slog.LevelInfo || c.Log.Format != "json" {
 		t.Fatalf("defaults: %+v", c)
 	}
+	// Swagger выключен, пока его не включили явно: на проде контракт наружу не светится
+	if c.HTTP.DocsEnabled {
+		t.Fatal("DocsEnabled по умолчанию включён")
+	}
+}
+
+func TestLoadDocsEnabledPerBinary(t *testing.T) {
+	c, err := config.Load[config.Admin]("ADMIN_", []string{
+		"ADMIN_HTTP_ADDR=:8081",
+		"ADMIN_DATABASE_URL=postgres://admin@localhost/wf",
+		"ADMIN_DOCS_ENABLED=true",
+		"API_DOCS_ENABLED=false",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.HTTP.DocsEnabled {
+		t.Fatal("ADMIN_DOCS_ENABLED=true не включил Swagger админки")
+	}
 }
 
 // Бинарник без обязательной переменной не должен стартовать молча.
