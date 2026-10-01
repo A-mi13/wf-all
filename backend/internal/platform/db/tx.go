@@ -11,7 +11,9 @@ import (
 // audit.Write), вызван вне db.InTx.
 var ErrNoTx = errors.New("db: нужна транзакция из db.InTx")
 
-// TxStarter открывает транзакцию; его реализует *pgxpool.Pool.
+// TxStarter открывает транзакцию; его реализует *pgxpool.Pool. Передавать нужно именно пул:
+// Begin есть и у pgx.Tx, и у *pgx.Conn, а pgx.Tx открыл бы вложенную транзакцию через
+// savepoint, то есть молча присоединился бы к внешней — спека §4.4 этого запрещает.
 type TxStarter interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
@@ -27,17 +29,22 @@ func InTx(ctx context.Context, s TxStarter, fn func(ctx context.Context, tx pgx.
 	if err != nil {
 		return err
 	}
+	completed := false
 	defer func() {
 		if p := recover(); p != nil {
 			_ = tx.Rollback(context.WithoutCancel(ctx))
 			panic(p)
 		}
-		if err != nil {
-			// откат и после отмены ctx: иначе соединение вернётся в пул с открытой транзакцией
+		// !completed — fn не вернулась и не запаниковала: runtime.Goexit (t.FailNow в тесте)
+		if !completed || err != nil {
+			// WithoutCancel даёт откату завершиться и после отмены ctx: иначе pgx
+			// уничтожит соединение, а не вернёт его в пул для повторного использования
 			_ = tx.Rollback(context.WithoutCancel(ctx))
 		}
 	}()
-	if err = fn(context.WithValue(ctx, txKey{}, tx), tx); err != nil {
+	err = fn(context.WithValue(ctx, txKey{}, tx), tx)
+	completed = true
+	if err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

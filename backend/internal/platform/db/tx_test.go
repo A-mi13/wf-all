@@ -3,9 +3,11 @@ package db_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/testkit/dbtest"
@@ -22,7 +24,7 @@ func count(t *testing.T, q interface {
 	return n
 }
 
-func probe(t *testing.T) (context.Context, db.TxStarter, func() int) {
+func probe(t *testing.T) (context.Context, *pgxpool.Pool, func() int) {
 	t.Helper()
 	pool := dbtest.NewPool(t)
 	ctx := context.Background()
@@ -30,6 +32,15 @@ func probe(t *testing.T) (context.Context, db.TxStarter, func() int) {
 		t.Fatal(err)
 	}
 	return ctx, pool, func() int { return count(t, pool) }
+}
+
+// noLeakedConns — соединение вернулось в пул: без отката/коммита оно осталось бы занятым,
+// а строки при этом тоже не видны другим соединениям, так что одних rows() мало.
+func noLeakedConns(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if n := pool.Stat().AcquiredConns(); n != 0 {
+		t.Fatalf("занятых соединений = %d, нужно 0 — транзакция не завершена", n)
+	}
 }
 
 func TestInTxCommitsAndExposesTx(t *testing.T) {
@@ -56,6 +67,7 @@ func TestInTxRollsBackOnError(t *testing.T) {
 		}
 		return boom
 	})
+	noLeakedConns(t, pool)
 	if !errors.Is(err, boom) || rows() != 0 {
 		t.Fatalf("err = %v, строк = %d", err, rows())
 	}
@@ -76,6 +88,7 @@ func TestInTxRollsBackOnPanicAndRepanics(t *testing.T) {
 			panic("boom")
 		})
 	}()
+	noLeakedConns(t, pool)
 	if rows() != 0 {
 		t.Fatalf("строк = %d после паники", rows())
 	}
@@ -85,17 +98,21 @@ func TestInTxRollsBackOnPanicAndRepanics(t *testing.T) {
 // её откат не трогает внешнюю, и TxFrom внутри видит внутреннюю.
 func TestNestedInTxOpensOwnTransaction(t *testing.T) {
 	ctx, pool, rows := probe(t)
+	errInner := errors.New("откатить внутреннюю")
 	err := db.InTx(ctx, pool, func(ctx context.Context, outer pgx.Tx) error {
 		if _, err := outer.Exec(ctx, "INSERT INTO tx_probe VALUES (1)"); err != nil {
 			return err
 		}
-		_ = db.InTx(ctx, pool, func(ctx context.Context, inner pgx.Tx) error {
+		innerErr := db.InTx(ctx, pool, func(ctx context.Context, inner pgx.Tx) error {
 			if got, _ := db.TxFrom(ctx); got != inner || inner == outer {
 				t.Fatal("вложенный InTx не открыл свою транзакцию")
 			}
 			_, _ = inner.Exec(ctx, "INSERT INTO tx_probe VALUES (2)")
-			return errors.New("откатить внутреннюю")
+			return errInner
 		})
+		if !errors.Is(innerErr, errInner) {
+			t.Fatalf("внутренний InTx вернул %v, нужна ошибка колбэка", innerErr)
+		}
 		return nil
 	})
 	if err != nil || rows() != 1 {
@@ -114,8 +131,31 @@ func TestInTxRollsBackWhenContextCancelled(t *testing.T) {
 		cancel()
 		return ctx.Err()
 	})
+	noLeakedConns(t, pool)
 	if !errors.Is(err, context.Canceled) || rows() != 0 {
 		t.Fatalf("err = %v, строк = %d", err, rows())
+	}
+}
+
+// runtime.Goexit в колбэке (t.FailNow в тесте) — не паника и не возврат: транзакцию всё равно
+// нужно откатить, иначе соединение остаётся занятым навсегда.
+func TestInTxRollsBackOnGoexit(t *testing.T) {
+	ctx, pool, rows := probe(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done) // Goexit завершает эту горутину, defer при этом отрабатывает
+		_ = db.InTx(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, "INSERT INTO tx_probe VALUES (1)"); err != nil {
+				return err
+			}
+			runtime.Goexit()
+			return nil
+		})
+	}()
+	<-done
+	noLeakedConns(t, pool)
+	if rows() != 0 {
+		t.Fatalf("строк = %d после Goexit", rows())
 	}
 }
 
