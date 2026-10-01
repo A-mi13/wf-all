@@ -17,6 +17,8 @@ import (
 	"wf/backend/internal/platform/id"
 )
 
+// ErrInvalidEntry — запись не прошла проверку (действие не в формате <модуль>.<действие>,
+// нет типа объекта, before/after не сериализуются); в базу ничего не попало.
 var ErrInvalidEntry = errors.New("audit: невалидная запись")
 
 var action = regexp.MustCompile(`^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`)
