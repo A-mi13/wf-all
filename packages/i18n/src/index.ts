@@ -9,11 +9,22 @@ export function withFallback(base: Messages, over: Messages): Messages {
   const out: Messages = { ...base };
   for (const [key, value] of Object.entries(over)) {
     if (typeof value === 'string') {
-      if (value !== '') Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+      if (value !== '')
+        Object.defineProperty(out, key, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
     } else {
       const b = base[key];
       const merged = withFallback(isGroup(b) ? b : {}, value);
-      Object.defineProperty(out, key, { value: merged, enumerable: true, writable: true, configurable: true });
+      Object.defineProperty(out, key, {
+        value: merged,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
   }
   return out;
@@ -32,4 +43,17 @@ export function diffKeys(a: Messages, b: Messages): { missing: string[]; extra: 
     missing: [...pa].filter((p) => !pb.has(p)).sort(),
     extra: [...pb].filter((p) => !pa.has(p)).sort(),
   };
+}
+
+// missingKeys — ключи из keys, для которых в m нет текста (уровни вложенности — через точку).
+// Пустая строка — тоже нет текста: в базовой локали (ru) она показала бы пустоту.
+export function missingKeys(m: Messages, keys: string[]): string[] {
+  const have = new Set(texts(m));
+  return keys.filter((k) => !have.has(k)).sort();
+}
+
+function texts(m: Messages, prefix = ''): string[] {
+  return Object.entries(m).flatMap(([k, v]) =>
+    isGroup(v) ? texts(v, `${prefix}${k}.`) : v === '' ? [] : [`${prefix}${k}`],
+  );
 }

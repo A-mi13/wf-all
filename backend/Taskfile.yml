@@ -7,8 +7,9 @@ vars:
 
 tasks:
   gen:
-    desc: Кодогенерация бэкенда (sqlc, oapi-codegen)
+    desc: Кодогенерация бэкенда (бандлы контрактов, sqlc, oapi-codegen)
     cmds:
+      - pnpm --filter @wf/contracts bundle
       - '{{.GOTOOL}} sqlc generate'
       - '{{.GOTOOL}} oapi-codegen -config internal/httpapi/public/oapi-codegen.yaml ../contracts/openapi/public.yaml'
       - '{{.GOTOOL}} oapi-codegen -config internal/httpapi/admin/oapi-codegen.yaml ../contracts/openapi/admin.yaml'

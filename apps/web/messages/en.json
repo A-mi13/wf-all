@@ -1,4 +1,16 @@
 {
   "app": { "title": "" },
-  "health": { "checking": "", "ok": "", "down": "" }
+  "health": { "checking": "", "ok": "", "down": "" },
+  "errors": {
+    "internal": "",
+    "request": {
+      "invalid": "",
+      "too_large": ""
+    },
+    "validation": { "failed": "" },
+    "http": {
+      "not_found": "",
+      "method_not_allowed": ""
+    }
+  }
 }

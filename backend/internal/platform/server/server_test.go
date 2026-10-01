@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -37,14 +38,33 @@ func TestRunHTTPServesAndStops(t *testing.T) {
 		done <- server.RunHTTP(ctx, "test", server.HTTPConfig{
 			HTTP: config.HTTP{Addr: addr, ShutdownTimeout: time.Second},
 			DB:   config.DB{URL: url, MaxConns: 2},
-		}, io.Discard, func(_ *slog.Logger, _ *pgxpool.Pool) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+		}, io.Discard, func(_ *slog.Logger, _ *pgxpool.Pool) (http.Handler, error) {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }), nil
 		})
 	}()
 	waitStatus(t, "http://"+addr+"/", http.StatusNoContent)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("RunHTTP: %v", err)
+	}
+}
+
+// Хендлер не собрался (битый контракт) — RunHTTP отказывает до открытия порта, а не
+// поднимает сервер без хендлера.
+func TestRunHTTPFailsWhenBuildFails(t *testing.T) {
+	errBuild := errors.New("контракт не собрался")
+	// дедлайн — только страховка: с багом RunHTTP поднял бы сервер и не вернулся; запас —
+	// на подключение к базе под нагрузкой параллельных тестов
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	err := server.RunHTTP(ctx, "test", server.HTTPConfig{
+		HTTP: config.HTTP{Addr: freeAddr(t), ShutdownTimeout: time.Second},
+		DB:   config.DB{URL: dbtest.NewURL(t), MaxConns: 2},
+	}, io.Discard, func(_ *slog.Logger, _ *pgxpool.Pool) (http.Handler, error) {
+		return nil, errBuild
+	})
+	if !errors.Is(err, errBuild) {
+		t.Fatalf("RunHTTP = %v, want %v", err, errBuild)
 	}
 }
 

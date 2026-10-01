@@ -6,6 +6,8 @@ on:
       - 'apps/admin/**'
       - 'packages/**'
       - 'contracts/openapi/admin.yaml'
+      - 'contracts/src/**'
+      - 'contracts/package.json'
       - 'contracts/tokens/**'
       - 'pnpm-workspace.yaml'
       - 'pnpm-lock.yaml'

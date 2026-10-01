@@ -6,7 +6,7 @@
 
 | Что | Версия | Где закреплено |
 | --- | --- | --- |
-| Go | 1.27.1 | `toolchain` в `backend/go.mod`, `backend/tools/go.mod`, `tools/go.mod`, `tools/lint/go.mod` |
+| Go | 1.27.1 | `toolchain` в `backend/go.mod`, `backend/tools/go.mod`, `tools/go.mod`, `tools/lint/go.mod`, `tools/oasdiff/go.mod` |
 | Node.js | 26.10.0 | `devEngines.runtime` в корневом `package.json` |
 | pnpm | 12.6.0 | `packageManager` в корневом `package.json` |
 | PostgreSQL / PostGIS | 18.6 / 3.6.2 | `scripts/pg.sh` (локально, zip), `postgis/postgis:18-3.6` в CI |
@@ -28,6 +28,9 @@
 | go-task / gitleaks / actionlint / Mailpit | 3.53.1 / 8.30.1 / 1.7.12 / 1.31.2 | `tools/go.mod` |
 | golangci-lint | 2.14.0 | `tools/lint/go.mod` |
 | lefthook | 2.1.14 | корневой `package.json` |
+| Redocly CLI | 2.57.0 | `contracts/package.json` (сборка бандлов контракта) |
+| oasdiff | 1.32.1 | `tools/oasdiff/go.mod` (отдельный модуль, см. ловушки) |
+| go-pgquery (pg_query в wasm) | v0.0.0-20250409022910-10ac41983c07 | `backend/go.mod` — та же версия, что у sqlc в `backend/tools/go.mod` |
 
 ## Исключения
 
@@ -46,3 +49,4 @@
   `verifyDepsBeforeRun: error` (`pnpm-workspace.yaml`): устаревший `node_modules` — ошибка
   `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`, чинится одним `pnpm install`. Сам `pnpm install`
   параллельно ни с чем не запускать. Хук pre-commit зовёт `node_modules/.bin/prettier` без pnpm.
+- oasdiff — отдельный модуль `tools/oasdiff`: общий `tools/go.mod` с ним не собирается (yaml/v4 rc); `replace` не использовать.

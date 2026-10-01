@@ -1,17 +1,35 @@
 package public
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
+	"wf/backend/internal/httpapi/public/oapi"
 	"wf/backend/internal/platform/httpx"
 )
 
-// NewHandler собирает публичный API на общей HTTP-платформе.
-func NewHandler(log *slog.Logger) http.Handler {
-	strict := NewStrictHandlerWithOptions(Server{}, nil, StrictHTTPServerOptions{
-		RequestErrorHandlerFunc:  httpx.RequestErrorHandler,
+// NewHandler собирает публичный API на общей HTTP-платформе: лимит тела и проверка
+// запроса по контракту стоят до strict-хендлера.
+func NewHandler(log *slog.Logger) (http.Handler, error) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		return nil, fmt.Errorf("public: контракт: %w", err)
+	}
+	validate, err := httpx.ValidateRequests(spec)
+	if err != nil {
+		return nil, err
+	}
+	requestErr := httpx.RequestErrorHandler(log)
+	strict := oapi.NewStrictHandlerWithOptions(Server{}, nil, oapi.StrictHTTPServerOptions{
+		RequestErrorHandlerFunc:  requestErr,
 		ResponseErrorHandlerFunc: httpx.ResponseErrorHandler(log),
 	})
-	return HandlerFromMux(strict, httpx.NewRouter(log))
+	// ErrorHandlerFunc — ошибки биндинга параметров в chi-обёртке; по умолчанию oapi-codegen
+	// отвечает text/plain с текстом ошибки
+	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
+		// порядок по спеке §6.1: аутентификация (план 3/3) встаёт между LimitBody и validate
+		BaseRouter:       httpx.NewRouter(log, httpx.LimitBody(httpx.MaxBodyBytes), validate),
+		ErrorHandlerFunc: requestErr,
+	}), nil
 }

@@ -3,12 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./error-codes": {
+      "types": "./src/error-codes.d.mts",
+      "default": "./src/error-codes.mjs"
+    }
+  },
   "scripts": {
+    "bundle": "node scripts/bundle.mjs",
     "gen:web": "openapi-typescript openapi/public.yaml -o ../apps/web/src/api/gen/public.d.ts",
     "gen:admin": "openapi-typescript openapi/admin.yaml -o ../apps/admin/src/api/gen/admin.d.ts",
     "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
+    "@redocly/cli": "2.57.0",
     "openapi-typescript": "7.13.0",
     "typescript": "catalog:contracts",
     "yaml": "2.9.1"

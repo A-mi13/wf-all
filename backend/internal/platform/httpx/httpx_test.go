@@ -1,14 +1,19 @@
 package httpx_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5/middleware"
 
 	"wf/backend/internal/platform/httpx"
 )
@@ -79,6 +84,53 @@ func TestRecovererWorksOnEmptyRouter(t *testing.T) {
 	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope", nil))
 	if p := decodeProblem(t, rec); rec.Code != http.StatusInternalServerError || p.Code != "internal" {
 		t.Fatalf("got %d %+v", rec.Code, p)
+	}
+}
+
+// Middleware бинарника стоит после общих (видит request id) и до маршрутов — включая 404.
+func TestRouterRunsBinaryMiddlewareAfterCommon(t *testing.T) {
+	var seenID string
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seenID = middleware.GetReqID(r.Context())
+			next.ServeHTTP(w, r)
+		})
+	}
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope", nil)
+	req.Header.Set("X-Request-Id", "req-7")
+	rec := httptest.NewRecorder()
+	httpx.NewRouter(quiet(), mw).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound || seenID != "req-7" {
+		t.Fatalf("status = %d, request id в middleware бинарника = %q", rec.Code, seenID)
+	}
+}
+
+// Паника в middleware бинарника ловится общим recoverer — он стоит раньше.
+func TestRouterRecoversBinaryMiddlewarePanic(t *testing.T) {
+	boom := func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("бум") })
+	}
+	rec := httptest.NewRecorder()
+	httpx.NewRouter(quiet(), boom).ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope", nil))
+	if p := decodeProblem(t, rec); rec.Code != http.StatusInternalServerError || p.Code != "internal" {
+		t.Fatalf("got %d %+v", rec.Code, p)
+	}
+}
+
+// Ошибка разбора запроса в сгенерированном коде: клиенту — problem+json без текста ошибки,
+// текст — в лог.
+func TestRequestErrorHandlerHidesErrorText(t *testing.T) {
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil)
+	httpx.RequestErrorHandler(log)(rec, req, errors.New("внутренности биндинга"))
+	p := decodeProblem(t, rec)
+	if rec.Code != http.StatusBadRequest || p.Code != "request.invalid" || p.Detail != "" {
+		t.Fatalf("got %d %+v", rec.Code, p)
+	}
+	if strings.Contains(rec.Body.String(), "внутренности") || !strings.Contains(logs.String(), "внутренности биндинга") {
+		t.Fatalf("текст ошибки: ответ = %s, лог = %s", rec.Body.String(), logs.String())
 	}
 }
 

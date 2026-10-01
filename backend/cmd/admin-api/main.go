@@ -33,5 +33,5 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 		return err
 	}
 	return server.RunHTTP(ctx, "admin-api", server.HTTPConfig(cfg), logOut,
-		func(log *slog.Logger, _ *pgxpool.Pool) http.Handler { return admin.NewHandler(log) })
+		func(log *slog.Logger, _ *pgxpool.Pool) (http.Handler, error) { return admin.NewHandler(log) })
 }

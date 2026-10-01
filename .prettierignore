@@ -1,6 +1,8 @@
 # Генерированное и документы не форматируем
 pnpm-lock.yaml
 **/src/api/gen/**
+contracts/openapi/public.yaml
+contracts/openapi/admin.yaml
 packages/tokens/tokens.css
 packages/tokens/tokens.ts
 **/.next/**

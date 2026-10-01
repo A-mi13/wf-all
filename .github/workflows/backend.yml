@@ -5,6 +5,11 @@ on:
     paths: &paths
       - 'backend/**'
       - 'contracts/openapi/**'
+      - 'contracts/scripts/**'
+      - 'contracts/package.json'
+      - 'contracts/oasdiff-severity.txt'
+      - 'contracts/oasdiff-err-ignore-admin.txt'
+      - 'pnpm-lock.yaml'
       - 'tools/**'
       - 'scripts/**'
       - 'Taskfile.yml'
@@ -30,6 +35,8 @@ jobs:
           --health-interval 2s --health-timeout 3s --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: backend/go.mod
@@ -39,3 +46,7 @@ jobs:
       # сервис postgis/postgis не видит deploy/dev/initdb — накатываем роли и расширения вручную
       - run: psql "postgresql://postgres:postgres@localhost:15432/postgres" -v ON_ERROR_STOP=1 -f deploy/dev/initdb/20_wf.sql
       - run: ./task backend:ci
+      # ломающее изменение контракта валит PR; ломать — только в /v2 (спека §8.3)
+      - run: ./task contracts:breaking
+        env:
+          CONTRACTS_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
