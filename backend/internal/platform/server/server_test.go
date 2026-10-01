@@ -43,6 +43,8 @@ func TestRunHTTPServesAndStops(t *testing.T) {
 		})
 	}()
 	waitStatus(t, "http://"+addr+"/", http.StatusNoContent)
+	waitStatus(t, "http://"+addr+"/healthz", http.StatusOK)
+	waitStatus(t, "http://"+addr+"/readyz", http.StatusOK)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("RunHTTP: %v", err)
@@ -75,8 +77,11 @@ func waitStatus(t *testing.T, url string, want int) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// без keep-alive: иначе клиент может дозвониться «про запас» и оставить соединение, которое
+	// сервер до 5 с считает активным — graceful shutdown упрётся в ShutdownTimeout
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 	for time.Now().Before(deadline) {
-		if resp, err := http.DefaultClient.Do(req); err == nil {
+		if resp, err := client.Do(req); err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == want {
 				return

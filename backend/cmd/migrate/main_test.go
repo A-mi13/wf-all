@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"wf/backend/internal/platform/testkit/dbtest"
 )
@@ -75,5 +78,55 @@ func TestResetLogsMigrationsWithConfiguredLogger(t *testing.T) {
 		if !strings.Contains(logs.String(), want) {
 			t.Fatalf("в логе нет %q:\n%s", want, logs.String())
 		}
+	}
+}
+
+func TestUpAppliesGrants(t *testing.T) {
+	url := dbtest.NewURL(t)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"up"}, []string{"MIGRATOR_DATABASE_URL=" + url}, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "grants: права ролей применены") {
+		t.Fatalf("вывод up: %s", out.String())
+	}
+	db, err := sql.Open("pgx", url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var canUpdate, canInsert bool
+	if err := db.QueryRowContext(context.Background(), `SELECT has_table_privilege('api', 'audit_log', 'UPDATE'),
+		has_table_privilege('api', 'audit_log', 'INSERT')`).Scan(&canUpdate, &canInsert); err != nil {
+		t.Fatal(err)
+	}
+	if canUpdate || !canInsert {
+		t.Fatalf("api на audit_log: UPDATE=%v INSERT=%v", canUpdate, canInsert)
+	}
+}
+
+// down откатывает последнюю миграцию, а Down может пересоздать таблицу (0017 возвращает
+// прежний outbox) — без применения прав она осталась бы только у владельца.
+func TestDownAppliesGrants(t *testing.T) {
+	url := dbtest.NewURL(t)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"down"}, []string{"MIGRATOR_DATABASE_URL=" + url}, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "grants: права ролей применены") {
+		t.Fatalf("вывод down: %s", out.String())
+	}
+	db, err := sql.Open("pgx", url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var apiInsert, workerSelect bool
+	if err := db.QueryRowContext(context.Background(), `SELECT has_table_privilege('api', 'outbox', 'INSERT'),
+		has_table_privilege('worker', 'outbox', 'SELECT')`).Scan(&apiInsert, &workerSelect); err != nil {
+		t.Fatal(err)
+	}
+	if !apiInsert || !workerSelect {
+		t.Fatalf("outbox после down: api INSERT=%v, worker SELECT=%v", apiInsert, workerSelect)
 	}
 }

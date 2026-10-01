@@ -25,6 +25,7 @@
 | oapi-codegen / sqlc | 2.8.0 / 1.31.1 | `backend/tools/go.mod` |
 | River | 0.47.0 | `backend/go.mod` (рантайм-библиотека воркера), CLI — `backend/tools/go.mod` |
 | goose / pgtestdb / kin-openapi | 3.28.0 / 0.1.1 / 0.149.0 | `backend/go.mod` |
+| google/uuid | 1.6.0 | `backend/go.mod` (UUIDv7 — `internal/platform/id`) |
 | go-task / gitleaks / actionlint / Mailpit | 3.53.1 / 8.30.1 / 1.7.12 / 1.31.2 | `tools/go.mod` |
 | golangci-lint | 2.14.0 | `tools/lint/go.mod` |
 | lefthook | 2.1.14 | корневой `package.json` |

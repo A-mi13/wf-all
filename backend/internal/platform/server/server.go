@@ -13,6 +13,7 @@ import (
 
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
+	"wf/backend/internal/platform/health"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/logx"
 )
@@ -36,6 +37,8 @@ func RunHTTP(ctx context.Context, name string, c HTTPConfig, logOut io.Writer,
 	if err != nil {
 		return err
 	}
+	// пробы — до хендлера бинарника: без логов доступа и проверки по контракту
+	h = health.Handler(pool.Ping, h)
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", c.HTTP.Addr)
 	if err != nil {

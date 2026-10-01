@@ -18,8 +18,10 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE DATABASE wf OWNER migrator;
 
 \connect wf
-GRANT USAGE ON SCHEMA public TO api, admin, worker;
-ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO api, admin, worker;
-ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO api, admin, worker;
+-- Права на таблицы выдаёт cmd/migrate после каждого наката (backend/internal/platform/grants):
+-- широких умолчаний здесь нет, иначе каждая новая таблица до прогона grants была бы открыта
+-- всем ролям (спека бэкенда §10.1).
+-- Кластер, инициализированный раньше (.tools/pg), хранит старые умолчания — снять разово
+-- в базе wf: ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
+--   REVOKE ALL ON TABLES FROM api, admin, worker; (и то же ON SEQUENCES)
+-- (scripts/pg.sh init существующий кластер не пересоздаёт).

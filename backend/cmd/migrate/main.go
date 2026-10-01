@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"wf/backend/internal/platform/config"
+	"wf/backend/internal/platform/grants"
 	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/migrate"
 )
@@ -61,19 +63,29 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		for _, r := range res {
 			fmt.Fprintln(out, r)
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return applyGrants(ctx, db, out)
 	case "down":
 		r, err := p.Down(ctx)
 		if r != nil {
 			fmt.Fprintln(out, r)
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// Down может пересоздать таблицу (0017 возвращает прежний outbox): без прав она
+		// осталась бы только у владельца
+		return applyGrants(ctx, db, out)
 	case "reset":
 		if _, err := p.DownTo(ctx, 0); err != nil {
 			return err
 		}
-		_, err := p.Up(ctx)
-		return err
+		if _, err := p.Up(ctx); err != nil {
+			return err
+		}
+		return applyGrants(ctx, db, out)
 	default: // status
 		st, err := p.Status(ctx)
 		for _, s := range st {
@@ -81,4 +93,14 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		}
 		return err
 	}
+}
+
+// applyGrants — права ролей после up, down и reset (спека §10.1): новые и пересозданные
+// таблицы получают права сразу.
+func applyGrants(ctx context.Context, db *sql.DB, out io.Writer) error {
+	if err := grants.Apply(ctx, db); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "grants: права ролей применены")
+	return nil
 }

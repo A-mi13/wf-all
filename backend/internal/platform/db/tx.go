@@ -1,0 +1,57 @@
+package db
+
+import (
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// ErrNoTx — механизм платформы, которому нужна транзакция из ctx (events.Publish,
+// audit.Write), вызван вне db.InTx.
+var ErrNoTx = errors.New("db: нужна транзакция из db.InTx")
+
+// TxStarter открывает транзакцию; его реализует *pgxpool.Pool. Передавать нужно именно пул:
+// Begin есть и у pgx.Tx, и у *pgx.Conn, а pgx.Tx открыл бы вложенную транзакцию через
+// savepoint, то есть молча присоединился бы к внешней — спека §4.4 этого запрещает.
+type TxStarter interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+type txKey struct{}
+
+// InTx исполняет fn в новой транзакции и кладёт её в ctx — оттуда её читают только
+// механизмы платформы (события, аудит, идемпотентность), спека §4.4. Транзакция открывается
+// всегда новая, даже если в ctx уже есть другая: невидимого присоединения к чужой транзакции
+// нет. nil — коммит; ошибка или паника — откат (паника пробрасывается).
+func InTx(ctx context.Context, s TxStarter, fn func(ctx context.Context, tx pgx.Tx) error) (err error) {
+	tx, err := s.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	completed := false
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback(context.WithoutCancel(ctx))
+			panic(p)
+		}
+		// !completed — fn не вернулась и не запаниковала: runtime.Goexit (t.FailNow в тесте)
+		if !completed || err != nil {
+			// WithoutCancel даёт откату завершиться и после отмены ctx: иначе pgx
+			// уничтожит соединение, а не вернёт его в пул для повторного использования
+			_ = tx.Rollback(context.WithoutCancel(ctx))
+		}
+	}()
+	err = fn(context.WithValue(ctx, txKey{}, tx), tx)
+	completed = true
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// TxFrom — транзакция, которую положил db.InTx.
+func TxFrom(ctx context.Context) (pgx.Tx, bool) {
+	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
+	return tx, ok
+}

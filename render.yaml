@@ -14,7 +14,9 @@ services:
     # же контейнере сценарием из образа (backend/Dockerfile). На сервере migrate — отдельный
     # разовый запуск перед обновлением.
     dockerCommand: migrate-then-api
-    healthCheckPath: /v1/health
+    # /healthz — процесс жив, базу не трогает: частые пробы Render не будят Neon (он засыпает
+    # через 5 минут простоя — бесплатные часы). Готовность с базой — /readyz.
+    healthCheckPath: /healthz
     autoDeployTrigger: checksPass
     buildFilter:
       paths:

@@ -39,6 +39,8 @@ var Schema = map[string]Object{
 	// platform
 	"audit_log":        table("platform"),
 	"outbox":           table("platform"),
+	"event_inbox":      table("platform"),
+	"event_cursors":    table("platform"),
 	"idempotency_keys": table("platform"),
 	"feature_flags":    table("platform"),
 	"goose_db_version": table("platform"),
@@ -48,6 +50,7 @@ var Schema = map[string]Object{
 	"age_years":                {Function, "platform", true},
 	"set_updated_at":           {Function, "platform", false},
 	"audit_log_is_append_only": {Function, "platform", false},
+	"outbox_notify":            {Function, "platform", false},
 
 	// geo
 	"countries":     table("geo"),
