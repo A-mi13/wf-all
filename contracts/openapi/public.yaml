@@ -100,3 +100,4 @@ x-error-codes-common:
   - validation.failed
   - http.not_found
   - http.method_not_allowed
+x-anonymous-mutations: []

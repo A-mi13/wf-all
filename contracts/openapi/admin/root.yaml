@@ -20,6 +20,9 @@ x-error-codes-common:
   - validation.failed
   - http.not_found
   - http.method_not_allowed
+# Анонимные мутирующие операции — закрытый список operationId. В админке он пуст:
+# Idempotency-Key обязателен у всех мутирующих операций (спека бэкенда §6.4).
+x-anonymous-mutations: []
 paths:
   /v1/health:
     $ref: './platform/paths.yaml#/health'
