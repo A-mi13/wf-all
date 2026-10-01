@@ -1,5 +1,7 @@
-package: public
-output: internal/httpapi/public/api.gen.go
+# Сгенерированные типы и strict-интерфейс — отдельный пакет: хендлеры модулей
+# (internal/<модуль>/httpapi) импортируют типы, а сборка сервера — хендлеры (спека §8.2).
+package: oapi
+output: internal/httpapi/public/oapi/api.gen.go
 generate:
   models: true
   chi-server: true

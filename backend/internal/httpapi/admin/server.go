@@ -1,12 +1,18 @@
 package admin
 
-import "context"
+import (
+	"context"
 
-// Server реализует маршруты API админки. Зависимости модулей добавляются полями.
+	"wf/backend/internal/httpapi/admin/oapi"
+)
+
+// Server собирает API админки: встраивает хендлеры модулей (internal/<модуль>/admin),
+// операции платформы (тег platform) реализует сам. Компилятор ловит и нереализованную
+// операцию, и реализованную двумя модулями (неоднозначный метод) — спека §8.2.
 type Server struct{}
 
-var _ StrictServerInterface = Server{}
+var _ oapi.StrictServerInterface = Server{}
 
-func (Server) GetHealth(context.Context, GetHealthRequestObject) (GetHealthResponseObject, error) {
-	return GetHealth200JSONResponse{Status: Ok}, nil
+func (Server) GetHealth(context.Context, oapi.GetHealthRequestObject) (oapi.GetHealthResponseObject, error) {
+	return oapi.GetHealth200JSONResponse{Status: oapi.Ok}, nil
 }
