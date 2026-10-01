@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Первая команда на чистой машине. Ничего не ставит глобально:
-# Go-инструменты собираются в .tools/bin по пинам из tools/go.mod (проверка go.sum).
+# Go-инструменты собираются в .tools/bin по пинам из tools/go.mod, tools/lint/go.mod и
+# tools/oasdiff/go.mod (проверка go.sum).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN="$PWD/.tools/bin"
