@@ -64,3 +64,20 @@ func TestLoadParsesLogLevel(t *testing.T) {
 		t.Fatalf("level = %v", c.Log.Level)
 	}
 }
+
+func TestLoadWorkerQueuesAndRelay(t *testing.T) {
+	c, err := config.Load[config.Worker]("WORKER_", []string{
+		"WORKER_DATABASE_URL=postgres://w@localhost/wf",
+		"WORKER_QUEUE_MAIL=7",
+		"WORKER_RELAY_POLL=2s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Queues.Mail != 7 || c.Queues.Events != 10 || c.Queues.Maintenance != 2 {
+		t.Fatalf("очереди: %+v", c.Queues)
+	}
+	if c.Relay.Poll != 2*time.Second || c.Relay.Batch != 100 {
+		t.Fatalf("relay: %+v", c.Relay)
+	}
+}

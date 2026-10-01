@@ -3,15 +3,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/riverqueue/river"
+
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
+	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/queue"
 )
@@ -30,22 +35,54 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := validateRelay(cfg.Relay); err != nil {
+		return err
+	}
 	log := logx.New(logOut, cfg.Log).With("service", "worker")
 	pool, err := db.Open(ctx, cfg.DB)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	client, err := queue.NewClient(pool, queue.NewWorkers(), cfg.MaxWorkers, log)
+	reg, err := subscriptions()
+	if err != nil {
+		return err
+	}
+	workers := queue.NewWorkers()
+	events.AddWorkers(workers, pool, reg)
+	client, err := queue.NewClient(pool, workers, cfg.Queues, []*river.PeriodicJob{events.CleanupJob()}, log)
 	if err != nil {
 		return err
 	}
 	if err := client.Start(ctx); err != nil {
 		return err
 	}
-	log.Info("очередь запущена", "max_workers", cfg.MaxWorkers)
+	relay := events.NewRelay(pool, client, reg, log, events.RelayConfig{Batch: cfg.Relay.Batch, Poll: cfg.Relay.Poll})
+	var wg sync.WaitGroup
+	wg.Go(func() { _ = relay.Run(ctx) })
+	log.Info("воркер запущен", "queues", cfg.Queues)
 	<-ctx.Done()
+	wg.Wait()
 	stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return client.Stop(stopCtx)
+}
+
+// validateRelay — до подключения к базе: пачка меньше 1 зациклила бы Drain, неположительный
+// опрос уронил бы time.NewTicker паникой.
+func validateRelay(r config.Relay) error {
+	var errs []error
+	if r.Batch < 1 {
+		errs = append(errs, fmt.Errorf("WORKER_RELAY_BATCH = %d: нужно не меньше 1", r.Batch))
+	}
+	if r.Poll <= 0 {
+		errs = append(errs, fmt.Errorf("WORKER_RELAY_POLL = %s: нужно больше нуля", r.Poll))
+	}
+	return errors.Join(errs...)
+}
+
+// subscriptions — подписчики модулей на события. Пусто, пока нет модулей: каждая спека
+// модуля добавляет сюда свои Subscription (internal/<модуль>/subscribers).
+func subscriptions() (*events.Registry, error) {
+	return events.NewRegistry()
 }

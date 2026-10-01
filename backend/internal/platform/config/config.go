@@ -40,10 +40,28 @@ type Admin struct {
 	DB   DB
 }
 
+// Queues — конкурентность очередей воркера (спека §9.1).
+type Queues struct {
+	Events      int `env:"QUEUE_EVENTS" envDefault:"10"`
+	Lifecycle   int `env:"QUEUE_LIFECYCLE" envDefault:"5"`
+	Notify      int `env:"QUEUE_NOTIFY" envDefault:"5"`
+	Mail        int `env:"QUEUE_MAIL" envDefault:"2"`
+	Stats       int `env:"QUEUE_STATS" envDefault:"2"`
+	Media       int `env:"QUEUE_MEDIA" envDefault:"2"`
+	Maintenance int `env:"QUEUE_MAINTENANCE" envDefault:"2"`
+}
+
+// Relay — раскладка событий outbox (internal/platform/events).
+type Relay struct {
+	Batch int           `env:"RELAY_BATCH" envDefault:"100"`
+	Poll  time.Duration `env:"RELAY_POLL" envDefault:"5s"`
+}
+
 type Worker struct {
-	Log        Log
-	DB         DB
-	MaxWorkers int `env:"MAX_WORKERS" envDefault:"10"`
+	Log    Log
+	DB     DB
+	Queues Queues
+	Relay  Relay
 }
 
 type Migrator struct {

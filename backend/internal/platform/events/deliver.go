@@ -13,10 +13,11 @@ import (
 
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events/eventsdb"
+	"wf/backend/internal/platform/queue"
 )
 
 // QueueEvents — очередь доставки событий подписчикам (спека §9.1).
-const QueueEvents = "events"
+const QueueEvents = queue.Events
 
 // DeliverArgs — доставить событие одному подписчику. Только id: событие читается из outbox
 // (хранится 30 дней), персональных данных в аргументах нет (§9.5). V — версия аргументов.
@@ -115,4 +116,5 @@ func (w *DeliverWorker) Work(ctx context.Context, job *river.Job[DeliverArgs]) e
 // AddWorkers регистрирует задачи платформы событий в реестре воркера.
 func AddWorkers(w *river.Workers, pool *pgxpool.Pool, reg *Registry) {
 	river.AddWorker(w, NewDeliverWorker(pool, pool, reg))
+	river.AddWorker(w, NewCleanupWorker(pool))
 }
