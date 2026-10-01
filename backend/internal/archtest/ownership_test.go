@@ -126,7 +126,7 @@ func TestModuleQueriesRespectOwnership(t *testing.T) {
 		if strings.Contains(slash, "platform/flags/") {
 			sawFlags = true
 		}
-		src, err := os.ReadFile(f)
+		src, err := os.ReadFile(f) //nolint:gosec // путь — из glob по каталогам queries этого репо, не внешний ввод
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -21,12 +21,12 @@ func (fakeServer) GetHealth() {}
 
 // Сервер объявил метод, который есть и у встроенного хендлера: Go молча берёт метод
 // сервера (он мельче), так что операцию обслуживает платформа, а не модуль.
-type shadowServer struct{ fakeTeams }
+type shadowServer struct{ fakeTeams } //nolint:unused // встроен ради набора методов: проверяется затенение, поле не читается
 
 func (shadowServer) GetTeam() {}
 
 // То же с указательным получателем: в методах значения сервера GetTeam нет вовсе.
-type shadowPtrServer struct{ fakeTeams }
+type shadowPtrServer struct{ fakeTeams } //nolint:unused // встроен ради набора методов: проверяется затенение, поле не читается
 
 func (*shadowPtrServer) GetTeam() {}
 
