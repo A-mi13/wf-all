@@ -3,8 +3,10 @@ package events_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -176,20 +178,134 @@ func TestDeliveryModesAndStaleVersions(t *testing.T) {
 	}
 }
 
-// Неизвестный подписчик (убран в новом релизе) и удалённое чисткой событие — отмена задачи,
-// а не 20 бессмысленных повторов.
-func TestUnknownSubscriberOrEventCancelsJob(t *testing.T) {
+// Удалённое чисткой событие — отмена задачи, а не 20 бессмысленных повторов. Неизвестный
+// подписчик — обычная ошибка с повтором: задачу мог взять воркер старого релиза при выкатке,
+// отмена потеряла бы событие (River повторит, после исчерпания попыток задача — discarded).
+func TestUnknownSubscriberRetriesDeletedEventCancels(t *testing.T) {
 	pool := dbtest.NewPool(t)
 	reg, _ := events.NewRegistry()
 	w := events.NewDeliverWorker(pool, pool, reg)
 	eventID := publish(t, pool, joined(id.New(), 1))
-	for name, j := range map[string]*river.Job[events.DeliverArgs]{
-		"подписчик": job(eventID, "stats.gone"),
-		"событие":   job(id.New(), "stats.count"),
-	} {
-		var cancel *river.JobCancelError
-		if err := w.Work(context.Background(), j); !errors.As(err, &cancel) {
-			t.Errorf("%s: err = %v, ждали river.JobCancel", name, err)
+
+	var cancel *river.JobCancelError
+	if err := w.Work(context.Background(), job(id.New(), "stats.count")); !errors.As(err, &cancel) {
+		t.Errorf("удалённое событие: err = %v, ждали river.JobCancel", err)
+	}
+	err := w.Work(context.Background(), job(eventID, "stats.gone"))
+	if err == nil {
+		t.Fatal("неизвестный подписчик: ошибка проглочена")
+	}
+	if errors.As(err, &cancel) {
+		t.Errorf("неизвестный подписчик: err = %v — отмена теряет событие, ждали ошибку с повтором", err)
+	}
+}
+
+// lockWaiters — сколько сессий тестовой базы ждут блокировку.
+func lockWaiters(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Две доставки одного агрегата одному LatestState-подписчику идут параллельно: v3 держит
+// блокировку курсора (FOR UPDATE), пока её обработчик не отпущен; v2 ждёт на этой блокировке и,
+// получив её, видит курсор 3 — отбрасывается как устаревшее. Курсор создан заранее доставкой v1:
+// иначе вторую доставку сериализовал бы уже INSERT … ON CONFLICT в EnsureCursor, а не LockCursor.
+func TestConcurrentLatestStateDropsStale(t *testing.T) {
+	pool := dbtest.NewPool(t)
+	effects(t, pool)
+	holding := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock) // при провале теста горутина v3 вернёт соединение до закрытия пула
+
+	h := func(ctx context.Context, tx pgx.Tx, e events.Envelope) error {
+		if err := record("notify.roster")(ctx, tx, e); err != nil {
+			return err
 		}
+		if e.AggregateVersion == 3 {
+			close(holding)
+			<-release
+		}
+		return nil
+	}
+	reg, err := events.NewRegistry(events.Subscription{
+		Subscriber: "notify.roster", EventType: "teams.member_joined", Delivery: events.LatestState, Handle: h,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := events.NewDeliverWorker(pool, pool, reg)
+	agg := id.New()
+	v1 := publish(t, pool, joined(agg, 1))
+	v3 := publish(t, pool, joined(agg, 3))
+	v2 := publish(t, pool, joined(agg, 2))
+	ctx := context.Background()
+	if err := w.Work(ctx, job(v1, "notify.roster")); err != nil {
+		t.Fatal(err)
+	}
+
+	done3 := make(chan error, 1)
+	go func() { done3 <- w.Work(ctx, job(v3, "notify.roster")) }()
+	select {
+	case <-holding:
+	case err := <-done3:
+		t.Fatalf("v3 завершилась, не дойдя до обработчика: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("v3 не дошла до обработчика")
+	}
+
+	// v2 стартует, пока v3 держит курсор. Отпускаем v3, только когда v2 либо встала на
+	// блокировку (верное поведение), либо уже завершилась (блокировки нет — баг, ловит проверка ниже):
+	// так исход не зависит от того, успела ли v2 дойти до курсора.
+	done2 := make(chan error, 1)
+	go func() { done2 <- w.Work(ctx, job(v2, "notify.roster")) }()
+	var err2 error
+	finished2 := false
+	deadline := time.Now().Add(30 * time.Second)
+	for !finished2 && lockWaiters(t, pool) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("v2 не встала на блокировку курсора и не завершилась")
+		}
+		select {
+		case err2 = <-done2:
+			finished2 = true
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	unblock()
+	if err := <-done3; err != nil {
+		t.Fatalf("v3: %v", err)
+	}
+	if !finished2 {
+		err2 = <-done2
+	}
+	if err2 != nil {
+		t.Fatalf("v2: %v", err2)
+	}
+
+	rows, err := pool.Query(ctx, "SELECT version FROM test_effects WHERE subscriber = 'notify.roster' ORDER BY version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != 2 || applied[0] != 1 || applied[1] != 3 {
+		t.Fatalf("применены версии %v, ждали [1 3] — устаревшая v2 применена поверх v3", applied)
+	}
+	var cursor int64
+	if err := pool.QueryRow(ctx,
+		"SELECT version FROM event_cursors WHERE subscriber = 'notify.roster' AND aggregate_id = $1", agg).Scan(&cursor); err != nil {
+		t.Fatal(err)
+	}
+	if cursor != 3 {
+		t.Fatalf("курсор = %d, ждали 3", cursor)
 	}
 }
