@@ -1,0 +1,33 @@
+# Dev-стенд на Render (бесплатный тариф): публичный API для нативного приложения.
+# Образ — backend/Dockerfile, тот же, что потом пойдёт на свой сервер (docs/deploy-dev.md).
+# Секреты (строки подключения к Neon) задаются в настройках сервиса, не здесь: sync: false.
+services:
+  - type: web
+    name: wf-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # На бесплатном тарифе нет preDeployCommand — миграции накатываются перед стартом API в том
+    # же контейнере (goose держит блокировку, двойного наката не будет). На сервере migrate —
+    # отдельный разовый запуск перед обновлением.
+    dockerCommand: /bin/sh -c 'set -e; migrate up; exec api'
+    healthCheckPath: /v1/health
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
+    envVars:
+      - key: API_HTTP_ADDR
+        value: 0.0.0.0:10000
+      - key: API_LOG_FORMAT
+        value: json
+      - key: MIGRATOR_LOG_FORMAT
+        value: json
+      - key: API_DATABASE_URL
+        sync: false
+      - key: MIGRATOR_DATABASE_URL
+        sync: false
