@@ -95,7 +95,9 @@ func (w *walker) walk(n any, stmt string, ctes map[string]bool) {
 				continue // FOR UPDATE OF t — псевдонимы из FROM, а не таблицы
 			case k == "RangeVar":
 				w.add(child, w.reads, ctes)
-			case k == "relation" && writeStmts[stmt]:
+			case k == "relation" && writeStmts[stmt] && hasRelname(child):
+				// цель записи — RangeVar прямо в поле оператора; обёрнутый узел ({"RangeVar": …}
+				// у RangeTableSample в FROM/USING) — источник, он обходится как обычно
 				w.add(child, w.writes, nil) // цель записи никогда не CTE
 				continue
 			case k == "relations" && stmt == "TruncateStmt":
@@ -164,12 +166,18 @@ func isStmtNode(k string) bool {
 }
 
 // add записывает отношение в set; неквалифицированное имя из ctes — CTE, не таблица.
+// Отсутствующее отношение (COPY (SELECT …) TO) пропускается; непустой узел без relname —
+// незнакомая форма дерева, ошибка: страж закрыт по умолчанию, а не теряет таблицу молча.
 func (w *walker) add(rel any, set, ctes map[string]bool) {
 	m := asMap(rel)
 	name, _ := m["relname"].(string)
 	schema, _ := m["schemaname"].(string)
 	switch {
+	case len(m) == 0:
+		return
 	case name == "":
+		w.fail(fmt.Errorf("sqlscan: отношение без relname (%s) — форма дерева разбора не поддерживается",
+			strings.Join(slices.Sorted(maps.Keys(m)), ", ")))
 		return
 	case schema == "" && ctes[name]:
 		return
@@ -177,6 +185,12 @@ func (w *walker) add(rel any, set, ctes map[string]bool) {
 		name = schema + "." + name
 	}
 	set[name] = true
+}
+
+// hasRelname — узел сам является RangeVar (а не обёрткой над ним).
+func hasRelname(n any) bool {
+	_, ok := asMap(n)["relname"]
+	return ok
 }
 
 func (w *walker) addFunc(fc any) {

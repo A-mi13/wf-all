@@ -111,6 +111,21 @@ SELECT 1 FROM users WHERE email = 'a@b.ru'`,
 			want: sqlscan.Usage{Writes: []string{"users"}},
 		},
 		{
+			name: "update from с TABLESAMPLE — источник читается",
+			sql:  `UPDATE matches m SET x = 1 FROM teams TABLESAMPLE SYSTEM (10)`,
+			want: sqlscan.Usage{Writes: []string{"matches"}, Reads: []string{"teams"}},
+		},
+		{
+			name: "delete using с TABLESAMPLE — источник читается",
+			sql:  `DELETE FROM matches USING teams TABLESAMPLE SYSTEM (10)`,
+			want: sqlscan.Usage{Writes: []string{"matches"}, Reads: []string{"teams"}},
+		},
+		{
+			name: "select с TABLESAMPLE",
+			sql:  `SELECT 1 FROM teams TABLESAMPLE SYSTEM (10)`,
+			want: sqlscan.Usage{Reads: []string{"teams"}},
+		},
+		{
 			name: "delete using",
 			sql:  `DELETE FROM sessions s USING users u WHERE u.id = s.user_id`,
 			want: sqlscan.Usage{Writes: []string{"sessions"}, Reads: []string{"users"}},
