@@ -33,20 +33,17 @@ transaction mode он несовместим (спека бэкенда §6.5).
 
 ## Роли базы на Neon
 
-Выполняется один раз владельцем базы `wf` **до первого наката миграций** — права по умолчанию
-действуют только на таблицы, созданные после них:
+Выполняется один раз владельцем базы `wf`:
 
 ```sql
 CREATE ROLE api LOGIN PASSWORD '<генерируется>';
-GRANT USAGE ON SCHEMA public TO api;
-ALTER DEFAULT PRIVILEGES FOR ROLE <владелец> IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO api;
-ALTER DEFAULT PRIVILEGES FOR ROLE <владелец> IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO api;
 ```
 
-Это та же схема, что `deploy/dev/initdb/20_wf.sql` для локальной базы. Роли `admin` и `worker`
-добавятся, когда на стенд выйдут admin-api и воркер.
+Права на таблицы роль получает от `migrate up` — он применяет `backend/internal/platform/grants/grants.sql`
+после миграций (матрица — в его комментариях и спеке бэкенда §10.1). Роли `admin` и `worker`
+создаются так же, когда на стенд выйдут admin-api и воркер; до тех пор `grants.sql` их пропускает.
+Умолчания `ALTER DEFAULT PRIVILEGES`, выданные на Neon при создании стенда, безвредны: после
+каждого наката права пересчитываются заново.
 
 ## Потом — свой сервер
 

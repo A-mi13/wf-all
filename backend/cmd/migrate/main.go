@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"wf/backend/internal/platform/config"
+	"wf/backend/internal/platform/grants"
 	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/migrate"
 )
@@ -61,7 +63,10 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		for _, r := range res {
 			fmt.Fprintln(out, r)
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return applyGrants(ctx, db, out)
 	case "down":
 		r, err := p.Down(ctx)
 		if r != nil {
@@ -72,8 +77,10 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		if _, err := p.DownTo(ctx, 0); err != nil {
 			return err
 		}
-		_, err := p.Up(ctx)
-		return err
+		if _, err := p.Up(ctx); err != nil {
+			return err
+		}
+		return applyGrants(ctx, db, out)
 	default: // status
 		st, err := p.Status(ctx)
 		for _, s := range st {
@@ -81,4 +88,13 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		}
 		return err
 	}
+}
+
+// applyGrants — права ролей после миграций (спека §10.1): новые таблицы получают права сразу.
+func applyGrants(ctx context.Context, db *sql.DB, out io.Writer) error {
+	if err := grants.Apply(ctx, db); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "grants: права ролей применены")
+	return nil
 }
