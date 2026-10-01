@@ -54,7 +54,9 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := client.Start(ctx); err != nil {
+	// Отмена ctx Start в River — жёсткая остановка (ctx задач отменяется сразу); останавливаем
+	// сами: сначала relay, потом мягко River (queue.Stop).
+	if err := client.Start(context.WithoutCancel(ctx)); err != nil {
 		return err
 	}
 	relay := events.NewRelay(pool, client, reg, log, events.RelayConfig{Batch: cfg.Relay.Batch, Poll: cfg.Relay.Poll})
@@ -62,10 +64,8 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	wg.Go(func() { _ = relay.Run(ctx) })
 	log.Info("воркер запущен", "queues", cfg.Queues)
 	<-ctx.Done()
-	wg.Wait()
-	stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return client.Stop(stopCtx)
+	wg.Wait() // relay больше не ставит задачи
+	return queue.Stop(context.Background(), client, 30*time.Second)
 }
 
 // validateRelay — до подключения к базе: пачка меньше 1 зациклила бы Drain, неположительный

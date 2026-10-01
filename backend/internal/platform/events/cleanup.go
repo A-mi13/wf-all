@@ -12,7 +12,8 @@ import (
 )
 
 // cleanupBatch — строк за один DELETE: короткие транзакции не держат блокировки.
-const cleanupBatch = 1000
+// Переменная только ради теста цикла по пачкам (SetCleanupBatch в export_test.go).
+var cleanupBatch int32 = 1000
 
 // CleanupArgs — чистка опубликованного outbox и старого inbox (спека §6.5, §9.3).
 type CleanupArgs struct {
@@ -22,7 +23,8 @@ type CleanupArgs struct {
 func (CleanupArgs) Kind() string { return "events.cleanup" }
 
 func (CleanupArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: queue.Maintenance, UniqueOpts: river.UniqueOpts{ByPeriod: time.Hour}}
+	// Чистка идемпотентна, а через час будет следующий запуск: долго повторять незачем.
+	return river.InsertOpts{Queue: queue.Maintenance, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByPeriod: time.Hour}}
 }
 
 type CleanupWorker struct {
@@ -43,7 +45,7 @@ func (w *CleanupWorker) Work(ctx context.Context, _ *river.Job[CleanupArgs]) err
 			if err != nil {
 				return err
 			}
-			if n < cleanupBatch {
+			if n < int64(cleanupBatch) {
 				break
 			}
 		}

@@ -4,7 +4,10 @@ package queue
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,4 +67,28 @@ func NewClient(pool *pgxpool.Pool, workers *river.Workers, c config.Queues,
 		PeriodicJobs: periodic,
 		Logger:       log,
 	})
+}
+
+// hardStopTimeout — сколько ждать задачи после отмены их ctx, если мягкая остановка не уложилась.
+const hardStopTimeout = 5 * time.Second
+
+// Stop — остановка клиента, запущенного на ctx без отмены (context.WithoutCancel): отмена ctx
+// Start в River — это StopAndCancel, идущие задачи потеряли бы ctx сразу. Сначала мягко —
+// новые задачи не берутся, идущие доделываются в пределах timeout; не уложились — их ctx
+// отменяется, и Stop возвращает ошибку мягкой остановки.
+func Stop(ctx context.Context, c *river.Client[pgx.Tx], timeout time.Duration) error {
+	softCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	softErr := c.Stop(softCtx)
+	if softErr == nil {
+		return nil
+	}
+	softErr = fmt.Errorf("queue: мягкая остановка не уложилась в %s, задачи отменены: %w", timeout, softErr)
+	// Жёсткая — даже если ctx вызывающего уже отменён: клиент нужно остановить в любом случае.
+	hardCtx, cancelHard := context.WithTimeout(context.WithoutCancel(ctx), hardStopTimeout)
+	defer cancelHard()
+	if err := c.StopAndCancel(hardCtx); err != nil {
+		return errors.Join(softErr, fmt.Errorf("queue: жёсткая остановка: %w", err))
+	}
+	return softErr
 }

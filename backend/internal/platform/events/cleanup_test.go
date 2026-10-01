@@ -58,9 +58,36 @@ func TestCleanupRemovesOnlyOldProcessed(t *testing.T) {
 	}
 }
 
+// Старого больше, чем пачка: чистка идёт пачками, пока не вычистит всё, а не одну пачку за запуск.
+func TestCleanupDeletesInBatchesUntilDone(t *testing.T) {
+	events.SetCleanupBatch(t, 2)
+	pool := dbtest.NewPool(t)
+	ctx := context.Background()
+	for range 5 {
+		eventID := publish(t, pool, joined(id.New(), 1))
+		if _, err := pool.Exec(ctx, "UPDATE outbox SET published_at = now() - interval '31 days' WHERE id = $1", eventID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, "INSERT INTO event_inbox (subscriber, event_id, processed_at) VALUES ('stats.count', $1, now() - interval '31 days')", eventID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := events.NewCleanupWorker(pool).Work(ctx, &river.Job[events.CleanupArgs]{JobRow: &rivertype.JobRow{}}); err != nil {
+		t.Fatal(err)
+	}
+	var outboxLeft, inboxLeft int
+	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM outbox), (SELECT count(*) FROM event_inbox)").Scan(&outboxLeft, &inboxLeft); err != nil {
+		t.Fatal(err)
+	}
+	if outboxLeft != 0 || inboxLeft != 0 {
+		t.Fatalf("после чистки пачками по 2 осталось: outbox %d, inbox %d из 5", outboxLeft, inboxLeft)
+	}
+}
+
 func TestCleanupJobConventions(t *testing.T) {
 	opts := (events.CleanupArgs{}).InsertOpts()
-	if (events.CleanupArgs{}).Kind() != "events.cleanup" || opts.Queue != queue.Maintenance || opts.UniqueOpts.ByPeriod == 0 {
+	if (events.CleanupArgs{}).Kind() != "events.cleanup" || opts.Queue != queue.Maintenance || opts.UniqueOpts.ByPeriod == 0 ||
+		opts.MaxAttempts != 5 {
 		t.Fatalf("опции чистки: %+v", opts)
 	}
 	if events.CleanupJob() == nil {

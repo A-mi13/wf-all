@@ -62,6 +62,7 @@ func TestRunPublishesPendingEventsAndStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // run остановится и при падении теста до cancel()
 	done := make(chan error, 1)
 	go func() { done <- run(ctx, []string{"WORKER_DATABASE_URL=" + url}, io.Discard) }()
 	deadline := time.Now().Add(10 * time.Second)
