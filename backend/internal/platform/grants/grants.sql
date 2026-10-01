@@ -1,4 +1,4 @@
--- Права ролей БД (спека бэкенда §10.1). Применяет cmd/migrate после up и reset: права на
+-- Права ролей БД (спека бэкенда §10.1). Применяет cmd/migrate после up, down и reset: права на
 -- таблицы, созданные миграциями, иначе не выдать. Идемпотентно: на каждом объекте сначала
 -- REVOKE ALL, потом ровно нужное. Обходятся только объекты public, которыми владеет текущая
 -- роль, кроме объектов расширений (spatial_ref_sys PostGIS). Роли нет — пропуск с NOTICE
@@ -42,8 +42,9 @@ BEGIN
                                              WHEN 'admin' THEN 'SELECT, INSERT' ELSE 'INSERT' END
         WHEN r.name IN ('event_inbox', 'event_cursors') THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE' END
         -- очередь: API ставит задачи (письма с кодами), админка смотрит и перезапускает, воркер
-        -- исполняет; UPDATE у api — уникальная вставка River идёт через ON CONFLICT DO UPDATE
-        WHEN r.name = 'river_job' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE'
+        -- исполняет; UPDATE у api — уникальная вставка River идёт через ON CONFLICT DO UPDATE.
+        -- MAINTAIN (PG17+) у воркера — лидер River ежедневно переиндексирует river_job
+        WHEN r.name = 'river_job' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE, MAINTAIN'
                                                 ELSE 'SELECT, INSERT, UPDATE' END
         WHEN r.name LIKE 'river\_%' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE' END
         WHEN r.kind IN ('v', 'm') THEN 'SELECT'

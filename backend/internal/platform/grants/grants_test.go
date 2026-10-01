@@ -24,7 +24,7 @@ func TestRolePrivileges(t *testing.T) {
 	for _, ddl := range []string{
 		"CREATE TABLE IF NOT EXISTS staff_probe (id int)",
 		"CREATE TABLE IF NOT EXISTS credentials (user_id uuid, password_hash text)",
-		"GRANT ALL ON staff_probe, credentials, audit_log, event_inbox, outbox, goose_db_version TO api, admin, worker",
+		"GRANT ALL ON staff_probe, credentials, audit_log, event_inbox, outbox, goose_db_version, river_job, river_leader TO api, admin, worker",
 	} {
 		if _, err := db.ExecContext(ctx, ddl); err != nil {
 			t.Fatal(err)
@@ -58,6 +58,18 @@ func TestRolePrivileges(t *testing.T) {
 		{"worker", "DELETE FROM credentials WHERE user_id = gen_random_uuid()", true},
 		{"worker", "SELECT 1 FROM staff_probe", false},
 		{"worker", "SELECT 1 FROM event_inbox", true},
+		// рантайм воркера: relay забирает пачку outbox, River держит лидерство и очереди
+		{"worker", "SELECT 1 FROM outbox FOR UPDATE SKIP LOCKED", true},
+		{"worker", "SELECT 1 FROM river_leader", true},
+		{"worker", "SELECT 1 FROM river_queue", true},
+		// River на лидере ежедневно переиндексирует river_job (REINDEX … CONCURRENTLY) — нужен
+		// MAINTAIN; обычный REINDEX проверяет то же право и допустим в транзакции
+		{"worker", "REINDEX INDEX river_job_kind", true},
+		{"api", "REINDEX INDEX river_job_kind", false},
+		// рантайм API: публикация события в транзакции запроса
+		{"api", "INSERT INTO outbox (id, event_type, schema_version, aggregate_type, aggregate_id, aggregate_version, payload) " +
+			"VALUES (gen_random_uuid(), 'test.probe', 1, 'probe', gen_random_uuid(), 1, '{}')", true},
+		{"api", "SELECT 1 FROM river_leader", false},
 	}
 	for _, c := range cases {
 		t.Run(c.role+": "+c.sql, func(t *testing.T) {

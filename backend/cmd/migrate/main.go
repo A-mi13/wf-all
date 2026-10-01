@@ -72,7 +72,12 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		if r != nil {
 			fmt.Fprintln(out, r)
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// Down может пересоздать таблицу (0017 возвращает прежний outbox): без прав она
+		// осталась бы только у владельца
+		return applyGrants(ctx, db, out)
 	case "reset":
 		if _, err := p.DownTo(ctx, 0); err != nil {
 			return err
@@ -90,7 +95,8 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	}
 }
 
-// applyGrants — права ролей после миграций (спека §10.1): новые таблицы получают права сразу.
+// applyGrants — права ролей после up, down и reset (спека §10.1): новые и пересозданные
+// таблицы получают права сразу.
 func applyGrants(ctx context.Context, db *sql.DB, out io.Writer) error {
 	if err := grants.Apply(ctx, db); err != nil {
 		return err
