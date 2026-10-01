@@ -28,6 +28,7 @@ func NewHandler(log *slog.Logger) (http.Handler, error) {
 	// ErrorHandlerFunc — ошибки биндинга параметров в chi-обёртке; по умолчанию oapi-codegen
 	// отвечает text/plain с текстом ошибки
 	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
+		// порядок по спеке §6.1: аутентификация (план 3/3) встаёт между LimitBody и validate
 		BaseRouter:       httpx.NewRouter(log, httpx.LimitBody(httpx.MaxBodyBytes), validate),
 		ErrorHandlerFunc: requestErr,
 	}), nil

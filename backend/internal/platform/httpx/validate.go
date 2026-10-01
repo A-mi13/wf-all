@@ -71,10 +71,10 @@ func ValidateRequests(spec *openapi3.T) (func(http.Handler) http.Handler, error)
 			if r.Body != nil {
 				if body, err = io.ReadAll(r.Body); err != nil {
 					if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
-						WriteProblem(w, r, http.StatusRequestEntityTooLarge, "request.too_large", "")
+						WriteProblem(w, r, http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "")
 						return
 					}
-					WriteProblem(w, r, http.StatusBadRequest, "request.invalid", "")
+					WriteProblem(w, r, http.StatusBadRequest, CodeRequestInvalid, "")
 					return
 				}
 				// тело читается здесь, чтобы отличить 413 от прочих ошибок чтения; kin-openapi
@@ -88,7 +88,7 @@ func ValidateRequests(spec *openapi3.T) (func(http.Handler) http.Handler, error)
 					return
 				}
 				// текст ошибки kin-openapi клиенту не отдаём: он раскрывает устройство валидатора
-				WriteProblem(w, r, http.StatusBadRequest, "request.invalid", "")
+				WriteProblem(w, r, http.StatusBadRequest, CodeRequestInvalid, "")
 				return
 			}
 			next.ServeHTTP(w, r)

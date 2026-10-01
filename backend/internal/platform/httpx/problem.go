@@ -37,7 +37,7 @@ func WriteProblem(w http.ResponseWriter, r *http.Request, status int, code, deta
 
 // WriteValidationProblem — 400 validation.failed со списком нарушенных полей.
 func WriteValidationProblem(w http.ResponseWriter, r *http.Request, errs []FieldError) {
-	writeProblem(w, r, Problem{Status: http.StatusBadRequest, Code: "validation.failed", Errors: errs})
+	writeProblem(w, r, Problem{Status: http.StatusBadRequest, Code: CodeValidationFailed, Errors: errs})
 }
 
 func writeProblem(w http.ResponseWriter, r *http.Request, p Problem) {
@@ -56,7 +56,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p Problem) {
 func RequestErrorHandler(log *slog.Logger) func(http.ResponseWriter, *http.Request, error) {
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		log.InfoContext(r.Context(), "request error", "err", err, "request_id", middleware.GetReqID(r.Context()))
-		WriteProblem(w, r, http.StatusBadRequest, "request.invalid", "")
+		WriteProblem(w, r, http.StatusBadRequest, CodeRequestInvalid, "")
 	}
 }
 
@@ -64,6 +64,6 @@ func RequestErrorHandler(log *slog.Logger) func(http.ResponseWriter, *http.Reque
 func ResponseErrorHandler(log *slog.Logger) func(http.ResponseWriter, *http.Request, error) {
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		log.ErrorContext(r.Context(), "handler error", "err", err, "request_id", middleware.GetReqID(r.Context()))
-		WriteProblem(w, r, http.StatusInternalServerError, "internal", "")
+		WriteProblem(w, r, http.StatusInternalServerError, CodeInternal, "")
 	}
 }

@@ -23,10 +23,10 @@ func NewRouter(log *slog.Logger, mws ...func(http.Handler) http.Handler) chi.Rou
 	// RequestID/лога/recoverer напрямую из Mux.ServeHTTP.
 	_ = r.With()
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		WriteProblem(w, r, http.StatusNotFound, "http.not_found", "")
+		WriteProblem(w, r, http.StatusNotFound, CodeNotFound, "")
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		WriteProblem(w, r, http.StatusMethodNotAllowed, "http.method_not_allowed", "")
+		WriteProblem(w, r, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "")
 	})
 	return r
 }
@@ -54,7 +54,7 @@ func recoverer(log *slog.Logger) func(http.Handler) http.Handler {
 						panic(v)
 					}
 					log.ErrorContext(r.Context(), "panic", "value", v, "stack", string(debug.Stack()))
-					WriteProblem(w, r, http.StatusInternalServerError, "internal", "")
+					WriteProblem(w, r, http.StatusInternalServerError, CodeInternal, "")
 				}
 			}()
 			next.ServeHTTP(w, r)

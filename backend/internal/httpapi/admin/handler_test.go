@@ -73,3 +73,19 @@ func TestOversizedBodyIsRejected(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
+
+// Страж спеки §12.4 «коды ошибок задокументированы»: коды платформы (httpx.PlatformCodes)
+// и x-error-codes-common контракта совпадают в обе стороны.
+func TestPlatformCodesDocumented(t *testing.T) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := apitest.CommonCodeViolations(spec, httpx.PlatformCodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range v {
+		t.Error(msg)
+	}
+}

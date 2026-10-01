@@ -18,6 +18,7 @@ paths:
 - Цикл TDD — `./task backend:test:watch`; `./task backend:test` всегда прогоняет заново.
 - Тесты с БД — `internal/platform/testkit/dbtest` (клон базы на тест); HTTP — `testkit/apitest` (проверка по контракту).
 - Ошибки клиенту — `httpx.WriteProblem` с кодом `<модуль>.<ошибка>`; клиенты переводят по `code`, `title` — техническая сводка, не для показа.
+- Код ошибки платформы — константа в `internal/platform/httpx/codes.go` (и в `PlatformCodes`) + строка `x-error-codes-common` в `contracts/openapi/{public,admin}/root.yaml` + тексты `errors.<код>` в локалях приложений; сверку с контрактом держит `TestPlatformCodesDocumented`, литерал кода в httpx — `TestProblemCodesAreConstants`. Коды модуля (`<модуль>.<ошибка>`) объявляются в модуле и перечисляются в `x-error-codes` его операций (сверка по модулю — с первой спекой модуля).
 - Возраст не хранится: дата рождения + `age_years()`; пороги — поля `countries.min_signup_age` и `countries.age_of_majority`, не константы.
 - Что уже гарантирует база — проверки в коде нужны ради понятной ошибки, а не как единственная защита:
   два матча на одном поле в пересекающееся время (`EXCLUDE` + зазор 10 минут); одинаковые названия
