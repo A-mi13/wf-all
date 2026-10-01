@@ -108,15 +108,14 @@ func TestEverySchemaObjectHasOwner(t *testing.T) {
 
 // Главный страж: SQL каждого модуля трогает только своё и экспортированное.
 func TestModuleQueriesRespectOwnership(t *testing.T) {
-	files, err := filepath.Glob("../*/queries/*.sql")
-	if err != nil {
-		t.Fatal(err)
+	var files []string
+	for _, g := range queryGlobs {
+		found, err := filepath.Glob("../" + g)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, found...)
 	}
-	platformFiles, err := filepath.Glob("../platform/*/queries/*.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	files = append(files, platformFiles...)
 	sawFlags := false
 	for _, f := range files {
 		slash := filepath.ToSlash(f)
@@ -142,5 +141,53 @@ func TestModuleQueriesRespectOwnership(t *testing.T) {
 	}
 	if !sawFlags {
 		t.Fatal("не найден internal/platform/flags/queries — страж проверяет вхолостую")
+	}
+}
+
+// Каталоги queries из backend/sqlc.yaml лежат там, где их видит страж владения: SQL вне
+// queryGlobs выпал бы из проверки молча.
+func TestSqlcQueriesCoveredByOwnershipGuard(t *testing.T) {
+	cfg, err := os.ReadFile("../../sqlc.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirs, violations, err := sqlcQueriesViolations(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirs == 0 {
+		t.Fatal("в sqlc.yaml нет ни одного queries — страж проверяет вхолостую")
+	}
+	for _, v := range violations {
+		t.Error(v)
+	}
+}
+
+// Подсадка багов: queries вне internal/<модуль>/queries/ и internal/platform/<пакет>/queries/.
+func TestSqlcQueriesViolations(t *testing.T) {
+	ok := []string{
+		"sql:\n  - queries: internal/platform/flags/queries/\n",
+		"sql:\n  - queries: internal/teams/queries\n",
+		"sql:\n  - queries: [internal/teams/queries/, ./internal/matches/queries/]\n",
+	}
+	for _, cfg := range ok {
+		if _, v, err := sqlcQueriesViolations([]byte(cfg)); err != nil || len(v) != 0 {
+			t.Errorf("%q: лишние нарушения %v, err %v", cfg, v, err)
+		}
+	}
+	bad := []string{
+		"sql:\n  - queries: internal/teams/internal/store/queries/\n", // глубже queryGlobs
+		"sql:\n  - queries: internal/nosuch/queries/\n",               // не модуль из Layers
+		"sql:\n  - queries: internal/httpapi/queries/\n",              // не модуль и не platform
+		"sql:\n  - queries: internal/platform/queries/\n",             // platform без пакета
+		"sql:\n  - queries: queries/\n",                               // вне internal/
+		"sql:\n  - queries: internal/teams/queries/teams.sql\n",       // файл, а не каталог
+		"sql:\n  - queries: [internal/teams/queries/, internal/teams/store/queries/]\n",
+		"sql:\n  - engine: postgresql\n", // элемент без queries
+	}
+	for _, cfg := range bad {
+		if _, v, err := sqlcQueriesViolations([]byte(cfg)); err == nil && len(v) == 0 {
+			t.Errorf("%q: нарушение не поймано", cfg)
+		}
 	}
 }

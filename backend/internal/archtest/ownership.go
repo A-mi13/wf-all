@@ -2,7 +2,10 @@ package archtest
 
 import (
 	"fmt"
+	"path"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"wf/backend/internal/archtest/sqlscan"
 )
@@ -193,4 +196,68 @@ func ownershipViolations(module string, u sqlscan.Usage) []string {
 		}
 	}
 	return out
+}
+
+// queryGlobs — где страж владения ищет SQL модулей (пути от internal/).
+var queryGlobs = []string{"*/queries/*.sql", "platform/*/queries/*.sql"}
+
+// sqlcQueriesViolations сверяет backend/sqlc.yaml со стражем владения: каждый queries —
+// каталог internal/<модуль>/queries/ (модуль из Layers) или internal/platform/<пакет>/queries/,
+// и queryGlobs его покрывают. dirs — сколько путей queries проверено.
+func sqlcQueriesViolations(cfg []byte) (dirs int, violations []string, err error) {
+	var c struct {
+		SQL []struct {
+			Queries any `yaml:"queries"`
+		} `yaml:"sql"`
+	}
+	if err := yaml.Unmarshal(cfg, &c); err != nil {
+		return 0, nil, fmt.Errorf("sqlc.yaml: %w", err)
+	}
+	for i, entry := range c.SQL {
+		var paths []string
+		switch q := entry.Queries.(type) {
+		case string:
+			paths = []string{q}
+		case []any:
+			for _, item := range q {
+				s, ok := item.(string)
+				if !ok {
+					return 0, nil, fmt.Errorf("sqlc.yaml: sql[%d].queries: %v — не строка", i, item)
+				}
+				paths = append(paths, s)
+			}
+		case nil:
+			violations = append(violations, fmt.Sprintf("sqlc.yaml: sql[%d] без queries", i))
+		default:
+			return 0, nil, fmt.Errorf("sqlc.yaml: sql[%d].queries: неожиданный тип %T", i, q)
+		}
+		for _, q := range paths {
+			dirs++
+			if v := queriesDirViolation(q); v != "" {
+				violations = append(violations, fmt.Sprintf("sqlc.yaml: sql[%d].queries %s: %s", i, q, v))
+			}
+		}
+	}
+	return dirs, violations, nil
+}
+
+func queriesDirViolation(q string) string {
+	p := path.Clean(strings.ReplaceAll(q, `\`, "/"))
+	seg := strings.Split(p, "/")
+	switch {
+	case len(seg) == 3 && seg[0] == "internal" && seg[2] == "queries":
+		if _, ok := Layers[seg[1]]; !ok {
+			return fmt.Sprintf("%s — не модуль из archtest.Layers", seg[1])
+		}
+	case len(seg) == 4 && seg[0] == "internal" && seg[1] == "platform" && seg[3] == "queries":
+	default:
+		return "SQL модуля — только в internal/<модуль>/queries/ или internal/platform/<пакет>/queries/ (каталог), иначе страж владения его не увидит"
+	}
+	rel := strings.TrimPrefix(p, "internal/") + "/probe.sql"
+	for _, g := range queryGlobs {
+		if ok, _ := path.Match(g, rel); ok {
+			return ""
+		}
+	}
+	return "каталог не покрыт queryGlobs стража владения"
 }

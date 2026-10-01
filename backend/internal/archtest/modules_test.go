@@ -26,6 +26,10 @@ func TestImportViolation(t *testing.T) {
 		{"wf/backend/cmd/api", p + "teams/internal/app"},
 		{p + "teams", "github.com/jackc/pgx/v5"},
 		{p + "stats/subscribers", p + "results"},
+		{p + "httpapi/public", p + "teams"},                    // сборка сервера — корневой пакет модуля
+		{p + "httpapi/admin", p + "teams/admin"},               // и его admin/
+		{p + "httpapi/public", p + "httpapi/public/oapi"},      // внутри httpapi
+		{p + "platform/testkit/apitest", p + "platform/httpx"}, // внутри платформы
 	}
 	for _, c := range allowed {
 		if v := importViolation(c[0], c[1]); v != "" {
@@ -44,10 +48,29 @@ func TestImportViolation(t *testing.T) {
 		{p + "teams/admin", p + "httpapi/public/oapi"},          // admin/ — только admin/oapi
 		{p + "teams/httpapi", p + "httpapi/public"},             // сборка сервера
 		{p + "teams", p + "archtest"},
+		{p + "httpapi/public", p + "identity/intx"},           // intx — только из пар §4.4
+		{p + "httpapi/public", p + "teams/jobs"},              // не корневой пакет и не httpapi/admin
+		{p + "httpapi/public", p + "teams/subscribers"},       // то же
+		{p + "httpapi/admin", p + "teams/internal/app"},       // то же
+		{p + "archtest", p + "matches/internal/store"},        // то же — для любого немодульного пакета
+		{p + "platform/db", p + "httpapi/public/oapi"},        // платформа не зависит от сборки сервера
+		{p + "platform/testkit/apitest", p + "httpapi/admin"}, // то же
+		{p + "platform/db", p + "archtest"},                   // платформа не зависит от стражей
+		{p + "platform/db", p + "archtest/sqlscan"},           // то же
 	}
 	for _, c := range forbidden {
 		if v := importViolation(c[0], c[1]); v == "" {
 			t.Errorf("%s → %s должен быть запрещён", c[0], c[1])
+		}
+	}
+}
+
+// Список пар §4.4 согласован с проверкой импортов: каждая пара — разрешённый импорт.
+func TestIntxPairsAreAllowedImports(t *testing.T) {
+	for pair := range IntxPairs {
+		from, to := p+pair[0]+"/internal/app", p+pair[1]+"/intx"
+		if v := importViolation(from, to); v != "" {
+			t.Errorf("пара %v из IntxPairs запрещена проверкой импортов: %s", pair, v)
 		}
 	}
 }

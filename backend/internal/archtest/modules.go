@@ -66,7 +66,9 @@ func under(rest, dir string) bool {
 }
 
 // importViolation — почему импорт from → to нарушает границы модулей; "" — не нарушает.
-// cmd/* и внешние пакеты — точки сборки и зависимости, их не ограничиваем.
+// cmd/* и внешние пакеты — точки сборки и зависимости, их не ограничиваем. Немодульные
+// каталоги internal/ (httpapi, platform, archtest) видят у модуля только корневой пакет,
+// httpapi и admin; платформа не зависит ни от модулей, ни от httpapi и archtest.
 func importViolation(from, to string) string {
 	fTop, fRest, ok := splitInternal(from)
 	if !ok {
@@ -81,6 +83,14 @@ func importViolation(from, to string) string {
 	switch {
 	case fTop == "platform" && toModule:
 		return "платформа не зависит от модулей"
+	case fTop == "platform" && (tTop == "httpapi" || tTop == "archtest"):
+		return "платформа не зависит от сборки HTTP-сервера и стражей"
+	case infra[fTop] && toModule:
+		// сборка сервера (httpapi) и стражи видят модуль снаружи: корневой пакет и хендлеры
+		// httpapi/ и admin/; intx — только из пар §4.4, внутренности модуля — никому
+		if tRest != "" && tRest != "httpapi" && tRest != "admin" {
+			return fmt.Sprintf("из internal/%s у модуля %s можно импортировать только корневой пакет, httpapi и admin", fTop, tTop)
+		}
 	case fromModule && tTop == "httpapi":
 		if under(fRest, "httpapi") && to == internalPrefix+"httpapi/public/oapi" ||
 			under(fRest, "admin") && to == internalPrefix+"httpapi/admin/oapi" {

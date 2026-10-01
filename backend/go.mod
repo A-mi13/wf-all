@@ -15,6 +15,7 @@ require (
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0
 	github.com/wasilibs/go-pgquery v0.0.0-20250409022910-10ac41983c07
+	go.yaml.in/yaml/v3 v3.0.5
 )
 
 require (
