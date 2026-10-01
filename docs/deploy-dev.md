@@ -42,8 +42,14 @@ CREATE ROLE api LOGIN PASSWORD '<генерируется>';
 Права на таблицы роль получает от `migrate up` — он применяет `backend/internal/platform/grants/grants.sql`
 после миграций (матрица — в его комментариях и спеке бэкенда §10.1). Роли `admin` и `worker`
 создаются так же, когда на стенд выйдут admin-api и воркер; до тех пор `grants.sql` их пропускает.
-Умолчания `ALTER DEFAULT PRIVILEGES`, выданные на Neon при создании стенда, безвредны: после
-каждого наката права пересчитываются заново.
+Умолчания `ALTER DEFAULT PRIVILEGES`, выданные на Neon при создании стенда, надо снять: если
+`migrate up` упадёт посреди наката, таблицы этого прогона останутся открыты по умолчаниям до
+следующего успешного `up`. Разово, владельцем базы:
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE <владелец> IN SCHEMA public REVOKE ALL ON TABLES FROM api;
+ALTER DEFAULT PRIVILEGES FOR ROLE <владелец> IN SCHEMA public REVOKE ALL ON SEQUENCES FROM api;
+```
 
 ## Потом — свой сервер
 

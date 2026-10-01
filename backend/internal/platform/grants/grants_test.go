@@ -13,14 +13,18 @@ import (
 )
 
 // Страж спеки §12.7: под api нельзя прочитать staff_* и изменить audit_log, под worker —
-// прочитать credentials. Таблиц staff_* и credentials в схеме ещё нет (спека identity) —
-// тест создаёт их сам, до применения прав: правило должно сработать по имени.
+// прочитать credentials (кроме user_id для удаления). Таблиц staff_* и credentials в схеме
+// ещё нет (спека identity) — тест создаёт их сам, до применения прав: правило должно
+// сработать по имени. Перед Apply
+// тест раздаёт всем ролям всё на проверяемые таблицы — так отказы доказывают, что Apply
+// права отзывает, а не просто не выдаёт (свежий кластер широких умолчаний не имеет).
 func TestRolePrivileges(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
 	for _, ddl := range []string{
 		"CREATE TABLE IF NOT EXISTS staff_probe (id int)",
-		"CREATE TABLE IF NOT EXISTS credentials (id int)",
+		"CREATE TABLE IF NOT EXISTS credentials (user_id uuid, password_hash text)",
+		"GRANT ALL ON staff_probe, credentials, audit_log, event_inbox, outbox, goose_db_version TO api, admin, worker",
 	} {
 		if _, err := db.ExecContext(ctx, ddl); err != nil {
 			t.Fatal(err)
@@ -47,8 +51,11 @@ func TestRolePrivileges(t *testing.T) {
 		{"admin", "SELECT 1 FROM audit_log", true},
 		{"admin", "UPDATE audit_log SET reason = reason", false},
 		{"admin", "SELECT 1 FROM staff_probe", true},
-		{"worker", "SELECT 1 FROM credentials", false},
-		{"worker", "DELETE FROM credentials", true},
+		// SELECT 1 под колоночным правом (user_id) PostgreSQL пропускает — проверяем полную строку
+		{"worker", "SELECT * FROM credentials", false},
+		{"worker", "SELECT password_hash FROM credentials", false},
+		// WHERE читает user_id — без SELECT (user_id) удаление аккаунта упало бы с 42501
+		{"worker", "DELETE FROM credentials WHERE user_id = gen_random_uuid()", true},
 		{"worker", "SELECT 1 FROM staff_probe", false},
 		{"worker", "SELECT 1 FROM event_inbox", true},
 	}

@@ -34,7 +34,8 @@ BEGIN
         WHEN r.name = 'audit_log' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT' ELSE 'INSERT' END
         -- вход сотрудников — только admin-api
         WHEN r.name LIKE 'staff\_%' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END
-        -- пароли: воркер только удаляет (удаление аккаунта), прочитать не может
+        -- пароли: воркер только удаляет (удаление аккаунта), хеш прочитать не может; SELECT (user_id)
+        -- для WHERE удаления выдаётся колоночно ниже
         WHEN r.name = 'credentials' THEN CASE who WHEN 'worker' THEN 'DELETE' ELSE 'SELECT, INSERT, UPDATE, DELETE' END
         -- события: API и админка публикуют, воркер раскладывает и чистит
         WHEN r.name = 'outbox' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE'
@@ -50,6 +51,14 @@ BEGIN
       END;
       IF privs IS NOT NULL THEN
         EXECUTE format('GRANT %s ON %I TO %I', privs, r.name, who);
+      END IF;
+      -- DELETE … WHERE user_id = $1 требует SELECT на колонки из WHERE. REVOKE ALL выше снимает
+      -- и колоночные права, поэтому выдача идемпотентна. Нет колонки — нечего выдавать.
+      IF r.name = 'credentials' AND who = 'worker' AND EXISTS (
+           SELECT 1 FROM pg_attribute a
+           WHERE a.attrelid = format('%I', r.name)::regclass AND a.attname = 'user_id'
+             AND a.attnum > 0 AND NOT a.attisdropped) THEN
+        EXECUTE format('GRANT SELECT (user_id) ON %I TO %I', r.name, who);
       END IF;
     END LOOP;
   END LOOP;

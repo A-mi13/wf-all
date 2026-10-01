@@ -11,7 +11,7 @@ import (
 //go:embed grants.sql
 var script string
 
-// Execer — *sql.DB или *sql.Conn.
+// Execer — *sql.DB, *sql.Conn или *sql.Tx.
 type Execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
