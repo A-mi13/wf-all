@@ -51,6 +51,10 @@ tasks:
       - pnpm --filter @wf/contracts gen:admin
       - pnpm --filter @wf/tokens build
 
+  contracts:breaking:
+    desc: Ломающие изменения контрактов относительно базы (CONTRACTS_BASE, по умолчанию origin/main)
+    cmds: ['bash scripts/contracts-breaking.sh']
+
   dev:
     desc: Всё разом — Postgres, миграции, api :8080, admin-api :8081, worker, веб :3000, админка :5173, Mailpit :18025
     preconditions:
