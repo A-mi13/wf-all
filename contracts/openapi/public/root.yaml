@@ -9,10 +9,36 @@ openapi: 3.0.3
 info:
   title: WF public API
   version: 0.1.0
+# Аутентификация по умолчанию; анонимная операция объявляет `security: []`.
+security:
+  - bearer: []
+# Коды ошибок платформы — их может вернуть любая операция; у операций — свои x-error-codes.
+x-error-codes-common:
+  - internal
+  - request.invalid
+  - request.too_large
+  - validation.failed
+  - http.not_found
+  - http.method_not_allowed
 paths:
   /v1/health:
     $ref: './platform/paths.yaml#/health'
 components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
   responses:
     Problem:
       description: Ошибка в формате RFC 9457
@@ -38,5 +64,19 @@ components:
           type: string
         request_id:
           type: string
+        errors:
+          type: array
+          description: Ошибки по полям — только у validation.failed
+          items:
+            type: object
+            required: [field, code]
+            additionalProperties: false
+            properties:
+              field:
+                type: string
+                description: 'body.<путь через точку>, query.<имя>, path.<имя> или header.<имя>'
+              code:
+                type: string
+                description: 'Нарушенное правило схемы: required, minLength, maximum, enum, format…'
     Health:
       $ref: './platform/schemas.yaml#/Health'

@@ -3,6 +3,8 @@ health:
   get:
     operationId: getHealth
     tags: [platform]
+    security: []
+    x-error-codes: []
     summary: Проверка живости сервиса
     responses:
       '200':

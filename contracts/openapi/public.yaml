@@ -2,12 +2,16 @@ openapi: 3.0.3
 info:
   title: WF public API
   version: 0.1.0
+security:
+  - bearer: []
 paths:
   /v1/health:
     get:
       operationId: getHealth
       tags:
         - platform
+      security: []
+      x-error-codes: []
       summary: Проверка живости сервиса
       responses:
         '200':
@@ -19,6 +23,21 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
   responses:
     Problem:
       description: Ошибка в формате RFC 9457
@@ -48,6 +67,22 @@ components:
           type: string
         request_id:
           type: string
+        errors:
+          type: array
+          description: Ошибки по полям — только у validation.failed
+          items:
+            type: object
+            required:
+              - field
+              - code
+            additionalProperties: false
+            properties:
+              field:
+                type: string
+                description: body.<путь через точку>, query.<имя>, path.<имя> или header.<имя>
+              code:
+                type: string
+                description: 'Нарушенное правило схемы: required, minLength, maximum, enum, format…'
     Health:
       type: object
       required:
@@ -58,3 +93,10 @@ components:
           type: string
           enum:
             - ok
+x-error-codes-common:
+  - internal
+  - request.invalid
+  - request.too_large
+  - validation.failed
+  - http.not_found
+  - http.method_not_allowed

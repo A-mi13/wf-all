@@ -45,8 +45,17 @@ type HealthStatus string
 // Problem defines model for Problem.
 type Problem struct {
 	// Code Стабильный машинный код ошибки; клиенты переводят текст по нему
-	Code      string  `json:"code"`
-	Detail    *string `json:"detail,omitempty"`
+	Code   string  `json:"code"`
+	Detail *string `json:"detail,omitempty"`
+
+	// Errors Ошибки по полям — только у validation.failed
+	Errors *[]struct {
+		// Code Нарушенное правило схемы: required, minLength, maximum, enum, format…
+		Code string `json:"code"`
+
+		// Field body.<путь через точку>, query.<имя>, path.<имя> или header.<имя>
+		Field string `json:"field"`
+	} `json:"errors,omitempty"`
 	RequestId *string `json:"request_id,omitempty"`
 	Status    int     `json:"status"`
 	Title     string  `json:"title"`
@@ -328,16 +337,21 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"lFPBbhMxEP0Va+DGKkkpCLGcEFKht4oLB1Qhd9dJXHZtYzuVqmilNnBAKhJ/AOofpBFBS9uEXxj/ERpv",
-	"mrQ0gDitd97Mm5k3M0PIdGm0Eso7SIdghTNaORF/dqzeK0RJz0wrL5SnJzemkBn3Uqu2aTzu7TutCHNZ",
-	"X5ScXnet6EIKd9or/naDuvYVb1VVCeTCZVYaooMU8Ev4iDWe4TmOGU5Y+IDzcISXOA4jnLKXW8/Y4wcP",
-	"HwFFLugo2wvBC9+P1eW5JC5e7FhthPWSeunywokEzDXTEJznfhBfQg1KSF+Dfgu7CfhDIyAF561UvZjJ",
-	"incDaUVOPouolZ/e2xeZhyq5rtfNTJnOBX1/6/U0jHCMZ1jjRfiEs3CCP1hslSSYXRnOcY7fGM6XwtRP",
-	"yHiBNU5xFkbhhOFPnIYjnOKEfMPnMGIkF56H4zAidM5whlO8DO/hVn80As9lQQXegqhz4fwbma+FVxIu",
-	"IKm86AlLmJe+EGujGsPwH0JH9IpmmSppxLwtP4VL1dWRuEkNr7YYz0up2NOdbUjgQFjXSN9pbbQ6VIo2",
-	"QnEjIYXNVqe1CQkY7vuxo/bBRru/3KueiMtPU42rv51DCs+FX2xecvNy7nc6f7ma/7uWRYZ1x3Iaxz7B",
-	"Ohwz/I41Tppxdvmg8H/iXRZ67Q4TcIOy5PaQWL+GI5zjJHLHM4zMOKdlwpqF41VWHNOEeM/RwEzBfVfb",
-	"Enarqqp+DQA=",
+	"lFTNjhtFEH6VVsONie2wIIQ5IaRABIcVHDgsltU7U7Y7meme9PRsYq0seW1QIm2kvXAFlAtnx8IweNez",
+	"r1D9CnkSVD3jn+x6iXLyuH6/qvr6O+WhTlKtQNmMt0+5gSzVKgP/59Do4xgS+gy1sqAsfYo0jWUorNSq",
+	"mVYRHz3KtCJfFg4gEfT1oYEeb/MPmtv6zcqbNdd1R6NRwCPIQiNTKsfbHH93L7DA17jEGcM5cz9j6cZ4",
+	"hTM3wQX7/sFX7PNPPv2MU2Zdjrp9AyK2A48uiiTVEvGh0SkYK2mWnogzCHi6YzrlmRU291+g8oS3j7h+",
+	"zDsBt8MUeJtn1kjV950MPMmlgYhi6qxtnD5+BKHlo2B3X293CnUE9Htj1ldugjN8jQVeupe4cuf4L/Oj",
+	"0gpWa8MSS/yLYblZTPEFGS+xwAWu3MSdM7zGhRvjAucU6y7chNG6cOnO3IS8JcMVLvDKTfmt+egEVsiY",
+	"AN5ygTHaZHuwb+9U1A2uscRLd4FX7M34V+pf+rGWWDI3ZScilpEnTaMnZAwRD7i0kGTvebQ7VvkbztzY",
+	"Td0L2gmusMQFw2s3xhnOab8E4sz94ndw3mbrgwYskeo7UH07CFginskkTwJGdAhYT5tE2DfjP/etrCch",
+	"jm7jONbRsPFT3modhHjtpm7iXjL3vD7OP34p7jku3dTHQMCe5GA2GQVeuYu1JxV2sMfB/DQFG4CIwOwJ",
+	"4O8icAU9qDa5j8a1QRgjhrxOhsx2ZbSXIttnVLukstAH40tJG8PerMpw+g6s3rsus2l1J3ZCA2FupB3+",
+	"QOJQv3PIMlnpk6QjhVo/llROiYSyn/a6Ikqk6q4DtytI5bcwrHRKqp72gKuR+I8PmM9iXx4+5AE/AVM1",
+	"4a3G/UaLRtQpKJFK3uYHjVbjgAecbuohNU/uNwcbzeqDF1aiuX8hDyPe5l+DrVUteFuVP261/keR30+J",
+	"6w77hPiVZ+0cC3fG8G8scF5JRU/ksb2r7gbojsZvb8LbR52AZ3mSCDOkHn+4MZY495284Ps+WJJsYcHc",
+	"2RYDzugsop8RLdJYWHqeRIFn97xG3SNKkLMzutFyhwBHndHNjHuhThLv87w1SsR8Q/mGVF63dixW624s",
+	"TB/o5ns0bWBt2lDadns6VxtDAnagoy7ZRRzrpxDxzui/AQA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

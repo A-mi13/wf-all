@@ -25,10 +25,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        Health: {
-            /** @enum {string} */
-            status: "ok";
-        };
         Problem: {
             type: string;
             title: string;
@@ -37,6 +33,17 @@ export interface components {
             code: string;
             detail?: string;
             request_id?: string;
+            /** @description Ошибки по полям — только у validation.failed */
+            errors?: {
+                /** @description body.<путь через точку>, query.<имя>, path.<имя> или header.<имя> */
+                field: string;
+                /** @description Нарушенное правило схемы: required, minLength, maximum, enum, format… */
+                code: string;
+            }[];
+        };
+        Health: {
+            /** @enum {string} */
+            status: "ok";
         };
     };
     responses: {
@@ -50,7 +57,10 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды */
+        IdempotencyKey: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
