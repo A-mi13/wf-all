@@ -7,6 +7,8 @@ on:
       - 'contracts/openapi/**'
       - 'contracts/scripts/**'
       - 'contracts/package.json'
+      - 'contracts/oasdiff-severity.txt'
+      - 'contracts/oasdiff-err-ignore-admin.txt'
       - 'pnpm-lock.yaml'
       - 'tools/**'
       - 'scripts/**'

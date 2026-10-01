@@ -18,6 +18,8 @@ export const buildBundle = (name, out) =>
       cwd: root,
       encoding: 'utf8',
       stdio: out ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+      // бандл в stdout растёт вместе с API; по умолчанию буфер 1 МиБ — больше обрывает сборку ENOBUFS
+      maxBuffer: 64 * 1024 * 1024,
       // сборка герметична: без телеметрии (метаданные контракта наружу не уходят)
       // и без проверки обновлений CLI в реестре npm
       env: { ...process.env, REDOCLY_TELEMETRY: 'off', REDOCLY_SUPPRESS_UPDATE_NOTICE: 'true' },

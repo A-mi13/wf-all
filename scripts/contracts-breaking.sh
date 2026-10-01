@@ -7,6 +7,11 @@
 # Уровни серьёзности — contracts/oasdiff-severity.txt (формат oasdiff: «<id правила> <уровень>», комментарии
 # в файле не допускаются, поэтому причины здесь). Добавление значения в enum ответа — не ломающее (спека §8.3:
 # enum'ы открытые, клиент обязан переживать незнакомое значение); oasdiff по умолчанию считает его ERR.
+# admin.yaml проверяется так же. Админка выкатывается вместе с apps/admin, поэтому осознанная ломающая правка
+# её контракта допустима — только явной строкой в contracts/oasdiff-err-ignore-admin.txt (формат oasdiff
+# --err-ignore: «<МЕТОД> <путь> <текст изменения из отчёта>», например «GET /v1/x api path removed without
+# deprecation») и с причиной в сообщении коммита. Комментарии форматом не предусмотрены — файл без них, причины
+# здесь и в коммитах. У public.yaml исключений нет: ломать только в /v2.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BASE="${CONTRACTS_BASE:-origin/main}"
@@ -30,8 +35,12 @@ for name in public admin; do
   fi
   git show "$BASE:$file" > "$TMP/contracts-base-$name.yaml"
   echo "contracts:breaking: $file против $BASE"
+  ignore=()
+  if [[ "$name" == admin ]]; then
+    ignore=(--err-ignore contracts/oasdiff-err-ignore-admin.txt)
+  fi
   "$OASDIFF" breaking "$TMP/contracts-base-$name.yaml" "$file" --fail-on ERR \
-    --severity-levels contracts/oasdiff-severity.txt || status=1
+    --severity-levels contracts/oasdiff-severity.txt "${ignore[@]}" || status=1
   rm -f "$TMP/contracts-base-$name.yaml"
 done
 exit $status
