@@ -1,6 +1,3 @@
-# Публичный API приложений и веба. Версии — теги contracts-vX.Y.Z.
-# Схема Problem продублирована в admin.yaml намеренно (контракты версионируются
-# независимо); тест в contracts/ падает, если копии разошлись.
 openapi: 3.0.3
 info:
   title: WF public API
@@ -9,16 +6,18 @@ paths:
   /v1/health:
     get:
       operationId: getHealth
+      tags:
+        - platform
       summary: Проверка живости сервиса
       responses:
-        "200":
+        '200':
           description: Сервис жив
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Health"
+                $ref: '#/components/schemas/Health'
         default:
-          $ref: "#/components/responses/Problem"
+          $ref: '#/components/responses/Problem'
 components:
   responses:
     Problem:
@@ -26,19 +25,15 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: '#/components/schemas/Problem'
   schemas:
-    Health:
-      type: object
-      required: [status]
-      additionalProperties: false
-      properties:
-        status:
-          type: string
-          enum: [ok]
     Problem:
       type: object
-      required: [type, title, status, code]
+      required:
+        - type
+        - title
+        - status
+        - code
       properties:
         type:
           type: string
@@ -53,3 +48,13 @@ components:
           type: string
         request_id:
           type: string
+    Health:
+      type: object
+      required:
+        - status
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum:
+            - ok

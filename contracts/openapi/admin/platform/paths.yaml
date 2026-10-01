@@ -1,0 +1,15 @@
+# Операции платформы, не модуля: их реализует internal/httpapi/admin.Server напрямую.
+health:
+  get:
+    operationId: getHealth
+    tags: [platform]
+    summary: Проверка живости сервиса
+    responses:
+      '200':
+        description: Сервис жив
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Health'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
