@@ -32,6 +32,9 @@ func TestOperationsImplementedByTaggedModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(ops) == 0 {
+		t.Fatal("в контракте нет операций — страж проверяет вхолостую")
+	}
 	owners := apitest.Owners(reflect.TypeOf(public.Server{}), apitest.ModuleOf)
 	for _, v := range apitest.TagViolations(ops, owners) {
 		t.Error(v)

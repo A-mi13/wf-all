@@ -2,6 +2,8 @@ package apitest_test
 
 import (
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -17,11 +19,74 @@ type fakeServer struct{ fakeTeams }
 
 func (fakeServer) GetHealth() {}
 
+// Сервер объявил метод, который есть и у встроенного хендлера: Go молча берёт метод
+// сервера (он мельче), так что операцию обслуживает платформа, а не модуль.
+type shadowServer struct{ fakeTeams }
+
+func (shadowServer) GetTeam() {}
+
+// То же с указательным получателем: в методах значения сервера GetTeam нет вовсе.
+type shadowPtrServer struct{ fakeTeams }
+
+func (*shadowPtrServer) GetTeam() {}
+
+// Два модуля, второй встроен указателем: *sync.Mutex — тип из другого пакета,
+// чтобы moduleOf получил два разных пути пакета.
+type twoModulesServer struct {
+	fakeTeams
+	*sync.Mutex
+}
+
+// moduleOf тестов: пакет sync — «модуль» matches, пакет тестов — teams.
+func fakeModuleOf(pkgPath string) string {
+	if pkgPath == "sync" {
+		return "matches"
+	}
+	return "teams"
+}
+
 func TestOwners(t *testing.T) {
-	got := apitest.Owners(reflect.TypeOf(fakeServer{}), func(string) string { return "teams" })
-	want := map[string]string{"GetTeam": "teams", "GetHealth": "platform"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v want %v", got, want)
+	cases := []struct {
+		name   string
+		server reflect.Type
+		want   map[string]string
+	}{
+		{"встроенный модуль и метод платформы", reflect.TypeFor[fakeServer](),
+			map[string]string{"GetTeam": "teams", "GetHealth": "platform"}},
+		{"метод сервера затеняет метод модуля", reflect.TypeFor[shadowServer](),
+			map[string]string{"GetTeam": "platform"}},
+		{"затенение указательным получателем", reflect.TypeFor[shadowPtrServer](),
+			map[string]string{"GetTeam": "platform"}},
+		{"два модуля, один встроен указателем", reflect.TypeFor[twoModulesServer](),
+			map[string]string{"GetTeam": "teams", "Lock": "matches", "TryLock": "matches", "Unlock": "matches"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := apitest.Owners(c.server, fakeModuleOf); !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("got %v want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// Встроенный тип вне модулей (moduleOf вернул "") не становится «платформой».
+func TestOwnersKeepsUnknownModule(t *testing.T) {
+	owners := apitest.Owners(reflect.TypeFor[fakeServer](), func(string) string { return "" })
+	if owner, ok := owners["GetTeam"]; !ok || owner != "" {
+		t.Fatalf("GetTeam: owner = %q, ok = %v; ожидался пустой модуль", owner, ok)
+	}
+	v := apitest.TagViolations([]apitest.Operation{{Method: "GetTeam", Tag: "teams"}}, owners)
+	if len(v) != 1 || !strings.Contains(v[0], "тип вне модулей") {
+		t.Fatalf("ожидалось нарушение «тип вне модулей», есть %v", v)
+	}
+}
+
+// Затенение доходит до нарушения: тег teams, а обслуживает платформа.
+func TestShadowingIsViolation(t *testing.T) {
+	owners := apitest.Owners(reflect.TypeFor[shadowServer](), fakeModuleOf)
+	v := apitest.TagViolations([]apitest.Operation{{Method: "GetTeam", Tag: "teams"}}, owners)
+	if len(v) != 1 || !strings.Contains(v[0], `реализует модуль "platform"`) {
+		t.Fatalf("ожидалось нарушение «реализует модуль platform», есть %v", v)
 	}
 }
 
@@ -31,10 +96,14 @@ func TestTagViolations(t *testing.T) {
 	if v := apitest.TagViolations(ok, owners); len(v) != 0 {
 		t.Fatalf("лишние нарушения: %v", v)
 	}
-	// подсадка: тег не совпадает с реализатором; операция без реализации
+	// подсадка: тег не совпадает с реализатором; операция без реализации — у каждой свой текст
 	bad := []apitest.Operation{{Method: "GetTeam", Tag: "matches"}, {Method: "GetMissing", Tag: "teams"}}
-	if v := apitest.TagViolations(bad, owners); len(v) != 2 {
-		t.Fatalf("ожидалось 2 нарушения, есть %v", v)
+	want := []string{
+		`GetTeam: тег "matches", а реализует модуль "teams"`,
+		"GetMissing: сервер не реализует операцию",
+	}
+	if v := apitest.TagViolations(bad, owners); !reflect.DeepEqual(v, want) {
+		t.Fatalf("нарушения %q, ожидались %q", v, want)
 	}
 }
 
