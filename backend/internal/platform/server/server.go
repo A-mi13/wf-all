@@ -24,18 +24,23 @@ type HTTPConfig struct {
 }
 
 func RunHTTP(ctx context.Context, name string, c HTTPConfig, logOut io.Writer,
-	build func(log *slog.Logger, pool *pgxpool.Pool) http.Handler) error {
+	build func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error)) error {
 	log := logx.New(logOut, c.Log).With("service", name)
 	pool, err := db.Open(ctx, c.DB)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	// хендлер собирается до открытия порта: битый контракт — отказ старта, а не полуживой сервер
+	h, err := build(log, pool)
+	if err != nil {
+		return err
+	}
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", c.HTTP.Addr)
 	if err != nil {
 		return err
 	}
 	log.Info("слушаю", "addr", ln.Addr().String())
-	return httpx.Serve(ctx, ln, build(log, pool), c.HTTP.ShutdownTimeout)
+	return httpx.Serve(ctx, ln, h, c.HTTP.ShutdownTimeout)
 }

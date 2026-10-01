@@ -10,10 +10,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// NewRouter — роутер с общим набором middleware. Бинарники только монтируют свои маршруты.
-func NewRouter(log *slog.Logger) chi.Router {
+// NewRouter — роутер с общим набором middleware. mws — middleware бинарника после общих
+// (лимит тела, валидация по контракту); добавить их позже нельзя: chi запрещает Use после
+// маршрутов. Бинарники только монтируют свои маршруты.
+func NewRouter(log *slog.Logger, mws ...func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, accessLog(log), recoverer(log))
+	r.Use(mws...)
 	// chi собирает цепочку middleware лениво — только при первой регистрации
 	// маршрута (Handle/Get/...). Без этого вызова, пока в роутере нет ни одного
 	// маршрута, 404/405 идут в NotFoundHandler/MethodNotAllowedHandler мимо

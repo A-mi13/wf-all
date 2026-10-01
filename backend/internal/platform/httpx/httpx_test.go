@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
+
 	"wf/backend/internal/platform/httpx"
 )
 
@@ -79,6 +81,24 @@ func TestRecovererWorksOnEmptyRouter(t *testing.T) {
 	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope", nil))
 	if p := decodeProblem(t, rec); rec.Code != http.StatusInternalServerError || p.Code != "internal" {
 		t.Fatalf("got %d %+v", rec.Code, p)
+	}
+}
+
+// Middleware бинарника стоит после общих (видит request id) и до маршрутов — включая 404.
+func TestRouterRunsBinaryMiddlewareAfterCommon(t *testing.T) {
+	var seenID string
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seenID = middleware.GetReqID(r.Context())
+			next.ServeHTTP(w, r)
+		})
+	}
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nope", nil)
+	req.Header.Set("X-Request-Id", "req-7")
+	rec := httptest.NewRecorder()
+	httpx.NewRouter(quiet(), mw).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound || seenID != "req-7" {
+		t.Fatalf("status = %d, request id в middleware бинарника = %q", rec.Code, seenID)
 	}
 }
 
