@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { diffKeys, withFallback } from './index';
+import { diffKeys, missingKeys, withFallback } from './index';
 
 const ru = { health: { ok: 'API работает', down: 'API недоступен' }, title: 'Админка' };
 
@@ -25,7 +25,10 @@ describe('withFallback', () => {
 
 describe('diffKeys', () => {
   test('одинаковые наборы — пусто', () => {
-    expect(diffKeys(ru, { health: { ok: '', down: '' }, title: '' })).toEqual({ missing: [], extra: [] });
+    expect(diffKeys(ru, { health: { ok: '', down: '' }, title: '' })).toEqual({
+      missing: [],
+      extra: [],
+    });
   });
   test('находит отсутствующие и лишние пути', () => {
     expect(diffKeys(ru, { health: { ok: '' }, title: '', extra: { x: '' } })).toEqual({
@@ -42,5 +45,17 @@ describe('security', () => {
     expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
     expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(true);
     expect(out.title).toBe('T');
+  });
+});
+
+describe('missingKeys', () => {
+  const m = { errors: { internal: 'Сбой', request: { invalid: 'Плохой запрос' } } };
+  test('вложенные ключи через точку', () => {
+    expect(
+      missingKeys(m, ['errors.request.invalid', 'errors.internal', 'errors.http.not_found']),
+    ).toEqual(['errors.http.not_found']);
+  });
+  test('группа — не строка', () => {
+    expect(missingKeys(m, ['errors.request'])).toEqual(['errors.request']);
   });
 });

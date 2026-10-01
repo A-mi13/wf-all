@@ -115,6 +115,9 @@ importers:
       '@wf/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@wf/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(supports-color@10.2.2)
@@ -200,6 +203,9 @@ importers:
       '@wf/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@wf/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(supports-color@10.2.2)
