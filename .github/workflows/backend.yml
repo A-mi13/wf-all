@@ -62,7 +62,7 @@ jobs:
         env:
           CONTRACTS_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
   # Образ бэкенда (backend/Dockerfile) собирается и запускается так же, как на dev-стенде Render:
-  # миграции на чистую базу, затем API, затем /v1/health. Локально Docker не работает — проверка здесь.
+  # миграции на чистую базу, затем API, затем /healthz, /readyz и /docs. Локально Docker не работает — проверка здесь.
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -88,7 +88,9 @@ jobs:
             -e MIGRATOR_DATABASE_URL='postgres://migrator:migrator@127.0.0.1:15432/wf?sslmode=disable' \
             wf-backend migrate-then-api
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:18080/v1/health; then
+            if curl -fsS http://127.0.0.1:18080/healthz; then
+              # готовность: API видит базу под своей ролью (права из grants.sql)
+              curl -fsS http://127.0.0.1:18080/readyz
               # Swagger dev-стенда: контракт вшит в образ и отдаётся
               curl -fsS -o /dev/null http://127.0.0.1:18080/docs/openapi.json
               exit 0

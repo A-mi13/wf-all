@@ -9,9 +9,9 @@
 | --- | --- | --- |
 | Образ | `backend/Dockerfile` | один образ, внутри `api`, `admin-api`, `worker`, `migrate` и сценарий `migrate-then-api`; команда по умолчанию — `api`; миграции вшиты в бинарники |
 | База | Neon, проект `wf-dev`, Postgres 18, регион Frankfurt | база `wf`; роль-владелец Neon = наш `migrator`, роль `api` — только DML |
-| API | Render, веб-сервис `wf-api` (`render.yaml`), бесплатный тариф, Frankfurt — https://wf-api-o3rn.onrender.com | команда `migrate-then-api`: `migrate up`, затем `api` (shell в `dockerCommand` Render не разбирает — сценарий лежит в образе); проверка живости `/v1/health`; деплой из `main` после зелёного CI |
+| API | Render, веб-сервис `wf-api` (`render.yaml`), бесплатный тариф, Frankfurt — https://wf-api-o3rn.onrender.com | команда `migrate-then-api`: `migrate up`, затем `api` (shell в `dockerCommand` Render не разбирает — сценарий лежит в образе); проверка живости `/healthz` (процесс жив, без базы; готовность с базой — `/readyz`); деплой из `main` после зелёного CI |
 | Swagger | https://wf-api-o3rn.onrender.com/docs | Swagger UI по контракту, вшитому в образ (`/docs/openapi.json` — сам контракт для генераторов клиентов); «Try it out» шлёт запросы на этот же стенд |
-| Проверка образа | CI, задание `image` в `.github/workflows/backend.yml` | сборка, миграции на чистую базу, старт API, `/v1/health` — как на Render; локально Docker не нужен |
+| Проверка образа | CI, задание `image` в `.github/workflows/backend.yml` | сборка, миграции на чистую базу, старт API, `/healthz`, `/readyz`, `/docs` — как на Render; локально Docker не нужен |
 
 Ограничения бесплатного стенда: Render усыпляет сервис после 15 минут без запросов, первый запрос
 будит его около минуты; воркера нет (на бесплатном тарифе Render фоновых процессов нет); база Neon
