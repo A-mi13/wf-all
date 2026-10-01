@@ -18,7 +18,7 @@ var safeLast = map[string]bool{"at": true, "count": true, "verified": true, "ena
 // Слова, делающие ключ чувствительным сами по себе.
 var sensitiveWord = map[string]bool{
 	"email": true, "emails": true, "phone": true, "phones": true, "mobile": true, "msisdn": true,
-	"birth": true, "birthday": true, "dob": true, "patronymic": true,
+	"birth": true, "birthday": true, "birthdate": true, "dob": true, "patronymic": true, "surname": true,
 	"password": true, "passwd": true, "secret": true, "secrets": true,
 	"token": true, "tokens": true, "hash": true, "otp": true, "totp": true,
 	"ip": true, "device": true, "telegram": true, "vk": true,
@@ -28,6 +28,9 @@ var sensitiveWord = map[string]bool{
 var sensitivePair = [][2]string{
 	{"user", "agent"}, {"first", "name"}, {"last", "name"}, {"middle", "name"}, {"full", "name"},
 	{"api", "key"}, {"recovery", "code"}, {"recovery", "codes"}, {"provider", "user"},
+	// claims OIDC (given_name, family_name) и сетевые адреса клиента; просто address — адрес поля,
+	// он публичен и не маскируется
+	{"given", "name"}, {"family", "name"}, {"remote", "addr"}, {"client", "addr"}, {"forwarded", "for"},
 }
 
 // words делит ключ на слова в нижнем регистре.
