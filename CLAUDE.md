@@ -10,11 +10,10 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 2. Суммы — `int64` в минорных единицах + ISO 4217, без float; валюта — из страны города, не выбирается руками (`backend/migrations/README.md`).
 3. Время — `timestamptz` в UTC; матч «в 20:00» — время поля, таймзона у города/поля (`docs/02-архитектура.md`).
 4. Роли — `role_assignments` со скоупом, не колонка в `users` (`backend/migrations/0003_identity.sql`).
-5. Мутирующие запросы принимают `Idempotency-Key` (кроме анонимных: регистрация, вход, коды); события пишутся в `outbox` в той же транзакции, что и данные (спека бэкенда §6.4–6.5).
+5. Ручка создана или изменена → в том же коммите контракт с полным описанием и примерами всего (`.claude/rules/contracts.md`, страж `contracts/src/docs.mjs`; Swagger — `/docs`). Мутирующие запросы принимают `Idempotency-Key` (кроме анонимных: регистрация, вход, коды); события пишутся в `outbox` в той же транзакции, что и данные (спека бэкенда §6.4–6.5).
 6. Строки UI, включая админку, — только в `apps/*/messages/{ru,en}.json`; тексты писем и пушей — в `backend/locales/{ru,en}.json`; `en` с теми же ключами (`@wf/i18n`, тесты локалей).
 7. TDD: сначала падающий тест, потом код — бэк и фронт; страж проверяется подсадкой бага (`docs/04-принципы-архитектуры.md`).
-8. Ручка создана или изменена → в том же коммите контракт с полным описанием и примерами всего (`.claude/rules/contracts.md`, страж `contracts/src/docs.mjs`); Swagger — `/docs` при `*_DOCS_ENABLED=true`.
-9. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
+8. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
 
 ## File structure
 - `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate}`, `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
@@ -24,10 +23,11 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - `design/` — бриф, `screens/*.dc.html`, `tools/extract-export.mjs`; `product/` — «почему так»
 - Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`
 - Архитектура бэкенда (модули, владение таблицами, платформа, стражи, порядок): `docs/superpowers/specs/2026-10-01-backend-architecture-design.md`
-- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`)
+- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`)
 
-## Skills
-Проектных нет: справочники восстанавливаются из `backend/migrations/README.md` и `design/README.md`.
+## Skills и агенты
+Проектных скиллов нет: справочники восстанавливаются из `backend/migrations/README.md` и `design/README.md`.
+Субагенты плана — `wf-implementer` (задача по брифу; model при вызове: лёгкое — sonnet, иначе opus) и `wf-reviewer` (любое ревью, только opus); haiku не использовать.
 
 ## What NOT to do
 - Не урезать объём и не обходить доменные правила временно (автоодобрение и т. п.): строим весь продукт, включая турниры, рейтинги, подписки, кредиты, косметику, прогнозы, чат, второй язык; выключенное — за фича-флагами по городам (пользователь, 01.10.2026).
