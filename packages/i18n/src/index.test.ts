@@ -58,4 +58,10 @@ describe('missingKeys', () => {
   test('группа — не строка', () => {
     expect(missingKeys(m, ['errors.request'])).toEqual(['errors.request']);
   });
+  test('пустая строка — нет текста', () => {
+    const empty = { errors: { internal: '', request: { invalid: 'Плохой запрос' } } };
+    expect(missingKeys(empty, ['errors.internal', 'errors.request.invalid'])).toEqual([
+      'errors.internal',
+    ]);
+  });
 });

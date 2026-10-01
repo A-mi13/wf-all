@@ -45,8 +45,15 @@ export function diffKeys(a: Messages, b: Messages): { missing: string[]; extra: 
   };
 }
 
-// missingKeys — ключи из keys, для которых в m нет строки (уровни вложенности — через точку).
+// missingKeys — ключи из keys, для которых в m нет текста (уровни вложенности — через точку).
+// Пустая строка — тоже нет текста: в базовой локали (ru) она показала бы пустоту.
 export function missingKeys(m: Messages, keys: string[]): string[] {
-  const have = new Set(paths(m));
+  const have = new Set(texts(m));
   return keys.filter((k) => !have.has(k)).sort();
+}
+
+function texts(m: Messages, prefix = ''): string[] {
+  return Object.entries(m).flatMap(([k, v]) =>
+    isGroup(v) ? texts(v, `${prefix}${k}.`) : v === '' ? [] : [`${prefix}${k}`],
+  );
 }
