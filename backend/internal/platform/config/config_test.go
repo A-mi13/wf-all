@@ -139,18 +139,22 @@ func TestAPIConfigRequiresKeys(t *testing.T) {
 	}
 }
 
+// Почта — отдельный конфиг: её читает только воркер, разовые команды (events replay) — нет.
 func TestWorkerMailConfig(t *testing.T) {
-	c, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=x",
+	c, err := config.Load[config.Mail]("WORKER_", []string{
 		"WORKER_MAIL_SMTP_ADDR=127.0.0.1:11025", "WORKER_MAIL_FROM=WF <noreply@wf.local>"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Mail.TLS != "mandatory" || c.Mail.SMTPAddr != "127.0.0.1:11025" {
-		t.Fatalf("%+v", c.Mail)
+	if c.TLS != "mandatory" || c.SMTPAddr != "127.0.0.1:11025" {
+		t.Fatalf("%+v", c)
 	}
-	if _, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=x"}); err == nil ||
+	if _, err := config.Load[config.Mail]("WORKER_", nil); err == nil ||
 		!strings.Contains(err.Error(), "WORKER_MAIL_SMTP_ADDR") {
 		t.Fatalf("без почты: %v", err)
+	}
+	if _, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=x"}); err != nil {
+		t.Fatalf("конфиг воркера без почты: %v", err)
 	}
 }
 

@@ -72,7 +72,8 @@ type Admin struct {
 	RateLimits     string         `env:"RATE_LIMITS"`
 }
 
-// Mail — SMTP транзакционных писем (спека §6.9); в dev — Mailpit.
+// Mail — SMTP транзакционных писем (спека §6.9); в dev — Mailpit. Воркер читает отдельно:
+// config.Load[config.Mail]("WORKER_", …).
 type Mail struct {
 	SMTPAddr string `env:"MAIL_SMTP_ADDR,required"`
 	From     string `env:"MAIL_FROM,required"`
@@ -98,12 +99,13 @@ type Relay struct {
 	Poll  time.Duration `env:"RELAY_POLL" envDefault:"5s"`
 }
 
+// Worker — без почты: Mail (WORKER_MAIL_*) воркер читает отдельно, только в режиме воркера —
+// разовым командам (events replay) почта не нужна.
 type Worker struct {
 	Log    Log
 	DB     DB
 	Queues Queues
 	Relay  Relay
-	Mail   Mail
 }
 
 type Migrator struct {

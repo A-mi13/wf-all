@@ -49,11 +49,18 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	if err := validateRelay(cfg.Relay); err != nil {
 		return err
 	}
-	// почта проверяется до подключения к базе: битый адрес SMTP — отказ старта
-	sender, err := mail.NewSMTP(mail.SMTPConfig{Addr: cfg.Mail.SMTPAddr, From: cfg.Mail.From,
-		Username: cfg.Mail.Username, Password: cfg.Mail.Password, TLS: cfg.Mail.TLS})
-	if err != nil {
-		return err
+	// почта нужна только воркеру, не разовым командам; проверяется до подключения к базе:
+	// нет WORKER_MAIL_* или битый адрес SMTP — отказ старта
+	var sender *mail.SMTP
+	if len(args) == 0 {
+		mc, err := config.Load[config.Mail]("WORKER_", environ)
+		if err != nil {
+			return err
+		}
+		if sender, err = mail.NewSMTP(mail.SMTPConfig{Addr: mc.SMTPAddr, From: mc.From,
+			Username: mc.Username, Password: mc.Password, TLS: mc.TLS}); err != nil {
+			return err
+		}
 	}
 	log := logx.New(logOut, cfg.Log).With("service", "worker")
 	// сторонние библиотеки и стандартный log — через тот же логгер с маскированием ПД

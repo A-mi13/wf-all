@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -103,6 +104,24 @@ func TestReplayCommandValidatesArguments(t *testing.T) {
 				t.Fatal("ждали ошибку")
 			}
 		})
+	}
+}
+
+// Переигровка писем не шлёт: WORKER_MAIL_* ей не нужны — команда доходит до events.Replay.
+func TestReplayDoesNotRequireMail(t *testing.T) {
+	env := []string{"WORKER_DATABASE_URL=" + dbtest.NewURL(t)}
+	args := []string{"events", "replay", "--type", "teams.member_joined", "--subscriber", "notify.roster", "--since", "2026-10-01T00:00:00Z"}
+	if err := run(context.Background(), args, env, io.Discard, io.Discard); !errors.Is(err, events.ErrUnknownSubscription) {
+		t.Fatalf("err = %v — ждали отказ Replay (подписчика нет), а не требование почты", err)
+	}
+}
+
+// Воркеру почта обязательна: без WORKER_MAIL_* — отказ старта до подключения к базе.
+func TestRunRequiresMail(t *testing.T) {
+	env := []string{"WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1"}
+	if err := run(context.Background(), nil, env, io.Discard, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "WORKER_MAIL_SMTP_ADDR") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
