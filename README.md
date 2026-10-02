@@ -123,7 +123,9 @@ CI поднимает свою базу на 15432 (`.github/workflows/backend.y
 
 Ключи `API_JWT_SEEDS` и `API_HUMANCHECK_KEYS` без значения не дают api стартовать. `./task setup`,
 создавая `backend/.env`, сразу заменяет их плейсхолдеры (`<base64-32-байта>`) случайными
-ключами — `scripts/env-keys.sh` (значения не выводит). Уже существующий `backend/.env` setup
+ключами — `scripts/env-keys.sh` (значения не выводит). Файл собирается во временном
+`backend/.env.tmp` и встаёт на место только целиком: при сбое (нет `openssl`) `backend/.env` не
+появится, и повторный `./task setup` сделает шаг заново. Уже существующий `backend/.env` setup
 не трогает: остались плейсхолдеры — `bash scripts/env-keys.sh backend/.env`. `API_BFF_*` пусты
 до спеки веба.
 

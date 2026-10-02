@@ -3,6 +3,8 @@ design/_export/
 
 # окружение и инструменты
 .env
+# временные файлы ./task setup и scripts/env-keys.sh — с настоящими ключами
+.env.tmp*
 .tools/
 .task/
 node_modules/
