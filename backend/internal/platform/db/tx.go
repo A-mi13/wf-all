@@ -20,10 +20,22 @@ type TxStarter interface {
 
 type txKey struct{}
 
+// TxHook — действие платформы в начале каждой транзакции db.InTx этого запроса: идемпотентность
+// вставляет ключ в бизнес-транзакцию (спека §6.4). Ошибка хука откатывает транзакцию.
+type TxHook func(ctx context.Context, tx pgx.Tx) error
+
+type hookKey struct{}
+
+// WithTxHook — хук для всех db.InTx с этим ctx.
+func WithTxHook(ctx context.Context, h TxHook) context.Context {
+	return context.WithValue(ctx, hookKey{}, h)
+}
+
 // InTx исполняет fn в новой транзакции и кладёт её в ctx — оттуда её читают только
 // механизмы платформы (события, аудит, идемпотентность), спека §4.4. Транзакция открывается
 // всегда новая, даже если в ctx уже есть другая: невидимого присоединения к чужой транзакции
-// нет. nil — коммит; ошибка или паника — откат (паника пробрасывается).
+// нет. nil — коммит; ошибка или паника — откат (паника пробрасывается). Хук из ctx
+// (WithTxHook) исполняется первым в той же транзакции.
 func InTx(ctx context.Context, s TxStarter, fn func(ctx context.Context, tx pgx.Tx) error) (err error) {
 	tx, err := s.Begin(ctx)
 	if err != nil {
@@ -42,7 +54,14 @@ func InTx(ctx context.Context, s TxStarter, fn func(ctx context.Context, tx pgx.
 			_ = tx.Rollback(context.WithoutCancel(ctx))
 		}
 	}()
-	err = fn(context.WithValue(ctx, txKey{}, tx), tx)
+	txCtx := context.WithValue(ctx, txKey{}, tx)
+	if h, ok := ctx.Value(hookKey{}).(TxHook); ok && h != nil {
+		if err = h(txCtx, tx); err != nil {
+			completed = true
+			return err
+		}
+	}
+	err = fn(txCtx, tx)
 	completed = true
 	if err != nil {
 		return err

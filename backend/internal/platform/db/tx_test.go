@@ -164,3 +164,57 @@ func TestTxFromEmptyContext(t *testing.T) {
 		t.Fatal("в пустом ctx нашлась транзакция")
 	}
 }
+
+// Хук идемпотентности исполняется в той же транзакции до fn: его запись живёт и умирает с ней.
+func TestInTxRunsHookFirstInSameTx(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.NewPool(t)
+	if _, err := pool.Exec(ctx, "CREATE TABLE hook_probe (v int)"); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	hook := func(ctx context.Context, tx pgx.Tx) error {
+		order = append(order, "hook")
+		if got, ok := db.TxFrom(ctx); !ok || got != tx {
+			t.Error("хук получил не ту транзакцию")
+		}
+		_, err := tx.Exec(ctx, "INSERT INTO hook_probe VALUES (1)")
+		return err
+	}
+	hctx := db.WithTxHook(ctx, hook)
+
+	errBusiness := errors.New("бизнес-ошибка")
+	err := db.InTx(hctx, pool, func(ctx context.Context, tx pgx.Tx) error {
+		order = append(order, "fn")
+		return errBusiness
+	})
+	if !errors.Is(err, errBusiness) || len(order) != 2 || order[0] != "hook" {
+		t.Fatalf("err=%v порядок=%v", err, order)
+	}
+	var n int
+	_ = pool.QueryRow(ctx, "SELECT count(*) FROM hook_probe").Scan(&n)
+	if n != 0 {
+		t.Fatal("запись хука пережила откат транзакции")
+	}
+
+	if err := db.InTx(hctx, pool, func(context.Context, pgx.Tx) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	_ = pool.QueryRow(ctx, "SELECT count(*) FROM hook_probe").Scan(&n)
+	if n != 1 {
+		t.Fatalf("после коммита строк %d", n)
+	}
+}
+
+func TestInTxHookErrorSkipsFn(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.NewPool(t)
+	errHook := errors.New("ключ занят")
+	called := false
+	err := db.InTx(db.WithTxHook(ctx, func(context.Context, pgx.Tx) error { return errHook }), pool,
+		func(context.Context, pgx.Tx) error { called = true; return nil })
+	if !errors.Is(err, errHook) || called {
+		t.Fatalf("err=%v fn вызвана=%v", err, called)
+	}
+	noLeakedConns(t, pool)
+}
