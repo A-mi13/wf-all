@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/keys"
+	"wf/backend/internal/platform/peer"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/testkit/apitest"
 	"wf/backend/internal/platform/testkit/dbtest"
@@ -206,6 +208,44 @@ func TestPipelineWired(t *testing.T) {
 			t.Fatalf("%s, битый токен при исчерпанном лимите: %d %s — ждали 401 (auth до ratelimit)",
 				name, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// Render за Cloudflare: все клиенты приходят от одного пира балансировщика с одним узлом CDN
+// правее в X-Forwarded-For. С заголовком CDN клиенты не делят лимит по IP; второй запрос того же
+// клиента — 429 (лимит действительно считается по адресу из заголовка).
+func TestRateLimitByClientIPHeader(t *testing.T) {
+	o := testOptions(t)
+	o.Peer = peer.Config{
+		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
+		ClientIPHeader: "CF-Connecting-IP",
+	}
+	o.Limiter = ratelimit.NewPG(o.DB, clock.System)
+	o.RateRules = ratelimit.DefaultRules()
+	d := o.RateRules[ratelimit.DefaultClass]
+	d.IP = ratelimit.Policy{Limit: 1, Period: time.Hour}
+	o.RateRules[ratelimit.DefaultClass] = d
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(client string) int {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil)
+		r.RemoteAddr = "10.0.0.5:4000"
+		r.Header.Set("X-Forwarded-For", client+", 104.16.0.1")
+		r.Header.Set("CF-Connecting-IP", client)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec.Code
+	}
+	if code := get("203.0.113.7"); code != http.StatusOK {
+		t.Fatalf("первый клиент: %d", code)
+	}
+	if code := get("198.51.100.8"); code != http.StatusOK {
+		t.Fatalf("второй клиент за тем же узлом CDN: %d — лимит общий", code)
+	}
+	if code := get("203.0.113.7"); code != http.StatusTooManyRequests {
+		t.Fatalf("первый клиент повторно: %d — ждали 429", code)
 	}
 }
 

@@ -54,7 +54,8 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	if err := rules.Validate(); err != nil {
 		return err
 	}
-	pc := peer.Config{TrustedProxies: cfg.Peer.TrustedProxies, BFFNets: cfg.Peer.BFFNets, BFFSecrets: cfg.Peer.BFFSecrets}
+	pc := peer.Config{TrustedProxies: cfg.Peer.TrustedProxies, BFFNets: cfg.Peer.BFFNets, BFFSecrets: cfg.Peer.BFFSecrets,
+		ClientIPHeader: cfg.Peer.ClientIPHeader}
 	if err := pc.Validate(); err != nil {
 		return err
 	}

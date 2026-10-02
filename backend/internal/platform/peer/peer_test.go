@@ -123,6 +123,144 @@ func TestNoBFFConfigured(t *testing.T) {
 	}
 }
 
+// Заголовок CDN (CF-Connecting-IP) от доверенного прокси: на Render перед балансировщиком стоит
+// Cloudflare, и X-Forwarded-For приходит как «клиент, узел Cloudflare[, 10.x Render]».
+func TestClientIPHeader(t *testing.T) {
+	cdn := cfg
+	cdn.ClientIPHeader = "CF-Connecting-IP"
+	render := func(cf string) req {
+		return req{"10.0.0.5:4000", map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1", "CF-Connecting-IP": cf}}
+	}
+	cases := []struct {
+		name string
+		c    peer.Config
+		r    req
+		ip   string
+	}{
+		{"Render-цепочка: адрес из заголовка", cdn, render("203.0.113.7"), "203.0.113.7"},
+		// пин старого поведения: без настройки клиентом становится узел Cloudflare — общий для всех за ним
+		{"без настройки — узел CDN из X-Forwarded-For", cfg, render("203.0.113.7"), "104.16.0.1"},
+		{"имя заголовка без учёта регистра", peer.Config{TrustedProxies: cfg.TrustedProxies, ClientIPHeader: "cf-connecting-ip"},
+			render("203.0.113.7"), "203.0.113.7"},
+		// клиент мимо прокси не выбирает себе IP
+		{"подделка: пир не доверенный", cdn, req{"198.51.100.9:4000", map[string]string{"CF-Connecting-IP": "1.2.3.4"}}, "198.51.100.9"},
+		{"подделка: пир не доверенный, с X-Forwarded-For", cdn,
+			req{"198.51.100.9:4000", map[string]string{"CF-Connecting-IP": "1.2.3.4", "X-Forwarded-For": "1.2.3.4"}}, "198.51.100.9"},
+		// не годится — запасной путь X-Forwarded-For
+		{"два адреса через запятую", cdn, render("1.2.3.4, 5.6.7.8"), "104.16.0.1"},
+		{"адрес с портом", cdn, render("1.2.3.4:80"), "104.16.0.1"},
+		{"мусор", cdn, render("abc"), "104.16.0.1"},
+		{"пустое значение", cdn, render(""), "104.16.0.1"},
+		{"IPv6 с зоной", cdn, render("fe80::1%eth0"), "104.16.0.1"},
+		{"заголовка нет", cdn, req{"10.0.0.5:4000", map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1"}}, "104.16.0.1"},
+		{"ни заголовка, ни X-Forwarded-For — пир", cdn, req{"10.0.0.5:4000", nil}, "10.0.0.5"},
+		{"пробелы вокруг адреса", cdn, render("  203.0.113.7 "), "203.0.113.7"},
+		{"IPv6", cdn, render("2001:db8::7"), "2001:db8::7"},
+		{"IPv4 в IPv6-обёртке", cdn, render("::ffff:203.0.113.7"), "203.0.113.7"},
+		// защита в глубину: CDN передаёт публичный адрес посетителя; частный, петля, нулевой — не от CDN
+		{"частный IPv4", cdn, render("10.1.2.3"), "104.16.0.1"},
+		{"частный IPv4 в IPv6-обёртке", cdn, render("::ffff:192.168.1.1"), "104.16.0.1"},
+		{"петля IPv4", cdn, render("127.0.0.1"), "104.16.0.1"},
+		{"петля IPv6", cdn, render("::1"), "104.16.0.1"},
+		{"нулевой IPv4", cdn, render("0.0.0.0"), "104.16.0.1"},
+		{"нулевой IPv6", cdn, render("::"), "104.16.0.1"},
+		{"частный IPv6 (ULA)", cdn, render("fd00::1"), "104.16.0.1"},
+		{"link-local IPv6 без зоны", cdn, render("fe80::1"), "104.16.0.1"},
+		{"multicast", cdn, render("224.0.0.1"), "104.16.0.1"},
+		// Cloudflare Pseudo IPv4 (режим overwrite) кладёт IPv6-клиентам адреса из 240.0.0.0/4: отказ
+		// им отправил бы IPv6-клиентов в общую корзину узла CDN
+		{"Pseudo IPv4 Cloudflare (240/4)", cdn, render("240.0.0.1"), "240.0.0.1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, _ := resolve(t, c.c, c.r)
+			if got.IP != netip.MustParseAddr(c.ip) || got.ViaBFF {
+				t.Fatalf("got %+v, want ip=%s", got, c.ip)
+			}
+		})
+	}
+}
+
+// Две строки заголовка — не «ровно один IP»: CDN ставит одну, затирая присланное клиентом.
+func TestClientIPHeaderRepeated(t *testing.T) {
+	cdn := cfg
+	cdn.ClientIPHeader = "CF-Connecting-IP"
+	var got peer.Info
+	h := peer.Middleware(cdn)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = peer.From(r.Context()) }))
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.5:4000"
+	r.Header.Set("X-Forwarded-For", "203.0.113.7, 104.16.0.1")
+	r.Header.Add("CF-Connecting-IP", "1.2.3.4")
+	r.Header.Add("CF-Connecting-IP", "203.0.113.7")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if got.IP != netip.MustParseAddr("104.16.0.1") {
+		t.Fatalf("got %+v — ждали запасной путь X-Forwarded-For", got)
+	}
+}
+
+// BFF за CDN: адрес BFF берётся из заголовка CDN, дальше — прежняя проверка секрета.
+func TestClientIPHeaderThenBFF(t *testing.T) {
+	cdn := cfg
+	cdn.ClientIPHeader = "CF-Connecting-IP"
+	got, _ := resolve(t, cdn, req{"10.0.0.5:4000", map[string]string{"X-Forwarded-For": "104.16.0.1", "CF-Connecting-IP": "192.0.2.10",
+		peer.HeaderBFFSecret: secret, peer.HeaderClientIP: "198.51.100.7"}})
+	if got.IP != netip.MustParseAddr("198.51.100.7") || !got.ViaBFF {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// Подставной заголовок CDN с адресом BFF из частной сети не делает запрос «от BFF»: частный адрес
+// из заголовка отвергается, адрес — из X-Forwarded-For, секрет BFF не помогает.
+func TestClientIPHeaderPrivateBFFAddrRejected(t *testing.T) {
+	c := peer.Config{
+		TrustedProxies: cfg.TrustedProxies,
+		BFFNets:        []netip.Prefix{netip.MustParsePrefix("192.168.0.0/16")},
+		BFFSecrets:     cfg.BFFSecrets,
+		ClientIPHeader: "CF-Connecting-IP",
+	}
+	got, _ := resolve(t, c, req{"10.0.0.5:4000", map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1",
+		"CF-Connecting-IP": "192.168.1.10", peer.HeaderBFFSecret: secret, peer.HeaderClientIP: "198.51.100.7"}})
+	if got.ViaBFF || got.IP != netip.MustParseAddr("104.16.0.1") {
+		t.Fatalf("got %+v — ждали 104.16.0.1 без BFF", got)
+	}
+}
+
+func TestConfigValidateClientIPHeader(t *testing.T) {
+	ok := peer.Config{TrustedProxies: cfg.TrustedProxies, ClientIPHeader: "CF-Connecting-IP"}
+	if err := ok.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, h := range map[string]string{
+		"пробел":         "CF Connecting-IP",
+		"двоеточие":      "CF-Connecting-IP:",
+		"скобка":         "CF(IP)",
+		"не ASCII":       "Адрес",
+		"перевод строки": "CF-Connecting-IP\n",
+		// заголовки BFF проверяются отдельно (адрес BFF и секрет) и снимаются middleware
+		"заголовок BFF с IP":          peer.HeaderClientIP,
+		"он же строчными":             strings.ToLower(peer.HeaderClientIP),
+		"заголовок BFF с секретом":    peer.HeaderBFFSecret,
+		"заголовок BFF с устройством": peer.HeaderDevice,
+		// X-Forwarded-For дописывается прокси, а не затирается: его первая строка — от клиента
+		"X-Forwarded-For": "x-forwarded-for",
+		// клиент присылает их сам, Cloudflare их не ставит и не затирает
+		"Forwarded": "Forwarded",
+		"forwarded": "forwarded",
+		"X-Real-IP": "X-Real-IP",
+		"x-real-ip": "x-real-ip",
+	} {
+		bad := ok
+		bad.ClientIPHeader = h
+		if bad.Validate() == nil {
+			t.Errorf("%s: %q принят", name, h)
+		}
+	}
+	// заголовку некому доверять: без прокси хостинга его прислал бы сам клиент
+	if (peer.Config{ClientIPHeader: "CF-Connecting-IP"}).Validate() == nil {
+		t.Error("заголовок без TrustedProxies принят")
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)

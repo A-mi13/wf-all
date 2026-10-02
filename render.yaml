@@ -39,6 +39,12 @@ services:
       # Балансировщик Render — из частных сетей: только им верим X-Forwarded-For
       - key: API_TRUSTED_PROXIES
         value: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      # На стенде перед балансировщиком Render стоит Cloudflare (видно 02.10.2026): в X-Forwarded-For
+      # правее клиента — публичный узел Cloudflare, общий для всех за ним. Адрес посетителя — из
+      # CF-Connecting-IP (Cloudflare затирает присланный клиентом), только от API_TRUSTED_PROXIES.
+      # Что перед пиром был именно Cloudflare, API не проверяет — допущение (docs/deploy-dev.md)
+      - key: API_CLIENT_IP_HEADER
+        value: CF-Connecting-IP
       - key: MIGRATOR_LOG_FORMAT
         value: json
       - key: API_DATABASE_URL
