@@ -18,13 +18,13 @@ paths:
 
 ## Край платформы (план 3/3)
 
-- Текущее время — только `clock.Clock` (в тестах `clocktest.Fake`); длительности и таймауты — `time.Since`
-  (монотонные часы).
+- Текущее время — только `clock.Clock` (в тестах `clocktest.Fake`); длительности и таймауты —
+  `start := time.Now()` … `time.Since(start)` (монотонные часы).
 - Ошибка, которую должен увидеть клиент (лимит, антибот, идемпотентность, флаг), — `httpx.ProblemError`
   (`httpx.NewError(статус, httpx.Code…)`); код строкой — падение стража `TestProblemCodesAreConstants`.
-- Почта — только задача `mail.SendArgs{V: 1, Mail: "<модуль>.<письмо>", Ref: id}` (другую версию воркер
-  отклонит); адрес находит `mail.Composer`
-  модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en).
+- Почта — только задача `mail.SendArgs{V: 1, Mail: "<модуль>.<письмо>", Ref: id}` (на другую версию воркер
+  вернёт ошибку, задача уйдёт в повтор и после `MaxAttempts` станет «мёртвой»); адрес находит
+  `mail.Composer` модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en).
 - Пароли — `password.Check` + `password.Hasher` (argon2id под семафором); «нет почты» — `VerifyDummy`.
 - Когда требовать PoW — `risk.Assessor`; требование — `humancheck.Require` (403 с задачей).
 - Тесты механизмов с SQL — под ролью прода: `dbtest.NewPoolsAs(t, "api"|"worker"|"admin")`.
