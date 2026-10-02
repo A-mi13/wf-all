@@ -25,6 +25,17 @@ func TestRunRejectsEmptyNetElement(t *testing.T) {
 	}
 }
 
+// Заголовок CDN без прокси хостинга — отказ старта до подключения к базе: API_CLIENT_IP_HEADER
+// доходит до peer.Config.
+func TestRunRejectsClientIPHeaderWithoutProxies(t *testing.T) {
+	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
+		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_CLIENT_IP_HEADER=CF-Connecting-IP"}
+	err := run(context.Background(), env, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "CF-Connecting-IP") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 // Битые сиды JWT — отказ старта до подключения к базе.
 func TestRunRejectsBadJWTSeeds(t *testing.T) {
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",

@@ -71,6 +71,18 @@ func TestAdminHasNoBFF(t *testing.T) {
 	}
 }
 
+// Заголовок с адресом посетителя от CDN — ADMIN_CLIENT_IP_HEADER; по умолчанию пусто.
+func TestAdminClientIPHeader(t *testing.T) {
+	base := []string{"ADMIN_HTTP_ADDR=:8081", "ADMIN_DATABASE_URL=postgres://admin@localhost/wf"}
+	c, err := config.Load[config.Admin]("ADMIN_", append(base, "ADMIN_CLIENT_IP_HEADER=CF-Connecting-IP"))
+	if err != nil || c.ClientIPHeader != "CF-Connecting-IP" {
+		t.Fatalf("%v %q", err, c.ClientIPHeader)
+	}
+	if c, err = config.Load[config.Admin]("ADMIN_", base); err != nil || c.ClientIPHeader != "" {
+		t.Fatalf("по умолчанию: %v %q", err, c.ClientIPHeader)
+	}
+}
+
 // Бинарник без обязательной переменной не должен стартовать молча.
 func TestLoadFailsOnMissingRequiredAndNamesIt(t *testing.T) {
 	_, err := config.Load[config.API]("API_", []string{"API_HTTP_ADDR=:8080"})
@@ -116,11 +128,15 @@ func TestAPIConfig(t *testing.T) {
 		"API_JWT_SEEDS=a,b", "API_HUMANCHECK_KEYS=k",
 		"API_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12",
 		"API_BFF_NETS=192.0.2.0/24", "API_BFF_SECRETS=s1,s2",
+		"API_CLIENT_IP_HEADER=CF-Connecting-IP",
 		"API_RATE_LIMITS=auth.ip=10/1m",
 	}
 	c, err := config.Load[config.API]("API_", env)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if c.Peer.ClientIPHeader != "CF-Connecting-IP" {
+		t.Fatalf("заголовок CDN: %q", c.Peer.ClientIPHeader)
 	}
 	if len(c.Auth.JWTSeeds) != 2 || c.Humancheck.TTL != 5*time.Minute || c.Humancheck.MaxNumber != 100000 ||
 		c.HTTP.RequestTimeout != 15*time.Second || c.RateLimits != "auth.ip=10/1m" {

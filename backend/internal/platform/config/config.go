@@ -42,6 +42,8 @@ type Peer struct {
 	TrustedProxies []netip.Prefix `env:"TRUSTED_PROXIES" envSeparator:","` // балансировщик хостинга
 	BFFNets        []netip.Prefix `env:"BFF_NETS" envSeparator:","`        // адреса BFF (Next.js)
 	BFFSecrets     []string       `env:"BFF_SECRETS" envSeparator:","`     // секрет BFF ↔ API, ≥ 32 символов
+	// ClientIPHeader — заголовок CDN с адресом посетителя (CF-Connecting-IP), только от TrustedProxies
+	ClientIPHeader string `env:"CLIENT_IP_HEADER"`
 }
 
 // Humancheck — PoW антибота (спека §6.7).
@@ -69,7 +71,9 @@ type Admin struct {
 	// TrustedProxies — балансировщик хостинга (спека §8.4). BFF у admin-api нет — её фронт ходит
 	// в API напрямую, поэтому BFF_NETS и BFF_SECRETS у неё не читаются.
 	TrustedProxies []netip.Prefix `env:"TRUSTED_PROXIES" envSeparator:","`
-	RateLimits     string         `env:"RATE_LIMITS"`
+	// ClientIPHeader — заголовок CDN с адресом посетителя (CF-Connecting-IP), только от TrustedProxies
+	ClientIPHeader string `env:"CLIENT_IP_HEADER"`
+	RateLimits     string `env:"RATE_LIMITS"`
 }
 
 // Mail — SMTP транзакционных писем (спека §6.9); в dev — Mailpit. Воркер читает отдельно:
