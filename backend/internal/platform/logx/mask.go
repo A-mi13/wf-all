@@ -11,8 +11,11 @@ import (
 var (
 	// local@домен: локальная часть скрывается, домен остаётся для разбора инцидентов.
 	// Локальная часть — любые символы, кроме пробелов, кавычек, скобок, разделителей
-	// (`=`, `:`, `,`, `;`, `/`, `?`, `&`) и «@»; апостроф допустим, но не первым (`'a@b.co'`).
-	emailRe = regexp.MustCompile(`[^\s"'<>(),;:=@/\\\[\]{}?&][^\s"<>(),;:=@/\\\[\]{}?&]*@(?:[\p{L}\p{N}\-]+\.)+\p{L}{2,}`)
+	// (`=`, `:`, `,`, `;`, `/`, `?`, `&`, `|`), типографскими кавычками и тире и «@»; апостроф
+	// допустим, но не первым (`'a@b.co'`).
+	emailRe = regexp.MustCompile("[^\\s\"'<>(),;:=@/\\\\\\[\\]{}?&|`\\p{Pi}\\p{Pf}—–][^\\s\"<>(),;:=@/\\\\\\[\\]{}?&|`\\p{Pi}\\p{Pf}—–]*@(?:[\\p{L}\\p{N}\\-]+\\.)+\\p{L}{2,}")
+	// хвост UUID перед совпадением: «-» после него склеивает номер с UUID
+	uuidTailRe = regexp.MustCompile(`(?i)[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}$`)
 	// кандидат в телефон: 10–15 цифр, между ними — пробелы, скобки, дефисы
 	phoneRe = regexp.MustCompile(`\+?\d(?:[\s()\-]{0,2}\d){9,14}`)
 )
@@ -53,8 +56,9 @@ func maskPhones(s string) string {
 }
 
 // gluedBefore — совпадение продолжает «слово» слева: оно часть UUID, хеша, десятичной дроби
-// или адреса. Склеивают буква и цифра; «-» — только после hex-символа (хвост UUID), «.» —
-// только после цифры (дробь, IPv4). «:», «_», «=» и прочее — границы: `phone:+7…`, `phone_7…`.
+// или адреса. Склеивают буква и цифра; «-» — только после префикса UUID (`xxxxxxxx-xxxx-xxxx-xxxx-`),
+// «.» — только после цифры (дробь, IPv4). «:», «_», «=» и прочее — границы: `phone:+7…`,
+// `phone_7…`, `phone-7…`.
 func gluedBefore(s string) bool {
 	r, size := utf8.DecodeLastRuneInString(s)
 	if size == 0 {
@@ -65,8 +69,8 @@ func gluedBefore(s string) bool {
 	}
 	switch r {
 	case '-':
-		p, n := utf8.DecodeLastRuneInString(s[:len(s)-size])
-		return n > 0 && isHex(p)
+		const uuidPrefixLen = len("xxxxxxxx-xxxx-xxxx-xxxx-")
+		return uuidTailRe.MatchString(s[max(0, len(s)-uuidPrefixLen):])
 	case '.':
 		p, n := utf8.DecodeLastRuneInString(s[:len(s)-size])
 		return n > 0 && unicode.IsDigit(p)
@@ -90,10 +94,6 @@ func gluedAfter(s string) bool {
 		return nsize > 0 && unicode.IsDigit(n)
 	}
 	return false
-}
-
-func isHex(r rune) bool {
-	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
 }
 
 func lastDigits(s string, n int) string {
