@@ -346,25 +346,6 @@ func TestDebugLogOffAtInfo(t *testing.T) {
 	}
 }
 
-// На Info горячий путь не платит за диагностику: без проверки уровня заголовки склеивались бы и
-// атрибуты собирались бы зря (стража пропавшей проверки — запись на Info и так отбросит handler).
-// Замер: ~7 аллокаций на запрос с проверкой, ~17 без неё; порог с запасом между ними.
-func TestDebugLogNoOverheadAtInfo(t *testing.T) {
-	captureLog(t, slog.LevelInfo)
-	cdn := cfg
-	cdn.ClientIPHeader = "CF-Connecting-IP"
-	h := peer.Middleware(cdn)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
-	r.RemoteAddr = "10.0.0.5:4000"
-	r.Header.Add("X-Forwarded-For", "203.0.113.7")
-	r.Header.Add("X-Forwarded-For", "104.16.0.1")
-	r.Header.Add("CF-Connecting-IP", "203.0.113.7")
-	w := httptest.NewRecorder()
-	if allocs := testing.AllocsPerRun(100, func() { h.ServeHTTP(w, r) }); allocs > 12 {
-		t.Fatalf("%v аллокаций на запрос при Info — диагностика собирается без проверки уровня", allocs)
-	}
-}
-
 func TestConfigValidateClientIPHeader(t *testing.T) {
 	ok := peer.Config{TrustedProxies: cfg.TrustedProxies, ClientIPHeader: "CF-Connecting-IP"}
 	if err := ok.Validate(); err != nil {

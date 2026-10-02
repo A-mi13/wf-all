@@ -145,7 +145,8 @@ func Middleware(c Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			info, src := resolve(c, r)
-			// до снятия заголовков BFF: лог видит запрос таким, каким он пришёл (значения BFF не читает)
+			// до снятия заголовков BFF: лог видит запрос таким, каким он пришёл (значения BFF не читает);
+			// проверка уровня — чтобы на Info не склеивать заголовки и не собирать атрибуты на горячем пути
 			if slog.Default().Enabled(r.Context(), slog.LevelDebug) {
 				logPeer(r, c, info, src)
 			}
