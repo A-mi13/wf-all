@@ -10,6 +10,8 @@ import (
 	"time"
 
 	gomail "github.com/wneessen/go-mail"
+
+	"wf/backend/internal/platform/logx"
 )
 
 type SMTPConfig struct {
@@ -59,7 +61,8 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 		return fmt.Errorf("mail: отправитель: %w", err)
 	}
 	if err := msg.To(m.To); err != nil {
-		return fmt.Errorf("mail: получатель: %w", err)
+		// текст ошибки go-mail содержит адрес, а River пишет ошибку в river_job.errors (§6.9)
+		return errors.New("mail: некорректный адрес получателя")
 	}
 	msg.Subject(m.Subject)
 	msg.SetBodyString(gomail.TypeTextPlain, m.Text)
@@ -77,7 +80,31 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 		return fmt.Errorf("mail: клиент SMTP: %w", err)
 	}
 	if err := c.DialAndSendWithContext(ctx, msg); err != nil {
-		return fmt.Errorf("mail: отправка: %w", err)
+		return scrub(err)
 	}
 	return nil
 }
+
+// scrub — ошибка отправки без персональных данных: текст SendError go-mail дописывает адреса
+// получателей, а ответ сервера на RCPT TO часто повторяет адрес. Из SendError берём только
+// причину и коды; остальные ошибки (соединение, контекст) — с маскированием на всякий случай.
+func scrub(err error) error {
+	var se *gomail.SendError
+	if errors.As(err, &se) {
+		msg := fmt.Sprintf("mail: отправка: %s", se.Reason)
+		if code := se.ErrorCode(); code != 0 {
+			msg += fmt.Sprintf(" (SMTP %d %s)", code, se.EnhancedStatusCode())
+		}
+		return errors.New(msg)
+	}
+	return &maskedError{msg: logx.Mask("mail: отправка: " + err.Error()), cause: err}
+}
+
+// maskedError — текст без ПД, цепочка (context.DeadlineExceeded и т. п.) сохранена для errors.Is.
+type maskedError struct {
+	msg   string
+	cause error
+}
+
+func (e *maskedError) Error() string { return e.msg }
+func (e *maskedError) Unwrap() error { return e.cause }

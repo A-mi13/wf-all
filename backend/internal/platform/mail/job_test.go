@@ -67,8 +67,16 @@ func TestSendWorker(t *testing.T) {
 		t.Fatalf("задача не отменена: %v", err)
 	}
 	// вид не зарегистрирован этим воркером (старый релиз) — обычная ошибка: River повторит
-	if err := w.Work(ctx, &river.Job[mail.SendArgs]{Args: mail.SendArgs{V: 1, Mail: "identity.new_kind", Ref: ref}}); err == nil || errors.Is(err, mail.ErrSkip) {
-		t.Fatalf("неизвестный вид: %v", err)
+	if err := w.Work(ctx, &river.Job[mail.SendArgs]{Args: mail.SendArgs{V: 1, Mail: "identity.new_kind", Ref: ref}}); err == nil || errors.Is(err, mail.ErrSkip) || errors.Is(err, &river.JobCancelError{}) {
+		t.Fatalf("неизвестный вид — обычная ошибка (не отмена): %v", err)
+	}
+	// версия аргументов от более нового релиза — тоже обычная ошибка: повтор возьмёт новый воркер
+	n := len(sent.Messages())
+	if err := w.Work(ctx, &river.Job[mail.SendArgs]{Args: mail.SendArgs{V: 2, Mail: "identity.signup_code", Ref: ref}}); err == nil || errors.Is(err, &river.JobCancelError{}) {
+		t.Fatalf("V=2: %v", err)
+	}
+	if len(sent.Messages()) != n {
+		t.Fatal("письмо отправлено по аргументам неизвестной версии")
 	}
 	if opts := (mail.SendArgs{}).InsertOpts(); opts.Queue != "mail" || opts.MaxAttempts != 10 {
 		t.Fatalf("InsertOpts: %+v", opts)

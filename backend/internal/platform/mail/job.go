@@ -43,6 +43,8 @@ func (r *Registry) Add(kind string, c Composer) error {
 }
 
 // SendArgs — задача очереди mail: вид письма и id получателя или кода — не адрес.
+// Доставка «хотя бы один раз»: если SMTP принял письмо, а задача не успела завершиться,
+// повтор отправит дубль — письма должны быть безопасны к повторному получению.
 type SendArgs struct {
 	V    int       `json:"v"`
 	Mail string    `json:"mail"`
@@ -66,6 +68,10 @@ func NewSendWorker(r *Registry, s Sender) *SendWorker { return &SendWorker{reg: 
 func (*SendWorker) Timeout(*river.Job[SendArgs]) time.Duration { return time.Minute }
 
 func (w *SendWorker) Work(ctx context.Context, job *river.Job[SendArgs]) error {
+	if job.Args.V != 1 {
+		// аргументы более нового релиза: повтор возьмёт воркер, который их понимает
+		return fmt.Errorf("mail: версия аргументов %d не поддерживается этим воркером", job.Args.V)
+	}
 	c, ok := w.reg.m[job.Args.Mail]
 	if !ok {
 		// воркер прежнего релиза при перекрытии выкатки: повтор возьмёт воркер нового
