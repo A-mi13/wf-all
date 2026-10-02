@@ -30,7 +30,9 @@ type Policy struct {
 }
 
 // Validate — политика осмысленна. Всплеск у валидной политики ≥ 1, поэтому окно T·Burst ≥ T:
-// свежая строка (INSERT в Take без проверки окна) никогда не пропускает лишнего.
+// свежая строка (INSERT в Take без проверки окна) никогда не пропускает лишнего. Интервал —
+// не меньше микросекунды: точность timestamptz и make_interval, меньший стал бы нулём и
+// выключил бы лимит.
 func (p Policy) Validate() error {
 	switch {
 	case p == (Policy{}):
@@ -42,7 +44,7 @@ func (p Policy) Validate() error {
 	case p.Burst < 0:
 		return fmt.Errorf("ratelimit: всплеск %d — нужен ≥ 0", p.Burst)
 	case p.interval() <= 0:
-		return fmt.Errorf("ratelimit: %d за %s — интервал меньше наносекунды", p.Limit, p.Period)
+		return fmt.Errorf("ratelimit: %d за %s — интервал меньше микросекунды", p.Limit, p.Period)
 	case p.interval() > time.Duration(math.MaxInt64)/time.Duration(p.burst()):
 		return fmt.Errorf("ratelimit: всплеск %d при интервале %s — окно не помещается в time.Duration", p.burst(), p.interval())
 	}
@@ -51,7 +53,13 @@ func (p Policy) Validate() error {
 
 func (p Policy) off() bool { return p.Limit == 0 }
 
-func (p Policy) interval() time.Duration { return p.Period / time.Duration(p.Limit) }
+// interval — T, усечённый до микросекунды: база хранит tat и считает make_interval с точностью
+// до мкс и округляет T и окно по отдельности — при T, не кратном мкс, округлённое вверх T
+// умножалось бы на всплеск мимо округлённого окна и всплеск недодавал бы запрос (7/1m → 6).
+// Усечённые T и окно = T·всплеск в мкс точны; лимит чуть щедрее (на доли мкс за интервал).
+func (p Policy) interval() time.Duration {
+	return (p.Period / time.Duration(p.Limit)).Truncate(time.Microsecond)
+}
 
 func (p Policy) burst() int {
 	if p.Burst > 0 {
@@ -108,6 +116,10 @@ func (l *PG) Allow(ctx context.Context, key string, p Policy) (Result, error) {
 		return Result{}, fmt.Errorf("ratelimit: %w", err)
 	}
 	tat, err := l.q.GetTAT(ctx, key)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// строку между отказом и чтением удалила чистка — повтор через интервал
+		return Result{RetryAfter: t}, nil
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("ratelimit: %w", err)
 	}

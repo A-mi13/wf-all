@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -36,6 +37,28 @@ func DefaultRules() Rules {
 			Device: Policy{Limit: 20, Period: time.Minute, Burst: 10},
 		},
 	}
+}
+
+// Validate — на старте api: класс default есть (ручки без x-rate-limit), все политики всех
+// классов валидны. Невалидная политика в работе дала бы ошибку Allow, а Middleware при ошибке
+// пропускает запрос — лимит молча не работал бы.
+func (r Rules) Validate() error {
+	var errs []error
+	if _, ok := r[DefaultClass]; !ok {
+		errs = append(errs, fmt.Errorf("ratelimit: нет класса %s", DefaultClass))
+	}
+	for _, class := range slices.Sorted(maps.Keys(r)) {
+		cp := r[class]
+		for _, k := range []struct {
+			name string
+			p    Policy
+		}{{"ip", cp.IP}, {"user", cp.User}, {"device", cp.Device}} {
+			if err := k.p.Validate(); err != nil {
+				errs = append(errs, fmt.Errorf("%s.%s: %w", class, k.name, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 var (

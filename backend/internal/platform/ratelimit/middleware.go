@@ -44,11 +44,16 @@ func Middleware(l Limiter, r Rules, log *slog.Logger) func(http.Handler) http.Ha
 			if info.IP.IsValid() {
 				checks = append(checks, check{"ip:" + class + ":" + info.IP.String(), cp.IP})
 			}
-			device := info.Device
+			// устройство сессии (s:) и метка BFF (b:) — разные пространства ключей: метка из
+			// cookie, совпавшая строкой с чужим DeviceID, не расходует его лимит
+			device := ""
+			if info.Device != "" {
+				device = "b:" + info.Device
+			}
 			if p, ok := auth.From(ctx); ok {
 				checks = append(checks, check{"user:" + class + ":" + p.UserID.String(), cp.User})
 				if p.DeviceID != uuid.Nil {
-					device = p.DeviceID.String()
+					device = "s:" + p.DeviceID.String()
 				}
 			}
 			if device != "" {

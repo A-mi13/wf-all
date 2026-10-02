@@ -58,6 +58,29 @@ func TestParseRules(t *testing.T) {
 	}
 }
 
+// Rules.Validate — проверка на старте api: все политики всех классов и обязательный default.
+func TestRulesValidate(t *testing.T) {
+	if err := ratelimit.DefaultRules().Validate(); err != nil {
+		t.Fatalf("умолчания отвергнуты: %v", err)
+	}
+	noDefault := ratelimit.DefaultRules()
+	delete(noDefault, ratelimit.DefaultClass)
+	if noDefault.Validate() == nil {
+		t.Fatal("правила без default приняты")
+	}
+	for _, cp := range []ratelimit.ClassPolicy{
+		{IP: ratelimit.Policy{Limit: -1, Period: time.Second}},
+		{User: ratelimit.Policy{Limit: 1}},
+		{Device: ratelimit.Policy{Limit: 1, Period: time.Second, Burst: -1}},
+	} {
+		r := ratelimit.DefaultRules()
+		r["upload"] = cp
+		if r.Validate() == nil {
+			t.Fatalf("принята невалидная политика %+v", cp)
+		}
+	}
+}
+
 // База — переданная карта, а не свежий DefaultRules: ParseRules её не трогает.
 func TestParseRulesKeepsBase(t *testing.T) {
 	base := ratelimit.DefaultRules()

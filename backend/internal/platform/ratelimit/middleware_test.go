@@ -141,6 +141,53 @@ func TestMiddlewareDevice(t *testing.T) {
 	if rec := doDevice(h, http.MethodGet, "/feed", "198.51.100.1", "dev-d", who); rec.Code != 429 {
 		t.Fatalf("сессия, то же устройство с другой меткой BFF: %d", rec.Code)
 	}
+
+	// метка BFF из cookie, совпавшая строкой с чужим DeviceID, не делит с ним счёт
+	victim := &auth.Principal{UserID: uuid.New(), DeviceID: uuid.New()}
+	if rec := doDevice(h, http.MethodGet, "/feed", "192.0.2.1", victim.DeviceID.String(), nil); rec.Code != 204 {
+		t.Fatalf("аноним с меткой-двойником: %d", rec.Code)
+	}
+	if rec := doDevice(h, http.MethodGet, "/feed", "192.0.2.2", "", victim); rec.Code != 204 {
+		t.Fatalf("метка BFF расходовала лимит чужого устройства сессии: %d", rec.Code)
+	}
+}
+
+// recording — Limiter, который запоминает ключи и всё пропускает.
+type recording struct{ keys []string }
+
+func (r *recording) Allow(_ context.Context, key string, _ ratelimit.Policy) (ratelimit.Result, error) {
+	r.keys = append(r.keys, key)
+	return ratelimit.Result{Allowed: true}, nil
+}
+func (*recording) Add(context.Context, string, ratelimit.Policy) error          { return nil }
+func (*recording) Over(context.Context, string, ratelimit.Policy) (bool, error) { return false, nil }
+
+// Формат ключей: <вид>:<класс>:<значение>; устройство — s: (сессия) или b: (метка BFF).
+func TestMiddlewareKeys(t *testing.T) {
+	var logs bytes.Buffer
+	who := &auth.Principal{UserID: uuid.New(), DeviceID: uuid.New()}
+	for _, tc := range []struct {
+		name   string
+		path   string
+		method string
+		device string
+		p      *auth.Principal
+		want   []string
+	}{
+		{"аноним с меткой BFF", "/login", http.MethodPost, "dev-a", nil,
+			[]string{"ip:auth:203.0.113.1", "device:auth:b:dev-a"}},
+		{"пользователь с устройством сессии", "/feed", http.MethodGet, "dev-a", who,
+			[]string{"ip:default:203.0.113.1", "user:default:" + who.UserID.String(), "device:default:s:" + who.DeviceID.String()}},
+		{"пользователь без устройства сессии", "/feed", http.MethodGet, "dev-a", &auth.Principal{UserID: who.UserID},
+			[]string{"ip:default:203.0.113.1", "user:default:" + who.UserID.String(), "device:default:b:dev-a"}},
+	} {
+		rec := &recording{}
+		h := pipeline(t, rec, ratelimit.DefaultRules(), &logs)
+		doDevice(h, tc.method, tc.path, "203.0.113.1", tc.device, tc.p)
+		if strings.Join(rec.keys, " ") != strings.Join(tc.want, " ") {
+			t.Fatalf("%s: ключи %v, нужно %v", tc.name, rec.keys, tc.want)
+		}
+	}
 }
 
 // Маршрут не из контракта лимитом не считается — его ответит роутер.
