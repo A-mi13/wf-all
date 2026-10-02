@@ -69,7 +69,13 @@ func TestRotation(t *testing.T) {
 	if _, err := rotated.Verify(raw); err != nil {
 		t.Fatalf("токен старого ключа отвергнут при ротации: %v", err)
 	}
-	fresh, _, _ := rotated.Access(uuid.New(), uuid.New())
+	fresh, _, err := rotated.Access(uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rotated.Verify(fresh); err != nil {
+		t.Fatalf("токен нового ключа отвергнут: %v", err)
+	}
 	if _, err := old.Verify(fresh); err == nil {
 		t.Fatal("подписал не первый ключ списка")
 	}
@@ -118,6 +124,8 @@ func TestVerifyRejects(t *testing.T) {
 		}(), kid),
 		"неизвестный kid":     sign(jwt.SigningMethodEdDSA, priv, valid(), "unknownkid0"),
 		"без kid":             sign(jwt.SigningMethodEdDSA, priv, valid(), ""),
+		"без iat":             sign(jwt.SigningMethodEdDSA, priv, func() jwt.MapClaims { m := valid(); delete(m, "iat"); return m }(), kid),
+		"без aud":             sign(jwt.SigningMethodEdDSA, priv, func() jwt.MapClaims { m := valid(); delete(m, "aud"); return m }(), kid),
 		"без exp":             sign(jwt.SigningMethodEdDSA, priv, jwt.MapClaims{"sub": uuid.NewString(), "sid": uuid.NewString(), "aud": "public", "iat": start.Unix()}, kid),
 		"sub не UUID":         sign(jwt.SigningMethodEdDSA, priv, func() jwt.MapClaims { m := valid(); m["sub"] = "42"; return m }(), kid),
 		"без sid":             sign(jwt.SigningMethodEdDSA, priv, func() jwt.MapClaims { m := valid(); delete(m, "sid"); return m }(), kid),
@@ -139,6 +147,22 @@ func TestVerifyRejects(t *testing.T) {
 		defer c.Set(start)
 		if _, err := iss.Verify(good); !errors.Is(err, token.ErrInvalid) {
 			t.Fatalf("просроченный принят: %v", err)
+		}
+	})
+
+	// Границы leeway (5 с): расхождение часов в 3 с прощается, 6 с после срока — уже нет.
+	t.Run("iat +3 с принимается", func(t *testing.T) {
+		m := valid()
+		m["iat"] = start.Add(3 * time.Second).Unix()
+		if _, err := iss.Verify(sign(jwt.SigningMethodEdDSA, priv, m, kid)); err != nil {
+			t.Fatalf("iat в пределах leeway отвергнут: %v", err)
+		}
+	})
+	t.Run("exp +6 с отвергается", func(t *testing.T) {
+		c.Set(start.Add(token.AccessTTL + 6*time.Second))
+		defer c.Set(start)
+		if _, err := iss.Verify(good); !errors.Is(err, token.ErrInvalid) {
+			t.Fatalf("истёкший за пределами leeway принят: %v", err)
 		}
 	})
 }

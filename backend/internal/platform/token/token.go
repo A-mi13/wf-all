@@ -139,5 +139,9 @@ func (i *Issuer) Verify(raw string) (Claims, error) {
 	if c.IssuedAt == nil {
 		return Claims{}, fmt.Errorf("%w: iat", ErrInvalid)
 	}
+	// exp обязателен уже в парсере (WithExpirationRequired); здесь — не держаться на одной опции
+	if c.ExpiresAt == nil {
+		return Claims{}, fmt.Errorf("%w: exp", ErrInvalid)
+	}
 	return Claims{UserID: uid, SessionID: sid, IssuedAt: c.IssuedAt.Time.UTC(), ExpiresAt: c.ExpiresAt.Time.UTC()}, nil
 }
