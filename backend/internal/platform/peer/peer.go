@@ -31,15 +31,27 @@ type Info struct {
 	Device string     // метка устройства браузера из cookie BFF; только от BFF
 }
 
+// Config — кому и в чём доверяем; пустой Config не доверяет никому.
 type Config struct {
 	TrustedProxies []netip.Prefix // балансировщик хостинга: им верим X-Forwarded-For
 	BFFNets        []netip.Prefix // адреса BFF (Next.js)
 	BFFSecrets     []string       // общий секрет BFF ↔ API, списком для ротации
 }
 
-// Validate — до старта: слабый секрет или BFF без секрета — конфигурация ошибочна.
+// Validate — до старта: слабый секрет, BFF без секрета, невалидный префикс или префикс /0
+// (доверие всему интернету) — конфигурация ошибочна.
 func (c Config) Validate() error {
 	var errs []error
+	for _, l := range []struct {
+		name string
+		nets []netip.Prefix
+	}{{"TrustedProxies", c.TrustedProxies}, {"BFFNets", c.BFFNets}} {
+		for i, n := range l.nets {
+			if !n.IsValid() || n.Bits() == 0 {
+				errs = append(errs, fmt.Errorf("peer: %s №%d — невалидная сеть или /0", l.name, i+1))
+			}
+		}
+	}
 	if len(c.BFFNets) > 0 && len(c.BFFSecrets) == 0 {
 		errs = append(errs, errors.New("peer: адреса BFF заданы, а секрета нет"))
 	}
@@ -53,19 +65,25 @@ func (c Config) Validate() error {
 
 type infoKey struct{}
 
+// With кладёт Info в контекст — для тестов других пакетов.
 func With(ctx context.Context, i Info) context.Context { return context.WithValue(ctx, infoKey{}, i) }
 
+// From достаёт Info из контекста; если Middleware не проходил — нулевой Info.
 func From(ctx context.Context) Info {
 	i, _ := ctx.Value(infoKey{}).(Info)
 	return i
 }
 
+// Middleware разбирает собеседника запроса и кладёт Info в контекст. Заголовки BFF снимаются
+// всегда: значения уже в Info, а дальше по конвейеру (хендлеры, логи) они только соблазн
+// прочитать непроверенное.
 func Middleware(c Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			info := resolve(c, r)
-			// секрет дальше не нужен никому — и в логи не попадёт
 			r.Header.Del(HeaderBFFSecret)
+			r.Header.Del(HeaderClientIP)
+			r.Header.Del(HeaderDevice)
 			next.ServeHTTP(w, r.WithContext(With(r.Context(), info)))
 		})
 	}
@@ -92,7 +110,7 @@ func resolve(c Config, r *http.Request) Info {
 
 // forwarded — справа налево до первого недоверенного адреса: левее него клиент мог дописать
 // что угодно. Неразбираемая запись обрывает поиск — верим последнему разобранному.
-func forwarded(values []string, trusted []netip.Prefix, peer netip.Addr) netip.Addr {
+func forwarded(values []string, trusted []netip.Prefix, last netip.Addr) netip.Addr {
 	var hops []string
 	for _, v := range values {
 		hops = append(hops, strings.Split(v, ",")...)
@@ -100,14 +118,14 @@ func forwarded(values []string, trusted []netip.Prefix, peer netip.Addr) netip.A
 	for i := len(hops) - 1; i >= 0; i-- {
 		ip, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
 		if err != nil {
-			return peer
+			return last
 		}
-		peer = ip.Unmap()
-		if !contains(trusted, peer) {
-			return peer
+		last = ip.Unmap()
+		if !contains(trusted, last) {
+			return last
 		}
 	}
-	return peer
+	return last
 }
 
 func contains(nets []netip.Prefix, a netip.Addr) bool {

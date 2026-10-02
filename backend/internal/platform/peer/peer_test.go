@@ -61,6 +61,8 @@ func TestResolve(t *testing.T) {
 		{"BFF с верным секретом", req{"192.0.2.10:5000", bff}, "198.51.100.7", true, "web-dev-1"},
 		{"BFF за прокси хостинга", req{"10.1.2.3:4000", map[string]string{"X-Forwarded-For": "192.0.2.10",
 			peer.HeaderBFFSecret: secret, peer.HeaderClientIP: "198.51.100.7"}}, "198.51.100.7", true, ""},
+		// ротация: старый секрет ещё действует
+		{"BFF со старым секретом", req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: strings.Repeat("o", 32), peer.HeaderClientIP: "198.51.100.7"}}, "198.51.100.7", true, ""},
 		{"BFF с неверным секретом", req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: strings.Repeat("x", 32), peer.HeaderClientIP: "198.51.100.7"}}, "192.0.2.10", false, ""},
 		{"верный секрет не с адреса BFF", req{"203.0.113.5:4000", bff}, "203.0.113.5", false, ""},
 		{"BFF с битым X-WF-Client-IP", req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: secret, peer.HeaderClientIP: "nope"}}, "192.0.2.10", false, ""},
@@ -68,6 +70,13 @@ func TestResolve(t *testing.T) {
 		{"IPv6", req{"[2001:db8::1]:4000", nil}, "2001:db8::1", false, ""},
 		{"метка устройства длиннее 128 — отброшена", req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: secret,
 			peer.HeaderClientIP: "198.51.100.7", peer.HeaderDevice: strings.Repeat("d", 129)}}, "198.51.100.7", true, ""},
+		{"метка устройства ровно 128 — принята", req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: secret,
+			peer.HeaderClientIP: "198.51.100.7", peer.HeaderDevice: strings.Repeat("d", 128)}}, "198.51.100.7", true, strings.Repeat("d", 128)},
+		{"метка устройства с пробелом — отброшена", req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: secret,
+			peer.HeaderClientIP: "198.51.100.7", peer.HeaderDevice: "web dev"}}, "198.51.100.7", true, ""},
+		{"метка устройства с управляющим символом — отброшена", req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: secret,
+			peer.HeaderClientIP: "198.51.100.7", peer.HeaderDevice: "web\x01dev"}}, "198.51.100.7", true, ""},
+		{"метка устройства не от BFF — игнорируется", req{"203.0.113.5:4000", map[string]string{peer.HeaderDevice: "web-dev-1"}}, "203.0.113.5", false, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -79,11 +88,29 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-// Секрет BFF не уходит дальше по конвейеру (логи, хендлеры) ни при каком исходе.
-func TestSecretHeaderRemoved(t *testing.T) {
-	_, h := resolve(t, cfg, req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: secret, peer.HeaderClientIP: "198.51.100.7"}})
-	if h.Get(peer.HeaderBFFSecret) != "" {
-		t.Fatal("секрет BFF дошёл до хендлера")
+// Заголовки BFF не уходят дальше по конвейеру (логи, хендлеры) ни при каком исходе:
+// их значения уже в Info, а секрет не нужен никому.
+func TestBFFHeadersRemoved(t *testing.T) {
+	all := func(s string) map[string]string {
+		return map[string]string{peer.HeaderBFFSecret: s, peer.HeaderClientIP: "198.51.100.7", peer.HeaderDevice: "web-dev-1"}
+	}
+	cases := []struct {
+		name string
+		r    req
+	}{
+		{"верный секрет", req{"192.0.2.10:5000", all(secret)}},
+		{"неверный секрет", req{"192.0.2.10:5000", all(strings.Repeat("x", 32))}},
+		{"не с адреса BFF", req{"203.0.113.5:4000", all(secret)}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, h := resolve(t, cfg, c.r)
+			for _, k := range []string{peer.HeaderBFFSecret, peer.HeaderClientIP, peer.HeaderDevice} {
+				if h.Get(k) != "" {
+					t.Fatalf("заголовок %s дошёл до хендлера", k)
+				}
+			}
+		})
 	}
 }
 
@@ -107,5 +134,17 @@ func TestConfigValidate(t *testing.T) {
 	noSecret := peer.Config{BFFNets: cfg.BFFNets}
 	if noSecret.Validate() == nil {
 		t.Fatal("адреса BFF без секрета приняты")
+	}
+	// префикс /0 сделал бы доверенным весь интернет; нулевой Prefix — ошибка разбора конфига
+	for name, bad := range map[string]peer.Config{
+		"/0 в TrustedProxies":      {TrustedProxies: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}},
+		"IPv6 /0 в TrustedProxies": {TrustedProxies: []netip.Prefix{netip.MustParsePrefix("::/0")}},
+		"невалидный в Trusted":     {TrustedProxies: []netip.Prefix{{}}},
+		"/0 в BFFNets":             {BFFNets: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}, BFFSecrets: cfg.BFFSecrets},
+		"невалидный в BFFNets":     {BFFNets: []netip.Prefix{{}}, BFFSecrets: cfg.BFFSecrets},
+	} {
+		if bad.Validate() == nil {
+			t.Fatalf("%s принят", name)
+		}
 	}
 }
