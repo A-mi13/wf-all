@@ -172,8 +172,9 @@ func resolve(c Config, r *http.Request) Info {
 // X-Forwarded-For так не годится: прокси хостинга дописывает его, и справа от клиента стоит
 // публичный узел CDN — общий для всех клиентов за ним. IP отсюда — сигнал для лимитов и риска,
 // не фактор входа и прав.
-// Годится ровно одна строка с голым публичным IP без зоны; иначе (запятые, порт, мусор, пусто,
-// частный, петля, нулевой, multicast) — false, и адрес берётся прежним путём из X-Forwarded-For.
+// Годится ровно одна строка с голым IP без зоны — не частный, не петля, не нулевой, не
+// multicast/link-local; иначе (запятые, порт, мусор, пусто, такие адреса) — false, и адрес берётся
+// прежним путём из X-Forwarded-For.
 func fromCDN(h http.Header, name string) (netip.Addr, bool) {
 	if name == "" {
 		return netip.Addr{}, false
@@ -187,9 +188,9 @@ func fromCDN(h http.Header, name string) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	ip = ip.Unmap()
-	// защита в глубину: CDN передаёт публичный адрес посетителя; частный адрес в заголовке — не от
-	// CDN (и мог бы совпасть с сетью BFF или прокси)
-	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() {
+	// защита в глубину: частный адрес в заголовке — не от CDN (и мог бы совпасть с сетью BFF или
+	// прокси); петлю, нулевой, multicast и link-local отсекает IsGlobalUnicast
+	if !ip.IsGlobalUnicast() || ip.IsPrivate() {
 		return netip.Addr{}, false
 	}
 	return ip, true

@@ -614,8 +614,9 @@ contracts/openapi/
   который CDN ставит сам, затирая присланный клиентом (`CF-Connecting-IP`), —
   `API_CLIENT_IP_HEADER` (`ADMIN_CLIENT_IP_HEADER`), по умолчанию пусто. Заголовок читается
   **только от пира из `TrustedProxies`** (пришедший мимо прокси клиент себе IP не выберет) и
-  важнее `X-Forwarded-For`; годится ровно одна строка с голым публичным IP (IPv4-mapped
-  разворачивается; частный, петля, нулевой, multicast, с зоной — нет), иначе — прежний разбор
+  важнее `X-Forwarded-For`; годится ровно одна строка с голым IP — не частный, не петля, не
+  нулевой, не multicast/link-local, без зоны (IPv4-mapped разворачивается; 240/4 Pseudo IPv4
+  Cloudflare принимается), иначе — прежний разбор
   `X-Forwarded-For` (запасной путь, не подделывается). На старте: имя — HTTP token, не заголовок
   BFF, не `X-Forwarded-For`, `Forwarded` и `X-Real-IP` (их присылает сам клиент), задан без
   `TrustedProxies` — отказ. Для Cloudflare — только `CF-Connecting-IP`; другое имя — только после

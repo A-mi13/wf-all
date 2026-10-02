@@ -167,6 +167,9 @@ func TestClientIPHeader(t *testing.T) {
 		{"частный IPv6 (ULA)", cdn, render("fd00::1"), "104.16.0.1"},
 		{"link-local IPv6 без зоны", cdn, render("fe80::1"), "104.16.0.1"},
 		{"multicast", cdn, render("224.0.0.1"), "104.16.0.1"},
+		// Cloudflare Pseudo IPv4 (режим overwrite) кладёт IPv6-клиентам адреса из 240.0.0.0/4: отказ
+		// им отправил бы IPv6-клиентов в общую корзину узла CDN
+		{"Pseudo IPv4 Cloudflare (240/4)", cdn, render("240.0.0.1"), "240.0.0.1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
