@@ -143,5 +143,5 @@ func (i *Issuer) Verify(raw string) (Claims, error) {
 	if c.ExpiresAt == nil {
 		return Claims{}, fmt.Errorf("%w: exp", ErrInvalid)
 	}
-	return Claims{UserID: uid, SessionID: sid, IssuedAt: c.IssuedAt.Time.UTC(), ExpiresAt: c.ExpiresAt.Time.UTC()}, nil
+	return Claims{UserID: uid, SessionID: sid, IssuedAt: c.IssuedAt.UTC(), ExpiresAt: c.ExpiresAt.UTC()}, nil
 }

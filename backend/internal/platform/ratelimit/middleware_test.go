@@ -51,7 +51,7 @@ func do(h http.Handler, method, path, ip string, p *auth.Principal) *httptest.Re
 }
 
 func doDevice(h http.Handler, method, path, ip, device string, p *auth.Principal) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, path, nil)
+	r := httptest.NewRequestWithContext(context.Background(), method, path, nil)
 	ctx := peer.With(r.Context(), peer.Info{IP: netip.MustParseAddr(ip), Device: device})
 	if p != nil {
 		ctx = auth.With(ctx, p)

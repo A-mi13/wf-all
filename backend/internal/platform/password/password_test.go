@@ -103,18 +103,18 @@ func TestVerifyDummyCostsLikeVerify(t *testing.T) {
 	h := hasher(t, password.DefaultParams)
 	enc, _ := h.Hash(ctx, "correct horse battery staple")
 	const rounds = 5
-	real, dummy := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
+	verifyTime, dummy := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
 	for range rounds {
 		start := time.Now()
 		_, _, _ = h.Verify(ctx, "wrong", enc)
-		real = min(real, time.Since(start))
+		verifyTime = min(verifyTime, time.Since(start))
 		start = time.Now()
 		if err := h.VerifyDummy(ctx, "wrong"); err != nil {
 			t.Fatal(err)
 		}
 		dummy = min(dummy, time.Since(start))
 	}
-	if dummy < real/3 {
-		t.Fatalf("фиктивная проверка %v против настоящей %v (минимумы из %d) — argon2 пропущен", dummy, real, rounds)
+	if dummy < verifyTime/3 {
+		t.Fatalf("фиктивная проверка %v против настоящей %v (минимумы из %d) — argon2 пропущен", dummy, verifyTime, rounds)
 	}
 }

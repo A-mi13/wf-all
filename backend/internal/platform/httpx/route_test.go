@@ -41,7 +41,7 @@ func TestRoutesPutsOperationInContext(t *testing.T) {
 		got, found = httpx.RouteFrom(r.Context())
 	}))
 
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/things/42", nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/things/42", nil))
 	if !found || got.Operation().OperationID != "getThing" {
 		t.Fatalf("маршрут: found=%v %+v", found, got)
 	}
@@ -52,8 +52,8 @@ func TestRoutesPutsOperationInContext(t *testing.T) {
 
 	// маршрут не из контракта и чужой метод — дальше без Route: ответит роутер (404/405)
 	for _, req := range []*http.Request{
-		httptest.NewRequest(http.MethodGet, "/docs", nil),
-		httptest.NewRequest(http.MethodDelete, "/things/42", nil),
+		httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/docs", nil),
+		httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/things/42", nil),
 	} {
 		found = true
 		h.ServeHTTP(httptest.NewRecorder(), req)
@@ -63,7 +63,8 @@ func TestRoutesPutsOperationInContext(t *testing.T) {
 	}
 }
 
-const bearerSpec = `
+// securedSpec — спека, где часть операций требует bearer. Имя без «bearer»: иначе gosec G101 принимает константу за секрет.
+const securedSpec = `
 openapi: 3.0.3
 info: {title: t, version: "1"}
 security:
@@ -100,11 +101,11 @@ func TestRouteAcceptsBearer(t *testing.T) {
 		spec, path string
 		want       bool
 	}{
-		{bearerSpec, "/inherited", true},
-		{bearerSpec, "/anonymous", false},
-		{bearerSpec, "/empty-requirement", false},
-		{bearerSpec, "/optional", true},
-		{bearerSpec, "/other-scheme", false},
+		{securedSpec, "/inherited", true},
+		{securedSpec, "/anonymous", false},
+		{securedSpec, "/empty-requirement", false},
+		{securedSpec, "/optional", true},
+		{securedSpec, "/other-scheme", false},
 		{noSecuritySpec, "/plain", false},
 	}
 	for _, c := range cases {
@@ -119,7 +120,7 @@ func TestRouteAcceptsBearer(t *testing.T) {
 		var got *httpx.Route
 		routes(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			got, _ = httpx.RouteFrom(r.Context())
-		})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, c.path, nil))
+		})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, c.path, nil))
 		if got == nil {
 			t.Fatalf("%s: нет маршрута", c.path)
 		}

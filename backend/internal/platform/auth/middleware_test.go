@@ -72,7 +72,7 @@ func TestMiddleware(t *testing.T) {
 					got, _ = auth.From(r.Context())
 					w.WriteHeader(http.StatusNoContent)
 				}))
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 			if c.header != "" {
 				req.Header.Set("Authorization", c.header)
 			}
@@ -155,7 +155,7 @@ func TestMiddlewareIgnoresAuthorizationOnAnonymousOperation(t *testing.T) {
 					got, _ = auth.From(r.Context())
 					w.WriteHeader(http.StatusNoContent)
 				})))
-			req := httptest.NewRequest(http.MethodGet, c.path, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, c.path, nil)
 			req.Header.Set("Authorization", c.header)
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
@@ -181,7 +181,7 @@ func TestMiddlewareLoaderPanic(t *testing.T) {
 	called := false
 	h := auth.Middleware(v, l, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))(
 		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer good")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -202,7 +202,7 @@ func TestMiddlewareNilPrincipal(t *testing.T) {
 	called := false
 	h := auth.Middleware(v, loader, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))(
 		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer good")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

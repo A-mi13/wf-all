@@ -42,7 +42,7 @@ func TestDeleteExpiredKeepsKeyReclaimedConcurrently(t *testing.T) {
 		_, err := idempotencydb.New(pool).DeleteExpired(ctx, 100)
 		done <- err
 	}()
-	waitForLockWaiter(t, ctx, pool)
+	waitForLockWaiter(ctx, t, pool)
 
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestDeleteExpiredKeepsKeyReclaimedConcurrently(t *testing.T) {
 }
 
 // waitForLockWaiter ждёт, пока в базе теста появится соединение, ожидающее блокировку.
-func waitForLockWaiter(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+func waitForLockWaiter(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

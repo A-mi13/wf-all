@@ -141,7 +141,7 @@ func header(k, v string) func(*http.Request) {
 }
 
 func (e *env) do(method, path, key, body string, opts ...func(*http.Request)) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	r := httptest.NewRequestWithContext(context.Background(), method, path, strings.NewReader(body))
 	if key != "" {
 		r.Header.Set(idempotency.Header, key)
 	}
@@ -472,7 +472,7 @@ func TestPassthrough(t *testing.T) {
 	if rec := e.do(http.MethodPost, "/v1/things", "", `{}`); rec.Code != http.StatusCreated {
 		t.Fatalf("без ключа: %d", rec.Code)
 	}
-	r := httptest.NewRequest(http.MethodPost, "/v1/things", strings.NewReader(`{}`))
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/things", strings.NewReader(`{}`))
 	r.Header.Set(idempotency.Header, key)
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, r)

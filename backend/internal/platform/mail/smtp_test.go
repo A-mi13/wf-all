@@ -22,7 +22,7 @@ func smtpServer(t *testing.T) (string, <-chan string) {
 // ext — дополнительные расширения в ответе EHLO (ENHANCEDSTATUSCODES).
 func smtpServerRcpt(t *testing.T, rejectRcpt bool, ext ...string) (string, <-chan string) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

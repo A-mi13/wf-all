@@ -2,6 +2,7 @@ package httpx_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,7 +33,7 @@ func TestWriteErrorProblemError(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&logs, nil))
 	err := fmt.Errorf("teams: создать: %w", httpx.NewError(http.StatusConflict, httpx.CodeIdempotencyInProgress))
 	rec := httptest.NewRecorder()
-	httpx.WriteError(log, rec, httptest.NewRequest(http.MethodPost, "/x", nil), err)
+	httpx.WriteError(log, rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil), err)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("статус = %d", rec.Code)
 	}
@@ -48,7 +49,7 @@ func TestWriteErrorUnknownIsInternal(t *testing.T) {
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, nil))
 	rec := httptest.NewRecorder()
-	httpx.WriteError(log, rec, httptest.NewRequest(http.MethodGet, "/x", nil), errors.New("pgx: сломалось"))
+	httpx.WriteError(log, rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil), errors.New("pgx: сломалось"))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("статус = %d", rec.Code)
 	}
@@ -69,7 +70,7 @@ func TestResponseErrorHandler(t *testing.T) {
 	handle := httpx.ResponseErrorHandler(slog.New(slog.NewTextHandler(&logs, nil)))
 
 	rec := httptest.NewRecorder()
-	handle(rec, httptest.NewRequest(http.MethodPost, "/x", nil),
+	handle(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil),
 		fmt.Errorf("x: %w", httpx.NewError(http.StatusForbidden, httpx.CodeFeatureDisabled)))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("статус = %d", rec.Code)
@@ -82,7 +83,7 @@ func TestResponseErrorHandler(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	handle(rec, httptest.NewRequest(http.MethodGet, "/x", nil), errors.New("pgx: сломалось"))
+	handle(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil), errors.New("pgx: сломалось"))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("статус = %d", rec.Code)
 	}
@@ -97,7 +98,7 @@ func TestResponseErrorHandler(t *testing.T) {
 // Retry-After — заголовком, не полем тела; задача антибота — в теле.
 func TestWriteProblemValueRetryAfterAndChallenge(t *testing.T) {
 	rec := httptest.NewRecorder()
-	httpx.WriteProblemValue(rec, httptest.NewRequest(http.MethodGet, "/x", nil), httpx.Problem{
+	httpx.WriteProblemValue(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil), httpx.Problem{
 		Status: http.StatusTooManyRequests, Code: httpx.CodeRateLimited, RetryAfter: 7,
 	})
 	if got := rec.Header().Get("Retry-After"); got != "7" {
@@ -111,7 +112,7 @@ func TestWriteProblemValueRetryAfterAndChallenge(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	httpx.WriteProblemValue(rec, httptest.NewRequest(http.MethodGet, "/x", nil), httpx.Problem{
+	httpx.WriteProblemValue(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil), httpx.Problem{
 		Status: http.StatusForbidden, Code: httpx.CodeHumancheckRequired, Challenge: map[string]any{"salt": "s"},
 	})
 	m = decode(t, rec)

@@ -29,8 +29,11 @@ func TestDecodeAcceptsAllBase64Forms(t *testing.T) {
 
 func TestIDIsStableShortAndDistinct(t *testing.T) {
 	a, b := []byte("ключ-а"), []byte("ключ-б")
-	if keys.ID(a) != keys.ID(a) || keys.ID(a) == keys.ID(b) || len(keys.ID(a)) != 11 {
-		t.Fatalf("ID: %q %q", keys.ID(a), keys.ID(b))
+	// Детерминизм: ID зависит только от содержимого ключа, а не от вызова. Копия среза —
+	// чтобы сравнение не свелось к одному и тому же значению и не зависело от адреса данных.
+	first, second := keys.ID(a), keys.ID(append([]byte(nil), a...))
+	if first != second || first == keys.ID(b) || len(first) != 11 {
+		t.Fatalf("ID: %q %q %q", first, second, keys.ID(b))
 	}
 }
 

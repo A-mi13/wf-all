@@ -49,7 +49,7 @@ func TestMiddlewareCarriesSolution(t *testing.T) {
 	h := humancheck.Middleware()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got = humancheck.Require(r.Context(), pow)
 	}))
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil)
 	r.Header.Set(humancheck.Header, s)
 	h.ServeHTTP(httptest.NewRecorder(), r)
 	if got != nil {

@@ -1,6 +1,7 @@
 package peer_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -31,7 +32,7 @@ func resolve(t *testing.T, c peer.Config, r req) (peer.Info, http.Header) {
 	h := peer.Middleware(c)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got, seen = peer.From(r.Context()), r.Header.Clone()
 	}))
-	hr := httptest.NewRequest(http.MethodGet, "/", nil)
+	hr := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 	hr.RemoteAddr = r.remote
 	for k, v := range r.headers {
 		hr.Header.Set(k, v)

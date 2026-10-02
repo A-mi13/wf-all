@@ -184,7 +184,7 @@ func TestInTxRunsHookFirstInSameTx(t *testing.T) {
 	hctx := db.WithTxHook(ctx, hook)
 
 	errBusiness := errors.New("бизнес-ошибка")
-	err := db.InTx(hctx, pool, func(ctx context.Context, tx pgx.Tx) error {
+	err := db.InTx(hctx, pool, func(_ context.Context, _ pgx.Tx) error {
 		order = append(order, "fn")
 		return errBusiness
 	})

@@ -17,7 +17,7 @@ import (
 const (
 	HeaderClientIP  = "X-WF-Client-IP"
 	HeaderDevice    = "X-WF-Device"
-	HeaderBFFSecret = "X-WF-BFF-Secret"
+	HeaderBFFSecret = "X-WF-BFF-Secret" //nolint:gosec // G101: имя HTTP-заголовка, а не значение секрета
 	headerForwarded = "X-Forwarded-For"
 
 	minSecretLen = 32
