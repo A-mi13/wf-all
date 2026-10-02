@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
@@ -143,7 +144,7 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 		"без базы":     func(o *admin.Options) { o.DB = nil },
 		"без лимитера": func(o *admin.Options) { o.Limiter = nil },
 		"без правил":   func(o *admin.Options) { o.RateRules = nil },
-		"класс x-rate-limit без правила": func(o *admin.Options) {
+		"нет класса default": func(o *admin.Options) {
 			o.RateRules = ratelimit.Rules{"auth": ratelimit.DefaultRules()["auth"]} // нет default
 		},
 		"невалидная политика": func(o *admin.Options) {
@@ -162,13 +163,42 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 	}
 }
 
-// Страж: каждый класс x-rate-limit контракта админки описан в правилах по умолчанию.
+// Страж: каждый класс x-rate-limit контракта описан в правилах по умолчанию. Пока в контракте
+// нет ни одной операции с x-rate-limit, проверять нечего — тест пропускается явно, а не
+// проходит вхолостую; с первой такой операцией страж станет активным сам.
 func TestRateLimitClassesKnown(t *testing.T) {
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
 	}
+	// при пустых правилах UnknownClasses перечисляет все операции с x-rate-limit
+	if len(ratelimit.UnknownClasses(spec, ratelimit.Rules{})) == 0 {
+		t.Skip("в контракте нет x-rate-limit — страж станет активным с первой такой операцией")
+	}
 	for _, v := range ratelimit.UnknownClasses(spec, ratelimit.DefaultRules()) {
 		t.Error(v)
 	}
 }
+
+// Конвейер собран: rate limit подключён и стоит до хендлера.
+func TestPipelineWired(t *testing.T) {
+	o := testOptions(t)
+	o.Limiter = denyAll{}
+	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil))
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("лимит: %d %v", rec.Code, rec.Header())
+	}
+}
+
+type denyAll struct{}
+
+func (denyAll) Allow(context.Context, string, ratelimit.Policy) (ratelimit.Result, error) {
+	return ratelimit.Result{RetryAfter: 5 * time.Second}, nil
+}
+func (denyAll) Add(context.Context, string, ratelimit.Policy) error          { return nil }
+func (denyAll) Over(context.Context, string, ratelimit.Policy) (bool, error) { return true, nil }

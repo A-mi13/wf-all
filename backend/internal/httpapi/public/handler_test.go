@@ -168,11 +168,23 @@ func TestPipelineWired(t *testing.T) {
 	}
 
 	o.Limiter = denyAll{}
-	h, _ = public.NewHandler(slog.New(slog.DiscardHandler), o)
+	h, err = public.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil))
 	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("лимит: %d %v", rec.Code, rec.Header())
+	}
+
+	// порядок: аутентификация до rate limit — битый токен отвергается, не расходуя лимит
+	r = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil)
+	r.Header.Set("Authorization", "Bearer garbage")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("битый токен при исчерпанном лимите: %d %s — ждали 401 (auth до ratelimit)", rec.Code, rec.Body.String())
 	}
 }
 
@@ -193,7 +205,7 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 		"без сессий":   func(o *public.Options) { o.Sessions = nil },
 		"без лимитера": func(o *public.Options) { o.Limiter = nil },
 		"без правил":   func(o *public.Options) { o.RateRules = nil },
-		"класс x-rate-limit без правила": func(o *public.Options) {
+		"нет класса default": func(o *public.Options) {
 			o.RateRules = ratelimit.Rules{"auth": ratelimit.DefaultRules()["auth"]} // нет default
 		},
 		"невалидная политика": func(o *public.Options) {
@@ -212,11 +224,17 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 	}
 }
 
-// Страж: каждый класс x-rate-limit контракта описан в правилах по умолчанию.
+// Страж: каждый класс x-rate-limit контракта описан в правилах по умолчанию. Пока в контракте
+// нет ни одной операции с x-rate-limit, проверять нечего — тест пропускается явно, а не
+// проходит вхолостую; с первой такой операцией страж станет активным сам.
 func TestRateLimitClassesKnown(t *testing.T) {
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
+	}
+	// при пустых правилах UnknownClasses перечисляет все операции с x-rate-limit
+	if len(ratelimit.UnknownClasses(spec, ratelimit.Rules{})) == 0 {
+		t.Skip("в контракте нет x-rate-limit — страж станет активным с первой такой операцией")
 	}
 	for _, v := range ratelimit.UnknownClasses(spec, ratelimit.DefaultRules()) {
 		t.Error(v)

@@ -19,6 +19,7 @@ import (
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/humancheck"
+	"wf/backend/internal/platform/keys"
 	"wf/backend/internal/platform/peer"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/server"
@@ -40,8 +41,11 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 		return err
 	}
 	// ключи, лимиты и доверие к заголовкам проверяются до подключения к базе
-	keys, err := token.ParseKeys(cfg.Auth.JWTSeeds)
+	jwtKeys, err := token.ParseKeys(cfg.Auth.JWTSeeds)
 	if err != nil {
+		return err
+	}
+	if err := checkHumancheckKeys(cfg.Humancheck.Keys); err != nil {
 		return err
 	}
 	rules, err := ratelimit.ParseRules(cfg.RateLimits, ratelimit.DefaultRules())
@@ -57,7 +61,8 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	}
 	return server.RunHTTP(ctx, "api", server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB}, logOut,
 		func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error) {
-			// ключи PoW проверяются на старте; сценарии identity получат этот же PoW
+			// срок и сложность PoW проверяются здесь, ключи — ещё до базы; сценарии identity
+			// получат этот же PoW
 			if _, err := humancheck.NewPoW(pool, clock.System, humancheck.PoWConfig{
 				Keys: cfg.Humancheck.Keys, TTL: cfg.Humancheck.TTL, MaxNumber: cfg.Humancheck.MaxNumber,
 			}); err != nil {
@@ -68,11 +73,29 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 				RequestTimeout: cfg.HTTP.RequestTimeout,
 				Peer:           pc,
 				DB:             pool,
-				Tokens:         token.NewIssuer(keys, clock.System),
+				Tokens:         token.NewIssuer(jwtKeys, clock.System),
 				// сессий нет до спеки identity: любой токен — 401; identity подставит свой загрузчик
 				Sessions:  auth.NewCachedLoader(auth.NoSessions, 5*time.Second, clock.System, 100_000),
 				Limiter:   ratelimit.NewPG(pool, clock.System),
 				RateRules: rules,
 			})
 		})
+}
+
+// minHumancheckKey — ключ HMAC задач антибота не короче 256 бит (humancheck.NewPoW).
+const minHumancheckKey = 32
+
+// checkHumancheckKeys — ключи PoW до подключения к базе: битый ключ — отказ старта сразу, а не
+// после открытия пула. Полную проверку повторяет humancheck.NewPoW.
+func checkHumancheckKeys(list []string) error {
+	for i, s := range list {
+		k, err := keys.Decode(s)
+		if err != nil {
+			return fmt.Errorf("humancheck: ключ №%d: %w", i+1, err)
+		}
+		if len(k) < minHumancheckKey {
+			return fmt.Errorf("humancheck: ключ №%d — %d байт, нужно ≥ %d", i+1, len(k), minHumancheckKey)
+		}
+	}
+	return nil
 }

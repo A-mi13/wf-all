@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/health"
@@ -42,7 +43,7 @@ func RunHTTP(ctx context.Context, name string, c HTTPConfig, logOut io.Writer,
 	}
 	// пробы — до хендлера бинарника: без логов доступа и проверки по контракту; /readyz
 	// открыт — пинг базы не чаще раза в секунду
-	h = health.Handler(health.Cached(pool.Ping, time.Second, time.Now), h)
+	h = health.Handler(health.Cached(pool.Ping, time.Second, clock.System.Now), h)
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", c.HTTP.Addr)
 	if err != nil {
