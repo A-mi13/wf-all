@@ -9,15 +9,18 @@ import (
 )
 
 var (
-	// local@домен: локальная часть скрывается, домен остаётся для разбора инцидентов
-	emailRe = regexp.MustCompile(`[\p{L}\p{N}._%+\-]+@(?:[\p{L}\p{N}\-]+\.)+\p{L}{2,}`)
+	// local@домен: локальная часть скрывается, домен остаётся для разбора инцидентов.
+	// Локальная часть — любые символы, кроме пробелов, кавычек, скобок, разделителей
+	// (`=`, `:`, `,`, `;`, `/`, `?`, `&`) и «@»; апостроф допустим, но не первым (`'a@b.co'`).
+	emailRe = regexp.MustCompile(`[^\s"'<>(),;:=@/\\\[\]{}?&][^\s"<>(),;:=@/\\\[\]{}?&]*@(?:[\p{L}\p{N}\-]+\.)+\p{L}{2,}`)
 	// кандидат в телефон: 10–15 цифр, между ними — пробелы, скобки, дефисы
 	phoneRe = regexp.MustCompile(`\+?\d(?:[\s()\-]{0,2}\d){9,14}`)
 )
 
 // Mask скрывает персональные данные в строке лога (спека §6.9): почту — до «***@домен»,
-// номер телефона — до «***» и двух последних цифр. Цифры, приклеенные к букве, точке,
-// двоеточию или дефису (UUID, хеш, адрес, дата), — не телефон и не трогаются.
+// номер телефона — до «***» и двух последних цифр. Цифры, приклеенные к букве или цифре
+// (UUID, хеш, адрес, дата), — не телефон и не трогаются; знак препинания рядом с номером
+// (`79161234567:`, `79161234567.`, `phone:+7…`) его не защищает — см. gluedBefore/gluedAfter.
 func Mask(s string) string {
 	if s == "" {
 		return s
@@ -37,9 +40,7 @@ func maskPhones(s string) string {
 	last := 0
 	for _, l := range locs {
 		start, end := l[0], l[1]
-		before, _ := utf8.DecodeLastRuneInString(s[:start])
-		after, _ := utf8.DecodeRuneInString(s[end:])
-		if glued(before) || glued(after) {
+		if gluedBefore(s[:start]) || gluedAfter(s[end:]) {
 			continue
 		}
 		b.WriteString(s[last:start])
@@ -51,12 +52,48 @@ func maskPhones(s string) string {
 	return b.String()
 }
 
-// glued — символ продолжает «слово»: совпадение — часть UUID, хеша, даты или адреса.
-func glued(r rune) bool {
-	if r == utf8.RuneError {
-		return false // начало или конец строки
+// gluedBefore — совпадение продолжает «слово» слева: оно часть UUID, хеша, десятичной дроби
+// или адреса. Склеивают буква и цифра; «-» — только после hex-символа (хвост UUID), «.» —
+// только после цифры (дробь, IPv4). «:», «_», «=» и прочее — границы: `phone:+7…`, `phone_7…`.
+func gluedBefore(s string) bool {
+	r, size := utf8.DecodeLastRuneInString(s)
+	if size == 0 {
+		return false // начало строки
 	}
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("-.:_", r)
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		return true
+	}
+	switch r {
+	case '-':
+		p, n := utf8.DecodeLastRuneInString(s[:len(s)-size])
+		return n > 0 && isHex(p)
+	case '.':
+		p, n := utf8.DecodeLastRuneInString(s[:len(s)-size])
+		return n > 0 && unicode.IsDigit(p)
+	}
+	return false
+}
+
+// gluedAfter — то же справа. Склеивают буква и цифра; «-», «.», «:» — только если за ними
+// снова цифра (дата, адрес с портом, продолжение номера). Иначе это знак препинания:
+// `79161234567: blocked`, `звонок на 79161234567.`.
+func gluedAfter(s string) bool {
+	r, size := utf8.DecodeRuneInString(s)
+	if size == 0 {
+		return false // конец строки
+	}
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		return true
+	}
+	if strings.ContainsRune("-.:", r) {
+		n, nsize := utf8.DecodeRuneInString(s[size:])
+		return nsize > 0 && unicode.IsDigit(n)
+	}
+	return false
+}
+
+func isHex(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
 }
 
 func lastDigits(s string, n int) string {
