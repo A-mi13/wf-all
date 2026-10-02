@@ -2,6 +2,7 @@
 // clock.System, в тестах — clocktest.Fake. Хранится и передаётся только UTC; местное время
 // считается по таймзоне места (поле → город) функцией In. База таймзон вшита в бинарник
 // (time/tzdata): контейнер без tzdata не ломает расчёт местного времени.
+// Длительности и таймауты меряются time.Since, не через Clock (UTC снимает монотонные показания).
 package clock
 
 import (
@@ -20,7 +21,7 @@ type system struct{}
 
 func (system) Now() time.Time { return time.Now().UTC() }
 
-// System — настоящие часы, время в UTC.
+// System — настоящие часы, время в UTC. Не присваивать: в тестах часы передаются параметром clock.Clock.
 var System Clock = system{}
 
 // ErrNoZone — ни одной непустой таймзоны не передано.

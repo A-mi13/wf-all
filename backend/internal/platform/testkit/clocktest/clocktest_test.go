@@ -31,12 +31,20 @@ func TestFakeSetAndAdvance(t *testing.T) {
 func TestFakeConcurrentAdvance(t *testing.T) {
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	f := clocktest.New(start)
+	// нагрузка подобрана так, чтобы потерянные сдвиги ловились и без -race
+	const workers, iterations = 8, 10_000
 	var wg sync.WaitGroup
-	for range 100 {
-		wg.Go(func() { f.Advance(time.Second); _ = f.Now() })
+	for range workers {
+		wg.Go(func() {
+			for range iterations {
+				f.Advance(time.Second)
+				_ = f.Now()
+			}
+		})
 	}
 	wg.Wait()
-	if got := f.Now(); !got.Equal(start.Add(100 * time.Second)) {
-		t.Fatalf("после 100 сдвигов: %v", got)
+	want := start.Add(workers * iterations * time.Second)
+	if got := f.Now(); !got.Equal(want) {
+		t.Fatalf("после %d сдвигов: %v, нужно %v", workers*iterations, got, want)
 	}
 }
