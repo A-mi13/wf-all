@@ -142,7 +142,7 @@ func TestClientIPHeader(t *testing.T) {
 		r    req
 		ip   string
 	}{
-		{"Render-цепочка: адрес из заголовка", cdn, render("203.0.113.7"), "203.0.113.7"},
+		{"пир 10.x (платный тариф / без локального прокси): адрес из заголовка", cdn, render("203.0.113.7"), "203.0.113.7"},
 		// пин старого поведения: без настройки клиентом становится узел Cloudflare — общий для всех за ним
 		{"без настройки — узел CDN из X-Forwarded-For", cfg, render("203.0.113.7"), "104.16.0.1"},
 		{"имя заголовка без учёта регистра", peer.Config{TrustedProxies: cfg.TrustedProxies, ClientIPHeader: "cf-connecting-ip"},
@@ -230,6 +230,57 @@ func TestClientIPHeaderPrivateBFFAddrRejected(t *testing.T) {
 	}
 }
 
+// Render, бесплатный тариф (стенд, лог 02.10.2026): к приложению подключается локальный прокси
+// Render внутри контейнера по петле [::1], а не балансировщик 10.x. XFF — «клиент, узел Cloudflare,
+// 10.x Render», заголовок CDN верен. Петля обязана быть в TrustedProxies (::1/128), иначе заголовок
+// CDN и X-Forwarded-For не читаются и все клиенты получают один IP ::1 — общий лимит.
+func TestRenderFreeLoopbackProxy(t *testing.T) {
+	stand := peer.Config{
+		TrustedProxies: []netip.Prefix{
+			netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128"),
+			netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("192.168.0.0/16"),
+		},
+		ClientIPHeader: "CF-Connecting-IP",
+	}
+	// пин прежней настройки стенда: без петли в списке доверять нечему — общий IP ::1
+	withoutLoopback := stand
+	withoutLoopback.TrustedProxies = []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("192.168.0.0/16"),
+	}
+	xff := "203.0.113.7, 172.70.242.31, 10.29.109.133"
+	full := map[string]string{"X-Forwarded-For": xff, "CF-Connecting-IP": "203.0.113.7"}
+	cases := []struct {
+		name    string
+		c       peer.Config
+		r       req
+		ip      string
+		trusted bool
+		source  string
+	}{
+		{"петля в TrustedProxies — адрес из заголовка CDN", stand, req{"[::1]:41198", full}, "203.0.113.7", true, "cdn"},
+		{"пир 127.0.0.1 — адрес из заголовка CDN", stand, req{"127.0.0.1:41198", full}, "203.0.113.7", true, "cdn"},
+		{"пир [::ffff:127.0.0.1] — адрес из заголовка CDN", stand, req{"[::ffff:127.0.0.1]:41198", full}, "203.0.113.7", true, "cdn"},
+		// петля доверена, но заголовка CDN нет: разбор X-Forwarded-For останавливается на узле Cloudflare —
+		// поэтому CF-Connecting-IP по-прежнему нужен
+		{"петля без заголовка CDN — узел Cloudflare из X-Forwarded-For", stand,
+			req{"[::1]:41198", map[string]string{"X-Forwarded-For": xff}}, "172.70.242.31", true, "forwarded"},
+		{"без ::1/128 — общий IP ::1", withoutLoopback, req{"[::1]:41198", full}, "::1", false, "peer"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			buf := captureLog(t, slog.LevelDebug)
+			got, _ := resolve(t, c.c, c.r)
+			if got.IP != netip.MustParseAddr(c.ip) || got.ViaBFF {
+				t.Fatalf("got %+v, want ip=%s", got, c.ip)
+			}
+			rec := peerRecord(t, buf)
+			if rec["remote_trusted"] != c.trusted || rec["source"] != c.source {
+				t.Fatalf("запись %v, want remote_trusted=%v source=%s", rec, c.trusted, c.source)
+			}
+		})
+	}
+}
+
 // captureLog подменяет slog.Default (им пользуется Middleware: сервер ставит его через
 // slog.SetDefault) на JSON-логгер в буфер с заданным уровнем; прежний возвращается в t.Cleanup.
 // Тесты с подменой не параллельные.
@@ -272,7 +323,7 @@ func TestDebugLog(t *testing.T) {
 		r    req
 		want map[string]any
 	}{
-		{"Render-цепочка с заголовком CDN", cdn, req{"10.0.0.5:4000", withCF}, map[string]any{
+		{"пир 10.x (платный тариф / без локального прокси) с заголовком CDN", cdn, req{"10.0.0.5:4000", withCF}, map[string]any{
 			"remote_addr": "10.0.0.5:4000", "remote_trusted": true, "forwarded": "203.0.113.7, 104.16.0.1",
 			"cdn_header": "CF-Connecting-IP", "cdn_value": "203.0.113.7", "client_ip": "203.0.113.7", "source": "cdn"}},
 		{"без заголовка CDN — X-Forwarded-For", cdn, req{"10.0.0.5:4000", xff}, map[string]any{
