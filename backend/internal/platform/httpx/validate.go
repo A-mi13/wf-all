@@ -2,8 +2,8 @@ package httpx
 
 import (
 	"bytes"
+	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -12,7 +12,6 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers/gorillamux"
 )
 
 // Форматы, которые kin-openapi по умолчанию не проверяет (из коробки — byte, date, date-time,
@@ -43,32 +42,45 @@ func LimitBody(n int64) func(http.Handler) http.Handler {
 	}
 }
 
+// ValidateOptions — настройки проверки запроса.
+type ValidateOptions struct {
+	// Authenticated — есть ли в ctx аутентифицированный пользователь (Principal кладёт слой
+	// аутентификации раньше, спека §6.1). nil — никто не вошёл: операции с security — 401.
+	Authenticated func(context.Context) bool
+	// WWWAuthenticate — схема в заголовке ответа 401 (RFC 9110 §11.6.1), например "Bearer".
+	WWWAuthenticate string
+}
+
+var errUnauthenticated = errors.New("httpx: нет аутентификации")
+
 // ValidateRequests проверяет запрос по контракту до strict-хендлера: strict-сервер
 // oapi-codegen схему сам не валидирует (minLength, enum, format, обязательные заголовки).
-// Маршрут не из контракта пропускается дальше — его ответит роутер (404/405).
-// Аутентификация здесь не проверяется — это отдельный слой конвейера (спека §6.1).
-func ValidateRequests(spec *openapi3.T) (func(http.Handler) http.Handler, error) {
-	spec.Servers = nil // иначе FindRoute сверяет хост и префикс из servers
-	router, err := gorillamux.NewRouter(spec)
-	if err != nil {
-		return nil, fmt.Errorf("httpx: роутер контракта: %w", err)
-	}
+// Маршрут берётся из ctx (Routes); запрос без маршрута пропускается — его ответит роутер.
+// Требование входа — из security операции: нет Principal — 401 auth.unauthenticated раньше
+// нарушений схемы.
+func ValidateRequests(o ValidateOptions) func(http.Handler) http.Handler {
 	// SkipSettingDefaults: валидатор только проверяет. Иначе kin-openapi дописывает default
 	// в query и заголовки и перекодирует тело — хендлер получил бы не то, что прислал клиент.
 	opts := &openapi3filter.Options{
-		AuthenticationFunc:  openapi3filter.NoopAuthenticationFunc,
+		AuthenticationFunc: func(ctx context.Context, _ *openapi3filter.AuthenticationInput) error {
+			if o.Authenticated != nil && o.Authenticated(ctx) {
+				return nil
+			}
+			return errUnauthenticated
+		},
 		MultiError:          true,
 		SkipSettingDefaults: true,
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			route, params, err := router.FindRoute(r)
-			if err != nil {
+			rt, ok := RouteFrom(r.Context())
+			if !ok {
 				next.ServeHTTP(w, r)
 				return
 			}
 			var body []byte
 			if r.Body != nil {
+				var err error
 				if body, err = io.ReadAll(r.Body); err != nil {
 					if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
 						WriteProblem(w, r, http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "")
@@ -81,8 +93,15 @@ func ValidateRequests(spec *openapi3.T) (func(http.Handler) http.Handler, error)
 				// прочитает его ещё раз и сам вернёт в запрос для хендлера
 				r.Body = io.NopCloser(bytes.NewReader(body))
 			}
-			in := &openapi3filter.RequestValidationInput{Request: r, PathParams: params, Route: route, Options: opts}
+			in := &openapi3filter.RequestValidationInput{Request: r, PathParams: rt.params, Route: rt.route, Options: opts}
 			if verr := openapi3filter.ValidateRequest(r.Context(), in); verr != nil {
+				if _, unauth := errors.AsType[*openapi3filter.SecurityRequirementsError](verr); unauth {
+					if o.WWWAuthenticate != "" {
+						w.Header().Set("WWW-Authenticate", o.WWWAuthenticate)
+					}
+					WriteProblem(w, r, http.StatusUnauthorized, CodeUnauthenticated, "")
+					return
+				}
 				if fields, ok := fieldErrors(verr); ok {
 					WriteValidationProblem(w, r, fields)
 					return
@@ -93,7 +112,7 @@ func ValidateRequests(spec *openapi3.T) (func(http.Handler) http.Handler, error)
 			}
 			next.ServeHTTP(w, r)
 		})
-	}, nil
+	}
 }
 
 // fieldErrors раскладывает ошибку kin-openapi по полям. false — ошибка не про поля

@@ -24,10 +24,14 @@ func NewHandler(log *slog.Logger, opts Options) (http.Handler, error) {
 		return nil, fmt.Errorf("admin: контракт: %w", err)
 	}
 	title := spec.Info.Title
-	validate, err := httpx.ValidateRequests(spec)
+	routes, err := httpx.Routes(spec)
 	if err != nil {
 		return nil, err
 	}
+	// аутентификация (Task 9) встанет между routes и validate; пока Principal нет ни у кого —
+	// операции с security отвечают 401
+	// вход сотрудников — cookie (спека identity): заголовок WWW-Authenticate у админки не Bearer
+	validate := httpx.ValidateRequests(httpx.ValidateOptions{})
 	requestErr := httpx.RequestErrorHandler(log)
 	strict := oapi.NewStrictHandlerWithOptions(Server{}, nil, oapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  requestErr,
@@ -35,8 +39,8 @@ func NewHandler(log *slog.Logger, opts Options) (http.Handler, error) {
 	})
 	// ErrorHandlerFunc — ошибки биндинга параметров в chi-обёртке; по умолчанию oapi-codegen
 	// отвечает text/plain с текстом ошибки
-	// порядок по спеке §6.1: аутентификация (план 3/3) встаёт между LimitBody и validate
-	router := httpx.NewRouter(log, httpx.LimitBody(httpx.MaxBodyBytes), validate)
+	// порядок — спека §6.1; полный конвейер собирается в Task 19
+	router := httpx.NewRouter(log, httpx.LimitBody(httpx.MaxBodyBytes), routes, validate)
 	if opts.Docs {
 		// /docs не в контракте: валидатор такие маршруты пропускает дальше, к роутеру
 		specJSON, err := oapi.GetSpecJSON()

@@ -51,23 +51,38 @@ paths:
                 contact: {type: string, format: email}
       responses:
         "204": {description: ok}
+  /public:
+    get:
+      operationId: getPublic
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, maximum: 100}
+      responses:
+        "204": {description: ok}
 components:
   securitySchemes:
     bearer: {type: http, scheme: bearer}
 `
 
-// validated — лимит тела и валидация по thingsSpec поверх next.
+// validated — лимит тела, маршрут и валидация по thingsSpec поверх next.
 func validated(t *testing.T, next http.Handler) http.Handler {
+	t.Helper()
+	return validatedWith(t, httpx.ValidateOptions{Authenticated: func(context.Context) bool { return true }}, next)
+}
+
+func validatedWith(t *testing.T, o httpx.ValidateOptions, next http.Handler) http.Handler {
 	t.Helper()
 	spec, err := openapi3.NewLoader().LoadFromData([]byte(thingsSpec))
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate, err := httpx.ValidateRequests(spec)
+	routes, err := httpx.Routes(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httpx.LimitBody(64)(validate(next))
+	return httpx.LimitBody(64)(routes(httpx.ValidateRequests(o)(next)))
 }
 
 // handler — валидация поверх хендлера, который запоминает тело и отвечает 204.
@@ -104,8 +119,6 @@ func TestValidateRequests(t *testing.T) {
 			errs: []httpx.FieldError{{Field: "header.Idempotency-Key", Code: "required"}}},
 		{name: "query больше максимума", body: okBody, query: "limit=500", status: 400, code: "validation.failed",
 			errs: []httpx.FieldError{{Field: "query.limit", Code: "maximum"}}},
-		// у операции security: [bearer], а Authorization нет — аутентификация отдельный слой
-		{name: "без Authorization запрос доходит до хендлера", body: okBody, status: 204},
 		{name: "query не того типа", body: okBody, query: "limit=abc", status: 400, code: "validation.failed",
 			errs: []httpx.FieldError{{Field: "query.limit", Code: "type"}}},
 		{name: "пустой query", body: okBody, query: "limit=", status: 400, code: "validation.failed",
@@ -158,6 +171,54 @@ func TestValidateRequests(t *testing.T) {
 			}
 			if p.Detail != "" {
 				t.Fatalf("detail раскрывает внутренности валидатора: %q", p.Detail)
+			}
+		})
+	}
+}
+
+// Требование входа — из security контракта (спека §6.1): нет Principal — 401 раньше нарушений
+// схемы (неаутентифицированному не раскрываем правила полей); анонимная операция — без входа.
+func TestValidateRequestsRequiresAuthentication(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	nobody := httpx.ValidateOptions{WWWAuthenticate: "Bearer"}
+	cases := []struct {
+		name   string
+		o      httpx.ValidateOptions
+		method string
+		url    string
+		body   string
+		status int
+	}{
+		{"операция с security без входа", nobody, http.MethodPost, "/things", `{"name":"ab","kind":"a"}`, 401},
+		{"без входа и с невалидным телом — всё равно 401", nobody, http.MethodPost, "/things", `{"name":"a"}`, 401},
+		{"Authenticated не задана — никто не вошёл", httpx.ValidateOptions{}, http.MethodPost, "/things", `{"name":"ab","kind":"a"}`, 401},
+		{"анонимная операция без входа", nobody, http.MethodGet, "/public", "", 204},
+		{"анонимная операция: схема проверяется", nobody, http.MethodGet, "/public?limit=500", "", 400},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := validatedWith(t, c.o, ok)
+			var body io.Reader
+			if c.body != "" {
+				body = strings.NewReader(c.body)
+			}
+			req := httptest.NewRequestWithContext(context.Background(), c.method, c.url, body)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", strings.Repeat("k", 16))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != c.status {
+				t.Fatalf("status = %d, want %d, body = %s", rec.Code, c.status, rec.Body.String())
+			}
+			if c.status != http.StatusUnauthorized {
+				return
+			}
+			var p httpx.Problem
+			if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || p.Code != httpx.CodeUnauthenticated {
+				t.Fatalf("тело: %s", rec.Body.String())
+			}
+			if want := c.o.WWWAuthenticate; rec.Header().Get("WWW-Authenticate") != want {
+				t.Fatalf("WWW-Authenticate = %q, want %q", rec.Header().Get("WWW-Authenticate"), want)
 			}
 		})
 	}
