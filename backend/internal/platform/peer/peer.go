@@ -15,6 +15,8 @@ import (
 	"net/netip"
 	"net/textproto"
 	"strings"
+
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const (
@@ -132,10 +134,11 @@ func From(ctx context.Context) Info {
 type source string
 
 const (
-	sourcePeer      source = "peer"      // адрес TCP-соединения (RemoteAddr)
-	sourceCDN       source = "cdn"       // заголовок CDN (ClientIPHeader)
-	sourceForwarded source = "forwarded" // X-Forwarded-For справа налево
-	sourceBFF       source = "bff"       // X-WF-Client-IP от BFF
+	sourcePeer source = "peer" // адрес TCP-соединения (RemoteAddr)
+	sourceCDN  source = "cdn"  // заголовок CDN (ClientIPHeader)
+	// разбирался X-Forwarded-For (адрес может остаться адресом пира, если правая запись не разобралась)
+	sourceForwarded source = "forwarded"
+	sourceBFF       source = "bff" // X-WF-Client-IP от BFF
 )
 
 // Middleware разбирает собеседника запроса и кладёт Info в контекст. Заголовки BFF снимаются
@@ -166,6 +169,7 @@ func Middleware(c Config) func(http.Handler) http.Handler {
 func logPeer(r *http.Request, c Config, info Info, src source) {
 	remote := peerAddr(r)
 	attrs := []any{
+		"request_id", middleware.GetReqID(r.Context()),
 		"remote_addr", r.RemoteAddr,
 		"remote_trusted", contains(c.TrustedProxies, remote),
 		"forwarded", strings.Join(r.Header.Values(headerForwarded), ", "),

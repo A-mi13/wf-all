@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
+
 	"wf/backend/internal/platform/peer"
 )
 
@@ -280,7 +282,8 @@ func TestDebugLog(t *testing.T) {
 			req{"10.0.0.5:4000", map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1", "CF-Connecting-IP": "10.1.2.3"}},
 			map[string]any{"cdn_value": "10.1.2.3", "client_ip": "104.16.0.1", "source": "forwarded"}},
 		{"имя CDN не задано", cfg, req{"10.0.0.5:4000", withCF}, map[string]any{
-			"cdn_header": "", "forwarded": "203.0.113.7, 104.16.0.1", "client_ip": "104.16.0.1", "source": "forwarded"}},
+			// nil — ключа в записи нет (cdn_value пишется, только если имя заголовка задано)
+			"cdn_header": "", "cdn_value": nil, "forwarded": "203.0.113.7, 104.16.0.1", "client_ip": "104.16.0.1", "source": "forwarded"}},
 		// именно эта картина (пир вне TrustedProxies, например 100.64/10) и есть первая версия сбоя
 		{"недоверенный пир", cdn, req{"100.64.0.5:4000", withCF}, map[string]any{
 			"remote_addr": "100.64.0.5:4000", "remote_trusted": false, "forwarded": "203.0.113.7, 104.16.0.1",
@@ -332,6 +335,44 @@ func TestDebugLogRepeatedCDNHeader(t *testing.T) {
 	rec := peerRecord(t, buf)
 	if rec["cdn_value"] != "1.2.3.4, 203.0.113.7" || rec["forwarded"] != "203.0.113.7, 104.16.0.1" || rec["source"] != "forwarded" {
 		t.Fatalf("запись %v", rec)
+	}
+}
+
+// Идентификатор запроса (chi RequestID стоит в конвейере раньше peer) связывает запись с access-логом.
+func TestDebugLogRequestID(t *testing.T) {
+	buf := captureLog(t, slog.LevelDebug)
+	h := chimw.RequestID(peer.Middleware(cfg)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.5:4000"
+	r.Header.Set("X-Request-Id", "req-42")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if rec := peerRecord(t, buf); rec["request_id"] != "req-42" {
+		t.Fatalf("запись %v", rec)
+	}
+}
+
+// Проверка уровня: на Info запрос с заголовками, которые диагностика склеила бы, стоит столько же,
+// сколько без них. Без проверки Join и сборка атрибутов добавляют аллокации (относительно себя же —
+// порог не привязан к версии Go).
+func TestDebugLogNoOverheadAtInfo(t *testing.T) {
+	captureLog(t, slog.LevelInfo)
+	cdn := cfg
+	cdn.ClientIPHeader = "CF-Connecting-IP"
+	h := peer.Middleware(cdn)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	allocs := func(withHeaders bool) float64 {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		r.RemoteAddr = "100.64.0.5:4000" // недоверенный пир: заголовки не разбираются
+		if withHeaders {
+			r.Header.Add("X-Forwarded-For", "203.0.113.7")
+			r.Header.Add("X-Forwarded-For", "104.16.0.1")
+			r.Header.Add("CF-Connecting-IP", "1.2.3.4")
+			r.Header.Add("CF-Connecting-IP", "203.0.113.7")
+		}
+		w := httptest.NewRecorder()
+		return testing.AllocsPerRun(100, func() { h.ServeHTTP(w, r) })
+	}
+	if with, without := allocs(true), allocs(false); with != without {
+		t.Fatalf("%v аллокаций с заголовками против %v без них — диагностика собирается без проверки уровня", with, without)
 	}
 }
 
