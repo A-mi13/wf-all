@@ -173,13 +173,13 @@ func TestInTxRunsHookFirstInSameTx(t *testing.T) {
 		t.Fatal(err)
 	}
 	var order []string
-	hook := func(ctx context.Context, tx pgx.Tx) error {
+	hook := func(ctx context.Context, tx pgx.Tx) (func(bool), error) {
 		order = append(order, "hook")
 		if got, ok := db.TxFrom(ctx); !ok || got != tx {
 			t.Error("хук получил не ту транзакцию")
 		}
 		_, err := tx.Exec(ctx, "INSERT INTO hook_probe VALUES (1)")
-		return err
+		return nil, err
 	}
 	hctx := db.WithTxHook(ctx, hook)
 
@@ -211,10 +211,89 @@ func TestInTxHookErrorSkipsFn(t *testing.T) {
 	pool := dbtest.NewPool(t)
 	errHook := errors.New("ключ занят")
 	called := false
-	err := db.InTx(db.WithTxHook(ctx, func(context.Context, pgx.Tx) error { return errHook }), pool,
+	err := db.InTx(db.WithTxHook(ctx, func(context.Context, pgx.Tx) (func(bool), error) { return nil, errHook }), pool,
 		func(context.Context, pgx.Tx) error { called = true; return nil })
 	if !errors.Is(err, errHook) || called {
 		t.Fatalf("err=%v fn вызвана=%v", err, called)
 	}
 	noLeakedConns(t, pool)
+}
+
+// after хука сообщает исход транзакции: true — только после успешного Commit (запись уже видна
+// другим соединениям), иначе false — ровно один вызов на транзакцию при любом исходе.
+func TestInTxHookAfterReportsOutcome(t *testing.T) {
+	boom := errors.New("boom")
+	cases := []struct {
+		name    string
+		hookErr error
+		fn      func(ctx context.Context, tx pgx.Tx) error
+		want    bool
+		rows    int // строк tx_probe, видимых другим соединениям в момент after
+	}{
+		{name: "коммит", want: true, rows: 1, fn: func(ctx context.Context, tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, "INSERT INTO tx_probe VALUES (1)")
+			return err
+		}},
+		{name: "ошибка fn", fn: func(ctx context.Context, tx pgx.Tx) error {
+			_, _ = tx.Exec(ctx, "INSERT INTO tx_probe VALUES (1)")
+			return boom
+		}},
+		{name: "ошибка хука", hookErr: boom, fn: func(context.Context, pgx.Tx) error {
+			t.Error("fn вызвана после ошибки хука")
+			return nil
+		}},
+		{name: "паника", fn: func(ctx context.Context, tx pgx.Tx) error {
+			_, _ = tx.Exec(ctx, "INSERT INTO tx_probe VALUES (1)")
+			panic("boom")
+		}},
+		{name: "Goexit", fn: func(ctx context.Context, tx pgx.Tx) error {
+			_, _ = tx.Exec(ctx, "INSERT INTO tx_probe VALUES (1)")
+			runtime.Goexit()
+			return nil
+		}},
+		{name: "неудачный коммит", fn: func(ctx context.Context, tx pgx.Tx) error {
+			// отложенная проверка уникальности падает только на COMMIT
+			if _, err := tx.Exec(ctx, "INSERT INTO tx_probe VALUES (1)"); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, "INSERT INTO tx_deferred VALUES (1), (1)")
+			return err
+		}},
+	}
+	// одна база на все случаи: клон базы на подтест под нагрузкой стоит секунды
+	ctx, pool, rows := probe(t)
+	if _, err := pool.Exec(ctx, "CREATE TABLE tx_deferred (n int UNIQUE DEFERRABLE INITIALLY DEFERRED)"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, "TRUNCATE tx_probe, tx_deferred"); err != nil {
+				t.Fatal(err)
+			}
+			var outcomes []bool
+			visible := -1
+			hook := func(context.Context, pgx.Tx) (func(bool), error) {
+				return func(committed bool) {
+					outcomes = append(outcomes, committed)
+					visible = rows()
+				}, tc.hookErr
+			}
+			done := make(chan error, 1)
+			go func() {
+				defer func() { _ = recover(); close(done) }() // паника из InTx — ожидаемый исход
+				done <- db.InTx(db.WithTxHook(ctx, hook), pool, tc.fn)
+			}()
+			err := <-done
+			if len(outcomes) != 1 || outcomes[0] != tc.want || visible != tc.rows {
+				t.Fatalf("after: вызовы %v, строк видно %d; нужно [%v] и %d", outcomes, visible, tc.want, tc.rows)
+			}
+			if tc.want && err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			if tc.name == "неудачный коммит" && err == nil {
+				t.Fatal("Commit с нарушенной отложенной проверкой не вернул ошибку")
+			}
+			noLeakedConns(t, pool)
+		})
+	}
 }

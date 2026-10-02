@@ -22,11 +22,19 @@ func TestCleanupDeletesOnlyExpired(t *testing.T) {
 		t.Fatal(err)
 	}
 	var keys []string
-	rows, _ := pools.Owner.Query(ctx, "SELECT key FROM idempotency_keys")
+	rows, err := pools.Owner.Query(ctx, "SELECT key FROM idempotency_keys")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for rows.Next() {
 		var k string
-		_ = rows.Scan(&k)
+		if err := rows.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
 		keys = append(keys, k)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if len(keys) != 1 || keys[0] != "live" {
 		t.Fatalf("осталось %v", keys)
