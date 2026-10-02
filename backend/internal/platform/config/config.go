@@ -4,6 +4,7 @@ package config
 
 import (
 	"log/slog"
+	"net/netip"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -17,6 +18,8 @@ type Log struct {
 type HTTP struct {
 	Addr            string        `env:"HTTP_ADDR,required"`
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
+	// RequestTimeout — крайний срок запроса (спека §6.1): запросы к базе прерываются по нему.
+	RequestTimeout time.Duration `env:"REQUEST_TIMEOUT" envDefault:"15s"`
 	// DocsEnabled — Swagger UI и контракт на /docs (internal/platform/apidocs): dev-стенд и
 	// локальная разработка; на проде выключен.
 	DocsEnabled bool `env:"DOCS_ENABLED" envDefault:"false"`
@@ -27,17 +30,53 @@ type DB struct {
 	MaxConns int32  `env:"DB_MAX_CONNS" envDefault:"10"`
 }
 
-type API struct {
-	Log  Log
-	HTTP HTTP
-	DB   DB
+// Auth — access-токены публичного API (спека §6.2).
+type Auth struct {
+	// JWTSeeds — сиды Ed25519 (base64, 32 байта) через запятую: первый подписывает, все
+	// проверяют. Ротация: новый ключ первым, старый — следом на время жизни access (10 мин).
+	JWTSeeds []string `env:"JWT_SEEDS,required" envSeparator:","`
 }
 
-// Admin — отдельный тип, хотя сейчас совпадает с API: конфиги разойдутся (2FA, allowlist).
+// Peer — кому верить заголовкам IP (спека §8.4).
+type Peer struct {
+	TrustedProxies []netip.Prefix `env:"TRUSTED_PROXIES" envSeparator:","` // балансировщик хостинга
+	BFFNets        []netip.Prefix `env:"BFF_NETS" envSeparator:","`        // адреса BFF (Next.js)
+	BFFSecrets     []string       `env:"BFF_SECRETS" envSeparator:","`     // секрет BFF ↔ API, ≥ 32 символов
+}
+
+// Humancheck — PoW антибота (спека §6.7).
+type Humancheck struct {
+	Keys      []string      `env:"HUMANCHECK_KEYS,required" envSeparator:","` // HMAC, base64, ≥ 32 байт
+	TTL       time.Duration `env:"HUMANCHECK_TTL" envDefault:"5m"`
+	MaxNumber int64         `env:"HUMANCHECK_MAX_NUMBER" envDefault:"100000"`
+}
+
+type API struct {
+	Log        Log
+	HTTP       HTTP
+	DB         DB
+	Auth       Auth
+	Peer       Peer
+	RateLimits string `env:"RATE_LIMITS"` // переопределения ratelimit.DefaultRules: auth.ip=30/1m:10,…
+	Humancheck Humancheck
+}
+
+// Admin — вход сотрудников (сессия, TOTP, аллоулист) добавит спека identity.
 type Admin struct {
-	Log  Log
-	HTTP HTTP
-	DB   DB
+	Log        Log
+	HTTP       HTTP
+	DB         DB
+	Peer       Peer
+	RateLimits string `env:"RATE_LIMITS"`
+}
+
+// Mail — SMTP транзакционных писем (спека §6.9); в dev — Mailpit.
+type Mail struct {
+	SMTPAddr string `env:"MAIL_SMTP_ADDR,required"`
+	From     string `env:"MAIL_FROM,required"`
+	Username string `env:"MAIL_SMTP_USERNAME"`
+	Password string `env:"MAIL_SMTP_PASSWORD"`
+	TLS      string `env:"MAIL_SMTP_TLS" envDefault:"mandatory"` // mandatory | opportunistic | none
 }
 
 // Queues — конкурентность очередей воркера (спека §9.1).
@@ -62,6 +101,7 @@ type Worker struct {
 	DB     DB
 	Queues Queues
 	Relay  Relay
+	Mail   Mail
 }
 
 type Migrator struct {

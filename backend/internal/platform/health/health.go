@@ -6,7 +6,10 @@ package health
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // readyTimeout — дольше проба не ждёт: зависшая база — «не готов», а не зависшая проба.
@@ -41,4 +44,44 @@ func write(w http.ResponseWriter, status int, s string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(`{"status":"` + s + `"}`))
+}
+
+// Cached — результат ready не чаще раза в ttl, одновременные пробы ждут одну проверку: поток
+// запросов к открытому /readyz не превращается в поток пингов базы. Ошибка тоже кэшируется на
+// ttl. Проверка не обрывается отменой одной из проб, но ограничена readyTimeout.
+func Cached(ready func(context.Context) error, ttl time.Duration, now func() time.Time) func(context.Context) error {
+	var (
+		mu      sync.Mutex
+		last    error
+		expires time.Time
+		group   singleflight.Group
+	)
+	return func(ctx context.Context) error {
+		mu.Lock()
+		if now().Before(expires) {
+			err := last
+			mu.Unlock()
+			return err
+		}
+		mu.Unlock()
+		_, err, _ := group.Do("ready", func() (any, error) {
+			// проба могла опоздать к общей проверке, которая только что закончилась, — её
+			// результат уже в кэше
+			mu.Lock()
+			if now().Before(expires) {
+				err := last
+				mu.Unlock()
+				return nil, err
+			}
+			mu.Unlock()
+			c, cancel := context.WithTimeout(context.WithoutCancel(ctx), readyTimeout)
+			defer cancel()
+			err := ready(c)
+			mu.Lock()
+			last, expires = err, now().Add(ttl)
+			mu.Unlock()
+			return nil, err
+		})
+		return err
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,11 +19,16 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events"
+	"wf/backend/internal/platform/humancheck"
+	"wf/backend/internal/platform/idempotency"
 	"wf/backend/internal/platform/logx"
+	"wf/backend/internal/platform/mail"
 	"wf/backend/internal/platform/queue"
+	"wf/backend/internal/platform/ratelimit"
 )
 
 func main() {
@@ -43,7 +49,15 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	if err := validateRelay(cfg.Relay); err != nil {
 		return err
 	}
+	// почта проверяется до подключения к базе: битый адрес SMTP — отказ старта
+	sender, err := mail.NewSMTP(mail.SMTPConfig{Addr: cfg.Mail.SMTPAddr, From: cfg.Mail.From,
+		Username: cfg.Mail.Username, Password: cfg.Mail.Password, TLS: cfg.Mail.TLS})
+	if err != nil {
+		return err
+	}
 	log := logx.New(logOut, cfg.Log).With("service", "worker")
+	// сторонние библиотеки и стандартный log — через тот же логгер с маскированием ПД
+	slog.SetDefault(log)
 	pool, err := db.Open(ctx, cfg.DB)
 	if err != nil {
 		return err
@@ -54,11 +68,16 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		return err
 	}
 	if len(args) > 0 {
-		return command(ctx, args, pool, reg, out)
+		return command(ctx, args, pool, reg, out, log)
 	}
 	workers := queue.NewWorkers()
 	events.AddWorkers(workers, pool, reg)
-	client, err := queue.NewClient(pool, workers, cfg.Queues, []*river.PeriodicJob{events.CleanupJob()}, log)
+	river.AddWorker(workers, ratelimit.NewCleanupWorker(pool, clock.System))
+	river.AddWorker(workers, humancheck.NewCleanupWorker(pool, clock.System))
+	river.AddWorker(workers, idempotency.NewCleanupWorker(pool))
+	mail.AddWorkers(workers, mails(), sender)
+	periodic := []*river.PeriodicJob{events.CleanupJob(), ratelimit.CleanupJob(), humancheck.CleanupJob(), idempotency.CleanupJob()}
+	client, err := queue.NewClient(pool, workers, cfg.Queues, periodic, log)
 	if err != nil {
 		return err
 	}
@@ -83,7 +102,7 @@ const softStopTimeout = 25 * time.Second
 const usage = "без аргументов — воркер; events replay --type <модуль>.<факт> --subscriber <модуль>.<имя> --since <RFC 3339>"
 
 // command — разовые команды воркера: им нужен реестр подписчиков, который знает только воркер.
-func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, out io.Writer) error {
+func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, out io.Writer, log *slog.Logger) error {
 	if len(args) < 2 || args[0] != "events" || args[1] != "replay" {
 		return fmt.Errorf("неизвестная команда %q: %s", strings.Join(args, " "), usage)
 	}
@@ -103,7 +122,7 @@ func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events
 		return fmt.Errorf("--since: нужен RFC 3339, например 2026-10-01T00:00:00Z")
 	}
 	// клиент только для вставки: очереди обслуживает работающий воркер
-	ins, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	ins, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Logger: log})
 	if err != nil {
 		return err
 	}
@@ -132,4 +151,10 @@ func validateRelay(r config.Relay) error {
 // модуля добавляет сюда свои Subscription (internal/<модуль>/subscribers).
 func subscriptions() (*events.Registry, error) {
 	return events.NewRegistry()
+}
+
+// mails — виды писем модулей. Пусто, пока нет модулей: спека identity добавит письма с кодами
+// (mail.Composer по id кода).
+func mails() *mail.Registry {
+	return mail.NewRegistry()
 }
