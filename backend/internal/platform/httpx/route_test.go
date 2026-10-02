@@ -20,6 +20,7 @@ paths:
     get:
       operationId: getThing
       x-rate-limit: auth
+      x-limit: 5
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       responses: {"200": {description: ok}}
@@ -44,8 +45,9 @@ func TestRoutesPutsOperationInContext(t *testing.T) {
 	if !found || got.Operation().OperationID != "getThing" {
 		t.Fatalf("маршрут: found=%v %+v", found, got)
 	}
-	if got.Extension("x-rate-limit") != "auth" || got.Extension("x-nope") != "" {
-		t.Fatalf("расширения: %q %q", got.Extension("x-rate-limit"), got.Extension("x-nope"))
+	// нет расширения и нестроковое (x-limit: 5) — ""
+	if got.Extension("x-rate-limit") != "auth" || got.Extension("x-nope") != "" || got.Extension("x-limit") != "" {
+		t.Fatalf("расширения: %q %q %q", got.Extension("x-rate-limit"), got.Extension("x-nope"), got.Extension("x-limit"))
 	}
 
 	// маршрут не из контракта и чужой метод — дальше без Route: ответит роутер (404/405)

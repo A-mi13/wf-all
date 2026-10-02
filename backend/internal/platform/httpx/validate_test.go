@@ -176,28 +176,47 @@ func TestValidateRequests(t *testing.T) {
 	}
 }
 
+// signedInKey — метка «пользователь вошёл» в ctx запроса для тестов аутентификации.
+type signedInKey struct{}
+
 // Требование входа — из security контракта (спека §6.1): нет Principal — 401 раньше нарушений
 // схемы (неаутентифицированному не раскрываем правила полей); анонимная операция — без входа.
 func TestValidateRequestsRequiresAuthentication(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	// Authenticated читает метку из ctx запроса — так её будет читать слой аутентификации;
+	// заодно проверяется, что в AuthenticationFunc приходит ctx запроса, а не фоновый
+	byMark := httpx.ValidateOptions{
+		Authenticated:   func(ctx context.Context) bool { v, _ := ctx.Value(signedInKey{}).(bool); return v },
+		WWWAuthenticate: "Bearer",
+	}
 	nobody := httpx.ValidateOptions{WWWAuthenticate: "Bearer"}
 	cases := []struct {
-		name   string
-		o      httpx.ValidateOptions
-		method string
-		url    string
-		body   string
-		status int
+		name     string
+		o        httpx.ValidateOptions
+		signedIn bool
+		method   string
+		url      string
+		body     string
+		status   int
 	}{
-		{"операция с security без входа", nobody, http.MethodPost, "/things", `{"name":"ab","kind":"a"}`, 401},
-		{"без входа и с невалидным телом — всё равно 401", nobody, http.MethodPost, "/things", `{"name":"a"}`, 401},
-		{"Authenticated не задана — никто не вошёл", httpx.ValidateOptions{}, http.MethodPost, "/things", `{"name":"ab","kind":"a"}`, 401},
-		{"анонимная операция без входа", nobody, http.MethodGet, "/public", "", 204},
-		{"анонимная операция: схема проверяется", nobody, http.MethodGet, "/public?limit=500", "", 400},
+		{"операция с security без входа", nobody, false, http.MethodPost, "/things", `{"name":"ab","kind":"a"}`, 401},
+		{"без входа и с невалидным телом — всё равно 401", nobody, false, http.MethodPost, "/things", `{"name":"a"}`, 401},
+		{"Authenticated не задана — никто не вошёл", httpx.ValidateOptions{}, false, http.MethodPost, "/things", `{"name":"ab","kind":"a"}`, 401},
+		{"Authenticated задана, метки входа в ctx нет", byMark, false, http.MethodPost, "/things", `{"name":"ab","kind":"a"}`, 401},
+		{"Authenticated задана, метка входа в ctx есть", byMark, true, http.MethodPost, "/things", `{"name":"ab","kind":"a"}`, 204},
+		{"анонимная операция без входа", nobody, false, http.MethodGet, "/public", "", 204},
+		{"анонимная операция: схема проверяется", nobody, false, http.MethodGet, "/public?limit=500", "", 400},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h := validatedWith(t, c.o, ok)
+			inner := validatedWith(t, c.o, ok)
+			// тестовый слой перед конвейером: кладёт метку входа в ctx, как слой аутентификации
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if c.signedIn {
+					r = r.WithContext(context.WithValue(r.Context(), signedInKey{}, true))
+				}
+				inner.ServeHTTP(w, r)
+			})
 			var body io.Reader
 			if c.body != "" {
 				body = strings.NewReader(c.body)

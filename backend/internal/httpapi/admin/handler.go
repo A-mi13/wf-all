@@ -28,9 +28,8 @@ func NewHandler(log *slog.Logger, opts Options) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	// аутентификация (Task 9) встанет между routes и validate; пока Principal нет ни у кого —
-	// операции с security отвечают 401
-	// вход сотрудников — cookie (спека identity): заголовок WWW-Authenticate у админки не Bearer
+	// вход сотрудников (cookie-сессия, TOTP) — спека identity; до неё операции с security
+	// отвечают 401. Заголовок WWW-Authenticate у админки не Bearer — поэтому пуст
 	validate := httpx.ValidateRequests(httpx.ValidateOptions{})
 	requestErr := httpx.RequestErrorHandler(log)
 	strict := oapi.NewStrictHandlerWithOptions(Server{}, nil, oapi.StrictHTTPServerOptions{
