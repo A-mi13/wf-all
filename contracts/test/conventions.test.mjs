@@ -252,6 +252,34 @@ test('enum без x-extensible-enum — нарушение', () => {
   assert.deepEqual(conventionViolations(d), []);
 });
 
+// Пример и расширения — данные, а не схема: объект со свойством enum в них не нарушение.
+test('enum внутри example, examples и x-* не проверяется', () => {
+  const d = base();
+  d.components.schemas.Team = {
+    type: 'object',
+    example: { kind: 'select', enum: ['a', 'b'] },
+    'x-ui': { enum: ['c'] },
+  };
+  post(d).parameters.push({
+    name: 'filter',
+    in: 'query',
+    schema: { type: 'string' },
+    examples: { list: { value: { enum: ['d'] } } },
+  });
+  assert.deepEqual(conventionViolations(d), []);
+});
+
+test('свойство с именем example — схема, его enum проверяется', () => {
+  const d = base();
+  d.components.schemas.Team = {
+    type: 'object',
+    properties: { example: { type: 'string', enum: ['a'] } },
+  };
+  assert.deepEqual(conventionViolations(d), [
+    'components.schemas.Team.properties.example: enum без x-extensible-enum: true',
+  ]);
+});
+
 test('enum в параметре операции тоже помечается', () => {
   const d = base();
   post(d).parameters.push({ name: 'sort', in: 'query', schema: { type: 'string', enum: ['a'] } });

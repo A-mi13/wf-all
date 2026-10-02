@@ -28,12 +28,18 @@ function refs(node, out = []) {
   return out;
 }
 
+// Ключи с данными, а не схемой: пример и расширения не проверяются. Под properties и schemas
+// это имена (свойство «example» — схема), там пропуска нет.
+const DATA_KEY = (k) => k === 'example' || k === 'examples' || k.startsWith('x-');
+const NAME_MAPS = new Set(['properties', 'schemas']);
+
 function closedEnums(node, path = [], out = []) {
   if (Array.isArray(node)) node.forEach((n, i) => closedEnums(n, [...path, i], out));
   else if (node && typeof node === 'object') {
     if (Array.isArray(node.enum) && node['x-extensible-enum'] !== true) out.push(path.join('.'));
+    const names = NAME_MAPS.has(path.at(-1));
     for (const [k, v] of Object.entries(node)) {
-      if (k !== 'enum') closedEnums(v, [...path, k], out);
+      if (k !== 'enum' && (names || !DATA_KEY(k))) closedEnums(v, [...path, k], out);
     }
   }
   return out;

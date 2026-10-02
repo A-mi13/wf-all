@@ -61,6 +61,39 @@ func TestWriteErrorUnknownIsInternal(t *testing.T) {
 	}
 }
 
+// Главный путь прода: strict-хендлер вернул ошибку, oapi-codegen зовёт ResponseErrorHandler.
+// ProblemError (обёрнутая) отвечает своей Problem без записи в лог, иное — 500 internal с
+// причиной только в логе.
+func TestResponseErrorHandler(t *testing.T) {
+	var logs bytes.Buffer
+	handle := httpx.ResponseErrorHandler(slog.New(slog.NewTextHandler(&logs, nil)))
+
+	rec := httptest.NewRecorder()
+	handle(rec, httptest.NewRequest(http.MethodPost, "/x", nil),
+		fmt.Errorf("x: %w", httpx.NewError(http.StatusForbidden, httpx.CodeFeatureDisabled)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("статус = %d", rec.Code)
+	}
+	if m := decode(t, rec); m["code"] != httpx.CodeFeatureDisabled || m["status"] != float64(403) {
+		t.Fatalf("тело: %v", m)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("ожидаемый ответ попал в лог: %s", logs.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handle(rec, httptest.NewRequest(http.MethodGet, "/x", nil), errors.New("pgx: сломалось"))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("статус = %d", rec.Code)
+	}
+	if m := decode(t, rec); m["code"] != httpx.CodeInternal || strings.Contains(rec.Body.String(), "pgx") {
+		t.Fatalf("тело раскрывает причину или код не тот: %s", rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), "pgx: сломалось") {
+		t.Fatalf("причины нет в логе: %s", logs.String())
+	}
+}
+
 // Retry-After — заголовком, не полем тела; задача антибота — в теле.
 func TestWriteProblemValueRetryAfterAndChallenge(t *testing.T) {
 	rec := httptest.NewRecorder()
@@ -81,7 +114,8 @@ func TestWriteProblemValueRetryAfterAndChallenge(t *testing.T) {
 	httpx.WriteProblemValue(rec, httptest.NewRequest(http.MethodGet, "/x", nil), httpx.Problem{
 		Status: http.StatusForbidden, Code: httpx.CodeHumancheckRequired, Challenge: map[string]any{"salt": "s"},
 	})
-	if m := decode(t, rec); m["challenge"].(map[string]any)["salt"] != "s" {
+	m = decode(t, rec)
+	if c, ok := m["challenge"].(map[string]any); !ok || c["salt"] != "s" {
 		t.Fatalf("challenge: %v", m)
 	}
 	if rec.Header().Get("Retry-After") != "" {
