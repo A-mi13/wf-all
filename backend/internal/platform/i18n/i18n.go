@@ -14,16 +14,22 @@ import (
 	"github.com/kaptinlin/messageformat-go/mf1"
 )
 
+// Default — язык по умолчанию: на него уходит неизвестный язык пользователя.
 const Default = "ru"
 
+// Supported — языки каталога; для каждого нужен <язык>.json в backend/locales.
 var Supported = []string{"ru", "en"}
 
+// ErrUnknownKey — в каталоге нет сообщения с таким ключом.
 var ErrUnknownKey = errors.New("i18n: нет такого ключа")
 
+// Catalog — скомпилированные сообщения всех поддерживаемых языков.
 type Catalog struct {
 	msgs map[string]map[string]*mf1.CompiledMessage
 }
 
+// Load читает и компилирует сообщения всех Supported-языков; любая ошибка файла или
+// ICU-синтаксиса — отказ загрузки.
 func Load(fsys fs.FS) (*Catalog, error) {
 	c := &Catalog{msgs: map[string]map[string]*mf1.CompiledMessage{}}
 	for _, loc := range Supported {
@@ -48,6 +54,7 @@ func Load(fsys fs.FS) (*Catalog, error) {
 }
 
 // Flatten — <язык>.json в плоские ключи через точку; значения — только строки.
+// Ключ с точкой, совпавший с вложенным, — ошибка, а не тихое затирание.
 func Flatten(fsys fs.FS, locale string) (map[string]string, error) {
 	data, err := fs.ReadFile(fsys, locale+".json")
 	if err != nil {
@@ -67,6 +74,9 @@ func Flatten(fsys fs.FS, locale string) (map[string]string, error) {
 			}
 			switch v := v.(type) {
 			case string:
+				if _, dup := out[key]; dup {
+					return fmt.Errorf("i18n: %s.json %s: ключ задан дважды", locale, key)
+				}
 				out[key] = v
 			case map[string]any:
 				if err := walk(key, v); err != nil {
@@ -81,10 +91,13 @@ func Flatten(fsys fs.FS, locale string) (map[string]string, error) {
 	return out, walk("", tree)
 }
 
+// Keys — отсортированные ключи сообщений языка.
 func (c *Catalog) Keys(locale string) []string {
 	return slices.Sorted(maps.Keys(c.msgs[locale]))
 }
 
+// Text форматирует сообщение key на языке locale (неизвестный язык — Default); нет ключа —
+// ErrUnknownKey, не хватает аргумента — ошибка.
 func (c *Catalog) Text(locale, key string, args map[string]any) (string, error) {
 	msgs, ok := c.msgs[locale]
 	if !ok {

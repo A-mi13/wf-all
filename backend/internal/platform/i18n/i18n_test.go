@@ -2,10 +2,12 @@ package i18n_test
 
 import (
 	"errors"
-	"regexp"
+	"maps"
 	"slices"
 	"testing"
 	"testing/fstest"
+
+	"github.com/kaptinlin/messageformat-go/mf1"
 
 	"wf/backend/internal/platform/i18n"
 	"wf/backend/locales"
@@ -29,7 +31,58 @@ func TestLocalesHaveSameKeys(t *testing.T) {
 	}
 }
 
-var argRe = regexp.MustCompile(`\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,}]`)
+// messageArgs — имена аргументов сообщения из AST парсера mf1 (а не регуляркой по тексту:
+// слова вариантов select/plural вроде {Captain} не аргументы).
+func messageArgs(t *testing.T, src string) []string {
+	t.Helper()
+	toks, err := mf1.Parse(src, nil)
+	if err != nil {
+		t.Fatalf("разбор %q: %v", src, err)
+	}
+	set := map[string]bool{}
+	var walk func([]mf1.Token)
+	walk = func(toks []mf1.Token) {
+		for _, tok := range toks {
+			switch v := tok.(type) {
+			case *mf1.PlainArg:
+				set[v.Arg] = true
+			case *mf1.FunctionArg:
+				set[v.Arg] = true
+				walk(v.Param)
+			case *mf1.Select:
+				set[v.Arg] = true
+				for _, c := range v.Cases {
+					walk(c.Tokens)
+				}
+			}
+		}
+	}
+	walk(toks)
+	return slices.Sorted(maps.Keys(set))
+}
+
+func TestMessageArgs(t *testing.T) {
+	cases := []struct {
+		src  string
+		want []string
+	}{
+		{"{role, select, captain {Captain} other {Player}}", []string{"role"}},
+		{"{role, select, captain {Капитан} other {Игрок}}", []string{"role"}},
+		{"Привет, {name}! {count, plural, one {# минуту} other {# минуты}}", []string{"count", "name"}},
+		{"{n, plural, one {{who} one} other {{who} many}}", []string{"n", "who"}},
+		{"{d, date, short} {x, number}", []string{"d", "x"}},
+		{"без аргументов", nil},
+	}
+	for _, c := range cases {
+		if got := messageArgs(t, c.src); !slices.Equal(got, c.want) {
+			t.Errorf("%q: %v, нужно %v", c.src, got, c.want)
+		}
+	}
+	// расхождение имён аргументов между языками ловится
+	if slices.Equal(messageArgs(t, "{num, plural, other {#}}"), messageArgs(t, "{count, plural, other {#}}")) {
+		t.Error("разные имена аргументов не различаются")
+	}
+}
 
 // Аргументы сообщения одинаковы в обоих языках: письмо не теряет подстановку при переводе.
 func TestLocalesHaveSameArguments(t *testing.T) {
@@ -41,16 +94,8 @@ func TestLocalesHaveSameArguments(t *testing.T) {
 		}
 		raw[loc] = m
 	}
-	args := func(s string) []string {
-		var out []string
-		for _, m := range argRe.FindAllStringSubmatch(s, -1) {
-			out = append(out, m[1])
-		}
-		slices.Sort(out)
-		return slices.Compact(out)
-	}
 	for k, ru := range raw["ru"] {
-		if a, b := args(ru), args(raw["en"][k]); !slices.Equal(a, b) {
+		if a, b := messageArgs(t, ru), messageArgs(t, raw["en"][k]); !slices.Equal(a, b) {
 			t.Errorf("%s: аргументы ru %v, en %v", k, a, b)
 		}
 	}
@@ -76,7 +121,10 @@ func TestPlurals(t *testing.T) {
 
 func TestTextErrorsAndFallback(t *testing.T) {
 	c := catalog(t)
-	ru, _ := c.Text("ru", "mail.footer", nil)
+	ru, err := c.Text("ru", "mail.footer", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if de, err := c.Text("de", "mail.footer", nil); err != nil || de != ru {
 		t.Fatalf("неизвестный язык не ушёл в ru: %q %v", de, err)
 	}
@@ -94,7 +142,8 @@ func TestLoadRejectsBrokenCatalogs(t *testing.T) {
 		"нет en":    {"ru.json": {Data: []byte(ok)}},
 		"не строка": {"ru.json": {Data: []byte(`{"a": 1}`)}, "en.json": {Data: []byte(ok)}},
 		"битый ICU": {"ru.json": {Data: []byte(`{"a": "{count, plural, one {x}"}`)}, "en.json": {Data: []byte(ok)}},
-		"не JSON":   {"ru.json": {Data: []byte(`{`)}, "en.json": {Data: []byte(ok)}},
+		"ключ с точкой совпал с вложенным": {"ru.json": {Data: []byte(`{"mail.footer": "x", "mail": {"footer": "y"}}`)}, "en.json": {Data: []byte(ok)}},
+		"не JSON": {"ru.json": {Data: []byte(`{`)}, "en.json": {Data: []byte(ok)}},
 	} {
 		if _, err := i18n.Load(fsys); err == nil {
 			t.Errorf("%s: загружено", name)
