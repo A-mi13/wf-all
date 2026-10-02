@@ -18,8 +18,9 @@ func smtpServer(t *testing.T) (string, <-chan string) {
 	return smtpServerRcpt(t, false)
 }
 
-// smtpServerRcpt — то же; rejectRcpt: на RCPT TO отвечает 550 с адресом получателя в тексте.
-func smtpServerRcpt(t *testing.T, rejectRcpt bool) (string, <-chan string) {
+// smtpServerRcpt — то же; rejectRcpt: на RCPT TO отвечает 550 с адресом получателя в тексте;
+// ext — дополнительные расширения в ответе EHLO (ENHANCEDSTATUSCODES).
+func smtpServerRcpt(t *testing.T, rejectRcpt bool, ext ...string) (string, <-chan string) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -56,6 +57,9 @@ func smtpServerRcpt(t *testing.T, rejectRcpt bool) (string, <-chan string) {
 			switch cmd := strings.ToUpper(strings.TrimSpace(line)); {
 			case strings.HasPrefix(cmd, "EHLO"):
 				write("250-test")
+				for _, e := range ext {
+					write("250-" + e)
+				}
 				write("250 8BITMIME")
 			case rejectRcpt && strings.HasPrefix(cmd, "RCPT TO"):
 				write("550 5.1.1 <user@example.com> recipient rejected")
@@ -140,6 +144,29 @@ func TestSMTPErrorsHaveNoAddress(t *testing.T) {
 			t.Fatalf("в ошибке адрес получателя: %v", err)
 		}
 	})
+
+	// текст уходит в river_job.errors: код SMTP без висящего пробела, расширенный — если сервер
+	// объявил ENHANCEDSTATUSCODES
+	for _, c := range []struct {
+		name string
+		ext  []string
+		want string
+	}{
+		{"без расширенного кода", nil, "(SMTP 550)"},
+		{"с расширенным кодом", []string{"ENHANCEDSTATUSCODES"}, "(SMTP 550 5.1.1)"},
+	} {
+		t.Run("код отказа: "+c.name, func(t *testing.T) {
+			addr, _ := smtpServerRcpt(t, true, c.ext...)
+			s, err := mail.NewSMTP(mail.SMTPConfig{Addr: addr, From: "noreply@example.com", TLS: "none"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = s.Send(ctx, mail.Message{To: "user@example.com", Subject: "Code", Text: "x"})
+			if err == nil || !strings.HasSuffix(err.Error(), c.want) {
+				t.Fatalf("err = %q, ждали окончание %q", err, c.want)
+			}
+		})
+	}
 
 	t.Run("битый адрес получателя", func(t *testing.T) {
 		s, err := mail.NewSMTP(mail.SMTPConfig{Addr: "127.0.0.1:1", From: "noreply@example.com", TLS: "none"})

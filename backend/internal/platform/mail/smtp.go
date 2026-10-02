@@ -93,7 +93,12 @@ func scrub(err error) error {
 	if errors.As(err, &se) {
 		msg := fmt.Sprintf("mail: отправка: %s", se.Reason)
 		if code := se.ErrorCode(); code != 0 {
-			msg += fmt.Sprintf(" (SMTP %d %s)", code, se.EnhancedStatusCode())
+			// расширенный код (5.1.1) — только если сервер объявил ENHANCEDSTATUSCODES
+			if esc := se.EnhancedStatusCode(); esc != "" {
+				msg += fmt.Sprintf(" (SMTP %d %s)", code, esc)
+			} else {
+				msg += fmt.Sprintf(" (SMTP %d)", code)
+			}
 		}
 		return errors.New(msg)
 	}
