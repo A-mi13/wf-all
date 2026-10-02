@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 )
 
-// FS — файлы в каталоге (dev): данные в data/<ключ>, тип — в meta/<ключ>.json. Запись атомарна:
-// временный файл и переименование.
+// FS — файлы в каталоге (dev): данные в data/<ключ>, тип — в meta/<ключ>.json. Атомарен каждый
+// файл (временный файл и переименование), а не вся запись: между данными и метаданными возможен
+// сбой, тогда останется тип предыдущей версии. Префикс существующего ключа («avatars» при
+// «avatars/x/f») — каталог, не файл: Get даёт ErrNotFound, Delete ничего не делает.
 type FS struct{ root string }
 
 func NewFS(root string) (*FS, error) {
@@ -35,7 +37,7 @@ func (s *FS) Put(_ context.Context, key string, r io.Reader, contentType string)
 	}
 	meta, err := json.Marshal(Info{ContentType: contentType})
 	if err != nil {
-		return err
+		return fmt.Errorf("blob: %w", err)
 	}
 	if err := writeAtomic(s.path("data", key), r); err != nil {
 		return err
@@ -57,7 +59,11 @@ func (s *FS) Get(_ context.Context, key string) (io.ReadCloser, Info, error) {
 	st, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return nil, Info{}, err
+		return nil, Info{}, fmt.Errorf("blob: %w", err)
+	}
+	if st.IsDir() {
+		_ = f.Close()
+		return nil, Info{}, ErrNotFound
 	}
 	var info Info
 	if raw, err := os.ReadFile(s.path("meta", key) + ".json"); err == nil {
@@ -72,9 +78,24 @@ func (s *FS) Delete(_ context.Context, key string) error {
 		return err
 	}
 	for _, p := range []string{s.path("data", key), s.path("meta", key) + ".json"} {
-		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("blob: %w", err)
+		if err := removeFile(p); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// removeFile удаляет файл; несуществующий путь и каталог (префикс другого ключа) — не ошибка.
+func removeFile(path string) error {
+	st, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && st.IsDir()) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("blob: %w", err)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("blob: %w", err)
 	}
 	return nil
 }
@@ -94,7 +115,7 @@ func writeAtomic(path string, r io.Reader) error {
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmp.Name())
-		return err
+		return fmt.Errorf("blob: %w", err)
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		_ = os.Remove(tmp.Name())

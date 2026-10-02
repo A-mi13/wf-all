@@ -3,6 +3,7 @@ package blob
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"sync"
 )
@@ -26,7 +27,7 @@ func (m *Memory) Put(_ context.Context, key string, r io.Reader, contentType str
 	}
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return err
+		return fmt.Errorf("blob: %w", err)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

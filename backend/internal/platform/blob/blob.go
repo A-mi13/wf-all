@@ -27,14 +27,17 @@ type Store interface {
 	Delete(ctx context.Context, key string) error
 }
 
-var keyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._\-/]*$`)
+// Каждый сегмент пути непустой, начинается и кончается на [a-z0-9]: так не бывает «.», завершающего
+// «/», точки в конце сегмента (на Windows «dot.» совпадает с «dot») и сегментов «.tmp-…» —
+// пространства имён временных файлов FS.
+var keyRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*$`)
 
 const maxKeyLen = 512
 
 // ValidKey — ключ одинаково безопасен для файловой системы и S3: нижний регистр, цифры,
-// «/ . _ -», без «..» и ведущего «/».
+// «/ . _ -», без «..», пустых сегментов и ведущего или завершающего «/».
 func ValidKey(key string) error {
-	if len(key) > maxKeyLen || !keyRe.MatchString(key) || strings.Contains(key, "..") || strings.Contains(key, "//") {
+	if len(key) > maxKeyLen || !keyRe.MatchString(key) || strings.Contains(key, "..") {
 		return ErrBadKey
 	}
 	return nil
