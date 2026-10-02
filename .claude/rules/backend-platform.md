@@ -18,14 +18,16 @@ paths:
 
 ## Край платформы (план 3/3)
 
-- Время — только `clock.Clock` (в тестах `clocktest.Fake`), не `time.Now` в коде платформы и модулей.
+- Текущее время — только `clock.Clock` (в тестах `clocktest.Fake`); длительности и таймауты — `time.Since`
+  (монотонные часы).
 - Ошибка, которую должен увидеть клиент (лимит, антибот, идемпотентность, флаг), — `httpx.ProblemError`
   (`httpx.NewError(статус, httpx.Code…)`); код строкой — падение стража `TestProblemCodesAreConstants`.
-- Почта — только задача `mail.SendArgs{Mail: "<модуль>.<письмо>", Ref: id}`; адрес находит `mail.Composer`
+- Почта — только задача `mail.SendArgs{V: 1, Mail: "<модуль>.<письмо>", Ref: id}` (другую версию воркер
+  отклонит); адрес находит `mail.Composer`
   модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en).
 - Пароли — `password.Check` + `password.Hasher` (argon2id под семафором); «нет почты» — `VerifyDummy`.
 - Когда требовать PoW — `risk.Assessor`; требование — `humancheck.Require` (403 с задачей).
-- Тесты механизмов с SQL — под ролью прода: `dbtest.NewPoolsAs(t, "api"|"worker")`.
+- Тесты механизмов с SQL — под ролью прода: `dbtest.NewPoolsAs(t, "api"|"worker"|"admin")`.
 - Пагинация — пакет `page` (непрозрачный курсор keyset по `(created_at, id)`, `page.Limit`: 20 по умолчанию,
   максимум 100); свой курсор модули не пишут.
 - `*auth.Principal` из `auth.From(ctx)` — общий для всех запросов сессии (кэш отдаёт один указатель): срезы

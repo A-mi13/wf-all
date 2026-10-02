@@ -10,8 +10,9 @@ import (
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 )
 
-// Route — операция контракта, на которую пришёл запрос. Кладёт Routes; читают валидатор,
-// rate limit (x-rate-limit) и идемпотентность — маршрут ищется один раз на запрос.
+// Route — операция контракта, на которую пришёл запрос. Кладёт Routes; читают валидатор и
+// rate limit (x-rate-limit) — маршрут ищется один раз на запрос. Идемпотентность маршрут не
+// читает: ей нужен фактический путь (r.URL.Path).
 type Route struct {
 	route  *routers.Route
 	params map[string]string
