@@ -12,7 +12,9 @@ import (
 type Querier interface {
 	// Счётчик сигнала риска: расходуется всегда, даже сверх порога.
 	Add(ctx context.Context, arg AddParams) error
-	// Строка с tat в прошлом ничего не ограничивает. Пачками — короткие транзакции.
+	// Строка с tat в прошлом ничего не ограничивает. Пачками — короткие транзакции. Условие — и на
+	// внешнем DELETE: подзапрос видит снимок до коммита параллельного Take, а после ожидания
+	// блокировки перепроверяется только WHERE внешнего оператора — иначе удалился бы свежий tat.
 	DeleteExpired(ctx context.Context, arg DeleteExpiredParams) (int64, error)
 	GetTAT(ctx context.Context, key string) (time.Time, error)
 	// Rate limit по GCRA (спека бэкенда §6.6). Владелец rate_limits — platform. Время — из часов

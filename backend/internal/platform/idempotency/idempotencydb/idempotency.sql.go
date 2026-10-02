@@ -62,9 +62,13 @@ func (q *Queries) CurrentLockTimeout(ctx context.Context) (string, error) {
 
 const deleteExpired = `-- name: DeleteExpired :execrows
 DELETE FROM idempotency_keys
-WHERE (user_id, key) IN (SELECT user_id, key FROM idempotency_keys WHERE expires_at <= now() LIMIT $1)
+WHERE expires_at <= now()
+  AND (user_id, key) IN (SELECT user_id, key FROM idempotency_keys WHERE expires_at <= now() LIMIT $1)
 `
 
+// Условие срока — и на внешнем DELETE: подзапрос видит снимок до коммита параллельного Claim, а
+// после ожидания блокировки перепроверяется только WHERE внешнего оператора. Без него ключ,
+// переиспользованный в эту секунду, удалился бы — и повтор исполнил бы действие второй раз.
 func (q *Queries) DeleteExpired(ctx context.Context, batch int32) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpired, batch)
 	if err != nil {
@@ -93,7 +97,8 @@ type GetRow struct {
 }
 
 // Идемпотентность мутирующих запросов (спека бэкенда §6.4). Владелец idempotency_keys — platform.
-// Время — время базы: срок ключа (24 ч) задаёт DEFAULT таблицы.
+// Время — время базы. Срок ключа 24 ч задают DEFAULT таблицы и Claim (при переиспользовании) —
+// менять вместе.
 func (q *Queries) Get(ctx context.Context, arg GetParams) (GetRow, error) {
 	row := q.db.QueryRow(ctx, get, arg.UserID, arg.Key)
 	var i GetRow

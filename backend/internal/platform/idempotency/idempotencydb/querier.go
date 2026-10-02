@@ -15,9 +15,13 @@ type Querier interface {
 	// (не дольше lock_timeout).
 	Claim(ctx context.Context, arg ClaimParams) (time.Time, error)
 	CurrentLockTimeout(ctx context.Context) (string, error)
+	// Условие срока — и на внешнем DELETE: подзапрос видит снимок до коммита параллельного Claim, а
+	// после ожидания блокировки перепроверяется только WHERE внешнего оператора. Без него ключ,
+	// переиспользованный в эту секунду, удалился бы — и повтор исполнил бы действие второй раз.
 	DeleteExpired(ctx context.Context, batch int32) (int64, error)
 	// Идемпотентность мутирующих запросов (спека бэкенда §6.4). Владелец idempotency_keys — platform.
-	// Время — время базы: срок ключа (24 ч) задаёт DEFAULT таблицы.
+	// Время — время базы. Срок ключа 24 ч задают DEFAULT таблицы и Claim (при переиспользовании) —
+	// менять вместе.
 	Get(ctx context.Context, arg GetParams) (GetRow, error)
 	// Ответ сохраняется после коммита бизнес-транзакции; 0 строк — транзакция откатилась (ключа нет).
 	SaveResponse(ctx context.Context, arg SaveResponseParams) (int64, error)

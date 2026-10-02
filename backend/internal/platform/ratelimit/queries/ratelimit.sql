@@ -24,7 +24,10 @@ SET tat = greatest(r.tat, @now::timestamptz) + make_interval(secs => @interval_s
 -- name: GetTAT :one
 SELECT tat FROM rate_limits WHERE key = @key;
 
--- Строка с tat в прошлом ничего не ограничивает. Пачками — короткие транзакции.
+-- Строка с tat в прошлом ничего не ограничивает. Пачками — короткие транзакции. Условие — и на
+-- внешнем DELETE: подзапрос видит снимок до коммита параллельного Take, а после ожидания
+-- блокировки перепроверяется только WHERE внешнего оператора — иначе удалился бы свежий tat.
 -- name: DeleteExpired :execrows
 DELETE FROM rate_limits
-WHERE key IN (SELECT key FROM rate_limits WHERE tat < @now::timestamptz LIMIT @batch);
+WHERE tat < @now::timestamptz
+  AND key IN (SELECT key FROM rate_limits WHERE tat < @now::timestamptz LIMIT @batch);

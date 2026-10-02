@@ -80,6 +80,9 @@ func TestRolePrivileges(t *testing.T) {
 		{"worker", "DELETE FROM rate_limits WHERE tat < now()", true},
 		{"worker", "DELETE FROM humancheck_spent WHERE expires_at < now()", true},
 		{"worker", "DELETE FROM idempotency_keys WHERE expires_at < now()", true},
+		// admin-api — тоже край: лимиты входа сотрудников и идемпотентность мутаций админки
+		{"admin", "INSERT INTO rate_limits (key, tat) VALUES ('probe', now()) ON CONFLICT (key) DO UPDATE SET tat = excluded.tat", true},
+		{"admin", "INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash) VALUES (gen_random_uuid(), 'probe', '/p', 'h')", true},
 	}
 	for _, c := range cases {
 		t.Run(c.role+": "+c.sql, func(t *testing.T) {

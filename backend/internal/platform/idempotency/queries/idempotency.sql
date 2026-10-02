@@ -1,5 +1,6 @@
 -- Идемпотентность мутирующих запросов (спека бэкенда §6.4). Владелец idempotency_keys — platform.
--- Время — время базы: срок ключа (24 ч) задаёт DEFAULT таблицы.
+-- Время — время базы. Срок ключа 24 ч задают DEFAULT таблицы и Claim (при переиспользовании) —
+-- менять вместе.
 
 -- name: Get :one
 SELECT request_hash, response_status, response_headers, response_body
@@ -36,6 +37,10 @@ SELECT current_setting('lock_timeout')::text;
 -- name: SetLockTimeout :exec
 SELECT set_config('lock_timeout', @value::text, true);
 
+-- Условие срока — и на внешнем DELETE: подзапрос видит снимок до коммита параллельного Claim, а
+-- после ожидания блокировки перепроверяется только WHERE внешнего оператора. Без него ключ,
+-- переиспользованный в эту секунду, удалился бы — и повтор исполнил бы действие второй раз.
 -- name: DeleteExpired :execrows
 DELETE FROM idempotency_keys
-WHERE (user_id, key) IN (SELECT user_id, key FROM idempotency_keys WHERE expires_at <= now() LIMIT @batch);
+WHERE expires_at <= now()
+  AND (user_id, key) IN (SELECT user_id, key FROM idempotency_keys WHERE expires_at <= now() LIMIT @batch);

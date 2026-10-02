@@ -9,6 +9,8 @@ import (
 )
 
 type Querier interface {
+	// Условие — и на внешнем DELETE, как у rate_limits и idempotency_keys: подзапрос видит снимок
+	// до коммита параллельной записи, перепроверяется только WHERE внешнего оператора.
 	DeleteExpired(ctx context.Context, arg DeleteExpiredParams) (int64, error)
 	// Израсходованные решения PoW (спека бэкенда §6.7). Владелец humancheck_spent — platform.
 	// 0 строк — решение уже предъявляли: повтор.

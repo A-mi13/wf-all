@@ -12,7 +12,8 @@ import (
 
 const deleteExpired = `-- name: DeleteExpired :execrows
 DELETE FROM humancheck_spent
-WHERE signature IN (SELECT signature FROM humancheck_spent WHERE expires_at < $1::timestamptz LIMIT $2)
+WHERE expires_at < $1::timestamptz
+  AND signature IN (SELECT signature FROM humancheck_spent WHERE expires_at < $1::timestamptz LIMIT $2)
 `
 
 type DeleteExpiredParams struct {
@@ -20,6 +21,8 @@ type DeleteExpiredParams struct {
 	Batch int32
 }
 
+// Условие — и на внешнем DELETE, как у rate_limits и idempotency_keys: подзапрос видит снимок
+// до коммита параллельной записи, перепроверяется только WHERE внешнего оператора.
 func (q *Queries) DeleteExpired(ctx context.Context, arg DeleteExpiredParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpired, arg.Now, arg.Batch)
 	if err != nil {
