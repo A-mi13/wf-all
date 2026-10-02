@@ -19,9 +19,16 @@ type Verifier interface {
 // дальше без Principal (нужен ли вход, решает security контракта в валидаторе). Заголовок
 // есть, но токен битый, просрочен или сессия недействительна — 401 сразу. Сбой загрузки
 // сессии — 500: недоступная база — не повод выкидывать пользователя из приложения.
+// Операция только анонимная (в security нет bearer: refresh, вход, коды) — Authorization не
+// читается вовсе, Principal не кладётся: клиент, вешающий заголовок на все запросы, с истёкшим
+// токеном иначе получал бы 401 на самом refresh. Маршрута в ctx нет — заголовок проверяется.
 func Middleware(v Verifier, l SessionLoader, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if rt, ok := httpx.RouteFrom(r.Context()); ok && !rt.AcceptsBearer() {
+				next.ServeHTTP(w, r)
+				return
+			}
 			h := r.Header.Get("Authorization")
 			if h == "" {
 				next.ServeHTTP(w, r)

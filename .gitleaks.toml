@@ -1,0 +1,16 @@
+# Правила gitleaks — встроенные; исключение одно: контракт, вшитый oapi-codegen в api.gen.go
+# (swaggerSpec — gzip в base64, строки по 80 символов). Случайный кусок base64 похож на ключ
+# (generic-api-key), и находка плавает от правки к правке текста контракта. Секрет в контракте
+# ловится в его исходниках contracts/openapi/**; в api.gen.go пропускаются только находки в
+# строках base64 (находка начинается в такой строке и может захватить следующую), остальной код
+# файла проверяется. Разделитель пути — / и \ (Windows). Проверено в режиме git (pre-commit и
+# ./task secrets); в режиме dir gitleaks 8.30 не заполняет строку находки — исключение там не действует.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "контракт, вшитый в api.gen.go (base64 от gzip)"
+condition = "AND"
+paths = ['''backend[/\\]internal[/\\]httpapi[/\\][a-z]+[/\\]oapi[/\\]api\.gen\.go$''']
+regexTarget = "line"
+regexes = ['''^\s*"[A-Za-z0-9+/=]{80}",''']

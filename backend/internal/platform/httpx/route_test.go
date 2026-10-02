@@ -63,6 +63,72 @@ func TestRoutesPutsOperationInContext(t *testing.T) {
 	}
 }
 
+const bearerSpec = `
+openapi: 3.0.3
+info: {title: t, version: "1"}
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: Bearer}
+    key: {type: apiKey, in: header, name: X-Key}
+paths:
+  /inherited:
+    get: {responses: {"200": {description: ok}}}
+  /anonymous:
+    get: {security: [], responses: {"200": {description: ok}}}
+  /empty-requirement:
+    get: {security: [{}], responses: {"200": {description: ok}}}
+  /optional:
+    get: {security: [{}, {bearer: []}], responses: {"200": {description: ok}}}
+  /other-scheme:
+    get: {security: [{key: []}], responses: {"200": {description: ok}}}
+`
+
+const noSecuritySpec = `
+openapi: 3.0.3
+info: {title: t, version: "1"}
+paths:
+  /plain:
+    get: {responses: {"200": {description: ok}}}
+`
+
+// Принимает ли операция bearer: security операции, а без неё — общий документа. Анонимная
+// (security: [] или только пустое требование) и операция с другой схемой — нет.
+func TestRouteAcceptsBearer(t *testing.T) {
+	cases := []struct {
+		spec, path string
+		want       bool
+	}{
+		{bearerSpec, "/inherited", true},
+		{bearerSpec, "/anonymous", false},
+		{bearerSpec, "/empty-requirement", false},
+		{bearerSpec, "/optional", true},
+		{bearerSpec, "/other-scheme", false},
+		{noSecuritySpec, "/plain", false},
+	}
+	for _, c := range cases {
+		spec, err := openapi3.NewLoader().LoadFromData([]byte(c.spec))
+		if err != nil {
+			t.Fatal(err)
+		}
+		routes, err := httpx.Routes(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got *httpx.Route
+		routes(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got, _ = httpx.RouteFrom(r.Context())
+		})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, c.path, nil))
+		if got == nil {
+			t.Fatalf("%s: нет маршрута", c.path)
+		}
+		if got.AcceptsBearer() != c.want {
+			t.Errorf("%s: AcceptsBearer = %v, ждали %v", c.path, !c.want, c.want)
+		}
+	}
+}
+
 func TestTimeoutSetsDeadline(t *testing.T) {
 	var left time.Duration
 	var ok bool

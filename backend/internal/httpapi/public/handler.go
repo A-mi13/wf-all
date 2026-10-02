@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/httpapi/public/oapi"
@@ -36,6 +37,15 @@ const defaultRequestTimeout = 15 * time.Second
 // NewHandler собирает публичный API на общей HTTP-платформе: конвейер спеки §6.1 стоит до
 // strict-хендлера. Забытая зависимость или класс x-rate-limit без правила — отказ старта.
 func NewHandler(log *slog.Logger, o Options) (http.Handler, error) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		return nil, fmt.Errorf("public: контракт: %w", err)
+	}
+	return newHandler(log, o, spec)
+}
+
+// newHandler — сборка на заданном контракте; в работе это всегда oapi.GetSpec (NewHandler).
+func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, error) {
 	if o.DB == nil || o.Tokens == nil || o.Sessions == nil || o.Limiter == nil || o.RateRules == nil {
 		return nil, errors.New("public: не заданы зависимости (DB, Tokens, Sessions, Limiter, RateRules)")
 	}
@@ -46,10 +56,6 @@ func NewHandler(log *slog.Logger, o Options) (http.Handler, error) {
 	}
 	if err := o.Peer.Validate(); err != nil {
 		return nil, err
-	}
-	spec, err := oapi.GetSpec()
-	if err != nil {
-		return nil, fmt.Errorf("public: контракт: %w", err)
 	}
 	if unknown := ratelimit.UnknownClasses(spec, o.RateRules); len(unknown) > 0 {
 		return nil, fmt.Errorf("public: классы rate limit без правил: %v", unknown)

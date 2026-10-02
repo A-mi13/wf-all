@@ -4,14 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 )
 
-// Route — операция контракта, на которую пришёл запрос. Кладёт Routes; читают валидатор и
-// rate limit (x-rate-limit) — маршрут ищется один раз на запрос. Идемпотентность маршрут не
+// Route — операция контракта, на которую пришёл запрос. Кладёт Routes; читают аутентификация
+// (security), валидатор и rate limit (x-rate-limit) — маршрут ищется один раз на запрос. Идемпотентность маршрут не
 // читает: ей нужен фактический путь (r.URL.Path).
 type Route struct {
 	route  *routers.Route
@@ -24,6 +25,29 @@ func (r *Route) Operation() *openapi3.Operation { return r.route.Operation }
 func (r *Route) Extension(name string) string {
 	s, _ := r.route.Operation.Extensions[name].(string)
 	return s
+}
+
+// AcceptsBearer — есть ли в security операции (без своего — в общем security документа) схема
+// HTTP Bearer, обязательная или опциональная ([{}, {bearer: []}]). Нет — операция только
+// анонимная (security: [] или эквивалент): слой аутентификации заголовок Authorization не читает.
+func (r *Route) AcceptsBearer() bool {
+	security := r.route.Operation.Security
+	if security == nil {
+		security = &r.route.Spec.Security
+	}
+	var schemes openapi3.SecuritySchemes
+	if c := r.route.Spec.Components; c != nil {
+		schemes = c.SecuritySchemes
+	}
+	for _, req := range *security {
+		for name := range req {
+			if s := schemes[name]; s != nil && s.Value != nil &&
+				s.Value.Type == "http" && strings.EqualFold(s.Value.Scheme, "bearer") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type routeKey struct{}

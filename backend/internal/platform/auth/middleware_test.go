@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/uuid"
 
 	"wf/backend/internal/platform/auth"
@@ -90,6 +91,78 @@ func TestMiddleware(t *testing.T) {
 				t.Fatal("нет WWW-Authenticate: Bearer")
 			}
 			if c.withWho != (got != nil) || (got != nil && got.UserID != uid) {
+				t.Fatalf("Principal: %+v", got)
+			}
+		})
+	}
+}
+
+const securitySpec = `
+openapi: 3.0.3
+info: {title: t, version: "1"}
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+paths:
+  /anonymous:
+    get: {security: [], responses: {"200": {description: ok}}}
+  /required:
+    get: {responses: {"200": {description: ok}}}
+  /optional:
+    get: {security: [{}, {bearer: []}], responses: {"200": {description: ok}}}
+`
+
+// Маршрут известен: у анонимной операции (в security нет bearer) Authorization не читается —
+// клиент с истёкшим токеном, вешающий заголовок на все запросы, не получит 401 на refresh,
+// входе и кодах. Операция с bearer (обязательным или опциональным) — битый токен даёт 401.
+func TestMiddlewareIgnoresAuthorizationOnAnonymousOperation(t *testing.T) {
+	uid, sid := uuid.New(), uuid.New()
+	v := fakeVerifier{"good": {UserID: uid, SessionID: sid}}
+	loader := auth.SessionLoaderFunc(func(_ context.Context, s uuid.UUID) (*auth.Principal, error) {
+		if s == sid {
+			return &auth.Principal{UserID: uid, SessionID: sid, Status: "active"}, nil
+		}
+		return nil, auth.ErrSessionInvalid
+	})
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(securitySpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := httpx.Routes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, path, header string
+		status             int
+		withWho            bool
+	}{
+		{"анонимная + битый токен — анонимно", "/anonymous", "Bearer forged", 204, false},
+		{"анонимная + не Bearer — анонимно", "/anonymous", "Basic Zm9vOmJhcg==", 204, false},
+		{"анонимная + действующий токен — Principal не кладётся", "/anonymous", "Bearer good", 204, false},
+		{"обязательный bearer + битый токен — 401", "/required", "Bearer forged", 401, false},
+		{"опциональный bearer + битый токен — 401", "/optional", "Bearer forged", 401, false},
+		{"опциональный bearer + действующий токен", "/optional", "Bearer good", 204, true},
+		{"маршрута нет + битый токен — 401, как раньше", "/nope", "Bearer forged", 401, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var got *auth.Principal
+			h := routes(auth.Middleware(v, loader, slog.New(slog.DiscardHandler))(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					got, _ = auth.From(r.Context())
+					w.WriteHeader(http.StatusNoContent)
+				})))
+			req := httptest.NewRequest(http.MethodGet, c.path, nil)
+			req.Header.Set("Authorization", c.header)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != c.status {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if c.withWho != (got != nil) {
 				t.Fatalf("Principal: %+v", got)
 			}
 		})

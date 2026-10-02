@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
+
 	"wf/backend/internal/httpapi/public"
 	"wf/backend/internal/httpapi/public/oapi"
 	"wf/backend/internal/platform/auth"
@@ -151,20 +153,26 @@ func TestDocsOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
-// Конвейер собран: слой аутентификации стоит и на анонимной операции (битый токен — 401),
-// rate limit — до хендлера.
+// Конвейер собран: на анонимной операции Authorization не читается (битый токен — запрос идёт
+// анонимно), rate limit — до хендлера; на операции с bearer аутентификация стоит до rate limit.
 func TestPipelineWired(t *testing.T) {
+	get := func(h http.Handler, authz string) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil)
+		if authz != "" {
+			r.Header.Set("Authorization", authz)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec
+	}
 	o := testOptions(t)
 	h, err := public.NewHandler(slog.New(slog.DiscardHandler), o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil)
-	r.Header.Set("Authorization", "Bearer garbage")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, r)
-	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), `"code":"auth.unauthenticated"`) {
-		t.Fatalf("битый токен: %d %s", rec.Code, rec.Body.String())
+	// /v1/health — security: []: клиент с истёкшим токеном в заголовке не получает 401
+	if rec := get(h, "Bearer garbage"); rec.Code != http.StatusOK {
+		t.Fatalf("анонимная операция, битый токен: %d %s — ждали 200", rec.Code, rec.Body.String())
 	}
 
 	o.Limiter = denyAll{}
@@ -172,19 +180,32 @@ func TestPipelineWired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil))
-	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+	if rec := get(h, ""); rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("лимит: %d %v", rec.Code, rec.Header())
 	}
 
-	// порядок: аутентификация до rate limit — битый токен отвергается, не расходуя лимит
-	r = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil)
-	r.Header.Set("Authorization", "Bearer garbage")
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, r)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("битый токен при исчерпанном лимите: %d %s — ждали 401 (auth до ratelimit)", rec.Code, rec.Body.String())
+	// Порядок на операции с bearer — обязательным и опциональным ([{}, {bearer: []}]): в контракте
+	// такой операции пока нет, поэтому security у /v1/health подменяется. Аутентификация стоит до
+	// rate limit — это принятый порядок спеки §6.1, а не защита: битый токен получает 401, не
+	// расходуя лимит, и перебор токенов лимитом не сдерживается (остаток M-3 — спека identity).
+	for name, sec := range map[string]openapi3.SecurityRequirements{
+		"обязательный bearer": {{"bearer": {}}},
+		"опциональный bearer": {{}, {"bearer": {}}},
+	} {
+		spec, err := oapi.GetSpec()
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec.Paths.Find("/v1/health").Get.Security = &sec
+		h, err := public.NewHandlerWithSpec(slog.New(slog.DiscardHandler), o, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec := get(h, "Bearer garbage"); rec.Code != http.StatusUnauthorized ||
+			!strings.Contains(rec.Body.String(), `"code":"auth.unauthenticated"`) {
+			t.Fatalf("%s, битый токен при исчерпанном лимите: %d %s — ждали 401 (auth до ratelimit)",
+				name, rec.Code, rec.Body.String())
+		}
 	}
 }
 

@@ -20,7 +20,8 @@ paths:
 
 ## Конвейер (спека §6.1)
 
-peer → лимит тела → таймаут → `httpx.Routes` → `auth.Middleware` → `httpx.ValidateRequests` (вход — из
+peer → лимит тела → таймаут → `httpx.Routes` → `auth.Middleware` (на операции без bearer в `security` —
+`Route.AcceptsBearer` — `Authorization` не читает) → `httpx.ValidateRequests` (вход — из
 `security` операции) → `ratelimit.Middleware` (класс — `x-rate-limit` операции) → `humancheck.Middleware`
 → `idempotency.Middleware` → strict-хендлер. Principal — `auth.From(ctx)`; IP — `peer.From(ctx)`; права
 на ресурс — в `app/` модуля. Новый класс `x-rate-limit` — сначала правило в `ratelimit.DefaultRules`,
