@@ -1,6 +1,7 @@
 package ratelimit_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -112,5 +113,31 @@ paths:
 	got := ratelimit.UnknownClasses(spec, ratelimit.DefaultRules())
 	if len(got) != 1 || got[0] != "GET /b: x-rate-limit nope" {
 		t.Fatalf("got %v", got)
+	}
+}
+
+// Класс правил, которого нет ни в DefaultRules, ни в x-rate-limit контракта, — опечатка в
+// API_RATE_LIMITS / ADMIN_RATE_LIMITS: переопределение молча не действовало бы.
+func TestStrayClasses(t *testing.T) {
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(`
+openapi: 3.0.3
+info: {title: t, version: "1"}
+paths:
+  /a:
+    get: {operationId: a, x-rate-limit: match, responses: {"200": {description: ok}}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := ratelimit.ParseRules("atuh.ip=30/1m:10,match.ip=5/1m,auth.ip=30/1m,zzz.user=off", ratelimit.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// auth — из DefaultRules, хоть контракт его и не использует; match — из контракта
+	if got := ratelimit.StrayClasses(spec, r); !slices.Equal(got, []string{"atuh", "zzz"}) {
+		t.Fatalf("got %v", got)
+	}
+	if got := ratelimit.StrayClasses(spec, ratelimit.DefaultRules()); len(got) != 0 {
+		t.Fatalf("умолчания: %v", got)
 	}
 }

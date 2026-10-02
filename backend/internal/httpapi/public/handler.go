@@ -60,6 +60,10 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	if unknown := ratelimit.UnknownClasses(spec, o.RateRules); len(unknown) > 0 {
 		return nil, fmt.Errorf("public: классы rate limit без правил: %v", unknown)
 	}
+	// класс из API_RATE_LIMITS, которого нет ни в умолчаниях, ни в контракте, — опечатка
+	if stray := ratelimit.StrayClasses(spec, o.RateRules); len(stray) > 0 {
+		return nil, fmt.Errorf("public: классы rate limit не из правил по умолчанию и не из x-rate-limit контракта (опечатка в API_RATE_LIMITS?): %v", stray)
+	}
 	title := spec.Info.Title
 	routes, err := httpx.Routes(spec)
 	if err != nil {

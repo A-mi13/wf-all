@@ -163,6 +163,20 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 	}
 }
 
+// Опечатка класса в ADMIN_RATE_LIMITS (atuh вместо auth) — отказ старта с именем класса, а не
+// переопределение, которое молча ни на что не действует.
+func TestNewHandlerRejectsStrayRateClass(t *testing.T) {
+	o := testOptions(t)
+	r, err := ratelimit.ParseRules("atuh.ip=30/1m:10", ratelimit.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.RateRules = r
+	if _, err := admin.NewHandler(slog.New(slog.DiscardHandler), o); err == nil || !strings.Contains(err.Error(), "atuh") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 // Страж: каждый класс x-rate-limit контракта описан в правилах по умолчанию. Пока в контракте
 // нет ни одной операции с x-rate-limit, проверять нечего — тест пропускается явно, а не
 // проходит вхолостую; с первой такой операцией страж станет активным сам.

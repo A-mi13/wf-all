@@ -125,6 +125,29 @@ func ParseRules(s string, base Rules) (Rules, error) {
 	return out, nil
 }
 
+// StrayClasses — классы правил, которых нет ни в DefaultRules, ни в x-rate-limit контракта:
+// опечатка в API_RATE_LIMITS / ADMIN_RATE_LIMITS (atuh.ip=…), переопределение молча не
+// действовало бы. Классы — по алфавиту.
+func StrayClasses(spec *openapi3.T, r Rules) []string {
+	known := DefaultRules()
+	used := map[string]bool{}
+	for _, item := range spec.Paths.Map() {
+		for _, op := range item.Operations() {
+			if class, _ := op.Extensions["x-rate-limit"].(string); class != "" {
+				used[class] = true
+			}
+		}
+	}
+	var out []string
+	for class := range r {
+		if _, ok := known[class]; !ok && !used[class] {
+			out = append(out, class)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // UnknownClasses — операции, чей x-rate-limit не описан в правилах: «<МЕТОД> <путь>: x-rate-limit <класс>».
 func UnknownClasses(spec *openapi3.T, r Rules) []string {
 	var out []string

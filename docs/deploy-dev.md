@@ -29,7 +29,7 @@
 | `API_JWT_SEEDS` | сиды Ed25519 access-токенов (base64, 32 байта) через запятую: первый подписывает, все проверяют. `generateValue: true` в `render.yaml` — Render генерирует сам при синхронизации Blueprint; без ключа API не стартует |
 | `API_HUMANCHECK_KEYS` | ключи HMAC задач антибота (PoW, ALTCHA), base64 ≥ 32 байт, через запятую; `generateValue: true` — как у `API_JWT_SEEDS` |
 | `API_TRUSTED_PROXIES` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` (в `render.yaml`) — частные сети балансировщика Render: только им API верит `X-Forwarded-For`. Через запятую без висячей запятой: пустой элемент — отказ старта |
-| `API_RATE_LIMITS` | не задана — умолчания `ratelimit.DefaultRules`; переопределение — `<класс>.<ip\|user\|device>=<лимит>/<период>[:<всплеск>]` или `=off`, через запятую |
+| `API_RATE_LIMITS` | не задана — умолчания `ratelimit.DefaultRules`; переопределение — `<класс>.<ip\|user\|device>=<лимит>/<период>[:<всплеск>]` или `=off`, через запятую; класс не из умолчаний и не из контракта (опечатка) — отказ старта |
 | `API_BFF_NETS`, `API_BFF_SECRETS` | не заданы: BFF (Next.js) на стенде нет, заголовкам `X-WF-*` API не верит |
 
 Воркер на стенде не запущен — переменные `WORKER_*`, в том числе `WORKER_MAIL_*`, на Render не нужны.

@@ -51,6 +51,10 @@ func NewHandler(log *slog.Logger, o Options) (http.Handler, error) {
 	if unknown := ratelimit.UnknownClasses(spec, o.RateRules); len(unknown) > 0 {
 		return nil, fmt.Errorf("admin: классы rate limit без правил: %v", unknown)
 	}
+	// класс из ADMIN_RATE_LIMITS, которого нет ни в умолчаниях, ни в контракте, — опечатка
+	if stray := ratelimit.StrayClasses(spec, o.RateRules); len(stray) > 0 {
+		return nil, fmt.Errorf("admin: классы rate limit не из правил по умолчанию и не из x-rate-limit контракта (опечатка в ADMIN_RATE_LIMITS?): %v", stray)
+	}
 	title := spec.Info.Title
 	routes, err := httpx.Routes(spec)
 	if err != nil {
