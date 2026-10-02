@@ -3,6 +3,7 @@ package password_test
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -95,18 +96,25 @@ func TestSemaphoreRespectsContext(t *testing.T) {
 
 // Фиктивная проверка стоит столько же, сколько настоящая: «нет почты» и «неверный пароль» по
 // времени неразличимы (§7.1). Допуск грубый — тест ловит пропуск argon2, а не микросекунды.
+// Сравниваются минимумы из нескольких замеров вперемежку: один замер на нагруженном CI мог
+// попасть на паузу планировщика или GC и уронить тест без пропуска argon2.
 func TestVerifyDummyCostsLikeVerify(t *testing.T) {
 	ctx := context.Background()
 	h := hasher(t, password.DefaultParams)
 	enc, _ := h.Hash(ctx, "correct horse battery staple")
-	start := time.Now()
-	_, _, _ = h.Verify(ctx, "wrong", enc)
-	real := time.Since(start)
-	start = time.Now()
-	if err := h.VerifyDummy(ctx, "wrong"); err != nil {
-		t.Fatal(err)
+	const rounds = 5
+	real, dummy := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
+	for range rounds {
+		start := time.Now()
+		_, _, _ = h.Verify(ctx, "wrong", enc)
+		real = min(real, time.Since(start))
+		start = time.Now()
+		if err := h.VerifyDummy(ctx, "wrong"); err != nil {
+			t.Fatal(err)
+		}
+		dummy = min(dummy, time.Since(start))
 	}
-	if dummy := time.Since(start); dummy < real/3 {
-		t.Fatalf("фиктивная проверка %v против настоящей %v — argon2 пропущен", dummy, real)
+	if dummy < real/3 {
+		t.Fatalf("фиктивная проверка %v против настоящей %v (минимумы из %d) — argon2 пропущен", dummy, real, rounds)
 	}
 }
