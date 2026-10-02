@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,8 +59,12 @@ type cachedLoader struct {
 // ошибку (500), а не держит запросы и не раздаёт состояние старше ttl. Вызывающий, чей ctx
 // истёк, уходит сразу, общая загрузка продолжается для остальных. Больше maxEntries
 // записей — просроченные выбрасываются, а если и это не помогло — кэш очищается целиком
-// (дешевле, чем LRU, и не растёт без предела).
+// (дешевле, чем LRU, и не растёт без предела). ttl <= 0 или maxEntries <= 0 — паника:
+// ошибка конфигурации на старте (срок загрузки 0 положил бы всю аутентификацию).
 func NewCachedLoader(next SessionLoader, ttl time.Duration, c clock.Clock, maxEntries int) SessionLoader {
+	if ttl <= 0 || maxEntries <= 0 {
+		panic(fmt.Sprintf("auth: NewCachedLoader: ttl %v и maxEntries %d должны быть > 0", ttl, maxEntries))
+	}
 	return &cachedLoader{next: next, ttl: ttl, clock: c, maxEntries: maxEntries, entries: make(map[uuid.UUID]entry)}
 }
 
@@ -70,7 +76,14 @@ func (l *cachedLoader) LoadSession(ctx context.Context, sid uuid.UUID) (*Princip
 	if ok && now.Before(e.expires) {
 		return e.p, nil
 	}
-	ch := l.group.DoChan(sid.String(), func() (any, error) {
+	ch := l.group.DoChan(sid.String(), func() (v any, err error) {
+		// загрузка идёт в горутине singleflight: recoverer сервера её панику не видит, а
+		// DoChan переподнимает панику там же — без перехвата падает весь процесс
+		defer func() {
+			if r := recover(); r != nil {
+				v, err = nil, fmt.Errorf("auth: паника в загрузке сессии: %v\n%s", r, debug.Stack())
+			}
+		}()
 		// срок — от начала загрузки: прочитанное верно на момент запроса к базе, и долгий
 		// ответ не продлевает жизнь отозванной сессии сверх ttl
 		start := l.clock.Now()

@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/httpx"
+	"wf/backend/internal/platform/testkit/clocktest"
 	"wf/backend/internal/platform/token"
 )
 
@@ -91,6 +93,29 @@ func TestMiddleware(t *testing.T) {
 				t.Fatalf("Principal: %+v", got)
 			}
 		})
+	}
+}
+
+// Паника загрузчика за кэшем (чужая горутина singleflight — recoverer сервера её не видит):
+// 500 на этот запрос, процесс жив.
+func TestMiddlewareLoaderPanic(t *testing.T) {
+	uid, sid := uuid.New(), uuid.New()
+	v := fakeVerifier{"good": {UserID: uid, SessionID: sid}}
+	next := auth.SessionLoaderFunc(func(context.Context, uuid.UUID) (*auth.Principal, error) {
+		panic("загрузчик сломан")
+	})
+	l := auth.NewCachedLoader(next, 5*time.Second, clocktest.New(time.Now()), 100)
+	called := false
+	h := auth.Middleware(v, l, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer good")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var p httpx.Problem
+	if rec.Code != http.StatusInternalServerError || called ||
+		json.Unmarshal(rec.Body.Bytes(), &p) != nil || p.Code != httpx.CodeInternal {
+		t.Fatalf("status = %d, хендлер вызван: %v, тело: %s", rec.Code, called, rec.Body.String())
 	}
 }
 

@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -104,6 +105,8 @@ func TestCachedLoaderSingleflight(t *testing.T) {
 	c := clocktest.New(time.Now())
 	next := &counting{gate: make(chan struct{})}
 	l := auth.NewCachedLoader(next, 5*time.Second, c, 100)
+	open := sync.OnceFunc(func() { close(next.gate) })
+	defer open()
 	sid := uuid.New()
 	var wg sync.WaitGroup
 	for range 10 {
@@ -113,10 +116,8 @@ func TestCachedLoaderSingleflight(t *testing.T) {
 			}
 		})
 	}
-	for auth.Waiters(l) < 10 { // все десять встали в ожидание общей загрузки
-		time.Sleep(time.Millisecond)
-	}
-	close(next.gate)
+	waitWaiters(t, l, 10, open) // все десять встали в ожидание общей загрузки
+	open()
 	wg.Wait()
 	if n := next.calls.Load(); n != 1 {
 		t.Fatalf("обращений %d, нужно 1", n)
@@ -177,10 +178,13 @@ func TestCachedLoaderLoadTimeout(t *testing.T) {
 func TestCachedLoaderCallerCancel(t *testing.T) {
 	c := clocktest.New(time.Now())
 	next := &counting{gate: make(chan struct{})}
+	open := sync.OnceFunc(func() { close(next.gate) })
+	defer open()
 	l := auth.NewCachedLoader(next, 5*time.Second, c, 100)
 	sid := uuid.New()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	gone := make(chan error, 1)
 	go func() {
 		_, err := l.LoadSession(ctx, sid)
@@ -191,9 +195,7 @@ func TestCachedLoaderCallerCancel(t *testing.T) {
 		_, err := l.LoadSession(context.Background(), sid)
 		stays <- err
 	}()
-	for auth.Waiters(l) < 2 {
-		time.Sleep(time.Millisecond)
-	}
+	waitWaiters(t, l, 2, open)
 
 	cancel()
 	select {
@@ -202,16 +204,68 @@ func TestCachedLoaderCallerCancel(t *testing.T) {
 			t.Fatalf("отменённый вызывающий: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		close(next.gate)
 		t.Fatal("отменённый вызывающий ждёт загрузку")
 	}
 
-	close(next.gate)
+	open()
 	if err := <-stays; err != nil {
 		t.Fatalf("общая загрузка оборвалась: %v", err)
 	}
 	if n := next.calls.Load(); n != 1 {
 		t.Fatalf("обращений %d, нужно 1", n)
+	}
+}
+
+// Паника загрузчика идёт в чужой горутине singleflight: перехвачена и стала ошибкой, а не
+// уронила процесс (без перехвата тестовый бинарь падает целиком).
+func TestCachedLoaderPanic(t *testing.T) {
+	c := clocktest.New(time.Now())
+	next := auth.SessionLoaderFunc(func(context.Context, uuid.UUID) (*auth.Principal, error) {
+		panic("загрузчик сломан")
+	})
+	l := auth.NewCachedLoader(next, 5*time.Second, c, 100)
+	p, err := l.LoadSession(context.Background(), uuid.New())
+	if err == nil || p != nil || !strings.Contains(err.Error(), "загрузчик сломан") {
+		t.Fatalf("паника загрузчика: %v, %v", p, err)
+	}
+}
+
+// ttl <= 0 или maxEntries <= 0 — ошибка конфигурации на старте: иначе срок загрузки 0
+// кладёт всю аутентификацию.
+func TestNewCachedLoaderRejectsBadConfig(t *testing.T) {
+	c := clocktest.New(time.Now())
+	for _, tc := range []struct {
+		name       string
+		ttl        time.Duration
+		maxEntries int
+	}{
+		{"ttl 0", 0, 100},
+		{"ttl < 0", -time.Second, 100},
+		{"maxEntries 0", time.Second, 0},
+		{"maxEntries < 0", time.Second, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("конфигурация принята")
+				}
+			}()
+			auth.NewCachedLoader(auth.NoSessions, tc.ttl, c, tc.maxEntries)
+		})
+	}
+}
+
+// waitWaiters — ждёт n вызовов в общей загрузке не дольше 5 с; не дождался — открывает
+// загрузку (чтобы горутины теста не повисли) и падает.
+func waitWaiters(t *testing.T, l auth.SessionLoader, n int, open func()) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for auth.Waiters(l) < n {
+		if time.Now().After(deadline) {
+			open()
+			t.Fatalf("ждущих общую загрузку %d, нужно %d", auth.Waiters(l), n)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
