@@ -23,10 +23,11 @@ var (
 var commonRaw string
 
 var commonSet = sync.OnceValue(func() map[string]struct{} {
+	// Комментарий — только строка с «# »: записи списка вроде «#1babygirl» — настоящие пароли.
 	set := make(map[string]struct{}, 10000)
 	for line := range strings.SplitSeq(commonRaw, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" || strings.HasPrefix(line, "# ") {
 			continue
 		}
 		set[line] = struct{}{}

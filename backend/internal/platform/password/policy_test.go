@@ -19,6 +19,7 @@ func TestCheck(t *testing.T) {
 		"QWERTYUIOP":                   password.ErrCommon, // регистр не спасает
 		"ЙЦУКЕНГШЩЗ":                   password.ErrCommon,
 		"пароль1234":                   password.ErrCommon,
+		"#1babygirl":                   password.ErrCommon, // запись списка с «#» — пароль, не комментарий
 		strings.Repeat("я", 129):       password.ErrTooLong,
 		strings.Repeat("я", 128):       nil,
 	}
