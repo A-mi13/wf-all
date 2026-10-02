@@ -21,6 +21,16 @@ sql:
         # иначе models.go тянет всю схему (~2400 строк на один запрос).
         omit_unused_structs: true
         overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: { import: github.com/google/uuid, type: UUID, pointer: true }
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: { type: time.Time, pointer: true }
           - db_type: geography
             go_type: string
           - db_type: geography
@@ -60,6 +70,87 @@ sql:
       go:
         package: auditdb
         out: internal/platform/audit/auditdb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: { import: github.com/google/uuid, type: UUID, pointer: true }
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: { type: time.Time, pointer: true }
+          - db_type: geography
+            go_type: string
+          - db_type: geography
+            nullable: true
+            go_type: { type: string, pointer: true }
+  - engine: postgresql
+    schema: migrations/
+    queries: internal/platform/ratelimit/queries/
+    gen:
+      go:
+        package: ratelimitdb
+        out: internal/platform/ratelimit/ratelimitdb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: { import: github.com/google/uuid, type: UUID, pointer: true }
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: { type: time.Time, pointer: true }
+          - db_type: geography
+            go_type: string
+          - db_type: geography
+            nullable: true
+            go_type: { type: string, pointer: true }
+  - engine: postgresql
+    schema: migrations/
+    queries: internal/platform/humancheck/queries/
+    gen:
+      go:
+        package: humancheckdb
+        out: internal/platform/humancheck/humancheckdb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: { import: github.com/google/uuid, type: UUID, pointer: true }
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: { type: time.Time, pointer: true }
+          - db_type: geography
+            go_type: string
+          - db_type: geography
+            nullable: true
+            go_type: { type: string, pointer: true }
+  - engine: postgresql
+    schema: migrations/
+    queries: internal/platform/idempotency/queries/
+    gen:
+      go:
+        package: idempotencydb
+        out: internal/platform/idempotency/idempotencydb
         sql_package: pgx/v5
         emit_interface: true
         emit_pointers_for_null_types: true

@@ -7,6 +7,8 @@ package flagsdb
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 const getFlag = `-- name: GetFlag :one
@@ -23,4 +25,22 @@ func (q *Queries) GetFlag(ctx context.Context, key string) (GetFlagRow, error) {
 	var i GetFlagRow
 	err := row.Scan(&i.Key, &i.EnabledGlobally)
 	return i, err
+}
+
+const isEnabled = `-- name: IsEnabled :one
+SELECT (enabled_globally OR $1::uuid = ANY(enabled_city_ids))::boolean AS enabled
+FROM feature_flags WHERE key = $2
+`
+
+type IsEnabledParams struct {
+	CityID uuid.UUID
+	Key    string
+}
+
+// Включён ли флаг в городе: глобально или город в списке. 0 строк — флага нет.
+func (q *Queries) IsEnabled(ctx context.Context, arg IsEnabledParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isEnabled, arg.CityID, arg.Key)
+	var enabled bool
+	err := row.Scan(&enabled)
+	return enabled, err
 }

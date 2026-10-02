@@ -70,6 +70,16 @@ func TestRolePrivileges(t *testing.T) {
 		{"api", "INSERT INTO outbox (id, event_type, schema_version, aggregate_type, aggregate_id, aggregate_version, payload) " +
 			"VALUES (gen_random_uuid(), 'test.probe', 1, 'probe', gen_random_uuid(), 1, '{}')", true},
 		{"api", "SELECT 1 FROM river_leader", false},
+		// край платформы (план 3/3): API считает лимиты, тратит решения PoW, ведёт ключи
+		// идемпотентности; воркер чистит просроченное
+		{"api", "INSERT INTO rate_limits (key, tat) VALUES ('probe', now()) ON CONFLICT (key) DO UPDATE SET tat = excluded.tat", true},
+		{"api", "SELECT tat FROM rate_limits WHERE key = 'probe'", true},
+		{"api", "INSERT INTO humancheck_spent (signature, expires_at) VALUES ('probe', now()) ON CONFLICT DO NOTHING", true},
+		{"api", "INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash) VALUES (gen_random_uuid(), 'probe', '/p', 'h')", true},
+		{"api", "UPDATE idempotency_keys SET response_status = 200, response_headers = '{}' WHERE false", true},
+		{"worker", "DELETE FROM rate_limits WHERE tat < now()", true},
+		{"worker", "DELETE FROM humancheck_spent WHERE expires_at < now()", true},
+		{"worker", "DELETE FROM idempotency_keys WHERE expires_at < now()", true},
 	}
 	for _, c := range cases {
 		t.Run(c.role+": "+c.sql, func(t *testing.T) {

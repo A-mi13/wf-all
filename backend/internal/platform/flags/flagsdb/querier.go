@@ -10,6 +10,8 @@ import (
 
 type Querier interface {
 	GetFlag(ctx context.Context, key string) (GetFlagRow, error)
+	// Включён ли флаг в городе: глобально или город в списке. 0 строк — флага нет.
+	IsEnabled(ctx context.Context, arg IsEnabledParams) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)
