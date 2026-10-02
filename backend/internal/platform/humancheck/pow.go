@@ -25,12 +25,14 @@ const (
 	algorithm  = "SHA-256"
 	saltBytes  = 12
 	minKeySize = 32
+	// maxSafeInteger — Number.MAX_SAFE_INTEGER: наибольшее целое, точное в JS
+	maxSafeInteger = 1<<53 - 1
 )
 
 type PoWConfig struct {
 	Keys      []string      // ключи HMAC (base64, ≥ 32 байт): первый подписывает, все проверяют
-	TTL       time.Duration // срок жизни задачи
-	MaxNumber int64         // сложность: верхняя граница перебора
+	TTL       time.Duration // срок жизни задачи, ≥ 1 с
+	MaxNumber int64         // сложность: верхняя граница перебора, 1…2^53-1
 }
 
 // PoW — серверная часть ALTCHA на своих часах: только SHA-256, kid ключа в соли, ротация
@@ -44,29 +46,51 @@ type PoW struct {
 	q       *humancheckdb.Queries
 }
 
-func NewPoW(db humancheckdb.DBTX, c clock.Clock, cfg PoWConfig) (*PoW, error) {
-	if len(cfg.Keys) == 0 {
+// Keys — разобранные ключи HMAC задач: первый подписывает, все проверяют.
+type Keys struct {
+	signKID string
+	verify  map[string][]byte
+}
+
+// ParseKeys — ключи HMAC из окружения (base64, ≥ 32 байт); kid — keys.ID ключа. Без базы:
+// cmd/api зовёт до подключения к ней, NewPoW — повторно.
+func ParseKeys(list []string) (*Keys, error) {
+	if len(list) == 0 {
 		return nil, errors.New("humancheck: нет ключей HMAC")
 	}
-	if cfg.TTL <= 0 || cfg.MaxNumber < 1 {
-		return nil, fmt.Errorf("humancheck: срок %s и сложность %d — нужны больше нуля", cfg.TTL, cfg.MaxNumber)
-	}
-	p := &PoW{verify: map[string][]byte{}, ttl: cfg.TTL, max: cfg.MaxNumber, clock: c, q: humancheckdb.New(db)}
-	for i, s := range cfg.Keys {
-		k, err := keys.Decode(s)
+	k := &Keys{verify: make(map[string][]byte, len(list))}
+	for i, s := range list {
+		b, err := keys.Decode(s)
 		if err != nil {
 			return nil, fmt.Errorf("humancheck: ключ №%d: %w", i+1, err)
 		}
-		if len(k) < minKeySize {
-			return nil, fmt.Errorf("humancheck: ключ №%d — %d байт, нужно ≥ %d", i+1, len(k), minKeySize)
+		if len(b) < minKeySize {
+			return nil, fmt.Errorf("humancheck: ключ №%d — %d байт, нужно ≥ %d", i+1, len(b), minKeySize)
 		}
-		kid := keys.ID(k)
-		p.verify[kid] = k
+		kid := keys.ID(b)
+		k.verify[kid] = b
 		if i == 0 {
-			p.signKID = kid
+			k.signKID = kid
 		}
 	}
-	return p, nil
+	return k, nil
+}
+
+func NewPoW(db humancheckdb.DBTX, c clock.Clock, cfg PoWConfig) (*PoW, error) {
+	// expires в соли — Unix-секунды: срок меньше секунды дал бы задачу, истёкшую при выдаче
+	if cfg.TTL < time.Second {
+		return nil, fmt.Errorf("humancheck: срок задачи %s — нужен ≥ 1s", cfg.TTL)
+	}
+	// maxNumber уходит в JS-виджет ALTCHA: больше 2^53-1 число там теряет точность; заодно
+	// p.max+1 в NewChallenge не переполняется
+	if cfg.MaxNumber < 1 || cfg.MaxNumber > maxSafeInteger {
+		return nil, fmt.Errorf("humancheck: сложность %d — нужна от 1 до %d", cfg.MaxNumber, int64(maxSafeInteger))
+	}
+	k, err := ParseKeys(cfg.Keys)
+	if err != nil {
+		return nil, err
+	}
+	return &PoW{signKID: k.signKID, verify: k.verify, ttl: cfg.TTL, max: cfg.MaxNumber, clock: c, q: humancheckdb.New(db)}, nil
 }
 
 func (p *PoW) NewChallenge(context.Context) (Challenge, error) {

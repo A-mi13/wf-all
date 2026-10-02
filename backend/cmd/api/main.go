@@ -19,7 +19,6 @@ import (
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/humancheck"
-	"wf/backend/internal/platform/keys"
 	"wf/backend/internal/platform/peer"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/server"
@@ -45,7 +44,7 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := checkHumancheckKeys(cfg.Humancheck.Keys); err != nil {
+	if _, err := humancheck.ParseKeys(cfg.Humancheck.Keys); err != nil {
 		return err
 	}
 	rules, err := ratelimit.ParseRules(cfg.RateLimits, ratelimit.DefaultRules())
@@ -61,8 +60,9 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	}
 	return server.RunHTTP(ctx, "api", server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB}, logOut,
 		func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error) {
-			// срок и сложность PoW проверяются здесь, ключи — ещё до базы; сценарии identity
-			// получат этот же PoW
+			// PoW создаётся только ради проверки срока и сложности на старте (ключи проверены ещё до
+			// базы) и выбрасывается: в конвейере его никто не ждёт; передать его в сценарии входа и
+			// регистрации — работа спеки identity
 			if _, err := humancheck.NewPoW(pool, clock.System, humancheck.PoWConfig{
 				Keys: cfg.Humancheck.Keys, TTL: cfg.Humancheck.TTL, MaxNumber: cfg.Humancheck.MaxNumber,
 			}); err != nil {
@@ -80,22 +80,4 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 				RateRules: rules,
 			})
 		})
-}
-
-// minHumancheckKey — ключ HMAC задач антибота не короче 256 бит (humancheck.NewPoW).
-const minHumancheckKey = 32
-
-// checkHumancheckKeys — ключи PoW до подключения к базе: битый ключ — отказ старта сразу, а не
-// после открытия пула. Полную проверку повторяет humancheck.NewPoW.
-func checkHumancheckKeys(list []string) error {
-	for i, s := range list {
-		k, err := keys.Decode(s)
-		if err != nil {
-			return fmt.Errorf("humancheck: ключ №%d: %w", i+1, err)
-		}
-		if len(k) < minHumancheckKey {
-			return fmt.Errorf("humancheck: ключ №%d — %d байт, нужно ≥ %d", i+1, len(k), minHumancheckKey)
-		}
-	}
-	return nil
 }

@@ -179,9 +179,37 @@ func TestNewPoWValidatesConfig(t *testing.T) {
 		"короткий ключ":     {Keys: []string{short}, TTL: time.Minute, MaxNumber: 1000},
 		"нулевой срок":      {Keys: []string{newKey(t)}, MaxNumber: 1000},
 		"нулевая сложность": {Keys: []string{newKey(t)}, TTL: time.Minute},
+		// expires в соли — Unix-секунды: срок меньше секунды дал бы задачу, истёкшую при выдаче
+		"срок меньше секунды": {Keys: []string{newKey(t)}, TTL: 999 * time.Millisecond, MaxNumber: 1000},
+		// maxNumber уходит в JS-виджет: больше 2^53-1 число там теряет точность
+		"сложность больше 2^53-1": {Keys: []string{newKey(t)}, TTL: time.Minute, MaxNumber: 1 << 53},
 	} {
 		if _, err := humancheck.NewPoW(pools.As, c, cfg); err == nil {
 			t.Errorf("%s: принято", name)
 		}
+	}
+	// границы допустимого
+	if _, err := humancheck.NewPoW(pools.As, c, humancheck.PoWConfig{
+		Keys: []string{newKey(t)}, TTL: time.Second, MaxNumber: 1<<53 - 1,
+	}); err != nil {
+		t.Errorf("срок 1 с и сложность 2^53-1: %v", err)
+	}
+}
+
+// Ключи HMAC проверяются без базы: cmd/api зовёт ParseKeys до подключения к ней.
+func TestParseKeys(t *testing.T) {
+	short := base64.StdEncoding.EncodeToString([]byte("short"))
+	for name, list := range map[string][]string{
+		"нет ключей":    nil,
+		"не base64":     {"не-base64"},
+		"короткий ключ": {short},
+		"второй битый":  {newKey(t), short},
+	} {
+		if _, err := humancheck.ParseKeys(list); err == nil {
+			t.Errorf("%s: принято", name)
+		}
+	}
+	if _, err := humancheck.ParseKeys([]string{newKey(t), newKey(t)}); err != nil {
+		t.Fatal(err)
 	}
 }
