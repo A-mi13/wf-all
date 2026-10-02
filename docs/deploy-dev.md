@@ -65,8 +65,18 @@ Render стоит Cloudflare, а балансировщик дописывает
 - Сервисы в частной сети Render (адреса из `API_TRUSTED_PROXIES`) и раньше могли подставить любой IP
   через `X-Forwarded-For`; теперь — и через `CF-Connecting-IP`. Доверие то же, не новое.
 
-IP клиента в логи не пишется — проверять лимитом, пробой A/B. В `render.yaml` заголовок задан, поэтому
-шаг A на стенде — до деплоя этой правки или временно с пустым `API_CLIENT_IP_HEADER` в панели Render.
+**Диагностика.** Лимит делится на всех клиентов, а причина не ясна (пир вне `API_TRUSTED_PROXIES`,
+например 100.64/10 или IPv6 ULA; заголовок CDN не доходит или в другом виде) — временно
+`API_LOG_LEVEL=debug`: в логах приложения Render появятся строки `peer` (`remote_addr`,
+`remote_trusted`, `forwarded`, `cdn_header`, `cdn_value`, `client_ip`, `source`; `source` — `peer`,
+`cdn`, `forwarded` или `bff`). Секрет BFF и `X-WF-Device` в них не пишутся. После диагностики —
+вернуть `info`: IP клиента — персональные данные, на `info` запись не создаётся.
+
+У admin-api тот же лог включается через `ADMIN_LOG_LEVEL=debug`.
+
+Вне диагностики IP клиента в логи не пишется — проверять лимитом, пробой A/B. В `render.yaml` заголовок
+задан, поэтому шаг A на стенде — до деплоя PR #8 (заголовок CDN) или временно с пустым
+`API_CLIENT_IP_HEADER` в панели Render.
 Запрос — `curl -s -o /dev/null -w '%{http_code}\n' https://<адрес wf-api>/v1/health`.
 
 1. В настройках сервиса `wf-api` временно задать `API_RATE_LIMITS=default.ip=3/10m:3` (3 запроса на

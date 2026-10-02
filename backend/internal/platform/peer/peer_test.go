@@ -1,12 +1,17 @@
 package peer_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
 	"testing"
+
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"wf/backend/internal/platform/peer"
 )
@@ -222,6 +227,163 @@ func TestClientIPHeaderPrivateBFFAddrRejected(t *testing.T) {
 		"CF-Connecting-IP": "192.168.1.10", peer.HeaderBFFSecret: secret, peer.HeaderClientIP: "198.51.100.7"}})
 	if got.ViaBFF || got.IP != netip.MustParseAddr("104.16.0.1") {
 		t.Fatalf("got %+v — ждали 104.16.0.1 без BFF", got)
+	}
+}
+
+// captureLog подменяет slog.Default (им пользуется Middleware: сервер ставит его через
+// slog.SetDefault) на JSON-логгер в буфер с заданным уровнем; прежний возвращается в t.Cleanup.
+// Тесты с подменой не параллельные.
+func captureLog(t *testing.T, level slog.Level) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: level})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+// peerRecord — единственная запись «peer» из буфера.
+func peerRecord(t *testing.T, buf *bytes.Buffer) map[string]any {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 || lines[0] == "" {
+		t.Fatalf("ждали ровно одну запись, получили %d: %q", len(lines), buf.String())
+	}
+	var rec map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatalf("запись не JSON: %v: %q", err, lines[0])
+	}
+	if rec["msg"] != "peer" || rec["level"] != "DEBUG" {
+		t.Fatalf("ждали DEBUG «peer», получили %v", rec)
+	}
+	return rec
+}
+
+// Диагностика источника IP: на Debug одна запись «peer» с тем, что пришло в процесс, и тем, откуда
+// взят адрес. Секрет BFF и метка устройства в неё не попадают никогда.
+func TestDebugLog(t *testing.T) {
+	cdn := cfg
+	cdn.ClientIPHeader = "CF-Connecting-IP"
+	xff := map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1"}
+	withCF := map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1", "CF-Connecting-IP": "203.0.113.7"}
+	cases := []struct {
+		name string
+		c    peer.Config
+		r    req
+		want map[string]any
+	}{
+		{"Render-цепочка с заголовком CDN", cdn, req{"10.0.0.5:4000", withCF}, map[string]any{
+			"remote_addr": "10.0.0.5:4000", "remote_trusted": true, "forwarded": "203.0.113.7, 104.16.0.1",
+			"cdn_header": "CF-Connecting-IP", "cdn_value": "203.0.113.7", "client_ip": "203.0.113.7", "source": "cdn"}},
+		{"без заголовка CDN — X-Forwarded-For", cdn, req{"10.0.0.5:4000", xff}, map[string]any{
+			"remote_addr": "10.0.0.5:4000", "remote_trusted": true, "forwarded": "203.0.113.7, 104.16.0.1",
+			"cdn_header": "CF-Connecting-IP", "cdn_value": "", "client_ip": "104.16.0.1", "source": "forwarded"}},
+		{"заголовок CDN не годится — X-Forwarded-For", cdn,
+			req{"10.0.0.5:4000", map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1", "CF-Connecting-IP": "10.1.2.3"}},
+			map[string]any{"cdn_value": "10.1.2.3", "client_ip": "104.16.0.1", "source": "forwarded"}},
+		{"имя CDN не задано", cfg, req{"10.0.0.5:4000", withCF}, map[string]any{
+			// nil — ключа в записи нет (cdn_value пишется, только если имя заголовка задано)
+			"cdn_header": "", "cdn_value": nil, "forwarded": "203.0.113.7, 104.16.0.1", "client_ip": "104.16.0.1", "source": "forwarded"}},
+		// именно эта картина (пир вне TrustedProxies, например 100.64/10) и есть первая версия сбоя
+		{"недоверенный пир", cdn, req{"100.64.0.5:4000", withCF}, map[string]any{
+			"remote_addr": "100.64.0.5:4000", "remote_trusted": false, "forwarded": "203.0.113.7, 104.16.0.1",
+			"cdn_value": "203.0.113.7", "client_ip": "100.64.0.5", "source": "peer"}},
+		{"доверенный пир без заголовков", cdn, req{"10.0.0.5:4000", nil}, map[string]any{
+			"remote_trusted": true, "forwarded": "", "cdn_value": "", "client_ip": "10.0.0.5", "source": "peer"}},
+		{"BFF", cdn, req{"192.0.2.10:5000", map[string]string{peer.HeaderBFFSecret: secret,
+			peer.HeaderClientIP: "198.51.100.7", peer.HeaderDevice: "web-dev-1"}}, map[string]any{
+			"remote_addr": "192.0.2.10:5000", "remote_trusted": false, "client_ip": "198.51.100.7", "source": "bff"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			buf := captureLog(t, slog.LevelDebug)
+			resolve(t, c.c, c.r)
+			rec := peerRecord(t, buf)
+			for k, want := range c.want {
+				if rec[k] != want {
+					t.Errorf("%s: got %#v, want %#v (запись %v)", k, rec[k], want, rec)
+				}
+			}
+			for _, k := range []string{"remote_addr", "remote_trusted", "forwarded", "cdn_header", "client_ip", "source"} {
+				if _, ok := rec[k]; !ok {
+					t.Errorf("нет атрибута %s", k)
+				}
+			}
+			// секрет BFF и метка устройства — никогда, ни в каком виде
+			for _, banned := range []string{secret, "web-dev-1", strings.Repeat("o", 32)} {
+				if strings.Contains(buf.String(), banned) {
+					t.Errorf("в логе %q", banned)
+				}
+			}
+		})
+	}
+}
+
+// cdn_value — сырое значение заголовка: повторные строки склеиваются через «, ».
+func TestDebugLogRepeatedCDNHeader(t *testing.T) {
+	cdn := cfg
+	cdn.ClientIPHeader = "CF-Connecting-IP"
+	buf := captureLog(t, slog.LevelDebug)
+	h := peer.Middleware(cdn)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.5:4000"
+	r.Header.Add("X-Forwarded-For", "203.0.113.7")
+	r.Header.Add("X-Forwarded-For", "104.16.0.1")
+	r.Header.Add("CF-Connecting-IP", "1.2.3.4")
+	r.Header.Add("CF-Connecting-IP", "203.0.113.7")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	rec := peerRecord(t, buf)
+	if rec["cdn_value"] != "1.2.3.4, 203.0.113.7" || rec["forwarded"] != "203.0.113.7, 104.16.0.1" || rec["source"] != "forwarded" {
+		t.Fatalf("запись %v", rec)
+	}
+}
+
+// Идентификатор запроса (chi RequestID стоит в конвейере раньше peer) связывает запись с access-логом.
+func TestDebugLogRequestID(t *testing.T) {
+	buf := captureLog(t, slog.LevelDebug)
+	h := chimw.RequestID(peer.Middleware(cfg)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.5:4000"
+	r.Header.Set("X-Request-Id", "req-42")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if rec := peerRecord(t, buf); rec["request_id"] != "req-42" {
+		t.Fatalf("запись %v", rec)
+	}
+}
+
+// Проверка уровня: на Info запрос с заголовками, которые диагностика склеила бы, стоит столько же,
+// сколько без них. Без проверки Join и сборка атрибутов добавляют аллокации (относительно себя же —
+// порог не привязан к версии Go).
+func TestDebugLogNoOverheadAtInfo(t *testing.T) {
+	captureLog(t, slog.LevelInfo)
+	cdn := cfg
+	cdn.ClientIPHeader = "CF-Connecting-IP"
+	h := peer.Middleware(cdn)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	allocs := func(withHeaders bool) float64 {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		r.RemoteAddr = "100.64.0.5:4000" // недоверенный пир: заголовки не разбираются
+		if withHeaders {
+			r.Header.Add("X-Forwarded-For", "203.0.113.7")
+			r.Header.Add("X-Forwarded-For", "104.16.0.1")
+			r.Header.Add("CF-Connecting-IP", "1.2.3.4")
+			r.Header.Add("CF-Connecting-IP", "203.0.113.7")
+		}
+		w := httptest.NewRecorder()
+		return testing.AllocsPerRun(100, func() { h.ServeHTTP(w, r) })
+	}
+	if with, without := allocs(true), allocs(false); with != without {
+		t.Fatalf("%v аллокаций с заголовками против %v без них — диагностика собирается без проверки уровня", with, without)
+	}
+}
+
+// На Info записи нет: IP клиента — персональные данные, лог только на время диагностики.
+func TestDebugLogOffAtInfo(t *testing.T) {
+	cdn := cfg
+	cdn.ClientIPHeader = "CF-Connecting-IP"
+	buf := captureLog(t, slog.LevelInfo)
+	resolve(t, cdn, req{"10.0.0.5:4000", map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1", "CF-Connecting-IP": "203.0.113.7"}})
+	if buf.Len() != 0 {
+		t.Fatalf("на Info что-то записано: %q", buf.String())
 	}
 }
 

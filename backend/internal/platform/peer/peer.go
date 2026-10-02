@@ -10,10 +10,13 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/textproto"
 	"strings"
+
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const (
@@ -127,13 +130,29 @@ func From(ctx context.Context) Info {
 	return i
 }
 
+// source — каким путём получен адрес клиента; значения пишутся в диагностический лог.
+type source string
+
+const (
+	sourcePeer source = "peer" // адрес TCP-соединения (RemoteAddr)
+	sourceCDN  source = "cdn"  // заголовок CDN (ClientIPHeader)
+	// разбирался X-Forwarded-For (адрес может остаться адресом пира, если правая запись не разобралась)
+	sourceForwarded source = "forwarded"
+	sourceBFF       source = "bff" // X-WF-Client-IP от BFF
+)
+
 // Middleware разбирает собеседника запроса и кладёт Info в контекст. Заголовки BFF снимаются
 // всегда: значения уже в Info, а дальше по конвейеру (хендлеры, логи) они только соблазн
 // прочитать непроверенное.
 func Middleware(c Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			info := resolve(c, r)
+			info, src := resolve(c, r)
+			// до снятия заголовков BFF: лог видит запрос таким, каким он пришёл (значения BFF не читает);
+			// проверка уровня — чтобы на Info не склеивать заголовки и не собирать атрибуты на горячем пути
+			if slog.Default().Enabled(r.Context(), slog.LevelDebug) {
+				logPeer(r, c, info, src)
+			}
 			r.Header.Del(HeaderBFFSecret)
 			r.Header.Del(HeaderClientIP)
 			r.Header.Del(HeaderDevice)
@@ -142,27 +161,54 @@ func Middleware(c Config) func(http.Handler) http.Handler {
 	}
 }
 
-func resolve(c Config, r *http.Request) Info {
-	var addr netip.Addr
-	if ap, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
-		addr = ap.Addr().Unmap()
+// logPeer — диагностика источника IP за прокси и CDN: что пришло в процесс (адрес соединения,
+// X-Forwarded-For, заголовок CDN) и откуда взят итоговый адрес. Включается временно —
+// API_LOG_LEVEL=debug, при Info запись не создаётся и заголовки не склеиваются. IP клиента —
+// персональные данные, поэтому только Debug и только на время диагностики. Секрет BFF и X-WF-Device
+// не пишутся никогда. Вызывается только при включённом Debug.
+func logPeer(r *http.Request, c Config, info Info, src source) {
+	remote := peerAddr(r)
+	attrs := []any{
+		"request_id", middleware.GetReqID(r.Context()),
+		"remote_addr", r.RemoteAddr,
+		"remote_trusted", contains(c.TrustedProxies, remote),
+		"forwarded", strings.Join(r.Header.Values(headerForwarded), ", "),
+		"cdn_header", c.ClientIPHeader,
 	}
+	if c.ClientIPHeader != "" {
+		attrs = append(attrs, "cdn_value", strings.Join(r.Header.Values(c.ClientIPHeader), ", "))
+	}
+	attrs = append(attrs, "client_ip", info.IP.String(), "source", string(src))
+	slog.DebugContext(r.Context(), "peer", attrs...)
+}
+
+// peerAddr — адрес TCP-соединения без IPv4-обёртки; нулевой, если RemoteAddr не разобрать.
+func peerAddr(r *http.Request) netip.Addr {
+	if ap, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
+		return ap.Addr().Unmap()
+	}
+	return netip.Addr{}
+}
+
+// resolve возвращает собеседника и путь, которым получен его адрес.
+func resolve(c Config, r *http.Request) (Info, source) {
+	addr, src := peerAddr(r), sourcePeer
 	if contains(c.TrustedProxies, addr) {
 		if ip, ok := fromCDN(r.Header, c.ClientIPHeader); ok {
-			addr = ip
-		} else {
-			addr = forwarded(r.Header.Values(headerForwarded), c.TrustedProxies, addr)
+			addr, src = ip, sourceCDN
+		} else if vals := r.Header.Values(headerForwarded); len(vals) > 0 {
+			addr, src = forwarded(vals, c.TrustedProxies, addr), sourceForwarded
 		}
 	}
 	info := Info{IP: addr}
 	if !contains(c.BFFNets, addr) || !secretOK(r.Header.Get(HeaderBFFSecret), c.BFFSecrets) {
-		return info
+		return info, src
 	}
 	ip, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get(HeaderClientIP)))
 	if err != nil {
-		return info
+		return info, src
 	}
-	return Info{IP: ip.Unmap(), ViaBFF: true, Device: device(r.Header.Get(HeaderDevice))}
+	return Info{IP: ip.Unmap(), ViaBFF: true, Device: device(r.Header.Get(HeaderDevice))}, sourceBFF
 }
 
 // fromCDN — адрес посетителя из заголовка CDN; вызывается только для пира из TrustedProxies.
