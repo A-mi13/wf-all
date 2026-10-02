@@ -53,6 +53,11 @@ func renderEnv(t *testing.T) map[string]string {
 // render.yaml, и прогоняем ту же картину запроса.
 func TestRenderYAMLClientIP(t *testing.T) {
 	stand := renderEnv(t)
+	for _, k := range []string{"API_TRUSTED_PROXIES", "API_CLIENT_IP_HEADER"} {
+		if v, ok := stand[k]; !ok || v == "" {
+			t.Fatalf("render.yaml: у wf-api нет %s со значением", k)
+		}
+	}
 	c, err := config.Load[config.API]("API_", []string{
 		"API_HTTP_ADDR=:8080", "API_DATABASE_URL=postgres://x", "API_JWT_SEEDS=a", "API_HUMANCHECK_KEYS=k",
 		"API_TRUSTED_PROXIES=" + stand["API_TRUSTED_PROXIES"],
