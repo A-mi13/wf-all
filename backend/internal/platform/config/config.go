@@ -63,11 +63,13 @@ type API struct {
 
 // Admin — вход сотрудников (сессия, TOTP, аллоулист) добавит спека identity.
 type Admin struct {
-	Log        Log
-	HTTP       HTTP
-	DB         DB
-	Peer       Peer
-	RateLimits string `env:"RATE_LIMITS"`
+	Log  Log
+	HTTP HTTP
+	DB   DB
+	// TrustedProxies — балансировщик хостинга (спека §8.4). BFF у admin-api нет — её фронт ходит
+	// в API напрямую, поэтому BFF_NETS и BFF_SECRETS у неё не читаются.
+	TrustedProxies []netip.Prefix `env:"TRUSTED_PROXIES" envSeparator:","`
+	RateLimits     string         `env:"RATE_LIMITS"`
 }
 
 // Mail — SMTP транзакционных писем (спека §6.9); в dev — Mailpit.

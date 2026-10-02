@@ -44,7 +44,7 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 		return err
 	}
 	// BFF у админки нет: её фронт ходит в API напрямую
-	pc := peer.Config{TrustedProxies: cfg.Peer.TrustedProxies}
+	pc := peer.Config{TrustedProxies: cfg.TrustedProxies}
 	if err := pc.Validate(); err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package config_test
 import (
 	"log/slog"
 	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,30 @@ func TestLoadDocsEnabledPerBinary(t *testing.T) {
 	}
 	if !c.HTTP.DocsEnabled {
 		t.Fatal("ADMIN_DOCS_ENABLED=true не включил Swagger админки")
+	}
+}
+
+// admin-api BFF не принимает (фронт админки ходит в API напрямую): переменных ADMIN_BFF_* нет —
+// иначе они принимались бы и ни на что не влияли. Прокси хостинга — ADMIN_TRUSTED_PROXIES.
+func TestAdminHasNoBFF(t *testing.T) {
+	var walk func(reflect.Type)
+	walk = func(rt reflect.Type) {
+		for f := range rt.Fields() {
+			if strings.HasPrefix(f.Tag.Get("env"), "BFF_") {
+				t.Errorf("config.Admin: поле %s (ADMIN_%s)", f.Name, f.Tag.Get("env"))
+			}
+			if f.Type.Kind() == reflect.Struct {
+				walk(f.Type)
+			}
+		}
+	}
+	walk(reflect.TypeFor[config.Admin]())
+	c, err := config.Load[config.Admin]("ADMIN_", []string{
+		"ADMIN_HTTP_ADDR=:8081", "ADMIN_DATABASE_URL=postgres://admin@localhost/wf",
+		"ADMIN_TRUSTED_PROXIES=10.0.0.0/8",
+	})
+	if err != nil || len(c.TrustedProxies) != 1 || c.TrustedProxies[0] != netip.MustParsePrefix("10.0.0.0/8") {
+		t.Fatalf("прокси: %v %+v", err, c.TrustedProxies)
 	}
 }
 
