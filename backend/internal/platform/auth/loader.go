@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,11 +40,12 @@ type entry struct {
 }
 
 type cachedLoader struct {
-	next  SessionLoader
-	ttl   time.Duration
-	clock clock.Clock
-	max   int
-	group singleflight.Group
+	next       SessionLoader
+	ttl        time.Duration
+	clock      clock.Clock
+	maxEntries int
+	group      singleflight.Group
+	waiters    atomic.Int32 // вызовы, ждущие общую загрузку (видят тесты)
 
 	mu      sync.Mutex
 	entries map[uuid.UUID]entry
@@ -51,10 +53,13 @@ type cachedLoader struct {
 
 // NewCachedLoader — кэш в процессе не дольше ttl (§6.2: 5 с): бан, «выйти везде» и смена
 // пароля действуют в пределах ttl. Кэшируется только успех; одновременные промахи одной
-// сессии — одно обращение к next. Больше max записей — просроченные выбрасываются, а если
-// и это не помогло — кэш очищается целиком (дешевле, чем LRU, и не растёт без предела).
-func NewCachedLoader(next SessionLoader, ttl time.Duration, c clock.Clock, max int) SessionLoader {
-	return &cachedLoader{next: next, ttl: ttl, clock: c, max: max, entries: make(map[uuid.UUID]entry)}
+// сессии — одно обращение к next, и у этой загрузки свой срок ttl: зависшая база даёт
+// ошибку (500), а не держит запросы и не раздаёт состояние старше ttl. Вызывающий, чей ctx
+// истёк, уходит сразу, общая загрузка продолжается для остальных. Больше maxEntries
+// записей — просроченные выбрасываются, а если и это не помогло — кэш очищается целиком
+// (дешевле, чем LRU, и не растёт без предела).
+func NewCachedLoader(next SessionLoader, ttl time.Duration, c clock.Clock, maxEntries int) SessionLoader {
+	return &cachedLoader{next: next, ttl: ttl, clock: c, maxEntries: maxEntries, entries: make(map[uuid.UUID]entry)}
 }
 
 func (l *cachedLoader) LoadSession(ctx context.Context, sid uuid.UUID) (*Principal, error) {
@@ -65,22 +70,33 @@ func (l *cachedLoader) LoadSession(ctx context.Context, sid uuid.UUID) (*Princip
 	if ok && now.Before(e.expires) {
 		return e.p, nil
 	}
-	v, err, _ := l.group.Do(sid.String(), func() (any, error) {
+	ch := l.group.DoChan(sid.String(), func() (any, error) {
 		// срок — от начала загрузки: прочитанное верно на момент запроса к базе, и долгий
 		// ответ не продлевает жизнь отозванной сессии сверх ttl
 		start := l.clock.Now()
-		// загрузка не должна оборваться из-за отмены одного из ждущих запросов
-		p, err := l.next.LoadSession(context.WithoutCancel(ctx), sid)
+		// отмена одного из ждущих не обрывает общую загрузку, но у неё свой срок — ttl:
+		// WithoutCancel снимает и срок вызывающего
+		lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), l.ttl)
+		defer cancel()
+		p, err := l.next.LoadSession(lctx, sid)
 		if err != nil {
 			return nil, err
 		}
 		l.put(sid, p, start.Add(l.ttl))
 		return p, nil
 	})
-	if err != nil {
-		return nil, err
+	// DoChan уже записал вызов в общую загрузку
+	l.waiters.Add(1)
+	defer l.waiters.Add(-1)
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*Principal), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return v.(*Principal), nil
 }
 
 func (l *cachedLoader) put(sid uuid.UUID, p *Principal, expires time.Time) {
@@ -90,13 +106,13 @@ func (l *cachedLoader) put(sid uuid.UUID, p *Principal, expires time.Time) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.entries) >= l.max {
+	if len(l.entries) >= l.maxEntries {
 		for k, e := range l.entries {
 			if !now.Before(e.expires) {
 				delete(l.entries, k)
 			}
 		}
-		if len(l.entries) >= l.max {
+		if len(l.entries) >= l.maxEntries {
 			clear(l.entries)
 		}
 	}

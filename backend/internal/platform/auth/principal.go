@@ -18,7 +18,8 @@ type Role struct {
 }
 
 // Principal — пользователь запроса. Загружается одним запросом по sid (identity) и не
-// меняется: кэш отдаёт один указатель всем запросам сессии.
+// меняется: кэш отдаёт один указатель всем запросам сессии. Срезы Roles и Restrictions
+// общие для всех запросов сессии: не изменять (append, sort, запись по индексу).
 type Principal struct {
 	UserID       uuid.UUID
 	SessionID    uuid.UUID

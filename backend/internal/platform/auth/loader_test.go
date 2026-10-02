@@ -113,9 +113,103 @@ func TestCachedLoaderSingleflight(t *testing.T) {
 			}
 		})
 	}
-	time.Sleep(50 * time.Millisecond) // все десять встали в ожидание
+	for auth.Waiters(l) < 10 { // все десять встали в ожидание общей загрузки
+		time.Sleep(time.Millisecond)
+	}
 	close(next.gate)
 	wg.Wait()
+	if n := next.calls.Load(); n != 1 {
+		t.Fatalf("обращений %d, нужно 1", n)
+	}
+}
+
+// У загрузки свой крайний срок не дальше ttl по реальным часам — даже если у вызывающего
+// срок длиннее: зависшая база не держит запросы и не раздаёт состояние старше ttl.
+func TestCachedLoaderLoadDeadline(t *testing.T) {
+	c := clocktest.New(time.Now())
+	var deadline time.Time
+	var has bool
+	next := auth.SessionLoaderFunc(func(ctx context.Context, sid uuid.UUID) (*auth.Principal, error) {
+		deadline, has = ctx.Deadline()
+		return &auth.Principal{SessionID: sid}, nil
+	})
+	const ttl = 5 * time.Second
+	l := auth.NewCachedLoader(next, ttl, c, 100)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	if _, err := l.LoadSession(ctx, uuid.New()); err != nil {
+		t.Fatal(err)
+	}
+	if !has || deadline.After(time.Now().Add(ttl)) {
+		t.Fatalf("у загрузки нет срока или он дальше ttl: %v, %v", has, deadline)
+	}
+}
+
+// Загрузка дольше ttl — ошибка, а не Principal.
+func TestCachedLoaderLoadTimeout(t *testing.T) {
+	c := clocktest.New(time.Now())
+	next := auth.SessionLoaderFunc(func(ctx context.Context, _ uuid.UUID) (*auth.Principal, error) {
+		<-ctx.Done() // база зависла
+		return nil, ctx.Err()
+	})
+	l := auth.NewCachedLoader(next, 20*time.Millisecond, c, 100)
+	type result struct {
+		p   *auth.Principal
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		p, err := l.LoadSession(context.Background(), uuid.New())
+		done <- result{p, err}
+	}()
+	select {
+	case r := <-done:
+		if !errors.Is(r.err, context.DeadlineExceeded) || r.p != nil {
+			t.Fatalf("загрузка дольше ttl: %v, %v", r.p, r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("у загрузки нет срока: зависшая база держит запрос")
+	}
+}
+
+// Вызывающий, у которого истёк свой срок, уходит сразу; общая загрузка продолжается для
+// остальных.
+func TestCachedLoaderCallerCancel(t *testing.T) {
+	c := clocktest.New(time.Now())
+	next := &counting{gate: make(chan struct{})}
+	l := auth.NewCachedLoader(next, 5*time.Second, c, 100)
+	sid := uuid.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	gone := make(chan error, 1)
+	go func() {
+		_, err := l.LoadSession(ctx, sid)
+		gone <- err
+	}()
+	stays := make(chan error, 1)
+	go func() {
+		_, err := l.LoadSession(context.Background(), sid)
+		stays <- err
+	}()
+	for auth.Waiters(l) < 2 {
+		time.Sleep(time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-gone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("отменённый вызывающий: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		close(next.gate)
+		t.Fatal("отменённый вызывающий ждёт загрузку")
+	}
+
+	close(next.gate)
+	if err := <-stays; err != nil {
+		t.Fatalf("общая загрузка оборвалась: %v", err)
+	}
 	if n := next.calls.Load(); n != 1 {
 		t.Fatalf("обращений %d, нужно 1", n)
 	}
