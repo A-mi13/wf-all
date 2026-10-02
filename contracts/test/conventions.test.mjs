@@ -236,3 +236,54 @@ test('errorCodes — общие коды и коды операций без п�
   d.paths['/v1/x'] = { get: { 'x-error-codes': ['teams.name_taken', 'teams.not_found'] } };
   assert.deepEqual(errorCodes(d), ['internal', 'teams.name_taken', 'teams.not_found']);
 });
+
+// Спека §8.3: enum'ы открытые — клиент обязан пережить незнакомое значение; генераторам (в том
+// числе Dart) это сообщает x-extensible-enum.
+test('enum без x-extensible-enum — нарушение', () => {
+  const d = base();
+  d.components.schemas.Team = {
+    type: 'object',
+    properties: { status: { type: 'string', enum: ['active', 'paused'] } },
+  };
+  assert.deepEqual(conventionViolations(d), [
+    'components.schemas.Team.properties.status: enum без x-extensible-enum: true',
+  ]);
+  d.components.schemas.Team.properties.status['x-extensible-enum'] = true;
+  assert.deepEqual(conventionViolations(d), []);
+});
+
+// Пример и расширения — данные, а не схема: объект со свойством enum в них не нарушение.
+test('enum внутри example, examples и x-* не проверяется', () => {
+  const d = base();
+  d.components.schemas.Team = {
+    type: 'object',
+    example: { kind: 'select', enum: ['a', 'b'] },
+    'x-ui': { enum: ['c'] },
+  };
+  post(d).parameters.push({
+    name: 'filter',
+    in: 'query',
+    schema: { type: 'string' },
+    examples: { list: { value: { enum: ['d'] } } },
+  });
+  assert.deepEqual(conventionViolations(d), []);
+});
+
+test('свойство с именем example — схема, его enum проверяется', () => {
+  const d = base();
+  d.components.schemas.Team = {
+    type: 'object',
+    properties: { example: { type: 'string', enum: ['a'] } },
+  };
+  assert.deepEqual(conventionViolations(d), [
+    'components.schemas.Team.properties.example: enum без x-extensible-enum: true',
+  ]);
+});
+
+test('enum в параметре операции тоже помечается', () => {
+  const d = base();
+  post(d).parameters.push({ name: 'sort', in: 'query', schema: { type: 'string', enum: ['a'] } });
+  assert.deepEqual(conventionViolations(d), [
+    'paths./v1/teams.post.parameters.1.schema: enum без x-extensible-enum: true',
+  ]);
+});

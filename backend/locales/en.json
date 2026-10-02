@@ -1,0 +1,8 @@
+{
+  "common": {
+    "minutes": "{count, plural, one {# minute} other {# minutes}}"
+  },
+  "mail": {
+    "footer": "This email was sent automatically, please do not reply."
+  }
+}

@@ -84,15 +84,17 @@ jobs:
           docker run -d --name wf-api --network host \
             -e API_HTTP_ADDR=127.0.0.1:18080 \
             -e API_DOCS_ENABLED=true \
+            -e API_JWT_SEEDS="$(openssl rand -base64 32)" \
+            -e API_HUMANCHECK_KEYS="$(openssl rand -base64 32)" \
             -e API_DATABASE_URL='postgres://api:api@127.0.0.1:15432/wf?sslmode=disable' \
             -e MIGRATOR_DATABASE_URL='postgres://migrator:migrator@127.0.0.1:15432/wf?sslmode=disable' \
             wf-backend migrate-then-api
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:18080/healthz; then
-              # готовность: API видит базу под своей ролью (права из grants.sql)
-              curl -fsS http://127.0.0.1:18080/readyz
+              # готовность: API подключается к базе под своей ролью (пинг; права проверяют тесты grants)
+              curl -fsS http://127.0.0.1:18080/readyz || { docker logs wf-api; exit 1; }
               # Swagger dev-стенда: контракт вшит в образ и отдаётся
-              curl -fsS -o /dev/null http://127.0.0.1:18080/docs/openapi.json
+              curl -fsS -o /dev/null http://127.0.0.1:18080/docs/openapi.json || { docker logs wf-api; exit 1; }
               exit 0
             fi
             sleep 2

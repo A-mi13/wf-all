@@ -1,6 +1,9 @@
 {
   "enabledPlugins": {
     "expo@claude-plugins-official": false,
-    "figma@claude-plugins-official": false
+    "figma@claude-plugins-official": false,
+    "render@claude-plugins-official": true,
+    "neon@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": false
   }
 }

@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/health"
@@ -27,6 +29,8 @@ type HTTPConfig struct {
 func RunHTTP(ctx context.Context, name string, c HTTPConfig, logOut io.Writer,
 	build func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error)) error {
 	log := logx.New(logOut, c.Log).With("service", name)
+	// сторонние библиотеки и стандартный log — через тот же логгер с маскированием ПД
+	slog.SetDefault(log)
 	pool, err := db.Open(ctx, c.DB)
 	if err != nil {
 		return err
@@ -37,8 +41,9 @@ func RunHTTP(ctx context.Context, name string, c HTTPConfig, logOut io.Writer,
 	if err != nil {
 		return err
 	}
-	// пробы — до хендлера бинарника: без логов доступа и проверки по контракту
-	h = health.Handler(pool.Ping, h)
+	// пробы — до хендлера бинарника: без логов доступа и проверки по контракту; /readyz
+	// открыт — пинг базы не чаще раза в секунду
+	h = health.Handler(health.Cached(pool.Ping, time.Second, clock.System.Now), h)
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", c.HTTP.Addr)
 	if err != nil {

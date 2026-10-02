@@ -11,6 +11,15 @@
     "http": {
       "not_found": "",
       "method_not_allowed": ""
-    }
+    },
+    "auth": { "unauthenticated": "" },
+    "ratelimit": { "exceeded": "" },
+    "humancheck": { "required": "" },
+    "idempotency": {
+      "key_reused": "",
+      "in_progress": "",
+      "replay_unavailable": ""
+    },
+    "feature": { "disabled": "" }
   }
 }

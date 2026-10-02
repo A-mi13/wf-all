@@ -75,6 +75,35 @@ export interface components {
                  */
                 code: string;
             }[];
+            /** @description Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature) */
+            challenge?: {
+                /**
+                 * @description Хеш-функция задачи; сейчас всегда SHA-256
+                 * @example SHA-256
+                 */
+                algorithm: string;
+                /**
+                 * @description SHA-256 от salt и искомого числа, hex
+                 * @example 4d5b2c0e7f9a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c
+                 */
+                challenge: string;
+                /**
+                 * Format: int64
+                 * @description Верхняя граница перебора
+                 * @example 100000
+                 */
+                maxNumber: number;
+                /**
+                 * @description Соль с параметрами срока задачи (expires, Unix-время) и ключа подписи (kid)
+                 * @example b1946ac92492d2347c62?expires=1790000000&kid=Hx3k9QpLm2s&
+                 */
+                salt: string;
+                /**
+                 * @description HMAC-SHA-256 задачи на ключе сервера, hex
+                 * @example 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                 */
+                signature: string;
+            };
         };
         /** @description Состояние сервиса */
         Health: {
@@ -89,6 +118,11 @@ export interface components {
         /** @description Ошибка в формате RFC 9457 */
         Problem: {
             headers: {
+                /**
+                 * @description Через сколько секунд повторить — только у 429 ratelimit.exceeded
+                 * @example 30
+                 */
+                "Retry-After"?: number;
                 [name: string]: unknown;
             };
             content: {

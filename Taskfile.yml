@@ -31,7 +31,10 @@ tasks:
   setup:
     desc: Первый запуск после scripts/bootstrap.sh
     cmds:
-      - test -f backend/.env || cp backend/.env.example backend/.env
+      # свежий .env — с настоящими ключами вместо плейсхолдеров шаблона: иначе api не стартует.
+      # Собирается во временном файле и встаёт на место только целиком: при сбое (нет openssl)
+      # .env не появится, и повторный setup сделает шаг заново, а не пропустит его
+      - 'test -f backend/.env || { cp backend/.env.example backend/.env.tmp && bash scripts/env-keys.sh backend/.env.tmp && mv backend/.env.tmp backend/.env || { rm -f backend/.env.tmp; false; }; }'
       - test -f apps/web/.env.local || cp apps/web/.env.example apps/web/.env.local
       - test -f apps/admin/.env.local || cp apps/admin/.env.example apps/admin/.env.local
       # до pg.sh init: порт кластера берётся из WF_PG_PORT этого файла

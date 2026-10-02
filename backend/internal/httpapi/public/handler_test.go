@@ -8,16 +8,46 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/getkin/kin-openapi/openapi3"
 
 	"wf/backend/internal/httpapi/public"
 	"wf/backend/internal/httpapi/public/oapi"
+	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
+	"wf/backend/internal/platform/keys"
+	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/testkit/apitest"
+	"wf/backend/internal/platform/testkit/dbtest"
+	"wf/backend/internal/platform/token"
 )
+
+// testOptions — рабочий набор зависимостей: лимиты пропускают всё, сессий нет, ключ токенов —
+// новый на каждый тест, база — чистая (идемпотентность).
+func testOptions(t *testing.T) public.Options {
+	t.Helper()
+	seed, err := keys.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := token.ParseKeys([]string{seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return public.Options{
+		DB:        dbtest.NewPool(t),
+		Tokens:    token.NewIssuer(k, clock.System),
+		Sessions:  auth.NoSessions,
+		Limiter:   ratelimit.Unlimited,
+		RateRules: ratelimit.DefaultRules(),
+	}
+}
 
 func TestHealthMatchesContract(t *testing.T) {
 	v := apitest.New(t, oapi.GetSpec)
-	h, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{})
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +78,7 @@ func TestOperationsImplementedByTaggedModule(t *testing.T) {
 
 // Валидатор пропускает маршрут не из контракта — 404 отвечает роутер в формате Problem.
 func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
-	h, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{})
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +92,7 @@ func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
 // Страж проводки: лимит тела и валидатор стоят в цепочке хендлера — тело больше
 // httpx.MaxBodyBytes отвергается до strict-хендлера, даже у операции без тела.
 func TestOversizedBodyIsRejected(t *testing.T) {
-	h, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{})
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +128,16 @@ func TestDocsOnlyWhenEnabled(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
 		return rec
 	}
-	off, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{})
+	off, err := public.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec := get(off, "/docs"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"http.not_found"`) {
 		t.Fatalf("без флага: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	on, err := public.NewHandler(slog.New(slog.DiscardHandler), public.Options{Docs: true})
+	o := testOptions(t)
+	o.Docs = true
+	on, err := public.NewHandler(slog.New(slog.DiscardHandler), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,5 +150,128 @@ func TestDocsOnlyWhenEnabled(t *testing.T) {
 	}
 	if rec := get(on, "/docs/openapi.json"); rec.Code != http.StatusOK || rec.Body.String() != string(want) {
 		t.Fatalf("/docs/openapi.json: status = %d", rec.Code)
+	}
+}
+
+// Конвейер собран: на анонимной операции Authorization не читается (битый токен — запрос идёт
+// анонимно), rate limit — до хендлера; на операции с bearer аутентификация стоит до rate limit.
+func TestPipelineWired(t *testing.T) {
+	get := func(h http.Handler, authz string) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil)
+		if authz != "" {
+			r.Header.Set("Authorization", authz)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec
+	}
+	o := testOptions(t)
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// /v1/health — security: []: клиент с истёкшим токеном в заголовке не получает 401
+	if rec := get(h, "Bearer garbage"); rec.Code != http.StatusOK {
+		t.Fatalf("анонимная операция, битый токен: %d %s — ждали 200", rec.Code, rec.Body.String())
+	}
+
+	o.Limiter = denyAll{}
+	h, err = public.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := get(h, ""); rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("лимит: %d %v", rec.Code, rec.Header())
+	}
+
+	// Порядок на операции с bearer — обязательным и опциональным ([{}, {bearer: []}]): в контракте
+	// такой операции пока нет, поэтому security у /v1/health подменяется. Аутентификация стоит до
+	// rate limit — это принятый порядок спеки §6.1, а не защита: битый токен получает 401, не
+	// расходуя лимит, и перебор токенов лимитом не сдерживается (остаток M-3 — спека identity).
+	for name, sec := range map[string]openapi3.SecurityRequirements{
+		"обязательный bearer": {{"bearer": {}}},
+		"опциональный bearer": {{}, {"bearer": {}}},
+	} {
+		spec, err := oapi.GetSpec()
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec.Paths.Find("/v1/health").Get.Security = &sec
+		h, err := public.NewHandlerWithSpec(slog.New(slog.DiscardHandler), o, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec := get(h, "Bearer garbage"); rec.Code != http.StatusUnauthorized ||
+			!strings.Contains(rec.Body.String(), `"code":"auth.unauthenticated"`) {
+			t.Fatalf("%s, битый токен при исчерпанном лимите: %d %s — ждали 401 (auth до ratelimit)",
+				name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+type denyAll struct{}
+
+func (denyAll) Allow(context.Context, string, ratelimit.Policy) (ratelimit.Result, error) {
+	return ratelimit.Result{RetryAfter: 5 * time.Second}, nil
+}
+func (denyAll) Add(context.Context, string, ratelimit.Policy) error          { return nil }
+func (denyAll) Over(context.Context, string, ratelimit.Policy) (bool, error) { return true, nil }
+
+// Без зависимостей хендлер не собирается: забытый в main лимитер или токены — отказ старта.
+func TestNewHandlerRequiresDependencies(t *testing.T) {
+	full := testOptions(t)
+	for name, mutate := range map[string]func(*public.Options){
+		"без базы":     func(o *public.Options) { o.DB = nil },
+		"без токенов":  func(o *public.Options) { o.Tokens = nil },
+		"без сессий":   func(o *public.Options) { o.Sessions = nil },
+		"без лимитера": func(o *public.Options) { o.Limiter = nil },
+		"без правил":   func(o *public.Options) { o.RateRules = nil },
+		"нет класса default": func(o *public.Options) {
+			o.RateRules = ratelimit.Rules{"auth": ratelimit.DefaultRules()["auth"]} // нет default
+		},
+		"невалидная политика": func(o *public.Options) {
+			r := ratelimit.DefaultRules()
+			d := r[ratelimit.DefaultClass]
+			d.IP = ratelimit.Policy{Limit: 5} // без периода: Allow ошибался бы, а лимит молча не работал
+			r[ratelimit.DefaultClass] = d
+			o.RateRules = r
+		},
+	} {
+		o := full
+		mutate(&o)
+		if _, err := public.NewHandler(slog.New(slog.DiscardHandler), o); err == nil {
+			t.Errorf("%s: собрано", name)
+		}
+	}
+}
+
+// Опечатка класса в API_RATE_LIMITS (atuh вместо auth) — отказ старта с именем класса, а не
+// переопределение, которое молча ни на что не действует.
+func TestNewHandlerRejectsStrayRateClass(t *testing.T) {
+	o := testOptions(t)
+	r, err := ratelimit.ParseRules("atuh.ip=30/1m:10", ratelimit.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.RateRules = r
+	if _, err := public.NewHandler(slog.New(slog.DiscardHandler), o); err == nil || !strings.Contains(err.Error(), "atuh") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Страж: каждый класс x-rate-limit контракта описан в правилах по умолчанию. Пока в контракте
+// нет ни одной операции с x-rate-limit, проверять нечего — тест пропускается явно, а не
+// проходит вхолостую; с первой такой операцией страж станет активным сам.
+func TestRateLimitClassesKnown(t *testing.T) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// при пустых правилах UnknownClasses перечисляет все операции с x-rate-limit
+	if len(ratelimit.UnknownClasses(spec, ratelimit.Rules{})) == 0 {
+		t.Skip("в контракте нет x-rate-limit — страж станет активным с первой такой операцией")
+	}
+	for _, v := range ratelimit.UnknownClasses(spec, ratelimit.DefaultRules()) {
+		t.Error(v)
 	}
 }

@@ -42,6 +42,8 @@ var Schema = map[string]Object{
 	"event_inbox":      table("platform"),
 	"event_cursors":    table("platform"),
 	"idempotency_keys": table("platform"),
+	"rate_limits":      table("platform"),
+	"humancheck_spent": table("platform"),
 	"feature_flags":    table("platform"),
 	"goose_db_version": table("platform"),
 

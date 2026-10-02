@@ -20,9 +20,16 @@ info:
       для показа. Коды, общие для всех операций: `internal`, `request.invalid`,
       `request.too_large`, `validation.failed` (со списком полей в `errors`),
       `http.not_found`, `http.method_not_allowed`. Свои коды операции — в её описании.
+      Механизмы платформы: `auth.unauthenticated` (401 — нет действующего входа, войдите
+      заново), `ratelimit.exceeded` (429 — повторите через `Retry-After` секунд),
+      `humancheck.required` (403 — решите задачу из поля `challenge` и повторите запрос с
+      решением в заголовке `X-WF-Humancheck`), `idempotency.key_reused` (422 — ключ уже
+      использован с другим запросом), `idempotency.in_progress` (409 — запрос с этим ключом ещё
+      выполняется), `idempotency.replay_unavailable` (409 — действие выполнено, перечитайте
+      состояние), `feature.disabled` (403 — функция выключена флагом).
     - **Idempotency-Key** — обязательный заголовок мутирующих операций: новый ключ (UUID) на
       каждое действие пользователя, тот же ключ при повторе после обрыва сети — действие не
-      выполнится дважды.
+      выполнится дважды: повтор отдаёт сохранённый ответ с заголовком `Idempotency-Replayed: true`.
     - **Время** — ISO 8601 в UTC (`2026-10-01T17:00:00Z`); местное время матча считается по
       таймзоне города или поля.
     - **Деньги** — целое число в минорных единицах (копейки) плюс код валюты ISO 4217.
@@ -42,6 +49,13 @@ x-error-codes-common:
   - validation.failed
   - http.not_found
   - http.method_not_allowed
+  - auth.unauthenticated
+  - ratelimit.exceeded
+  - humancheck.required
+  - idempotency.key_reused
+  - idempotency.in_progress
+  - idempotency.replay_unavailable
+  - feature.disabled
 # Анонимные мутирующие операции — закрытый список operationId. В админке он пуст:
 # Idempotency-Key обязателен у всех мутирующих операций (спека бэкенда §6.4).
 x-anonymous-mutations: []
@@ -69,6 +83,13 @@ components:
   responses:
     Problem:
       description: Ошибка в формате RFC 9457
+      headers:
+        Retry-After:
+          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded
+          schema:
+            type: integer
+            minimum: 1
+          example: 30
       content:
         application/problem+json:
           schema:
@@ -119,5 +140,36 @@ components:
                 type: string
                 description: 'Нарушенное правило схемы: required, minLength, maximum, enum, format…'
                 example: minLength
+        challenge:
+          type: object
+          description: >-
+            Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в
+            camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором
+            SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке
+            X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature)
+          required: [algorithm, challenge, maxNumber, salt, signature]
+          additionalProperties: false
+          properties:
+            algorithm:
+              type: string
+              description: Хеш-функция задачи; сейчас всегда SHA-256
+              example: SHA-256
+            challenge:
+              type: string
+              description: SHA-256 от salt и искомого числа, hex
+              example: 4d5b2c0e7f9a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c
+            maxNumber:
+              type: integer
+              format: int64
+              description: Верхняя граница перебора
+              example: 100000
+            salt:
+              type: string
+              description: Соль с параметрами срока задачи (expires, Unix-время) и ключа подписи (kid)
+              example: 'b1946ac92492d2347c62?expires=1790000000&kid=Hx3k9QpLm2s&'
+            signature:
+              type: string
+              description: HMAC-SHA-256 задачи на ключе сервера, hex
+              example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
     Health:
       $ref: './platform/schemas.yaml#/Health'

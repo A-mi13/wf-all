@@ -8,16 +8,30 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/httpx"
+	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/testkit/apitest"
+	"wf/backend/internal/platform/testkit/dbtest"
 )
+
+// testOptions — рабочий набор зависимостей: лимиты пропускают всё, база — чистая
+// (идемпотентность). Входа сотрудников до спеки identity нет.
+func testOptions(t *testing.T) admin.Options {
+	t.Helper()
+	return admin.Options{
+		DB:        dbtest.NewPool(t),
+		Limiter:   ratelimit.Unlimited,
+		RateRules: ratelimit.DefaultRules(),
+	}
+}
 
 func TestHealthMatchesContract(t *testing.T) {
 	v := apitest.New(t, oapi.GetSpec)
-	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), admin.Options{})
+	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +62,7 @@ func TestOperationsImplementedByTaggedModule(t *testing.T) {
 
 // Валидатор пропускает маршрут не из контракта — 404 отвечает роутер в формате Problem.
 func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
-	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), admin.Options{})
+	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +76,7 @@ func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
 // Страж проводки: лимит тела и валидатор стоят в цепочке хендлера — тело больше
 // httpx.MaxBodyBytes отвергается до strict-хендлера, даже у операции без тела.
 func TestOversizedBodyIsRejected(t *testing.T) {
-	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), admin.Options{})
+	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +112,16 @@ func TestDocsOnlyWhenEnabled(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
 		return rec
 	}
-	off, err := admin.NewHandler(slog.New(slog.DiscardHandler), admin.Options{})
+	off, err := admin.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec := get(off, "/docs"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"http.not_found"`) {
 		t.Fatalf("без флага: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	on, err := admin.NewHandler(slog.New(slog.DiscardHandler), admin.Options{Docs: true})
+	o := testOptions(t)
+	o.Docs = true
+	on, err := admin.NewHandler(slog.New(slog.DiscardHandler), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,3 +136,83 @@ func TestDocsOnlyWhenEnabled(t *testing.T) {
 		t.Fatalf("/docs/openapi.json: status = %d", rec.Code)
 	}
 }
+
+// Без зависимостей хендлер не собирается: забытый в main лимитер — отказ старта.
+func TestNewHandlerRequiresDependencies(t *testing.T) {
+	full := testOptions(t)
+	for name, mutate := range map[string]func(*admin.Options){
+		"без базы":     func(o *admin.Options) { o.DB = nil },
+		"без лимитера": func(o *admin.Options) { o.Limiter = nil },
+		"без правил":   func(o *admin.Options) { o.RateRules = nil },
+		"нет класса default": func(o *admin.Options) {
+			o.RateRules = ratelimit.Rules{"auth": ratelimit.DefaultRules()["auth"]} // нет default
+		},
+		"невалидная политика": func(o *admin.Options) {
+			r := ratelimit.DefaultRules()
+			d := r[ratelimit.DefaultClass]
+			d.IP = ratelimit.Policy{Limit: 5} // без периода: Allow ошибался бы, а лимит молча не работал
+			r[ratelimit.DefaultClass] = d
+			o.RateRules = r
+		},
+	} {
+		o := full
+		mutate(&o)
+		if _, err := admin.NewHandler(slog.New(slog.DiscardHandler), o); err == nil {
+			t.Errorf("%s: собрано", name)
+		}
+	}
+}
+
+// Опечатка класса в ADMIN_RATE_LIMITS (atuh вместо auth) — отказ старта с именем класса, а не
+// переопределение, которое молча ни на что не действует.
+func TestNewHandlerRejectsStrayRateClass(t *testing.T) {
+	o := testOptions(t)
+	r, err := ratelimit.ParseRules("atuh.ip=30/1m:10", ratelimit.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.RateRules = r
+	if _, err := admin.NewHandler(slog.New(slog.DiscardHandler), o); err == nil || !strings.Contains(err.Error(), "atuh") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Страж: каждый класс x-rate-limit контракта описан в правилах по умолчанию. Пока в контракте
+// нет ни одной операции с x-rate-limit, проверять нечего — тест пропускается явно, а не
+// проходит вхолостую; с первой такой операцией страж станет активным сам.
+func TestRateLimitClassesKnown(t *testing.T) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// при пустых правилах UnknownClasses перечисляет все операции с x-rate-limit
+	if len(ratelimit.UnknownClasses(spec, ratelimit.Rules{})) == 0 {
+		t.Skip("в контракте нет x-rate-limit — страж станет активным с первой такой операцией")
+	}
+	for _, v := range ratelimit.UnknownClasses(spec, ratelimit.DefaultRules()) {
+		t.Error(v)
+	}
+}
+
+// Конвейер собран: rate limit подключён и стоит до хендлера.
+func TestPipelineWired(t *testing.T) {
+	o := testOptions(t)
+	o.Limiter = denyAll{}
+	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/health", nil))
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("лимит: %d %v", rec.Code, rec.Header())
+	}
+}
+
+type denyAll struct{}
+
+func (denyAll) Allow(context.Context, string, ratelimit.Policy) (ratelimit.Result, error) {
+	return ratelimit.Result{RetryAfter: 5 * time.Second}, nil
+}
+func (denyAll) Add(context.Context, string, ratelimit.Policy) error          { return nil }
+func (denyAll) Over(context.Context, string, ratelimit.Policy) (bool, error) { return true, nil }

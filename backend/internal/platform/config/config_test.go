@@ -2,6 +2,8 @@ package config_test
 
 import (
 	"log/slog"
+	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ func TestLoadAPIWithDefaults(t *testing.T) {
 	c, err := config.Load[config.API]("API_", []string{
 		"API_HTTP_ADDR=:8080",
 		"API_DATABASE_URL=postgres://api@localhost/wf",
+		"API_JWT_SEEDS=a", "API_HUMANCHECK_KEYS=k",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +47,30 @@ func TestLoadDocsEnabledPerBinary(t *testing.T) {
 	}
 }
 
+// admin-api BFF не принимает (фронт админки ходит в API напрямую): переменных ADMIN_BFF_* нет —
+// иначе они принимались бы и ни на что не влияли. Прокси хостинга — ADMIN_TRUSTED_PROXIES.
+func TestAdminHasNoBFF(t *testing.T) {
+	var walk func(reflect.Type)
+	walk = func(rt reflect.Type) {
+		for f := range rt.Fields() {
+			if strings.HasPrefix(f.Tag.Get("env"), "BFF_") {
+				t.Errorf("config.Admin: поле %s (ADMIN_%s)", f.Name, f.Tag.Get("env"))
+			}
+			if f.Type.Kind() == reflect.Struct {
+				walk(f.Type)
+			}
+		}
+	}
+	walk(reflect.TypeFor[config.Admin]())
+	c, err := config.Load[config.Admin]("ADMIN_", []string{
+		"ADMIN_HTTP_ADDR=:8081", "ADMIN_DATABASE_URL=postgres://admin@localhost/wf",
+		"ADMIN_TRUSTED_PROXIES=10.0.0.0/8",
+	})
+	if err != nil || len(c.TrustedProxies) != 1 || c.TrustedProxies[0] != netip.MustParsePrefix("10.0.0.0/8") {
+		t.Fatalf("прокси: %v %+v", err, c.TrustedProxies)
+	}
+}
+
 // Бинарник без обязательной переменной не должен стартовать молча.
 func TestLoadFailsOnMissingRequiredAndNamesIt(t *testing.T) {
 	_, err := config.Load[config.API]("API_", []string{"API_HTTP_ADDR=:8080"})
@@ -68,6 +95,7 @@ func TestLoadParsesLogLevel(t *testing.T) {
 func TestLoadWorkerQueuesAndRelay(t *testing.T) {
 	c, err := config.Load[config.Worker]("WORKER_", []string{
 		"WORKER_DATABASE_URL=postgres://w@localhost/wf",
+		"WORKER_MAIL_SMTP_ADDR=127.0.0.1:11025", "WORKER_MAIL_FROM=WF <noreply@wf.local>",
 		"WORKER_QUEUE_MAIL=7",
 		"WORKER_RELAY_POLL=2s",
 	})
@@ -79,5 +107,68 @@ func TestLoadWorkerQueuesAndRelay(t *testing.T) {
 	}
 	if c.Relay.Poll != 2*time.Second || c.Relay.Batch != 100 {
 		t.Fatalf("relay: %+v", c.Relay)
+	}
+}
+
+func TestAPIConfig(t *testing.T) {
+	env := []string{
+		"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://x",
+		"API_JWT_SEEDS=a,b", "API_HUMANCHECK_KEYS=k",
+		"API_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12",
+		"API_BFF_NETS=192.0.2.0/24", "API_BFF_SECRETS=s1,s2",
+		"API_RATE_LIMITS=auth.ip=10/1m",
+	}
+	c, err := config.Load[config.API]("API_", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Auth.JWTSeeds) != 2 || c.Humancheck.TTL != 5*time.Minute || c.Humancheck.MaxNumber != 100000 ||
+		c.HTTP.RequestTimeout != 15*time.Second || c.RateLimits != "auth.ip=10/1m" {
+		t.Fatalf("%+v", c)
+	}
+	if len(c.Peer.TrustedProxies) != 2 || c.Peer.TrustedProxies[1] != netip.MustParsePrefix("172.16.0.0/12") ||
+		len(c.Peer.BFFSecrets) != 2 {
+		t.Fatalf("peer: %+v", c.Peer)
+	}
+}
+
+func TestAPIConfigRequiresKeys(t *testing.T) {
+	_, err := config.Load[config.API]("API_", []string{"API_HTTP_ADDR=x", "API_DATABASE_URL=y"})
+	if err == nil || !strings.Contains(err.Error(), "API_JWT_SEEDS") || !strings.Contains(err.Error(), "API_HUMANCHECK_KEYS") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Почта — отдельный конфиг: её читает только воркер, разовые команды (events replay) — нет.
+func TestWorkerMailConfig(t *testing.T) {
+	c, err := config.Load[config.Mail]("WORKER_", []string{
+		"WORKER_MAIL_SMTP_ADDR=127.0.0.1:11025", "WORKER_MAIL_FROM=WF <noreply@wf.local>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TLS != "mandatory" || c.SMTPAddr != "127.0.0.1:11025" {
+		t.Fatalf("%+v", c)
+	}
+	if _, err := config.Load[config.Mail]("WORKER_", nil); err == nil ||
+		!strings.Contains(err.Error(), "WORKER_MAIL_SMTP_ADDR") {
+		t.Fatalf("без почты: %v", err)
+	}
+	if _, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=x"}); err != nil {
+		t.Fatalf("конфиг воркера без почты: %v", err)
+	}
+}
+
+// Пустой список сетей (локально прокси нет) — допустим. Висячая запятая даёт пустой элемент:
+// netip.Prefix разбирает "" без ошибки в нулевой (невалидный) префикс — его отвергает
+// peer.Config.Validate на старте (cmd/api, cmd/admin-api), а не молча доверяет пустоте.
+func TestPeerNetsEmptyAndTrailingComma(t *testing.T) {
+	base := []string{"API_HTTP_ADDR=x", "API_DATABASE_URL=y", "API_JWT_SEEDS=a", "API_HUMANCHECK_KEYS=k"}
+	c, err := config.Load[config.API]("API_", append(base, "API_TRUSTED_PROXIES=", "API_BFF_NETS="))
+	if err != nil || len(c.Peer.TrustedProxies) != 0 || len(c.Peer.BFFNets) != 0 {
+		t.Fatalf("пустые списки: %v %+v", err, c.Peer)
+	}
+	c, err = config.Load[config.API]("API_", append(base, "API_TRUSTED_PROXIES=10.0.0.0/8,"))
+	if err != nil || len(c.Peer.TrustedProxies) != 2 || c.Peer.TrustedProxies[1].IsValid() {
+		t.Fatalf("висячая запятая: %v %+v", err, c.Peer)
 	}
 }

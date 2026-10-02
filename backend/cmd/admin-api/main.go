@@ -14,7 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/httpapi/admin"
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
+	"wf/backend/internal/platform/peer"
+	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/server"
 )
 
@@ -32,8 +35,28 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return server.RunHTTP(ctx, "admin-api", server.HTTPConfig(cfg), logOut,
-		func(log *slog.Logger, _ *pgxpool.Pool) (http.Handler, error) {
-			return admin.NewHandler(log, admin.Options{Docs: cfg.HTTP.DocsEnabled})
+	// лимиты и доверие к заголовкам проверяются до подключения к базе
+	rules, err := ratelimit.ParseRules(cfg.RateLimits, ratelimit.DefaultRules())
+	if err != nil {
+		return err
+	}
+	if err := rules.Validate(); err != nil {
+		return err
+	}
+	// BFF у админки нет: её фронт ходит в API напрямую
+	pc := peer.Config{TrustedProxies: cfg.TrustedProxies}
+	if err := pc.Validate(); err != nil {
+		return err
+	}
+	return server.RunHTTP(ctx, "admin-api", server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB}, logOut,
+		func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error) {
+			return admin.NewHandler(log, admin.Options{
+				Docs:           cfg.HTTP.DocsEnabled,
+				RequestTimeout: cfg.HTTP.RequestTimeout,
+				Peer:           pc,
+				DB:             pool,
+				Limiter:        ratelimit.NewPG(pool, clock.System),
+				RateRules:      rules,
+			})
 		})
 }

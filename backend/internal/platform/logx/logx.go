@@ -8,8 +8,10 @@ import (
 	"wf/backend/internal/platform/config"
 )
 
+// New — логгер бинарника. Персональные данные (почта, телефон) маскируются в сообщении,
+// строковых атрибутах и ошибках (спека §6.9) — в том числе в текстах ошибок разбора запроса.
 func New(w io.Writer, c config.Log) *slog.Logger {
-	opts := &slog.HandlerOptions{Level: c.Level}
+	opts := &slog.HandlerOptions{Level: c.Level, ReplaceAttr: maskAttr}
 	if c.Format == "text" {
 		return slog.New(slog.NewTextHandler(w, opts))
 	}

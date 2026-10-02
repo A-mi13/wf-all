@@ -26,6 +26,11 @@
 | River | 0.47.0 | `backend/go.mod` (рантайм-библиотека воркера), CLI — `backend/tools/go.mod` |
 | goose / pgtestdb / kin-openapi | 3.28.0 / 0.1.1 / 0.149.0 | `backend/go.mod` |
 | google/uuid | 1.6.0 | `backend/go.mod` (UUIDv7 — `internal/platform/id`) |
+| golang-jwt/jwt | 5.3.1 | `backend/go.mod` (access-токены, EdDSA — `internal/platform/token`) |
+| golang.org/x/crypto / x/sync | 0.57.0 / 0.23.0 | `backend/go.mod` (argon2id — `internal/platform/password`; singleflight — `internal/platform/auth`, `internal/platform/health`) |
+| messageformat-go/mf1 | 0.8.6 | `backend/go.mod` (ICU MessageFormat v1 серверных локалей — `internal/platform/i18n`) |
+| go-mail | 0.8.1 | `backend/go.mod` (SMTP — `internal/platform/mail`) |
+| altcha-lib-go | 1.0.0 | `backend/go.mod` (только тесты совместимости ALTCHA — `internal/platform/humancheck`) |
 | go-task / gitleaks / actionlint / Mailpit | 3.53.1 / 8.30.1 / 1.7.12 / 1.31.2 | `tools/go.mod` |
 | golangci-lint | 2.14.0 | `tools/lint/go.mod` |
 | lefthook | 2.1.14 | корневой `package.json` |

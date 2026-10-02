@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"wf/backend/internal/platform/health"
 )
@@ -68,5 +71,43 @@ func TestOtherRequestsGoToNext(t *testing.T) {
 	}
 	if rec := do(h, http.MethodHead, "/healthz"); rec.Code != http.StatusOK {
 		t.Errorf("HEAD /healthz: %d", rec.Code)
+	}
+}
+
+// Открытый вопрос плана 2/3: /readyz публичный — поток запросов не должен превращаться в поток
+// пингов базы. Результат кэшируется на ttl, одновременные пробы схлопываются.
+func TestCachedReady(t *testing.T) {
+	var calls atomic.Int32
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	ready := health.Cached(func(context.Context) error { calls.Add(1); time.Sleep(20 * time.Millisecond); return nil }, time.Second, clock)
+	h := health.Handler(ready, next)
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Go(func() {
+			if rec := do(h, http.MethodGet, "/readyz"); rec.Code != http.StatusOK {
+				t.Errorf("status = %d", rec.Code)
+			}
+		})
+	}
+	wg.Wait()
+	if calls.Load() != 1 {
+		t.Fatalf("пингов %d на 50 проб", calls.Load())
+	}
+	now = now.Add(time.Second + time.Millisecond)
+	do(h, http.MethodGet, "/readyz")
+	if calls.Load() != 2 {
+		t.Fatalf("после ttl пингов %d, нужно 2", calls.Load())
+	}
+}
+
+func TestReadyzExactBodiesAndHead(t *testing.T) {
+	down := health.Handler(func(context.Context) error { return errors.New("x") }, next)
+	if rec := do(down, http.MethodGet, "/readyz"); rec.Body.String() != `{"status":"unavailable"}` {
+		t.Fatalf("тело 503: %q", rec.Body.String())
+	}
+	up := health.Handler(func(context.Context) error { return nil }, next)
+	if rec := do(up, http.MethodHead, "/readyz"); rec.Code != http.StatusOK {
+		t.Fatalf("HEAD /readyz: %d", rec.Code)
 	}
 }
