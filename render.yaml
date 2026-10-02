@@ -36,13 +36,16 @@ services:
         generateValue: true
       - key: API_HUMANCHECK_KEYS
         generateValue: true
-      # Балансировщик Render — из частных сетей: только им верим X-Forwarded-For
+      # Цепочка на стенде (debug-лог peer 02.10.2026): Cloudflare → балансировщик Render (10.x) →
+      # локальный прокси Render на петле (бесплатный тариф, экземпляр «hibernate») → приложение.
+      # TCP-пир приложения — петля (::1), поэтому в списке и петля, и частные сети: только им верим
+      # заголовку CDN и X-Forwarded-For. Петле можно верить: к ней подключаются только процессы
+      # контейнера (прокси Render)
       - key: API_TRUSTED_PROXIES
-        value: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
-      # На стенде перед балансировщиком Render стоит Cloudflare (видно 02.10.2026): в X-Forwarded-For
-      # правее клиента — публичный узел Cloudflare, общий для всех за ним. Адрес посетителя — из
-      # CF-Connecting-IP (Cloudflare затирает присланный клиентом), только от API_TRUSTED_PROXIES.
-      # Что перед пиром был именно Cloudflare, API не проверяет — допущение (docs/deploy-dev.md)
+        value: 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      # Адрес посетителя — из CF-Connecting-IP (Cloudflare затирает присланный клиентом), только от
+      # доверенного пира. Что перед пиром был именно Cloudflare (обход не проверяется), API не
+      # проверяет — допущение (docs/deploy-dev.md)
       - key: API_CLIENT_IP_HEADER
         value: CF-Connecting-IP
       - key: MIGRATOR_LOG_FORMAT

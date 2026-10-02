@@ -230,6 +230,50 @@ func TestClientIPHeaderPrivateBFFAddrRejected(t *testing.T) {
 	}
 }
 
+// Render, бесплатный тариф (стенд, лог 02.10.2026): к приложению подключается локальный прокси
+// Render внутри контейнера по петле [::1], а не балансировщик 10.x. XFF — «клиент, узел Cloudflare,
+// 10.x Render», заголовок CDN верен. Петля обязана быть в TrustedProxies (::1/128), иначе заголовок
+// CDN и X-Forwarded-For не читаются и все клиенты получают один IP ::1 — общий лимит.
+func TestRenderFreeLoopbackProxy(t *testing.T) {
+	stand := peer.Config{
+		TrustedProxies: []netip.Prefix{
+			netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128"),
+			netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("192.168.0.0/16"),
+		},
+		ClientIPHeader: "CF-Connecting-IP",
+	}
+	// пин прежней настройки стенда: без петли в списке доверять нечему — общий IP ::1
+	withoutLoopback := stand
+	withoutLoopback.TrustedProxies = []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("192.168.0.0/16"),
+	}
+	r := req{"[::1]:41198", map[string]string{
+		"X-Forwarded-For": "203.0.113.7, 172.70.242.31, 10.29.109.133", "CF-Connecting-IP": "203.0.113.7"}}
+	cases := []struct {
+		name    string
+		c       peer.Config
+		ip      string
+		trusted bool
+		source  string
+	}{
+		{"петля в TrustedProxies — адрес из заголовка CDN", stand, "203.0.113.7", true, "cdn"},
+		{"без ::1/128 — общий IP ::1", withoutLoopback, "::1", false, "peer"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			buf := captureLog(t, slog.LevelDebug)
+			got, _ := resolve(t, c.c, r)
+			if got.IP != netip.MustParseAddr(c.ip) || got.ViaBFF {
+				t.Fatalf("got %+v, want ip=%s", got, c.ip)
+			}
+			rec := peerRecord(t, buf)
+			if rec["remote_trusted"] != c.trusted || rec["source"] != c.source {
+				t.Fatalf("запись %v, want remote_trusted=%v source=%s", rec, c.trusted, c.source)
+			}
+		})
+	}
+}
+
 // captureLog подменяет slog.Default (им пользуется Middleware: сервер ставит его через
 // slog.SetDefault) на JSON-логгер в буфер с заданным уровнем; прежний возвращается в t.Cleanup.
 // Тесты с подменой не параллельные.
