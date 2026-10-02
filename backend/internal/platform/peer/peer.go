@@ -44,7 +44,8 @@ type Config struct {
 }
 
 // Validate — до старта: слабый секрет, BFF без секрета, невалидный префикс или префикс /0
-// (доверие всему интернету) — конфигурация ошибочна.
+// (доверие всему интернету), ClientIPHeader — не имя HTTP-заголовка, заголовок BFF,
+// X-Forwarded-For, Forwarded, X-Real-IP или задан без TrustedProxies — конфигурация ошибочна.
 func (c Config) Validate() error {
 	var errs []error
 	for _, l := range []struct {
@@ -71,8 +72,8 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// validateClientIPHeader — имя заголовка CDN: HTTP token (RFC 9110 §5.6.2), не заголовок BFF и не
-// X-Forwarded-For, и есть прокси хостинга, от которого его читать.
+// validateClientIPHeader — имя заголовка CDN: HTTP token (RFC 9110 §5.6.2), не заголовок BFF, не
+// X-Forwarded-For, Forwarded и X-Real-IP, и есть прокси хостинга, от которого его читать.
 func (c Config) validateClientIPHeader() []error {
 	var errs []error
 	h := c.ClientIPHeader
@@ -87,6 +88,9 @@ func (c Config) validateClientIPHeader() []error {
 	case canon(headerForwarded):
 		// прокси дописывает X-Forwarded-For, а не затирает: первая строка может быть от клиента
 		errs = append(errs, fmt.Errorf("peer: ClientIPHeader %q — X-Forwarded-For уже разбирается справа налево", h))
+	case "Forwarded", "X-Real-Ip":
+		// клиент присылает их сам, Cloudflare их не ставит и не затирает
+		errs = append(errs, fmt.Errorf("peer: ClientIPHeader %q — заголовок может прислать клиент", h))
 	}
 	if len(c.TrustedProxies) == 0 {
 		// без прокси хостинга заголовок пришёл бы прямо от клиента
@@ -162,12 +166,14 @@ func resolve(c Config, r *http.Request) Info {
 }
 
 // fromCDN — адрес посетителя из заголовка CDN; вызывается только для пира из TrustedProxies.
-// Верим потому, что CDN (Cloudflare с CF-Connecting-IP) ставит заголовок сам и затирает присланный
-// клиентом, а мимо CDN к прокси хостинга не пройти (на Render Cloudflare стоит всегда; где CDN нет,
-// заголовок не настраивают). X-Forwarded-For так не годится: прокси хостинга
-// дописывает его, и справа от клиента стоит публичный узел CDN — общий для всех клиентов за ним.
-// Годится ровно одна строка с голым IP без зоны; иначе (запятые, порт, мусор, пусто) — false, и
-// адрес берётся прежним путём из X-Forwarded-For.
+// Доверие ровно такое: верим любому пиру из TrustedProxies, был ли перед ним CDN — не проверяем.
+// Расчёт на то, что CDN (Cloudflare с CF-Connecting-IP) ставит заголовок сам и затирает присланный
+// клиентом, а к прокси хостинга запросы приходят только через CDN; второе — допущение (спека §8.4).
+// X-Forwarded-For так не годится: прокси хостинга дописывает его, и справа от клиента стоит
+// публичный узел CDN — общий для всех клиентов за ним. IP отсюда — сигнал для лимитов и риска,
+// не фактор входа и прав.
+// Годится ровно одна строка с голым публичным IP без зоны; иначе (запятые, порт, мусор, пусто,
+// частный, петля, нулевой, multicast) — false, и адрес берётся прежним путём из X-Forwarded-For.
 func fromCDN(h http.Header, name string) (netip.Addr, bool) {
 	if name == "" {
 		return netip.Addr{}, false
@@ -180,7 +186,13 @@ func fromCDN(h http.Header, name string) (netip.Addr, bool) {
 	if err != nil || ip.Zone() != "" {
 		return netip.Addr{}, false
 	}
-	return ip.Unmap(), true
+	ip = ip.Unmap()
+	// защита в глубину: CDN передаёт публичный адрес посетителя; частный адрес в заголовке — не от
+	// CDN (и мог бы совпасть с сетью BFF или прокси)
+	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() {
+		return netip.Addr{}, false
+	}
+	return ip, true
 }
 
 // forwarded — справа налево до первого недоверенного адреса: левее него клиент мог дописать

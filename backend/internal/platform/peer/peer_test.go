@@ -157,6 +157,16 @@ func TestClientIPHeader(t *testing.T) {
 		{"пробелы вокруг адреса", cdn, render("  203.0.113.7 "), "203.0.113.7"},
 		{"IPv6", cdn, render("2001:db8::7"), "2001:db8::7"},
 		{"IPv4 в IPv6-обёртке", cdn, render("::ffff:203.0.113.7"), "203.0.113.7"},
+		// защита в глубину: CDN передаёт публичный адрес посетителя; частный, петля, нулевой — не от CDN
+		{"частный IPv4", cdn, render("10.1.2.3"), "104.16.0.1"},
+		{"частный IPv4 в IPv6-обёртке", cdn, render("::ffff:192.168.1.1"), "104.16.0.1"},
+		{"петля IPv4", cdn, render("127.0.0.1"), "104.16.0.1"},
+		{"петля IPv6", cdn, render("::1"), "104.16.0.1"},
+		{"нулевой IPv4", cdn, render("0.0.0.0"), "104.16.0.1"},
+		{"нулевой IPv6", cdn, render("::"), "104.16.0.1"},
+		{"частный IPv6 (ULA)", cdn, render("fd00::1"), "104.16.0.1"},
+		{"link-local IPv6 без зоны", cdn, render("fe80::1"), "104.16.0.1"},
+		{"multicast", cdn, render("224.0.0.1"), "104.16.0.1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -196,6 +206,22 @@ func TestClientIPHeaderThenBFF(t *testing.T) {
 	}
 }
 
+// Подставной заголовок CDN с адресом BFF из частной сети не делает запрос «от BFF»: частный адрес
+// из заголовка отвергается, адрес — из X-Forwarded-For, секрет BFF не помогает.
+func TestClientIPHeaderPrivateBFFAddrRejected(t *testing.T) {
+	c := peer.Config{
+		TrustedProxies: cfg.TrustedProxies,
+		BFFNets:        []netip.Prefix{netip.MustParsePrefix("192.168.0.0/16")},
+		BFFSecrets:     cfg.BFFSecrets,
+		ClientIPHeader: "CF-Connecting-IP",
+	}
+	got, _ := resolve(t, c, req{"10.0.0.5:4000", map[string]string{"X-Forwarded-For": "203.0.113.7, 104.16.0.1",
+		"CF-Connecting-IP": "192.168.1.10", peer.HeaderBFFSecret: secret, peer.HeaderClientIP: "198.51.100.7"}})
+	if got.ViaBFF || got.IP != netip.MustParseAddr("104.16.0.1") {
+		t.Fatalf("got %+v — ждали 104.16.0.1 без BFF", got)
+	}
+}
+
 func TestConfigValidateClientIPHeader(t *testing.T) {
 	ok := peer.Config{TrustedProxies: cfg.TrustedProxies, ClientIPHeader: "CF-Connecting-IP"}
 	if err := ok.Validate(); err != nil {
@@ -214,6 +240,11 @@ func TestConfigValidateClientIPHeader(t *testing.T) {
 		"заголовок BFF с устройством": peer.HeaderDevice,
 		// X-Forwarded-For дописывается прокси, а не затирается: его первая строка — от клиента
 		"X-Forwarded-For": "x-forwarded-for",
+		// клиент присылает их сам, Cloudflare их не ставит и не затирает
+		"Forwarded": "Forwarded",
+		"forwarded": "forwarded",
+		"X-Real-IP": "X-Real-IP",
+		"x-real-ip": "x-real-ip",
 	} {
 		bad := ok
 		bad.ClientIPHeader = h
