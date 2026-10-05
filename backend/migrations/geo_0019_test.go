@@ -131,10 +131,12 @@ func TestGeo0019SeedFilled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := vr.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	cols, err := vr.Columns()
-	if cerr := vr.Close(); cerr != nil {
-		t.Fatal(cerr)
-	}
 	if err != nil {
 		t.Fatal(err)
 	}
