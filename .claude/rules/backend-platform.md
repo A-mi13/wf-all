@@ -28,8 +28,11 @@ paths:
 - Пароли — `password.Check` + `password.Hasher` (argon2id под семафором); «нет почты» — `VerifyDummy`.
 - Когда требовать PoW — `risk.Assessor`; требование — `humancheck.Require` (403 с задачей).
 - Тесты механизмов с SQL — под ролью прода: `dbtest.NewPoolsAs(t, "api"|"worker"|"admin")`.
-- Пагинация — пакет `page` (непрозрачный курсор keyset по `(created_at, id)`, `page.Limit`: 20 по умолчанию,
-  максимум 100); свой курсор модули не пишут.
+- Пагинация — пакет `page`, свой курсор модули не пишут: v1 `Encode/Decode` — keyset по `(created_at, id)`;
+  v2 `EncodeKeyset/DecodeKeyset` — произвольный порядок: `page.Keyset{Set: "<модуль>.<список>(<поле>,…)", Values}` и
+  `Kind`ы полей (`int64 | string | time.Time | uuid.UUID`, строго по Kinds, иначе паника); отпечаток Set и Kinds
+  отсекает курсор чужого списка и старого набора полей. Негодный курсор — `page.ErrBadCursor` (400 по `query.cursor`);
+  `page.Limit`: 20 по умолчанию, максимум 100. Поменял поля сортировки или их порядок — поменяй Set и Kinds.
 - `*auth.Principal` из `auth.From(ctx)` — общий для всех запросов сессии (кэш отдаёт один указатель): срезы
   `Roles` и `Restrictions` не изменять (append, sort, запись по индексу).
 - В логи — только строки и ошибки: `logx` маскирует ПД (почту, телефоны) только в них; структуры, `Stringer`
