@@ -65,7 +65,7 @@ cities:
         schema:
           type: string
           maxLength: 1024
-        example: eyJ2IjoyLCJzIjoiOWMxZTRmMGEiLCJrIjpbMiw0MzM5MzEsIjNmMmM4ZTFhLTliNGQtNGM3ZS1hNmYxLTJkOGI1ZTBjOWE0NyJdfQ
+        example: eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiLCIzZjJjOGUxYS05YjRkLTRjN2UtYTZmMS0yZDhiNWUwYzlhNDciXX0
       - name: limit
         in: query
         required: false

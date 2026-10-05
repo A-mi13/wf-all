@@ -110,7 +110,7 @@ paths:
           schema:
             type: string
             maxLength: 1024
-          example: eyJ2IjoyLCJzIjoiOWMxZTRmMGEiLCJrIjpbMiw0MzM5MzEsIjNmMmM4ZTFhLTliNGQtNGM3ZS1hNmYxLTJkOGI1ZTBjOWE0NyJdfQ
+          example: eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiLCIzZjJjOGUxYS05YjRkLTRjN2UtYTZmMS0yZDhiNWUwYzlhNDciXX0
         - name: limit
           in: query
           required: false
@@ -671,7 +671,7 @@ components:
           type: string
           nullable: true
           description: Курсор следующей страницы — передайте его в cursor; null — страниц больше нет
-          example: eyJ2IjoyLCJzIjoiOWMxZTRmMGEiLCJrIjpbMiw0MzM5MzEsIjNmMmM4ZTFhLTliNGQtNGM3ZS1hNmYxLTJkOGI1ZTBjOWE0NyJdfQ
+          example: eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiLCIzZjJjOGUxYS05YjRkLTRjN2UtYTZmMS0yZDhiNWUwYzlhNDciXX0
     GeoPlace:
       type: object
       description: Населённый пункт справочника GeoNames (CC BY 4.0), в котором находится точка запроса

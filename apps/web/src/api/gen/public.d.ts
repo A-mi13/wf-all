@@ -365,7 +365,7 @@ export interface components {
             items: components["schemas"]["City"][];
             /**
              * @description Курсор следующей страницы — передайте его в cursor; null — страниц больше нет
-             * @example eyJ2IjoyLCJzIjoiOWMxZTRmMGEiLCJrIjpbMiw0MzM5MzEsIjNmMmM4ZTFhLTliNGQtNGM3ZS1hNmYxLTJkOGI1ZTBjOWE0NyJdfQ
+             * @example eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiLCIzZjJjOGUxYS05YjRkLTRjN2UtYTZmMS0yZDhiNWUwYzlhNDciXX0
              */
             next_cursor: string | null;
         };
@@ -508,7 +508,7 @@ export interface operations {
                 q?: string;
                 /**
                  * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
-                 * @example eyJ2IjoyLCJzIjoiOWMxZTRmMGEiLCJrIjpbMiw0MzM5MzEsIjNmMmM4ZTFhLTliNGQtNGM3ZS1hNmYxLTJkOGI1ZTBjOWE0NyJdfQ
+                 * @example eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiLCIzZjJjOGUxYS05YjRkLTRjN2UtYTZmMS0yZDhiNWUwYzlhNDciXX0
                  */
                 cursor?: string;
                 /**
