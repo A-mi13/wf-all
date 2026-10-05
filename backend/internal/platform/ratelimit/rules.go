@@ -25,6 +25,7 @@ const DefaultClass = "default"
 
 // DefaultRules — стартовые политики. IP щедрее пользователя: за одним адресом мобильного
 // оператора (CGNAT) — многие. auth — вход, регистрация, коды: перебор паролей и рассылки.
+// geo_nearest — автоопределение города (спека geo §4.2).
 func DefaultRules() Rules {
 	return Rules{
 		DefaultClass: {
@@ -35,6 +36,11 @@ func DefaultRules() Rules {
 		"auth": {
 			IP:     Policy{Limit: 60, Period: time.Minute, Burst: 20},
 			Device: Policy{Limit: 20, Period: time.Minute, Burst: 10},
+		},
+		// автоопределение города по точке (спека geo §4.2): ручка анонимная — только по IP;
+		// приложение спрашивает на старте и по кнопке «определить», не на каждый ввод
+		"geo_nearest": {
+			IP: Policy{Limit: 30, Period: time.Minute, Burst: 10},
 		},
 	}
 }
