@@ -3,10 +3,12 @@ package source_test
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"wf/backend/internal/geo/internal/source"
 )
@@ -163,6 +165,27 @@ func TestParseAdmin1(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := source.ParseAdmin1(strings.NewReader(row+"\n"), "RU"); !errors.Is(err, source.ErrFormat) {
 				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
+// Ошибка чтения посреди строки: Scanner отдаёт оборванный остаток как последнюю строку; он не
+// должен сойти за ErrFormat «N колонок» — причина в ошибке чтения.
+func TestParseReadErrorBeforePartialLine(t *testing.T) {
+	boom := errors.New("обрыв соединения")
+	partial := func() io.Reader { return io.MultiReader(strings.NewReader("1\tобрыв"), iotest.ErrReader(boom)) }
+	for name, parse := range map[string]func() error{
+		"places":   func() error { _, err := source.ParsePlaces(partial()); return err },
+		"altnames": func() error { _, err := source.ParseAltNames(partial()); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := parse()
+			if !errors.Is(err, boom) || errors.Is(err, source.ErrFormat) {
+				t.Fatalf("err = %v — ждали ошибку чтения, не ErrFormat", err)
+			}
+			if n := strings.Count(err.Error(), "source:"); n != 1 {
+				t.Fatalf("«source:» %d раз(а) в %q", n, err)
 			}
 		})
 	}

@@ -34,6 +34,25 @@ const (
 	defaultTimeout = 15 * time.Minute
 )
 
+// Внутренние сигнальные ошибки (наружу не экспортируются): тоже несут префикс «source:».
+var (
+	errRedirects = fmt.Errorf("source: больше %d редиректов", maxRedirects)
+	errRead      = errors.New("source: чтение")
+)
+
+// fileErr — ошибка файла в виде «<файл>: source: <причина>»: префикс «source:» в тексте ровно
+// один — у сигнальных ошибок он уже есть, остальным (HTTP, сеть) добавляется здесь. В журнал
+// импорта уходит, например, `RU.zip: source: архив GeoNames не той формы: лишняя запись "evil.sh"`.
+func fileErr(name string, err error) error {
+	for _, sig := range []error{ErrInsecureURL, ErrForeignRedirect, ErrTooLarge, ErrBadArchive, ErrBadCountry,
+		ErrFormat, errRedirects, errRead} {
+		if errors.Is(err, sig) {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return fmt.Errorf("%s: source: %w", name, err)
+}
+
 var countryRe = regexp.MustCompile(`^[A-Z]{2}$`)
 
 // Fetch скачивает и разбирает выгрузку страны: admin1CodesASCII.txt, <CC>.zip,
@@ -61,7 +80,7 @@ func Fetch(ctx context.Context, cfg FetchConfig, country string) (Raw, error) {
 	}
 	raw.Files = append(raw.Files, file)
 	if raw.Admin1, err = ParseAdmin1(bytes.NewReader(body), country); err != nil {
-		return Raw{Files: raw.Files}, fmt.Errorf("source: admin1CodesASCII.txt: %w", err)
+		return Raw{Files: raw.Files}, fileErr("admin1CodesASCII.txt", err)
 	}
 
 	entry := country + ".txt"
@@ -78,7 +97,7 @@ func Fetch(ctx context.Context, cfg FetchConfig, country string) (Raw, error) {
 	})
 	_ = rc.Close()
 	if err != nil {
-		return Raw{Files: raw.Files}, fmt.Errorf("source: %s: %w", name, err)
+		return Raw{Files: raw.Files}, fileErr(name, err)
 	}
 
 	ids := make(map[int64]bool, len(raw.Places)+len(raw.Admin1))
@@ -101,7 +120,7 @@ func Fetch(ctx context.Context, cfg FetchConfig, country string) (Raw, error) {
 	})
 	_ = rc.Close()
 	if err != nil {
-		return Raw{Files: raw.Files}, fmt.Errorf("source: %s: %w", name, err)
+		return Raw{Files: raw.Files}, fileErr(name, err)
 	}
 	return raw, nil
 }
@@ -115,7 +134,7 @@ func secureClient(c *http.Client, host string) *http.Client {
 	}
 	out.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= maxRedirects {
-			return fmt.Errorf("source: больше %d редиректов", maxRedirects)
+			return errRedirects
 		}
 		if req.URL.Scheme != "https" || !strings.EqualFold(req.URL.Host, host) {
 			return fmt.Errorf("%w: %s://%s", ErrForeignRedirect, req.URL.Scheme, req.URL.Host)
@@ -130,25 +149,25 @@ func secureClient(c *http.Client, host string) *http.Client {
 func download(ctx context.Context, c *http.Client, u *url.URL, name string, limit int64) ([]byte, File, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, File{}, fmt.Errorf("source: %s: %w", name, err)
+		return nil, File{}, fileErr(name, err)
 	}
 	resp, err := c.Do(req)
 	if err != nil {
-		return nil, File{}, fmt.Errorf("source: %s: %w", name, err)
+		return nil, File{}, fileErr(name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, File{}, fmt.Errorf("source: %s: HTTP %d", name, resp.StatusCode)
+		return nil, File{}, fileErr(name, fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 	if resp.ContentLength > limit {
-		return nil, File{}, fmt.Errorf("%w: %s — %d байт, лимит %d", ErrTooLarge, name, resp.ContentLength, limit)
+		return nil, File{}, fileErr(name, fmt.Errorf("%w: %d байт, лимит %d", ErrTooLarge, resp.ContentLength, limit))
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, File{}, fmt.Errorf("source: %s: %w", name, err)
+		return nil, File{}, fileErr(name, err)
 	}
 	if int64(len(body)) > limit {
-		return nil, File{}, fmt.Errorf("%w: %s — больше %d байт", ErrTooLarge, name, limit)
+		return nil, File{}, fileErr(name, fmt.Errorf("%w: больше %d байт", ErrTooLarge, limit))
 	}
 	sum := sha256.Sum256(body)
 	return body, File{Name: name, URL: resp.Request.URL.String(), Bytes: int64(len(body)),
@@ -165,7 +184,7 @@ func zipped(ctx context.Context, c *http.Client, u *url.URL, name, entry string,
 	}
 	rc, err := openEntry(body, entry, cfg.MaxUncompressed)
 	if err != nil {
-		return nil, file, fmt.Errorf("source: %s: %w", name, err)
+		return nil, file, fileErr(name, err)
 	}
 	return rc, file, nil
 }
@@ -200,7 +219,10 @@ func openEntry(body []byte, want string, limit int64) (io.ReadCloser, error) {
 	return &capReader{rc: rc, limit: limit}, nil
 }
 
-// capReader — ошибка ErrTooLarge, как только прочитано больше limit: заголовок zip может лгать.
+// capReader — страховка поверх проверки archive/zip (она сама не отдаёт больше размера из заголовка
+// записи): ErrTooLarge, как только прочитано больше limit. Ошибки чтения записи — подменённое
+// тело (контрольная сумма), неверный размер, битый поток — становятся ErrBadArchive: так их
+// видит журнал импорта, а не «чтение: zip: checksum error» без класса.
 type capReader struct {
 	rc       io.ReadCloser
 	n, limit int64
@@ -211,6 +233,9 @@ func (c *capReader) Read(p []byte) (int, error) {
 	c.n += int64(n)
 	if c.n > c.limit {
 		return n, fmt.Errorf("%w: распакованная запись больше %d байт", ErrTooLarge, c.limit)
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, fmt.Errorf("%w: чтение записи: %w", ErrBadArchive, err)
 	}
 	return n, err
 }

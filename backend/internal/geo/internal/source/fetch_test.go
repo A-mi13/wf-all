@@ -38,6 +38,24 @@ func zipOf(t *testing.T, entries ...entry) []byte {
 	return buf.Bytes()
 }
 
+// zipStored — zip без сжатия: тело записи лежит в архиве как есть и его можно подменить байтом.
+func zipStored(t *testing.T, name, body string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 const readme = "GeoNames: описание выгрузки (в тесте — заглушка)\n"
 
 const (
@@ -199,6 +217,16 @@ func TestFetchRejectsUnexpectedArchive(t *testing.T) {
 		"путь в записи":     zipOf(t, entry{"../RU.txt", ru}),
 		"нет записи страны": zipOf(t, entry{"readme.txt", readme}),
 		"не zip":            []byte("это не zip"),
+		// тело записи подменено при целом центральном каталоге: ловит контрольная сумма zip
+		"подменено содержимое записи": func() []byte {
+			b := zipStored(t, "RU.txt", ru)
+			i := bytes.Index(b, []byte("Stavropol"))
+			if i < 0 {
+				t.Fatal("тело записи не найдено в архиве")
+			}
+			b[i] = 'X'
+			return b
+		}(),
 		// оборванное скачивание: центрального каталога в конце архива нет
 		"обрезан при скачивании": func() []byte { b := zipOf(t, entry{"readme.txt", readme}, entry{"RU.txt", ru}); return b[:len(b)/2] }(),
 	}
@@ -250,31 +278,100 @@ func TestFetchHTTPError(t *testing.T) {
 	}
 }
 
-// R27: второй файл отвергнут (битая строка или подменённый архив) — уже скачанные файлы с
+// R27: любой из трёх файлов отвергнут (битая строка или подменённый архив) — уже скачанные файлы с
 // отпечатками, включая отвергнутый, возвращаются вместе с ошибкой (журнал импорта хранит sha256
 // именно подменённого файла).
 func TestFetchKeepsDownloadedFilesOnError(t *testing.T) {
 	for name, tc := range map[string]struct {
-		body []byte
-		is   error
+		path  string // какой файл подменён
+		body  []byte
+		is    error
+		file  string // имя отвергнутого файла в журнале
+		count int    // сколько файлов скачано к моменту ошибки (отвергнутый — последний)
 	}{
-		"битая строка":  {zipOf(t, entry{"RU.txt", "1\tобрыв\n"}), source.ErrFormat},
-		"лишняя запись": {zipOf(t, entry{"RU.txt", "x"}, entry{"evil.sh", "echo pwned"}), source.ErrBadArchive},
+		"битая строка admin1": {pathAdmin1, []byte("RU70\tX\tX\t1\n"), source.ErrFormat, "admin1CodesASCII.txt", 1},
+		"битая строка RU.zip": {pathPlaces, zipOf(t, entry{"RU.txt", "1\tобрыв\n"}), source.ErrFormat, "RU.zip", 2},
+		"лишняя запись RU.zip": {pathPlaces, zipOf(t, entry{"RU.txt", "x"}, entry{"evil.sh", "echo pwned"}),
+			source.ErrBadArchive, "RU.zip", 2},
+		"битая строка alternatenames": {pathAlt, zipOf(t, entry{"RU.txt", "1\tобрыв\n"}), source.ErrFormat,
+			"alternatenames/RU.zip", 3},
+		"отвергнут alternatenames/RU.zip": {pathAlt, zipOf(t, entry{"RU.txt", "x"}, entry{"evil.sh", "echo pwned"}),
+			source.ErrBadArchive, "alternatenames/RU.zip", 3},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := dump(t)
-			files[pathPlaces] = tc.body
+			files[tc.path] = tc.body
 			srv := site{files: files}.serve(t)
 			raw, err := source.Fetch(context.Background(), fetchConfig(srv), "RU")
 			if !errors.Is(err, tc.is) {
 				t.Fatalf("err = %v", err)
 			}
 			sum := sha256.Sum256(tc.body)
-			if len(raw.Files) != 2 || raw.Files[1].Name != "RU.zip" || raw.Files[1].SHA256 != hex.EncodeToString(sum[:]) {
-				t.Fatalf("файлы при ошибке: %+v", raw.Files)
+			if len(raw.Files) != tc.count {
+				t.Fatalf("файлов %d, ждали %d: %+v", len(raw.Files), tc.count, raw.Files)
+			}
+			if last := raw.Files[tc.count-1]; last.Name != tc.file || last.SHA256 != hex.EncodeToString(sum[:]) ||
+				last.Bytes != int64(len(tc.body)) {
+				t.Fatalf("последний файл — не отвергнутый: %+v", last)
 			}
 			if raw.Places != nil || raw.AltNames != nil || raw.Admin1 != nil {
 				t.Fatalf("при ошибке — только файлы: %+v", raw)
+			}
+		})
+	}
+}
+
+// Текст ошибки уходит в журнал импорта: «source:» в нём ровно один раз, файл назван, класс и
+// подробности (на них опираются тесты сценария импорта) остаются подстроками.
+func TestFetchErrorText(t *testing.T) {
+	ru := string(readTestdata(t, "RU.txt"))
+	evil := zipOf(t, entry{"RU.txt", ru}, entry{"evil.sh", "echo pwned"})
+	tampered := zipStored(t, "RU.txt", ru)
+	tampered[bytes.Index(tampered, []byte("Stavropol"))] = 'X'
+	cases := map[string]struct {
+		path string
+		body []byte
+		want string
+	}{
+		"лишняя запись": {pathPlaces, evil, `RU.zip: source: архив GeoNames не той формы: лишняя запись "evil.sh"`},
+		"подменённое тело": {pathPlaces, tampered,
+			"RU.zip: source: архив GeoNames не той формы: чтение записи: zip: checksum error"},
+		"битая строка": {pathPlaces, zipOf(t, entry{"RU.txt", "1\tобрыв\n"}),
+			"RU.zip: source: строка не в формате GeoNames: строка 1: 2 колонок, ждали 19"},
+		"битый admin1":     {pathAdmin1, []byte("RU70\tX\tX\t1\n"), "admin1CodesASCII.txt: source: строка не в формате GeoNames"},
+		"нет файла":        {pathAlt, nil, "alternatenames/RU.zip: source: HTTP 404"},
+		"больше лимита":    {pathPlaces, evil, "RU.zip: source: файл больше лимита: "},
+		"чужой хост":       {pathPlaces, nil, "RU.zip: Get "},
+		"много редиректов": {pathPlaces, nil, "source: больше 5 редиректов"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			files := dump(t)
+			redirects := map[string]string{}
+			switch name {
+			case "нет файла":
+				delete(files, tc.path)
+			case "чужой хост":
+				redirects[pathPlaces] = "https://example.invalid" + pathPlaces
+			case "много редиректов":
+				for i := range 7 {
+					redirects["/hop"+strconv.Itoa(i)] = "/hop" + strconv.Itoa(i+1)
+				}
+				redirects[pathPlaces] = "/hop0"
+			default:
+				files[tc.path] = tc.body
+			}
+			srv := site{files: files, redirects: redirects}.serve(t)
+			cfg := fetchConfig(srv)
+			if name == "больше лимита" {
+				cfg.MaxCompressed = int64(len(tc.body)) - 1
+			}
+			_, err := source.Fetch(context.Background(), cfg, "RU")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v\nждали подстроку %q", err, tc.want)
+			}
+			if n := strings.Count(err.Error(), "source:"); n != 1 {
+				t.Fatalf("«source:» %d раз(а) в %q", n, err)
 			}
 		})
 	}

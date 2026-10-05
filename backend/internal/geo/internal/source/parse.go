@@ -113,6 +113,11 @@ func eachRow(r io.Reader, columns int, fn func(f []string) error) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), maxLineBytes)
 	for n := 1; sc.Scan(); n++ {
+		// при ошибке чтения Scanner отдаёт ещё и оборванную последнюю строку: смотрим ошибку до
+		// разбора, иначе обрывок сошёл бы за ErrFormat «N колонок»
+		if err := sc.Err(); err != nil {
+			return readErr(err)
+		}
 		line := strings.TrimSuffix(sc.Text(), "\r")
 		if line == "" {
 			continue
@@ -126,9 +131,18 @@ func eachRow(r io.Reader, columns int, fn func(f []string) error) error {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return fmt.Errorf("source: чтение: %w", err)
+		return readErr(err)
 	}
 	return nil
+}
+
+// readErr — ошибка чтения потока: ErrTooLarge и ErrBadArchive от записи zip уже классифицированы,
+// остальные получают errRead.
+func readErr(err error) error {
+	if errors.Is(err, ErrTooLarge) || errors.Is(err, ErrBadArchive) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", errRead, err)
 }
 
 func parseID(s string) (int64, error) {
