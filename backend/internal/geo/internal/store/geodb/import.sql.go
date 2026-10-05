@@ -12,6 +12,19 @@ import (
 	"github.com/google/uuid"
 )
 
+const importAdmin1Count = `-- name: ImportAdmin1Count :one
+SELECT count(*)::int AS n FROM geonames_admin1 WHERE country_code = $1
+`
+
+// Строк admin1 страны сейчас — база порога 90 % для admin1 источника (R34): общий файл
+// admin1CodesASCII.txt, обрезанный на границе строки, иначе молча удалил бы регионы страны.
+func (q *Queries) ImportAdmin1Count(ctx context.Context, countryCode string) (int32, error) {
+	row := q.db.QueryRow(ctx, importAdmin1Count, countryCode)
+	var n int32
+	err := row.Scan(&n)
+	return n, err
+}
+
 const importCityCandidates = `-- name: ImportCityCandidates :many
 SELECT p.geoname_id, p.admin1_code
 FROM cities c

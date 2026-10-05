@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -38,6 +39,9 @@ var (
 	// ErrSourceTruncated — мест в источнике меньше 90 % прошлого успешного импорта: файл обрезан
 	// или подменён; ничего не записано и не удалено (§5.4 шаг 4).
 	ErrSourceTruncated = errors.New("geo: в источнике меньше 90 % мест прошлого успешного импорта")
+	// ErrAdmin1Incomplete — отобранные места ссылаются на коды admin1, которых нет в admin1 страны
+	// из источника (общий admin1CodesASCII.txt обрезан или подменён); ничего не записано (R34).
+	ErrAdmin1Incomplete = errors.New("geo: в admin1 нет кодов, на которые ссылаются места")
 	// ErrImportClosed — строку журнала закрыл другой запуск (счёл зависшей), пока шёл этот.
 	ErrImportClosed = errors.New("geo: строка журнала импорта уже закрыта другим запуском")
 )
@@ -59,6 +63,11 @@ const (
 	auditAction         = "geo.import"
 	codeUniqueViolation = "23505"
 	runningIndex        = "geonames_imports_running"
+	cityGeonameKey      = "cities_geoname_id_key"
+	// admin1Unknown — код admin1 «неизвестно» в GeoNames: строки в admin1CodesASCII.txt у него нет
+	admin1Unknown = "00"
+	// maxListedCodes — сколько недостающих кодов admin1 перечислять в тексте ошибки
+	maxListedCodes = 20
 
 	statusSucceeded = "succeeded"
 	statusFailed    = "failed"
@@ -75,10 +84,13 @@ type ImportResult struct {
 }
 
 // Reconciled — отчёт сверки заведённых городов без geoname_id (geonames_imports.reconciled).
+// Conflict — единственное место, пока шла сверка, досталось другому городу (админ активировал
+// его параллельно): привязка откатилась до своего savepoint, импорт продолжился (R35).
 type Reconciled struct {
 	Linked    []LinkedCity    `json:"linked"`
 	Ambiguous []UnmatchedCity `json:"ambiguous"`
 	NotFound  []UnmatchedCity `json:"not_found"`
+	Conflict  []UnmatchedCity `json:"conflict"`
 }
 
 // LinkedCity — город получил geoname_id.
@@ -88,7 +100,8 @@ type LinkedCity struct {
 	GeonameID int64     `json:"geoname_id"`
 }
 
-// UnmatchedCity — город не тронут: кандидатов нет (NotFound) или несколько (Ambiguous).
+// UnmatchedCity — город не тронут: кандидатов нет (NotFound), несколько (Ambiguous) или
+// место заняли параллельно (Conflict).
 type UnmatchedCity struct {
 	CityID     uuid.UUID `json:"city_id"`
 	Slug       string    `json:"slug"`
@@ -110,6 +123,8 @@ type Importer struct {
 	cfg   source.FetchConfig
 	log   *slog.Logger
 	fetch func(context.Context, source.FetchConfig, string) (source.Raw, error)
+	// beforeLink — тестовый хук перед привязкой города (SetBeforeLink); в проде nil
+	beforeLink func(ctx context.Context, cityID uuid.UUID, geonameID int64)
 }
 
 func NewImporter(pool *pgxpool.Pool, clk clock.Clock, cfg source.FetchConfig, log *slog.Logger) *Importer {
@@ -157,7 +172,7 @@ func (im *Importer) Import(ctx context.Context, country string, startedBy *uuid.
 		"places", res.PlacesUpserted, "removed", res.PlacesRemoved, "missing", res.PlacesMissing,
 		"skipped", res.PlacesSkipped, "names", res.NamesUpserted, "linked", len(res.Reconciled.Linked),
 		"ambiguous", len(res.Reconciled.Ambiguous), "not_found", len(res.Reconciled.NotFound),
-		"duration", time.Since(start).String())
+		"conflict", len(res.Reconciled.Conflict), "duration", time.Since(start).String())
 	return res, nil
 }
 
@@ -227,9 +242,15 @@ func (im *Importer) load(ctx context.Context, run importRun) (ImportResult, []so
 	now := im.clk.Now()
 	set := prepare(raw, run, now)
 	res := ImportResult{ID: run.id, PlacesUpserted: len(set.places), PlacesSkipped: set.skippedTimezone}
+	if err := checkAdmin1Refs(set); err != nil {
+		return ImportResult{}, raw.Files, err
+	}
 	err = db.InTx(ctx, im.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := geodb.New(tx)
 		if err := checkShare(ctx, q, run.country, len(set.places)); err != nil {
+			return err
+		}
+		if err := checkAdmin1Share(ctx, q, run.country, len(set.admin1)); err != nil {
 			return err
 		}
 		names, err := writeSource(ctx, q, run, set)
@@ -247,7 +268,7 @@ func (im *Importer) load(ctx context.Context, run importRun) (ImportResult, []so
 		}
 		slices.Sort(missing) // порядок RETURNING у UPDATE не определён — отчёт стабильный
 		res.PlacesMissing, res.PlacesRemoved = len(missing), int(removed)
-		if res.Reconciled, err = reconcile(ctx, q, run); err != nil {
+		if res.Reconciled, err = im.reconcile(ctx, tx, run); err != nil {
 			return err
 		}
 		return finish(ctx, q, run, raw.Files, res, missing, now)
@@ -383,6 +404,49 @@ func checkShare(ctx context.Context, q *geodb.Queries, country string, n int) er
 	return nil
 }
 
+// checkAdmin1Share — R34 (б): строк admin1 страны в источнике не меньше 90 % от строк
+// geonames_admin1 в базе (общий admin1CodesASCII.txt, обрезанный на границе строки, иначе молча
+// удалил бы регионы страны). Пусто в базе — порога нет.
+func checkAdmin1Share(ctx context.Context, q *geodb.Queries, country string, n int) error {
+	cur, err := q.ImportAdmin1Count(ctx, country)
+	if err != nil {
+		return fmt.Errorf("geo: admin1 в базе: %w", err)
+	}
+	if int64(n)*10 < int64(cur)*9 {
+		return fmt.Errorf("%w: admin1 — в источнике %d строк, в базе %d — файл admin1CodesASCII.txt обрезан или подменён",
+			ErrSourceTruncated, n, cur)
+	}
+	return nil
+}
+
+// checkAdmin1Refs — R34 (а): каждый непустой код admin1 отобранных мест, кроме «00»
+// («неизвестно» в GeoNames), есть в admin1 страны из источника. Проверка в памяти — до записи.
+func checkAdmin1Refs(set prepared) error {
+	known := make(map[string]bool, len(set.admin1))
+	for _, a := range set.admin1 {
+		known[a.Code] = true
+	}
+	gaps := map[string]bool{}
+	for _, p := range set.places {
+		if p.Admin1Code != "" && p.Admin1Code != admin1Unknown && !known[p.Admin1Code] {
+			gaps[p.Admin1Code] = true
+		}
+	}
+	if len(gaps) == 0 {
+		return nil
+	}
+	codes := slices.Sorted(maps.Keys(gaps))
+	return fmt.Errorf("%w: %s", ErrAdmin1Incomplete, codeList(codes))
+}
+
+// codeList — коды через запятую, не больше maxListedCodes; дальше — сколько ещё.
+func codeList(codes []string) string {
+	if len(codes) <= maxListedCodes {
+		return strings.Join(codes, ", ")
+	}
+	return fmt.Sprintf("%s … и ещё %d", strings.Join(codes[:maxListedCodes], ", "), len(codes)-maxListedCodes)
+}
+
 // writeSource — шаг 4: места, их названия, admin1 и названия admin1 пачками по batchSize.
 // Возвращает число вставленных названий.
 func writeSource(ctx context.Context, q *geodb.Queries, run importRun, set prepared) (int, error) {
@@ -458,8 +522,9 @@ func writeSource(ctx context.Context, q *geodb.Queries, run importRun, set prepa
 }
 
 // reconcile — шаг 5: сверка заведённых городов страны без geoname_id.
-func reconcile(ctx context.Context, q *geodb.Queries, run importRun) (Reconciled, error) {
-	rec := Reconciled{Linked: []LinkedCity{}, Ambiguous: []UnmatchedCity{}, NotFound: []UnmatchedCity{}}
+func (im *Importer) reconcile(ctx context.Context, tx pgx.Tx, run importRun) (Reconciled, error) {
+	q := geodb.New(tx)
+	rec := Reconciled{Linked: []LinkedCity{}, Ambiguous: []UnmatchedCity{}, NotFound: []UnmatchedCity{}, Conflict: []UnmatchedCity{}}
 	cities, err := q.ImportUnlinkedCities(ctx, run.country)
 	if err != nil {
 		return rec, fmt.Errorf("geo: сверка: %w", err)
@@ -492,13 +557,48 @@ func reconcile(ctx context.Context, q *geodb.Queries, run importRun) (Reconciled
 			// несколько мест или одно место на несколько городов — решает админ
 			rec.Ambiguous = append(rec.Ambiguous, UnmatchedCity{CityID: m.city.ID, Slug: m.city.Slug, Candidates: ids})
 		default:
-			if err := link(ctx, q, run, m.city, m.cands[0]); err != nil {
-				return rec, err
+			if im.beforeLink != nil {
+				im.beforeLink(ctx, m.city.ID, m.cands[0].GeonameID)
 			}
-			rec.Linked = append(rec.Linked, LinkedCity{CityID: m.city.ID, Slug: m.city.Slug, GeonameID: m.cands[0].GeonameID})
+			taken, err := linkSavepoint(ctx, tx, run, m.city, m.cands[0])
+			switch {
+			case err != nil:
+				return rec, err
+			case taken:
+				rec.Conflict = append(rec.Conflict, UnmatchedCity{CityID: m.city.ID, Slug: m.city.Slug, Candidates: ids})
+			default:
+				rec.Linked = append(rec.Linked, LinkedCity{CityID: m.city.ID, Slug: m.city.Slug, GeonameID: m.cands[0].GeonameID})
+			}
 		}
 	}
 	return rec, nil
+}
+
+// linkSavepoint — привязка во вложенной транзакции (SAVEPOINT): место успели отдать другому
+// городу (админ активировал его параллельно, 23505 cities_geoname_id_key) — откатывается только
+// эта привязка, taken = true, импорт продолжается (R35). Прочие ошибки — ошибка импорта.
+// События и аудит пишутся в tx из ctx — на том же соединении, поэтому откат до savepoint
+// снимает и событие geo.city_linked.
+func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.ImportUnlinkedCitiesRow,
+	p geodb.ImportCityCandidatesRow) (taken bool, err error) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("geo: savepoint привязки %s: %w", c.Slug, err)
+	}
+	if err := link(ctx, geodb.New(sp), run, c, p); err != nil {
+		if rerr := sp.Rollback(ctx); rerr != nil {
+			return false, errors.Join(err, fmt.Errorf("geo: откат привязки %s: %w", c.Slug, rerr))
+		}
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == codeUniqueViolation &&
+			pgErr.ConstraintName == cityGeonameKey {
+			return true, nil
+		}
+		return false, err
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return false, fmt.Errorf("geo: savepoint привязки %s: %w", c.Slug, err)
+	}
+	return false, nil
 }
 
 // link — город получает geoname_id, version + 1, недостающие переводы; регион — код admin1 и
@@ -580,7 +680,8 @@ func finish(ctx context.Context, q *geodb.Queries, run importRun, files []source
 		"places_upserted": res.PlacesUpserted, "places_removed": res.PlacesRemoved,
 		"places_missing": res.PlacesMissing, "names_upserted": res.NamesUpserted,
 		"cities_linked": len(res.Reconciled.Linked), "cities_ambiguous": len(res.Reconciled.Ambiguous),
-		"cities_not_found": len(res.Reconciled.NotFound), "skipped_timezone": res.PlacesSkipped,
+		"cities_not_found": len(res.Reconciled.NotFound), "cities_conflict": len(res.Reconciled.Conflict),
+		"skipped_timezone": res.PlacesSkipped,
 	})
 }
 

@@ -36,6 +36,11 @@ WHERE country_code = sqlc.arg(country_code) AND status = 'succeeded'
 ORDER BY finished_at DESC, started_at DESC
 LIMIT 1;
 
+-- name: ImportAdmin1Count :one
+-- Строк admin1 страны сейчас — база порога 90 % для admin1 источника (R34): общий файл
+-- admin1CodesASCII.txt, обрезанный на границе строки, иначе молча удалил бы регионы страны.
+SELECT count(*)::int AS n FROM geonames_admin1 WHERE country_code = sqlc.arg(country_code);
+
 -- name: ImportUpsertPlaces :exec
 -- Пачка мест (до 1000): массивы одной длины, по элементу на место.
 INSERT INTO geonames_places (geoname_id, country_code, admin1_code, name, ascii_name, feature_code,

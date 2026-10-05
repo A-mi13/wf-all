@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,5 +21,20 @@ func TestEnded(t *testing.T) {
 		if got := ended(to, now); got != want {
 			t.Errorf("ended(%q) = %v, want %v", to, got, want)
 		}
+	}
+}
+
+// Недостающие коды admin1 в тексте ошибки: не больше 20, дальше — сколько ещё.
+func TestCodeList(t *testing.T) {
+	codes := make([]string, 25)
+	for i := range codes {
+		codes[i] = fmt.Sprintf("%02d", i+1)
+	}
+	if got, want := codeList(codes[:2]), "01, 02"; got != want {
+		t.Errorf("2 кода: %q", got)
+	}
+	got := codeList(codes)
+	if !strings.HasPrefix(got, "01, 02, ") || !strings.Contains(got, ", 20 … и ещё 5") || strings.Contains(got, "21") {
+		t.Errorf("25 кодов: %q", got)
 	}
 }

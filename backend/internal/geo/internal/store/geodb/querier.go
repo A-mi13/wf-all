@@ -20,6 +20,9 @@ type Querier interface {
 	// выключена — 0 строк (here = null). Названия: запрошенная локаль → язык страны → name источника;
 	// регион: у заведённого — регион города (может отсутствовать), иначе admin1 источника; '' — нет.
 	GetVisiblePlace(ctx context.Context, arg GetVisiblePlaceParams) (GetVisiblePlaceRow, error)
+	// Строк admin1 страны сейчас — база порога 90 % для admin1 источника (R34): общий файл
+	// admin1CodesASCII.txt, обрезанный на границе строки, иначе молча удалил бы регионы страны.
+	ImportAdmin1Count(ctx context.Context, countryCode string) (int32, error)
 	// Места страны с тем же названием (основное или ru, после normalize_text) в том же регионе:
 	// по geoname_admin1_code региона, а без кода — по названиям региона и admin1. Место, уже
 	// привязанное к городу, не кандидат. Город без региона кандидатов не получает.

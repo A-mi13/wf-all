@@ -836,8 +836,9 @@ func TestImportReconcilesCities(t *testing.T) {
 	if err := json.Unmarshal(payload, &linked); err != nil || linked.CityID != mikh || linked.GeonameID != 526815 || aggVersion != 2 {
 		t.Fatalf("geo.city_linked: %s v%d %v", payload, aggVersion, err)
 	}
-	if !bytes.Contains(journalRow(t, e.owner, res.ID).Reconciled, []byte("test-zarechnyy")) {
-		t.Fatal("отчёт сверки не в журнале")
+	if rep := journalRow(t, e.owner, res.ID).Reconciled; !bytes.Contains(rep, []byte("test-zarechnyy")) ||
+		!bytes.Contains(rep, []byte(`"conflict": []`)) {
+		t.Fatalf("отчёт сверки в журнале (conflict — пустой список, не null): %s", rep)
 	}
 	// повтор: привязанные уже не кандидаты, событий не прибавилось
 	res, err = im.Import(ctx, "RU", nil, nil)
@@ -846,5 +847,143 @@ func TestImportReconcilesCities(t *testing.T) {
 	}
 	if n := count(t, e.owner, "SELECT count(*) FROM outbox WHERE event_type = $1", geo.EventCityLinked); n != 2 {
 		t.Fatalf("событий geo.city_linked %d", n)
+	}
+}
+
+func admin1Without(list []source.Admin1, keep func(source.Admin1) bool) []source.Admin1 {
+	return slices.DeleteFunc(slices.Clone(list), func(a source.Admin1) bool { return !keep(a) })
+}
+
+// R34 (а): каждый код admin1 отобранных мест (кроме «00» — «неизвестно» в GeoNames — и пустого)
+// есть в admin1 страны из источника; иначе импорт падает до любой записи.
+func TestImportRequiresAdmin1OfPlaces(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	base := fixture(t)
+	odd := synth(9500001, 2)
+	odd[0].Admin1Code, odd[1].Admin1Code = "00", ""
+	base.Places = append(base.Places, odd...)
+	raw := base
+	im := e.importer(&raw)
+	first, err := im.Import(ctx, "RU", nil, nil)
+	if err != nil || first.PlacesUpserted != 5 {
+		t.Fatalf("места с кодом «00» и пустым не требуют admin1: %v %+v", err, first)
+	}
+	raw.Admin1 = admin1Without(base.Admin1, func(a source.Admin1) bool { return a.Code != "70" })
+	e.clk.Advance(time.Hour)
+	res, err := im.Import(ctx, "RU", nil, nil)
+	if !errors.Is(err, app.ErrAdmin1Incomplete) || !strings.HasSuffix(err.Error(), ": 70") {
+		t.Fatalf("err = %v", err)
+	}
+	if j := journalRow(t, e.owner, res.ID); j.Status != "failed" || j.Error == nil || !strings.HasSuffix(*j.Error, ": 70") {
+		t.Fatalf("журнал: %+v", j)
+	}
+	if s := finishedStatus(t, e.owner, res.ID); s != "failed" {
+		t.Fatalf("событие: %s", s)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM geonames_admin1"); n != 3 {
+		t.Fatalf("admin1 %d — данные тронуты", n)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM geonames_places WHERE import_id = $1", first.ID); n != 5 {
+		t.Fatalf("мест первого импорта %d — данные тронуты", n)
+	}
+}
+
+// R34 (б): строк admin1 страны в источнике не меньше 90 % от строк geonames_admin1 в базе —
+// обрезанный на границе строки admin1CodesASCII.txt не удаляет регионы страны.
+func TestImportRejectsTruncatedAdmin1(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	base := fixture(t)
+	raw := base
+	im := e.importer(&raw)
+	if _, err := im.Import(ctx, "RU", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	// места — только региона 70 (иначе раньше сработает проверка ссылок) и не меньше прежних
+	raw = without(base, 526815)
+	raw.Places = append(raw.Places, synth(9000001, 2)...)
+	raw.Admin1 = admin1Without(base.Admin1, func(a source.Admin1) bool { return a.Code == "70" }) // 1 из 3
+	e.clk.Advance(time.Hour)
+	res, err := im.Import(ctx, "RU", nil, nil)
+	if !errors.Is(err, app.ErrSourceTruncated) || !strings.Contains(err.Error(), "admin1") {
+		t.Fatalf("err = %v", err)
+	}
+	if j := journalRow(t, e.owner, res.ID); j.Status != "failed" || j.Error == nil || !strings.Contains(*j.Error, "admin1") {
+		t.Fatalf("журнал: %+v", j)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM geonames_admin1"); n != 3 {
+		t.Fatalf("admin1 %d — регионы удалены", n)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM geonames_admin1_names"); n != 6 {
+		t.Fatalf("названий admin1 %d", n)
+	}
+}
+
+// R35: гонка с активацией того же места админом — привязка откатывается до своего savepoint,
+// город — в Conflict, остальная сверка и запись источника проходят, импорт успешен.
+func TestImportReconcileConflictKeepsImport(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	ural := addRegion(t, e, "Свердловская область")
+	mikh := addCity(t, e, ural, "test-mikhaylovsk-ural", map[string]string{"ru": "Михайловск"})
+	lesnoy := addCity(t, e, ural, "test-lesnoy", map[string]string{"ru": "Лесной"})
+	// город, которому «админ» отдаёт место Михайловска между отбором кандидатов и привязкой
+	other := addCity(t, e, ural, "test-activated-by-admin", map[string]string{"ru": "Активированный"})
+	raw := fixture(t)
+	named(&raw, 9100010, "Lesnoy", "Лесной", "71")
+	im := e.importer(&raw)
+	im.SetBeforeLink(func(_ context.Context, cityID uuid.UUID, gid int64) {
+		if cityID != mikh {
+			return
+		}
+		// не t.Fatal: колбэк внутри db.InTx держит соединение
+		if _, err := e.owner.Exec(context.Background(), "UPDATE cities SET geoname_id = $1 WHERE id = $2", gid, other); err != nil {
+			t.Errorf("активация админом: %v", err)
+		}
+	})
+	res, err := im.Import(ctx, "RU", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := res.Reconciled
+	if len(rec.Conflict) != 1 || rec.Conflict[0].CityID != mikh || !slices.Equal(rec.Conflict[0].Candidates, []int64{526815}) {
+		t.Fatalf("конфликт: %+v", rec.Conflict)
+	}
+	if len(rec.Linked) != 1 || rec.Linked[0].CityID != lesnoy || rec.Linked[0].GeonameID != 9100010 {
+		t.Fatalf("привязаны: %+v", rec.Linked)
+	}
+	j := journalRow(t, e.owner, res.ID)
+	var rep struct {
+		Conflict []struct {
+			Slug       string  `json:"slug"`
+			Candidates []int64 `json:"candidates"`
+		} `json:"conflict"`
+	}
+	if err := json.Unmarshal(j.Reconciled, &rep); err != nil || j.Status != "succeeded" || len(rep.Conflict) != 1 ||
+		rep.Conflict[0].Slug != "test-mikhaylovsk-ural" || !slices.Equal(rep.Conflict[0].Candidates, []int64{526815}) {
+		t.Fatalf("журнал: %v %s %s", err, j.Status, j.Reconciled)
+	}
+	var gid *int64
+	var version int64
+	if err := e.owner.QueryRow(ctx, "SELECT geoname_id, version FROM cities WHERE id = $1", mikh).Scan(&gid, &version); err != nil ||
+		gid != nil || version != 1 {
+		t.Fatalf("Михайловск тронут: %v %v v%d", err, gid, version)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM city_names WHERE city_id = $1", mikh); n != 1 {
+		t.Fatalf("переводов Михайловска %d — откат неполный", n)
+	}
+	for id, want := range map[uuid.UUID]int{mikh: 0, lesnoy: 1} {
+		if n := count(t, e.owner, "SELECT count(*) FROM outbox WHERE event_type = $1 AND aggregate_id = $2",
+			geo.EventCityLinked, id); n != want {
+			t.Fatalf("geo.city_linked для %s: %d, ждали %d", id, n, want)
+		}
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM geonames_places WHERE import_id = $1", res.ID); n != 4 {
+		t.Fatalf("мест %d", n)
+	}
+	if n := count(t, e.owner, `SELECT (after->>'cities_conflict')::int FROM audit_log WHERE action = 'geo.import' AND object_id = $1`,
+		res.ID); n != 1 {
+		t.Fatalf("аудит cities_conflict: %d", n)
 	}
 }
