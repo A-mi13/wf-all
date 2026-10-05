@@ -85,6 +85,20 @@ func TestChooseName(t *testing.T) {
 			{ID: 1, Locale: "ru", Name: "Stavropolye", Short: true},
 			{ID: 2, Locale: "ru", Name: "Ставрополье", Short: true},
 		}, "ru", true, "Stavropol", "Ставрополье"},
+		{"шаг 4: оба краткие — предпочтительное раньше письменности", []domain.AltName{
+			{ID: 1, Locale: "ru", Name: "Stavropolye", Preferred: true, Short: true},
+			{ID: 2, Locale: "ru", Name: "Ставрополье", Short: true},
+		}, "ru", true, "Fallback", "Stavropolye"},
+		// синтетика: условия шага 7 по отдельности (ru-строк нет, язык страны — ждём fallback)
+		{"шаг 7: предпочтительное без языка, но латиницей — не годится", []domain.AltName{
+			{ID: 1, Locale: "", Name: "Stavropol", Preferred: true},
+		}, "ru", true, "Fallback", "Fallback"},
+		{"шаг 7: непредпочтительное без языка кириллицей — не годится", []domain.AltName{
+			{ID: 1, Locale: "", Name: "Ставрополь"},
+		}, "ru", true, "Fallback", "Fallback"},
+		{"шаг 7: предпочтительное кириллицей с чужим языком — не годится", []domain.AltName{
+			{ID: 1, Locale: "uk", Name: "Ставрополь", Preferred: true},
+		}, "ru", true, "Fallback", "Fallback"},
 		{"шаг 6: ни одно правило не выбрало — минимальный ID", []domain.AltName{
 			{ID: 20, Locale: "ru", Name: "Bbb"},
 			{ID: 10, Locale: "ru", Name: "Aaa"},
