@@ -20,6 +20,45 @@ type Querier interface {
 	// выключена — 0 строк (here = null). Названия: запрошенная локаль → язык страны → name источника;
 	// регион: у заведённого — регион города (может отсутствовать), иначе admin1 источника; '' — нет.
 	GetVisiblePlace(ctx context.Context, arg GetVisiblePlaceParams) (GetVisiblePlaceRow, error)
+	// Места страны с тем же названием (основное или ru, после normalize_text) в том же регионе:
+	// по geoname_admin1_code региона, а без кода — по названиям региона и admin1. Место, уже
+	// привязанное к городу, не кандидат. Город без региона кандидатов не получает.
+	ImportCityCandidates(ctx context.Context, arg ImportCityCandidatesParams) ([]ImportCityCandidatesRow, error)
+	// Только отсутствующие переводы (§3.3); строку языка страны сверка не создаёт — она источник
+	// канонического cities.name.
+	ImportCityNamesFromPlace(ctx context.Context, arg ImportCityNamesFromPlaceParams) (int64, error)
+	// Импорт GeoNames (спека geo §5.4): журнал geonames_imports, источник geonames_*, сверка
+	// заведённых городов. Исполняет воркер (роль worker, grants.sql §3.8).
+	ImportCountry(ctx context.Context, code string) (ImportCountryRow, error)
+	ImportDeleteAdmin1Names(ctx context.Context, countryCode string) error
+	ImportDeleteGone(ctx context.Context, arg ImportDeleteGoneParams) (int64, error)
+	ImportDeletePlaceNames(ctx context.Context, geonameID []int64) error
+	ImportDeleteStaleAdmin1(ctx context.Context, arg ImportDeleteStaleAdmin1Params) error
+	// source_files — уже скачанные файлы (R27); NULL — ничего не скачано, прежнее значение остаётся.
+	ImportFail(ctx context.Context, arg ImportFailParams) (int64, error)
+	// Строки running старше таймаута задачи + 10 минут — процесс убит без итога (шаг 1).
+	ImportFailStale(ctx context.Context, arg ImportFailStaleParams) ([]uuid.UUID, error)
+	// Строка running этой же задачи River — прерванная попытка: она продолжается (шаг 1).
+	ImportFindOwnRunning(ctx context.Context, arg ImportFindOwnRunningParams) (uuid.UUID, error)
+	ImportInsertAdmin1Names(ctx context.Context, arg ImportInsertAdmin1NamesParams) (int64, error)
+	ImportInsertPlaceNames(ctx context.Context, arg ImportInsertPlaceNamesParams) (int64, error)
+	// Мест в прошлом успешном импорте страны — база порога 90 % (шаг 4).
+	ImportLastSucceededPlaces(ctx context.Context, countryCode string) (int32, error)
+	ImportLinkCity(ctx context.Context, arg ImportLinkCityParams) (int64, error)
+	// Региону, найденному по названию, — код admin1 (если пуст и не занят другим регионом страны:
+	// уникальность regions_country_admin1_key).
+	ImportLinkRegion(ctx context.Context, arg ImportLinkRegionParams) (int64, error)
+	// Пропали из источника, но на них ссылается город: остаются с отметкой и попадают в отчёт (шаг 4).
+	ImportMarkMissing(ctx context.Context, arg ImportMarkMissingParams) ([]int64, error)
+	ImportRegionNamesFromAdmin1(ctx context.Context, arg ImportRegionNamesFromAdmin1Params) (int64, error)
+	ImportRestart(ctx context.Context, arg ImportRestartParams) error
+	ImportStart(ctx context.Context, arg ImportStartParams) error
+	ImportSucceed(ctx context.Context, arg ImportSucceedParams) (int64, error)
+	// Заведённые города страны без geoname_id — кандидаты сверки (шаг 5).
+	ImportUnlinkedCities(ctx context.Context, countryCode string) ([]ImportUnlinkedCitiesRow, error)
+	ImportUpsertAdmin1(ctx context.Context, arg ImportUpsertAdmin1Params) error
+	// Пачка мест (до 1000): массивы одной длины, по элементу на место.
+	ImportUpsertPlaces(ctx context.Context, arg ImportUpsertPlacesParams) error
 	// Районы города без архивных (§3.2).
 	ListActiveDistricts(ctx context.Context, cityID uuid.UUID) ([]ListActiveDistrictsRow, error)
 	// Публичный список городов (спека geo §4.2). Видимость — только страны is_enabled (§4.1).
