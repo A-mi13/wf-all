@@ -78,6 +78,7 @@ func TestValidateRejects(t *testing.T) {
 		{"recommended со сборкой", func(v *appversion.Versions) { v.Recommended = "1.10.0+45" }, "recommended_version", appversion.CodeFormat},
 		{"min выше recommended", func(v *appversion.Versions) { v.Min, v.Recommended = "1.10.0", "1.9.0" }, "recommended_version", appversion.CodeMinimum},
 		{"http", func(v *appversion.Versions) { v.StoreURL = "http://apps.apple.com/app/id1" }, "store_url", appversion.CodeFormat},
+		{"схема в верхнем регистре", func(v *appversion.Versions) { v.StoreURL = "HTTPS://apps.apple.com/app/id1" }, "store_url", appversion.CodeFormat}, // CHECK базы: '^https://'
 		{"без схемы", func(v *appversion.Versions) { v.StoreURL = "apps.apple.com/app/id1" }, "store_url", appversion.CodeFormat},
 		{"пусто", func(v *appversion.Versions) { v.StoreURL = "" }, "store_url", appversion.CodeFormat},
 		{"opaque", func(v *appversion.Versions) { v.StoreURL = "https:apps.apple.com" }, "store_url", appversion.CodeFormat},

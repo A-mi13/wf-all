@@ -138,8 +138,10 @@ func Validate(v Versions) error {
 // (apps.apple.com.evil.example), порт и userinfo (apps.apple.com@evil.example) не проходят.
 // Неизвестная платформа — хост не проверяется (её нарушение уже в platform).
 func storeURLViolation(raw, host string, known bool) string {
+	// Схема — по исходной строке: url.Parse приводит её к нижнему регистру, а CHECK базы
+	// (store_url ~ '^https://') регистр различает (HTTPS:// база отвергнет).
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.Opaque != "" || u.Host == "" {
+	if err != nil || !strings.HasPrefix(raw, "https://") || u.Scheme != "https" || u.User != nil || u.Opaque != "" || u.Host == "" {
 		return CodeFormat
 	}
 	if known && u.Host != host {
