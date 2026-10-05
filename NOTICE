@@ -1,0 +1,18 @@
+Сторонние данные в этом репозитории
+
+Данные о городах — GeoNames, https://www.geonames.org
+Лицензия: CC BY 4.0, https://creativecommons.org/licenses/by/4.0/
+С изменениями: отбор, нормализация названий.
+
+Используются файлы export/dump/<CC>.zip, export/dump/alternatenames/<CC>.zip и
+export/dump/admin1CodesASCII.txt (https://download.geonames.org): импорт модуля geo
+(backend/internal/geo) и выдержки для тестов (backend/internal/geo/internal/source/testdata/).
+Клиенты показывают «Данные о городах: GeoNames (CC BY 4.0)» на экране «О приложении».
+
+---
+
+Third-party data in this repository
+
+City data: GeoNames, https://www.geonames.org
+License: CC BY 4.0, https://creativecommons.org/licenses/by/4.0/
+Changes: selection, name normalization.

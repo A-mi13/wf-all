@@ -45,7 +45,7 @@
 | `country_names`, `region_names`, `city_names`, `city_slug_history` (новые) | `geo` |
 | `geonames_places`, `geonames_place_names`, `geonames_admin1`, `geonames_admin1_names`, `geonames_imports` (новые) | `geo` |
 | представление `geo_read_city_settings` (экспортированное, новое) | `geo` |
-| представление `city_settings` (есть, в `legacyExported`) | удаляется в `0019` (§3.7) |
+| представление `city_settings` (было в 0002) | удаляется в `0019` (§3.7) |
 | `app_versions` (новая) | `platform` |
 
 Минимальная версия — механизм платформы: таблица и логика — `internal/platform/appversion`
@@ -112,7 +112,9 @@ pg_catalog, pg_temp`) — поиск по префиксу в админке.
   - `centroid geography(Point, 4326) NOT NULL` — в этой же миграции после заполнения сида (§3.6);
     GiST-индекс по `centroid`.
   - `name` — каноническое название на языке страны (`countries.default_locale`), зеркало строки
-    `city_names` этого языка (§3.3); `slug` — `[a-z0-9-]`, уникален глобально (как сейчас).
+    `city_names` этого языка (§3.3); `slug` —
+    `^[a-z0-9]+(-[a-z0-9]+)*$` (дефис только между частями), не длиннее 100 символов (CHECK
+    `cities_slug_format`; длинный slug при активации обрезается — geo 2/2), уникален глобально.
 - `regions`: `+ geoname_admin1_code text`, уникальность `(country_id, geoname_admin1_code)` где не
   NULL.
 - `countries`: `+ version bigint NOT NULL DEFAULT 1`.
@@ -123,7 +125,14 @@ pg_catalog, pg_temp`) — поиск по префиксу в админке.
   а читать чужие таблицы `geo` не может (§4.2–4.3 спеки бэкенда). Архивный район скрыт из публичных
   ответов, ссылки на него остаются.
 - `city_slug_history (slug text PK, city_id uuid NOT NULL REFERENCES cities, replaced_at
-  timestamptz)` — старые `slug` продолжают находить город (ссылки веба).
+  timestamptz NOT NULL)`, slug — тот же формат (CHECK `city_slug_history_slug_format`), строки
+  удаляются вместе с городом (`ON DELETE CASCADE`); время — из часов записывающего, без
+  `DEFAULT now()`; старые `slug` продолжают находить город (ссылки веба).
+
+Сверх этого (план geo 1/2, R13): названия `*_names` непустые (`btrim(name) <> ''`), `population >= 0`,
+`version > 0`, CHECK `country_code`/`locale` в таблицах `geonames_*`, `*_names` удаляются каскадом;
+имена ограничений для 23505 — `cities_geoname_id_key`, `districts_city_name_active_key`,
+`geonames_imports_running`, `regions_country_admin1_key`.
 
 ### 3.3. Названия по локалям
 
@@ -161,10 +170,10 @@ pg_catalog, pg_temp`) — поиск по префиксу в админке.
 ```
 app_versions (
   platform text PK CHECK (platform IN ('ios','android')),
-  min_version text NOT NULL CHECK (min_version ~ '^\d+\.\d+\.\d+$'),
-  recommended_version text NOT NULL CHECK (recommended_version ~ '^\d+\.\d+\.\d+$'),
-  store_url text NOT NULL,
-  version bigint NOT NULL DEFAULT 1,
+  min_version text NOT NULL CHECK (min_version ~ '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'),
+  recommended_version text NOT NULL CHECK (recommended_version ~ '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'),
+  store_url text NOT NULL CHECK (store_url ~ '^https://'),
+  version bigint NOT NULL DEFAULT 1 CHECK (version > 0),
   updated_at timestamptz NOT NULL DEFAULT now()
 )
 ```
@@ -287,8 +296,9 @@ query). Query видят Cloudflare и Render — спека клиентов т
 
 `platform/page` сейчас кодирует только `(created_at, id)` (wire v1), а свой курсор модулям писать
 запрещено (`.claude/rules/backend-platform.md`). Расширение: keyset-курсор с произвольным набором
-полей сортировки (`page.Key` — упорядоченный список значений `int64 | string | time | uuid`), wire
-v2 с версией и отпечатком набора полей (хэш имён и типов полей, не HMAC: курсор не секрет, отпечаток
+полей сортировки (`page.Keyset{Set, Values}`: `Set` — имя списка с полями сортировки по порядку, например
+`geo.cities(rank,population,id)`, `Values` — значения `int64 | string | time | uuid` по `Kind`ам), wire
+v2 с версией и отпечатком набора полей (хэш `Set` — имён полей — и их типов, не HMAC: курсор не секрет, отпечаток
 отсекает курсор чужого списка); v1 продолжает декодироваться. Тесты платформы — порча,
 чужой набор полей, граничные значения.
 
@@ -346,7 +356,7 @@ v2 с версией и отпечатком набора полей (хэш и�
 
 ### 5.4. Импорт GeoNames
 
-Логика — `internal/geo/internal/app` (`Import(ctx, country, startedBy)`), вызывается из двух мест:
+Логика — `internal/geo/internal/app` (`Import(ctx, country, startedBy, riverJobID)`), вызывается из двух мест:
 
 - **Задача River** `geo.import` (очередь `maintenance`): ставит её `POST /v1/geo/imports`; в
   аргументах — страна и `started_by` (id сотрудника); аудит постановки — от сотрудника.
@@ -365,12 +375,15 @@ v2 с версией и отпечатком набора полей (хэш и�
    10 минут (40 минут) → `failed` («прерван»). Иначе вставить свою строку `running`; уникальный
    индекс — параллельный импорт получит 409 `geo.import_in_progress`. При отмене ctx (штатная
    остановка воркера, таймаут) строка переводится в `failed` через `context.WithoutCancel`.
+   Весь `Import` идёт под сроком `Timeout` (30 мин) и у команды оператора: иначе живой импорт пережил бы
+   40 минут и был бы закрыт как зависший; закрытие зависшей строки — в аудите от закрывшего запуска.
 2. Скачать `<base>/export/dump/<CC>.zip`, `<base>/export/dump/alternatenames/<CC>.zip`,
    `<base>/export/dump/admin1CodesASCII.txt` (`base` — `WORKER_GEONAMES_BASE_URL`, по умолчанию
    `https://download.geonames.org`). Только HTTPS, редиректы — только на тот же хост; лимиты
    сжатого и распакованного размера (конфиг; по умолчанию 50 МБ / 200 МБ на файл); из zip читается
-   ровно одна ожидаемая запись (`<CC>.txt`) потоком, на диск не распаковывается; sha256 и размеры —
-   в журнал. `country` — `^[A-Z]{2}$`.
+   ровно одна ожидаемая запись (`<CC>.txt`) потоком, на диск не распаковывается; допускается и не
+   читается `readme.txt` (она есть в настоящих архивах), любая другая запись — отказ; sha256 и
+   размеры — в журнал, при ошибке — уже скачанных файлов. `country` — `^[A-Z]{2}$`.
 3. Разбор (формат проверен 02.10.2026: основной — 19 колонок; альтернативные названия V2 — 10
    колонок с `from`/`to` и флагами `isPreferredName`, `isShortName`, `isColloquial`, `isHistoric`;
    `admin1CodesASCII` — `code, name, name ascii, geonameid`, названия английские). Отбор: класс `P`,
@@ -381,13 +394,20 @@ v2 с версией и отпечатком набора полей (хэш и�
 4. Только после **полностью успешного** разбора: upsert пачками по 1000. Строки, пропавшие из
    источника: если новых строк меньше 90 % от прошлого успешного импорта — импорт падает (защита от
    обрезанного файла); иначе удаляются, а те, на которые ссылается город, получают `missing_since`
-   и попадают в отчёт.
+   и попадают в отчёт (`reconciled.missing`, `geoname_id`). До записи проверяется и admin1 (решение
+   пользователя 05.10.2026): каждый непустой код admin1 отобранных мест, кроме `00` («неизвестно» в
+   GeoNames), есть в наборе admin1 страны — иначе импорт падает со списком кодов (обрезанный общий
+   файл `admin1CodesASCII.txt`); строк admin1 страны не меньше 90 % от текущих в `geonames_admin1`.
 5. Сверка заведённых городов страны без `geoname_id`: совпадение `name_normalized` с ru- или
    основным названием места **и** региона (по `geoname_admin1_code`, иначе по `region_names` после
    `normalize_text`) → `geoname_id`, переводы (только отсутствующие, §3.3), региону —
    `geoname_admin1_code`. `centroid`/`population` у заведённого города не меняются; `version`
    города растёт, событие `geo.city_linked`. Ноль или несколько совпадений — в `reconciled`, город
-   не трогается.
+   не трогается. Город без региона кандидатов не получает (`not_found`): условие «и региона» не
+   выполнить. Каждая привязка — под savepoint: место за это время привязал другой город (активация
+   админом, 23505 `cities_geoname_id_key`) — откат только этой привязки, город — в
+   `reconciled.conflict`, импорт идёт дальше (решение пользователя 05.10.2026). Активация (этап 2) на
+   тот же 23505 отвечает 409 `geo.place_taken`.
 6. Итог в журнал (`succeeded`/`failed` с текстом ошибки), событие `geo.import_finished`.
 
 Атрибуция CC BY 4.0: `NOTICE` в корне репозитория («GeoNames, https://www.geonames.org, CC BY 4.0,
@@ -455,13 +475,17 @@ https://creativecommons.org/licenses/by/4.0/, с изменениями: отб�
 
 ```
 backend/internal/geo/
-  geo.go, events.go
-  internal/app/      сценарии: список, город, ближайший, активация, правки, страны, Import, выбор языка
+  geo.go, events.go, read.go, locale.go   API модуля; чтения справочника и выбор языка (geo.New)
+  internal/app/      сценарии записи: Import (этап 1); активация, правки, страны (этап 2)
   internal/store/    sqlc geodb + репозиторий
   internal/domain/   slug, выбор названия §3.4, r(pop) §4.3 — чистые правила
   httpapi/  admin/  jobs/  queries/
 backend/internal/platform/appversion/   таблица, semver, правила; ручки — internal/httpapi/{public,admin}
 ```
+
+Отступление от раскладки §3 спеки бэкенда: чтения справочника — в корневом пакете `geo`, а не в
+`internal/app`. Импорт (`internal/app`) публикует события из `geo/events.go` и потому импортирует корневой
+`geo`; реализация чтений в `internal/app` дала бы цикл импортов.
 
 Регистрация: строка `geo` в `Layers` (`internal/archtest/modules.go`), элемент `sql` в
 `backend/sqlc.yaml` (`omit_unused_structs: true`), владение в `ownership.go`, классы лимитов в
