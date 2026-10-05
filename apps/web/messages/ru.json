@@ -1,9 +1,9 @@
 {
   "app": { "title": "ГДЕФУТБОЛ" },
-  "health": {
-    "checking": "Проверяем API…",
-    "ok": "API работает",
-    "down": "API недоступен"
+  "connection": {
+    "checking": "Проверяем связь с API…",
+    "ok": "Связь с API есть",
+    "down": "Нет связи с API"
   },
   "errors": {
     "internal": "Что-то пошло не так. Попробуйте ещё раз",

@@ -1,6 +1,6 @@
 {
   "app": { "title": "" },
-  "health": { "checking": "", "ok": "", "down": "" },
+  "connection": { "checking": "", "ok": "", "down": "" },
   "errors": {
     "internal": "",
     "request": {
