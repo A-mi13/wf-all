@@ -675,7 +675,7 @@ func TestImportClosedByOtherRunRollsBack(t *testing.T) {
 		tag, err := e.owner.Exec(ctx, `UPDATE geonames_imports SET status = 'failed', finished_at = now()
 			WHERE country_code = 'RU' AND status = 'running'`)
 		if err != nil || tag.RowsAffected() != 1 {
-			return source.Raw{}, fmt.Errorf("закрыть свою строку: %v, строк %d", err, tag.RowsAffected())
+			return source.Raw{}, fmt.Errorf("закрыть свою строку: %w, строк %d", err, tag.RowsAffected())
 		}
 		return raw, nil
 	})

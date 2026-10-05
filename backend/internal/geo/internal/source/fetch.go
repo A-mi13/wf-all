@@ -151,7 +151,7 @@ func download(ctx context.Context, c *http.Client, u *url.URL, name string, limi
 	if err != nil {
 		return nil, File{}, fileErr(name, err)
 	}
-	resp, err := c.Do(req)
+	resp, err := c.Do(req) //nolint:gosec // адрес — из конфига оператора (WORKER_GEONAMES_BASE_URL), только https и тот же хост
 	if err != nil {
 		return nil, File{}, fileErr(name, err)
 	}

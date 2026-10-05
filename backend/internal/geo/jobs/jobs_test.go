@@ -127,18 +127,25 @@ func TestImportWorkerRunNow(t *testing.T) {
 		if country != "RU" || by != nil || job != nil {
 			t.Errorf("команда оператора: %s %v %v — ждали nil, nil", country, by, job)
 		}
-		return app.ImportResult{ID: importID, PlacesUpserted: 3, PlacesSkipped: 2, NamesUpserted: 12, Reconciled: app.Reconciled{
-			Linked:    []app.LinkedCity{{Slug: "a"}},
-			Ambiguous: []app.UnmatchedCity{{Slug: "b"}},
-			NotFound:  []app.UnmatchedCity{{Slug: "c"}, {Slug: "d"}},
-		}}, nil
+		// все счётчики разные и ненулевые: перепутанное или потерянное поле не пройдёт
+		return app.ImportResult{ID: importID, PlacesUpserted: 3, PlacesRemoved: 5, PlacesMissing: 7, PlacesSkipped: 2,
+			NamesUpserted: 12, Reconciled: app.Reconciled{
+				Linked:    []app.LinkedCity{{Slug: "a"}},
+				Ambiguous: []app.UnmatchedCity{{Slug: "b"}},
+				NotFound:  []app.UnmatchedCity{{Slug: "c"}, {Slug: "d"}},
+				Conflict:  []app.UnmatchedCity{{Slug: "e"}, {Slug: "f"}, {Slug: "g"}},
+			}}, nil
 	})
 	s, err := w.RunNow(context.Background(), "RU")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.ImportID != importID || s.PlacesUpserted != 3 || s.PlacesSkipped != 2 || s.NamesUpserted != 12 || !slices.Equal(s.Linked, []string{"a"}) ||
-		!slices.Equal(s.Ambiguous, []string{"b"}) || !slices.Equal(s.NotFound, []string{"c", "d"}) {
-		t.Fatalf("%+v", s)
+	if s.ImportID != importID || s.PlacesUpserted != 3 || s.PlacesRemoved != 5 || s.PlacesMissing != 7 || s.PlacesSkipped != 2 ||
+		s.NamesUpserted != 12 {
+		t.Fatalf("счётчики: %+v", s)
+	}
+	if !slices.Equal(s.Linked, []string{"a"}) || !slices.Equal(s.Ambiguous, []string{"b"}) ||
+		!slices.Equal(s.NotFound, []string{"c", "d"}) || !slices.Equal(s.Conflict, []string{"e", "f", "g"}) {
+		t.Fatalf("сверка: %+v", s)
 	}
 }

@@ -186,13 +186,16 @@ func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojo
 	fmt.Fprintf(out, "мест: %d, удалено: %d, пропало из источника (держит город): %d, названий: %d\n",
 		s.PlacesUpserted, s.PlacesRemoved, s.PlacesMissing, s.NamesUpserted)
 	fmt.Fprintf(out, "пропущено (таймзона): %d\n", s.PlacesSkipped)
-	fmt.Fprintf(out, "сверка городов: привязано %d, неоднозначно %d, не найдено %d\n",
-		len(s.Linked), len(s.Ambiguous), len(s.NotFound))
+	fmt.Fprintf(out, "сверка городов: привязано %d, неоднозначно %d, не найдено %d, конфликт %d\n",
+		len(s.Linked), len(s.Ambiguous), len(s.NotFound), len(s.Conflict))
 	for _, slug := range s.Ambiguous {
 		fmt.Fprintf(out, "  неоднозначно: %s\n", slug)
 	}
 	for _, slug := range s.NotFound {
 		fmt.Fprintf(out, "  не найдено: %s\n", slug)
+	}
+	for _, slug := range s.Conflict {
+		fmt.Fprintf(out, "  конфликт: %s\n", slug)
 	}
 	return nil
 }

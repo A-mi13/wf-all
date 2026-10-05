@@ -102,7 +102,7 @@ func (w *ImportWorker) Work(ctx context.Context, job *river.Job[ImportArgs]) err
 type Summary struct {
 	ImportID                                                                   uuid.UUID
 	PlacesUpserted, PlacesRemoved, PlacesMissing, PlacesSkipped, NamesUpserted int
-	Linked, Ambiguous, NotFound                                                []string
+	Linked, Ambiguous, NotFound, Conflict                                      []string
 }
 
 // RunNow — команда оператора: импорт синхронно, без сотрудника и задачи River (§5.4).
@@ -118,6 +118,9 @@ func (w *ImportWorker) RunNow(ctx context.Context, country string) (Summary, err
 	}
 	for _, c := range r.Reconciled.NotFound {
 		s.NotFound = append(s.NotFound, c.Slug)
+	}
+	for _, c := range r.Reconciled.Conflict {
+		s.Conflict = append(s.Conflict, c.Slug)
 	}
 	return s, err
 }
