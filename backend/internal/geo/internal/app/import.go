@@ -50,8 +50,12 @@ const (
 )
 
 const (
-	batchSize           = 1000 // строк на один INSERT … SELECT unnest
-	maxErrorRunes       = 2000
+	batchSize     = 1000 // строк на один INSERT … SELECT unnest
+	maxErrorRunes = 2000
+	// failTimeout — срок записи итога failed после ошибки: ctx импорта к этому моменту может быть
+	// отменён, а без срока CLI и задача River повисли бы на зависшем соединении. Не уложились —
+	// строку закроет как зависшую следующий запуск через StaleAfter.
+	failTimeout         = 30 * time.Second
 	auditAction         = "geo.import"
 	codeUniqueViolation = "23505"
 	runningIndex        = "geonames_imports_running"
@@ -138,8 +142,11 @@ func (im *Importer) Import(ctx context.Context, country string, startedBy *uuid.
 	res, files, err := im.load(ctx, run)
 	if err != nil {
 		// отмена ctx (остановка воркера, таймаут) не должна оставить строку running;
-		// WithoutCancel снимает и срок ImportTimeout
-		if ferr := im.fail(context.WithoutCancel(ctx), run, files, err); ferr != nil {
+		// WithoutCancel снимает и срок ImportTimeout — взамен свой короткий failTimeout
+		fctx, fcancel := context.WithTimeout(context.WithoutCancel(ctx), failTimeout)
+		ferr := im.fail(fctx, run, files, err)
+		fcancel()
+		if ferr != nil {
 			err = errors.Join(err, fmt.Errorf("geo: журнал импорта: %w", ferr))
 		}
 		im.log.Error("импорт GeoNames не удался", "country", country, "import_id", run.id.String(),
@@ -282,15 +289,19 @@ func prepare(raw source.Raw, run importRun, now time.Time) prepared {
 	zones := map[string]bool{}
 	seen := map[int64]bool{}
 	for _, pl := range raw.Places {
-		if pl.CountryCode != run.country || seen[pl.GeonameID] ||
-			!domain.PlaceAllowed(pl.FeatureClass, pl.FeatureCode, pl.Population) {
+		if pl.CountryCode != run.country || seen[pl.GeonameID] {
+			continue
+		}
+		// повтор geonameid — решает первая строка, даже отвергнутая: годный дубль после негодной
+		// не берётся, двойной негодный не считается в skipped дважды
+		seen[pl.GeonameID] = true
+		if !domain.PlaceAllowed(pl.FeatureClass, pl.FeatureCode, pl.Population) {
 			continue
 		}
 		if !validZone(zones, pl.Timezone) {
 			p.skippedTimezone++
 			continue
 		}
-		seen[pl.GeonameID] = true
 		p.places = append(p.places, pl)
 		for _, l := range domain.SupportedLocales {
 			if n := chooseName(alts[pl.GeonameID], l, run.locale, pl.Name, pl.ASCIIName); n != "" {

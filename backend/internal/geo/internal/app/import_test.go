@@ -300,24 +300,25 @@ func TestImportTwiceIsIdempotent(t *testing.T) {
 }
 
 // Пропавшие места удаляются; место, на которое ссылается город (Ставрополь сида), остаётся с
-// missing_since; вернулось в источник — отметка снимается. 18 из 20 — ровно порог 90 %.
+// missing_since; вернулось в источник — отметка снимается. 27 из 30 — ровно порог 90 %.
 func TestImportRemovesGoneAndKeepsReferenced(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	base := fixture(t)
-	base.Places = append(base.Places, synth(9000001, 17)...)
+	base.Places = append(base.Places, synth(9000001, 27)...)
 	raw := base
 	im := e.importer(&raw)
-	if res, err := im.Import(ctx, "RU", nil, nil); err != nil || res.PlacesUpserted != 20 {
+	if res, err := im.Import(ctx, "RU", nil, nil); err != nil || res.PlacesUpserted != 30 {
 		t.Fatalf("первый: %v %+v", err, res)
 	}
-	raw = without(base, 487846, 9000001)
+	// пропали оба места городов сида (Ставрополь, Михайловск) и одно место без города
+	raw = without(base, 487846, 493702, 9000001)
 	e.clk.Advance(time.Hour)
 	res, err := im.Import(ctx, "RU", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.PlacesUpserted != 18 || res.PlacesRemoved != 1 || res.PlacesMissing != 1 {
+	if res.PlacesUpserted != 27 || res.PlacesRemoved != 1 || res.PlacesMissing != 2 {
 		t.Fatalf("второй: %+v", res)
 	}
 	if n := count(t, e.owner, "SELECT count(*) FROM geonames_places WHERE geoname_id = 9000001"); n != 0 {
@@ -333,11 +334,13 @@ func TestImportRemovesGoneAndKeepsReferenced(t *testing.T) {
 	if missing == nil || !missing.Equal(t0.Add(time.Hour)) {
 		t.Fatalf("missing_since = %v", missing)
 	}
-	// §5.4 шаг 4: место города с missing_since — в отчёте журнала
+	// §5.4 шаг 4: места городов с missing_since — в отчёте журнала, по возрастанию (R28). Нынешний
+	// план ImportMarkMissing и сам идёт по geoname_id (индексы), slices.Sort в import.go страхует
+	// от смены плана — подсадкой данными его не уронить (раунд 1, отчёт Task 10)
 	var rep struct {
 		Missing []int64 `json:"missing"`
 	}
-	if err := json.Unmarshal(journalRow(t, e.owner, res.ID).Reconciled, &rep); err != nil || !slices.Equal(rep.Missing, []int64{487846}) {
+	if err := json.Unmarshal(journalRow(t, e.owner, res.ID).Reconciled, &rep); err != nil || !slices.Equal(rep.Missing, []int64{487846, 493702}) {
 		t.Fatalf("отчёт missing: %v %+v", err, rep)
 	}
 	raw = base
@@ -518,7 +521,8 @@ func TestImportStaleAndInterruptedRuns(t *testing.T) {
 		e := newEnv(t)
 		raw := fixture(t)
 		stale := insertRunning(t, e, t0.Add(-41*time.Minute), nil)
-		res, err := e.importer(&raw).Import(ctx, "RU", nil, ptr(int64(77)))
+		staff := uuid.New()
+		res, err := e.importer(&raw).Import(ctx, "RU", &staff, ptr(int64(77)))
 		if err != nil || res.ID == stale {
 			t.Fatalf("%v %+v", err, res)
 		}
@@ -529,9 +533,15 @@ func TestImportStaleAndInterruptedRuns(t *testing.T) {
 		if s := finishedStatus(t, e.owner, stale); s != "failed" {
 			t.Fatalf("событие зависшей: %s", s)
 		}
-		// R29: закрытие зависшей — в аудите, как прочие итоги geo.import
+		// R29: закрытие зависшей — в аудите, как прочие итоги geo.import, от закрывшего запуска
 		if n := count(t, e.owner, "SELECT count(*) FROM audit_log WHERE action = 'geo.import' AND object_id = $1", stale); n != 1 {
 			t.Fatalf("аудит зависшей: %d", n)
+		}
+		var role string
+		var actor *uuid.UUID
+		if err := e.owner.QueryRow(ctx, `SELECT actor_role, actor_user_id FROM audit_log WHERE action = 'geo.import' AND object_id = $1`,
+			stale).Scan(&role, &actor); err != nil || role != "admin" || actor == nil || *actor != staff {
+			t.Fatalf("автор аудита зависшей: %v %q %v", err, role, actor)
 		}
 	})
 	t.Run("повтор той же задачи продолжает свою строку", func(t *testing.T) {
@@ -627,6 +637,64 @@ func TestImportSkipsUnusableTimezones(t *testing.T) {
 	}
 }
 
+// Повтор geonameid — решает первая строка, даже негодная: годный дубль после негодной не берётся,
+// двойной негодный дубль считается в skipped_timezone один раз.
+func TestImportDuplicatePlaceFirstRowWins(t *testing.T) {
+	e := newEnv(t)
+	raw := fixture(t)
+	badThenGood := synth(9400001, 1)
+	badThenGood = append(badThenGood, badThenGood[0])
+	badThenGood[0].Timezone = ""
+	badTwice := synth(9400002, 1)
+	badTwice = append(badTwice, badTwice[0])
+	badTwice[0].Timezone, badTwice[1].Timezone = "Mars/Olympus", "Mars/Olympus"
+	raw.Places = append(append(raw.Places, badThenGood...), badTwice...)
+	res, err := e.importer(&raw).Import(context.Background(), "RU", nil, nil)
+	if err != nil || res.PlacesUpserted != 3 || res.PlacesSkipped != 2 {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM geonames_places WHERE geoname_id IN (9400001, 9400002)"); n != 0 {
+		t.Fatalf("дубль с негодной первой строкой записан: %d", n)
+	}
+	var rep struct {
+		SkippedTimezone int `json:"skipped_timezone"`
+	}
+	if err := json.Unmarshal(journalRow(t, e.owner, res.ID).Reconciled, &rep); err != nil || rep.SkippedTimezone != 2 {
+		t.Fatalf("отчёт: %v %+v", err, rep)
+	}
+}
+
+// Строку журнала закрыл другой запуск (счёл зависшей), пока шла загрузка: итог не пишется,
+// запись откатывается целиком, второго geo.import_finished нет.
+func TestImportClosedByOtherRunRollsBack(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	raw := fixture(t)
+	im := app.NewImporter(e.as, e.clk, source.FetchConfig{}, slog.New(slog.DiscardHandler))
+	im.SetFetch(func(ctx context.Context, _ source.FetchConfig, _ string) (source.Raw, error) {
+		tag, err := e.owner.Exec(ctx, `UPDATE geonames_imports SET status = 'failed', finished_at = now()
+			WHERE country_code = 'RU' AND status = 'running'`)
+		if err != nil || tag.RowsAffected() != 1 {
+			return source.Raw{}, fmt.Errorf("закрыть свою строку: %v, строк %d", err, tag.RowsAffected())
+		}
+		return raw, nil
+	})
+	res, err := im.Import(ctx, "RU", nil, nil)
+	if !errors.Is(err, app.ErrImportClosed) || res.ID == uuid.Nil {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM geonames_places"); n != 0 {
+		t.Fatalf("мест %d — запись не откатилась", n)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM outbox WHERE event_type = $1 AND aggregate_id = $2",
+		geo.EventImportFinished, res.ID); n != 0 {
+		t.Fatalf("событий geo.import_finished %d — итог чужой строки переписан", n)
+	}
+	if j := journalRow(t, e.owner, res.ID); j.Status != "failed" || j.Error != nil || j.Places != nil {
+		t.Fatalf("журнал тронут: %+v", j)
+	}
+}
+
 // Предпочтительное, но вышедшее из употребления (to в прошлом) название не выбирается.
 func TestImportIgnoresEndedNames(t *testing.T) {
 	e := newEnv(t)
@@ -692,6 +760,10 @@ func TestImportReconcilesCities(t *testing.T) {
 	lesnoy := addCity(t, e, ural, "test-lesnoy", map[string]string{"ru": "Лесной", "en": "Lesnoy (admin)"})
 	// два места-тёзки в одном регионе — решает админ
 	zar := addCity(t, e, stavropolKrai, "test-zarechnyy", map[string]string{"ru": "Заречный"})
+	// два заведённых города-тёзки на одно место: привязать нельзя ни один (второй дал бы 23505
+	// cities_geoname_id_key и уронил импорт страны) — решает админ
+	sosA := addCity(t, e, stavropolKrai, "test-sosnovka-a", map[string]string{"ru": "Сосновка"})
+	sosB := addCity(t, e, stavropolKrai, "test-sosnovka-b", map[string]string{"ru": "Сосновка"})
 	// место есть, но уже привязано к Ставрополю сида — не кандидат
 	addCity(t, e, stavropolKrai, "test-stavropol-2", map[string]string{"ru": "Ставрополь"})
 	// совпадений нет
@@ -701,6 +773,7 @@ func TestImportReconcilesCities(t *testing.T) {
 	named(&raw, 9100001, "Zarechnyy", "Заречный", "70")
 	named(&raw, 9100002, "Zarechnyy", "Заречный", "70")
 	named(&raw, 9100010, "Lesnoy", "Лесной", "71")
+	named(&raw, 9100020, "Sosnovka", "Сосновка", "70")
 	im := e.importer(&raw)
 	res, err := im.Import(ctx, "RU", nil, nil)
 	if err != nil {
@@ -711,7 +784,11 @@ func TestImportReconcilesCities(t *testing.T) {
 		rec.Linked[1].Slug != "test-mikhaylovsk-ural" || rec.Linked[1].GeonameID != 526815 {
 		t.Fatalf("привязаны: %+v", rec.Linked)
 	}
-	if len(rec.Ambiguous) != 1 || rec.Ambiguous[0].CityID != zar || !slices.Equal(rec.Ambiguous[0].Candidates, []int64{9100001, 9100002}) {
+	// порядок — по slug (ImportUnlinkedCities)
+	if len(rec.Ambiguous) != 3 ||
+		rec.Ambiguous[0].CityID != sosA || !slices.Equal(rec.Ambiguous[0].Candidates, []int64{9100020}) ||
+		rec.Ambiguous[1].CityID != sosB || !slices.Equal(rec.Ambiguous[1].Candidates, []int64{9100020}) ||
+		rec.Ambiguous[2].CityID != zar || !slices.Equal(rec.Ambiguous[2].Candidates, []int64{9100001, 9100002}) {
 		t.Fatalf("неоднозначные: %+v", rec.Ambiguous)
 	}
 	if len(rec.NotFound) != 2 || rec.NotFound[0].Slug != "test-nigdeevsk" || rec.NotFound[1].Slug != "test-stavropol-2" {
@@ -729,8 +806,10 @@ func TestImportReconcilesCities(t *testing.T) {
 	if gid, v := city(lesnoy); gid == nil || *gid != 9100010 || v != 2 {
 		t.Fatalf("Лесной: %v v%d", gid, v)
 	}
-	if gid, v := city(zar); gid != nil || v != 1 {
-		t.Fatalf("Заречный тронут: %v v%d", gid, v)
+	for name, id := range map[string]uuid.UUID{"Заречный": zar, "Сосновка-а": sosA, "Сосновка-б": sosB} {
+		if gid, v := city(id); gid != nil || v != 1 {
+			t.Fatalf("%s тронут: %v v%d", name, gid, v)
+		}
 	}
 	names := pairs(t, e.owner, `SELECT c.slug || '/' || n.locale, n.name FROM city_names n JOIN cities c ON c.id = n.city_id
 		WHERE c.slug LIKE 'test-%'`)
@@ -762,7 +841,7 @@ func TestImportReconcilesCities(t *testing.T) {
 	}
 	// повтор: привязанные уже не кандидаты, событий не прибавилось
 	res, err = im.Import(ctx, "RU", nil, nil)
-	if err != nil || len(res.Reconciled.Linked) != 0 || len(res.Reconciled.Ambiguous) != 1 {
+	if err != nil || len(res.Reconciled.Linked) != 0 || len(res.Reconciled.Ambiguous) != 3 {
 		t.Fatalf("повтор: %v %+v", err, res.Reconciled)
 	}
 	if n := count(t, e.owner, "SELECT count(*) FROM outbox WHERE event_type = $1", geo.EventCityLinked); n != 2 {
