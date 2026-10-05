@@ -1,9 +1,6 @@
 package i18n
 
-import (
-	"slices"
-	"strings"
-)
+import "strings"
 
 // maxAcceptLanguage — заголовок длиннее не разбирается: настоящие браузеры шлют десятки байт,
 // килобайт мусора — не повод тратить на него разбор.
@@ -17,26 +14,27 @@ type langRange struct {
 // Negotiate — первая поддерживаемая локаль из Accept-Language (RFC 9110: q-веса, '*' игнорируется,
 // регион отбрасывается: en-US → en; мусор — пропуск записи; заголовок длиннее 1 КБ — ok=false).
 // При равных весах побеждает запись, стоящая раньше. Возвращает написание из supported.
+// supported — первичные подтеги (`ru`, `en`): элемент вида `pt-BR` не совпадёт никогда.
 // Несколько строк заголовка вызывающий склеивает заранее (httpx.CombineHeaders, через ", ").
 func Negotiate(acceptLanguage string, supported []string) (locale string, ok bool) {
 	if len(acceptLanguage) > maxAcceptLanguage {
 		return "", false
 	}
-	var ranges []langRange
-	for _, el := range strings.Split(acceptLanguage, ",") {
-		if r, ok := parseRange(el); ok {
-			ranges = append(ranges, r)
+	// Линейный проход без сортировки: строгое «больше» — при равных весах остаётся ранняя запись.
+	best := 0
+	for el := range strings.SplitSeq(acceptLanguage, ",") {
+		r, valid := parseRange(el)
+		if !valid || r.q <= best {
+			continue
 		}
-	}
-	slices.SortStableFunc(ranges, func(a, b langRange) int { return b.q - a.q })
-	for _, r := range ranges {
 		for _, s := range supported {
 			if strings.EqualFold(r.primary, s) {
-				return s, true
+				locale, ok, best = s, true, r.q
+				break
 			}
 		}
 	}
-	return "", false
+	return locale, ok
 }
 
 // parseRange — запись списка: language-range [ OWS ";" OWS "q=" qvalue ]. Пустая, '*', с q=0

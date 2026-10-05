@@ -26,6 +26,8 @@ func TestNegotiate(t *testing.T) {
 		{"en;q=0.5, ru;q=0.8", "ru"},
 		{"en, ru", "en"},
 		{"ru;q=0.5, en;q=0.5", "ru"}, // равные веса — порядок заголовка
+		// 14 записей: нестабильная сортировка (slices.SortFunc, pdqsort на длинных срезах) отдала бы ru
+		{"en,de,de,ru,de,de,de,de,ru;q=0.5,de,de,de,de,de", "en"},
 		{"ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7", "ru"},          // браузер
 		{"fr-CH, fr;q=0.9, en;q=0.8, de;q=0.7, *;q=0.5", "en"}, // пример MDN
 		{" , ,ru", "ru"},     // пустые элементы списка
