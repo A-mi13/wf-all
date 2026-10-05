@@ -574,9 +574,10 @@ func (im *Importer) reconcile(ctx context.Context, tx pgx.Tx, run importRun) (Re
 	return rec, nil
 }
 
-// linkSavepoint — привязка во вложенной транзакции (SAVEPOINT): место успели отдать другому
-// городу (админ активировал его параллельно, 23505 cities_geoname_id_key) — откатывается только
-// эта привязка, taken = true, импорт продолжается (R35). Прочие ошибки — ошибка импорта.
+// linkSavepoint — привязка во вложенной транзакции (SAVEPOINT). Гонка с админом — откатывается
+// только эта привязка, taken = true, импорт продолжается (R35): место успели отдать другому
+// городу (23505 cities_geoname_id_key) или сам город успели привязать (ImportLinkCity без строки:
+// geoname_id уже не NULL, единственный источник ErrNoRows в link). Прочие ошибки — ошибка импорта.
 // События и аудит пишутся в tx из ctx — на том же соединении, поэтому откат до savepoint
 // снимает и событие geo.city_linked.
 func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.ImportUnlinkedCitiesRow,
@@ -591,6 +592,9 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 		}
 		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == codeUniqueViolation &&
 			pgErr.ConstraintName == cityGeonameKey {
+			return true, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
 			return true, nil
 		}
 		return false, err

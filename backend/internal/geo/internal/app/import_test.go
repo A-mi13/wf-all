@@ -987,3 +987,54 @@ func TestImportReconcileConflictKeepsImport(t *testing.T) {
 		t.Fatalf("аудит cities_conflict: %d", n)
 	}
 }
+
+// Раунд 3: та же гонка с другой стороны — пока шла сверка, админ привязал сам сверяемый город
+// к другому месту. ImportLinkCity не находит город без geoname_id (ErrNoRows): откат savepoint,
+// город — в Conflict, его привязка админа не тронута, импорт успешен.
+func TestImportReconcileConflictCityLinkedMeanwhile(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	ural := addRegion(t, e, "Свердловская область")
+	mikh := addCity(t, e, ural, "test-mikhaylovsk-ural", map[string]string{"ru": "Михайловск"})
+	lesnoy := addCity(t, e, ural, "test-lesnoy", map[string]string{"ru": "Лесной"})
+	raw := fixture(t)
+	named(&raw, 9100010, "Lesnoy", "Лесной", "71")
+	raw.Places = append(raw.Places, synth(9600001, 1)...) // свободное место, которое выберет админ
+	im := e.importer(&raw)
+	im.SetBeforeLink(func(_ context.Context, cityID uuid.UUID, _ int64) {
+		if cityID != mikh {
+			return
+		}
+		// не t.Fatal: колбэк внутри db.InTx держит соединение
+		if _, err := e.owner.Exec(context.Background(), "UPDATE cities SET geoname_id = 9600001 WHERE id = $1", mikh); err != nil {
+			t.Errorf("привязка админом: %v", err)
+		}
+	})
+	res, err := im.Import(ctx, "RU", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := res.Reconciled
+	if len(rec.Conflict) != 1 || rec.Conflict[0].CityID != mikh || !slices.Equal(rec.Conflict[0].Candidates, []int64{526815}) {
+		t.Fatalf("конфликт: %+v", rec.Conflict)
+	}
+	if len(rec.Linked) != 1 || rec.Linked[0].CityID != lesnoy {
+		t.Fatalf("привязаны: %+v", rec.Linked)
+	}
+	if j := journalRow(t, e.owner, res.ID); j.Status != "succeeded" {
+		t.Fatalf("журнал: %+v", j)
+	}
+	var gid *int64
+	var version int64
+	if err := e.owner.QueryRow(ctx, "SELECT geoname_id, version FROM cities WHERE id = $1", mikh).Scan(&gid, &version); err != nil ||
+		gid == nil || *gid != 9600001 || version != 1 {
+		t.Fatalf("привязка админа тронута: %v %v v%d", err, gid, version)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM city_names WHERE city_id = $1", mikh); n != 1 {
+		t.Fatalf("переводов Михайловска %d — откат неполный", n)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM outbox WHERE event_type = $1 AND aggregate_id = $2",
+		geo.EventCityLinked, mikh); n != 0 {
+		t.Fatalf("geo.city_linked для Михайловска: %d", n)
+	}
+}
