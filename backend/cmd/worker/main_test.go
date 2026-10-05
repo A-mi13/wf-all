@@ -222,6 +222,29 @@ func geonamesTLS(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// Итог команды: счётчики и перечень slug по каждой категории сверки; значения разные и ненулевые —
+// перепутанное или потерянное поле не пройдёт.
+func TestPrintGeoSummary(t *testing.T) {
+	var out bytes.Buffer
+	printGeoSummary(&out, "RU", geojobs.Summary{
+		ImportID:       uuid.MustParse("c41bb0df-449d-46fe-bacd-e9dd35dd3395"),
+		PlacesUpserted: 3, PlacesRemoved: 5, PlacesMissing: 7, PlacesSkipped: 2, NamesUpserted: 12,
+		Linked: []string{"a", "a2"}, Ambiguous: []string{"b"}, NotFound: []string{"c"}, Conflict: []string{"e"},
+	})
+	got := out.String()
+	for _, want := range []string{
+		"импорт RU завершён, журнал geonames_imports c41bb0df-449d-46fe-bacd-e9dd35dd3395\n",
+		"мест: 3, удалено: 5, пропало из источника (держит город): 7, названий: 12\n",
+		"пропущено (таймзона): 2\n",
+		"сверка городов: привязано 2, неоднозначно 1, не найдено 1, конфликт 1\n",
+		"  неоднозначно: b\n", "  не найдено: c\n", "  конфликт: e\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("нет строки %q в выводе:\n%s", want, got)
+		}
+	}
+}
+
 // Команда оператора импортирует синхронно в своём процессе: задачу River не ставит, почта не
 // нужна, журнал — без сотрудника и без задачи, аудит — от operator.
 func TestGeoImportCommandRunsSynchronously(t *testing.T) {
@@ -234,7 +257,8 @@ func TestGeoImportCommandRunsSynchronously(t *testing.T) {
 	if err := run(context.Background(), []string{"geo", "import", "--country", "ru"}, env, &out, io.Discard); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "мест: 3") || !strings.Contains(out.String(), "пропущено (таймзона): 0") {
+	if !strings.Contains(out.String(), "мест: 3") || !strings.Contains(out.String(), "пропущено (таймзона): 0") ||
+		!strings.Contains(out.String(), "конфликт 0") {
 		t.Fatalf("вывод:\n%s", out.String())
 	}
 	pool, err := pgxpool.New(context.Background(), url)

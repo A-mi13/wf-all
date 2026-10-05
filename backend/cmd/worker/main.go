@@ -182,6 +182,12 @@ func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojo
 		}
 		return fmt.Errorf("geo import %s: %w", cc, err)
 	}
+	printGeoSummary(out, cc, s)
+	return nil
+}
+
+// printGeoSummary — итог импорта в вывод команды: счётчики и перечень slug по категориям сверки.
+func printGeoSummary(out io.Writer, cc string, s geojobs.Summary) {
 	fmt.Fprintf(out, "импорт %s завершён, журнал geonames_imports %s\n", cc, s.ImportID)
 	fmt.Fprintf(out, "мест: %d, удалено: %d, пропало из источника (держит город): %d, названий: %d\n",
 		s.PlacesUpserted, s.PlacesRemoved, s.PlacesMissing, s.NamesUpserted)
@@ -197,7 +203,6 @@ func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojo
 	for _, slug := range s.Conflict {
 		fmt.Fprintf(out, "  конфликт: %s\n", slug)
 	}
-	return nil
 }
 
 // validateGeoNames — до подключения к базе: источник только https, лимиты положительны.
