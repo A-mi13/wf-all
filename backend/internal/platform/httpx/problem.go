@@ -69,6 +69,15 @@ func NewError(status int, code string) *Error {
 	return &Error{p: Problem{Status: status, Code: code}}
 }
 
+// NewFieldError — 400 validation.failed с одним полем: проверка хендлера, которую схема контракта
+// не выражает (q из одних знаков после нормализации) или которую хендлер дублирует явно (NaN в
+// координате). Ответ тот же, что у валидатора: field — query.<имя>, path.<имя>, body.<путь>;
+// code — правило (type, minLength, maximum…).
+func NewFieldError(field, code string) *Error {
+	return &Error{p: Problem{Status: http.StatusBadRequest, Code: CodeValidationFailed,
+		Errors: []FieldError{{Field: field, Code: code}}}}
+}
+
 func (e *Error) Error() string { return "httpx: " + e.p.Code }
 
 func (e *Error) Problem() Problem { return e.p }

@@ -37,6 +37,9 @@ paths:
         - name: id
           in: query
           schema: {type: string, format: uuid}
+        - name: lat
+          in: query
+          schema: {type: number, minimum: -90, maximum: 90}
       requestBody:
         required: true
         content:
@@ -123,6 +126,15 @@ func TestValidateRequests(t *testing.T) {
 			errs: []httpx.FieldError{{Field: "query.limit", Code: "type"}}},
 		{name: "пустой query", body: okBody, query: "limit=", status: 400, code: "validation.failed",
 			errs: []httpx.FieldError{{Field: "query.limit", Code: "empty"}}},
+		// strconv.ParseFloat принимает NaN и Inf, kin-openapi отвергает их не SchemaError, а
+		// ErrSchemaInputNaN/Inf — без своей ветки это был бы request.invalid (спека geo §4.2)
+		{name: "NaN в query — поле, не request.invalid", body: okBody, query: "lat=NaN", status: 400, code: "validation.failed",
+			errs: []httpx.FieldError{{Field: "query.lat", Code: "type"}}},
+		{name: "Inf в query", body: okBody, query: "lat=Inf", status: 400, code: "validation.failed",
+			errs: []httpx.FieldError{{Field: "query.lat", Code: "type"}}},
+		{name: "-Inf в query", body: okBody, query: "lat=-Inf", status: 400, code: "validation.failed",
+			errs: []httpx.FieldError{{Field: "query.lat", Code: "type"}}},
+		{name: "число на границе доходит до хендлера", body: okBody, query: "lat=90", status: 204},
 		{name: "тип в query не стирает нарушения тела", body: `{"name":"a","kind":"a"}`, query: "limit=abc", status: 400, code: "validation.failed",
 			errs: []httpx.FieldError{{Field: "body.name", Code: "minLength"}, {Field: "query.limit", Code: "type"}}},
 		{name: "uuid не по формату", body: okBody, query: "id=abc", status: 400, code: "validation.failed",
