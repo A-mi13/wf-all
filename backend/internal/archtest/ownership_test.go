@@ -18,9 +18,13 @@ func TestOwnershipViolations(t *testing.T) {
 		u      sqlscan.Usage
 	}{
 		{"teams", sqlscan.Usage{Writes: []string{"teams"}, Reads: []string{"team_members"}}},
-		{"matches", sqlscan.Usage{Reads: []string{"city_settings"}, Functions: []string{"nearby_pitches", "age_years", "count"}}},
+		{"matches", sqlscan.Usage{Reads: []string{"geo_read_city_settings"}, Functions: []string{"nearby_pitches", "age_years", "count"}}},
 		{"platform", sqlscan.Usage{Writes: []string{"river_job"}}},
 		{"matches", sqlscan.Usage{Functions: []string{"matches_set_slot"}}},
+		// geo пишет свои таблицы источника и справочника (спека geo §2)
+		{"geo", sqlscan.Usage{Writes: []string{"city_names", "geonames_places", "geonames_imports"}, Reads: []string{"countries", "geonames_admin1_names"}}},
+		// версии приложения — таблица платформы
+		{"platform", sqlscan.Usage{Writes: []string{"app_versions"}}},
 	}
 	for _, c := range ok {
 		if v := ownershipViolations(c.module, c.u); len(v) != 0 {
@@ -31,12 +35,15 @@ func TestOwnershipViolations(t *testing.T) {
 		module string
 		u      sqlscan.Usage
 	}{
-		{"matches", sqlscan.Usage{Writes: []string{"teams"}}},             // запись в чужую таблицу
-		{"matches", sqlscan.Usage{Reads: []string{"pitches"}}},            // чтение чужой таблицы
-		{"teams", sqlscan.Usage{Writes: []string{"city_settings"}}},       // запись в представление
-		{"teams", sqlscan.Usage{Reads: []string{"no_such_table"}}},        // объект без владельца
-		{"teams", sqlscan.Usage{Writes: []string{"no_such_table"}}},       // объект без владельца
-		{"teams", sqlscan.Usage{Functions: []string{"matches_set_slot"}}}, // не экспортированная функция
+		{"matches", sqlscan.Usage{Writes: []string{"teams"}}},                // запись в чужую таблицу
+		{"matches", sqlscan.Usage{Reads: []string{"pitches"}}},               // чтение чужой таблицы
+		{"teams", sqlscan.Usage{Writes: []string{"geo_read_city_settings"}}}, // запись в представление
+		{"teams", sqlscan.Usage{Reads: []string{"no_such_table"}}},           // объект без владельца
+		{"teams", sqlscan.Usage{Writes: []string{"no_such_table"}}},          // объект без владельца
+		{"teams", sqlscan.Usage{Functions: []string{"matches_set_slot"}}},    // не экспортированная функция
+		{"identity", sqlscan.Usage{Reads: []string{"city_names"}}},           // таблица geo в обход представления
+		{"geo", sqlscan.Usage{Writes: []string{"app_versions"}}},             // таблица платформы
+		{"teams", sqlscan.Usage{Reads: []string{"city_settings"}}},           // удалённое в 0019 представление
 	}
 	for _, c := range bad {
 		if v := ownershipViolations(c.module, c.u); len(v) == 0 {
@@ -50,7 +57,7 @@ func TestSchemaOwnersAreKnownModules(t *testing.T) {
 		if !isKnownOwner(o.Owner) {
 			t.Errorf("%s: владелец %q не модуль из Layers и не platform", name, o.Owner)
 		}
-		if o.Kind == View && o.Exported && !legacyExported[name] && !strings.HasPrefix(name, o.Owner+"_read_") {
+		if o.Kind == View && o.Exported && !strings.HasPrefix(name, o.Owner+"_read_") {
 			t.Errorf("%s: экспортированное представление называется %s_read_<имя> (спека §4.2)", name, o.Owner)
 		}
 	}

@@ -45,6 +45,7 @@ var Schema = map[string]Object{
 	"rate_limits":      table("platform"),
 	"humancheck_spent": table("platform"),
 	"feature_flags":    table("platform"),
+	"app_versions":     table("platform"),
 	"goose_db_version": table("platform"),
 
 	"normalize_text":           {Function, "platform", true},
@@ -54,12 +55,21 @@ var Schema = map[string]Object{
 	"audit_log_is_append_only": {Function, "platform", false},
 	"outbox_notify":            {Function, "platform", false},
 
-	// geo
-	"countries":     table("geo"),
-	"regions":       table("geo"),
-	"cities":        table("geo"),
-	"districts":     table("geo"),
-	"city_settings": {View, "geo", true},
+	// geo (спека geo §2)
+	"countries":              table("geo"),
+	"regions":                table("geo"),
+	"cities":                 table("geo"),
+	"districts":              table("geo"),
+	"country_names":          table("geo"),
+	"region_names":           table("geo"),
+	"city_names":             table("geo"),
+	"city_slug_history":      table("geo"),
+	"geonames_imports":       table("geo"),
+	"geonames_places":        table("geo"),
+	"geonames_place_names":   table("geo"),
+	"geonames_admin1":        table("geo"),
+	"geonames_admin1_names":  table("geo"),
+	"geo_read_city_settings": {View, "geo", true},
 
 	// identity
 	"users":                 table("identity"),
@@ -150,10 +160,6 @@ var Schema = map[string]Object{
 // ownerByPrefix — объекты, которые создаёт не наш код: миграции River (набор таблиц
 // и функций меняется от версии к версии).
 var ownerByPrefix = map[string]string{"river_": "platform"}
-
-// legacyExported — экспортированные представления, созданные до правила
-// <модуль>_read_*. Новые сюда не добавлять.
-var legacyExported = map[string]bool{"city_settings": true}
 
 func ownerOf(name string) (Object, bool) {
 	if o, ok := Schema[name]; ok {

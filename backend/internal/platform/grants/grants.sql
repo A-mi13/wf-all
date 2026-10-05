@@ -47,6 +47,30 @@ BEGIN
         WHEN r.name = 'river_job' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE, MAINTAIN'
                                                 ELSE 'SELECT, INSERT, UPDATE' END
         WHEN r.name LIKE 'river\_%' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE' END
+        -- справочник geo (спека geo §3.8): API только читает; админка правит, но не удаляет —
+        -- районы архивируются, города и страны остаются; воркер (сверка импорта, §5.4) обновляет
+        -- города и регионы, страны только читает
+        WHEN r.name IN ('countries', 'regions', 'cities', 'districts', 'city_slug_history') THEN CASE who
+          WHEN 'api' THEN 'SELECT'
+          WHEN 'admin' THEN 'SELECT, INSERT, UPDATE'
+          WHEN 'worker' THEN CASE WHEN r.name IN ('cities', 'regions') THEN 'SELECT, UPDATE'
+                                  WHEN r.name = 'countries' THEN 'SELECT' END
+        END
+        -- переводы: админка удаляет перевод; воркер дописывает только недостающие переводы
+        -- городов и регионов (ON CONFLICT DO NOTHING), переводы стран только читает
+        WHEN r.name IN ('country_names', 'region_names', 'city_names') THEN CASE who
+          WHEN 'api' THEN 'SELECT'
+          WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE'
+          WHEN 'worker' THEN CASE r.name WHEN 'country_names' THEN 'SELECT' ELSE 'SELECT, INSERT' END
+        END
+        -- источник GeoNames пишет только воркер; журнал импорта API не видит
+        WHEN r.name = 'geonames_imports' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                                       WHEN 'admin' THEN 'SELECT' END
+        WHEN r.name LIKE 'geonames\_%' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                                     ELSE 'SELECT' END
+        -- минимальная версия приложения: API читает, админка задаёт; воркеру не нужна
+        WHEN r.name = 'app_versions' THEN CASE who WHEN 'api' THEN 'SELECT'
+                                                   WHEN 'admin' THEN 'SELECT, INSERT, UPDATE' END
         WHEN r.kind IN ('v', 'm') THEN 'SELECT'
         ELSE 'SELECT, INSERT, UPDATE, DELETE'
       END;

@@ -82,6 +82,7 @@ UNIQUE INDEX geonames_imports_running ON geonames_imports (country_code) WHERE s
 geonames_places (
   geoname_id bigint PK, country_code char(2) NOT NULL, admin1_code text,
   name text NOT NULL, ascii_name text NOT NULL,
+  ascii_name_normalized text GENERATED ALWAYS AS (normalize_text(ascii_name)) STORED,
   feature_code text NOT NULL, population bigint NOT NULL DEFAULT 0,
   location geography(Point, 4326) NOT NULL, timezone text NOT NULL,
   missing_since timestamptz,                  -- пропало из источника, но на него ссылается город
@@ -95,8 +96,9 @@ geonames_admin1_names (country_code, admin1_code, locale, name, PK (country_code
 ```
 
 Индексы: GiST `geonames_places (location)`; `geonames_place_names (name_normalized
-text_pattern_ops)` и `geonames_places (country_code, normalize_text(ascii_name) text_pattern_ops)` —
-поиск по префиксу в админке.
+text_pattern_ops)` и `geonames_places (country_code, ascii_name_normalized text_pattern_ops)` (индекс по
+выражению с `normalize_text` не строится: с PG17 `CREATE INDEX` вычисляет выражения с `search_path =
+pg_catalog, pg_temp`) — поиск по префиксу в админке.
 
 ### 3.2. Справочник
 

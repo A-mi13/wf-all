@@ -16,9 +16,9 @@ func TestScan(t *testing.T) {
 		{
 			name: "insert из CTE с join представления и вызовом функции",
 			sql: `WITH x AS (SELECT id FROM teams)
-				INSERT INTO matches (id) SELECT id FROM x JOIN city_settings cs ON true
+				INSERT INTO matches (id) SELECT id FROM x JOIN geo_read_city_settings cs ON true
 				WHERE nearby_pitches(1, 2, 3) IS NOT NULL`,
-			want: sqlscan.Usage{Writes: []string{"matches"}, Reads: []string{"city_settings", "teams"}, Functions: []string{"nearby_pitches"}},
+			want: sqlscan.Usage{Writes: []string{"matches"}, Reads: []string{"geo_read_city_settings", "teams"}, Functions: []string{"nearby_pitches"}},
 		},
 		{
 			name: "update с from и delete в одном файле",

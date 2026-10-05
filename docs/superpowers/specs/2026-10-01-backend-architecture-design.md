@@ -78,13 +78,13 @@ backend/internal/<модуль>/
 
 У каждой таблицы ровно один модуль-владелец: **пишет её только он**. Карта хранится в
 коде (`backend/internal/archtest/ownership.go`) и проверяется стражем §12.2. Там же —
-владельцы представлений и функций схемы (`city_settings` — `geo`, `nearby_pitches()` —
+владельцы представлений и функций схемы (`geo_read_city_settings` — `geo`, `nearby_pitches()` —
 `pitches`, `age_years()`, `normalize_text()` — `platform`) и служебные таблицы
 (`goose_db_version`, `river_*` — `platform`).
 
 | Модуль | Таблицы | Отвечает за |
 | --- | --- | --- |
-| `geo` | countries, regions, cities, districts; представление city_settings | справочник, статусы городов, валюта и возрастные пороги страны |
+| `geo` | countries, regions, cities, districts, country_names, region_names, city_names, city_slug_history, geonames_* (источник GeoNames); представление geo_read_city_settings | справочник, статусы городов, валюта и возрастные пороги страны, источник GeoNames и его импорт |
 | `identity` | users (ядро аккаунта), credentials, auth_codes, sessions, security_events, devices, device_accounts, user_identities, role_assignments, user_restrictions, nickname_reservations, nickname_changes, reserved_nicknames, staff_mfa, staff_recovery_codes, staff_invites | регистрация, вход, сессии, устройства и связанные аккаунты, глобальные и городские роли, ограничения доступа, ники, удаление аккаунта, вход сотрудников |
 | `media` | media_objects | загрузка, проверка типа по содержимому, перекодирование, отдача с отдельного домена |
 | `economy` | wallets, ledger_entries, subscriptions, catalog_items, user_inventory, team_inventory, achievements, user_achievements, lootbox_*, quests, user_quests, referrals | очки и кредиты (двойная запись), каталог (аватары-архетипы, гербы, рамки), инвентарь, права на платные опции, подписки через IAP, достижения, задания, рефералы |
@@ -101,7 +101,7 @@ backend/internal/<модуль>/
 | `moderation` | abuse_reports, sanctions, anomaly_flags | жалобы, решения о санкциях, очереди аномалий |
 | `notify` | notifications, notification_preferences, notification_settings, push_tokens | входящие, пуши, письма-уведомления, категории, тихие часы |
 | `ads` | ad_placements, ad_dismissals | рекламные блоки |
-| `platform` | audit_log, outbox, event_inbox, event_cursors, idempotency_keys, feature_flags, rate_limits, humancheck_spent, river_* | общие механизмы (§6) |
+| `platform` | audit_log, outbox, event_inbox, event_cursors, idempotency_keys, feature_flags, rate_limits, humancheck_spent, app_versions, river_* | общие механизмы (§6) |
 
 `audit_log` пишут все модули, но только через `platform/audit` — это API платформы, а не
 доступ к чужой таблице.
@@ -109,7 +109,7 @@ backend/internal/<модуль>/
 ### 4.2. Чтение чужих данных
 
 Главный запрос продукта — лента города — фильтрует матчи по типу и покрытию поля,
-возрасту и уровню: это JOIN `matches`, `pitches`, `teams`, профилей и `city_settings`.
+возрасту и уровню: это JOIN `matches`, `pitches`, `teams`, профилей и `geo_read_city_settings`.
 Ночные пересчёты `stats` и `reputation` читают протоколы и составы массово. N вызовов
 через интерфейсы здесь не работают, поэтому чтение устроено так:
 
