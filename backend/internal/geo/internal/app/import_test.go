@@ -441,7 +441,7 @@ func TestImportFetchFailuresKeepData(t *testing.T) {
 				_, _ = w.Write(extra)
 				return
 			case "redirect":
-				http.Redirect(w, r, foreign.URL+r.URL.Path, http.StatusFound)
+				http.Redirect(w, r, foreign.URL+r.URL.Path, http.StatusFound) //nolint:gosec // тестовый сервер: редирект на чужой хост — проверяемый сценарий
 				return
 			}
 		}

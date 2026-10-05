@@ -178,7 +178,7 @@ func TestFetchRejectsForeignRedirect(t *testing.T) {
 	}
 	// тот же хост, но http — тоже отказ (схема проверяется отдельно от хоста)
 	plain := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "http://"+r.Host+r.URL.Path, http.StatusFound)
+		http.Redirect(w, r, "http://"+r.Host+r.URL.Path, http.StatusFound) //nolint:gosec // тестовый сервер: редирект на http — проверяемый сценарий
 	}))
 	defer plain.Close()
 	if _, err := source.Fetch(context.Background(), fetchConfig(plain), "RU"); !errors.Is(err, source.ErrForeignRedirect) {

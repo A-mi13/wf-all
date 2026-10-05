@@ -350,10 +350,10 @@ func prepare(raw source.Raw, run importRun, now time.Time) prepared {
 // для прочих — нет (строка не пишется).
 func chooseName(cands []domain.AltName, locale, countryLocale, name, ascii string) string {
 	fallback := ""
-	switch {
-	case locale == countryLocale:
+	switch locale {
+	case countryLocale:
 		fallback = name
-	case locale == "en":
+	case "en":
 		fallback = ascii
 	}
 	return strings.TrimSpace(domain.ChooseName(cands, locale, locale == countryLocale, fallback))
