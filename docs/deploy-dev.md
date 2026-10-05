@@ -8,10 +8,10 @@
 | Часть | Где | Что |
 | --- | --- | --- |
 | Образ | `backend/Dockerfile` | один образ, внутри `api`, `admin-api`, `worker`, `migrate` и сценарий `migrate-then-api`; команда по умолчанию — `api`; миграции вшиты в бинарники |
-| База | Neon, проект `wf-dev`, Postgres 18, регион Frankfurt | база `wf`; роль-владелец Neon = наш `migrator`, роль `api` — только DML |
+| База | Neon, проект `wf-dev`, Postgres 18, регион Frankfurt | база `wf`; роль-владелец Neon = наш `migrator`; роль `api` — права из `grants.sql` (справочник `geo` — только чтение); роль `worker` — для разовых команд оператора (раздел «Импорт городов GeoNames») |
 | API | Render, веб-сервис `wf-api` (`render.yaml`), бесплатный тариф, Frankfurt — https://wf-api-o3rn.onrender.com | команда `migrate-then-api`: `migrate up`, затем `api` (shell в `dockerCommand` Render не разбирает — сценарий лежит в образе); проверка живости `/healthz` (процесс жив, без базы; готовность с базой — `/readyz`); деплой из `main` после зелёного CI |
 | Swagger | https://wf-api-o3rn.onrender.com/docs | Swagger UI по контракту, вшитому в образ (`/docs/openapi.json` — сам контракт для генераторов клиентов); «Try it out» шлёт запросы на этот же стенд |
-| Проверка образа | CI, задание `image` в `.github/workflows/backend.yml` | сборка, миграции на чистую базу, старт API, `/healthz`, `/readyz`, `/docs` — как на Render; локально Docker не нужен |
+| Проверка образа | CI, задание `image` в `.github/workflows/backend.yml` | сборка, миграции на чистую базу, старт API, `/healthz`, `/readyz`, `/docs`, smoke публичных ручек `/v1/cities` и `/v1/app/min-version` — как на Render; локально Docker не нужен |
 
 Ограничения бесплатного стенда: Render усыпляет сервис после 15 минут без запросов, первый запрос
 будит его около минуты; воркера нет (на бесплатном тарифе Render фоновых процессов нет); база Neon
@@ -34,6 +34,10 @@
 | `API_BFF_NETS`, `API_BFF_SECRETS` | не заданы: BFF (Next.js) на стенде нет, заголовкам `X-WF-*` API не верит |
 
 Воркер на стенде не запущен — переменные `WORKER_*`, в том числе `WORKER_MAIL_*`, на Render не нужны.
+Разовые команды воркера (импорт городов) оператор запускает со своей машины против Neon — раздел
+«Импорт городов GeoNames». События outbox на стенде копятся без relay (единицы строк) — ожидаемо.
+
+Публичные справочники отдают `Cache-Control: public, max-age=300` и `Vary: Accept-Language`; правило Cloudflare «Cache Everything» для `/v1/*` не включать — Cloudflare игнорирует `Vary: Accept-Language` и отдаст всем один язык.
 
 **Ротация ключей** (`API_JWT_SEEDS`, `API_HUMANCHECK_KEYS`): в настройках сервиса Render новый ключ
 ставится первым, старый — следом через запятую (сгенерировать: `openssl rand -base64 32`); после
@@ -92,7 +96,8 @@ Cloudflare (`172.70.242.31`) — общем для всех клиентов з�
 Вне диагностики IP клиента в логи не пишется — проверять лимитом, пробой A/B. В `render.yaml` заголовок
 задан, поэтому шаг A на стенде — до деплоя PR #8 (заголовок CDN) или временно с пустым
 `API_CLIENT_IP_HEADER` в панели Render.
-Запрос — `curl -s -o /dev/null -w '%{http_code}\n' https://<адрес wf-api>/v1/health`.
+Запрос — `curl -s -o /dev/null -w '%{http_code}\n' 'https://<адрес wf-api>/v1/cities?limit=1'`
+(`listCities`, класс лимита `default`).
 
 1. В настройках сервиса `wf-api` временно задать `API_RATE_LIMITS=default.ip=3/10m:3` (3 запроса на
    IP подряд, восполнение — 1 запрос в 200 секунд: между сетями хватает времени) и дождаться
@@ -112,7 +117,7 @@ Cloudflare (`172.70.242.31`) — общем для всех клиентов з�
    запросе второй сети в B — заголовок не доходит: разбираться, а не ослаблять лимит.
 4. **Шаг C — подделка** (заголовок включён; через 10 минут после B). Из одной сети — 4 и больше
    запросов, каждый с новыми поддельными адресами:
-   `curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 1.2.3.N' -H 'CF-Connecting-IP: 1.2.3.N' https://<адрес wf-api>/v1/health`
+   `curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-For: 1.2.3.N' -H 'CF-Connecting-IP: 1.2.3.N' 'https://<адрес wf-api>/v1/cities?limit=1'`
    (N — 1, 2, 3, 4, …). 429 обязан прийти не позже четвёртого: Cloudflare затирает
    `CF-Connecting-IP`, поддельный `X-Forwarded-For` остаётся левее настоящего адреса. Нет 429 —
    адрес подделывается: убрать `API_CLIENT_IP_HEADER` (общий лимит лучше подделываемого) и
@@ -127,15 +132,26 @@ transaction mode он несовместим (спека бэкенда §6.5).
 
 ## Роли базы на Neon
 
-Выполняется один раз владельцем базы `wf`:
+Роли создаются **только SQL** (SQL Editor Neon или `psql` под ролью-владельцем базы `wf`), не через
+консоль, CLI или API Neon: роль, созданная там, получает членство в `neon_superuser`
+(`pg_read_all_data`, `pg_write_all_data`, `BYPASSRLS`) и обходит матрицу прав `grants.sql`. Пароль,
+заданный через SQL, Neon требует не слабее 60 бит энтропии: генерировать `openssl rand -hex 24`
+(hex не нужно экранировать в строке подключения), хранить в менеджере паролей; в git, чаты и вывод
+команд не попадает. Источник обоих правил — документация Neon «Manage roles»
+(https://neon.com/docs/manage/roles, разделы «The neon_superuser role» и «Manage roles with SQL»;
+сверено 05.10.2026).
+
+Роль `api` (один раз, при создании стенда):
 
 ```sql
 CREATE ROLE api LOGIN PASSWORD '<генерируется>';
 ```
 
 Права на таблицы роль получает от `migrate up` — он применяет `backend/internal/platform/grants/grants.sql`
-после миграций (матрица — в его комментариях и спеке бэкенда §10.1). Роли `admin` и `worker`
-создаются так же, когда на стенд выйдут admin-api и воркер; до тех пор `grants.sql` их пропускает.
+после каждого наката, в том числе когда новых миграций нет (матрица — в его комментариях, спеке
+бэкенда §10.1 и спеке `geo` §3.8). Роли нет — `grants.sql` её пропускает. Роль `admin` создаётся так
+же, когда на стенд выйдет admin-api.
+
 Умолчания `ALTER DEFAULT PRIVILEGES`, выданные на Neon при создании стенда, надо снять: если
 `migrate up` упадёт посреди наката, таблицы этого прогона останутся открыты по умолчаниям до
 следующего успешного `up`. Разово, владельцем базы:
@@ -144,6 +160,95 @@ CREATE ROLE api LOGIN PASSWORD '<генерируется>';
 ALTER DEFAULT PRIVILEGES FOR ROLE <владелец> IN SCHEMA public REVOKE ALL ON TABLES FROM api;
 ALTER DEFAULT PRIVILEGES FOR ROLE <владелец> IN SCHEMA public REVOKE ALL ON SEQUENCES FROM api;
 ```
+
+### Роль `worker`
+
+Нужна для импорта городов (ниже). Один раз, владельцем базы `wf`:
+
+```sql
+CREATE ROLE worker LOGIN PASSWORD '<генерируется>';
+```
+
+Умолчаний `ALTER DEFAULT PRIVILEGES` у `worker` быть не должно (их выдавали только `api` при создании
+стенда). Проверить владельцем базы — в `defaclacl` не должно быть записей `worker=`:
+
+```sql
+SELECT defaclrole::regrole, defaclnamespace::regnamespace, defaclobjtype, defaclacl FROM pg_default_acl;
+```
+
+Есть — снять так же, как у `api` выше (`REVOKE ALL ON TABLES/SEQUENCES FROM worker`).
+Права роль получит при следующем `migrate up`: в панели Render у сервиса `wf-api` — Manual Deploy →
+Deploy latest commit (старт идёт через `migrate-then-api`); в логе деплоя — строка
+`grants: права ролей применены`. Проверка владельцем базы:
+
+```sql
+SELECT has_table_privilege('worker', 'geonames_places', 'INSERT') AS import_ok,
+       has_table_privilege('worker', 'countries', 'UPDATE')       AS countries_write;
+```
+
+Ожидаемо: `import_ok = t`, `countries_write = f`. `import_ok = f` — `migrate up` ещё не прошёл после
+создания роли.
+
+## Импорт городов GeoNames
+
+Без импорта на стенде работают список городов, город и `nearest_open` (сид миграции `0019` — с
+точками), а `here` в `GET /v1/cities/nearest` всегда `null`: ему нужна таблица-источник
+`geonames_places`. Админская ручка импорта ставит задачу River, а воркера на стенде нет, — поэтому
+импорт запускает оператор командой воркера: она выполняет импорт синхронно в своём процессе (задачу
+не ставит) под ролью `worker` (спека `geo` §5.4).
+
+Нужно: Go из `docs/versions.md`, checkout коммита, который задеплоен на стенд (схема базы и код
+импорта должны совпадать), роль `worker` (выше) с правами.
+
+Строка подключения — прямая (в хосте нет `-pooler`), `sslmode=require`: в панели Neon (проект
+`wf-dev`, кнопка Connect) скопировать прямую строку владельца и заменить в ней пользователя и пароль
+на `worker` и его пароль. Строку не сохранять в файлы репозитория (`backend/.env` — для локальной
+базы) и не передавать аргументом команды (останется в истории shell) — только переменной окружения
+текущего терминала:
+
+```bash
+cd backend
+read -rs WORKER_DATABASE_URL && export WORKER_DATABASE_URL   # вставить строку, Enter; ввод не отображается
+WORKER_LOG_FORMAT=text go run ./cmd/worker geo import --country RU
+unset WORKER_DATABASE_URL
+```
+
+Разовой команде нужны только `WORKER_DATABASE_URL` и ключи источника; почта (`WORKER_MAIL_*`) — нет.
+
+| Переменная | По умолчанию | Что |
+| --- | --- | --- |
+| `WORKER_GEONAMES_BASE_URL` | `https://download.geonames.org` | откуда качать `export/dump/<CC>.zip`, `export/dump/alternatenames/<CC>.zip`, `export/dump/admin1CodesASCII.txt`; только HTTPS, редиректы — только на тот же хост |
+| `WORKER_GEONAMES_MAX_COMPRESSED` | 50 МБ | лимит сжатого файла; формат значения — `backend/.env.example` |
+| `WORKER_GEONAMES_MAX_UNCOMPRESSED` | 200 МБ | лимит распакованной записи zip; формат — там же |
+
+Значения неверны (не https, лимит не больше нуля) — команда и воркер отказывают на старте, до подключения
+к базе.
+
+Для RU умолчаний хватает (`RU.zip` — 15,2 МБ, распакованный `RU.txt` — 61,8 МБ; спека `geo` §13).
+
+Итог — в выводе команды и в журнале импорта (владельцем базы):
+
+```sql
+SELECT status, places_upserted, places_removed, places_missing, names_upserted, error
+FROM geonames_imports WHERE country_code = 'RU' ORDER BY started_at DESC LIMIT 1;
+```
+
+Ожидаемо `status = succeeded`, мест порядка 5 тыс. (после отбора спеки `geo` §5.4 в RU — 5171 на
+02.10.2026). Повторный запуск той же страны идемпотентен — так данные и обновляются. Импорт падает и
+ничего не удаляет, если новых мест меньше 90 % от прошлого успешного импорта (обрезанный файл), файл
+больше лимита или в общем `admin1CodesASCII.txt` нет кодов регионов, на которые ссылаются места, либо
+его строк меньше 90 % текущих. Ошибка «импорт страны уже идёт» — в журнале живая строка `running`:
+дождаться её итога; строку старше 40 минут (процесс убит) следующий запуск закроет сам как `failed` и
+продолжит.
+
+Проверка `here` (координаты — с точностью 0,01°, как требует спека клиентов):
+
+```bash
+curl -s 'https://<адрес wf-api>/v1/cities/nearest?lat=45.04&lon=41.97'
+```
+
+До импорта — `"here": null`, после — место Ставрополь (`geoname_id` 487846), `nearest_open` — город
+Ставрополь.
 
 ## Потом — свой сервер
 

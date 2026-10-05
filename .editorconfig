@@ -13,3 +13,7 @@ indent_style = tab
 
 [*.md]
 trim_trailing_whitespace = false
+
+# выдержки данных: пустые последние колонки TSV — это хвостовые TAB
+[**/testdata/**]
+trim_trailing_whitespace = false

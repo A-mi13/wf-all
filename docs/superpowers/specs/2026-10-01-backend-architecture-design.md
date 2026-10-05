@@ -38,7 +38,7 @@
 | Веб | Next.js — BFF: токены только на сервере Next, в браузере httpOnly cookie; Go API принимает только Bearer (§8.4) |
 | Токены (публичный API) | access — JWT EdDSA 10 мин + проверка сессии в базе на каждый запрос; refresh — непрозрачный, ротация, детект повтора, окно гонки возвращает того же преемника (§6.2) |
 | Админка | Отдельный бинарник и домен, непрозрачная серверная сессия без JWT, обязательный TOTP с привязкой только по приглашению (§10) |
-| ID | UUIDv7, генерируются в Go; keyset-пагинация по `(created_at, id)` |
+| ID | UUIDv7, генерируются в Go; keyset-пагинация через `platform/page`: курсор v1 по `(created_at, id)` или v2 (`page.Keyset`) — произвольный набор полей сортировки (спека `geo` §4.5) |
 | Покрытия полей | `pitch_surface` дополняется `rubber`, `sport_floor`; подсказка об обуви — функция (покрытие, тип) (§7.4) |
 
 ## 3. Модуль изнутри
@@ -78,13 +78,13 @@ backend/internal/<модуль>/
 
 У каждой таблицы ровно один модуль-владелец: **пишет её только он**. Карта хранится в
 коде (`backend/internal/archtest/ownership.go`) и проверяется стражем §12.2. Там же —
-владельцы представлений и функций схемы (`city_settings` — `geo`, `nearby_pitches()` —
+владельцы представлений и функций схемы (`geo_read_city_settings` — `geo`, `nearby_pitches()` —
 `pitches`, `age_years()`, `normalize_text()` — `platform`) и служебные таблицы
 (`goose_db_version`, `river_*` — `platform`).
 
 | Модуль | Таблицы | Отвечает за |
 | --- | --- | --- |
-| `geo` | countries, regions, cities, districts; представление city_settings | справочник, статусы городов, валюта и возрастные пороги страны |
+| `geo` | countries, regions, cities, districts, country_names, region_names, city_names, city_slug_history; источник GeoNames: geonames_places, geonames_place_names, geonames_admin1, geonames_admin1_names, geonames_imports; экспортированное представление geo_read_city_settings | справочник, статусы городов, названия по локалям, валюта и возрастные пороги страны, импорт GeoNames и активация городов (спека `geo`) |
 | `identity` | users (ядро аккаунта), credentials, auth_codes, sessions, security_events, devices, device_accounts, user_identities, role_assignments, user_restrictions, nickname_reservations, nickname_changes, reserved_nicknames, staff_mfa, staff_recovery_codes, staff_invites | регистрация, вход, сессии, устройства и связанные аккаунты, глобальные и городские роли, ограничения доступа, ники, удаление аккаунта, вход сотрудников |
 | `media` | media_objects | загрузка, проверка типа по содержимому, перекодирование, отдача с отдельного домена |
 | `economy` | wallets, ledger_entries, subscriptions, catalog_items, user_inventory, team_inventory, achievements, user_achievements, lootbox_*, quests, user_quests, referrals | очки и кредиты (двойная запись), каталог (аватары-архетипы, гербы, рамки), инвентарь, права на платные опции, подписки через IAP, достижения, задания, рефералы |
@@ -101,7 +101,7 @@ backend/internal/<модуль>/
 | `moderation` | abuse_reports, sanctions, anomaly_flags | жалобы, решения о санкциях, очереди аномалий |
 | `notify` | notifications, notification_preferences, notification_settings, push_tokens | входящие, пуши, письма-уведомления, категории, тихие часы |
 | `ads` | ad_placements, ad_dismissals | рекламные блоки |
-| `platform` | audit_log, outbox, event_inbox, event_cursors, idempotency_keys, feature_flags, rate_limits, humancheck_spent, river_* | общие механизмы (§6) |
+| `platform` | audit_log, outbox, event_inbox, event_cursors, idempotency_keys, feature_flags, rate_limits, humancheck_spent, app_versions, river_* | общие механизмы (§6), минимальная версия приложения (`platform/appversion`, спека `geo` §3.5) |
 
 `audit_log` пишут все модули, но только через `platform/audit` — это API платформы, а не
 доступ к чужой таблице.
@@ -109,12 +109,12 @@ backend/internal/<модуль>/
 ### 4.2. Чтение чужих данных
 
 Главный запрос продукта — лента города — фильтрует матчи по типу и покрытию поля,
-возрасту и уровню: это JOIN `matches`, `pitches`, `teams`, профилей и `city_settings`.
+возрасту и уровню: это JOIN `matches`, `pitches`, `teams`, профилей и `geo_read_city_settings`.
 Ночные пересчёты `stats` и `reputation` читают протоколы и составы массово. N вызовов
 через интерфейсы здесь не работают, поэтому чтение устроено так:
 
 - **Экспортированные представления.** Владелец публикует SQL-представления — свой
-  контракт чтения: `<модуль>_read_<имя>` (например, `pitches_read_public`,
+  контракт чтения: `<модуль>_read_<имя>` (например, `geo_read_city_settings`, `pitches_read_public`,
   `matches_read_feed`). Представление стабильно: удалить или переименовать колонку — то
   же, что сломать API модуля. В карте владения представление помечено как
   экспортированное.
@@ -202,7 +202,7 @@ geo ← identity ← media ← economy ← players ← pitches ← teams ← mat
 
 Имя — `<модуль>.<факт в прошедшем времени>`. Payload — только идентификаторы и
 непрофильные значения; персональных данных (почта, телефон, дата рождения) в событиях
-нет. Полный каталог — в спеке каждого модуля; опорные события:
+нет. Полный каталог — в спеке каждого модуля (`geo` — спека `geo` §6); опорные события:
 
 | Событие | Кто слушает |
 | --- | --- |
@@ -430,7 +430,7 @@ strict-хендлер. Ошибки механизмов — `httpx.ProblemError
 | Механизм | Решение |
 | --- | --- |
 | ID | UUIDv7 в Go; строки из SQL (сиды, триггеры) получают v4 по `DEFAULT`, поэтому порядок по времени — только по `created_at` |
-| Пагинация | keyset по `(created_at, id)`, непрозрачный курсор, `limit` по умолчанию 20, максимум 100 |
+| Пагинация | `platform/page`, keyset, непрозрачный курсор: v1 — по `(created_at, id)`; v2 (`page.Keyset`) — произвольный набор полей сортировки, в курсоре версия и отпечаток набора (хэш имён и типов полей, не HMAC: курсор не секрет, отпечаток отсекает курсор чужого списка; v1 продолжает декодироваться; спека `geo` §4.5); `limit` по умолчанию 20, максимум 100; свой курсор модули не пишут |
 | Время | `platform/clock` (подменяется в тестах); хранение в UTC; местное время — по таймзоне поля, затем города; `users.timezone` пуст → таймзона города; база таймзон вшита (`time/tzdata`) |
 | Серверные тексты | `backend/locales/{ru,en}.json`, ICU-сообщения для писем и пушей; язык — `users.locale`; тест сверки ключей |
 | Почта | `platform/mail.Sender`: одна реализация SMTP — в dev Mailpit (`./task mail`), в проде — провайдер (выбирается отдельно); отправка только задачей River (`mail.send`, очередь `mail`); в аргументах — вид письма и id получателя или кода, не адрес; письмо собирает `mail.Composer` модуля |
@@ -591,8 +591,14 @@ contracts/openapi/
   ломающим.
 - В `v1` только добавляющие изменения; CI сравнивает контракт с `main` через `oasdiff`,
   ломающее изменение валит PR; ломать — только в `/v2`. Версии контракта — теги
-  `contracts-vX.Y.Z`.
-- `GET /v1/app/min-version` — принудительное обновление приложений.
+  `contracts-vX.Y.Z`. Исключение — до первого тега `contracts-v1.0.0`: осознанная ломающая
+  правка public — только строкой в `contracts/oasdiff-err-ignore-public.txt` (формат как у
+  admin) с причиной в сообщении коммита; с тегом `contracts-v1.0.0` или новее файл обязан
+  быть пуст — страж в `scripts/contracts-breaking.sh` валит CI. Первое применение —
+  удаление `/v1/health` (спека `geo` §4.4).
+- `GET /v1/app/min-version?platform=ios|android` (`getAppMinVersion`, тег `platform`) —
+  принудительное обновление приложений; версии и ссылка на стор — таблица `app_versions`
+  (`platform/appversion`), меняются ручкой admin-api с аудитом, без деплоя (спека `geo` §3.5, §4.2).
 
 ### 8.4. Веб как BFF
 
@@ -759,9 +765,9 @@ TS-типы для веба и админки — из бандлов. Dart — 
 
 | Роль | Особенности |
 | --- | --- |
-| `api` | нет доступа к `staff_*`; `audit_log` — только `INSERT`; `SELECT, INSERT, UPDATE` на `river_job` (уникальная вставка River — `ON CONFLICT DO UPDATE … RETURNING`) — письма с кодами ставятся прямо из запроса |
-| `admin` | `audit_log` — `INSERT` и `SELECT`; `staff_*` — полный доступ |
-| `worker` | `credentials` — `DELETE` и чтение только столбца `user_id` (условие удаления); хеш пароля недоступен; `audit_log` — только `INSERT`; `river_job` — в т. ч. `MAINTAIN` (ежедневная переиндексация River) |
+| `api` | нет доступа к `staff_*`; `audit_log` — только `INSERT`; `SELECT, INSERT, UPDATE` на `river_job` (уникальная вставка River — `ON CONFLICT DO UPDATE … RETURNING`) — письма с кодами ставятся прямо из запроса; справочник `geo` и `app_versions` — только `SELECT` (спека `geo` §3.8) |
+| `admin` | `audit_log` — `INSERT` и `SELECT`; `staff_*` — полный доступ; `geo` и `app_versions` — по матрице спеки `geo` §3.8 (`geonames_imports` — только чтение, удаление — только `*_names`) |
+| `worker` | `credentials` — `DELETE` и чтение только столбца `user_id` (условие удаления); хеш пароля недоступен; `audit_log` — только `INSERT`; `river_job` — в т. ч. `MAINTAIN` (ежедневная переиндексация River); `geonames_*` — DML (импорт), `cities`/`regions` — `SELECT, UPDATE`, `city_names`/`region_names` — `SELECT, INSERT` (сверка импорта), `countries`/`country_names` — `SELECT` (спека `geo` §3.8) |
 | все | `UPDATE`/`DELETE` на `audit_log` запрещены (плюс триггер) |
 
 Тест стража §12.7 подключается под ролью `api` и под ролью `worker`.

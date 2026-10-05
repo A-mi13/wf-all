@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,31 +18,277 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
-// Defines values for HealthStatus.
+// Defines values for AppPlatform.
 const (
-	Ok HealthStatus = "ok"
+	Android AppPlatform = "android"
+	Ios     AppPlatform = "ios"
 )
 
-// Valid indicates whether the value is a known member of the HealthStatus enum.
-func (e HealthStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the AppPlatform enum.
+func (e AppPlatform) Valid() bool {
 	switch e {
-	case Ok:
+	case Android:
+		return true
+	case Ios:
 		return true
 	default:
 		return false
 	}
 }
 
-// Health Состояние сервиса
-type Health struct {
-	// Status Всегда ok — иначе сервис не ответил бы
-	Status HealthStatus `json:"status"`
+// Defines values for CityStatus.
+const (
+	Live     CityStatus = "live"
+	Pilot    CityStatus = "pilot"
+	Waitlist CityStatus = "waitlist"
+)
+
+// Valid indicates whether the value is a known member of the CityStatus enum.
+func (e CityStatus) Valid() bool {
+	switch e {
+	case Live:
+		return true
+	case Pilot:
+		return true
+	case Waitlist:
+		return true
+	default:
+		return false
+	}
 }
 
-// HealthStatus Всегда ok — иначе сервис не ответил бы
-type HealthStatus string
+// AppMinVersion Версии приложения для платформы. Все три поля null — версии ещё не заведены, приложение работает без проверки
+type AppMinVersion struct {
+	// MinVersion Минимальная версия MAJOR.MINOR.PATCH — ниже неё приложение требует обновиться
+	//
+	// Example: 1.4.0
+	MinVersion *string `json:"min_version"`
+
+	// Platform Платформа мобильного приложения
+	Platform AppPlatform `json:"platform"`
+
+	// RecommendedVersion Рекомендуемая версия — ниже неё приложение предлагает обновиться; не ниже min_version
+	//
+	// Example: 1.6.2
+	RecommendedVersion *string `json:"recommended_version"`
+
+	// StoreUrl Страница приложения в магазине платформы (App Store, Google Play), только https
+	//
+	// Example: https://apps.apple.com/app/id6740000000
+	StoreUrl *string `json:"store_url"`
+}
+
+// AppPlatform Платформа мобильного приложения
+type AppPlatform string
+
+// City Город платформы — пункт списка выбора города и основа карточки города
+type City struct {
+	// Country Страна записи — код и название на языке ответа
+	Country CountryRef `json:"country"`
+
+	// Id Id города — его сохраняет профиль игрока и передают другие операции
+	//
+	// Example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+	Id openapi_types.UUID `json:"id"`
+
+	// Location Точка на карте, WGS 84, градусы
+	Location GeoPoint `json:"location"`
+
+	// Name Название города на языке ответа; перевода нет — каноническое, на языке страны
+	//
+	// Example: Ставрополь
+	Name string `json:"name"`
+
+	// Region Регион города; null — регион не задан
+	Region *RegionRef `json:"region"`
+
+	// Slug Текущий адрес города в вебе; может смениться — прошлый адрес продолжает находить город
+	//
+	// Example: stavropol
+	Slug string `json:"slug"`
+
+	// Status Статус города. waitlist — игр пока нет, приложение показывает «станьте капитаном» (экран «Пустой город»); pilot — первые команды и модератор; live — город работает. Список открытый — незнакомое значение клиент обязан пережить
+	Status CityStatus `json:"status"`
+
+	// Timezone Таймзона IANA — местное время матчей города считается по ней
+	//
+	// Example: Europe/Moscow
+	Timezone string `json:"timezone"`
+}
+
+// CityDetails Город с правилами страны и районами — экран города и настройки регистрации (возрастные пороги, валюта, телефонный код)
+type CityDetails struct {
+	// AgeOfMajority Возраст совершеннолетия, полных лет — с него капитанство и покупки
+	//
+	// Example: 18
+	AgeOfMajority int `json:"age_of_majority"`
+
+	// Country Страна записи — код и название на языке ответа
+	Country CountryRef `json:"country"`
+
+	// Currency Валюта страны ISO 4217 — суммы города (аренда поля) в ней, в минорных единицах
+	//
+	// Example: RUB
+	Currency string `json:"currency"`
+
+	// DefaultLocale Язык страны ISO 639-1 — на нём канонические названия
+	//
+	// Example: ru
+	DefaultLocale string `json:"default_locale"`
+
+	// Districts Районы города без архивных; пусто — районов нет
+	Districts []District `json:"districts"`
+
+	// Id Id города — его сохраняет профиль игрока и передают другие операции
+	//
+	// Example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+	Id openapi_types.UUID `json:"id"`
+
+	// Location Точка на карте, WGS 84, градусы
+	Location GeoPoint `json:"location"`
+
+	// MinSignupAge Минимальный возраст регистрации в стране, полных лет
+	//
+	// Example: 14
+	MinSignupAge int `json:"min_signup_age"`
+
+	// Name Название города на языке ответа; перевода нет — каноническое, на языке страны
+	//
+	// Example: Ставрополь
+	Name string `json:"name"`
+
+	// PhonePrefix Телефонный код страны — подставляется в поле телефона
+	//
+	// Example: +7
+	PhonePrefix string `json:"phone_prefix"`
+
+	// Region Регион города; null — регион не задан
+	Region *RegionRef `json:"region"`
+
+	// Slug Текущий адрес города в вебе; может смениться — прошлый адрес продолжает находить город
+	//
+	// Example: stavropol
+	Slug string `json:"slug"`
+
+	// Status Статус города. waitlist — игр пока нет, приложение показывает «станьте капитаном» (экран «Пустой город»); pilot — первые команды и модератор; live — город работает. Список открытый — незнакомое значение клиент обязан пережить
+	Status CityStatus `json:"status"`
+
+	// Timezone Таймзона IANA — местное время матчей города считается по ней
+	//
+	// Example: Europe/Moscow
+	Timezone string `json:"timezone"`
+
+	// WeekStartsOn Первый день недели в календаре — 1 понедельник … 7 воскресенье (ISO 8601)
+	//
+	// Example: 1
+	WeekStartsOn int `json:"week_starts_on"`
+}
+
+// CityPage Страница списка городов
+type CityPage struct {
+	// Items Города страницы в порядке списка
+	Items []City `json:"items"`
+
+	// NextCursor Курсор следующей страницы — передайте его в cursor; null — страниц больше нет
+	//
+	// Example: eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiLCIzZjJjOGUxYS05YjRkLTRjN2UtYTZmMS0yZDhiNWUwYzlhNDciXX0
+	NextCursor *string `json:"next_cursor"`
+}
+
+// CityStatus Статус города. waitlist — игр пока нет, приложение показывает «станьте капитаном» (экран «Пустой город»); pilot — первые команды и модератор; live — город работает. Список открытый — незнакомое значение клиент обязан пережить
+type CityStatus string
+
+// CountryRef Страна записи — код и название на языке ответа
+type CountryRef struct {
+	// Code Код страны ISO 3166-1 alpha-2
+	//
+	// Example: RU
+	Code string `json:"code"`
+
+	// Name Название страны на языке ответа; перевода нет — на языке страны
+	//
+	// Example: Россия
+	Name string `json:"name"`
+}
+
+// District Район города — фильтр полей и матчей
+type District struct {
+	// Id Id района
+	//
+	// Example: c1d9e3a7-5b2f-4a8c-8e6d-0f4b7a2c9e15
+	Id openapi_types.UUID `json:"id"`
+
+	// Name Название района
+	//
+	// Example: Промышленный
+	Name string `json:"name"`
+}
+
+// GeoPlace Населённый пункт справочника GeoNames (CC BY 4.0), в котором находится точка запроса
+type GeoPlace struct {
+	// City Город платформы на этом месте (заведён и виден); null — города здесь пока нет, приложение предлагает стать капитаном. Если город есть, страна места — страна города
+	City *City `json:"city"`
+
+	// Country Страна записи — код и название на языке ответа
+	Country CountryRef `json:"country"`
+
+	// DistanceM Расстояние от точки запроса до центра места, метры
+	//
+	// Example: 1840.5
+	DistanceM float64 `json:"distance_m"`
+
+	// GeonameId Id места в GeoNames
+	//
+	// Example: 487846
+	GeonameId int64 `json:"geoname_id"`
+
+	// Name Название места на языке ответа; перевода нет — на языке страны
+	//
+	// Example: Ставрополь
+	Name string `json:"name"`
+
+	// RegionName Регион места на языке ответа; null — регион неизвестен
+	//
+	// Example: Ставропольский край
+	RegionName *string `json:"region_name"`
+}
+
+// GeoPoint Точка на карте, WGS 84, градусы
+type GeoPoint struct {
+	// Lat Широта, от -90 (юг) до 90 (север)
+	//
+	// Example: 45.03442
+	Lat float64 `json:"lat"`
+
+	// Lon Долгота, от -180 (запад) до 180 (восток)
+	//
+	// Example: 41.9642
+	Lon float64 `json:"lon"`
+}
+
+// NearestCity Автоопределение города по точке — ближайший работающий город и место точки
+type NearestCity struct {
+	// Here Населённый пункт, в котором точка (радиус пункта растёт с населением, от 2 до 30 км; из накрывающих — ближайший); null — точка вне населённых пунктов или в стране, где платформа не работает
+	Here *GeoPlace `json:"here"`
+
+	// NearestOpen Ближайший видимый город со статусом pilot или live, без ограничения расстояния; null — таких городов нет
+	NearestOpen *OpenCity `json:"nearest_open"`
+}
+
+// OpenCity Ближайший работающий город (pilot или live) и расстояние до него
+type OpenCity struct {
+	// City Город платформы — пункт списка выбора города и основа карточки города
+	City City `json:"city"`
+
+	// DistanceM Расстояние от точки запроса до центра города, метры
+	//
+	// Example: 1840.5
+	DistanceM float64 `json:"distance_m"`
+}
 
 // Problem Ошибка по RFC 9457. Решение принимается по code, тексты — для разработчика
 type Problem struct {
@@ -117,20 +364,123 @@ type Problem struct {
 	Type string `json:"type"`
 }
 
+// RegionRef Регион (субъект, область) — id и название на языке ответа
+type RegionRef struct {
+	// Id Id региона
+	//
+	// Example: b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+	Id openapi_types.UUID `json:"id"`
+
+	// Name Название региона на языке ответа; перевода нет — на языке страны
+	//
+	// Example: Ставропольский край
+	Name string `json:"name"`
+}
+
+// AcceptLanguage defines model for AcceptLanguage.
+type AcceptLanguage = string
+
+// GetAppMinVersionParams defines parameters for GetAppMinVersion.
+type GetAppMinVersionParams struct {
+	// Platform Платформа приложения, которое спрашивает
+	Platform AppPlatform `form:"platform" json:"platform"`
+}
+
+// ListCitiesParams defines parameters for ListCities.
+type ListCitiesParams struct {
+	// Status Только города с этими статусами; несколько значений — повторите параметр (status=pilot&status=live). Без параметра — все статусы
+	Status *[]CityStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Country Только города страны с этим кодом ISO 3166-1 alpha-2, заглавными буквами
+	Country *string `form:"country,omitempty" json:"country,omitempty"`
+
+	// Q Начало названия города на любом поддерживаемом языке (ru, en), без учёта регистра и ё/е — подсказка при вводе
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// Cursor Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Размер страницы, от 1 до 100; без параметра — 20
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AcceptLanguage Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+	AcceptLanguage *AcceptLanguage `json:"Accept-Language,omitempty"`
+}
+
+// GetCityBySlugParams defines parameters for GetCityBySlug.
+type GetCityBySlugParams struct {
+	// AcceptLanguage Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+	AcceptLanguage *AcceptLanguage `json:"Accept-Language,omitempty"`
+}
+
+// FindNearestCityParams defines parameters for FindNearestCity.
+type FindNearestCityParams struct {
+	// Lat Широта точки, градусы WGS 84, от -90 до 90; округлите до 0,01°
+	Lat float64 `form:"lat" json:"lat"`
+
+	// Lon Долгота точки, градусы WGS 84, от -180 до 180; округлите до 0,01°
+	Lon float64 `form:"lon" json:"lon"`
+
+	// AcceptLanguage Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+	AcceptLanguage *AcceptLanguage `json:"Accept-Language,omitempty"`
+}
+
+// GetCityParams defines parameters for GetCity.
+type GetCityParams struct {
+	// AcceptLanguage Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+	AcceptLanguage *AcceptLanguage `json:"Accept-Language,omitempty"`
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// GetHealth Проверка живости сервиса
-	// (GET /v1/health)
-	GetHealth(w http.ResponseWriter, r *http.Request)
+	// GetAppMinVersion Минимальная версия приложения
+	// (GET /v1/app/min-version)
+	GetAppMinVersion(w http.ResponseWriter, r *http.Request, params GetAppMinVersionParams)
+	// ListCities Список городов
+	// (GET /v1/cities)
+	ListCities(w http.ResponseWriter, r *http.Request, params ListCitiesParams)
+	// GetCityBySlug Город по адресу в вебе
+	// (GET /v1/cities/by-slug/{slug})
+	GetCityBySlug(w http.ResponseWriter, r *http.Request, slug string, params GetCityBySlugParams)
+	// FindNearestCity Город по геопозиции
+	// (GET /v1/cities/nearest)
+	FindNearestCity(w http.ResponseWriter, r *http.Request, params FindNearestCityParams)
+	// GetCity Город с настройками
+	// (GET /v1/cities/{cityId})
+	GetCity(w http.ResponseWriter, r *http.Request, cityId openapi_types.UUID, params GetCityParams)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
 
-// GetHealth Проверка живости сервиса
-// (GET /v1/health)
-func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
+// GetAppMinVersion Минимальная версия приложения
+// (GET /v1/app/min-version)
+func (_ Unimplemented) GetAppMinVersion(w http.ResponseWriter, r *http.Request, params GetAppMinVersionParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCities Список городов
+// (GET /v1/cities)
+func (_ Unimplemented) ListCities(w http.ResponseWriter, r *http.Request, params ListCitiesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCityBySlug Город по адресу в вебе
+// (GET /v1/cities/by-slug/{slug})
+func (_ Unimplemented) GetCityBySlug(w http.ResponseWriter, r *http.Request, slug string, params GetCityBySlugParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// FindNearestCity Город по геопозиции
+// (GET /v1/cities/nearest)
+func (_ Unimplemented) FindNearestCity(w http.ResponseWriter, r *http.Request, params FindNearestCityParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCity Город с настройками
+// (GET /v1/cities/{cityId})
+func (_ Unimplemented) GetCity(w http.ResponseWriter, r *http.Request, cityId openapi_types.UUID, params GetCityParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -143,11 +493,303 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
-// GetHealth operation middleware
-func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
+// GetAppMinVersion operation middleware
+func (siw *ServerInterfaceWrapper) GetAppMinVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAppMinVersionParams
+
+	// ------------- Required query parameter "platform" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "platform", r.URL.Query(), &params.Platform, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "platform"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "platform", Err: err})
+		}
+		return
+	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetHealth(w, r)
+		siw.Handler.GetAppMinVersion(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCities operation middleware
+func (siw *ServerInterfaceWrapper) ListCities(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCitiesParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "country" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "country", r.URL.Query(), &params.Country, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "country"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "country", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Accept-Language" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Accept-Language")]; found {
+		var AcceptLanguage AcceptLanguage
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Accept-Language", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Accept-Language", valueList[0], &AcceptLanguage, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Accept-Language", Err: err})
+			return
+		}
+
+		params.AcceptLanguage = &AcceptLanguage
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCities(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCityBySlug operation middleware
+func (siw *ServerInterfaceWrapper) GetCityBySlug(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", chi.URLParam(r, "slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetCityBySlugParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Accept-Language" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Accept-Language")]; found {
+		var AcceptLanguage AcceptLanguage
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Accept-Language", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Accept-Language", valueList[0], &AcceptLanguage, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Accept-Language", Err: err})
+			return
+		}
+
+		params.AcceptLanguage = &AcceptLanguage
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCityBySlug(w, r, slug, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// FindNearestCity operation middleware
+func (siw *ServerInterfaceWrapper) FindNearestCity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params FindNearestCityParams
+
+	// ------------- Required query parameter "lat" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "lat", r.URL.Query(), &params.Lat, runtime.BindQueryParameterOptions{Type: "number", Format: "double"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lat"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lat", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "lon" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "lon", r.URL.Query(), &params.Lon, runtime.BindQueryParameterOptions{Type: "number", Format: "double"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lon"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lon", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Accept-Language" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Accept-Language")]; found {
+		var AcceptLanguage AcceptLanguage
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Accept-Language", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Accept-Language", valueList[0], &AcceptLanguage, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Accept-Language", Err: err})
+			return
+		}
+
+		params.AcceptLanguage = &AcceptLanguage
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.FindNearestCity(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCity operation middleware
+func (siw *ServerInterfaceWrapper) GetCity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "cityId" -------------
+	var cityId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "cityId", chi.URLParam(r, "cityId"), &cityId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cityId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetCityParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Accept-Language" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Accept-Language")]; found {
+		var AcceptLanguage AcceptLanguage
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Accept-Language", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Accept-Language", valueList[0], &AcceptLanguage, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Accept-Language", Err: err})
+			return
+		}
+
+		params.AcceptLanguage = &AcceptLanguage
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCity(w, r, cityId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -271,7 +913,19 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/health", wrapper.GetHealth)
+		r.Get(options.BaseURL+"/v1/cities", wrapper.ListCities)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/cities/nearest", wrapper.FindNearestCity)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/cities/by-slug/{slug}", wrapper.GetCityBySlug)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/cities/{cityId}", wrapper.GetCity)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/app/min-version", wrapper.GetAppMinVersion)
 	})
 
 	return r
@@ -286,34 +940,273 @@ type ProblemApplicationProblemPlusJSONResponse struct {
 	Headers ProblemResponseHeaders
 }
 
-type GetHealthRequestObject struct {
+type GetAppMinVersionRequestObject struct {
+	Params GetAppMinVersionParams
 }
 
-type GetHealthResponseObject interface {
-	VisitGetHealthResponse(w http.ResponseWriter) error
+type GetAppMinVersionResponseObject interface {
+	VisitGetAppMinVersionResponse(w http.ResponseWriter) error
 }
 
-type GetHealth200JSONResponse Health
+type GetAppMinVersion200ResponseHeaders struct {
+	CacheControl string
+}
 
-func (response GetHealth200JSONResponse) VisitGetHealthResponse(w http.ResponseWriter) error {
+type GetAppMinVersion200JSONResponse struct {
+	Body    AppMinVersion
+	Headers GetAppMinVersion200ResponseHeaders
+}
+
+func (response GetAppMinVersion200JSONResponse) VisitGetAppMinVersionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type GetHealthdefaultApplicationProblemPlusJSONResponse struct {
+type GetAppMinVersiondefaultApplicationProblemPlusJSONResponse struct {
 	Body       Problem
 	Headers    ProblemResponseHeaders
 	StatusCode int
 }
 
-func (response GetHealthdefaultApplicationProblemPlusJSONResponse) VisitGetHealthResponse(w http.ResponseWriter) error {
+func (response GetAppMinVersiondefaultApplicationProblemPlusJSONResponse) VisitGetAppMinVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListCitiesRequestObject struct {
+	Params ListCitiesParams
+}
+
+type ListCitiesResponseObject interface {
+	VisitListCitiesResponse(w http.ResponseWriter) error
+}
+
+type ListCities200ResponseHeaders struct {
+	CacheControl    string
+	ContentLanguage *string
+	Vary            string
+}
+
+type ListCities200JSONResponse struct {
+	Body    CityPage
+	Headers ListCities200ResponseHeaders
+}
+
+func (response ListCities200JSONResponse) VisitListCitiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	if response.Headers.ContentLanguage != nil {
+		w.Header().Set("Content-Language", fmt.Sprint(*response.Headers.ContentLanguage))
+	}
+	w.Header().Set("Vary", fmt.Sprint(response.Headers.Vary))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListCitiesdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ListCitiesdefaultApplicationProblemPlusJSONResponse) VisitListCitiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCityBySlugRequestObject struct {
+	Slug   string `json:"slug"`
+	Params GetCityBySlugParams
+}
+
+type GetCityBySlugResponseObject interface {
+	VisitGetCityBySlugResponse(w http.ResponseWriter) error
+}
+
+type GetCityBySlug200ResponseHeaders struct {
+	CacheControl    string
+	ContentLanguage *string
+	Vary            string
+}
+
+type GetCityBySlug200JSONResponse struct {
+	Body    CityDetails
+	Headers GetCityBySlug200ResponseHeaders
+}
+
+func (response GetCityBySlug200JSONResponse) VisitGetCityBySlugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	if response.Headers.ContentLanguage != nil {
+		w.Header().Set("Content-Language", fmt.Sprint(*response.Headers.ContentLanguage))
+	}
+	w.Header().Set("Vary", fmt.Sprint(response.Headers.Vary))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCityBySlugdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response GetCityBySlugdefaultApplicationProblemPlusJSONResponse) VisitGetCityBySlugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FindNearestCityRequestObject struct {
+	Params FindNearestCityParams
+}
+
+type FindNearestCityResponseObject interface {
+	VisitFindNearestCityResponse(w http.ResponseWriter) error
+}
+
+type FindNearestCity200ResponseHeaders struct {
+	CacheControl    string
+	ContentLanguage *string
+	Vary            string
+}
+
+type FindNearestCity200JSONResponse struct {
+	Body    NearestCity
+	Headers FindNearestCity200ResponseHeaders
+}
+
+func (response FindNearestCity200JSONResponse) VisitFindNearestCityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	if response.Headers.ContentLanguage != nil {
+		w.Header().Set("Content-Language", fmt.Sprint(*response.Headers.ContentLanguage))
+	}
+	w.Header().Set("Vary", fmt.Sprint(response.Headers.Vary))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FindNearestCitydefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response FindNearestCitydefaultApplicationProblemPlusJSONResponse) VisitFindNearestCityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCityRequestObject struct {
+	CityId openapi_types.UUID `json:"cityId"`
+	Params GetCityParams
+}
+
+type GetCityResponseObject interface {
+	VisitGetCityResponse(w http.ResponseWriter) error
+}
+
+type GetCity200ResponseHeaders struct {
+	CacheControl    string
+	ContentLanguage *string
+	Vary            string
+}
+
+type GetCity200JSONResponse struct {
+	Body    CityDetails
+	Headers GetCity200ResponseHeaders
+}
+
+func (response GetCity200JSONResponse) VisitGetCityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	if response.Headers.ContentLanguage != nil {
+		w.Header().Set("Content-Language", fmt.Sprint(*response.Headers.ContentLanguage))
+	}
+	w.Header().Set("Vary", fmt.Sprint(response.Headers.Vary))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCitydefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response GetCitydefaultApplicationProblemPlusJSONResponse) VisitGetCityResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -330,9 +1223,21 @@ func (response GetHealthdefaultApplicationProblemPlusJSONResponse) VisitGetHealt
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
-	// GetHealth Проверка живости сервиса
-	// (GET /v1/health)
-	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
+	// GetAppMinVersion Минимальная версия приложения
+	// (GET /v1/app/min-version)
+	GetAppMinVersion(ctx context.Context, request GetAppMinVersionRequestObject) (GetAppMinVersionResponseObject, error)
+	// ListCities Список городов
+	// (GET /v1/cities)
+	ListCities(ctx context.Context, request ListCitiesRequestObject) (ListCitiesResponseObject, error)
+	// GetCityBySlug Город по адресу в вебе
+	// (GET /v1/cities/by-slug/{slug})
+	GetCityBySlug(ctx context.Context, request GetCityBySlugRequestObject) (GetCityBySlugResponseObject, error)
+	// FindNearestCity Город по геопозиции
+	// (GET /v1/cities/nearest)
+	FindNearestCity(ctx context.Context, request FindNearestCityRequestObject) (FindNearestCityResponseObject, error)
+	// GetCity Город с настройками
+	// (GET /v1/cities/{cityId})
+	GetCity(ctx context.Context, request GetCityRequestObject) (GetCityResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -374,23 +1279,131 @@ type strictHandler struct {
 	options     StrictHTTPServerOptions
 }
 
-// GetHealth operation middleware
-func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
-	var request GetHealthRequestObject
+// GetAppMinVersion operation middleware
+func (sh *strictHandler) GetAppMinVersion(w http.ResponseWriter, r *http.Request, params GetAppMinVersionParams) {
+	var request GetAppMinVersionRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetHealth(ctx, request.(GetHealthRequestObject))
+		return sh.ssi.GetAppMinVersion(ctx, request.(GetAppMinVersionRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetHealth")
+		handler = middleware(handler, "GetAppMinVersion")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
-		if err := validResponse.VisitGetHealthResponse(w); err != nil {
+	} else if validResponse, ok := response.(GetAppMinVersionResponseObject); ok {
+		if err := validResponse.VisitGetAppMinVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListCities operation middleware
+func (sh *strictHandler) ListCities(w http.ResponseWriter, r *http.Request, params ListCitiesParams) {
+	var request ListCitiesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListCities(ctx, request.(ListCitiesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListCities")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListCitiesResponseObject); ok {
+		if err := validResponse.VisitListCitiesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCityBySlug operation middleware
+func (sh *strictHandler) GetCityBySlug(w http.ResponseWriter, r *http.Request, slug string, params GetCityBySlugParams) {
+	var request GetCityBySlugRequestObject
+
+	request.Slug = slug
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCityBySlug(ctx, request.(GetCityBySlugRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCityBySlug")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCityBySlugResponseObject); ok {
+		if err := validResponse.VisitGetCityBySlugResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// FindNearestCity operation middleware
+func (sh *strictHandler) FindNearestCity(w http.ResponseWriter, r *http.Request, params FindNearestCityParams) {
+	var request FindNearestCityRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.FindNearestCity(ctx, request.(FindNearestCityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "FindNearestCity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(FindNearestCityResponseObject); ok {
+		if err := validResponse.VisitFindNearestCityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCity operation middleware
+func (sh *strictHandler) GetCity(w http.ResponseWriter, r *http.Request, cityId openapi_types.UUID, params GetCityParams) {
+	var request GetCityRequestObject
+
+	request.CityId = cityId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCity(ctx, request.(GetCityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCityResponseObject); ok {
+		if err := validResponse.VisitGetCityResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -403,65 +1416,157 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"pFp7b9vYlf8qF9z9w55SCiXLLxnFws0im8zOdtI8kN3GgUmJVxZriVRJKmPvwIBlj8cZOI3hosAuiu10",
-	"0339KytWTNuS/BXO/Qr9JItz7iVFScyjqBHYEh/3nufv/M65+Vares2W53I3DLTyt5rPg5bnBpy+PPS9",
-	"SoM38WPVc0PuhvjRarUaTtUKHc+905JP/ORXgefivaBa500LP/2tz2taWfubO+P178i7wZ143b29PV2z",
-	"eVD1nRYup5U1+FG8ggjO4Rq6DHpMfAcjsQ8D6IoD6LNH9+6y1dLisqZrdW7Z3Cc5H/HQ382t10Lu49ep",
-	"Ff8P+mIf+nDJRAeuYQQ34jX+xa99uBaHMIQLBrcwgp44oO0icSBesz/v/46Jg/QLh6xUXGW+FfKG03TC",
-	"PN+pcm5zW9M1vmM1Ww2ulRcMPWWGpuM6zXZTKxd0Ldxtca2sOW7It7iP2u/txc+SHve51QjrZGPbdlB+",
-	"q/HQ91rcDx30SM1qBHzGYm9hJDok+CkMIYI+KSb2oQeR6EBX07VWapFvtSC0wnaQYanf4ovwDi6gy7xt",
-	"0h8iGEJXHE+tymAIfQYjcQA96IsDiOCGwbk4QUu4qO9zzdvWXiRKB6HvuFuaru3k+E7I3cCpNHhOPhr6",
-	"bY6W8Pmv247PbXxZyThewKv8ildDbU9PR+XHYucWRkm45Bn8J/TFK+grC8Etepm+DKCLGoiOOJUvVT2b",
-	"6+h4DI6OOBAn0hIXcCNOmdiHLlzS73PUXxxDBNcZVq7WrUaDu1v8L/Xnv0EXPSCOUYsuDMm6tBd0M2Oy",
-	"3m5abrXOq9v52IR5Bv89Thyp7ojeowSALlv/6snd++u6jHtUDHqsajV5464VcJ2hSnDNIBJHDN7DhTjD",
-	"ZXoQwQW8R3upBcoYCV24ggtMGoySY4q6GxhReDADDTdiTWvn5+1mhfu6sj3uMFLpNoIBe3x/PVdcXJoL",
-	"rEbIfpJaZh4lq/MdafkeupAlttUZRFKFVOqify+hq5TuMPy3n3Y/DHBNeuYdmWMEPbiGPvvn3LN7ufuJ",
-	"OdlcxQr4Uklq8uXjr3+Oa8UWgwFEzGpseb4T1pt6WihXqYrK6CxwtlwrbPt8fiZIktczovl/UOSc+I4A",
-	"6lp8D5E4lULL6IjWJIJdYaSgXL1U+ipzpoFJG1+bTMo9fTJYJ+VQb0kbkHfQ5JHC0gGM0IZjf3V1dNbE",
-	"viV7sVKsGny5tmoVKgvVRXuZr9YMq1gpVZfsFW7UCtZCZbG6bK/yQq1olSpL1RXb4MVayVqqrFSzBE7i",
-	"KQvGEKfEEQzFKVrsHQXOECLxvcQFWQ7OKVy6aUkLBv7oWs3zm1YooXqppM0it66hITK2fiszU4VJl3Ye",
-	"ELzITxETHQp4gqiUL9kc32k5Pg909tR1dnLQIyEH4nSeyWS5EW8kJGD4XcAt2Ttic9uOPT9h7kphtbRk",
-	"VVeLpdWiXVwoLVeXin+nVv9pYXnVkD8bbcMoLm079k/v7yxsr/6i9VWzGMiLWQZPgnhW6/v/tH43l4RJ",
-	"WinEhrHsqRKCvzMiZbW2smQbK4WVlVJ12V5aXLWKNW5ZRnVx0bKNwqK1UKmVaoVKsWJUVorFql1YtJeq",
-	"hcWKUTMMy1iZFXyqrIzzLR3z6XBSrk0rnFWEsEhk+R9BGs6xHIrXMBQncMUIg19RtVEXMHEuMKHichWt",
-	"kZUIm4ZUcZIw7eGz4lQcpCqSrFNYgmEgDics+NJqODZxs3zNchpETWZ8afPQchoZ4v8XgegxDGOk/FTV",
-	"W1NoLo4oKCOUjZhBCouSGvMaLglpicphTKhnb2U+wKU4kXfF6wmd4E/4OIxkbClUh658W0qGJqdPSSWX",
-	"9QsxO8sC3Pc9P/gohYiUlRO0z6y9WfZ2Qt4MPln1p9hCdjz9ATFEHKrSNYRRzF26VItviMWKIwqEkzKL",
-	"Q11nTcf9irtbYV3H0osUVGfItnQmwe3P+/87YePk+Sxr1RzesGelq3j2bh4RY6EKt+KQOLM4VnF7yVQs",
-	"XYtDeobr7Ndt7idvRAhu8Z2WFdYzbjDSMWKS62c8MAl8KI9rNfknYUAqpLI4K73VBcv3rV1NvcyDcNPJ",
-	"MMMDezowiS6mU3TiAUaMOkkYGa49hs6Ed3hnCiYndPymlrNaTm7ZXq3d+Zedhe1ftAqVX4Y5BPRSMRO3",
-	"P0D27z958jBHfQMm3CGKNWbzXcXSEHoO4Rx9QN960B2jWE8i0g300xKWDCORIlUvQydsZAX4n6CPlRoi",
-	"ChzkFF2Em47EPbhW1kxh34zgEoX+KoT5mWWzR9LFWTaUFzJkj+A2NhQaibJwsvP4GEezKl47LFcalit7",
-	"LdHB95FFkdiiQ6SbYjQtbOq1TwY63Y2tnwTDBwMf44VX274T7j7GtlRiU4VbPvfHn+7F9OjLZ0+06fZl",
-	"vVrlQZBTvQaS9bkvnz1BEgOXqL6Me+rtVROGcf8+LjhreOPxN9bWFvdlHl0T7N1SKKy3w7rnO/9KupCA",
-	"WlkJNTZFPQxbcrTguDUvw29/TGL6WMXy+sMHWdJcsTnn68c6W3dt33NsycR6xB27eQY/qiLdRW5O1E7m",
-	"+UAyY0asrw/n4lC8EQfy3rjfGMH1hmvGGlEJKbOfkS5MAp01bUq6zM01BqOpreGcIDfZXmFQl2wnu1zU",
-	"tF/+DClMRduGsvkbxk3dwbi8ypIufkOiEb5F1CmfwTXVzyuW8j96eijOYCDXInKIgV0yCmonzJ4hiXOj",
-	"LB9tuOMVCI7iyOkrOjyidY7yDP4gl/i4L+YkXOHHpFXpMzXIQAHEKVwmuCGp22C86wgG8/LRC8rmDkFl",
-	"NPH4VVpmsj9qaFrtsJ5vu/iHuyEOzrhtyjYAAekwv+FuuPAjnIsfIJou792YgEngEEfTml6V8fUc++KL",
-	"NHX54gva3/zQqM5kczFA6QmBgC4z1WzFnM8z+P2YkMb9MwXAhssmqNEbZiKcmKoVT9FW4oMfoq1rzCRY",
-	"ovdMSUnNz5m06LQESSEfHMM7peXvcWtxolNcxUb9lBWZicXKd62GqTNTlfu84xK/M3XcLbkaet5mw/K3",
-	"OD46QwBNNic6crp4O26TlbEweDAhTElAzXm5MkJW3vXCzZrXdm1TV1eaPKx79ibesBoN7xtum3kGb8m4",
-	"cRKIk2llImnEHoO+OJM3aQ4oEytPhvsPKrvy0mVctW6oMqqBK9LJD8TuHMY17TGkSVA6JwjrfqASN0rB",
-	"vZ5OcjUoGsMaSiSJHqk2HiZRCsuXRvPol5nJK0pTXE0Y19QYKMVGzdSQ2JwY/cY+mJ2ikaoLtLhKgJRY",
-	"1OMS9MGl3BsjzEy6SvPzRlO492dOp8yp8ZSJJnFs3mx5IXeru/ltvrvp83agzFKMCyi130wcYmGTxhYd",
-	"JXHCmGBIaHiB7Qa8w4oxISkh4NR2jrvZ8r0tnwcBWUq5YXr09hsaYA4SQWQ69MUP4oyE6YkTlRxDcRpX",
-	"mOm9fN5qWLubbdd6aTkNq9Lg6S0nQBn6E2uSWUd6Ak1JLbtCd5D5O9MTdNy9xqn7z9tOgNtNBMPUTA53",
-	"i5Xry5LWY0Q0X0l3vlNjzgvoz+clXD8YK5f7R76rEPsDlegqo2wzBFE0rdhXSRdlApvMn3jwIENh7unT",
-	"B39PBa1LLkDwfE9lrp9hzGxufarLDu8A58P98drxeDcd+XIRVXRJx33JxGWrcxBj1szWMdCn/Zn0TBfQ",
-	"k3IjVqX3k61MzDPIvUdyCCjOxv1L0u4kZCGdbhikZtpJjygCuV1meF5hKjfCb+M5nfLgg8dfs5UlpDY9",
-	"9vTJXTZnFo3iUq5g5IzCk8Jy2TDKhvFLc36N0WAQdVVtfTLxkxOjA5r2ic409yJNKWwpiGFAfiFmNQ6z",
-	"bgKoCphicX9HBf01ZrgSWHwvpytTs/seShGhbGIfLYaxhewniiep4ojNkZ1u0WnIOuapiIg3aE414kIH",
-	"4RUcaaFlSsXCcixK9lQnTgRS6FxGHqYRK2DViuCMXoc/ymqaFOVNxzZJ6PFQrR8v1FWRq/CXapNOYaEY",
-	"AracxGfSnRyR5ckmPqNvn+jr0018fsNNGq+y9uwea7UrDaeKrYamay+5H8huxMgX8gY2mV6Lu1bL0cra",
-	"Qt7IL+BRgRXWqQG787Jwp56cDW7xMHNwJaP5WEYKKxqGnjAjpRq6WnRQ0vcQobRRxkHYhE7iZA29QNSK",
-	"mDsM42AYxlx1RPvuj7E7v+HCmexHugRRfXmIJb6TBE6ylDyDf0+XIXGYRDgamTIDBXsn64UkcNIKjMrf",
-	"5MwUub6M52NiFufiZMONh4PiUPnsNbP5Szk96CfHvjEuxTpTIWBzCkh7Y/xNHD2QTSIaK4ILwi865ZIp",
-	"gzqLk3kZATjkI3r4wNbK2j/wUB3y6pNH7UXD+Mgx+192vK52yDpdf5s+wqUgkPPgmtVuhB9aNxE0dXA/",
-	"HhRo5ecvdC1oN5uWvyvb6yQmZOzRPrFHZw+nQ2srwFlFq2GFOJzEucROjghyDhsLvPlib2rL8VTi+Yu9",
-	"F8kiGQcyN5L3wLnsgDN65xnmK4EjJTad6KTFTrjdRcJr+/pETuDg7JoisUfbig4B7ZAOhSKINF2jUWV5",
-	"rPceKW65nrvb9NpBrtkOyf2BNPGETXJVr9lEFZ9rceOi6dpU35K6kvQsCD4ZM+vJDiS+MNuAaLqW1RTg",
-	"Tln/KyKDVOOAPJOzTt1IscupO7NcUNO1abqmvdj7/wEA",
+	"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",
+	"Wkt17JtkAzTMson1KKeWH/7fAQA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

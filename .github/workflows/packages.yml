@@ -5,6 +5,7 @@ on:
     paths: &paths
       - 'packages/**'
       - 'contracts/**'
+      - 'scripts/contracts-breaking.sh'
       - 'design/tools/**'
       - 'pnpm-workspace.yaml'
       - 'pnpm-lock.yaml'

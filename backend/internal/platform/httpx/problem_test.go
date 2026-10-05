@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -121,5 +122,26 @@ func TestWriteProblemValueRetryAfterAndChallenge(t *testing.T) {
 	}
 	if rec.Header().Get("Retry-After") != "" {
 		t.Fatal("Retry-After без RetryAfter")
+	}
+}
+
+// Проверка хендлера сверх схемы (q из одних знаков, явная проверка NaN) — тот же ответ, что у
+// валидатора: 400 validation.failed с полем; обёрнутая ошибка не становится 500 и не пишется в лог.
+func TestNewFieldError(t *testing.T) {
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	err := fmt.Errorf("geo: список: %w", httpx.NewFieldError("query.q", "minLength"))
+	rec := httptest.NewRecorder()
+	httpx.WriteError(log, rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", nil), err)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("статус = %d", rec.Code)
+	}
+	m := decode(t, rec)
+	want := []any{map[string]any{"field": "query.q", "code": "minLength"}}
+	if m["code"] != httpx.CodeValidationFailed || !reflect.DeepEqual(m["errors"], want) {
+		t.Fatalf("тело: %v", m)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("ожидаемый ответ попал в лог: %s", logs.String())
 	}
 }

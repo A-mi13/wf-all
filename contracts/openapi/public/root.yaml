@@ -36,11 +36,22 @@ info:
     - **Время** — ISO 8601 в UTC (`2026-10-01T17:00:00Z`); местное время матча считается по
       таймзоне города или поля.
     - **Деньги** — целое число в минорных единицах (копейки) плюс код валюты ISO 4217.
+    - **Язык** — операции справочников (тег `geo`) читают `Accept-Language` (RFC 9110, q-веса;
+      несколько строк заголовка равны одной со списком через запятую): берётся первый
+      поддерживаемый язык (`ru`, `en`; регион отбрасывается — `en-US` → `en`), названия — на нём,
+      в ответе `Content-Language: <язык>`; нет перевода — каноническое название на языке страны.
+      Поддерживаемого языка нет, заголовка нет или он не разбирается — названия на языке страны
+      каждой записи, `Content-Language` не ставится. Такие ответы всегда с `Vary: Accept-Language`.
+    - **Кэш** — значение `Cache-Control` каждой операции описано в её ответе 200.
     - **Тело запроса** — не больше 1 МиБ.
     - Поле `request_id` в ошибке — назовите его, сообщая о проблеме: по нему находится запрос в логах.
 tags:
+  - name: geo
+    description: >-
+      Справочник городов и автоопределение города по геопозиции — выбор города, экран города,
+      «пустой город»
   - name: platform
-    description: Служебные операции платформы — живость сервиса и подобное, не продуктовые сценарии
+    description: Служебные операции платформы — минимальная версия приложения и подобное, не продуктовые сценарии
 # Аутентификация по умолчанию; анонимная операция объявляет `security: []`.
 security:
   - bearer: []
@@ -63,8 +74,16 @@ x-error-codes-common:
 # каждая — с обоснованием в description операции. Остальные мутирующие требуют Idempotency-Key.
 x-anonymous-mutations: []
 paths:
-  /v1/health:
-    $ref: './platform/paths.yaml#/health'
+  /v1/cities:
+    $ref: './geo/paths.yaml#/cities'
+  /v1/cities/nearest:
+    $ref: './geo/paths.yaml#/cities-nearest'
+  /v1/cities/by-slug/{slug}:
+    $ref: './geo/paths.yaml#/city-by-slug'
+  /v1/cities/{cityId}:
+    $ref: './geo/paths.yaml#/city'
+  /v1/app/min-version:
+    $ref: './platform/paths.yaml#/app-min-version'
 components:
   securitySchemes:
     bearer:
@@ -83,6 +102,32 @@ components:
         minLength: 16
         maxLength: 128
       example: 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      required: false
+      description: >-
+        Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион
+        отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением —
+        названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+      schema:
+        type: string
+      example: 'ru-RU,ru;q=0.9,en;q=0.8'
+  headers:
+    Vary:
+      description: Всегда Accept-Language — ответ зависит от языка, кэши хранят языки раздельно
+      required: true
+      schema:
+        type: string
+      example: Accept-Language
+    ContentLanguage:
+      description: >-
+        Язык названий в ответе (ru или en). Заголовка нет — поддерживаемый язык не выбран, названия
+        на языке страны каждой записи
+      required: false
+      schema:
+        type: string
+      example: ru
   responses:
     Problem:
       description: Ошибка в формате RFC 9457
@@ -174,5 +219,29 @@ components:
               type: string
               description: HMAC-SHA-256 задачи на ключе сервера, hex
               example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
-    Health:
-      $ref: './platform/schemas.yaml#/Health'
+    CityStatus:
+      $ref: './geo/schemas.yaml#/CityStatus'
+    GeoPoint:
+      $ref: './geo/schemas.yaml#/GeoPoint'
+    CountryRef:
+      $ref: './geo/schemas.yaml#/CountryRef'
+    RegionRef:
+      $ref: './geo/schemas.yaml#/RegionRef'
+    City:
+      $ref: './geo/schemas.yaml#/City'
+    District:
+      $ref: './geo/schemas.yaml#/District'
+    CityDetails:
+      $ref: './geo/schemas.yaml#/CityDetails'
+    CityPage:
+      $ref: './geo/schemas.yaml#/CityPage'
+    GeoPlace:
+      $ref: './geo/schemas.yaml#/GeoPlace'
+    OpenCity:
+      $ref: './geo/schemas.yaml#/OpenCity'
+    NearestCity:
+      $ref: './geo/schemas.yaml#/NearestCity'
+    AppPlatform:
+      $ref: './platform/schemas.yaml#/AppPlatform'
+    AppMinVersion:
+      $ref: './platform/schemas.yaml#/AppMinVersion'

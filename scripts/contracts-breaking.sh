@@ -7,13 +7,17 @@
 # Уровни серьёзности — contracts/oasdiff-severity.txt (формат oasdiff: «<id правила> <уровень>», комментарии
 # в файле не допускаются, поэтому причины здесь). Добавление значения в enum ответа — не ломающее (спека §8.3:
 # enum'ы открытые, клиент обязан переживать незнакомое значение); oasdiff по умолчанию считает его ERR.
-# admin.yaml проверяется так же. Админка выкатывается вместе с apps/admin, поэтому осознанная ломающая правка
-# её контракта допустима — только явной строкой в contracts/oasdiff-err-ignore-admin.txt (формат oasdiff
-# --err-ignore: «<МЕТОД> <путь> <текст изменения из отчёта>», например «GET /v1/x api path removed without
-# deprecation») и с причиной в сообщении коммита. Комментарии форматом не предусмотрены — файл без них, причины
-# здесь и в коммитах. У public.yaml исключений нет: ломать только в /v2.
+# Осознанная ломающая правка — только явной строкой в contracts/oasdiff-err-ignore-<public|admin>.txt (формат
+# oasdiff --err-ignore: «<МЕТОД> <путь> <текст изменения из отчёта>», например «GET /v1/x api path removed
+# without deprecation») и с причиной в сообщении коммита. Комментарии форматом не предусмотрены — файлы без
+# них, причины здесь и в коммитах.
+# - admin.yaml выкатывается вместе с apps/admin: исключения допустимы всегда.
+# - public.yaml — только до первого тега contracts-v1.0.0 (спека geo §4.4: удаление /v1/health). С тегом
+#   contracts-v1.0.0 или новее файл public обязан быть пуст — ломать только в /v2. Это проверяет страж
+#   contracts/src/public-ignore.mjs первым шагом, до проверки базы: без базы он не пропускается.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+node contracts/scripts/public-ignore.mjs
 BASE="${CONTRACTS_BASE:-origin/main}"
 OASDIFF="$PWD/.tools/bin/oasdiff"
 TMP="$PWD/.tools/tmp"
@@ -35,12 +39,8 @@ for name in public admin; do
   fi
   git show "$BASE:$file" > "$TMP/contracts-base-$name.yaml"
   echo "contracts:breaking: $file против $BASE"
-  ignore=()
-  if [[ "$name" == admin ]]; then
-    ignore=(--err-ignore contracts/oasdiff-err-ignore-admin.txt)
-  fi
   "$OASDIFF" breaking "$TMP/contracts-base-$name.yaml" "$file" --fail-on ERR \
-    --severity-levels contracts/oasdiff-severity.txt "${ignore[@]}" || status=1
+    --severity-levels contracts/oasdiff-severity.txt --err-ignore "contracts/oasdiff-err-ignore-$name.txt" || status=1
   rm -f "$TMP/contracts-base-$name.yaml"
 done
 exit $status

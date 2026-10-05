@@ -14,7 +14,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/public"
+	"wf/backend/internal/platform/appversion"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
@@ -76,9 +78,11 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 				DB:             pool,
 				Tokens:         token.NewIssuer(jwtKeys, clock.System),
 				// сессий нет до спеки identity: любой токен — 401; identity подставит свой загрузчик
-				Sessions:  auth.NewCachedLoader(auth.NoSessions, 5*time.Second, clock.System, 100_000),
-				Limiter:   ratelimit.NewPG(pool, clock.System),
-				RateRules: rules,
+				Sessions:    auth.NewCachedLoader(auth.NoSessions, 5*time.Second, clock.System, 100_000),
+				Limiter:     ratelimit.NewPG(pool, clock.System),
+				RateRules:   rules,
+				Geo:         geo.New(pool),
+				AppVersions: appversion.NewReader(pool),
 			})
 		})
 }

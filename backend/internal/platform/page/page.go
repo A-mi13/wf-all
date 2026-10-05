@@ -1,5 +1,6 @@
-// Package page — keyset-пагинация по (created_at, id) (спека бэкенда §6.9): непрозрачный
-// курсор, limit по умолчанию 20, максимум 100.
+// Package page — keyset-пагинация (спека бэкенда §6.9): непрозрачный курсор, limit по
+// умолчанию 20, максимум 100. v1 (Cursor, Encode/Decode) — порядок (created_at, id);
+// v2 (Keyset, EncodeKeyset/DecodeKeyset) — произвольный набор полей с отпечатком (спека geo §4.5).
 package page
 
 import (

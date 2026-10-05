@@ -12,7 +12,7 @@ import (
 
 func TestDefaultRulesValid(t *testing.T) {
 	r := ratelimit.DefaultRules()
-	for _, class := range []string{"default", "auth"} {
+	for _, class := range []string{"default", "auth", "geo_nearest"} {
 		cp, ok := r[class]
 		if !ok {
 			t.Fatalf("нет класса %s", class)
@@ -25,6 +25,20 @@ func TestDefaultRulesValid(t *testing.T) {
 	}
 	if r["default"].IP.Limit == 0 {
 		t.Fatal("default без лимита по IP")
+	}
+}
+
+// Спека geo §4.2: автоопределение города — свой класс geo_nearest, только по IP (ручка анонимная):
+// 30 запросов в минуту со всплеском 10. Правило — раньше класса в контракте: иначе API не стартует
+// (ratelimit.UnknownClasses).
+func TestDefaultRulesGeoNearest(t *testing.T) {
+	cp, ok := ratelimit.DefaultRules()["geo_nearest"]
+	if !ok {
+		t.Fatal("нет класса geo_nearest")
+	}
+	want := ratelimit.ClassPolicy{IP: ratelimit.Policy{Limit: 30, Period: time.Minute, Burst: 10}}
+	if cp != want {
+		t.Fatalf("geo_nearest = %+v, want %+v", cp, want)
 	}
 }
 

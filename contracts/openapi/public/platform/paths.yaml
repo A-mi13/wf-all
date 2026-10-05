@@ -1,21 +1,45 @@
 # Операции платформы, не модуля: их реализует internal/httpapi/public.Server напрямую.
-health:
+app-min-version:
   get:
-    operationId: getHealth
+    operationId: getAppMinVersion
     tags: [platform]
     security: []
     x-error-codes: []
-    summary: Проверка живости сервиса
+    summary: Минимальная версия приложения
     description: |
-      Отвечает 200, пока процесс жив и принимает запросы; база данных не проверяется.
-      Без аутентификации. Используется хостингом для health check; клиентам — чтобы
-      разбудить dev-стенд после простоя (первый запрос может идти до минуты).
+      Приложение спрашивает при запуске: ниже `min_version` — экран обязательного обновления со
+      ссылкой `store_url`; ниже `recommended_version` — предложение обновиться, которое можно
+      закрыть. Версии сравниваются как MAJOR.MINOR.PATCH, сборка отбрасывается (`1.2.3+45` →
+      `1.2.3`). Без аутентификации.
+
+      Версии для платформы ещё не заведены — 200 с `null` в `min_version`, `recommended_version`
+      и `store_url`: приложение работает без проверки. Версии меняются в админке без выпуска
+      сервера; ответ кэшируется до минуты.
+
+      `platform` — только `ios` или `android`: другое значение — 400 `validation.failed` (enum
+      помечен `x-extensible-enum` по правилу контракта, но валидатор запросов незнакомое значение
+      отвергает).
+    parameters:
+      - name: platform
+        in: query
+        required: true
+        description: Платформа приложения, которое спрашивает
+        schema:
+          $ref: '../root.yaml#/components/schemas/AppPlatform'
+        example: ios
     responses:
       '200':
-        description: Сервис жив
+        description: Версии приложения для платформы
+        headers:
+          Cache-Control:
+            description: Кэшируется до минуты — смена версий в админке доходит до приложений не позже
+            required: true
+            schema:
+              type: string
+            example: 'public, max-age=60'
         content:
           application/json:
             schema:
-              $ref: '../root.yaml#/components/schemas/Health'
+              $ref: '../root.yaml#/components/schemas/AppMinVersion'
       default:
         $ref: '../root.yaml#/components/responses/Problem'

@@ -147,6 +147,11 @@ func fieldErrors(err error) ([]FieldError, bool) {
 		case errors.Is(re.Err, openapi3filter.ErrInvalidRequired):
 			out = append(out, FieldError{Field: prefix, Code: "required"})
 			continue
+		case errors.Is(re.Err, openapi3.ErrSchemaInputNaN), errors.Is(re.Err, openapi3.ErrSchemaInputInf):
+			// NaN и ±Inf strconv.ParseFloat принимает, а схема отвергает отдельной ошибкой, не
+			// SchemaError: без этой ветки — request.invalid вместо поля (спека geo §4.2)
+			out = append(out, FieldError{Field: prefix, Code: "type"})
+			continue
 		}
 		schemaErrs := schemaErrors(re.Err)
 		if len(schemaErrs) == 0 {
