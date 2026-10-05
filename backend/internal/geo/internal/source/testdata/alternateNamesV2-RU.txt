@@ -1,0 +1,46 @@
+7948122	461740	ru	Зюзино	1					
+7949879	461740		Zyuzino						
+11389239	463825	ru	Зеленоградский Район				1	1962	2015
+1738212	464312	ru	Зашеек	1					2018
+296014	487839		Stavropol’ya						
+2185089	487839		Stavropol'skiy Kray	1					
+2298599	487839	ru	Ставрополье	1	1				
+5463406	487839		Stavropol'skiy		1				
+5649337	487839		Stavropol’skiy Kray						
+5702223	487839	link	https://en.wikipedia.org/wiki/Stavropol_Krai						
+6701982	487839		Stavropol Krai						
+6701983	487839		Stavropolsky kray						
+8656359	487839	ru	Ставропольский Край						
+13287294	487839	de	Region Stawropol						
+13669960	487839	en	Stavropol’ Kray						
+17086329	487839	en	Stavropol Kray	1					
+296020	487846		Voroshilovsk						
+1718340	487846	en	Stavropol	1	1				
+2426310	487846		Ставрополь	1					
+3738190	487846	ru	Stavropol’						
+5704270	487846	link	https://en.wikipedia.org/wiki/Stavropol						
+5961934	487846	ru	Ставрополь						
+8513873	487846	de	Stawropol	1					
+298529	493702		Shpakovskoye						
+298530	493702		Mikhaylovskoye						
+298531	493702		Mikhaylovska						
+1757119	493702	en	Mikhaylovsk	1					
+1757120	493702	ru	Шпаковское						
+3749932	493702		Mikhaylovsk						
+5968611	493702	ru	Михайловск	1					
+7202768	493702	link	https://en.wikipedia.org/wiki/Mikhaylovsk%2C_Stavropol_Krai						
+17506584	493702	de	Michailowsk						
+1623767	526815		Mikhaylovskiy						
+1623768	526815		Mikhaylovka						
+1623769	526815		Mikhalovskiy						
+1721558	526815	en	Mikhaylovsk						
+3816880	526815		Mikhaylovsk						
+3816881	526815		Михайловск						
+6007210	526815	ru	Михайловск						
+7156808	526815	link	https://en.wikipedia.org/wiki/Mikhaylovsk%2C_Sverdlovsk_Oblast						
+726355	1490542	en	Sverdlovsk Oblast						
+2185090	1490542		Sverdlovsk	1	1				
+5649336	1490542		Sverdlovskaya Oblast’						
+5702227	1490542	link	https://en.wikipedia.org/wiki/Sverdlovsk_Oblast						
+8656358	1490542	ru	Свердловская Область						
+13287696	1490542	de	Oblast Swerdlowsk						

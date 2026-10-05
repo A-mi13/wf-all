@@ -1,0 +1,3 @@
+RU.48	Moscow	Moscow	524894
+RU.70	Stavropol Kray	Stavropol Kray	487839
+RU.71	Sverdlovsk Oblast	Sverdlovsk Oblast	1490542
