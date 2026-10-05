@@ -118,6 +118,9 @@ func TestDecodeKeysetRejects(t *testing.T) {
 		"чужой набор": page.EncodeKeyset(page.Keyset{Set: "teams.list", Values: []any{int64(2), int64(433931), id}}, cityKinds...),
 		"чужие типы полей": page.EncodeKeyset(page.Keyset{Set: "geo.cities(rank,population,id)", Values: []any{int64(2), int64(433931), int64(7)}},
 			page.KindInt64, page.KindInt64, page.KindInt64),
+		// здесь решает только отпечаток типов: без Kinds в нём "2" разобралось бы как int64
+		"строка на месте int64": page.EncodeKeyset(page.Keyset{Set: "geo.cities(rank,population,id)", Values: []any{"2", int64(433931), id}},
+			page.KindString, page.KindInt64, page.KindUUID),
 		"версия 3":          rewrite(t, good, func(w map[string]any) { w["v"] = 3 }),
 		"версия 1":          rewrite(t, good, func(w map[string]any) { w["v"] = 1 }),
 		"без отпечатка":     rewrite(t, good, func(w map[string]any) { delete(w, "f") }),
