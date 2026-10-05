@@ -222,22 +222,24 @@ func geonamesTLS(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// Итог команды: счётчики и перечень slug по каждой категории сверки; значения разные и ненулевые —
-// перепутанное или потерянное поле не пройдёт.
+// Итог команды: счётчики и перечень slug по каждой категории сверки; значения и длины списков
+// (4/1/2/3) разные и ненулевые — перепутанное или потерянное поле не пройдёт.
 func TestPrintGeoSummary(t *testing.T) {
 	var out bytes.Buffer
 	printGeoSummary(&out, "RU", geojobs.Summary{
 		ImportID:       uuid.MustParse("c41bb0df-449d-46fe-bacd-e9dd35dd3395"),
 		PlacesUpserted: 3, PlacesRemoved: 5, PlacesMissing: 7, PlacesSkipped: 2, NamesUpserted: 12,
-		Linked: []string{"a", "a2"}, Ambiguous: []string{"b"}, NotFound: []string{"c"}, Conflict: []string{"e"},
+		Linked: []string{"a", "a2", "a3", "a4"}, Ambiguous: []string{"b"}, NotFound: []string{"c", "d"},
+		Conflict: []string{"e", "f", "g"},
 	})
 	got := out.String()
 	for _, want := range []string{
 		"импорт RU завершён, журнал geonames_imports c41bb0df-449d-46fe-bacd-e9dd35dd3395\n",
 		"мест: 3, удалено: 5, пропало из источника (держит город): 7, названий: 12\n",
 		"пропущено (таймзона): 2\n",
-		"сверка городов: привязано 2, неоднозначно 1, не найдено 1, конфликт 1\n",
-		"  неоднозначно: b\n", "  не найдено: c\n", "  конфликт: e\n",
+		"сверка городов: привязано 4, неоднозначно 1, не найдено 2, конфликт 3\n",
+		"  неоднозначно: b\n", "  не найдено: c\n", "  не найдено: d\n",
+		"  конфликт: e\n", "  конфликт: f\n", "  конфликт: g\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("нет строки %q в выводе:\n%s", want, got)
