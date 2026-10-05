@@ -103,13 +103,22 @@ type Relay struct {
 	Poll  time.Duration `env:"RELAY_POLL" envDefault:"5s"`
 }
 
+// GeoNames — источник городов для импорта geo (спека geo §5.4): только https, лимиты — байты
+// на скачиваемый файл и на распакованную запись zip.
+type GeoNames struct {
+	BaseURL         string `env:"GEONAMES_BASE_URL" envDefault:"https://download.geonames.org"`
+	MaxCompressed   int64  `env:"GEONAMES_MAX_COMPRESSED" envDefault:"52428800"`    // 50 МБ
+	MaxUncompressed int64  `env:"GEONAMES_MAX_UNCOMPRESSED" envDefault:"209715200"` // 200 МБ
+}
+
 // Worker — без почты: Mail (WORKER_MAIL_*) воркер читает отдельно, только в режиме воркера —
-// разовым командам (events replay) почта не нужна.
+// разовым командам (events replay, geo import) почта не нужна.
 type Worker struct {
-	Log    Log
-	DB     DB
-	Queues Queues
-	Relay  Relay
+	Log      Log
+	DB       DB
+	Queues   Queues
+	Relay    Relay
+	GeoNames GeoNames
 }
 
 type Migrator struct {

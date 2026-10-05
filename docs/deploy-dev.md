@@ -35,6 +35,12 @@
 
 Воркер на стенде не запущен — переменные `WORKER_*`, в том числе `WORKER_MAIL_*`, на Render не нужны.
 
+Импорт городов geo (GeoNames) на стенде делает оператор со своей машины: `worker geo import --country RU` под
+`WORKER_DATABASE_URL` (роль `worker`; синхронно, задача River не ставится). Источник — `WORKER_GEONAMES_BASE_URL`
+(только `https`, по умолчанию `https://download.geonames.org`), лимиты скачиваемого файла и распакованной записи —
+`WORKER_GEONAMES_MAX_COMPRESSED` (50 МБ) и `WORKER_GEONAMES_MAX_UNCOMPRESSED` (200 МБ); значения неверны — отказ
+команды и воркера на старте, до подключения к базе.
+
 **Ротация ключей** (`API_JWT_SEEDS`, `API_HUMANCHECK_KEYS`): в настройках сервиса Render новый ключ
 ставится первым, старый — следом через запятую (сгенерировать: `openssl rand -base64 32`); после
 деплоя подписывает новый, проверяют оба. Старый убрать: у JWT — через 10 минут (срок access-токена),

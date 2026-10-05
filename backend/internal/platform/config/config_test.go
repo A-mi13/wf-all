@@ -122,6 +122,26 @@ func TestLoadWorkerQueuesAndRelay(t *testing.T) {
 	}
 }
 
+// Источник GeoNames импорта geo (спека geo §5.4): по умолчанию download.geonames.org, 50 и 200 МБ.
+func TestLoadWorkerGeoNames(t *testing.T) {
+	c, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := c.GeoNames; g.BaseURL != "https://download.geonames.org" || g.MaxCompressed != 50<<20 || g.MaxUncompressed != 200<<20 {
+		t.Fatalf("по умолчанию: %+v", g)
+	}
+	c, err = config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=x",
+		"WORKER_GEONAMES_BASE_URL=https://mirror.example", "WORKER_GEONAMES_MAX_COMPRESSED=1024",
+		"WORKER_GEONAMES_MAX_UNCOMPRESSED=2048"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := c.GeoNames; g.BaseURL != "https://mirror.example" || g.MaxCompressed != 1024 || g.MaxUncompressed != 2048 {
+		t.Fatalf("из окружения: %+v", g)
+	}
+}
+
 func TestAPIConfig(t *testing.T) {
 	env := []string{
 		"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://x",
