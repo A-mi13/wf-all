@@ -294,7 +294,7 @@ query). Query видят Cloudflare и Render — спека клиентов т
 
 ### 4.5. Расширение `platform/page`
 
-`platform/page` сейчас кодирует только `(created_at, id)` (wire v1), а свой курсор модулям писать
+До этой спеки `platform/page` кодировал только `(created_at, id)` (wire v1), а свой курсор модулям писать
 запрещено (`.claude/rules/backend-platform.md`). Расширение: keyset-курсор с произвольным набором
 полей сортировки (`page.Keyset{Set, Values}`: `Set` — имя списка с полями сортировки по порядку, например
 `geo.cities(rank,population,id)`, `Values` — значения `int64 | string | time | uuid` по `Kind`ам), wire
@@ -405,8 +405,9 @@ v2 с версией и отпечатком набора полей (хэш `Se
    города растёт, событие `geo.city_linked`. Ноль или несколько совпадений — в `reconciled`, город
    не трогается. Город без региона кандидатов не получает (`not_found`): условие «и региона» не
    выполнить. Каждая привязка — под savepoint: место за это время привязал другой город (активация
-   админом, 23505 `cities_geoname_id_key`) — откат только этой привязки, город — в
-   `reconciled.conflict`, импорт идёт дальше (решение пользователя 05.10.2026). Активация (этап 2) на
+   админом, 23505 `cities_geoname_id_key`) или сам город за это время привязан (`ImportLinkCity` не
+   нашёл строку с `geoname_id IS NULL`) — тоже откат savepoint, `reconciled.conflict`; откат — только
+   этой привязки, импорт идёт дальше (решение пользователя 05.10.2026). Активация (этап 2) на
    тот же 23505 отвечает 409 `geo.city_already_active` (§5.3).
 6. Итог в журнал (`succeeded`/`failed` с текстом ошибки), событие `geo.import_finished`.
 
@@ -475,8 +476,9 @@ https://creativecommons.org/licenses/by/4.0/, с изменениями: отб�
 
 ```
 backend/internal/geo/
-  geo.go, events.go, read.go, locale.go   API модуля; чтения справочника и выбор языка (geo.New)
+  geo.go, events.go, codes.go, read.go, locale.go   API модуля; чтения справочника и выбор языка (geo.New)
   internal/app/      сценарии записи: Import (этап 1); активация, правки, страны (этап 2)
+  internal/source/   загрузка и разбор GeoNames (§5.4 шаги 2–3)
   internal/store/    sqlc geodb + репозиторий
   internal/domain/   slug, выбор названия §3.4, r(pop) §4.3 — чистые правила
   httpapi/  admin/  jobs/  queries/
