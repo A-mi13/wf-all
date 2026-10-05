@@ -50,16 +50,9 @@ func (r *reader) ListCities(ctx context.Context, p ListParams) (CityPage, error)
 		if err != nil {
 			return CityPage{}, err
 		}
-		if len(k.Values) != len(citiesKinds) {
-			return CityPage{}, page.ErrBadCursor
-		}
-		rank, ok1 := k.Values[0].(int64)
-		population, ok2 := k.Values[1].(int64)
-		id, ok3 := k.Values[2].(uuid.UUID)
-		if !ok1 || !ok2 || !ok3 {
-			return CityPage{}, page.ErrBadCursor
-		}
-		arg.HasCursor, arg.AfterRank, arg.AfterPopulation, arg.AfterID = true, rank, population, id
+		// типы гарантирует DecodeKeyset по citiesKinds (несоответствие — ошибка кода)
+		arg.HasCursor, arg.AfterRank, arg.AfterPopulation, arg.AfterID =
+			true, k.Values[0].(int64), k.Values[1].(int64), k.Values[2].(uuid.UUID)
 	}
 	limit := page.Limit(p.Limit)
 	arg.RowLimit = int64(limit) + 1 // лишняя строка — признак следующей страницы

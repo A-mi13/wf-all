@@ -364,6 +364,11 @@ func TestCityBySlug(t *testing.T) {
 			t.Fatalf("slug %s: %+v %v — ответ с текущим slug", slug, d.City, err)
 		}
 	}
+	// slug из истории Ставрополя теперь текущий у Михайловска: текущий slug важнее истории
+	f.exec(`INSERT INTO city_slug_history (slug, city_id, replaced_at) VALUES ('mihaylovsk', $1, now())`, stav)
+	if d, err := f.svc.CityBySlug(ctx, "mihaylovsk", "ru"); err != nil || d.ID != f.cityID("mihaylovsk") {
+		t.Fatalf("slug mihaylovsk: %+v %v — ждали Михайловск (текущий slug), а не Ставрополь из истории", d.City, err)
+	}
 	if _, err := f.svc.CityBySlug(ctx, "nope", "ru"); !errors.Is(err, geo.ErrCityNotFound) {
 		t.Fatalf("нет slug: %v", err)
 	}
@@ -481,6 +486,11 @@ func TestNearestHere(t *testing.T) {
 	f.addCity(testCity{Country: "RU", Slug: "sevastopol", Name: "Севастополь", Status: "waitlist",
 		Lat: 44.6, Lon: 33.52, Population: 400_000, RuName: true, GeonameID: ptr(int64(900004))})
 	f.addPlace(imp, testPlace{GeonameID: 900005, Country: "XA", Name: "Hidden", Population: 100_000, Lat: 10, Lon: 10})
+	// место выключенной страны XA заведено городом RU: страна города важнее страны источника (§4.1)
+	f.addPlace(imp, testPlace{GeonameID: 900007, Country: "XA", Name: "Pogranichny", Population: 100_000,
+		Lat: 30, Lon: 30, Names: map[string]string{"ru": "Пограничный"}})
+	f.addCity(testCity{Country: "RU", Slug: "pogranichny", Name: "Пограничный", Status: "waitlist",
+		Lat: 30, Lon: 30, Population: 100_000, RuName: true, GeonameID: ptr(int64(900007))})
 	f.addPlace(imp, testPlace{GeonameID: 900006, Country: "XB", Name: "Unknown", Population: 100_000, Lat: 20, Lon: 20})
 
 	type want struct {
@@ -520,6 +530,9 @@ func TestNearestHere(t *testing.T) {
 		{"место UA заведено городом RU — страна города (§4.1)",
 			geo.Point{Lat: 44.6, Lon: 33.52}, "",
 			&want{900004, "Севастополь", "", geo.Country{Code: "RU", Name: "Россия"}, "sevastopol", 0, 1}},
+		{"место XA (выключена) заведено городом RU — страна города, а не источника (§4.1)",
+			geo.Point{Lat: 30, Lon: 30}, "",
+			&want{900007, "Пограничный", "", geo.Country{Code: "RU", Name: "Россия"}, "pogranichny", 0, 1}},
 		{"страна источника выключена", geo.Point{Lat: 10, Lon: 10}, "", nil},
 		{"страны источника нет в справочнике", geo.Point{Lat: 20, Lon: 20}, "", nil},
 	}
