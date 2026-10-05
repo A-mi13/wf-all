@@ -9,6 +9,8 @@ on:
       - 'contracts/package.json'
       - 'contracts/oasdiff-severity.txt'
       - 'contracts/oasdiff-err-ignore-admin.txt'
+      - 'contracts/oasdiff-err-ignore-public.txt'
+      - 'contracts/src/public-ignore.mjs'
       - 'pnpm-lock.yaml'
       - 'tools/**'
       - 'scripts/**'
