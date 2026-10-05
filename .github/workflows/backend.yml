@@ -97,6 +97,10 @@ jobs:
               curl -fsS http://127.0.0.1:18080/readyz || { docker logs wf-api; exit 1; }
               # Swagger dev-стенда: контракт вшит в образ и отдаётся
               curl -fsS -o /dev/null http://127.0.0.1:18080/docs/openapi.json || { docker logs wf-api; exit 1; }
+              # публичные ручки на настоящей базе под ролью api: сид городов 0019, права grants.sql,
+              # сборка cmd/api (geo.New, appversion.NewReader); Ставрополь — первый по населению
+              curl -fsS 'http://127.0.0.1:18080/v1/cities?limit=1' | grep -q '"slug":"stavropol"' || { docker logs wf-api; exit 1; }
+              curl -fsS 'http://127.0.0.1:18080/v1/app/min-version?platform=android' | grep -q '"platform":"android"' || { docker logs wf-api; exit 1; }
               exit 0
             fi
             sleep 2

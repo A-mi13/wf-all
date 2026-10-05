@@ -23,6 +23,7 @@
 | Flutter / Dart | фиксируется в wf-native | в репо wf-native проекта Flutter пока нет — версии появятся с мобильной спекой |
 | chi / pgx | 5.3.2 / 5.11.0 | `backend/go.mod` |
 | oapi-codegen / sqlc | 2.8.0 / 1.31.1 | `backend/tools/go.mod` |
+| oapi-codegen runtime | 1.7.0 | `backend/go.mod` (биндинг параметров запроса в сгенерированном коде `internal/httpapi/*/oapi`) |
 | River | 0.47.0 | `backend/go.mod` (рантайм-библиотека воркера), CLI — `backend/tools/go.mod` |
 | goose / pgtestdb / kin-openapi | 3.28.0 / 0.1.1 / 0.149.0 | `backend/go.mod` |
 | google/uuid | 1.6.0 | `backend/go.mod` (UUIDv7 — `internal/platform/id`) |

@@ -1,11 +1,32 @@
-Health:
+AppPlatform:
+  type: string
+  description: Платформа мобильного приложения
+  enum: [ios, android]
+  x-extensible-enum: true
+AppMinVersion:
   type: object
-  description: Состояние сервиса
-  required: [status]
-  additionalProperties: false
+  description: >-
+    Версии приложения для платформы. Все три поля null — версии ещё не заведены, приложение
+    работает без проверки
+  required: [platform, min_version, recommended_version, store_url]
   properties:
-    status:
+    platform:
+      $ref: '../root.yaml#/components/schemas/AppPlatform'
+    min_version:
       type: string
-      description: Всегда ok — иначе сервис не ответил бы
-      enum: [ok]
-      x-extensible-enum: true
+      nullable: true
+      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+      description: Минимальная версия MAJOR.MINOR.PATCH — ниже неё приложение требует обновиться
+      example: 1.4.0
+    recommended_version:
+      type: string
+      nullable: true
+      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+      description: Рекомендуемая версия — ниже неё приложение предлагает обновиться; не ниже min_version
+      example: 1.6.2
+    store_url:
+      type: string
+      format: uri
+      nullable: true
+      description: Страница приложения в магазине платформы (App Store, Google Play), только https
+      example: https://apps.apple.com/app/id6740000000

@@ -13,9 +13,12 @@ test('схема Problem одинакова в public и admin', async () => {
   assert.deepEqual(adm.components.responses.Problem, pub.components.responses.Problem);
 });
 
+// Путь-образец каждого контракта есть в сгенерированных типах.
+const samplePath = { public: '/v1/cities/nearest', admin: '/v1/health' };
+
 for (const name of ['public', 'admin']) {
   test(`${name}.yaml генерирует TS-типы`, async () => {
     const out = astToString(await openapiTS(new URL(`../openapi/${name}.yaml`, import.meta.url)));
-    assert.match(out, /"\/v1\/health"/);
+    assert.ok(out.includes(`"${samplePath[name]}"`), `нет пути ${samplePath[name]}`);
   });
 }

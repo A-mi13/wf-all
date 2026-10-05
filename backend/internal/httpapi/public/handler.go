@@ -10,8 +10,11 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wf/backend/internal/geo"
+	geohttp "wf/backend/internal/geo/httpapi"
 	"wf/backend/internal/httpapi/public/oapi"
 	"wf/backend/internal/platform/apidocs"
+	"wf/backend/internal/platform/appversion"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/humancheck"
@@ -30,6 +33,8 @@ type Options struct {
 	Sessions       auth.SessionLoader
 	Limiter        ratelimit.Limiter
 	RateRules      ratelimit.Rules
+	Geo            geo.Service       // справочник городов (geo.New)
+	AppVersions    appversion.Reader // минимальные версии приложения (appversion.NewReader)
 }
 
 const defaultRequestTimeout = 15 * time.Second
@@ -46,8 +51,9 @@ func NewHandler(log *slog.Logger, o Options) (http.Handler, error) {
 
 // newHandler — сборка на заданном контракте; в работе это всегда oapi.GetSpec (NewHandler).
 func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, error) {
-	if o.DB == nil || o.Tokens == nil || o.Sessions == nil || o.Limiter == nil || o.RateRules == nil {
-		return nil, errors.New("public: не заданы зависимости (DB, Tokens, Sessions, Limiter, RateRules)")
+	if o.DB == nil || o.Tokens == nil || o.Sessions == nil || o.Limiter == nil || o.RateRules == nil ||
+		o.Geo == nil || o.AppVersions == nil {
+		return nil, errors.New("public: не заданы зависимости (DB, Tokens, Sessions, Limiter, RateRules, Geo, AppVersions)")
 	}
 	// класс default (операции без x-rate-limit) есть, политики валидны: невалидная дала бы
 	// ошибку Allow, а ratelimit.Middleware при ошибке пропускает — лимит молча не работал бы
@@ -74,13 +80,16 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		timeout = defaultRequestTimeout
 	}
 	requestErr := httpx.RequestErrorHandler(log)
-	strict := oapi.NewStrictHandlerWithOptions(Server{}, nil, oapi.StrictHTTPServerOptions{
+	strict := oapi.NewStrictHandlerWithOptions(Server{Handler: geohttp.New(o.Geo), versions: o.AppVersions}, nil, oapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  requestErr,
 		ResponseErrorHandlerFunc: httpx.ResponseErrorHandler(log),
 	})
 	// конвейер — спека §6.1
 	router := httpx.NewRouter(log,
 		peer.Middleware(o.Peer),
+		// несколько строк Accept-Language — одна (RFC 9110 §5.3): сгенерированный код принимает у
+		// заголовка-параметра ровно одну строку, на вторую ответил бы 400
+		httpx.CombineHeaders("Accept-Language"),
 		httpx.LimitBody(httpx.MaxBodyBytes),
 		httpx.Timeout(timeout),
 		routes,

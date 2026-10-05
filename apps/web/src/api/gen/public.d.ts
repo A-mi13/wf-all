@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/v1/health": {
+    "/v1/cities": {
         parameters: {
             query?: never;
             header?: never;
@@ -12,12 +12,141 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Проверка живости сервиса
-         * @description Отвечает 200, пока процесс жив и принимает запросы; база данных не проверяется.
-         *     Без аутентификации. Используется хостингом для health check; клиентам — чтобы
-         *     разбудить dev-стенд после простоя (первый запрос может идти до минуты).
+         * Список городов
+         * @description Города платформы всех статусов (`waitlist`, `pilot`, `live`) — экран выбора города и
+         *     подсказка при вводе. Видны только города включённых стран. Без аутентификации.
+         *
+         *     Порядок: статус (`live`, затем `pilot`, затем `waitlist`), население по убыванию, id.
+         *     Фильтры складываются: `status` (несколько значений — любой из них), `country`, `q` — начало
+         *     названия на любом поддерживаемом языке (ru, en) без учёта регистра и ё/е.
+         *
+         *     Страницы — по курсору: `next_cursor` ответа передайте в `cursor` следующего запроса; `null` —
+         *     страниц больше нет. Курсор непрозрачный, собирать его нельзя; испорченный курсор или курсор
+         *     другого списка — 400 `validation.failed` по полю `query.cursor`. Город, сменивший статус между
+         *     запросами страниц, может встретиться дважды или ни разу — для справочника это допустимо.
+         *
+         *     `q`, пустой после нормализации (одни знаки препинания или пробелы), — 400 `validation.failed`
+         *     по полю `query.q` с правилом `minLength`. Незнакомое значение `status` — 400
+         *     `validation.failed`: в ответах enum открытый, а фильтр принимает только известные значения.
+         *
+         *     Названия — на языке из `Accept-Language` (см. описание API). Ответ кэшируется до 5 минут.
          */
-        get: operations["getHealth"];
+        get: operations["listCities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cities/nearest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Город по геопозиции
+         * @description Автоопределение города при первом запуске и по кнопке «Определить»: по точке пользователя
+         *     возвращает ближайший работающий город платформы и населённый пункт, в котором точка
+         *     находится. Без аутентификации.
+         *
+         *     - `nearest_open` — ближайший видимый город со статусом `pilot` или `live`, без ограничения
+         *       расстояния; `null` — таких городов нет.
+         *     - `here` — населённый пункт справочника GeoNames, «накрывающий» точку: радиус пункта растёт
+         *       с населением (от 2 до 30 км), из накрывающих — ближайший; `null` — точка вне населённых
+         *       пунктов или в стране, где платформа не работает. `here.city` — город платформы на этом
+         *       месте; `null` — города здесь ещё нет: приложение предлагает стать капитаном.
+         *
+         *     Координаты округляйте до 0,01° (около 1 км) — для города достаточно. Сервер координаты не
+         *     сохраняет и в логи не пишет. `lat` вне [-90, 90], `lon` вне [-180, 180], `NaN`, `Infinity`,
+         *     пустое значение — 400 `validation.failed` с полем. Лимит частоты свой, строже общего
+         *     (`ratelimit.exceeded`, 429). Ответ не кэшируется.
+         */
+        get: operations["findNearestCity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cities/by-slug/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Город по адресу в вебе
+         * @description Тот же ответ, что у `getCity`, по `slug` из адреса веба. Прошлый `slug` города (после смены
+         *     адреса) тоже находит город; в ответе — всегда текущий `slug`: веб перенаправляет на него.
+         *     Без аутентификации.
+         *
+         *     Ошибки: `geo.city_not_found` (404) — города с таким текущим или прошлым `slug` нет либо его
+         *     страна выключена. Названия — на языке из `Accept-Language`. Ответ кэшируется до 5 минут.
+         */
+        get: operations["getCityBySlug"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cities/{cityId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Город с настройками
+         * @description Карточка города для экрана города и настроек регистрации: поля `City`, правила страны
+         *     (валюта, язык, телефонный код, первый день недели, возрастные пороги) и районы без архивных.
+         *     Без аутентификации.
+         *
+         *     Ошибки: `geo.city_not_found` (404) — города нет или его страна выключена. Названия — на языке
+         *     из `Accept-Language`. Ответ кэшируется до 5 минут.
+         */
+        get: operations["getCity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/app/min-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Минимальная версия приложения
+         * @description Приложение спрашивает при запуске: ниже `min_version` — экран обязательного обновления со
+         *     ссылкой `store_url`; ниже `recommended_version` — предложение обновиться, которое можно
+         *     закрыть. Версии сравниваются как MAJOR.MINOR.PATCH, сборка отбрасывается (`1.2.3+45` →
+         *     `1.2.3`). Без аутентификации.
+         *
+         *     Версии для платформы ещё не заведены — 200 с `null` в `min_version`, `recommended_version`
+         *     и `store_url`: приложение работает без проверки. Версии меняются в админке без выпуска
+         *     сервера; ответ кэшируется до минуты.
+         *
+         *     `platform` — только `ios` или `android`: другое значение — 400 `validation.failed` (enum
+         *     помечен `x-extensible-enum` по правилу контракта, но валидатор запросов незнакомое значение
+         *     отвергает).
+         */
+        get: operations["getAppMinVersion"];
         put?: never;
         post?: never;
         delete?: never;
@@ -105,13 +234,210 @@ export interface components {
                 signature: string;
             };
         };
-        /** @description Состояние сервиса */
-        Health: {
+        /**
+         * @description Статус города. waitlist — игр пока нет, приложение показывает «станьте капитаном» (экран «Пустой город»); pilot — первые команды и модератор; live — город работает. Список открытый — незнакомое значение клиент обязан пережить
+         * @enum {string}
+         */
+        CityStatus: "waitlist" | "pilot" | "live";
+        /** @description Точка на карте, WGS 84, градусы */
+        GeoPoint: {
             /**
-             * @description Всегда ok — иначе сервис не ответил бы
-             * @enum {string}
+             * Format: double
+             * @description Широта, от -90 (юг) до 90 (север)
+             * @example 45.03442
              */
-            status: "ok";
+            lat: number;
+            /**
+             * Format: double
+             * @description Долгота, от -180 (запад) до 180 (восток)
+             * @example 41.9642
+             */
+            lon: number;
+        };
+        /** @description Страна записи — код и название на языке ответа */
+        CountryRef: {
+            /**
+             * @description Код страны ISO 3166-1 alpha-2
+             * @example RU
+             */
+            code: string;
+            /**
+             * @description Название страны на языке ответа; перевода нет — на языке страны
+             * @example Россия
+             */
+            name: string;
+        };
+        /** @description Регион (субъект, область) — id и название на языке ответа */
+        RegionRef: {
+            /**
+             * Format: uuid
+             * @description Id региона
+             * @example b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+             */
+            id: string;
+            /**
+             * @description Название региона на языке ответа; перевода нет — на языке страны
+             * @example Ставропольский край
+             */
+            name: string;
+        };
+        /** @description Город платформы — пункт списка выбора города и основа карточки города */
+        City: {
+            /**
+             * Format: uuid
+             * @description Id города — его сохраняет профиль игрока и передают другие операции
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            id: string;
+            /**
+             * @description Текущий адрес города в вебе; может смениться — прошлый адрес продолжает находить город
+             * @example stavropol
+             */
+            slug: string;
+            /**
+             * @description Название города на языке ответа; перевода нет — каноническое, на языке страны
+             * @example Ставрополь
+             */
+            name: string;
+            status: components["schemas"]["CityStatus"];
+            /**
+             * @description Таймзона IANA — местное время матчей города считается по ней
+             * @example Europe/Moscow
+             */
+            timezone: string;
+            location: components["schemas"]["GeoPoint"];
+            /** @description Регион города; null — регион не задан */
+            region: components["schemas"]["RegionRef"] | null;
+            country: components["schemas"]["CountryRef"];
+        };
+        /** @description Район города — фильтр полей и матчей */
+        District: {
+            /**
+             * Format: uuid
+             * @description Id района
+             * @example c1d9e3a7-5b2f-4a8c-8e6d-0f4b7a2c9e15
+             */
+            id: string;
+            /**
+             * @description Название района
+             * @example Промышленный
+             */
+            name: string;
+        };
+        /** @description Город с правилами страны и районами — экран города и настройки регистрации (возрастные пороги, валюта, телефонный код) */
+        CityDetails: components["schemas"]["City"] & {
+            /**
+             * @description Валюта страны ISO 4217 — суммы города (аренда поля) в ней, в минорных единицах
+             * @example RUB
+             */
+            currency: string;
+            /**
+             * @description Язык страны ISO 639-1 — на нём канонические названия
+             * @example ru
+             */
+            default_locale: string;
+            /**
+             * @description Телефонный код страны — подставляется в поле телефона
+             * @example +7
+             */
+            phone_prefix: string;
+            /**
+             * @description Первый день недели в календаре — 1 понедельник … 7 воскресенье (ISO 8601)
+             * @example 1
+             */
+            week_starts_on: number;
+            /**
+             * @description Минимальный возраст регистрации в стране, полных лет
+             * @example 14
+             */
+            min_signup_age: number;
+            /**
+             * @description Возраст совершеннолетия, полных лет — с него капитанство и покупки
+             * @example 18
+             */
+            age_of_majority: number;
+            /** @description Районы города без архивных; пусто — районов нет */
+            districts: components["schemas"]["District"][];
+        };
+        /** @description Страница списка городов */
+        CityPage: {
+            /** @description Города страницы в порядке списка */
+            items: components["schemas"]["City"][];
+            /**
+             * @description Курсор следующей страницы — передайте его в cursor; null — страниц больше нет
+             * @example eyJ2IjoyLCJzIjoiOWMxZTRmMGEiLCJrIjpbMiw0MzM5MzEsIjNmMmM4ZTFhLTliNGQtNGM3ZS1hNmYxLTJkOGI1ZTBjOWE0NyJdfQ
+             */
+            next_cursor: string | null;
+        };
+        /** @description Населённый пункт справочника GeoNames (CC BY 4.0), в котором находится точка запроса */
+        GeoPlace: {
+            /**
+             * Format: int64
+             * @description Id места в GeoNames
+             * @example 487846
+             */
+            geoname_id: number;
+            /**
+             * @description Название места на языке ответа; перевода нет — на языке страны
+             * @example Ставрополь
+             */
+            name: string;
+            /**
+             * @description Регион места на языке ответа; null — регион неизвестен
+             * @example Ставропольский край
+             */
+            region_name: string | null;
+            country: components["schemas"]["CountryRef"];
+            /**
+             * Format: double
+             * @description Расстояние от точки запроса до центра места, метры
+             * @example 1840.5
+             */
+            distance_m: number;
+            /** @description Город платформы на этом месте (заведён и виден); null — города здесь пока нет, приложение предлагает стать капитаном. Если город есть, страна места — страна города */
+            city: components["schemas"]["City"] | null;
+        };
+        /** @description Ближайший работающий город (pilot или live) и расстояние до него */
+        OpenCity: {
+            city: components["schemas"]["City"];
+            /**
+             * Format: double
+             * @description Расстояние от точки запроса до центра города, метры
+             * @example 1840.5
+             */
+            distance_m: number;
+        };
+        /** @description Автоопределение города по точке — ближайший работающий город и место точки */
+        NearestCity: {
+            /** @description Ближайший видимый город со статусом pilot или live, без ограничения расстояния; null — таких городов нет */
+            nearest_open: components["schemas"]["OpenCity"] | null;
+            /** @description Населённый пункт, в котором точка (радиус пункта растёт с населением, от 2 до 30 км; из накрывающих — ближайший); null — точка вне населённых пунктов или в стране, где платформа не работает */
+            here: components["schemas"]["GeoPlace"] | null;
+        };
+        /**
+         * @description Платформа мобильного приложения
+         * @enum {string}
+         */
+        AppPlatform: "ios" | "android";
+        /** @description Версии приложения для платформы. Все три поля null — версии ещё не заведены, приложение работает без проверки */
+        AppMinVersion: {
+            platform: components["schemas"]["AppPlatform"];
+            /**
+             * @description Минимальная версия MAJOR.MINOR.PATCH — ниже неё приложение требует обновиться
+             * @example 1.4.0
+             */
+            min_version: string | null;
+            /**
+             * @description Рекомендуемая версия — ниже неё приложение предлагает обновиться; не ниже min_version
+             * @example 1.6.2
+             */
+            recommended_version: string | null;
+            /**
+             * Format: uri
+             * @description Страница приложения в магазине платформы (App Store, Google Play), только https
+             * @example https://apps.apple.com/app/id6740000000
+             */
+            store_url: string | null;
         };
     };
     responses: {
@@ -136,29 +462,244 @@ export interface components {
          * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
          */
         IdempotencyKey: string;
+        /**
+         * @description Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+         * @example ru-RU,ru;q=0.9,en;q=0.8
+         */
+        AcceptLanguage: string;
     };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /**
+         * @description Всегда Accept-Language — ответ зависит от языка, кэши хранят языки раздельно
+         * @example Accept-Language
+         */
+        Vary: string;
+        /**
+         * @description Язык названий в ответе (ru или en). Заголовка нет — поддерживаемый язык не выбран, названия на языке страны каждой записи
+         * @example ru
+         */
+        ContentLanguage: string;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    getHealth: {
+    listCities: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Только города с этими статусами; несколько значений — повторите параметр (status=pilot&status=live). Без параметра — все статусы
+                 * @example [
+                 *       "pilot",
+                 *       "live"
+                 *     ]
+                 */
+                status?: components["schemas"]["CityStatus"][];
+                /**
+                 * @description Только города страны с этим кодом ISO 3166-1 alpha-2, заглавными буквами
+                 * @example RU
+                 */
+                country?: string;
+                /**
+                 * @description Начало названия города на любом поддерживаемом языке (ru, en), без учёта регистра и ё/е — подсказка при вводе
+                 * @example став
+                 */
+                q?: string;
+                /**
+                 * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+                 * @example eyJ2IjoyLCJzIjoiOWMxZTRmMGEiLCJrIjpbMiw0MzM5MzEsIjNmMmM4ZTFhLTliNGQtNGM3ZS1hNmYxLTJkOGI1ZTBjOWE0NyJdfQ
+                 */
+                cursor?: string;
+                /**
+                 * @description Размер страницы, от 1 до 100; без параметра — 20
+                 * @example 20
+                 */
+                limit?: number;
+            };
+            header?: {
+                /**
+                 * @description Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница городов */
+            200: {
+                headers: {
+                    /**
+                     * @description Справочник — кэшируется до 5 минут, в том числе общими кэшами
+                     * @example public, max-age=300
+                     */
+                    "Cache-Control": string;
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CityPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    findNearestCity: {
+        parameters: {
+            query: {
+                /**
+                 * @description Широта точки, градусы WGS 84, от -90 до 90; округлите до 0,01°
+                 * @example 45.04
+                 */
+                lat: number;
+                /**
+                 * @description Долгота точки, градусы WGS 84, от -180 до 180; округлите до 0,01°
+                 * @example 41.97
+                 */
+                lon: number;
+            };
+            header?: {
+                /**
+                 * @description Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ближайший работающий город и место точки */
+            200: {
+                headers: {
+                    /**
+                     * @description Ответ по координатам пользователя — не кэшируется
+                     * @example private, no-store
+                     */
+                    "Cache-Control": string;
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NearestCity"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCityBySlug: {
         parameters: {
             query?: never;
+            header?: {
+                /**
+                 * @description Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path: {
+                /**
+                 * @description Адрес города в вебе — текущий или прошлый
+                 * @example stavropol
+                 */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Город с правилами страны и районами */
+            200: {
+                headers: {
+                    /**
+                     * @description Справочник — кэшируется до 5 минут, в том числе общими кэшами
+                     * @example public, max-age=300
+                     */
+                    "Cache-Control": string;
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CityDetails"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getCity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Языки пользователя по RFC 9110 с q-весами; ответ — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка, без поддерживаемого языка или с неразборчивым значением — названия на языке страны каждой записи. Приложение шлёт язык интерфейса устройства
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path: {
+                /**
+                 * @description Id города
+                 * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+                 */
+                cityId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Город с правилами страны и районами */
+            200: {
+                headers: {
+                    /**
+                     * @description Справочник — кэшируется до 5 минут, в том числе общими кэшами
+                     * @example public, max-age=300
+                     */
+                    "Cache-Control": string;
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CityDetails"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getAppMinVersion: {
+        parameters: {
+            query: {
+                /**
+                 * @description Платформа приложения, которое спрашивает
+                 * @example ios
+                 */
+                platform: components["schemas"]["AppPlatform"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Сервис жив */
+            /** @description Версии приложения для платформы */
             200: {
                 headers: {
+                    /**
+                     * @description Кэшируется до минуты — смена версий в админке доходит до приложений не позже
+                     * @example public, max-age=60
+                     */
+                    "Cache-Control": string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Health"];
+                    "application/json": components["schemas"]["AppMinVersion"];
                 };
             };
             default: components["responses"]["Problem"];
