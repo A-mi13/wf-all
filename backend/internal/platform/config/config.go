@@ -63,7 +63,8 @@ type API struct {
 	Humancheck Humancheck
 }
 
-// Admin — вход сотрудников (сессия, TOTP, аллоулист) добавит спека identity.
+// Admin — API админки: вход сотрудников по cookie-сессии с TOTP (спека среза сотрудников §5),
+// письма сотрудникам и их ключи — тоже здесь: всё о сотрудниках исполняет admin-api (решение D3).
 type Admin struct {
 	Log  Log
 	HTTP HTTP
@@ -74,10 +75,26 @@ type Admin struct {
 	// ClientIPHeader — заголовок CDN с адресом посетителя (CF-Connecting-IP), только от TrustedProxies
 	ClientIPHeader string `env:"CLIENT_IP_HEADER"`
 	RateLimits     string `env:"RATE_LIMITS"`
+	// Origin — единственный origin админки (схема, хост, порт): проверка CSRF (Origin запроса) и
+	// ссылки в письмах. В dev — http://127.0.0.1:5173 (Vite проксирует /v1).
+	Origin string `env:"ORIGIN,required"`
+	// StaffSecretKeys — кольцо ключей секретов сотрудников (keys.Ring: TOTP, коды приглашений,
+	// резервные коды, ключ лимита по почте), base64 ≥ 32 байт через запятую: первый — текущий.
+	StaffSecretKeys []string `env:"STAFF_SECRET_KEYS,required" envSeparator:","`
+	// IPAllowlist — сети, из которых пускают в админку (CIDR через запятую); пусто — выключено.
+	IPAllowlist []netip.Prefix `env:"IP_ALLOWLIST" envSeparator:","`
+	// CookieSecure — cookie сессии с Secure и префиксом __Host-; false — только dev по http, если
+	// браузер не принял __Host- на 127.0.0.1 (решение R6). В проде — только true.
+	CookieSecure bool `env:"COOKIE_SECURE" envDefault:"true"`
+	// StaticDir — каталог собранной apps/admin: admin-api отдаёт её с того же origin (решение D6);
+	// пусто — статику не отдаёт (в dev её отдаёт Vite).
+	StaticDir string `env:"STATIC_DIR"`
+	// Mail — SMTP писем сотрудникам (ADMIN_MAIL_*): исполнитель очереди staff внутри admin-api.
+	Mail Mail
 }
 
 // Mail — SMTP транзакционных писем (спека §6.9); в dev — Mailpit. Воркер читает отдельно:
-// config.Load[config.Mail]("WORKER_", …).
+// config.Load[config.Mail]("WORKER_", …); admin-api — полем Admin.Mail (ADMIN_MAIL_*).
 type Mail struct {
 	SMTPAddr string `env:"MAIL_SMTP_ADDR,required"`
 	From     string `env:"MAIL_FROM,required"`

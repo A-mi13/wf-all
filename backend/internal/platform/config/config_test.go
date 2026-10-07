@@ -32,13 +32,33 @@ func TestLoadAPIWithDefaults(t *testing.T) {
 	}
 }
 
+// adminEnv — обязательные переменные admin-api с правками: "KEY=value" заменяет или добавляет,
+// "KEY" без = убирает.
+func adminEnv(edits ...string) []string {
+	env := map[string]string{
+		"ADMIN_HTTP_ADDR":         ":8081",
+		"ADMIN_DATABASE_URL":      "postgres://admin@localhost/wf",
+		"ADMIN_ORIGIN":            "http://127.0.0.1:5173",
+		"ADMIN_STAFF_SECRET_KEYS": "k1",
+		"ADMIN_MAIL_SMTP_ADDR":    "127.0.0.1:11025",
+		"ADMIN_MAIL_FROM":         "WF <noreply@wf.local>",
+	}
+	for _, e := range edits {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			env[k] = v
+		} else {
+			delete(env, k)
+		}
+	}
+	out := make([]string, 0, len(env))
+	for k, v := range env {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
 func TestLoadDocsEnabledPerBinary(t *testing.T) {
-	c, err := config.Load[config.Admin]("ADMIN_", []string{
-		"ADMIN_HTTP_ADDR=:8081",
-		"ADMIN_DATABASE_URL=postgres://admin@localhost/wf",
-		"ADMIN_DOCS_ENABLED=true",
-		"API_DOCS_ENABLED=false",
-	})
+	c, err := config.Load[config.Admin]("ADMIN_", adminEnv("ADMIN_DOCS_ENABLED=true", "API_DOCS_ENABLED=false"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +82,7 @@ func TestAdminHasNoBFF(t *testing.T) {
 		}
 	}
 	walk(reflect.TypeFor[config.Admin]())
-	c, err := config.Load[config.Admin]("ADMIN_", []string{
-		"ADMIN_HTTP_ADDR=:8081", "ADMIN_DATABASE_URL=postgres://admin@localhost/wf",
-		"ADMIN_TRUSTED_PROXIES=10.0.0.0/8",
-	})
+	c, err := config.Load[config.Admin]("ADMIN_", adminEnv("ADMIN_TRUSTED_PROXIES=10.0.0.0/8"))
 	if err != nil || len(c.TrustedProxies) != 1 || c.TrustedProxies[0] != netip.MustParsePrefix("10.0.0.0/8") {
 		t.Fatalf("прокси: %v %+v", err, c.TrustedProxies)
 	}
@@ -73,8 +90,8 @@ func TestAdminHasNoBFF(t *testing.T) {
 
 // Заголовок с адресом посетителя от CDN — ADMIN_CLIENT_IP_HEADER; по умолчанию пусто.
 func TestAdminClientIPHeader(t *testing.T) {
-	base := []string{"ADMIN_HTTP_ADDR=:8081", "ADMIN_DATABASE_URL=postgres://admin@localhost/wf"}
-	c, err := config.Load[config.Admin]("ADMIN_", append(base, "ADMIN_CLIENT_IP_HEADER=CF-Connecting-IP"))
+	base := adminEnv()
+	c, err := config.Load[config.Admin]("ADMIN_", adminEnv("ADMIN_CLIENT_IP_HEADER=CF-Connecting-IP"))
 	if err != nil || c.ClientIPHeader != "CF-Connecting-IP" {
 		t.Fatalf("%v %q", err, c.ClientIPHeader)
 	}
@@ -207,4 +224,62 @@ func TestPeerNetsEmptyAndTrailingComma(t *testing.T) {
 	if err != nil || len(c.Peer.TrustedProxies) != 2 || c.Peer.TrustedProxies[1].IsValid() {
 		t.Fatalf("висячая запятая: %v %+v", err, c.Peer)
 	}
+}
+
+// Вход сотрудников (спека среза §5): origin, кольцо ключей, аллоулист, Secure-cookie, статика и
+// почта admin-api.
+func TestAdminStaffConfig(t *testing.T) {
+	c, err := config.Load[config.Admin]("ADMIN_", adminEnv(
+		"ADMIN_STAFF_SECRET_KEYS=new,old",
+		"ADMIN_IP_ALLOWLIST=203.0.113.0/24,2001:db8::/32",
+		"ADMIN_STATIC_DIR=../apps/admin/dist",
+		"ADMIN_MAIL_SMTP_TLS=none",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Origin != "http://127.0.0.1:5173" || len(c.StaffSecretKeys) != 2 || c.StaffSecretKeys[0] != "new" ||
+		c.StaticDir != "../apps/admin/dist" {
+		t.Fatalf("%+v", c)
+	}
+	if len(c.IPAllowlist) != 2 || c.IPAllowlist[1] != netip.MustParsePrefix("2001:db8::/32") {
+		t.Fatalf("аллоулист: %+v", c.IPAllowlist)
+	}
+	if !c.CookieSecure {
+		t.Fatal("ADMIN_COOKIE_SECURE по умолчанию не true")
+	}
+	if c.Mail.SMTPAddr != "127.0.0.1:11025" || c.Mail.TLS != "none" || c.Mail.From == "" {
+		t.Fatalf("почта: %+v", c.Mail)
+	}
+
+	c, err = config.Load[config.Admin]("ADMIN_", adminEnv("ADMIN_COOKIE_SECURE=false", "ADMIN_IP_ALLOWLIST="))
+	if err != nil || c.CookieSecure || len(c.IPAllowlist) != 0 || c.StaticDir != "" || c.Mail.TLS != "mandatory" {
+		t.Fatalf("dev без Secure, пустой аллоулист: %v %+v", err, c)
+	}
+}
+
+// Без origin, ключей или почты admin-api не стартует — и называет переменную.
+func TestAdminRequiresStaffSettings(t *testing.T) {
+	for _, name := range []string{"ADMIN_ORIGIN", "ADMIN_STAFF_SECRET_KEYS", "ADMIN_MAIL_SMTP_ADDR", "ADMIN_MAIL_FROM"} {
+		_, err := config.Load[config.Admin]("ADMIN_", adminEnv(name))
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("без %s: %v", name, err)
+		}
+	}
+}
+
+// Ключей сотрудников у воркера нет (решение D3): письма и перешифровка — в admin-api.
+func TestWorkerHasNoStaffKeys(t *testing.T) {
+	var walk func(reflect.Type)
+	walk = func(rt reflect.Type) {
+		for f := range rt.Fields() {
+			if strings.Contains(f.Tag.Get("env"), "STAFF") {
+				t.Errorf("config.Worker: поле %s (WORKER_%s)", f.Name, f.Tag.Get("env"))
+			}
+			if f.Type.Kind() == reflect.Struct {
+				walk(f.Type)
+			}
+		}
+	}
+	walk(reflect.TypeFor[config.Worker]())
 }

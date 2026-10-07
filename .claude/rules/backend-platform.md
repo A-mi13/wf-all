@@ -26,7 +26,14 @@ paths:
 - Почта — только задача `mail.SendArgs{V: 1, Mail: "<модуль>.<письмо>", Ref: id}` (на другую версию воркер
   вернёт ошибку, задача уйдёт в повтор и после `MaxAttempts` станет «мёртвой»); адрес находит
   `mail.Composer` модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en).
-- Пароли — `password.Check` + `password.Hasher` (argon2id под семафором); «нет почты» — `VerifyDummy`.
+- Пароли — `password.Check` + `password.Hasher` (argon2id под семафором; `password.DefaultParams()` — минимум OWASP);
+  «нет почты» — `VerifyDummy`. Пароль приводится к NFKC; длиннее `password.MaxInputBytes` (1024 байта) —
+  `ErrTooLong` до хэширования; хэш из базы с параметрами выше потолков (m 256 МиБ, t 10, p 16) или солью < 16 байт —
+  `ErrMalformed`.
+- Секреты в базе — `keys.Ring` из `*_SECRET_KEYS`: `Seal(данные, aad = id строки)` → шифротекст и `key_id` (хранить
+  рядом), `Open(ct, key_id, aad)`; хэш-коды — `MAC(key_id, метка, сообщение)` (своя метка на назначение, сравнение —
+  `hmac.Equal`). Новые строки — `CurrentID()`; старый ключ убирают из окружения, только когда ни одна строка на него
+  не ссылается (`Has`).
 - Когда требовать PoW — `risk.Assessor`; требование — `humancheck.Require` (403 с задачей).
 - Тесты механизмов с SQL — под ролью прода: `dbtest.NewPoolsAs(t, "api"|"worker"|"admin")`.
 - Пагинация — пакет `page`, свой курсор модули не пишут: v1 `Encode/Decode` — keyset по `(created_at, id)`;
