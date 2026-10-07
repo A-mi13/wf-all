@@ -116,8 +116,18 @@ func TestMatrixComplete(t *testing.T) {
 	}
 }
 
-// Права среза совпадают со спекой §2.5 и не черновые.
+// Права среза совпадают со спекой §2.5 и не черновые; в обе стороны: нечерновое право вне §2.5 —
+// правка матрицы мимо спеки.
 func TestMatrixMatchesSpec(t *testing.T) {
+	inSpec := map[string]bool{}
+	for _, s := range spec25 {
+		inSpec[s.key] = true
+	}
+	for _, p := range perm.Catalog {
+		if !p.Draft && !inSpec[p.Key] {
+			t.Errorf("%s: нечерновое право, которого нет в спеке §2.5 (и в spec25)", p.Key)
+		}
+	}
 	for _, s := range spec25 {
 		p, ok := perm.Lookup(s.key)
 		if !ok || p.Draft {
@@ -164,6 +174,72 @@ func TestMatrixInvariants(t *testing.T) {
 				t.Errorf("%s: у роли %s значение %s — право только владельца", key, r, g)
 			}
 		}
+	}
+}
+
+// strength — сила значения для сравнения ролей: allow (сам, везде) > scoped (сам, в своих городах) >
+// dual (только вдвоём) > deny.
+func strength(g auth.Grant) int {
+	switch g {
+	case auth.GrantAllow:
+		return 3
+	case auth.GrantScoped:
+		return 2
+	case auth.GrantDual:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// Иерархия ролей (R1, M3): у владельца ни в одной строке не строже, чем у админа (нет owner=dual при
+// admin=allow); админ не слабее модератора и поддержки; scoped — только у прав, привязанных к городу;
+// права audit.* — только чтение (удалить или править журнал не может никто).
+func TestMatrixHierarchy(t *testing.T) {
+	cityBound := 0
+	for _, p := range perm.Catalog {
+		m := perm.Matrix[p.Key]
+		if strength(m[perm.Owner]) < strength(m[perm.Admin]) {
+			t.Errorf("%s: у владельца %s строже, чем у админа %s", p.Key, m[perm.Owner], m[perm.Admin])
+		}
+		for _, r := range []perm.Role{perm.Moderator, perm.Support} {
+			if strength(m[perm.Admin]) < strength(m[r]) {
+				t.Errorf("%s: админ (%s) слабее роли %s (%s)", p.Key, m[perm.Admin], r, m[r])
+			}
+		}
+		if p.CityBound {
+			cityBound++
+		}
+		for _, r := range perm.Roles {
+			if m[r] == auth.GrantScoped && !p.CityBound {
+				t.Errorf("%s: scoped у права без привязки к городу — городам модератора не с чем сверяться", p.Key)
+			}
+		}
+		if strings.HasPrefix(p.Key, "audit.") && p.Mutating {
+			t.Errorf("%s: право изменения журнала действий — журнал только читают", p.Key)
+		}
+	}
+	if cityBound == 0 {
+		t.Fatal("нет прав с привязкой к городу — проверка scoped вхолостую")
+	}
+	if p, ok := perm.Lookup("audit.log.read"); !ok || p.Mutating {
+		t.Fatal("audit.log.read: права нет или оно не чтение — проверка audit.* вхолостую")
+	}
+}
+
+// Права с привязкой к городу перечислены явно: значение scoped у них осмысленно.
+func TestCityBound(t *testing.T) {
+	want := []string{"audit.log.read", "geo.cities.read", "geo.cities.manage", "geo.cities.rename",
+		"geo.districts.manage", "teams.captains.approve", "pitches.pitches.moderate", "moderation.reports.read",
+		"moderation.reports.resolve", "moderation.restrictions.apply", "results.reports.annul", "identity.pii.read"}
+	var got []string
+	for _, p := range perm.Catalog {
+		if p.CityBound {
+			got = append(got, p.Key)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("права с привязкой к городу:\n%v\nнужно:\n%v", got, want)
 	}
 }
 

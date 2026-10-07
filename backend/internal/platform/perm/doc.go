@@ -45,11 +45,11 @@ func Markdown() string {
 }
 
 func writeTable(b *strings.Builder, drafts bool) {
-	b.WriteString("| Право | Что разрешает | Вид |")
+	b.WriteString("| Право | Что разрешает | Вид | Привязка |")
 	for _, r := range Roles {
 		b.WriteString(" " + roleTitle[r] + " |")
 	}
-	b.WriteString("\n| --- | --- | --- |")
+	b.WriteString("\n| --- | --- | --- | --- |")
 	for range Roles {
 		b.WriteString(" --- |")
 	}
@@ -62,7 +62,11 @@ func writeTable(b *strings.Builder, drafts bool) {
 		if p.Mutating {
 			kind = "изменение"
 		}
-		b.WriteString("| `" + p.Key + "` | " + p.Title + " | " + kind + " |")
+		bound := "—"
+		if p.CityBound {
+			bound = "город"
+		}
+		b.WriteString("| `" + p.Key + "` | " + p.Title + " | " + kind + " | " + bound + " |")
 		for _, r := range Roles {
 			b.WriteString(" " + grantTitle(Matrix[p.Key][r]) + " |")
 		}

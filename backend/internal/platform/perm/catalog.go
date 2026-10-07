@@ -36,10 +36,11 @@ var Service = []string{Anonymous, Session, Self, Handler}
 
 // Permission — право каталога.
 type Permission struct {
-	Key      string // <модуль>.<ресурс>.<действие>
-	Title    string // по-русски, для таблицы docs/05
-	Mutating bool   // меняет состояние; false — только чтение (действие read или search)
-	Draft    bool   // строка будущего модуля: только в документе; в контракте и правах ролей её нет
+	Key       string // <модуль>.<ресурс>.<действие>
+	Title     string // по-русски, для таблицы docs/05
+	Mutating  bool   // меняет состояние; false — только чтение (действие read или search)
+	CityBound bool   // объект права принадлежит городу: только у таких прав бывает scoped (модератор — свои города)
+	Draft     bool   // строка будущего модуля: только в документе; в контракте и правах ролей её нет
 }
 
 const (
@@ -61,6 +62,13 @@ func reading(key, title string, owner, admin, moderator, support auth.Grant) row
 
 func changing(key, title string, owner, admin, moderator, support auth.Grant) row {
 	return row{Permission{Key: key, Title: title, Mutating: true}, [4]auth.Grant{owner, admin, moderator, support}}
+}
+
+// city — право над объектом города (город, район, запись журнала, заявка, жалоба): у него бывает scoped,
+// и конвейер или сценарий сверяет город объекта с городами модератора.
+func city(r row) row {
+	r.p.CityBound = true
+	return r
 }
 
 // draft — строка будущего модуля (макет 07, «Роли и доступ»): значения уточнит спека модуля.
@@ -85,14 +93,14 @@ var rows = []row{
 	changing("staff.invites.resend", "отправить приглашение повторно", allow, allow, deny, deny),
 	changing("staff.sessions.revoke", "завершить чужие сессии (админ — только модераторов и поддержки)", allow, allow, deny, deny),
 	// журнал действий
-	reading("audit.log.read", "читать журнал действий (модератор — свои города и свои записи)", allow, allow, scoped, allow),
+	city(reading("audit.log.read", "читать журнал действий (модератор — свои города и свои записи)", allow, allow, scoped, allow)),
 	// geo — справочник городов
 	reading("geo.places.search", "искать места GeoNames", allow, allow, deny, deny),
-	reading("geo.cities.read", "города и районы", allow, allow, scoped, allow),
+	city(reading("geo.cities.read", "города и районы", allow, allow, scoped, allow)),
 	changing("geo.cities.activate", "открыть город", allow, allow, deny, deny),
-	changing("geo.cities.manage", "статус, slug и привязка geoname_id города", allow, allow, deny, deny),
-	changing("geo.cities.rename", "названия города по языкам", allow, allow, scoped, deny),
-	changing("geo.districts.manage", "районы города", allow, allow, scoped, deny),
+	city(changing("geo.cities.manage", "статус, slug и привязка geoname_id города", allow, allow, deny, deny)),
+	city(changing("geo.cities.rename", "названия города по языкам", allow, allow, scoped, deny)),
+	city(changing("geo.districts.manage", "районы города", allow, allow, scoped, deny)),
 	reading("geo.countries.read", "страны и их правила", allow, allow, allow, allow),
 	changing("geo.countries.manage", "правила страны и её включение", allow, allow, deny, deny),
 	reading("geo.imports.read", "журнал импорта GeoNames", allow, allow, deny, allow),
@@ -104,14 +112,14 @@ var rows = []row{
 	changing("platform.flags.manage", "переключать флаги функций по городам", allow, allow, deny, deny),
 
 	// черновые строки будущих модулей (макет 07, «Роли и доступ»)
-	draft(changing("teams.captains.approve", "одобрять заявки на капитанство", allow, allow, scoped, deny)),
-	draft(changing("pitches.pitches.moderate", "публиковать и объединять площадки", allow, allow, scoped, deny)),
-	draft(reading("moderation.reports.read", "читать жалобы и споры", allow, allow, scoped, allow)),
-	draft(changing("moderation.reports.resolve", "решать жалобы и споры с формулировкой", allow, allow, scoped, deny)),
-	draft(changing("moderation.restrictions.apply", "накладывать ограничения до 30 дней", allow, allow, scoped, deny)),
+	draft(city(changing("teams.captains.approve", "одобрять заявки на капитанство", allow, allow, scoped, deny))),
+	draft(city(changing("pitches.pitches.moderate", "публиковать и объединять площадки", allow, allow, scoped, deny))),
+	draft(city(reading("moderation.reports.read", "читать жалобы и споры", allow, allow, scoped, allow))),
+	draft(city(changing("moderation.reports.resolve", "решать жалобы и споры с формулировкой", allow, allow, scoped, deny))),
+	draft(city(changing("moderation.restrictions.apply", "накладывать ограничения до 30 дней", allow, allow, scoped, deny))),
 	draft(changing("moderation.bans.issue", "блокировать навсегда, без срока", dual, dual, deny, deny)),
-	draft(changing("results.reports.annul", "аннулировать протокол матча (снятие голов у всех)", dual, dual, deny, deny)),
-	draft(reading("identity.pii.read", "видеть почту и телефон игрока (каждое чтение — в журнал)", allow, allow, scoped, allow)),
+	draft(city(changing("results.reports.annul", "аннулировать протокол матча (снятие голов у всех)", dual, dual, deny, deny))),
+	draft(city(reading("identity.pii.read", "видеть почту и телефон игрока (каждое чтение — в журнал)", allow, allow, scoped, allow))),
 	draft(changing("economy.catalog.manage", "каталог косметики, подписок и наград", allow, allow, deny, deny)),
 	draft(changing("economy.credits.grant", "ручное начисление кредитов и очков", dual, dual, deny, deny)),
 }

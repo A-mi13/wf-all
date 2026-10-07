@@ -16,7 +16,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 8. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
 
 ## File structure
-- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate}`, `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
+- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc}` (`permdoc` — кодогенерация таблицы прав, в образ не входит), `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
 - `contracts/` — OpenAPI: исходники `openapi/{public,admin}/` по модулям, бандлы `openapi/{public,admin}.yaml` (сгенерированы) — источник истины; `tokens/tokens.json`
 - `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`
 - `deploy/dev/` — роли и расширения БД; dev-стенд (Neon + Render): `backend/Dockerfile`, `render.yaml`, `docs/deploy-dev.md`; `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
