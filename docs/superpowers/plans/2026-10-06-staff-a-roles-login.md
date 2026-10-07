@@ -725,22 +725,37 @@ admin:e2e`, job в CI.
     учётка — `invited`, письма не получает). Константа `MailBootstrapped = "staff.bootstrapped"` — рядом с
     `MailInvite`/`MailAccessReset`/`MailLocked` в корне `staff`. Составитель `app.ComposeBootstrapped(ctx,
     ref, recipient)` — по образцу `ComposeLocked`: имя и почта новой учётки, время, «оператор сервера»;
-    язык — `staff_accounts.locale` получателя. Тест: два активных владельца и один выключенный → два
+    язык — `staff_accounts.locale` получателя; `ref` — id новой учётки (исполнитель всегда оператор, время
+    — `created_at`). Тест: два активных владельца и один выключенный → два
     письма; на пустой базе — ни одного. `bootstrap` по-прежнему доступен всегда (ограничения «только на
     пустой базе» нет и не вводится).
   - **U1 — письмо о выключении админа (Task 8b).** Выключение учётки с ролью `admin`
     (`staff.roles.revoke_admin`) в той же транзакции ставит `staff.NewMailArgs(staff.MailAdminDisabled,
-    adminID, ownerID)` каждому активному владельцу, кроме инициатора. Константа
-    `MailAdminDisabled = "staff.admin_disabled"`. Составитель `app.ComposeAdminDisabled` — кто выключил
-    (`actor_label`), кого (имя, почта), когда, причина из списка (`reason`); комментарий в письмо не
-    идёт. Тест: владельцы A (инициатор), B, C → письма B и C; выключение модератора — писем нет;
+    auditID, ownerID)` каждому активному владельцу, кроме инициатора. **`ref` — id записи аудита
+    `staff.disabled`** этого выключения (как у `staff.locked` `ref` — id сессии): в аргументах задачи только
+    id, колонок «кто выключил» и «причина» у учётки нет, а запись аудита однозначна и без гонки с
+    повторным выключением. Для этого `audit.Entry` получает поле `ID uuid.UUID` (задано — пишется оно,
+    пусто — `id.New()`, как сейчас) — в Task 3b (если 3b уже закрыт — первым шагом 8b, тест в
+    `platform/audit`); 8b генерирует `auditID := id.New()` до `audit.Write`. Константа
+    `MailAdminDisabled = "staff.admin_disabled"`. Составитель `app.ComposeAdminDisabled(ctx, ref,
+    recipient)` читает запись `audit_log` по `ref` (у роли `admin` чтение журнала есть): кто выключил
+    (`actor_label`), кого (`object_id` → имя и почта учётки), когда (`created_at`), причина из списка
+    (`reason` без комментария — комментарий в письмо не идёт). Тест: владельцы A (инициатор), B, C →
+    письма B и C с `ref` = id записи `staff.disabled`; выключение модератора — писем нет;
     `OperatorDisable` админа — письма всем активным владельцам (инициатор — оператор).
   - **Тексты (Task 7 и 8b).** `backend/locales/{ru,en}.json`: `staff.bootstrapped.subject`,
     `staff.bootstrapped.body`, `staff.admin_disabled.subject`, `staff.admin_disabled.body` — ru и en
     переводом (ключи ru = en, тест локалей).
   - **MailWorker (Task 10c).** В `switch a.Mail` — ветки `staff.MailBootstrapped` →
-    `ComposeBootstrapped`, `staff.MailAdminDisabled` → `ComposeAdminDisabled`; тест `TestMailWorkerArgs`
-    — новые виды. Живой e2e (Task 16) не трогать.
+    `ComposeBootstrapped`, `staff.MailAdminDisabled` → `ComposeAdminDisabled`. Аргументы новых видов
+    проверяют составители — по образцу `ComposeLocked` и `ComposeInvite` (`mail.ErrSkip` → задача
+    отменяется, письмо не уходит): `ref` указывает на существующую сущность нужного вида
+    (`staff.bootstrapped` — учётка с ролью `owner`; `staff.admin_disabled` — запись `audit_log` с действием
+    `staff.disabled`), получатель — всё ещё активный владелец; иначе `mail.ErrSkip`. Тест
+    `TestMailWorkerArgs` — новые случаи по образцу «блокировка без сессии»: `staff.bootstrapped` с
+    несуществующей учёткой, `staff.admin_disabled` с id несуществующей записи аудита или записи другого
+    действия, получатель выключен или не владелец — отмена без письма; составители — свои табличные
+    тесты `mail.ErrSkip` по образцу `TestComposeLocked`. Живой e2e (Task 16) не трогать.
   - **M10 (Task 10b).** `listGeoCities` для модератора фильтрует по `auth.Staff.CityIDs` (право `scoped`
     без `cityId` в пути — конвейер пропускает, фильтрует ручка): `geo.ListParams` получает ограничение
     городами модератора (пересечение с `IDs`, если они заданы). Тест «модератор видит только свои
