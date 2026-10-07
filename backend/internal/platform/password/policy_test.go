@@ -46,3 +46,21 @@ func TestCommonListIntegrity(t *testing.T) {
 		t.Fatalf("в списке %d паролей — файл обрезан?", n)
 	}
 }
+
+// Длина и список — после NFKC, как пароль и будет хэширован.
+func TestCheckNFKC(t *testing.T) {
+	cases := map[string]error{
+		"ｑｗｅｒｔｙｕｉｏｐ":                                  password.ErrCommon,   // полноширинный qwertyuiop
+		strings.Repeat("e\u0301", 9):                  password.ErrTooShort, // 18 кодовых точек, 9 символов
+		strings.Repeat("e\u0301", 10):                 nil,
+		strings.Repeat("\ufb00", 65):                  password.ErrTooLong, // ﬀ → ff: 130 символов
+		strings.Repeat("\ufb00", 64):                  nil,
+		strings.Repeat("a", 1<<20):                    password.ErrTooLong, // до NFKC, по байтам
+		strings.Repeat("a", password.MaxInputBytes+1): password.ErrTooLong,
+	}
+	for pw, want := range cases {
+		if got := password.Check(pw); !errors.Is(got, want) {
+			t.Errorf("Check(%.20q…) = %v, нужно %v", pw, got, want)
+		}
+	}
+}

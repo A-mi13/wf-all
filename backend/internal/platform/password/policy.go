@@ -9,13 +9,13 @@ import (
 )
 
 const (
-	MinLength = 10  // NIST SP 800-63B: длина вместо правил состава (§7.1)
+	MinLength = 10  // NIST SP 800-63B: длина вместо правил состава (§7.1), символов после NFKC
 	MaxLength = 128 // защита от гигантских паролей; argon2 съел бы и их, но смысла нет
 )
 
 var (
 	ErrTooShort = errors.New("password: короче 10 символов")
-	ErrTooLong  = errors.New("password: длиннее 128 символов")
+	ErrTooLong  = errors.New("password: длиннее 128 символов или 1024 байт")
 	ErrCommon   = errors.New("password: из списка распространённых")
 )
 
@@ -35,9 +35,14 @@ var commonSet = sync.OnceValue(func() map[string]struct{} {
 	return set
 })
 
-// Check — правила пароля без правил состава: длина в символах и список распространённых
-// (без учёта регистра).
+// Check — правила пароля без правил состава: длина в символах после NFKC (как пароль и будет
+// хэширован) и список распространённых (без учёта регистра). Длиннее MaxInputBytes — ErrTooLong
+// до нормализации.
 func Check(pw string) error {
+	pw, err := normalize(pw)
+	if err != nil {
+		return err
+	}
 	switch n := utf8.RuneCountInString(pw); {
 	case n < MinLength:
 		return ErrTooShort
