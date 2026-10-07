@@ -78,6 +78,14 @@ scripts/pg.sh port      # какой порт возьмёт скрипт
 scripts/pg.sh stop      # остановить, данные остаются
 ```
 
+Кластер одноразовый, поэтому `init` выключает `fsync`, `full_page_writes` и `synchronous_commit`.
+На Windows каждый `DROP DATABASE` делает принудительный checkpoint; с fsync очистка клонов баз в
+тестах встаёт в очередь до таймаута. Кластер, созданный раньше, переключается так:
+`scripts/pg.sh psql -c "ALTER SYSTEM SET fsync = off" -c "ALTER SYSTEM SET full_page_writes = off"
+-c "ALTER SYSTEM SET synchronous_commit = off" -c "SELECT pg_reload_conf()"`. После сбоя ОС
+кластер может испортиться: `stop`, удалить `.tools/pg/data`, `init`. Тесты бэкенда идут с `-p 4`
+(`./task backend:test`): так они быстрее, чем все пакеты разом.
+
 Точные версии — `docs/versions.md`. На Linux/macOS вместо скрипта используется системный
 PostgreSQL + PostGIS на том же порту (Docker — только в CI и на сервере).
 

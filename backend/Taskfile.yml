@@ -35,15 +35,17 @@ tasks:
   test:
     desc: Все тесты бэкенда (нужен Postgres — ./task infra:up). Цикл TDD — ./task backend:test:watch
     # Без sources намеренно: иначе ./task ci пропускает тесты как up-to-date.
+    # -p 4: каждый тест клонирует базу (pgtestdb); при 24 пакетах разом клоны и DROP DATABASE душат один
+    # Postgres и тест уходит в таймаут 10 мин. На 4 пакетах прогон быстрее, чем без ограничения.
     cmds:
-      - go test ./... -count=1
+      - go test ./... -count=1 -p 4
 
   test:watch:
     desc: Цикл TDD — перезапуск тестов бэкенда при изменении Go, SQL и go.mod
     watch: true
     sources: ['**/*.go', 'migrations/*.sql', 'sqlc.yaml', 'go.mod', 'go.sum']
     cmds:
-      - go test ./... -count=1
+      - go test ./... -count=1 -p 4
 
   ci:
     desc: Всё, что проверяет CI для бэкенда
