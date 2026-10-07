@@ -77,10 +77,11 @@ type Admin struct {
 	RateLimits     string `env:"RATE_LIMITS"`
 	// Origin — единственный origin админки (схема, хост, порт): проверка CSRF (Origin запроса) и
 	// ссылки в письмах. В dev — http://127.0.0.1:5173 (Vite проксирует /v1).
-	Origin string `env:"ORIGIN,required"`
+	// notEmpty: required ловит только отсутствие переменной, пустое значение — тоже отказ.
+	Origin string `env:"ORIGIN,required,notEmpty"`
 	// StaffSecretKeys — кольцо ключей секретов сотрудников (keys.Ring: TOTP, коды приглашений,
 	// резервные коды, ключ лимита по почте), base64 ≥ 32 байт через запятую: первый — текущий.
-	StaffSecretKeys []string `env:"STAFF_SECRET_KEYS,required" envSeparator:","`
+	StaffSecretKeys []string `env:"STAFF_SECRET_KEYS,required,notEmpty" envSeparator:","`
 	// IPAllowlist — сети, из которых пускают в админку (CIDR через запятую); пусто — выключено.
 	IPAllowlist []netip.Prefix `env:"IP_ALLOWLIST" envSeparator:","`
 	// CookieSecure — cookie сессии с Secure и префиксом __Host-; false — только dev по http, если

@@ -16,6 +16,9 @@ var (
 	ErrUnknownKey = errors.New("keys: ключ не найден в кольце")
 	// ErrDecrypt — шифротекст повреждён, обрезан, чужого формата или не от этого aad.
 	ErrDecrypt = errors.New("keys: не расшифровывается")
+	// ErrNoAAD — Seal или Open без aad: шифротекст не привязан к строке и открылся бы в чужой.
+	// Ошибка кода вызывающего, а не данных.
+	ErrNoAAD = errors.New("keys: пустой aad — шифротекст не привязан к строке")
 )
 
 const (
@@ -89,8 +92,12 @@ func (r *Ring) Has(keyID string) bool {
 }
 
 // Seal — AES-256-GCM текущим ключом. aad — к чему привязан шифротекст (id строки): тот же текст в
-// другой строке не расшифруется. ct = версия ‖ nonce ‖ шифротекст ‖ тег; keyID — сохранить рядом.
+// другой строке не расшифруется; пустой aad — ErrNoAAD. ct = версия ‖ nonce ‖ шифротекст ‖ тег;
+// keyID — сохранить рядом.
 func (r *Ring) Seal(plaintext, aad []byte) (ct []byte, keyID string, err error) {
+	if len(aad) == 0 {
+		return nil, "", ErrNoAAD
+	}
 	k := &r.keys[0]
 	nonce := make([]byte, k.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
@@ -102,9 +109,12 @@ func (r *Ring) Seal(plaintext, aad []byte) (ct []byte, keyID string, err error) 
 	return k.aead.Seal(out, nonce, plaintext, aad), k.id, nil
 }
 
-// Open — расшифровка ключом keyID: ErrUnknownKey — такого ключа нет; ErrDecrypt — повреждено,
-// не тот aad или не тот формат.
+// Open — расшифровка ключом keyID: ErrNoAAD — пустой aad; ErrUnknownKey — такого ключа нет;
+// ErrDecrypt — повреждено, не тот aad или не тот формат.
 func (r *Ring) Open(ct []byte, keyID string, aad []byte) ([]byte, error) {
+	if len(aad) == 0 {
+		return nil, ErrNoAAD
+	}
 	i, ok := r.byID[keyID]
 	if !ok {
 		return nil, ErrUnknownKey

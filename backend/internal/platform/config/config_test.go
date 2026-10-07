@@ -258,13 +258,22 @@ func TestAdminStaffConfig(t *testing.T) {
 	}
 }
 
-// Без origin, ключей или почты admin-api не стартует — и называет переменную.
+// Без origin, ключей или почты admin-api не стартует — и называет переменную. Пустое значение
+// origin и ключей — тоже отказ: required в caarlos0/env ловит только отсутствие переменной, а
+// пустое кольцо ключей или origin молча дошли бы до старта.
 func TestAdminRequiresStaffSettings(t *testing.T) {
-	for _, name := range []string{"ADMIN_ORIGIN", "ADMIN_STAFF_SECRET_KEYS", "ADMIN_MAIL_SMTP_ADDR", "ADMIN_MAIL_FROM"} {
-		_, err := config.Load[config.Admin]("ADMIN_", adminEnv(name))
+	check := func(edit, name string) {
+		t.Helper()
+		_, err := config.Load[config.Admin]("ADMIN_", adminEnv(edit))
 		if err == nil || !strings.Contains(err.Error(), name) {
-			t.Errorf("без %s: %v", name, err)
+			t.Errorf("%q: %v", edit, err)
 		}
+	}
+	for _, name := range []string{"ADMIN_ORIGIN", "ADMIN_STAFF_SECRET_KEYS", "ADMIN_MAIL_SMTP_ADDR", "ADMIN_MAIL_FROM"} {
+		check(name, name) // переменной нет
+	}
+	for _, name := range []string{"ADMIN_ORIGIN", "ADMIN_STAFF_SECRET_KEYS"} {
+		check(name+"=", name) // переменная пуста
 	}
 }
 

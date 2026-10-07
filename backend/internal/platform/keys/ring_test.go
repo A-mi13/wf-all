@@ -76,8 +76,8 @@ func TestRingSealOpenRoundTrip(t *testing.T) {
 		}
 	}
 	// случайный nonce: один и тот же текст шифруется по-разному
-	a, _, _ := r.Seal([]byte("same"), nil)
-	b, _, _ := r.Seal([]byte("same"), nil)
+	a, _, _ := r.Seal([]byte("same"), []byte("row-1"))
+	b, _, _ := r.Seal([]byte("same"), []byte("row-1"))
 	if bytes.Equal(a, b) {
 		t.Fatal("одинаковый шифротекст — nonce повторяется")
 	}
@@ -101,7 +101,7 @@ func TestRingOpenRejects(t *testing.T) {
 		err error
 	}{
 		"чужой aad":           {ct, kid, "row-2", keys.ErrDecrypt},
-		"без aad":             {ct, kid, "", keys.ErrDecrypt},
+		"без aad":             {ct, kid, "", keys.ErrNoAAD},
 		"испорчена версия":    {flip(0), kid, "row-1", keys.ErrDecrypt},
 		"испорчен nonce":      {flip(1), kid, "row-1", keys.ErrDecrypt},
 		"испорчен шифротекст": {flip(14), kid, "row-1", keys.ErrDecrypt},
@@ -114,6 +114,28 @@ func TestRingOpenRejects(t *testing.T) {
 	for name, c := range cases {
 		if _, err := r.Open(c.ct, c.kid, []byte(c.aad)); !errors.Is(err, c.err) {
 			t.Errorf("%s: %v, нужно %v", name, err, c.err)
+		}
+	}
+}
+
+// Без aad шифротекст не привязан к строке: его можно переложить в чужую строку, и он там
+// расшифруется. Пустой aad — ошибка кода (ErrNoAAD), а не молчаливое согласие: и при записи, и
+// при чтении.
+func TestRingRequiresAAD(t *testing.T) {
+	r := ring(t, enc(seq(32, 0)))
+	for name, aad := range map[string][]byte{"nil": nil, "пустой": {}} {
+		ct, kid, err := r.Seal([]byte("секрет"), aad)
+		if !errors.Is(err, keys.ErrNoAAD) || ct != nil || kid != "" {
+			t.Errorf("Seal, aad %s: ct=%x kid=%q err=%v", name, ct, kid, err)
+		}
+	}
+	ct, kid, err := r.Seal([]byte("секрет"), []byte("row-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, aad := range map[string][]byte{"nil": nil, "пустой": {}} {
+		if pt, err := r.Open(ct, kid, aad); !errors.Is(err, keys.ErrNoAAD) || pt != nil {
+			t.Errorf("Open, aad %s: pt=%q err=%v", name, pt, err)
 		}
 	}
 }
@@ -136,7 +158,7 @@ func TestRingRotation(t *testing.T) {
 	if pt, err := rotated.Open(ct, oldID, []byte("row")); err != nil || string(pt) != "секрет" {
 		t.Fatalf("старый ключ не открывает своё: %v", err)
 	}
-	if _, kid, _ := rotated.Seal([]byte("x"), nil); kid != rotated.CurrentID() {
+	if _, kid, _ := rotated.Seal([]byte("x"), []byte("row-2")); kid != rotated.CurrentID() {
 		t.Fatalf("шифрует не текущий: %q", kid)
 	}
 	// MAC строки проверяется ключом строки, а не текущим
