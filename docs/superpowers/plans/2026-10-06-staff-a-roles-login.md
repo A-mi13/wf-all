@@ -712,6 +712,40 @@ admin:e2e`, job в CI.
   - сверх каркаса: `PageHeader`, `Tabs`, `useOnline`, `useErrorText`, `FormError`, `renderWithIntl`;
   - генератор QR — `uqr`;
   - `text-faint` — только для плейсхолдеров (контраст).
+- **R1 (07.10.2026) — ревью ролевой модели и решения пользователя U1–U8, M10.** Авторитетны
+  `docs/05-ролевая-модель.md` (коммит раунда 1 Task 1) и спека §2 «Решения R1», §4.2, §4.9, §4.12, §6.1;
+  текст docs/05 в Task 1 ниже устарел. Код ошибки устаревшей цели — `platform.approval_stale` (не
+  `staff.approval_stale`), исправлено во всём плане.
+  - **`perm`.** У `Permission` новое поле `CityBound` (обёртка `city(…)` в `rows`): `scoped` — только у
+    прав с привязкой к городу. В таблице docs/05 — столбец «Привязка». `permissions.json` не меняется.
+    Новые тесты: иерархия ролей (владелец не строже админа, админ не слабее модератора и поддержки),
+    `audit.*` — только чтение, `TestMatrixMatchesSpec` в обе стороны.
+  - **U2 — письмо о `bootstrap` (Task 7).** `OperatorBootstrap` в своей транзакции ставит
+    `staff.NewMailArgs(staff.MailBootstrapped, newID, ownerID)` каждому активному владельцу (новая
+    учётка — `invited`, письма не получает). Константа `MailBootstrapped = "staff.bootstrapped"` — рядом с
+    `MailInvite`/`MailAccessReset`/`MailLocked` в корне `staff`. Составитель `app.ComposeBootstrapped(ctx,
+    ref, recipient)` — по образцу `ComposeLocked`: имя и почта новой учётки, время, «оператор сервера»;
+    язык — `staff_accounts.locale` получателя. Тест: два активных владельца и один выключенный → два
+    письма; на пустой базе — ни одного. `bootstrap` по-прежнему доступен всегда (ограничения «только на
+    пустой базе» нет и не вводится).
+  - **U1 — письмо о выключении админа (Task 8b).** Выключение учётки с ролью `admin`
+    (`staff.roles.revoke_admin`) в той же транзакции ставит `staff.NewMailArgs(staff.MailAdminDisabled,
+    adminID, ownerID)` каждому активному владельцу, кроме инициатора. Константа
+    `MailAdminDisabled = "staff.admin_disabled"`. Составитель `app.ComposeAdminDisabled` — кто выключил
+    (`actor_label`), кого (имя, почта), когда, причина из списка (`reason`); комментарий в письмо не
+    идёт. Тест: владельцы A (инициатор), B, C → письма B и C; выключение модератора — писем нет;
+    `OperatorDisable` админа — письма всем активным владельцам (инициатор — оператор).
+  - **Тексты (Task 7 и 8b).** `backend/locales/{ru,en}.json`: `staff.bootstrapped.subject`,
+    `staff.bootstrapped.body`, `staff.admin_disabled.subject`, `staff.admin_disabled.body` — ru и en
+    переводом (ключи ru = en, тест локалей).
+  - **MailWorker (Task 10c).** В `switch a.Mail` — ветки `staff.MailBootstrapped` →
+    `ComposeBootstrapped`, `staff.MailAdminDisabled` → `ComposeAdminDisabled`; тест `TestMailWorkerArgs`
+    — новые виды. Живой e2e (Task 16) не трогать.
+  - **M10 (Task 10b).** `listGeoCities` для модератора фильтрует по `auth.Staff.CityIDs` (право `scoped`
+    без `cityId` в пути — конвейер пропускает, фильтрует ручка): `geo.ListParams` получает ограничение
+    городами модератора (пересечение с `IDs`, если они заданы). Тест «модератор видит только свои
+    города» (и с `ids` чужого города — пусто). Описание `listGeoCities` в контракте (Task 9a) —
+    «модератору — только его города».
 
 ---
 
@@ -1887,7 +1921,7 @@ Expected: PASS. Подсадка из Step 9 → FAIL → откат.
   (для `свои города` — город цели в его списке), в активной сессии. Он не инициатор и не цель запроса
   — это держит и база.
 - При подтверждении проверяются срок, что инициатор всё ещё активен и имеет право, и версия цели.
-  Цель изменилась после запроса — статус «не исполнен», `409 staff.approval_stale`.
+  Цель изменилась после запроса — статус «не исполнен», `409 platform.approval_stale`.
 - Отменить запрос может только инициатор. Выключение, сброс доступа или смена роли инициатора
   отменяют его ожидающие запросы.
 - Входящие видит тот, кто может их подтвердить; счётчик в меню обновляется раз в минуту. Решения по
@@ -2404,7 +2438,7 @@ func TestStaff0020Approvals(t *testing.T) {
 		p.with(func(a *approvalRow) {
 			a.status, a.decidedAt, a.decidedByLabel, a.errText = "cancelled", true, "system", "initiator_changed"
 		}),
-		p.decide("failed", approverID).with(func(a *approvalRow) { a.errText = "staff.approval_stale" }),
+		p.decide("failed", approverID).with(func(a *approvalRow) { a.errText = "platform.approval_stale" }),
 	} {
 		execArgs(t, db, insertApproval, a.args()...)
 	}
@@ -15626,7 +15660,7 @@ func TestChangeRoleTable(t *testing.T) {
 	}
 }
 
-// D17: версия цели изменилась после запроса — staff.approval_stale, запрос failed.
+// D17: версия цели изменилась после запроса — platform.approval_stale, запрос failed.
 func TestChangeRoleStaleAfterVersionBump(t *testing.T) {
 	e := newMgEnv(t)
 	ctx := context.Background()
