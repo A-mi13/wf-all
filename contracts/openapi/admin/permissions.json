@@ -1,0 +1,190 @@
+{
+  "service": [
+    "anonymous",
+    "session",
+    "self",
+    "handler"
+  ],
+  "permissions": [
+    {
+      "key": "staff.roles.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "staff.accounts.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "staff.roles.grant_elevated",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "staff.roles.grant",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "staff.roles.revoke_owner",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "staff.roles.revoke_admin",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "staff.roles.revoke",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "staff.access.reset_elevated",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "staff.access.reset",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "staff.invites.resend",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "staff.sessions.revoke",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "audit.log.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "geo.places.search",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "geo.cities.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "geo.cities.activate",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "geo.cities.manage",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "geo.cities.rename",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "geo.districts.manage",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "geo.countries.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "geo.countries.manage",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "geo.imports.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "geo.imports.run",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "platform.versions.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "platform.versions.manage",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "platform.flags.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "platform.flags.manage",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "teams.captains.approve",
+      "draft": true,
+      "mutating": true
+    },
+    {
+      "key": "pitches.pitches.moderate",
+      "draft": true,
+      "mutating": true
+    },
+    {
+      "key": "moderation.reports.read",
+      "draft": true,
+      "mutating": false
+    },
+    {
+      "key": "moderation.reports.resolve",
+      "draft": true,
+      "mutating": true
+    },
+    {
+      "key": "moderation.restrictions.apply",
+      "draft": true,
+      "mutating": true
+    },
+    {
+      "key": "moderation.bans.issue",
+      "draft": true,
+      "mutating": true
+    },
+    {
+      "key": "results.reports.annul",
+      "draft": true,
+      "mutating": true
+    },
+    {
+      "key": "identity.pii.read",
+      "draft": true,
+      "mutating": false
+    },
+    {
+      "key": "economy.catalog.manage",
+      "draft": true,
+      "mutating": true
+    },
+    {
+      "key": "economy.credits.grant",
+      "draft": true,
+      "mutating": true
+    }
+  ]
+}

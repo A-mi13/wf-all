@@ -7,8 +7,10 @@ vars:
 
 tasks:
   gen:
-    desc: Кодогенерация бэкенда (бандлы контрактов, sqlc, oapi-codegen)
+    desc: Кодогенерация бэкенда (таблица прав docs/05 и каталог прав admin, бандлы контрактов, sqlc, oapi-codegen)
     cmds:
+      # матрица прав platform/perm → таблица в docs/05-ролевая-модель.md и contracts/openapi/admin/permissions.json
+      - go run ./cmd/permdoc
       - pnpm --filter @wf/contracts bundle
       - '{{.GOTOOL}} sqlc generate'
       - '{{.GOTOOL}} oapi-codegen -config internal/httpapi/public/oapi-codegen.yaml ../contracts/openapi/public.yaml'
@@ -20,10 +22,11 @@ tasks:
       - task: gen
       # git status, а не git diff: diff не видит новых неотслеживаемых файлов
       # (новый пакет sqlc, новый *.gen.go). Работает во встроенном shell go-task (mvdan/sh) и в CI.
+      # docs/05 — таблица прав генерируется из platform/perm
       - |
-        if [ -n "$(git status --porcelain -- . ../contracts)" ]; then
+        if [ -n "$(git status --porcelain -- . ../contracts ../docs/05-ролевая-модель.md)" ]; then
           echo "gen:check: после кодогенерации рабочее дерево расходится с закоммиченным:"
-          git status --short -- . ../contracts
+          git status --short -- . ../contracts ../docs/05-ролевая-модель.md
           exit 1
         fi
 

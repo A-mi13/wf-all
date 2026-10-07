@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths: &paths
       - 'backend/**'
+      - 'docs/05-ролевая-модель.md'
       - 'contracts/openapi/**'
       - 'contracts/scripts/**'
       - 'contracts/package.json'

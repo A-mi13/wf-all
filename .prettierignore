@@ -3,6 +3,7 @@ pnpm-lock.yaml
 **/src/api/gen/**
 contracts/openapi/public.yaml
 contracts/openapi/admin.yaml
+contracts/openapi/admin/permissions.json
 packages/tokens/tokens.css
 packages/tokens/tokens.ts
 **/.next/**

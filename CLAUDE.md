@@ -21,7 +21,8 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`
 - `deploy/dev/` — роли и расширения БД; dev-стенд (Neon + Render): `backend/Dockerfile`, `render.yaml`, `docs/deploy-dev.md`; `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
 - `design/` — бриф, `screens/*.dc.html`, `tools/extract-export.mjs`; `product/` — «почему так»
-- Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`
+- Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`,
+  `docs/05-ролевая-модель.md` (роли игроков и сотрудников, матрица прав — генерируется `./task gen`)
 - Архитектура бэкенда (модули, владение таблицами, платформа, стражи, порядок): `docs/superpowers/specs/2026-10-01-backend-architecture-design.md`
 - Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`)
 
