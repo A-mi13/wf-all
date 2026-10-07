@@ -736,16 +736,33 @@ admin:e2e`, job в CI.
     id, колонок «кто выключил» и «причина» у учётки нет, а запись аудита однозначна и без гонки с
     повторным выключением. Для этого `audit.Entry` получает поле `ID uuid.UUID` (задано — пишется оно,
     пусто — `id.New()`, как сейчас) — в Task 3b (если 3b уже закрыт — первым шагом 8b, тест в
-    `platform/audit`); 8b генерирует `auditID := id.New()` до `audit.Write`. Константа
+    `platform/audit`); 8b генерирует `auditID := id.New()` до `audit.Write`. Там же (Task 3b или первый
+    шаг 8b) — чтение одной записи: `audit.Get(ctx context.Context, q auditdb.DBTX, id uuid.UUID) (Record,
+    bool, error)`; запрос — в `platform/audit/queries` (`audit_log` — таблица `platform`: запрос из
+    `internal/staff/queries` уронил бы `TestModuleQueriesRespectOwnership`, а у `audit.List` фильтра по id
+    нет); IP маскируется так же, как в `List`. Тест в `platform/audit`: запись нашлась (поля как в `List`),
+    не нашлась (`ok = false`, без ошибки), `ip` маскирован до /24 или /48. Константа
     `MailAdminDisabled = "staff.admin_disabled"`. Составитель `app.ComposeAdminDisabled(ctx, ref,
-    recipient)` читает запись `audit_log` по `ref` (у роли `admin` чтение журнала есть): кто выключил
-    (`actor_label`), кого (`object_id` → имя и почта учётки), когда (`created_at`), причина из списка
-    (`reason` без комментария — комментарий в письмо не идёт). Тест: владельцы A (инициатор), B, C →
-    письма B и C с `ref` = id записи `staff.disabled`; выключение модератора — писем нет;
-    `OperatorDisable` админа — письма всем активным владельцам (инициатор — оператор).
+    recipient)` читает запись через `audit.Get` на пуле admin-api (у роли БД `admin` есть SELECT на
+    `audit_log` — `grants.sql`): кто выключил (`actor_label`), кого (`object_id` → имя и почта учётки),
+    когда (`created_at`) и причина. Причина: в аудит пишется `reasonText(reason, comment)` (например
+    `"left_team: ушёл"`), у `OperatorDisable` — `"operator"`. Код причины — часть `Record.Reason` до первого
+    `": "` (вся строка, если разделителя нет); комментарий в письмо не попадает никогда.
+    - код из `staff.Reasons` → переведённая метка: ключи `staff.reasons.<код>` в
+      `backend/locales/{ru,en}.json` (тексты — как `reasons.*` в `apps/admin/messages`: письма читают только
+      `backend/locales`, правило 6 CLAUDE.md);
+    - `operator` → отдельный текст «оператор сервера» / «server operator» (ключ `staff.reasons.operator`);
+    - неизвестный код → письмо без строки причины, но не `mail.ErrSkip`.
+
+    Табличный тест `ComposeAdminDisabled`: `left_team` без комментария, `security: текст комментария`
+    (комментария в теле письма нет), `operator`, неизвестный код `future_code` (письмо есть, строки причины
+    нет), а также ru и en получатели. Сценарный тест 8b: владельцы A (инициатор), B, C → письма B и C с
+    `ref` = id записи `staff.disabled`; выключение модератора — писем нет; `OperatorDisable` админа —
+    письма всем активным владельцам (инициатор — оператор).
   - **Тексты (Task 7 и 8b).** `backend/locales/{ru,en}.json`: `staff.bootstrapped.subject`,
-    `staff.bootstrapped.body`, `staff.admin_disabled.subject`, `staff.admin_disabled.body` — ru и en
-    переводом (ключи ru = en, тест локалей).
+    `staff.bootstrapped.body`, `staff.admin_disabled.subject`, `staff.admin_disabled.body`,
+    `staff.reasons.{left_team,security,role_change,other,operator}` — ru и en переводом (ключи ru = en,
+    тест локалей).
   - **MailWorker (Task 10c).** В `switch a.Mail` — ветки `staff.MailBootstrapped` →
     `ComposeBootstrapped`, `staff.MailAdminDisabled` → `ComposeAdminDisabled`. Аргументы новых видов
     проверяют составители — по образцу `ComposeLocked` и `ComposeInvite` (`mail.ErrSkip` → задача
