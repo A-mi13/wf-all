@@ -6,11 +6,18 @@ package auditdb
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
+	// Одна запись журнала по id (письмо о действии ссылается на неё); поля — как у ListAudit.
+	GetAudit(ctx context.Context, id uuid.UUID) (GetAuditRow, error)
 	// Аудит-лог (спека бэкенда §6.9, §10). Только вставка: изменение и удаление запрещены триггером.
 	InsertAudit(ctx context.Context, arg InsertAuditParams) error
+	// Журнал действий (спека §5.3): новые сверху, keyset по (created_at, id). Пустой фильтр (NULL) не
+	// сужает выборку. scoped — журнал модератора: записи его городов и его собственные.
+	ListAudit(ctx context.Context, arg ListAuditParams) ([]ListAuditRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -12,8 +12,8 @@ import (
 // (ContactEmail, contactEmail, contact_email -> contact, email).
 
 // Слова-исключения: если ключ ими оканчивается, это метка времени, счётчик или флаг, а не
-// сами данные (email_verified_at, phone_verified, password_changed_at).
-var safeLast = map[string]bool{"at": true, "count": true, "verified": true, "enabled": true, "required": true}
+// сами данные (email_verified_at, phone_verified, password_changed_at, recovery_codes_left).
+var safeLast = map[string]bool{"at": true, "count": true, "left": true, "verified": true, "enabled": true, "required": true}
 
 // Слова, делающие ключ чувствительным сами по себе.
 var sensitiveWord = map[string]bool{
@@ -21,7 +21,15 @@ var sensitiveWord = map[string]bool{
 	"birth": true, "birthday": true, "birthdate": true, "dob": true, "patronymic": true, "surname": true,
 	"password": true, "passwd": true, "secret": true, "secrets": true,
 	"token": true, "tokens": true, "hash": true, "otp": true, "totp": true,
-	"ip": true, "device": true, "telegram": true, "vk": true,
+	// коды приглашения, входа и резервные (code — с оговоркой publicCode ниже)
+	"code": true, "codes": true, "recovery": true,
+	"ip": true, "ips": true, "ipv4": true, "ipv6": true, "device": true, "telegram": true, "vk": true,
+}
+
+// Слова-справочники перед code: такой код публичен (country_code, error_code), а не секрет.
+var publicCode = map[string]bool{
+	"country": true, "currency": true, "error": true, "status": true, "language": true, "locale": true,
+	"region": true, "iso": true, "reason": true, "response": true, "http": true,
 }
 
 // Пары соседних слов: каждое слово в отдельности безобидно (name, user, key, code).
@@ -31,6 +39,7 @@ var sensitivePair = [][2]string{
 	// claims OIDC (given_name, family_name) и сетевые адреса клиента; просто address — адрес поля,
 	// он публичен и не маскируется
 	{"given", "name"}, {"family", "name"}, {"remote", "addr"}, {"client", "addr"}, {"forwarded", "for"},
+	{"remote", "address"}, {"client", "address"}, {"peer", "addr"}, {"peer", "address"},
 }
 
 // words делит ключ на слова в нижнем регистре.
@@ -58,6 +67,9 @@ func isSensitive(ws []string) bool {
 		return false
 	}
 	for i, w := range ws {
+		if (w == "code" || w == "codes") && i > 0 && publicCode[ws[i-1]] {
+			continue
+		}
 		if sensitiveWord[w] {
 			return true
 		}

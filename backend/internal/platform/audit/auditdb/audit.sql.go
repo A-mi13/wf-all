@@ -8,28 +8,83 @@ package auditdb
 import (
 	"context"
 	"net/netip"
+	"time"
 
 	"github.com/google/uuid"
 )
 
+const getAudit = `-- name: GetAudit :one
+SELECT id, actor_user_id, actor_staff_id, actor_label, actor_role, action, object_type, object_id,
+       scope_city_id, before, after, reason, ip, user_agent, created_at
+FROM audit_log
+WHERE id = $1
+`
+
+type GetAuditRow struct {
+	ID           uuid.UUID
+	ActorUserID  *uuid.UUID
+	ActorStaffID *uuid.UUID
+	ActorLabel   *string
+	ActorRole    *string
+	Action       string
+	ObjectType   string
+	ObjectID     *uuid.UUID
+	ScopeCityID  *uuid.UUID
+	Before       []byte
+	After        []byte
+	Reason       *string
+	Ip           *netip.Addr
+	UserAgent    *string
+	CreatedAt    time.Time
+}
+
+// Одна запись журнала по id (письмо о действии ссылается на неё); поля — как у ListAudit.
+func (q *Queries) GetAudit(ctx context.Context, id uuid.UUID) (GetAuditRow, error) {
+	row := q.db.QueryRow(ctx, getAudit, id)
+	var i GetAuditRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActorUserID,
+		&i.ActorStaffID,
+		&i.ActorLabel,
+		&i.ActorRole,
+		&i.Action,
+		&i.ObjectType,
+		&i.ObjectID,
+		&i.ScopeCityID,
+		&i.Before,
+		&i.After,
+		&i.Reason,
+		&i.Ip,
+		&i.UserAgent,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertAudit = `-- name: InsertAudit :exec
 
-INSERT INTO audit_log (id, actor_user_id, actor_role, action, object_type, object_id, before, after, reason, ip, user_agent)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO audit_log (id, actor_user_id, actor_staff_id, actor_role, actor_label, action, object_type, object_id,
+                       scope_city_id, before, after, reason, ip, user_agent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14)
 `
 
 type InsertAuditParams struct {
-	ID          uuid.UUID
-	ActorUserID *uuid.UUID
-	ActorRole   *string
-	Action      string
-	ObjectType  string
-	ObjectID    *uuid.UUID
-	Before      []byte
-	After       []byte
-	Reason      *string
-	Ip          *netip.Addr
-	UserAgent   *string
+	ID           uuid.UUID
+	ActorUserID  *uuid.UUID
+	ActorStaffID *uuid.UUID
+	ActorRole    *string
+	ActorLabel   *string
+	Action       string
+	ObjectType   string
+	ObjectID     *uuid.UUID
+	ScopeCityID  *uuid.UUID
+	Before       []byte
+	After        []byte
+	Reason       *string
+	Ip           *netip.Addr
+	UserAgent    *string
 }
 
 // Аудит-лог (спека бэкенда §6.9, §10). Только вставка: изменение и удаление запрещены триггером.
@@ -37,10 +92,13 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 	_, err := q.db.Exec(ctx, insertAudit,
 		arg.ID,
 		arg.ActorUserID,
+		arg.ActorStaffID,
 		arg.ActorRole,
+		arg.ActorLabel,
 		arg.Action,
 		arg.ObjectType,
 		arg.ObjectID,
+		arg.ScopeCityID,
 		arg.Before,
 		arg.After,
 		arg.Reason,
@@ -48,4 +106,106 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 		arg.UserAgent,
 	)
 	return err
+}
+
+const listAudit = `-- name: ListAudit :many
+SELECT id, actor_user_id, actor_staff_id, actor_label, actor_role, action, object_type, object_id,
+       scope_city_id, before, after, reason, ip, user_agent, created_at
+FROM audit_log
+WHERE ($1::uuid IS NULL OR actor_staff_id = $1)
+  AND ($2::text IS NULL OR starts_with(action, $2))
+  AND ($3::text IS NULL OR object_type = $3)
+  AND ($4::uuid IS NULL OR object_id = $4)
+  AND ($5::timestamptz IS NULL OR created_at >= $5)
+  AND ($6::timestamptz IS NULL OR created_at < $6)
+  AND (NOT $7::bool OR scope_city_id = ANY($8::uuid[]) OR actor_staff_id = $9::uuid)
+  AND (NOT $10::bool OR (created_at, id) < ($11::timestamptz, $12::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $13
+`
+
+type ListAuditParams struct {
+	ActorStaffID *uuid.UUID
+	ActionPrefix *string
+	ObjectType   *string
+	ObjectID     *uuid.UUID
+	FromAt       *time.Time
+	ToAt         *time.Time
+	Scoped       bool
+	CityIds      []uuid.UUID
+	OwnStaffID   uuid.UUID
+	HasCursor    bool
+	CursorAt     time.Time
+	CursorID     uuid.UUID
+	Lim          int32
+}
+
+type ListAuditRow struct {
+	ID           uuid.UUID
+	ActorUserID  *uuid.UUID
+	ActorStaffID *uuid.UUID
+	ActorLabel   *string
+	ActorRole    *string
+	Action       string
+	ObjectType   string
+	ObjectID     *uuid.UUID
+	ScopeCityID  *uuid.UUID
+	Before       []byte
+	After        []byte
+	Reason       *string
+	Ip           *netip.Addr
+	UserAgent    *string
+	CreatedAt    time.Time
+}
+
+// Журнал действий (спека §5.3): новые сверху, keyset по (created_at, id). Пустой фильтр (NULL) не
+// сужает выборку. scoped — журнал модератора: записи его городов и его собственные.
+func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]ListAuditRow, error) {
+	rows, err := q.db.Query(ctx, listAudit,
+		arg.ActorStaffID,
+		arg.ActionPrefix,
+		arg.ObjectType,
+		arg.ObjectID,
+		arg.FromAt,
+		arg.ToAt,
+		arg.Scoped,
+		arg.CityIds,
+		arg.OwnStaffID,
+		arg.HasCursor,
+		arg.CursorAt,
+		arg.CursorID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditRow
+	for rows.Next() {
+		var i ListAuditRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorUserID,
+			&i.ActorStaffID,
+			&i.ActorLabel,
+			&i.ActorRole,
+			&i.Action,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.ScopeCityID,
+			&i.Before,
+			&i.After,
+			&i.Reason,
+			&i.Ip,
+			&i.UserAgent,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
