@@ -26,12 +26,16 @@ type Subject struct {
 // SubjectFrom — субъект запроса: сотрудник (WithStaff) → staff, игрок (With) → user, иначе false.
 // Оба в ctx — ошибка сборки конвейера; побеждает сотрудник (admin-api строже). Нулевой id
 // (загрузчик нарушил договор) — false: общий ключ «нулевого» субъекта склеил бы чужие запросы.
+// При false Subject всегда нулевой.
 func SubjectFrom(ctx context.Context) (Subject, bool) {
+	var sub Subject
 	if s, ok := StaffFrom(ctx); ok {
-		return Subject{Kind: SubjectStaff, ID: s.StaffID}, s.StaffID != uuid.Nil
+		sub = Subject{Kind: SubjectStaff, ID: s.StaffID}
+	} else if p, ok := From(ctx); ok {
+		sub = Subject{Kind: SubjectUser, ID: p.UserID, DeviceID: p.DeviceID}
 	}
-	if p, ok := From(ctx); ok {
-		return Subject{Kind: SubjectUser, ID: p.UserID, DeviceID: p.DeviceID}, p.UserID != uuid.Nil
+	if sub.ID == uuid.Nil {
+		return Subject{}, false
 	}
-	return Subject{}, false
+	return sub, true
 }

@@ -29,8 +29,9 @@ func TestSubjectFrom(t *testing.T) {
 		{"сотрудник без id", auth.WithStaff(bg, &auth.Staff{Role: "admin"}), auth.Subject{}, false},
 	}
 	for _, c := range cases {
+		// и при ok=false — нулевой Subject: вызывающий, забывший проверить ok, не получит вид без id
 		got, ok := auth.SubjectFrom(c.ctx)
-		if ok != c.ok || (ok && got != c.want) {
+		if ok != c.ok || got != c.want {
 			t.Errorf("%s: %+v %v, нужно %+v %v", c.name, got, ok, c.want, c.ok)
 		}
 	}
