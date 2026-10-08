@@ -20,7 +20,7 @@ import (
 
 func entry() audit.Entry {
 	return audit.Entry{
-		ActorUserID: id.New(), ActorRole: "city_moderator",
+		ActorUserID: id.New(), ActorRole: "moderator", // автор-сотрудник (ActorStaffID) — Task 3b
 		Action: "identity.user_banned", ObjectType: "user", ObjectID: id.New(),
 		Before: map[string]any{"status": "active", "email": "ivan@mail.ru"},
 		After:  map[string]any{"status": "banned"},
