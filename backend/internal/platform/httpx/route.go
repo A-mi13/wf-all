@@ -12,8 +12,9 @@ import (
 )
 
 // Route — операция контракта, на которую пришёл запрос. Кладёт Routes; читают аутентификация
-// (security), валидатор и rate limit (x-rate-limit) — маршрут ищется один раз на запрос. Идемпотентность маршрут не
-// читает: ей нужен фактический путь (r.URL.Path).
+// (security), валидатор, rate limit (x-rate-limit) и идемпотентность (x-idempotency: no-store) —
+// маршрут ищется один раз на запрос. Ключ идемпотентности привязан к фактическому пути (r.URL.Path),
+// а не к шаблону маршрута.
 type Route struct {
 	route  *routers.Route
 	params map[string]string

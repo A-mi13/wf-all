@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -140,18 +141,34 @@ func header(k, v string) func(*http.Request) {
 	return func(r *http.Request) { r.Header.Set(k, v) }
 }
 
+// do — запрос игрока e.user.
 func (e *env) do(method, path, key, body string, opts ...func(*http.Request)) *httptest.ResponseRecorder {
-	r := httptest.NewRequestWithContext(context.Background(), method, path, strings.NewReader(body))
+	return e.doAs(asUser(e.user), method, path, key, body, opts...)
+}
+
+// doAs — запрос от субъекта, которого put кладёт в ctx (auth.With или auth.WithStaff).
+func (e *env) doAs(put func(context.Context) context.Context, method, path, key, body string,
+	opts ...func(*http.Request)) *httptest.ResponseRecorder {
+	r := httptest.NewRequestWithContext(put(context.Background()), method, path, strings.NewReader(body))
 	if key != "" {
 		r.Header.Set(idempotency.Header, key)
 	}
 	for _, o := range opts {
 		o(r)
 	}
-	r = r.WithContext(auth.With(r.Context(), &auth.Principal{UserID: e.user}))
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, r)
 	return rec
+}
+
+func asUser(id uuid.UUID) func(context.Context) context.Context {
+	return func(ctx context.Context) context.Context { return auth.With(ctx, &auth.Principal{UserID: id}) }
+}
+
+func asStaff(id uuid.UUID) func(context.Context) context.Context {
+	return func(ctx context.Context) context.Context {
+		return auth.WithStaff(ctx, &auth.Staff{StaffID: id, SessionID: uuid.New(), Role: "admin", Stage: auth.StageActive})
+	}
 }
 
 func (e *env) rows(t *testing.T) int {
@@ -483,5 +500,108 @@ func TestPassthrough(t *testing.T) {
 	_ = e.pools.Owner.QueryRow(context.Background(), "SELECT count(*) FROM idempotency_keys").Scan(&n)
 	if n != 0 {
 		t.Fatalf("ключей %d", n)
+	}
+}
+
+// Сотрудник admin-api — субъект идемпотентности (остаток фундамента 3/3: без Principal механизм
+// в админке был молча выключен). Ключ строки — id сотрудника в user_id (D19).
+func TestStaffSubjectReplays(t *testing.T) {
+	e := setup(t)
+	staff := uuid.New()
+	if rec := e.doAs(asStaff(staff), http.MethodPost, "/v1/things", key, `{}`); rec.Code != http.StatusCreated {
+		t.Fatalf("первый: %d %s", rec.Code, rec.Body.String())
+	}
+	again := e.doAs(asStaff(staff), http.MethodPost, "/v1/things", key, `{}`)
+	if again.Code != http.StatusCreated || again.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("повтор сотрудника: %d %v", again.Code, again.Header())
+	}
+	if e.probe.calls.Load() != 1 || e.rows(t) != 1 {
+		t.Fatalf("исполнено %d раз, строк %d", e.probe.calls.Load(), e.rows(t))
+	}
+	var subject uuid.UUID
+	if err := e.pools.Owner.QueryRow(context.Background(), "SELECT user_id FROM idempotency_keys WHERE key = $1", key).Scan(&subject); err != nil {
+		t.Fatal(err)
+	}
+	if subject != staff {
+		t.Fatalf("ключ записан на %s, нужен сотрудник %s", subject, staff)
+	}
+}
+
+// Одна строка Idempotency-Key у игрока и сотрудника — два разных ключа: второй запрос исполняется
+// (не 422 key_reused и не чужой повтор).
+func TestUserAndStaffKeysIndependent(t *testing.T) {
+	e := setup(t)
+	if rec := e.do(http.MethodPost, "/v1/things", key, `{"name":"x"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("игрок: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := e.doAs(asStaff(uuid.New()), http.MethodPost, "/v1/teams", key, `{"name":"y"}`)
+	if rec.Code != http.StatusCreated || rec.Header().Get("Idempotency-Replayed") != "" {
+		t.Fatalf("сотрудник с тем же ключом: %d %v %s", rec.Code, rec.Header(), rec.Body.String())
+	}
+	if e.probe.calls.Load() != 2 || e.rows(t) != 2 {
+		t.Fatalf("исполнено %d, строк %d", e.probe.calls.Load(), e.rows(t))
+	}
+}
+
+const noStoreSpec = `
+openapi: 3.0.3
+info: {title: t, version: "1"}
+paths:
+  /v1/things:
+    post: {operationId: createThing, responses: {"201": {description: ok}}}
+  /v1/secrets:
+    post: {operationId: createSecret, x-idempotency: no-store, responses: {"201": {description: ok}}}
+`
+
+// withRoutes — маршрут контракта в ctx до идемпотентности, как в конвейерах public и admin.
+func withRoutes(t *testing.T, h http.Handler) http.Handler {
+	t.Helper()
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(noStoreSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := httpx.Routes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return routes(h)
+}
+
+// Ответ с секретами (секрет TOTP, резервные коды) не ложится в idempotency_keys: повтор того же
+// запроса — 409 replay_unavailable, а не секрет из базы (решение D14). Обычная операция за тем же
+// конвейером повторяется как прежде.
+func TestNoStoreKeepsOnlyStatus(t *testing.T) {
+	e := setup(t)
+	e.h = withRoutes(t, e.h)
+	if rec := e.do(http.MethodPost, "/v1/secrets", key, `{}`); rec.Code != http.StatusCreated {
+		t.Fatalf("первый: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := e.do(http.MethodPost, "/v1/secrets", key, `{}`)
+	if rec.Code != http.StatusConflict || code(t, rec) != httpx.CodeIdempotencyReplayUnavailable {
+		t.Fatalf("повтор: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do(http.MethodPost, "/v1/secrets", key, `{"other":1}`); rec.Code != http.StatusUnprocessableEntity ||
+		code(t, rec) != httpx.CodeIdempotencyKeyReused {
+		t.Fatalf("тот же ключ, другой запрос: %d %s", rec.Code, rec.Body.String())
+	}
+	if e.probe.calls.Load() != 1 || e.rows(t) != 1 {
+		t.Fatalf("исполнено %d, строк %d", e.probe.calls.Load(), e.rows(t))
+	}
+	var status *int32
+	var stored bool
+	if err := e.pools.Owner.QueryRow(context.Background(), `SELECT response_status,
+		response_body IS NOT NULL OR response_headers IS NOT NULL FROM idempotency_keys WHERE key = $1`, key).Scan(&status, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if status == nil || *status != http.StatusCreated || stored {
+		t.Fatalf("строка ключа: статус %v, тело или заголовки сохранены: %v", status, stored)
+	}
+
+	other := strings.Repeat("o", 20)
+	if rec := e.do(http.MethodPost, "/v1/things", other, `{}`); rec.Code != http.StatusCreated {
+		t.Fatalf("обычная операция: %d", rec.Code)
+	}
+	if rec := e.do(http.MethodPost, "/v1/things", other, `{}`); rec.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("обычная операция за Routes не повторилась: %d %v", rec.Code, rec.Header())
 	}
 }
