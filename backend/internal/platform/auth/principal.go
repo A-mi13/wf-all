@@ -10,11 +10,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// Role — глобальная или территориальная роль из role_assignments (§4.5).
+// Role — роль игрока из role_assignments (§4.5): после миграции 0020 — только captain со скоупом
+// city. Роли сотрудников — не здесь: staff_roles модуля staff, в запросе — auth.Staff.
 type Role struct {
-	Name      string    // admin, city_moderator, captain
-	ScopeType string    // global, country, city
-	ScopeID   uuid.UUID // uuid.Nil у global
+	Name      string    // captain
+	ScopeType string    // city
+	ScopeID   uuid.UUID // город скоупа
 }
 
 // Principal — пользователь запроса. Загружается одним запросом по sid (identity) и не
