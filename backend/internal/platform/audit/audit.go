@@ -27,7 +27,8 @@ var ErrInvalidEntry = errors.New("audit: невалидная запись")
 
 var action = regexp.MustCompile(`^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`)
 
-// Роли автора — те же списки, что в CHECK audit_log (миграция 0020): поменял там — поменяй здесь.
+// Роли автора — те же списки, что в CHECK audit_log (миграция 0020): поменял там — поменяй здесь
+// (расхождение ловит TestActorRolesMatchCheck).
 var (
 	playerRoles  = map[string]bool{"player": true, "captain": true}
 	staffRoles   = map[string]bool{"owner": true, "admin": true, "moderator": true, "support": true}

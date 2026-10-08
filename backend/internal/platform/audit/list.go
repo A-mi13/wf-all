@@ -25,8 +25,12 @@ type ListParams struct {
 	ObjectType   string
 	ObjectID     uuid.UUID
 	From, To     time.Time
-	// CityIDs != nil — журнал модератора: записи этих городов (scope_city_id) и его собственные
-	// (actor_staff_id = OwnStaffID). Пустой, но не nil срез — только собственные.
+	// CityIDs == nil — без ограничения городом (глобальная роль). CityIDs != nil — журнал
+	// модератора: записи этих городов (scope_city_id) и его собственные (actor_staff_id =
+	// OwnStaffID); пустой, но не nil срез — только собственные. Скоуп выбирает вызывающий по праву
+	// (GrantScoped), а не по len: модератору он ВСЕГДА передаёт не-nil срез — копию
+	// append(make([]uuid.UUID, 0, len(s.CityIDs)), s.CityIDs...), иначе модератор без городов
+	// (nil) увидел бы весь журнал.
 	CityIDs    []uuid.UUID
 	OwnStaffID uuid.UUID
 	Cursor     string // из next прошлой страницы; негодный — page.ErrBadCursor

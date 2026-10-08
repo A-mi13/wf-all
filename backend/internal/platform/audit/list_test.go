@@ -113,18 +113,22 @@ func TestListOrderAndCursor(t *testing.T) {
 		row{id: e, action: "geo.city_updated", at: t0.Add(3 * time.Second)},
 	)
 	want := []uuid.UUID{e, d, c, b, a}
-	var got []uuid.UUID
-	cursor := ""
-	for range 10 {
-		items, next := list(t, pools, audit.ListParams{Limit: 2, Cursor: cursor})
-		got = append(got, ids(items)...)
-		if next == "" {
-			break
+	// Limit 1 и 3 ставят границу страницы между c и b (одно created_at): курсор только по времени
+	// потерял бы b; Limit 2 — пара внутри страницы.
+	for _, limit := range []int{1, 2, 3} {
+		var got []uuid.UUID
+		cursor := ""
+		for range 10 {
+			items, next := list(t, pools, audit.ListParams{Limit: limit, Cursor: cursor})
+			got = append(got, ids(items)...)
+			if next == "" {
+				break
+			}
+			cursor = next
 		}
-		cursor = next
-	}
-	if !sameIDs(got, want) {
-		t.Fatalf("порядок %v, нужно %v", got, want)
+		if !sameIDs(got, want) {
+			t.Errorf("Limit %d: порядок %v, нужно %v", limit, got, want)
+		}
 	}
 	// ровно на границе: limit == число записей — next пуст, лишнего запроса не нужно
 	if _, next := list(t, pools, audit.ListParams{Limit: 5}); next != "" {
@@ -206,6 +210,9 @@ func TestListMasksIP(t *testing.T) {
 	)
 	items, _ := list(t, pools, audit.ListParams{})
 	want := map[uuid.UUID]string{v4: "203.0.113.0/24", v6: "2001:db8:abcd::/48", mapped: "198.51.100.0/24", none: ""}
+	if len(items) != len(want) {
+		t.Fatalf("записей %d, нужно %d", len(items), len(want))
+	}
 	for _, r := range items {
 		if r.IP != want[r.ID] {
 			t.Errorf("%s: IP %q, нужно %q", r.ID, r.IP, want[r.ID])
