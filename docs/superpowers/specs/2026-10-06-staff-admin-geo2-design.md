@@ -196,7 +196,7 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
 ```
 
 - **`staff_accounts`**:
-  - `id` uuid PK, `email` citext UNIQUE, `display_name` text (1–80);
+  - `id` uuid PK, `email` citext UNIQUE (каноническая ASCII-форма, §4.1), `display_name` text (1–80);
   - `locale` text (`ru|en`), `status` staff_status;
   - `password_hash` text NULL — NULL до принятия приглашения и после сброса доступа;
   - `mfa_failures` int (подряд, обнуляется успехом второго фактора), `locked_until` timestamptz NULL,
@@ -271,6 +271,17 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
 
 - Пароль: `platform/password` (argon2id, ≥10 символов, список распространённых, NFKC, потолок длины
   на входе) — остатки фундамента 3/3 закрываются здесь же.
+- Почта сотрудника (`domain.NormalizeEmail`; решение пользователя 08.10.2026) — одна каноническая
+  ASCII-строка на адрес, без двойников:
+  - NFKC, обрезка пробелов по краям, нижний регистр; ровно одна `@`, обе части непустые;
+  - локальная часть — только печатный ASCII (0x21–0x7E), до 64 байт; SMTPUTF8 не принимается;
+  - домен — IDN переводится в A-label (punycode) профилем `idna.Registration` (`golang.org/x/net/idna`);
+    до IDNA в домене допустимы только буквы, метки, цифры, `-` и `.`;
+  - невидимые и управляющие символы (Cc, Cf, селекторы вариантов, заполнители, пустой символ Брайля) —
+    отказ;
+  - хранится ASCII-форма в нижнем регистре, общий предел — 254 байта по ней;
+  - основания: OWASP Email Validation and Verification Cheat Sheet, RFC 5321 (§4.5.3.1), RFC 6531,
+    UTS #46.
 - TOTP: RFC 6238, SHA-1, 6 цифр, шаг 30 с, допуск ±1 шаг, секрет 160 бит (base32). `last_used_step`
   запрещает повтор кода и кодов старше уже принятого.
 - Ключи — `ADMIN_STAFF_SECRET_KEYS`, кольцо `keys.Ring` (первый — текущий, остальные расшифровывают).

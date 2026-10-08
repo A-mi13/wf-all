@@ -22,9 +22,18 @@ func TestNormalizeEmail(t *testing.T) {
 			t.Errorf("NormalizeEmail(%q) = %q %v, ждали %q true", in, got, ok, want)
 		}
 	}
-	local := strings.Repeat("a", 254-len("@example.com"))
-	if got, ok := domain.NormalizeEmail(local + "@example.com"); !ok || len(got) != 254 {
-		t.Errorf("254 байта: %v", ok)
+	// локальная часть — до 64 байт (RFC 5321 §4.5.3.1.1), считается по хранимой ASCII-форме
+	local := strings.Repeat("a", 64)
+	if got, ok := domain.NormalizeEmail(local + "@example.com"); !ok || got != local+"@example.com" {
+		t.Errorf("локальная часть 64 байта: %q %v", got, ok)
+	}
+	if got, ok := domain.NormalizeEmail(strings.Repeat("ａ", 64) + "@example.com"); !ok || got != local+"@example.com" {
+		t.Errorf("64 полноширинные буквы (192 байта ввода, 64 после NFKC): %q %v", got, ok)
+	}
+	// общий предел 254 — длинным доменом (метки до 63, домен до 253 байт — их держит IDNA)
+	host := strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)
+	if got, ok := domain.NormalizeEmail(local + "@" + host); !ok || len(got) != 254 {
+		t.Errorf("254 байта: %d %v", len(got), ok)
 	}
 	bad := []string{
 		"",
@@ -39,7 +48,8 @@ func TestNormalizeEmail(t *testing.T) {
 		"maria.k@exa\u202emple.com", // смена направления письма (Cf)
 		"maria.k@example.com\ufeff", // BOM в хвосте (Cf)
 		"maria\u0000k@example.com",
-		"a" + local + "@example.com", // 255 байт
+		"a" + local + "@example.com", // локальная часть 65 байт
+		local + "@" + host + "d",     // 255 байт: метка 62 и домен 190 — в пределах IDNA, сверх общего предела
 	}
 	for _, in := range bad {
 		if got, ok := domain.NormalizeEmail(in); ok {
@@ -73,13 +83,21 @@ func TestNormalizeEmailIDN(t *testing.T) {
 		}
 	}
 
-	// длина считается по хранимой ASCII-форме: 248 байт ввода, но 255 после перевода домена в A-label
-	long := strings.Repeat("a", 234) + "@\u043a\u043b\u0443\u0431.\u0440\u0444"
+	// общий предел считается по хранимой ASCII-форме: «.рф» — 5 байт ввода, «.xn--p1ai» — 9
+	idn := func(n int) string {
+		return strings.Repeat("a", 64) + "@" + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." +
+			strings.Repeat("d", n) + ".\u0440\u0444"
+	}
+	if got, ok := domain.NormalizeEmail(idn(52)); !ok || len(got) != 254 || !strings.HasSuffix(got, ".xn--p1ai") {
+		t.Errorf("A-форма 254 байта: %q %v", got, ok)
+	}
+	// 53: ввод 251 байт, A-форма 255
+	long := idn(53)
 	if len(long) > 254 {
 		t.Fatalf("ввод %d байт, ждали не больше 254", len(long))
 	}
 	if got, ok := domain.NormalizeEmail(long); ok {
-		t.Errorf("A-форма длиннее 254 байт принята: %q (%d)", got, len(got))
+		t.Errorf("A-форма длиннее 254 байт принята (ввод %d байт): %q (%d)", len(long), got, len(got))
 	}
 
 	bad := []struct{ name, in string }{
