@@ -236,8 +236,9 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
     `decided_by_label` NULL, `decided_at`, `decision_comment`, `error` NULL.
   - Права: `admin` — DML, `api` и `worker` — ничего.
 - **`role_assignments`** (identity). Новые перечисления: `role_name` → только `captain`, `role_scope` →
-  только `city`. Старые значения удаляются: таблица пуста — проверка в миграции; сначала снимается
-  CHECK `role_scope_id_present`, затем тип пересоздаётся, затем новый CHECK. Правило 4 `CLAUDE.md`
+  только `city`. Старые значения удаляются: строки вне `captain`/`city` миграция отвергает с понятной
+  ошибкой (перенести или удалить и повторить `migrate up`), допуски капитана в городе переживают её;
+  сначала снимается CHECK `role_scope_id_present`, затем тип пересоздаётся, затем новый CHECK. Правило 4 `CLAUDE.md`
   уточняется: роли игроков — `role_assignments`, сотрудников — `staff_roles`.
 - **`audit_log`** (платформа):
   - `actor_staff_id uuid NULL`, `actor_label text NULL` (снимок отображаемого имени на момент действия:
@@ -245,7 +246,8 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
     модератора);
   - CHECK: `actor_user_id` и `actor_staff_id` не оба; без актора `actor_role` ∈
     `system|operator|anonymous` (анонимные события — неудачный вход, анонимная повторная отправка);
-  - индексы `(actor_staff_id, created_at DESC)`, `(scope_city_id, created_at DESC)`.
+  - индексы `(actor_staff_id, created_at DESC, id DESC) WHERE actor_staff_id IS NOT NULL`,
+    `(scope_city_id, created_at DESC, id DESC) WHERE scope_city_id IS NOT NULL` (keyset `(created_at, id)`).
 - **`idempotency_keys`** не меняется: ключ — `(user_id = id субъекта, key)`. UUIDv7 игрока и сотрудника
   не совпадают; комментарий колонки — «id субъекта: игрок или сотрудник».
 - **`feature_flags`** (план B): `version bigint`. Ключи флагов заводятся миграциями модулей, админ только

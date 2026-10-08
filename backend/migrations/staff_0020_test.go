@@ -206,6 +206,10 @@ func TestStaff0020Secrets(t *testing.T) {
 	wantArgsError(t, db, "23514", "staff_invites_code_key_id_format", inv, s2, "0a", "bad", 0, nil)
 	wantArgsError(t, db, "23514", "staff_invites_code_attempts_check", inv, s2, "0a", keyID, 6, nil)
 	wantArgsError(t, db, "23514", "staff_invites_closed_no_code", inv, s2, "0a", keyID, 0, ts)
+	// 5 неверных вводов стирают код (D12): код с пятью попытками — нарушение, четыре — ещё можно
+	wantArgsError(t, db, "23514", "staff_invites_code_wiped", inv, s2, "0a", keyID, 5, nil)
+	execArgs(t, db, inv, s2, "0a", keyID, 4, nil)
+	execArgs(t, db, `UPDATE staff_invites SET revoked_at = now(), code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, s2)
 	execArgs(t, db, inv, s2, nil, nil, 5, nil) // 5 неверных кодов: код стёрт, приглашение живо (D12)
 
 	const ses = `INSERT INTO staff_sessions (id, staff_id, token_hash, stage, created_at, last_seen_at, mfa_at,
@@ -265,8 +269,7 @@ func TestStaff0020Approvals(t *testing.T) {
 		p,
 		p.decide("executed", approverID),
 		p.decide("rejected", approverID).with(func(a *approvalRow) { a.comment = "роль не нужна" }),
-		p.decide("cancelled", initiatorID),                                       // отменяет инициатор
-		p.with(func(a *approvalRow) { a.status, a.decidedAt = "expired", true }), // просрочка: решившего нет
+		p.decide("cancelled", initiatorID), // отменяет инициатор
 		// решено системой (Task 8a: ApprovalExpireDue, ApprovalCancelByInitiator): без решившего, метка system
 		p.with(func(a *approvalRow) { a.status, a.decidedAt, a.decidedByLabel = "expired", true, "system" }),
 		p.with(func(a *approvalRow) {
@@ -303,6 +306,12 @@ func TestStaff0020Approvals(t *testing.T) {
 		{"approvals_failed_error", p.decide("failed", approverID)},
 		{"approvals_failed_error", p.decide("executed", approverID).with(func(a *approvalRow) { a.errText = "boom" })},
 		{"approvals_failed_error", p.with(func(a *approvalRow) { a.status, a.decidedAt, a.errText = "expired", true, "boom" })},
+		// решённое без решившего — только системой и с меткой system
+		{"approvals_system_decider", p.with(func(a *approvalRow) { a.status, a.decidedAt = "expired", true })},
+		{"approvals_system_decider", p.with(func(a *approvalRow) { a.status, a.decidedAt = "cancelled", true })},
+		// отменяет человек — только инициатор и без error (error — у отменённого системой, §4.8)
+		{"approvals_cancel_by_initiator", p.decide("cancelled", approverID)},
+		{"approvals_cancel_by_initiator", p.decide("cancelled", initiatorID).with(func(a *approvalRow) { a.errText = "initiator_changed" })},
 	} {
 		wantArgsError(t, db, "23514", c.constraint, insertApproval, c.a.args()...)
 	}
@@ -313,11 +322,10 @@ const insertAudit = `INSERT INTO audit_log (action, object_type, actor_user_id, 
 
 // Автор записи журнала (D11): не больше одного автора; роль — известная; у сотрудника — роль
 // сотрудника и снимок имени; служебная роль (system, operator, anonymous) — только без автора, а
-// без автора — только служебная или никакой (записи системы до 0020); снимок имени непустой.
+// без автора — только служебная (спека §3.2: роль обязательна); снимок имени непустой.
 func TestStaff0020AuditActors(t *testing.T) {
 	db := dbtest.New(t)
 	for _, a := range [][]any{
-		{nil, nil, nil, nil, nil},
 		{nil, nil, "system", "system", nil},
 		{nil, nil, "operator", "operator", nil},
 		{nil, nil, "anonymous", nil, nil},                  // неудачный вход
@@ -338,6 +346,7 @@ func TestStaff0020AuditActors(t *testing.T) {
 		{"audit_log_service_actor", []any{nil, nil, "owner", "Алексей М.", nil}},
 		{"audit_log_service_actor", []any{targetID, nil, "system", nil, nil}},
 		{"audit_log_service_actor", []any{targetID, nil, nil, nil, nil}},
+		{"audit_log_service_actor", []any{nil, nil, nil, nil, nil}}, // запись без автора и без роли
 		{"audit_log_actor_label", []any{nil, nil, "operator", "   ", nil}},
 	} {
 		wantArgsError(t, db, "23514", c.constraint, insertAudit, c.args...)
@@ -490,6 +499,9 @@ func TestStaff0020DownRestoresSchema(t *testing.T) {
 		"rel r approvals", "rel r staff_accounts", "rel r staff_sessions", "fn staff_role_cities_check",
 		"type role_name captain", "type role_scope city", "type staff_role owner,admin,moderator,support",
 		"cmt idempotency_keys.user_id id субъекта: игрок (users) или сотрудник (staff_accounts); UUIDv7 не пересекаются",
+		// keyset журнала по (created_at, id) — у частичных индексов автора и города тоже
+		"idx CREATE INDEX audit_log_staff_actor_idx ON public.audit_log USING btree (actor_staff_id, created_at DESC, id DESC) WHERE (actor_staff_id IS NOT NULL)",
+		"idx CREATE INDEX audit_log_scope_city_idx ON public.audit_log USING btree (scope_city_id, created_at DESC, id DESC) WHERE (scope_city_id IS NOT NULL)",
 	} {
 		if !slices.Contains(up, want) {
 			t.Errorf("после up нет %q — снимок сравнивает не то", want)

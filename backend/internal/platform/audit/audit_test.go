@@ -104,14 +104,15 @@ func TestWriteRejectsInvalidEntry(t *testing.T) {
 }
 
 // Системное действие (воркер, миграция): нулевые значения пишутся как NULL, а не как пустые строки.
+// Роль у записи без автора обязательна (0020, CHECK audit_log_service_actor) — system.
 func TestWriteSystemEntryStoresNulls(t *testing.T) {
 	pool := dbtest.NewPool(t)
-	e := audit.Entry{Action: "worker.cleanup_done", ObjectType: "session", ObjectID: uuid.Nil}
+	e := audit.Entry{ActorRole: "system", Action: "worker.cleanup_done", ObjectType: "session", ObjectID: uuid.Nil}
 	if err := audit.WriteRead(context.Background(), pool, e); err != nil {
 		t.Fatal(err)
 	}
 	var nulls bool
-	if err := pool.QueryRow(context.Background(), `SELECT actor_user_id IS NULL AND actor_role IS NULL
+	if err := pool.QueryRow(context.Background(), `SELECT actor_user_id IS NULL AND actor_role = 'system'
 		AND object_id IS NULL AND ip IS NULL AND user_agent IS NULL AND reason IS NULL
 		AND before IS NULL AND after IS NULL FROM audit_log`).Scan(&nulls); err != nil {
 		t.Fatal(err)

@@ -92,6 +92,10 @@ CREATE INDEX staff_role_cities_city_idx ON staff_role_cities (city_id);
 
 -- Модератор ⇔ хотя бы один город. Проверка отложена до COMMIT: роль и города меняются в одной
 -- транзакции в любом порядке. Ошибка — 23514 с именем staff_role_cities_moderator.
+-- Гонка: при READ COMMITTED две транзакции, снимающие разные последние города одного модератора,
+-- видят каждая чужой город и проходят обе. Защита — у вызывающего: любая правка роли или городов
+-- блокирует строку учётки (UPDATE staff_accounts SET version = version + 1 в той же транзакции,
+-- спека §3.1), тогда вторая транзакция ждёт первую и проверяет уже её результат.
 -- +goose StatementBegin
 CREATE FUNCTION staff_role_cities_check()
 RETURNS trigger
@@ -186,6 +190,8 @@ CREATE TABLE staff_invites (
     CONSTRAINT staff_invites_code_key_id_format CHECK (code_key_id ~ '^[A-Za-z0-9_-]{11}$'),
     CONSTRAINT staff_invites_closed_no_code CHECK ((consumed_at IS NULL AND revoked_at IS NULL) OR code_enc IS NULL),
     CONSTRAINT staff_invites_code_attempts_check CHECK (code_attempts BETWEEN 0 AND 5),
+    -- 5 неверных вводов стирают код (D12): код с исчерпанными попытками не живёт; новый код — с code_attempts = 0
+    CONSTRAINT staff_invites_code_wiped CHECK (code_attempts < 5 OR code_enc IS NULL),
     CONSTRAINT staff_invites_sends_check CHECK (sends >= 0)
 );
 
@@ -260,15 +266,19 @@ CREATE TABLE approvals (
     CONSTRAINT approvals_expiry CHECK (expires_at > requested_at),
     CONSTRAINT approvals_pending_undecided CHECK (status <> 'pending' OR (decided_at IS NULL AND decided_by IS NULL)),
     CONSTRAINT approvals_decided_at CHECK (status = 'pending' OR decided_at IS NOT NULL),
-    -- решивший-человек — всегда со снимком имени; без решившего метка только 'system' и только у
-    -- просрочки и отмены системой (ApprovalExpireDue, ApprovalCancelByInitiator — Task 8a)
+    -- решивший-человек — всегда со снимком имени; решённое без решившего — только просрочка и отмена
+    -- системой, и всегда с меткой 'system' (ApprovalExpireDue, ApprovalCancelByInitiator — Task 8a)
     CONSTRAINT approvals_decider_label CHECK (decided_by IS NULL OR decided_by_label IS NOT NULL),
-    CONSTRAINT approvals_system_decider CHECK (decided_by IS NOT NULL OR decided_by_label IS NULL
-        OR (decided_by_label = 'system' AND status IN ('expired', 'cancelled'))),
+    CONSTRAINT approvals_system_decider CHECK (decided_by IS NOT NULL
+        OR (status = 'pending' AND decided_by_label IS NULL)
+        OR (status IN ('expired', 'cancelled') AND coalesce(decided_by_label, '') = 'system')),
     CONSTRAINT approvals_decider_required CHECK (status NOT IN ('executed', 'rejected', 'failed') OR decided_by IS NOT NULL),
     -- правило двух рук: решает не инициатор и не цель (отменить может инициатор — статус cancelled)
     CONSTRAINT approvals_two_hands CHECK (status NOT IN ('executed', 'rejected', 'failed')
         OR (decided_by <> requested_by AND decided_by IS DISTINCT FROM target_id)),
+    -- отменяет человек — только инициатор (§4.8) и без error: error у отмены — только у системной
+    CONSTRAINT approvals_cancel_by_initiator CHECK (status <> 'cancelled' OR decided_by IS NULL
+        OR (decided_by = requested_by AND error IS NULL)),
     CONSTRAINT approvals_reject_comment CHECK (status <> 'rejected' OR coalesce(btrim(decision_comment), '') <> ''),
     -- error — причина failed; у отменённого системой — initiator_changed (CancelByInitiator, D17)
     CONSTRAINT approvals_failed_error CHECK (CASE status
@@ -289,8 +299,9 @@ CREATE INDEX approvals_decided_idx ON approvals (decided_at) WHERE status <> 'pe
 
 -- ---------------------------------------------------------------------------
 -- Журнал действий (D11): автор-сотрудник, снимок имени, город записи (журнал модератора).
--- Записи без автора — система (воркер, миграция), оператор или аноним (неудачный вход); NULL роли —
--- записи системы, сделанные до 0020.
+-- Запись без автора — система (воркер, миграция), оператор или аноним (неудачный вход); роль у неё
+-- обязательна (спека §3.2). У автора-игрока пока проверяется только «роль не служебная»: импорт geo
+-- пишет actor_user_id + admin до перевода на actor_staff_id (план B).
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE audit_log
@@ -302,13 +313,14 @@ ALTER TABLE audit_log
         ('player', 'captain', 'owner', 'admin', 'moderator', 'support', 'system', 'operator', 'anonymous')),
     ADD CONSTRAINT audit_log_staff_actor CHECK (actor_staff_id IS NULL
         OR (coalesce(actor_role, '') IN ('owner', 'admin', 'moderator', 'support') AND actor_label IS NOT NULL)),
-    -- служебная роль (или никакой) ⇔ нет автора
-    ADD CONSTRAINT audit_log_service_actor CHECK ((actor_user_id IS NULL AND actor_staff_id IS NULL)
-        = (actor_role IS NULL OR actor_role IN ('system', 'operator', 'anonymous'))),
+    -- роль есть всегда; служебная роль ⇔ нет автора
+    ADD CONSTRAINT audit_log_service_actor CHECK (actor_role IS NOT NULL
+        AND (actor_user_id IS NULL AND actor_staff_id IS NULL) = (actor_role IN ('system', 'operator', 'anonymous'))),
     ADD CONSTRAINT audit_log_actor_label CHECK (actor_label IS NULL OR char_length(btrim(actor_label)) BETWEEN 1 AND 120);
 
-CREATE INDEX audit_log_staff_actor_idx ON audit_log (actor_staff_id, created_at DESC) WHERE actor_staff_id IS NOT NULL;
-CREATE INDEX audit_log_scope_city_idx ON audit_log (scope_city_id, created_at DESC) WHERE scope_city_id IS NOT NULL;
+-- журнал сотрудника и журнал модератора по городу; keyset (created_at, id) — как у журнала целиком
+CREATE INDEX audit_log_staff_actor_idx ON audit_log (actor_staff_id, created_at DESC, id DESC) WHERE actor_staff_id IS NOT NULL;
+CREATE INDEX audit_log_scope_city_idx ON audit_log (scope_city_id, created_at DESC, id DESC) WHERE scope_city_id IS NOT NULL;
 -- журнал целиком: created_at DESC, id (keyset)
 CREATE INDEX audit_log_created_idx ON audit_log (created_at DESC, id DESC);
 

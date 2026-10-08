@@ -51,7 +51,7 @@ func TestRolePrivileges(t *testing.T) {
 		{"api", "UPDATE audit_log SET reason = reason", false},
 		{"api", "DELETE FROM audit_log", false},
 		{"api", "SELECT 1 FROM audit_log", false},
-		{"api", "INSERT INTO audit_log (action, object_type) VALUES ('test.probe', 'probe')", true},
+		{"api", "INSERT INTO audit_log (action, object_type, actor_role) VALUES ('test.probe', 'probe', 'system')", true},
 		{"api", "SELECT 1 FROM event_inbox", false},
 		{"api", "SELECT 1 FROM outbox", false},
 		{"api", "SELECT 1 FROM goose_db_version", false},

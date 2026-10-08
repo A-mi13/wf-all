@@ -2132,8 +2132,8 @@ P25). Отличия от каркаса: подтверждения — таб�
 - `grants.sql`: правило `staff\_%` уже есть (`admin` — DML, остальным ничего); последовательности
   (`kind = 'S'`) получают `USAGE, SELECT` все роли первой веткой — её нужно сузить для `staff_*` и
   `approvals_*` (M12); у `admin` на `river_job` — `SELECT, INSERT, UPDATE`, на остальные `river_*` — ничего.
-  Таблицы River после 0011–0016: `river_job`, `river_leader`, `river_queue`, `river_client`,
-  `river_client_queue`, `river_notification` (`river_migration` нет — миграции ведёт goose).
+  Таблицы River после 0011–0016: `river_job`, `river_leader`, `river_queue`, `river_notification`
+  (`river_client` и `river_client_queue` удалила `0016_river_v7.sql`; `river_migration` нет — миграции ведёт goose).
 - `archtest`: `TestEverySchemaObjectHasOwner` требует строку в `Schema` для каждой таблицы и функции,
   `TestSchemaOwnersAreKnownModules` — владельца из `Layers` или `platform`.
 - Тесты миграций — пакет `migrations_test`; хелперы `newProvider`, `mustExec`, `wantPgError` уже есть в
@@ -3249,7 +3249,7 @@ Expected: PASS. Затем подсадки из Step 5 по одной → FAIL
 		"CREATE SEQUENCE IF NOT EXISTS staff_probe_seq",
 		"CREATE SEQUENCE IF NOT EXISTS approvals_probe_seq",
 		"GRANT ALL ON credentials, audit_log, event_inbox, outbox, goose_db_version, river_job, river_leader, " +
-			"river_queue, river_client, river_client_queue TO api, admin, worker",
+			"river_queue, river_notification TO api, admin, worker",
 		"GRANT ALL ON countries, regions, cities, districts, country_names, region_names, city_names, city_slug_history, " +
 			"geonames_imports, geonames_places, geonames_place_names, geonames_admin1, geonames_admin1_names, app_versions " +
 			"TO api, admin, worker",
@@ -3303,8 +3303,9 @@ Expected: PASS. Затем подсадки из Step 5 по одной → FAIL
 		{"admin", "REINDEX INDEX river_job_kind", true},
 		{"admin", "SELECT 1 FROM river_leader", true},
 		{"admin", "SELECT 1 FROM river_queue", true},
-		{"admin", "DELETE FROM river_client WHERE false", true},
-		{"admin", "UPDATE river_client_queue SET name = name WHERE false", true},
+		// river_client и river_client_queue River v7 удалил (0016_river_v7.sql); остались job, leader, queue, notification
+		{"admin", "DELETE FROM river_notification WHERE false", true},
+		{"admin", "UPDATE river_queue SET paused_at = paused_at WHERE false", true},
 		{"api", "DELETE FROM river_job WHERE false", false},
 		{"api", "SELECT 1 FROM river_queue", false},
 ```
