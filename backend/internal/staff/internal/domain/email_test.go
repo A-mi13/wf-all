@@ -47,3 +47,85 @@ func TestNormalizeEmail(t *testing.T) {
 		}
 	}
 }
+
+// Домен IDN хранится A-label (UTS #46, профиль регистрации), локальная часть — только печатный
+// ASCII (без SMTPUTF8, RFC 6531). Ожидания A-label сверены независимо: node url.domainToASCII.
+func TestNormalizeEmailIDN(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"кириллический домен", "user@\u043a\u043b\u0443\u0431.\u0440\u0444", "user@xn--90ard6a.xn--p1ai"},
+		{"кириллический домен прописными", "User@\u041a\u041b\u0423\u0411.\u0420\u0424", "user@xn--90ard6a.xn--p1ai"},
+		{"A-label как есть", "user@XN--90ARD6A.xn--p1ai", "user@xn--90ard6a.xn--p1ai"},
+		{"домен с умлаутом", "anna@m\u00fcnchen.de", "anna@xn--mnchen-3ya.de"},
+		// смешанный: кириллическая «а» в латинском имени. Профиль регистрации UTS #46 смешение
+		// письменностей не проверяет и принимает; хранится A-label, отличный от example.com,
+		// поэтому двойником существующей учётки он не становится.
+		{"кириллическая а в латинском домене", "maria.k@ex\u0430mple.com", "maria.k@xn--exmple-4nf.com"},
+		// NFKC: полноширинные и лигатура приводятся к ASCII до проверки
+		{"лигатура fi в локальной части", "\ufb01nance@example.com", "finance@example.com"},
+	}
+	for _, c := range cases {
+		if got, ok := domain.NormalizeEmail(c.in); !ok || got != c.want {
+			t.Errorf("%s: NormalizeEmail(%+q) = %q %v, ждали %q true", c.name, c.in, got, ok, c.want)
+		}
+	}
+
+	// длина считается по хранимой ASCII-форме: 248 байт ввода, но 255 после перевода домена в A-label
+	long := strings.Repeat("a", 234) + "@\u043a\u043b\u0443\u0431.\u0440\u0444"
+	if len(long) > 254 {
+		t.Fatalf("ввод %d байт, ждали не больше 254", len(long))
+	}
+	if got, ok := domain.NormalizeEmail(long); ok {
+		t.Errorf("A-форма длиннее 254 байт принята: %q (%d)", got, len(got))
+	}
+
+	bad := []struct{ name, in string }{
+		{"не-ASCII в локальной части", "M\u00e1ria@example.com"},
+		{"кириллица в локальной части", "\u043c\u0430\u0440\u0438\u044f@example.com"},
+		{"кириллическая а в локальной части", "m\u0430ria.k@example.com"},
+		{"точка в конце домена", "maria.k@example.com."},
+		{"пустая метка домена", "maria.k@example..com"},
+		{"подчёркивание в домене", "maria.k@exa_mple.com"},
+		{"дефис в начале метки", "maria.k@-example.com"},
+		{"битый A-label", "maria.k@xn--zz.com"},
+		{"адрес-литерал", "maria.k@[127.0.0.1]"},
+		{"эмодзи в домене", "maria.k@exa\u26bdmple.com"},
+	}
+	for _, c := range bad {
+		if got, ok := domain.NormalizeEmail(c.in); ok {
+			t.Errorf("%s: NormalizeEmail(%+q) = %q, ждали отказ", c.name, c.in, got)
+		}
+	}
+}
+
+// Ревью Task 5, раунд 2: невидимые и «пустые» символы вне Cf (селекторы вариантов, CGJ,
+// хангыльские заполнители, пустой символ Брайля) — ни в локальной части, ни в домене.
+func TestNormalizeEmailInvisible(t *testing.T) {
+	invisible := map[string]string{
+		"U+FE0F селектор варианта": "\ufe0f",
+		"U+FE00 селектор варианта": "\ufe00",
+		"U+034F CGJ": "\u034f",
+		"U+115F хангыльский заполнитель":  "\u115f",
+		"U+1160 хангыльский заполнитель":  "\u1160",
+		"U+3164 хангыльский заполнитель":  "\u3164",
+		"U+FFA0 полуширинный заполнитель": "\uffa0",
+		"U+2800 пустой символ Брайля":     "\u2800",
+		"U+200B пробел нулевой ширины":    "\u200b",
+		"U+00AD мягкий перенос":           "\u00ad",
+	}
+	for name, x := range invisible {
+		for _, in := range []string{
+			"mar" + x + "ia.k@example.com",
+			x + "maria.k@example.com",
+			"maria.k@exa" + x + "mple.com",
+			"maria.k@example.com" + x,
+		} {
+			if got, ok := domain.NormalizeEmail(in); ok {
+				t.Errorf("%s: NormalizeEmail(%+q) = %q, ждали отказ", name, in, got)
+			}
+		}
+	}
+}
