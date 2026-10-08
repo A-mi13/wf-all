@@ -69,6 +69,12 @@ func TestNormalizeEmailIDN(t *testing.T) {
 		{"кириллический домен", "user@\u043a\u043b\u0443\u0431.\u0440\u0444", "user@xn--90ard6a.xn--p1ai"},
 		{"кириллический домен прописными", "User@\u041a\u041b\u0423\u0411.\u0420\u0424", "user@xn--90ard6a.xn--p1ai"},
 		{"A-label как есть", "user@XN--90ARD6A.xn--p1ai", "user@xn--90ard6a.xn--p1ai"},
+		{"A-label умлаута как есть", "anna@xn--mnchen-3ya.de", "anna@xn--mnchen-3ya.de"},
+		{"эсцет не заменяется на ss (не transitional)", "hans@stra\u00dfe.de", "hans@xn--strae-oqa.de"},
+		// локальная часть — dot-atom RFC 5322: atext и одиночные точки внутри
+		{"atext в локальной части", "o'brien+ops@example.com", "o'brien+ops@example.com"},
+		{"все спецсимволы atext", "a!#$%&'*+/=?^_`{|}~-z@example.com", "a!#$%&'*+/=?^_`{|}~-z@example.com"},
+		{"точки внутри локальной части", "a.b.c@example.com", "a.b.c@example.com"},
 		{"домен с умлаутом", "anna@m\u00fcnchen.de", "anna@xn--mnchen-3ya.de"},
 		// смешанный: кириллическая «а» в латинском имени. Профиль регистрации UTS #46 смешение
 		// письменностей не проверяет и принимает; хранится A-label, отличный от example.com,
@@ -110,6 +116,26 @@ func TestNormalizeEmailIDN(t *testing.T) {
 		{"дефис в начале метки", "maria.k@-example.com"},
 		{"битый A-label", "maria.k@xn--zz.com"},
 		{"адрес-литерал", "maria.k@[127.0.0.1]"},
+		// готовый A-label проверяется так же, как U-label: декодированная форма проходит тот же
+		// белый список (символы UTS #46 «valid, NV8» и заполнители — отказ)
+		{"A-label пустого символа Брайля", "maria.k@xn--example-ob0e.com"},
+		{"A-label эмодзи", "maria.k@xn--example-u67d.com"},
+		{"A-label киданьского заполнителя", "maria.k@xn--example-yh82d.com"},
+		// dot-atom: всё, что не atext, и точки на краю или подряд — отказ (иначе письмо падает в
+		// SMTP-клиенте уже после создания приглашения)
+		{"кавычки", `"maria"@example.com`},
+		{"кавычки с пробелом", `"maria k"@example.com`},
+		{"угловые скобки", "<maria>@example.com"},
+		{"запятая", "maria,k@example.com"},
+		{"точка с запятой", "maria;k@example.com"},
+		{"двоеточие", "maria:k@example.com"},
+		{"круглые скобки", "maria(k)@example.com"},
+		{"квадратные скобки", "maria[k]@example.com"},
+		{"обратная косая", `maria\k@example.com`},
+		{"точка в начале", ".maria@example.com"},
+		{"точка в конце", "maria.@example.com"},
+		{"две точки подряд", "maria..k@example.com"},
+		{"только точка", ".@example.com"},
 		{"эмодзи в домене", "maria.k@exa\u26bdmple.com"},
 	}
 	for _, c := range bad {
@@ -120,19 +146,21 @@ func TestNormalizeEmailIDN(t *testing.T) {
 }
 
 // Ревью Task 5, раунд 2: невидимые и «пустые» символы вне Cf (селекторы вариантов, CGJ,
-// хангыльские заполнители, пустой символ Брайля) — ни в локальной части, ни в домене.
+// хангыльские заполнители, пустой символ Брайля) — ни в локальной части, ни в домене. Раунд 3:
+// киданьский заполнитель U+16FE4 проходил и белый список (Mn), и профиль регистрации UTS #46.
 func TestNormalizeEmailInvisible(t *testing.T) {
 	invisible := map[string]string{
 		"U+FE0F селектор варианта": "\ufe0f",
 		"U+FE00 селектор варианта": "\ufe00",
 		"U+034F CGJ": "\u034f",
-		"U+115F хангыльский заполнитель":  "\u115f",
-		"U+1160 хангыльский заполнитель":  "\u1160",
-		"U+3164 хангыльский заполнитель":  "\u3164",
-		"U+FFA0 полуширинный заполнитель": "\uffa0",
-		"U+2800 пустой символ Брайля":     "\u2800",
-		"U+200B пробел нулевой ширины":    "\u200b",
-		"U+00AD мягкий перенос":           "\u00ad",
+		"U+115F хангыльский заполнитель":                            "\u115f",
+		"U+1160 хангыльский заполнитель":                            "\u1160",
+		"U+3164 хангыльский заполнитель":                            "\u3164",
+		"U+FFA0 полуширинный заполнитель":                           "\uffa0",
+		"U+2800 пустой символ Брайля":                               "\u2800",
+		"U+200B пробел нулевой ширины":                              "\u200b",
+		"U+00AD мягкий перенос":                                     "\u00ad",
+		"U+16FE4 киданьский заполнитель (Mn, не Default_Ignorable)": "\U00016fe4",
 	}
 	for name, x := range invisible {
 		for _, in := range []string{
