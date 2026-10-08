@@ -35,6 +35,9 @@ func TestNormalizeEmail(t *testing.T) {
 		"maria@k@example.com",
 		"maria k@example.com",
 		"maria.k@exa mple.com",
+		"\u200bmaria.k@example.com", // пробел нулевой ширины (Cf) — двойник учётки
+		"maria.k@exa\u202emple.com", // смена направления письма (Cf)
+		"maria.k@example.com\ufeff", // BOM в хвосте (Cf)
 		"maria\u0000k@example.com",
 		"a" + local + "@example.com", // 255 байт
 	}

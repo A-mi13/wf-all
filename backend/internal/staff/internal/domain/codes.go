@@ -71,12 +71,13 @@ func NewRecoveryCodes(rnd io.Reader) ([]string, error) {
 
 // NormalizeRecoveryCode — резервный код в каноническом виде: 10 символов алфавита без дефиса.
 // Ввод «как попало» (Review Focus 5): регистр, пробелы, дефисы и тире, переводы строк из .txt
-// (\r\n), полноширинные символы (NFKC). Любой другой символ или не та длина — ok=false.
+// (\r\n), BOM и невидимые символы при копировании (isFiller), полноширинные символы (NFKC).
+// Любой другой символ или не та длина — ok=false.
 func NormalizeRecoveryCode(s string) (string, bool) {
 	var b strings.Builder
 	for _, r := range strings.ToLower(norm.NFKC.String(s)) {
 		switch {
-		case unicode.IsSpace(r) || isDash(r):
+		case isFiller(r) || isDash(r):
 			continue
 		case r >= 'a' && r <= 'z' || r >= '2' && r <= '7':
 			b.WriteRune(r)
@@ -90,13 +91,13 @@ func NormalizeRecoveryCode(s string) (string, bool) {
 	return b.String(), true
 }
 
-// NormalizeCode — 6 цифр кода (TOTP, приглашение) после NFKC и удаления пробелов;
-// иначе ok=false.
+// NormalizeCode — 6 цифр кода (TOTP, приглашение) после NFKC и удаления пробелов и невидимых
+// символов (isFiller); иначе ok=false.
 func NormalizeCode(s string) (string, bool) {
 	var b strings.Builder
 	for _, r := range norm.NFKC.String(s) {
 		switch {
-		case unicode.IsSpace(r):
+		case isFiller(r):
 			continue
 		case r >= '0' && r <= '9':
 			b.WriteRune(r)
@@ -113,8 +114,13 @@ func NormalizeCode(s string) (string, bool) {
 // isDash — дефис и тире, которые редакторы подставляют вместо '-'.
 func isDash(r rune) bool {
 	switch r {
-	case '-', '‐', '‑', '‒', '–', '—', '−':
+	case '-', '‐', '‑', '‒', '–', '—', '―', '−':
 		return true
 	}
 	return false
 }
+
+// isFiller — символ, который при вводе кода пропускается: пробельный (включая \r\n и
+// неразрывный) или невидимый форматирующий категории Cf — BOM в начале .txt, пробел нулевой
+// ширины и word joiner при копировании. Иначе такой ввод тратил бы попытку второго фактора.
+func isFiller(r rune) bool { return unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) }

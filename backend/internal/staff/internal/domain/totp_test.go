@@ -87,7 +87,8 @@ func TestTOTPWindow(t *testing.T) {
 	if _, again := domain.VerifyTOTP(rfcSecret, code(T-1), now, step); again {
 		t.Fatal("код предыдущего шага принят второй раз")
 	}
-	// граница шага: за секунду до конца шага T код шага T+1 уже принимается, через 30 с код T — ещё да
+	// граница шага: за секунду до конца шага T (+29 с) код шага T+1 уже принимается; за секунду до
+	// конца шага T+1 (+59 с) код T — ещё да; с начала шага T+2 (+60 с) код T — уже нет
 	if _, ok := domain.VerifyTOTP(rfcSecret, code(T+1), now.Add(29*time.Second), 0); !ok {
 		t.Error("конец шага T: код T+1 отвергнут")
 	}

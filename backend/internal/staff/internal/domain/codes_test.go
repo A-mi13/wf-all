@@ -6,6 +6,7 @@ import (
 	"io"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"wf/backend/internal/staff/internal/domain"
@@ -59,8 +60,10 @@ func TestNewRecoveryCodes(t *testing.T) {
 	if want := []string{"abcde-fghij", "klmno-pqrst", "uvwxy-z2345", "67abc-defgh"}; !slices.Equal(codes[:4], want) {
 		t.Fatalf("первые коды %q, ждали %q", codes[:4], want)
 	}
-	if _, err := domain.NewRecoveryCodes(bytes.NewReader(make([]byte, 100))); err == nil {
-		t.Fatal("источник из нулей дал 10 одинаковых кодов без ошибки")
+	// источник из нулей: второй код повторяет первый — ошибка именно о повторе, а не любая
+	if _, err := domain.NewRecoveryCodes(bytes.NewReader(make([]byte, 100))); err == nil ||
+		!strings.Contains(err.Error(), "повтор резервного кода") {
+		t.Fatalf("источник из нулей: %v, ждали ошибку повтора резервного кода", err)
 	}
 	if _, err := domain.NewRecoveryCodes(bytes.NewReader(src[:95])); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("короткий источник: %v", err)
@@ -77,8 +80,11 @@ func TestRecoveryCodeNormalize(t *testing.T) {
 		"abcde-fghij\r\n",
 		"\tAbCdE – FgHiJ\n", // тире вместо дефиса
 		"abc de-fg hij",
-		"ＡＢＣＤＥ－ＦＧＨＩＪ",      // полноширинные (NFKC)
-		"abcde\u00a0fghij", // неразрывный пробел
+		"ＡＢＣＤＥ－ＦＧＨＩＪ",       // полноширинные (NFKC)
+		"abcde\u00a0fghij",  // неразрывный пробел
+		"\ufeffabcde-fghij", // BOM в начале .txt (Cf)
+		"abcde\u200b-fghij", // пробел нулевой ширины при копировании (Cf)
+		"abcde\u2015fghij",  // горизонтальная черта (NFKC её не меняет)
 	}
 	for _, in := range ok {
 		got, valid := domain.NormalizeRecoveryCode(in)
@@ -125,6 +131,9 @@ func TestNormalizeCode(t *testing.T) {
 		{"123456\r\n", "123456", true},
 		{"１２３４５６", "123456", true}, // полноширинные цифры (NFKC)
 		{"000000", "000000", true},
+		{"\ufeff123456", "123456", true}, // BOM (Cf)
+		{"123\u200b456", "123456", true}, // пробел нулевой ширины (Cf)
+		{"123456\u2060", "123456", true}, // word joiner (Cf)
 		{"12345", "", false},
 		{"1234567", "", false},
 		{"123-456", "", false},
