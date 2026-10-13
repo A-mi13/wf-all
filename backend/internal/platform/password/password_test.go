@@ -124,7 +124,7 @@ func TestVerifyDummyCostsLikeVerify(t *testing.T) {
 // DefaultParams — минимум OWASP (m = 19 МиБ, t = 2, p = 1) и совпадает с константами Min*. Что
 // умолчания нельзя испортить для всех, гарантирует не тест, а компилятор: DefaultParams — функция,
 // она возвращает новое значение при каждом вызове.
-func TestDefaultParamsAreConstants(t *testing.T) {
+func TestDefaultParamsAreOWASPMinimum(t *testing.T) {
 	want := password.Params{MemoryKiB: 19456, Iterations: 2, Parallelism: 1}
 	if p := password.DefaultParams(); p != want {
 		t.Fatalf("DefaultParams = %+v", p)
