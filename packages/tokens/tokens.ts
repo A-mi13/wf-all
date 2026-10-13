@@ -18,7 +18,16 @@ export const tokens = {
     "warning": "#E8B858",
     "danger": "#F97066",
     "slot-empty": "#1B241F",
-    "slot-filled": "#2A3B2E"
+    "slot-filled": "#2A3B2E",
+    "surface-sunken": "#0E130F",
+    "chip-bg": "#1F2A23",
+    "chip-accent-bg": "#2C4434",
+    "success-bg": "#1E2A17",
+    "warning-bg": "#2A2113",
+    "danger-bg": "#2A1614",
+    "danger-border": "#5A3733",
+    "text-faint": "#6E7B73",
+    "text-ghost": "#4F5C55"
   },
   "font": {
     "display": "'Oswald', sans-serif",
@@ -82,6 +91,9 @@ export const tokens = {
     "avatar-lg": 96,
     "slot": 56,
     "bar": 8
+  },
+  "breakpoint": {
+    "mobile": 768
   },
   "duration": {
     "fast": 120,

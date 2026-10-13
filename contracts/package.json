@@ -7,6 +7,10 @@
     "./error-codes": {
       "types": "./src/error-codes.d.mts",
       "default": "./src/error-codes.mjs"
+    },
+    "./labels": {
+      "types": "./src/labels.d.mts",
+      "default": "./src/labels.mjs"
     }
   },
   "scripts": {

@@ -1,9 +1,155 @@
-import createClient from 'openapi-fetch';
-import type { paths } from './gen/admin';
+import createClient, { type Middleware } from 'openapi-fetch';
+import { type ReauthBus, reauthBus } from '../app/reauth';
+import type { components, paths } from './gen/admin';
 
-// Клиент админского API. Существует только в apps/admin — веб его физически не видит.
-export function createApi(baseUrl: string) {
-  return createClient<paths>({ baseUrl });
+// Клиент админского API (спека сотрудников §9.1, §9.3). Существует только в apps/admin — веб его
+// физически не видит. Адрес — тот же origin (§5.2): dev-прокси Vite или сам admin-api.
+//
+// Middleware:
+// - X-WF-Admin: 1 на изменяющих методах (CSRF вместе с Origin); ключ идемпотентности НЕ создаёт —
+//   его даёт useAdminMutation, один на действие (M6);
+// - 401 auth.reauth_required → ожидание разблокировки (reauthBus) и повтор исходного запроса по
+//   клону, снятому до отправки (тело POST повторяется целиком, P20);
+// - любой не-2xx ответ → исключение ApiError: вызов либо возвращает данные, либо бросает.
+
+export const ADMIN_HEADER = 'X-WF-Admin';
+export const BACKGROUND_HEADER = 'X-WF-Background';
+
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+export type FieldError = { field: string; code: string };
+type Problem = components['schemas']['Problem'];
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly fields?: FieldError[];
+  readonly retryAfter?: number;
+  readonly attemptsLeft?: number;
+
+  constructor(init: {
+    status: number;
+    code: string;
+    fields?: FieldError[];
+    retryAfter?: number;
+    attemptsLeft?: number;
+  }) {
+    super(`${init.status} ${init.code}`);
+    this.name = 'ApiError';
+    this.status = init.status;
+    this.code = init.code;
+    if (init.fields) this.fields = init.fields;
+    if (init.retryAfter !== undefined) this.retryAfter = init.retryAfter;
+    if (init.attemptsLeft !== undefined) this.attemptsLeft = init.attemptsLeft;
+  }
+}
+
+export function isApiError(e: unknown, code?: string): e is ApiError {
+  return e instanceof ApiError && (code === undefined || e.code === code);
+}
+
+// Помечает фоновый опрос (счётчик подтверждений, статус импорта): сервер не продлевает по нему
+// бездействие сессии (§4.7), а клиент не открывает по нему разблокировку сам (Review Focus 2).
+// Использование: api.GET(path, { params, ...background() }).
+export function background<T extends RequestInit>(init?: T): T {
+  const headers = new Headers(init?.headers);
+  headers.set(BACKGROUND_HEADER, '1');
+  return { ...init, headers: Object.fromEntries(headers) } as unknown as T;
+}
+
+const nonNegative = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
+
+async function readProblem(res: Response): Promise<Partial<Problem> | null> {
+  try {
+    const body: unknown = await res.clone().json();
+    return body && typeof body === 'object' ? (body as Partial<Problem>) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Problem (RFC 9457) → ApiError. Ответ без Problem (прокси, HTML) — код internal: у него есть
+// текст в локалях, а статус сохраняется.
+async function toApiError(res: Response): Promise<ApiError> {
+  const p = await readProblem(res);
+  const header = Number.parseInt(res.headers.get('Retry-After') ?? '', 10);
+  const errors = p?.errors;
+  const fields = Array.isArray(errors)
+    ? errors.map(({ field, code }) => ({ field, code }))
+    : undefined;
+  return new ApiError({
+    status: res.status,
+    code: typeof p?.code === 'string' && p.code ? p.code : 'internal',
+    fields,
+    retryAfter: nonNegative(p?.retry_after) ?? nonNegative(header),
+    attemptsLeft: nonNegative(p?.attempts_left),
+  });
+}
+
+function adminMiddleware(bus: ReauthBus): Middleware {
+  // Клоны исходных запросов до отправки: тело Request читается один раз.
+  const originals = new Map<string, Request>();
+  return {
+    onRequest({ request, id }) {
+      if (MUTATING.has(request.method)) request.headers.set(ADMIN_HEADER, '1');
+      originals.set(id, request.clone());
+      return request;
+    },
+    async onResponse({ request, response, id, options }) {
+      const original = originals.get(id);
+      originals.delete(id);
+      let res = response;
+      if (res.status === 401 && original) {
+        const p = await readProblem(res);
+        if (p?.code === 'auth.reauth_required') {
+          const isBackground = request.headers.get(BACKGROUND_HEADER) === '1';
+          // Фоновый опрос ждёт уже открытую разблокировку, но свою не открывает.
+          const unlock = isBackground ? bus.current() : bus.request();
+          if (unlock) {
+            const unlocked = await unlock.then(
+              () => true,
+              () => false,
+            );
+            // Повтор — один раз: снова reauth_required уходит ошибкой, без второго круга.
+            if (unlocked) res = await options.fetch(original);
+          }
+        }
+      }
+      if (!res.ok) throw await toApiError(res);
+      return res;
+    },
+    onError({ id }) {
+      originals.delete(id);
+    },
+  };
+}
+
+// Типы операций без заголовка X-WF-Admin: его ставит middleware, вызывающий код его не передаёт.
+// Idempotency-Key остаётся обязательным — его даёт useAdminMutation (M6).
+type WithoutAdminHeader<H> = Omit<H, typeof ADMIN_HEADER>;
+type FixParams<P> = P extends { header: infer H }
+  ? Omit<P, 'header'> &
+      ([keyof WithoutAdminHeader<H>] extends [never]
+        ? { header?: never }
+        : { header: WithoutAdminHeader<H> })
+  : P;
+type FixOperation<O> = O extends { parameters: infer P }
+  ? Omit<O, 'parameters'> & { parameters: FixParams<P> }
+  : O;
+export type AdminPaths = {
+  [Path in keyof paths]: { [M in keyof paths[Path]]: FixOperation<paths[Path][M]> };
+};
+
+export function createApi(baseUrl: string, opts: { reauth?: ReauthBus } = {}) {
+  const client = createClient<AdminPaths>({
+    baseUrl,
+    credentials: 'same-origin',
+    // globalThis.fetch читается при каждом запросе, а не при создании клиента (подмена в тестах).
+    fetch: (request) => globalThis.fetch(request),
+  });
+  client.use(adminMiddleware(opts.reauth ?? reauthBus));
+  return client;
 }
 
 export type Api = ReturnType<typeof createApi>;

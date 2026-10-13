@@ -1,12 +1,127 @@
 {
-  "app": { "title": "Administration" },
+  "app": {
+    "title": "Administration"
+  },
+  "nav": {
+    "groups": {
+      "security": "Security"
+    },
+    "audit": "Audit log",
+    "staff": "Roles and access",
+    "approvals": "Approvals",
+    "me": "My access"
+  },
+  "pages": {
+    "login": {
+      "title": "Sign in"
+    },
+    "accept": {
+      "title": "Accept invitation"
+    },
+    "setup2fa": {
+      "title": "Two-factor setup"
+    }
+  },
+  "states": {
+    "loading": "Loading…",
+    "connection": {
+      "title": "No connection to the server",
+      "retry": "Retry"
+    },
+    "forbidden": {
+      "title": "No access to this section",
+      "text": "This section needs a permission your role doesn't have. An owner or admin can grant access."
+    },
+    "not_found": {
+      "title": "Page not found"
+    }
+  },
+  "locale": {
+    "label": "Interface language",
+    "ru": "Русский",
+    "en": "English"
+  },
+  "permissions": {
+    "staff": {
+      "roles": {
+        "read": "Role and permission matrix",
+        "grant_elevated": "Grant the owner or admin role",
+        "grant": "Grant the moderator or support role, add a city to a moderator",
+        "revoke_owner": "Remove an owner (disable the account)",
+        "revoke_admin": "Remove an admin (disable the account)",
+        "revoke": "Remove a moderator or support member, remove a city from a moderator"
+      },
+      "accounts": {
+        "read": "Staff list and profiles"
+      },
+      "access": {
+        "reset_elevated": "Reset access for an owner or admin",
+        "reset": "Reset access for a moderator or support member"
+      },
+      "invites": {
+        "resend": "Resend an invitation"
+      },
+      "sessions": {
+        "revoke": "End other staff members' sessions (admins: moderators and support only)"
+      }
+    },
+    "audit": {
+      "log": {
+        "read": "Read the audit log (moderators: own cities and own entries)"
+      }
+    },
+    "geo": {
+      "places": {
+        "search": "Search GeoNames places"
+      },
+      "cities": {
+        "read": "Cities and districts",
+        "activate": "Open a city",
+        "manage": "City status, slug and geoname_id link",
+        "rename": "City names by language"
+      },
+      "districts": {
+        "manage": "City districts"
+      },
+      "countries": {
+        "read": "Countries and their rules",
+        "manage": "Country rules and enabling a country"
+      },
+      "imports": {
+        "read": "GeoNames import log",
+        "run": "Run a GeoNames import"
+      }
+    },
+    "platform": {
+      "versions": {
+        "read": "App versions",
+        "manage": "Minimum and recommended version, store link"
+      },
+      "flags": {
+        "read": "Feature flags",
+        "manage": "Toggle feature flags by city"
+      }
+    }
+  },
+  "approvals": {
+    "actions": {
+      "staff": {
+        "invite": "Staff invitation",
+        "role_change": "Role or cities change",
+        "access_reset": "Access reset",
+        "revoke_owner": "Disabling an owner"
+      }
+    }
+  },
   "errors": {
     "internal": "Something went wrong. Please try again",
     "request": {
       "invalid": "The request could not be processed",
       "too_large": "The request is too large"
     },
-    "validation": { "failed": "Check the form fields" },
+    "validation": {
+      "failed": "Check the form fields"
+    },
     "http": {
       "not_found": "Not found",
       "method_not_allowed": "This action is not available",
@@ -20,14 +135,20 @@
       "reauth_required": "Confirm your sign-in with a code from your app",
       "setup_required": "Finish setting up two-factor authentication first"
     },
-    "ratelimit": { "exceeded": "Too many requests. Please wait a moment" },
-    "humancheck": { "required": "Please confirm you are not a robot" },
+    "ratelimit": {
+      "exceeded": "Too many requests. Please wait a moment"
+    },
+    "humancheck": {
+      "required": "Please confirm you are not a robot"
+    },
     "idempotency": {
       "key_reused": "This action was already performed with different data. Reload the page",
       "in_progress": "The action is still in progress. Please wait",
       "replay_unavailable": "The action is done. Reload the page"
     },
-    "feature": { "disabled": "This feature is not available yet" },
+    "feature": {
+      "disabled": "This feature is not available yet"
+    },
     "platform": {
       "approval_not_found": "Approval request not found",
       "approval_self": "You can't decide your own request or a request about you",
