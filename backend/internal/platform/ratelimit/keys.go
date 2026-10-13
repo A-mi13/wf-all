@@ -12,8 +12,9 @@ import (
 // Ключ лимита — <вид>:<класс>:<значение>. Виды не пересекаются: ip, user и staff (субъект запроса),
 // device (s: — устройство сессии, b: — метка BFF) считает Middleware; email — сценарии, которые
 // считают сами через Limiter (вход сотрудника по почте, решение D7). Ключ собирается только этими
-// функциями (IPKey, SubjectKey, SessionDeviceKey, BFFDeviceKey, EmailKey): так счётчик отказов сессии в конвейере admin-api (Limiter.Add) попадает в тот же
-// IP-лимит класса, что и запросы через Middleware.
+// функциями (IPKey, SubjectKey, SessionDeviceKey, BFFDeviceKey, EmailKey): так счётчик отказов
+// сессии в конвейере admin-api (Limiter.Add) попадает в тот же IP-лимит класса, что и запросы
+// через Middleware.
 
 // IPKey — ключ адреса клиента (peer) в классе.
 func IPKey(class string, ip netip.Addr) string {

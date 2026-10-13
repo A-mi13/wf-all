@@ -119,8 +119,8 @@ River на каждого подписчика и отмечает `published_at
 
 **Край платформы (спека бэкенда §6.4, §6.6, §6.7).** `rate_limits` и `humancheck_spent` — `UNLOGGED`:
 без WAL, после сбоя сервера пусты (короткое окно без лимита и повтора PoW допустимо). Ключ лимита —
-`<вид>:<класс>:<значение>`, собирается только `ratelimit.IPKey` / `SubjectKey` / `SessionDeviceKey` / `BFFDeviceKey` / `EmailKey`:
-`ip:auth:203.0.113.7`; субъект — игрок `user:default:<uuid>` или сотрудник `staff:default:<uuid>` (счётчики
+`<вид>:<класс>:<значение>`, собирается только `ratelimit.IPKey` / `SubjectKey` / `SessionDeviceKey` /
+`BFFDeviceKey` / `EmailKey`: `ip:auth:203.0.113.7`; субъект — игрок `user:default:<uuid>` или сотрудник `staff:default:<uuid>` (счётчики
 раздельны); почта (вход сотрудника) — `email:<класс>:<base64url(hmac)>`, сама почта не хранится; у устройства значение с
 префиксом источника — `device:<класс>:s:<uuid>` (устройство сессии) или `device:<класс>:b:<метка>`
 (метка BFF), чтобы метка из cookie не совпала с чужим устройством. Строка одна на ключ, `tat` — GCRA,

@@ -16,7 +16,7 @@ paths:
 - Сгенерированные типы API — `internal/httpapi/{public,admin}/oapi`; `httpapi/{public,admin}.Server` встраивает хендлеры модулей; операции платформы (тег `platform`) реализует сам. Тег операции в контракте = модуль-реализатор (`apitest.TagViolations`).
 - Ошибки клиенту — `httpx.WriteProblem` с кодом `<модуль>.<ошибка>`; клиенты переводят по `code`, `title` — техническая сводка, не для показа. Код ошибки платформы — константа в `internal/platform/httpx/codes.go` (и в `PlatformCodes`) вместе с контрактом и локалями (`.claude/rules/contracts.md`); литерал кода ловит `TestProblemCodesAreConstants` — он обходит все пакеты `internal/platform/*`; вне httpx код ошибки — только константа `httpx.Code…`. Коды модуля (`<модуль>.<ошибка>`) — константы в корневом пакете модуля (`internal/geo/codes.go`: `Code…` и список `Codes`), перечисляются в `x-error-codes` его операций; сверка в обе стороны — `TestGeoCodesDocumented` (`internal/httpapi/public`), следующий модуль добавляет такой же тест. Проверка хендлера сверх схемы (`q` из одних знаков, явная проверка точки до PostGIS) — `httpx.NewFieldError(поле, правило)`: 400 `validation.failed` с полем, как у валидатора.
 - Swagger UI — `internal/platform/apidocs` на `/docs` (контракт — `/docs/openapi.json`), включается `API_DOCS_ENABLED` / `ADMIN_DOCS_ENABLED` (`config.HTTP.DocsEnabled`, по умолчанию выкл.); `/docs` вне контракта — валидатор пропускает его к роутеру. Swagger UI грузится с jsDelivr; версия и SRI-хэши — в `apidocs.go`, обновлять вместе.
-- Пробы — `/healthz`, `/readyz` (`platform/health`) вне контракта. `/v1/health` удалён из обоих контрактов (public — спека `geo` §4.4, admin — план сотрудников R13; исключения — `contracts/oasdiff-err-ignore-{public,admin}.txt`). Проверка связи клиентов — запрос контракта (веб — `listCities` с `limit=1`, админка — `GET /v1/staff/me`).
+- Пробы — `/healthz`, `/readyz` (`platform/health`) вне контракта; в admin-api они стоят до IP-аллоулиста намеренно (health-check хостинга ходит не из сетей админки). `/v1/health` удалён из обоих контрактов (public — спека `geo` §4.4, admin — план сотрудников R13; исключения — `contracts/oasdiff-err-ignore-{public,admin}.txt`). Проверка связи клиентов — запрос контракта (веб — `listCities` с `limit=1`, админка — `GET /v1/staff/me`).
 
 ## Конвейер public (спека §6.1)
 
@@ -61,6 +61,9 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   `index.html` (SPA), нет файла в `assets/` — 404; `/v1/*` — 404 Problem; только GET/HEAD. Файл — через
   `os.OpenInRoot` (выход за каталог невозможен). Заголовки: CSP, `X-Content-Type-Options: nosniff`,
   `Referrer-Policy: no-referrer`; `index.html` — `no-store`, `assets/` — `immutable`, прочее — `no-cache`.
+- **Защита в глубину**: chi сопоставляет `{param}` с пустым сегментом (`PUT /v1/staff/accounts//role`), маршрутизатор
+  контракта — нет, и `httpx.Route` не ставится. В `ChiServerOptions` обоих API стоят `httpx.RequireRoute` (на хендлере) и
+  `httpx.NotFoundWithoutRoute` (на ошибке биндинга): запрос без `Route` — `404 http.not_found`, хендлер не вызывается.
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Операция контракта, которую ещё не исполняет сервер, — заглушка `501 http.not_implemented`

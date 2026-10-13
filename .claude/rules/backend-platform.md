@@ -72,9 +72,9 @@ paths:
   403; `Can` = «можно сразу» (для `Dual` — false). Вне стадии `active` или под `Reauth` — `Deny` на всё. Модули
   проверяют права так, не импортируя `staff`. Механизмы, которым всё равно, игрок или сотрудник (идемпотентность,
   лимиты), берут `auth.SubjectFrom`.
-- Ключ лимита — только `ratelimit.IPKey` / `SubjectKey` / `SessionDeviceKey` / `BFFDeviceKey` / `EmailKey` (`<вид>:<класс>:<значение>`; виды `ip`,
-  `user`, `staff`, `device`, `email`): счётчик, который сценарий ведёт сам через `Limiter`, попадает в то же
-  пространство, что и `ratelimit.Middleware`.
+- Ключ лимита — только `ratelimit.IPKey` / `SubjectKey` / `SessionDeviceKey` / `BFFDeviceKey` / `EmailKey`
+  (`<вид>:<класс>:<значение>`; виды `ip`, `user`, `staff`, `device`, `email`): счётчик, который сценарий ведёт
+  сам через `Limiter`, попадает в то же пространство, что и `ratelimit.Middleware`.
 - В логи — только строки и ошибки: `logx` маскирует ПД (почту, телефоны) только в них; структуры, `Stringer`
   и срезы не маскируются — с ПД их в лог не класть.
 - Права сотрудников — каталог и матрица `platform/perm` (`docs/05-ролевая-модель.md`): ключ
