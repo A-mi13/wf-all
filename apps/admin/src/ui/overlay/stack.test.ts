@@ -23,3 +23,22 @@ test('focusables: без disabled, полей в fieldset[disabled], hidden и i
   const names = focusables(document.getElementById('root')).map((el) => el.textContent?.trim());
   expect(names).toEqual(['Видимая', 'В легенде', 'Ссылка']);
 });
+
+// trapTab ведёт каждое нажатие Tab сам: элемент с tabindex="-1" (фокус только программно) в цикл
+// не входит, даже если он кнопка или ссылка; summary и contenteditable — входят.
+test('focusables: tabindex="-1" исключает любой элемент; summary и contenteditable — в цикле', () => {
+  document.body.innerHTML = `
+    <div id="root">
+      <button tabindex="-1">Кнопка вне Tab</button>
+      <a href="#x" tabindex="-1">Ссылка вне Tab</a>
+      <input tabindex="-1" value="Поле вне Tab" />
+      <details><summary>Подробнее</summary><p>текст</p></details>
+      <details><summary tabindex="-1">Сводка вне Tab</summary></details>
+      <div contenteditable="true">Редактор</div>
+      <div contenteditable="false">Не редактор</div>
+      <div contenteditable tabindex="-1">Редактор вне Tab</div>
+      <button>Обычная</button>
+    </div>`;
+  const names = focusables(document.getElementById('root')).map((el) => el.textContent?.trim());
+  expect(names).toEqual(['Подробнее', 'Редактор', 'Обычная']);
+});

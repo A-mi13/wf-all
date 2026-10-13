@@ -1,8 +1,8 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'use-intl';
 import { cx } from '../cx';
-import { TOASTS_ATTR } from '../overlay/stack';
+import { TOASTS_ATTR, topOverlayPanel } from '../overlay/stack';
 import {
   TOAST_HIDE_MS,
   type ToastAction,
@@ -26,17 +26,43 @@ const TONE: Record<ToastTone, string | undefined> = {
 // существующую область): успех и справка — aria-live="polite", ошибка — aria-live="assertive" и
 // без таймера. Роли status/alert не ставим: постоянный role="alert" путал бы getByRole('alert')
 // экранов (FormError, «нет связи»). При открытой модалке тосты входят в цикл Tab (overlay/stack.ts).
-const topDialog = () => {
-  const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]');
-  return dialogs[dialogs.length - 1] ?? null;
-};
+//
+// Порядок: успехи и справки — в своей области, ошибки — в своей, под ними; внутри области — в
+// порядке появления. Общий порядок появления между областями не держим: узел живёт в одной
+// области, а переставлять тосты стилем (order) без inline-стиля нельзя (CSP), display: contents
+// у живых областей ломает их объявление в части читалок. Ошибки внизу стабильны: исчезающие
+// успехи над ними их не двигают.
+//
+// Фокус: закрыли тост, на котором он стоял (кнопкой, действием или программно dismiss(id)), —
+// фокус возвращается на элемент, с которого пришли в область тостов; его нет (удалён, выключен,
+// вне верхнего диалога) — на панель верхнего диалога по стеку оверлеев; диалога нет — остаётся
+// браузеру.
 export function ToastProvider({ children }: { children: ReactNode }) {
   const t = useTranslations('ui.toast');
   const [items, setItems] = useState<Item[]>([]);
   const next = useRef(0);
+  const nodes = useRef(new Map<number, HTMLElement>());
+  const returnTo = useRef<HTMLElement | null>(null);
+  const register = useCallback((id: number, el: HTMLElement) => {
+    nodes.current.set(id, el);
+    return () => {
+      nodes.current.delete(id);
+    };
+  }, []);
 
   const api = useMemo<ToastApi>(() => {
-    const dismiss = (id: number) => setItems((list) => list.filter((i) => i.id !== id));
+    const restoreFocus = () => {
+      const top = topOverlayPanel();
+      const back = returnTo.current;
+      returnTo.current = null;
+      if (back?.isConnected && (!top || top.contains(back))) back.focus();
+      if (back && document.activeElement === back) return;
+      top?.focus();
+    };
+    const dismiss = (id: number) => {
+      if (nodes.current.get(id)?.contains(document.activeElement)) restoreFocus();
+      setItems((list) => list.filter((i) => i.id !== id));
+    };
     const push = (tone: ToastTone) => (text: string, opts?: ToastOptions) => {
       const id = ++next.current;
       setItems((list) => [...list, { id, tone, text, action: opts?.action }]);
@@ -49,19 +75,41 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext value={api}>
       {children}
       {createPortal(
-        <section className={styles.region} aria-label={t('region')} {...{ [TOASTS_ATTR]: '' }}>
+        <section
+          className={styles.region}
+          aria-label={t('region')}
+          {...{ [TOASTS_ATTR]: '' }}
+          onFocus={(e) => {
+            // вход в область снаружи — запомнить, откуда (мышью без фокуса до того — некуда)
+            const from = e.relatedTarget;
+            if (from instanceof HTMLElement && e.currentTarget.contains(from)) return;
+            returnTo.current = from instanceof HTMLElement ? from : null;
+          }}
+        >
           <div aria-live="polite" className={styles.list}>
             {items
               .filter((i) => i.tone !== 'error')
               .map((item) => (
-                <Toast key={item.id} item={item} closeLabel={t('close')} dismiss={api.dismiss} />
+                <Toast
+                  key={item.id}
+                  item={item}
+                  closeLabel={t('close')}
+                  dismiss={api.dismiss}
+                  register={register}
+                />
               ))}
           </div>
           <div aria-live="assertive" className={styles.list}>
             {items
               .filter((i) => i.tone === 'error')
               .map((item) => (
-                <Toast key={item.id} item={item} closeLabel={t('close')} dismiss={api.dismiss} />
+                <Toast
+                  key={item.id}
+                  item={item}
+                  closeLabel={t('close')}
+                  dismiss={api.dismiss}
+                  register={register}
+                />
               ))}
           </div>
         </section>,
@@ -75,20 +123,16 @@ function Toast({
   item,
   closeLabel,
   dismiss,
+  register,
 }: {
   item: Item;
   closeLabel: string;
   dismiss: (id: number) => void; // стабильная: новый тост не перезапускает таймеры старых
+  register: (id: number, el: HTMLElement) => () => void; // узел тоста — dismiss видит его фокус
 }) {
   const { id } = item;
-  const self = useRef<HTMLDivElement>(null);
-  // Закрыли руками: фокус был на тосте — вернуть его в верхний модальный диалог (иначе он упал бы
-  // на body, за пределы ловушки).
-  const onDismiss = () => {
-    const hadFocus = Boolean(self.current?.contains(document.activeElement));
-    dismiss(id);
-    if (hadFocus) topDialog()?.focus();
-  };
+  // фокус после закрытия возвращает dismiss провайдера
+  const onDismiss = () => dismiss(id);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const autoHide = item.tone !== 'error';
@@ -103,7 +147,7 @@ function Toast({
 
   return (
     <div
-      ref={self}
+      ref={(el) => (el ? register(id, el) : undefined)}
       className={cx(styles.toast, TONE[item.tone])}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

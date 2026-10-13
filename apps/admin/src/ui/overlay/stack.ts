@@ -2,29 +2,41 @@
 // (подтверждение поверх панели закрывается первым). Пока открыт хоть один — прокрутка фона
 // заблокирована: атрибут data-wf-scroll-lock на body, правило — в Overlay.module.css (не
 // inline-стиль: CSP админки).
-const stack: symbol[] = [];
+type Entry = { id: symbol; panel: HTMLElement | null };
+const stack: Entry[] = [];
 const LOCK_ATTR = 'data-wf-scroll-lock';
 
-export function pushOverlay(id: symbol): () => void {
-  stack.push(id);
+// panel — элемент диалога: на него уходит фокус, когда вернуть его больше некуда (тосты).
+export function pushOverlay(id: symbol, panel: HTMLElement | null = null): () => void {
+  stack.push({ id, panel });
   document.body.setAttribute(LOCK_ATTR, '');
   return () => {
-    const i = stack.lastIndexOf(id);
+    const i = stack.findLastIndex((e) => e.id === id);
     if (i !== -1) stack.splice(i, 1);
     if (stack.length === 0) document.body.removeAttribute(LOCK_ATTR);
   };
 }
 
-export const isTopOverlay = (id: symbol): boolean => stack[stack.length - 1] === id;
+export const isTopOverlay = (id: symbol): boolean => stack[stack.length - 1]?.id === id;
 
+// Панель верхнего открытого оверлея — по стеку открытия, не по порядку в DOM.
+export const topOverlayPanel = (): HTMLElement | null => stack[stack.length - 1]?.panel ?? null;
+
+// Цикл Tab ведёт trapTab сам, поэтому список — ровно то, куда браузер ставит фокус по Tab:
+// tabindex="-1" (фокус только программно) исключает любой элемент, даже кнопку и ссылку.
+const NOT_SKIPPED = ':not([tabindex="-1"])';
 const FOCUSABLE = [
   'a[href]',
   'button:not([disabled])',
   'input:not([disabled]):not([type="hidden"])',
   'select:not([disabled])',
   'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
+  'summary',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[tabindex]',
+]
+  .map((s) => s + NOT_SKIPPED)
+  .join(',');
 
 // Поле в fieldset[disabled] выключено, кроме содержимого его первой legend (HTML).
 function inDisabledFieldset(el: HTMLElement): boolean {

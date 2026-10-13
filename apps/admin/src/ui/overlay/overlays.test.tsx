@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { type ComponentType, type ReactNode, useState } from 'react';
+import { type ComponentType, type ReactNode, StrictMode, useState } from 'react';
 import { describe, expect, test, vi } from 'vitest';
 import { renderWithIntl } from '../../test/render';
 import { Button } from '../Button';
@@ -152,6 +152,43 @@ test('поле с autoFocus внутри: открыватель запомне�
   await user.keyboard('{Escape}');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Открыть' })).toHaveFocus();
+});
+
+// main.tsx рендерит под StrictMode: в dev эффект открытия выполняется дважды (с уборкой между
+// ними) — второй запуск не должен перебить autoFocus содержимого первым элементом диалога.
+test('StrictMode: autoFocus содержимого не перебивается повторным эффектом', async () => {
+  function AutoFocus() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <Button onClick={() => setOpen(true)}>Открыть</Button>
+        <Modal open={open} onClose={() => setOpen(false)} title="Разблокировка">
+          <Button>Раньше поля</Button>
+          <input aria-label="Код" autoFocus />
+        </Modal>
+      </>
+    );
+  }
+  const { user } = renderWithIntl(
+    <StrictMode>
+      <AutoFocus />
+    </StrictMode>,
+  );
+  await user.click(screen.getByRole('button', { name: 'Открыть' }));
+  expect(screen.getByLabelText('Код')).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Открыть' })).toHaveFocus();
+});
+
+test('StrictMode: без autoFocus — первый элемент содержимого', async () => {
+  const { user } = renderWithIntl(
+    <StrictMode>
+      <Harness Overlay={Modal} />
+    </StrictMode>,
+  );
+  await user.click(screen.getByRole('button', { name: 'Открыть' }));
+  expect(screen.getByLabelText('Почта')).toHaveFocus();
 });
 
 test('тост-ошибка при открытой модалке закрывается с клавиатуры, фокус возвращается в диалог', async () => {

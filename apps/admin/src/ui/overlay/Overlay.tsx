@@ -78,16 +78,30 @@ function Panel({
       trapTab(e, panel.current);
     }
   });
+  // Начальный фокус ставится один раз. В StrictMode (dev, main.tsx) эффект открытия повторяется
+  // после уборки, а уборка вернула фокус открывателю — повтор ставит его на тот же элемент, что и
+  // первый раз (поле с autoFocus), а не на первый элемент содержимого.
+  const initial = useRef<HTMLElement | null>(null);
   const focusInitial = useEffectEvent(() => {
+    const root = panel.current;
+    const inside = (el: Element | null): el is HTMLElement =>
+      el instanceof HTMLElement && Boolean(root?.contains(el));
+    const placed = initial.current;
+    if (placed?.isConnected && inside(placed)) {
+      if (!inside(document.activeElement)) placed.focus();
+      return;
+    }
     // фокус уже внутри (autoFocus содержимого) — не перебиваем
-    if (panel.current?.contains(document.activeElement)) return;
-    const target = initialFocus?.current ?? focusables(body.current)[0] ?? panel.current;
-    target?.focus();
+    const target = inside(document.activeElement)
+      ? document.activeElement
+      : (initialFocus?.current ?? focusables(body.current)[0] ?? root);
+    if (target !== document.activeElement) target?.focus();
+    initial.current = target ?? null;
   });
 
   useEffect(() => {
     const id = Symbol('overlay');
-    const release = pushOverlay(id);
+    const release = pushOverlay(id, panel.current);
     const listener = (e: KeyboardEvent) => onKeyDown(e, id);
     document.addEventListener('keydown', listener);
     focusInitial();
