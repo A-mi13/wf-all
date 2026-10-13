@@ -49,12 +49,12 @@ export function isApiError(e: unknown, code?: string): e is ApiError {
 }
 
 // Помечает фоновый опрос (счётчик подтверждений, статус импорта): сервер не продлевает по нему
-// бездействие сессии (§4.7), а клиент не открывает по нему разблокировку сам (Review Focus 2).
-// Использование: api.GET(path, { params, ...background() }).
-export function background<T extends RequestInit>(init?: T): T {
-  const headers = new Headers(init?.headers);
-  headers.set(BACKGROUND_HEADER, '1');
-  return { ...init, headers: Object.fromEntries(headers) } as unknown as T;
+// бездействие сессии (§4.7, Review Focus 2). Возвращает только заголовки — спред не переносит в
+// GET поля RequestInit вроде body. Использование: api.GET(path, { params, ...background() }).
+export function background(headers?: HeadersInit): { headers: Record<string, string> } {
+  return {
+    headers: { ...Object.fromEntries(new Headers(headers)), [BACKGROUND_HEADER]: '1' },
+  };
 }
 
 const nonNegative = (v: unknown): number | undefined =>
@@ -96,24 +96,21 @@ function adminMiddleware(bus: ReauthBus): Middleware {
       originals.set(id, request.clone());
       return request;
     },
-    async onResponse({ request, response, id, options }) {
+    async onResponse({ response, id, options }) {
       const original = originals.get(id);
       originals.delete(id);
       let res = response;
       if (res.status === 401 && original) {
         const p = await readProblem(res);
         if (p?.code === 'auth.reauth_required') {
-          const isBackground = request.headers.get(BACKGROUND_HEADER) === '1';
-          // Фоновый опрос ждёт уже открытую разблокировку, но свою не открывает.
-          const unlock = isBackground ? bus.current() : bus.request();
-          if (unlock) {
-            const unlocked = await unlock.then(
-              () => true,
-              () => false,
-            );
-            // Повтор — один раз: снова reauth_required уходит ошибкой, без второго круга.
-            if (unlocked) res = await options.fetch(original);
-          }
+          // Любой запрос, и фоновый опрос тоже, открывает разблокировку (§9.3): вкладка с опросом
+          // через 20 минут показывает модалку, а не замёрзший счётчик. Открыта уже — ждёт её же.
+          const unlocked = await bus.request().then(
+            () => true,
+            () => false,
+          );
+          // Повтор — один раз: снова reauth_required уходит ошибкой, без второго круга.
+          if (unlocked) res = await options.fetch(original);
         }
       }
       if (!res.ok) throw await toApiError(res);

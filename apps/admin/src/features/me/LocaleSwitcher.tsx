@@ -38,7 +38,12 @@ export function LocaleSwitcher() {
           {t(l)}
         </button>
       ))}
-      {save.error && <p role="alert">{te(save.error.code)}</p>}
+      {save.error && (
+        <p role="alert">
+          {/* код без текста (список кодов открытый) — общий текст */}
+          {te(te.has(save.error.code) ? save.error.code : 'internal')}
+        </p>
+      )}
     </div>
   );
 }

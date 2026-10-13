@@ -49,6 +49,19 @@ test('сервер не сохранил язык — тексты прежни�
   expect(screen.getByRole('button', { name: 'Русский' })).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('код ошибки без текста в локалях — общий текст errors.internal', async () => {
+  server.use(
+    http.patch('/v1/staff/me/locale', ({ response }) =>
+      response.untyped(problem(409, 'future.unknown_code')),
+    ),
+  );
+  renderWithProviders(<LocaleSwitcher />, { me: { ...meOwner, locale: 'ru' } });
+  await userEvent.click(screen.getByRole('button', { name: 'English' }));
+  await waitFor(() =>
+    expect(screen.getByRole('alert')).toHaveTextContent('Что-то пошло не так. Попробуйте ещё раз'),
+  );
+});
+
 test('текущий язык повторно не сохраняется', async () => {
   renderWithProviders(<LocaleSwitcher />, { me: { ...meOwner, locale: 'en' } });
   // неописанный запрос уронил бы тест (onUnhandledRequest: error)

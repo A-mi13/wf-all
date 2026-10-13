@@ -187,7 +187,7 @@ describe('reauth_required → разблокировка и повтор (P20)',
           body,
         }),
       ]);
-    return { state, bus, run, opened: () => opened };
+    return { state, bus, api, run, opened: () => opened };
   }
 
   test('одна разблокировка на два запроса, после resolve оба повторяются; тело POST — целиком', async () => {
@@ -208,12 +208,23 @@ describe('reauth_required → разблокировка и повтор (P20)',
   });
 
   test('после reject оба падают с auth.reauth_required', async () => {
-    const { state, bus, run } = setup();
-    const done = run();
+    const { state, bus, api } = setup();
+    const done = Promise.allSettled([
+      api.GET('/v1/staff/me/sessions'),
+      api.POST('/v1/staff/me/password', {
+        params: { header: { 'Idempotency-Key': KEY } },
+        body,
+      }),
+    ]);
     await until(() => state.hits === 2 && bus.pending());
     bus.reject();
-    const err = await caught(done);
-    expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required' });
+    const results = await done;
+    expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected']);
+    for (const r of results) {
+      const err = r.status === 'rejected' ? r.reason : undefined;
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required' });
+    }
     expect(state.hits).toBe(2);
   });
 
@@ -240,10 +251,10 @@ describe('background() — фоновые опросы (Review Focus 2)', () => 
     );
     await createApi(TEST_API).GET('/v1/approvals', {
       params: { query: { box: 'incoming', status: 'pending' } },
-      ...background({ headers: { 'X-Trace': 't1' } }),
+      ...background({ 'X-Trace': 't1' }),
     });
     expect(seen).toEqual(['1', 't1']);
-    expect(new Headers(background().headers).get('X-WF-Background')).toBe('1');
+    expect(background()).toEqual({ headers: { 'X-WF-Background': '1' } });
   });
 
   test('обычный запрос заголовка не несёт', async () => {
@@ -260,20 +271,37 @@ describe('background() — фоновые опросы (Review Focus 2)', () => 
     expect(seen).toBeNull();
   });
 
-  test('фоновый запрос сам разблокировку не открывает — ошибка сразу', async () => {
-    server.use(http.get('/v1/approvals', ({ response }) => response.untyped(reauth())));
-    const bus = createReauthBus();
-    let notified = 0;
-    bus.subscribe(() => notified++);
-    const err = await caught(
-      createApi(TEST_API, { reauth: bus }).GET('/v1/approvals', {
-        params: { query: { box: 'incoming', status: 'pending' } },
-        ...background(),
+  // Спека §9.3: вкладка с опросом через 20 минут бездействия показывает модалку разблокировки,
+  // а не тихо замёрзший счётчик.
+  test('фоновый reauth_required открывает разблокировку; после resolve опрос повторяется с меткой', async () => {
+    let unlocked = false;
+    const marks: (string | null)[] = [];
+    server.use(
+      http.get('/v1/approvals', ({ request, response }) => {
+        marks.push(request.headers.get('X-WF-Background'));
+        return unlocked
+          ? response(200).json({ items: [], next_cursor: null })
+          : response.untyped(reauth());
       }),
     );
-    expect(err.code).toBe('auth.reauth_required');
-    expect(bus.pending()).toBe(false);
-    expect(notified).toBe(0);
+    const bus = createReauthBus();
+    let opened = 0;
+    bus.subscribe(() => {
+      if (bus.pending()) opened++;
+    });
+    const done = createApi(TEST_API, { reauth: bus }).GET('/v1/approvals', {
+      params: { query: { box: 'incoming', status: 'pending' } },
+      ...background(),
+    });
+    await until(() => bus.pending());
+    expect(opened).toBe(1);
+
+    unlocked = true;
+    bus.resolve();
+    const res = await done;
+    expect(res.data).toEqual({ items: [], next_cursor: null });
+    expect(marks).toEqual(['1', '1']);
+    expect(opened).toBe(1);
   });
 
   test('при открытой разблокировке фоновый запрос ждёт её, не открывая повторно, и повторяется', async () => {

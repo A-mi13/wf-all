@@ -6,8 +6,6 @@
 export interface ReauthBus {
   // Ждать разблокировку; первый вызов открывает её (оповещает подписчиков), следующие — ждут ту же.
   request(): Promise<void>;
-  // Текущее ожидание или null: фоновые опросы ждут уже открытую разблокировку, но не открывают свою.
-  current(): Promise<void> | null;
   // Разблокировка открыта — для модалки (useSyncExternalStore).
   pending(): boolean;
   // Подписка на открытие и закрытие разблокировки; возвращает отписку.
@@ -59,7 +57,6 @@ export function createReauthBus(): ReauthBus {
       }
       return waiting.promise;
     },
-    current: () => waiting?.promise ?? null,
     pending: () => waiting !== null,
     subscribe(fn) {
       listeners.add(fn);

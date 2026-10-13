@@ -50,6 +50,7 @@
 | --- | --- | --- | --- | --- |
 | TypeScript (приложения) | 6.0.3 | 7.0.2 | typescript-eslint 8.70 поддерживает TS < 6.1; у 7.x нет классического JS API | когда typescript-eslint и eslint-config-next объявят поддержку TS 7 |
 | TypeScript (генератор) | 5.9.3 | 7.0.2 | openapi-typescript 7.13 требует `typescript ^5.x` | когда openapi-typescript поднимет peer |
+| TanStack Query | 5.103.2 | 5.104.2 | в Task 11 разрешён один `pnpm install` — на новые зависимости каркаса; подъём уже стоявшей Query в него не вошёл | в Task 12a вместе с её установкой |
 | TanStack Router | 1.170.42 | 1.170.44 | 1.170.43 и 1.170.44 (с `router-core` 1.171.36–37) опубликованы 12.10.2026 23:20–23:58 UTC, моложе `minimumReleaseAge` (сутки) на момент Task 11 (13.10.2026); исключение в `minimumReleaseAgeExclude` ради патча не вводили | после 14.10.2026 00:00 UTC — поднять до последней патч-версии 1.170.x |
 | ESLint | 9.39.5 | 10.11.0 | eslint-config-next 16.3.6 тянет eslint-plugin-react 7.37.5 (ESLint ≤ 9) | когда eslint-config-next перейдёт на ESLint 10 |
 
