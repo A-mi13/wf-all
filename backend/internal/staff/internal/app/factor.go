@@ -100,7 +100,8 @@ type factorCheck func(ctx context.Context, tx pgx.Tx, q *staffdb.Queries, acct s
 // тем же замком и коммитится до ответа (D8, раунд 1): параллельные попытки идут строго по очереди,
 // порог «5 подряд» не обойти, а под Idempotency-Key закоммичена ровно одна транзакция. Транзакция
 // идёт на ctx без отмены (detached): обрыв соединения не теряет неудачу. Неудача —
-// *staff.MFAError{AttemptsLeft, вид от check}. Сессию и закрытость учётки check проверяет сам
+// *staff.MFAError{AttemptsLeft, вид от check}; засчитываются только виды ErrMFAInvalid и
+// ErrPasswordInvalid, иной fail — ошибка без записи неудачи. Сессию и закрытость учётки check проверяет сам
 // (lockLiveSession) — withFactor их не навязывает: путь неудачи на уже закрытой учётке должен
 // оставаться без повторной блокировки (TestNoRelockWhileLocked).
 func (a *App) withFactor(ctx context.Context, s *auth.Staff, step string, m staff.Meta, check factorCheck) error {
@@ -122,6 +123,10 @@ func (a *App) withFactor(ctx context.Context, s *auth.Staff, step string, m staf
 		now := a.clock.Now() // после замка: параллельная попытка могла ждать его
 		if fail, err = check(ctx, tx, q, acct, now); err != nil || fail == nil {
 			return err
+		}
+		if !errors.Is(fail, staff.ErrMFAInvalid) && !errors.Is(fail, staff.ErrPasswordInvalid) {
+			// не вид неудачи, а ошибка сценария: откат без записи неудачи
+			return fail
 		}
 		left, err = a.recordFailure(ctx, q, tx, acct, s, step, m, now)
 		return err

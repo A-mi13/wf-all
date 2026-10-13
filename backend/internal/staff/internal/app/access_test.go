@@ -60,6 +60,17 @@ func (e *env) revokedReason(sid uuid.UUID) string {
 	return *r
 }
 
+// wantAuditMeta — у всех записей аудита action (а их n > 0) адрес и User-Agent запроса (metaWeb).
+func (e *env) wantAuditMeta(action string) {
+	e.t.Helper()
+	all := e.count(`SELECT count(*) FROM audit_log WHERE action = $1`, action)
+	withMeta := e.count(`SELECT count(*) FROM audit_log WHERE action = $1 AND ip = $2 AND user_agent = $3`,
+		action, metaWeb.IP, metaWeb.UserAgent)
+	if all == 0 || withMeta != all {
+		e.t.Fatalf("%s: записей %d, с IP и User-Agent запроса %d", action, all, withMeta)
+	}
+}
+
 // wantFieldError — 400 validation.failed с одним полем field и правилом code.
 func wantFieldError(t *testing.T, err error, field, code string) {
 	t.Helper()
@@ -235,7 +246,7 @@ func TestRevokeMySession(t *testing.T) {
 	_, foreign := e.rawSession(other.ID, auth.StageActive, ipHome, "x", t0.Add(-time.Hour))
 	ctx := context.Background()
 
-	if err := e.app.RevokeMySession(ctx, s, laptop); err != nil {
+	if err := e.app.RevokeMySession(ctx, s, laptop, metaWeb); err != nil {
 		t.Fatal(err)
 	}
 	if r := e.revokedReason(laptop); r != "revoked" {
@@ -246,8 +257,9 @@ func TestRevokeMySession(t *testing.T) {
 		rows[0].Label == nil || *rows[0].Label != "Ольга В." || !strings.Contains(rows[0].After, laptop.String()) {
 		t.Fatalf("аудит %+v", rows)
 	}
+	e.wantAuditMeta("staff.session_revoked")
 	for name, sid := range map[string]uuid.UUID{"чужая": foreign, "несуществующая": id.New(), "погашенная": laptop} {
-		if err := e.app.RevokeMySession(ctx, s, sid); !errors.Is(err, staff.ErrSessionNotFound) {
+		if err := e.app.RevokeMySession(ctx, s, sid, metaWeb); !errors.Is(err, staff.ErrSessionNotFound) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
@@ -257,7 +269,7 @@ func TestRevokeMySession(t *testing.T) {
 	if n := len(e.audits("staff.session_revoked")); n != 1 {
 		t.Fatalf("записей аудита %d — отказ записан", n)
 	}
-	if err := e.app.RevokeMySession(ctx, s, s.SessionID); err != nil {
+	if err := e.app.RevokeMySession(ctx, s, s.SessionID, metaWeb); err != nil {
 		t.Fatalf("текущая: %v", err)
 	}
 	if _, err := e.app.LoadStaff(ctx, tok, ipHome, false); !errors.Is(err, auth.ErrSessionInvalid) {
@@ -277,7 +289,7 @@ func TestRevokeOtherSessions(t *testing.T) {
 	_, foreign := e.rawSession(other.ID, auth.StageActive, ipHome, "x", t0.Add(-time.Hour))
 	ctx := context.Background()
 
-	n, err := e.app.RevokeOtherSessions(ctx, s)
+	n, err := e.app.RevokeOtherSessions(ctx, s, metaWeb)
 	if err != nil || n != 2 {
 		t.Fatalf("погашено %d: %v", n, err)
 	}
@@ -289,12 +301,89 @@ func TestRevokeOtherSessions(t *testing.T) {
 	if len(rows) != 1 || rows[0].StaffID == nil || *rows[0].StaffID != m.ID || !strings.Contains(rows[0].After, `"count": 2`) {
 		t.Fatalf("аудит %+v", rows)
 	}
-	if n, err := e.app.RevokeOtherSessions(ctx, s); err != nil || n != 0 {
+	e.wantAuditMeta("staff.sessions_revoked")
+	if n, err := e.app.RevokeOtherSessions(ctx, s, metaWeb); err != nil || n != 0 {
 		t.Fatalf("повтор: %d, %v", n, err)
 	}
 	if n := len(e.audits("staff.sessions_revoked")); n != 1 {
 		t.Fatalf("записей аудита %d — пустое гашение записано", n)
 	}
+}
+
+// Гонка смены токена: сотрудник запроса загружен со старым токеном, а unlock в другой вкладке уже
+// заменил сессию. «Завершить остальные» не гасит свежую сессию (она для старой «другая»), а отвечает
+// auth.ErrSessionReplaced (401 без стирания новой cookie); погашенная сессия — ErrSessionInvalid. Так
+// же ведут себя «завершить сессию» и смена языка: ничего не меняют и ничего не пишут.
+func TestSelfMutationsRecheckSession(t *testing.T) {
+	e := newEnv(t)
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+	_, laptop := e.rawSession(m.ID, auth.StageActive, ipHome, "x", t0.Add(-time.Hour))
+	s := e.load(e.signIn(m))
+	ctx := context.Background()
+	e.clock.Advance(30 * time.Second) // код входа уже принят — следующий шаг
+	fresh, err := e.app.Unlock(ctx, s, e.totp(m), "", metaWeb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.RevokeOtherSessions(ctx, s, metaWeb); !errors.Is(err, auth.ErrSessionReplaced) {
+		t.Fatalf("завершить остальные по заменённой сессии: %v", err)
+	}
+	e.load(fresh) // свежая сессия жива
+	if err := e.app.RevokeMySession(ctx, s, laptop, metaWeb); !errors.Is(err, auth.ErrSessionReplaced) {
+		t.Fatalf("завершить сессию по заменённой сессии: %v", err)
+	}
+	if err := e.app.SetLocale(ctx, s, "en", metaWeb); !errors.Is(err, auth.ErrSessionReplaced) {
+		t.Fatalf("язык по заменённой сессии: %v", err)
+	}
+
+	cur := e.load(fresh)
+	if err := e.app.Logout(ctx, cur); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.RevokeOtherSessions(ctx, cur, metaWeb); !errors.Is(err, auth.ErrSessionInvalid) {
+		t.Fatalf("завершить остальные по погашенной сессии: %v", err)
+	}
+	if err := e.app.RevokeMySession(ctx, cur, laptop, metaWeb); !errors.Is(err, auth.ErrSessionInvalid) {
+		t.Fatalf("завершить сессию по погашенной сессии: %v", err)
+	}
+	if err := e.app.SetLocale(ctx, cur, "en", metaWeb); !errors.Is(err, auth.ErrSessionInvalid) {
+		t.Fatalf("язык по погашенной сессии: %v", err)
+	}
+	if r := e.revokedReason(laptop); r != "" {
+		t.Fatalf("сессия ноутбука погашена: %q", r)
+	}
+	if n := e.count(`SELECT count(*) FROM staff_accounts WHERE id = $1 AND locale = 'ru'`, m.ID); n != 1 {
+		t.Fatal("язык сменился по недействительной сессии")
+	}
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action IN ('staff.session_revoked', 'staff.sessions_revoked',
+		'staff.locale_changed')`); n != 0 {
+		t.Fatalf("записей аудита %d", n)
+	}
+}
+
+// withFactor засчитывает неудачей только staff.ErrMFAInvalid и staff.ErrPasswordInvalid: иной «вид
+// неудачи» от check — ошибка без записи неудачи (откат), а не MFAError.
+func TestWithFactorRejectsUnknownFailKind(t *testing.T) {
+	e := newEnv(t)
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+	s := e.load(e.signIn(m))
+	odd := errors.New("не вид неудачи")
+	err := e.app.FactorWith(context.Background(), s, "password_change", metaWeb, odd)
+	if !errors.Is(err, odd) {
+		t.Fatalf("ждали ошибку как есть, получили %v", err)
+	}
+	if _, ok := errors.AsType[*staff.MFAError](err); ok {
+		t.Fatalf("неизвестный вид засчитан неудачей: %v", err)
+	}
+	if n := e.count(`SELECT mfa_failures FROM staff_accounts WHERE id = $1`, m.ID); n != 0 {
+		t.Fatalf("счётчик %d", n)
+	}
+	if n := len(e.audits("staff.factor_failed")); n != 0 {
+		t.Fatalf("неудач в аудите %d", n)
+	}
+	// известный вид — неудача, как раньше
+	err = e.app.FactorWith(context.Background(), s, "password_change", metaWeb, staff.ErrMFAInvalid)
+	wantFactorFailure(t, err, staff.ErrMFAInvalid, app.MaxFactorFailures-1)
 }
 
 // §4.7, M9: смена пароля — текущий пароль, второй фактор и новый пароль; успех гасит другие сессии
@@ -333,6 +422,7 @@ func TestChangePasswordSuccess(t *testing.T) {
 		!strings.Contains(rows[0].After, `"method": "recovery"`) || !strings.Contains(rows[0].After, `"sessions_revoked": 1`) {
 		t.Fatalf("аудит %+v", rows)
 	}
+	e.wantAuditMeta("staff.password_changed")
 	// новый пароль входит, старый — нет; резервный код второй раз не подходит
 	if _, err := e.app.Login(context.Background(), m.Email, testPassword, metaWeb); !errors.Is(err, staff.ErrInvalidCredentials) {
 		t.Fatalf("старый пароль: %v", err)
@@ -503,7 +593,7 @@ func TestSetLocale(t *testing.T) {
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))
 	ctx := context.Background()
-	if err := e.app.SetLocale(ctx, s, "en"); err != nil {
+	if err := e.app.SetLocale(ctx, s, "en", metaWeb); err != nil {
 		t.Fatal(err)
 	}
 	if n := e.count(`SELECT count(*) FROM staff_accounts WHERE id = $1 AND locale = 'en'`, m.ID); n != 1 {
@@ -513,16 +603,17 @@ func TestSetLocale(t *testing.T) {
 		AND before->>'locale' = 'ru' AND after->>'locale' = 'en'`, m.ID); n != 1 {
 		t.Fatal("аудит смены языка")
 	}
-	if err := e.app.SetLocale(ctx, s, "en"); err != nil {
+	e.wantAuditMeta("staff.locale_changed")
+	if err := e.app.SetLocale(ctx, s, "en", metaWeb); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(e.audits("staff.locale_changed")); n != 1 {
 		t.Fatalf("записей %d — тот же язык записан", n)
 	}
 	for _, bad := range []string{"de", "", "EN", "en-US"} {
-		wantFieldError(t, e.app.SetLocale(ctx, s, bad), "body.locale", "enum")
+		wantFieldError(t, e.app.SetLocale(ctx, s, bad, metaWeb), "body.locale", "enum")
 	}
-	if err := e.app.SetLocale(ctx, s, "ru"); err != nil {
+	if err := e.app.SetLocale(ctx, s, "ru", metaWeb); err != nil {
 		t.Fatal(err)
 	}
 	if n := e.count(`SELECT count(*) FROM staff_accounts WHERE id = $1 AND locale = 'ru'`, m.ID); n != 1 {

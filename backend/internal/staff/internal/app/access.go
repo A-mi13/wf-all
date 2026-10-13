@@ -97,10 +97,10 @@ func (a *App) sessionViews(ctx context.Context, staffID, current uuid.UUID) ([]s
 // RevokeMySession — завершить одну свою живую сессию (revoked). Чужая, несуществующая, уже
 // погашенная или истёкшая — staff.session_not_found без различия. Текущую тоже можно (контракт
 // revokeStaffMySession: «тогда следующий запрос ответит 401») — это выход с этого устройства.
-func (a *App) RevokeMySession(ctx context.Context, s *auth.Staff, sessionID uuid.UUID) error {
+func (a *App) RevokeMySession(ctx context.Context, s *auth.Staff, sessionID uuid.UUID, m staff.Meta) error {
 	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		acct, err := lockSelf(ctx, q, s)
+		acct, err := a.lockSelf(ctx, q, s)
 		if err != nil {
 			return err
 		}
@@ -114,17 +114,17 @@ func (a *App) RevokeMySession(ctx context.Context, s *auth.Staff, sessionID uuid
 			return staff.ErrSessionNotFound
 		}
 		return audit.Write(ctx, selfEntry(acct, actionSessionRevoked, nil,
-			map[string]any{"session_id": sessionID, "current": sessionID == s.SessionID}, staff.Meta{}))
+			map[string]any{"session_id": sessionID, "current": sessionID == s.SessionID}, m))
 	})
 }
 
 // RevokeOtherSessions — завершить все свои живые сессии, кроме текущей (revoked). Возвращает,
 // сколько завершено; 0 — без записи в аудит.
-func (a *App) RevokeOtherSessions(ctx context.Context, s *auth.Staff) (int, error) {
+func (a *App) RevokeOtherSessions(ctx context.Context, s *auth.Staff, m staff.Meta) (int, error) {
 	var n int64
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		acct, err := lockSelf(ctx, q, s)
+		acct, err := a.lockSelf(ctx, q, s)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func (a *App) RevokeOtherSessions(ctx context.Context, s *auth.Staff) (int, erro
 			return err
 		}
 		return audit.Write(ctx, selfEntry(acct, actionSessionsRevoked, nil,
-			map[string]any{"count": n, "kept_session_id": s.SessionID}, staff.Meta{}))
+			map[string]any{"count": n, "kept_session_id": s.SessionID}, m))
 	})
 	if err != nil {
 		return 0, err
@@ -203,11 +203,8 @@ func (a *App) ChangePassword(ctx context.Context, s *auth.Staff, current, code, 
 		return nil, audit.Write(ctx, selfEntry(acct, actionPasswordChanged, nil,
 			map[string]any{"method": factorMethod(code), "sessions_revoked": revoked}, m))
 	})
-	if errors.Is(err, errReplaced) {
-		// токен сессии только что заменён (unlock в другой вкладке): 401 без стирания новой cookie
-		return auth.ErrSessionReplaced
-	}
-	return err
+	// токен сессии только что заменён (unlock в другой вкладке): 401 без стирания новой cookie
+	return replacedAsSession(err)
 }
 
 // verifyCurrent — подходит ли текущий пароль к хэшу учётки. Нет хэша или пароль длиннее потолка
@@ -226,13 +223,13 @@ func (a *App) verifyCurrent(ctx context.Context, pw string, hash *string) (bool,
 // SetLocale — язык админки и писем сотруднику (ru | en — i18n.Supported, как CHECK
 // staff_accounts_locale_check). Иное — 400 validation.failed по body.locale. Тот же язык — без
 // изменений и без записи в аудит; смена — аудит staff.locale_changed (было/стало).
-func (a *App) SetLocale(ctx context.Context, s *auth.Staff, locale string) error {
+func (a *App) SetLocale(ctx context.Context, s *auth.Staff, locale string, m staff.Meta) error {
 	if !slices.Contains(i18n.Supported, locale) {
 		return httpx.NewFieldError(fieldLocale, ruleEnum)
 	}
 	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		acct, err := lockSelf(ctx, q, s)
+		acct, err := a.lockSelf(ctx, q, s)
 		if err != nil || acct.Locale == locale {
 			return err
 		}
@@ -240,18 +237,35 @@ func (a *App) SetLocale(ctx context.Context, s *auth.Staff, locale string) error
 			return err
 		}
 		return audit.Write(ctx, selfEntry(acct, actionLocaleChanged,
-			map[string]any{"locale": acct.Locale}, map[string]any{"locale": locale}, staff.Meta{}))
+			map[string]any{"locale": acct.Locale}, map[string]any{"locale": locale}, m))
 	})
 }
 
-// lockSelf — своя учётка под замком (первый замок транзакции: учётка → сессия): роль и снимок имени
-// для аудита. Учётки нет — сессия недействительна.
-func lockSelf(ctx context.Context, q *staffdb.Queries, s *auth.Staff) (staffdb.LockAccountRow, error) {
+// lockSelf — своя учётка, затем сессия запроса под замком (порядок: учётка → сессия) с перепроверкой
+// сессии (lockLiveSession): между загрузкой в конвейере и замком её могли погасить, заменить
+// (unlock в другой вкладке) или закрыть учётку. Учётки нет, сессия погашена, истекла, учётка
+// закрыта — auth.ErrSessionInvalid; заменена — auth.ErrSessionReplaced (401 без стирания новой
+// cookie): иначе «завершить остальные» по старой сессии погасил бы свежую. Учётка — роль и снимок
+// имени для аудита.
+func (a *App) lockSelf(ctx context.Context, q *staffdb.Queries, s *auth.Staff) (staffdb.LockAccountRow, error) {
 	acct, err := q.LockAccount(ctx, s.StaffID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return acct, auth.ErrSessionInvalid
 	}
-	return acct, err
+	if err != nil {
+		return acct, err
+	}
+	// время — после замка: параллельный запрос мог держать учётку
+	_, err = lockLiveSession(ctx, q, s, acct, a.clock.Now())
+	return acct, replacedAsSession(err)
+}
+
+// replacedAsSession — errReplaced (сессию запроса только что заменили) как auth.ErrSessionReplaced.
+func replacedAsSession(err error) error {
+	if errors.Is(err, errReplaced) {
+		return auth.ErrSessionReplaced
+	}
+	return err
 }
 
 // selfEntry — запись аудита действия сотрудника над своей учёткой: автор и объект — учётка acct.

@@ -21,7 +21,7 @@ paths:
   под `Idempotency-Key` — ровно одна закоммиченная транзакция. Любая проверка фактора (вход, unlock, смена
   пароля; 7 — перевыпуск кодов) — только через `a.withFactor(ctx, s, шаг, m, check)`: одна транзакция на ctx без
   отмены (`detached`), замок учётки, `check` → `(fail, err)`, где `fail` — вид неудачи (`ErrMFAInvalid` |
-  `ErrPasswordInvalid`, nil — успех), и при неудаче `recordFailure` в
+  `ErrPasswordInvalid`, nil — успех; иной `fail` — ошибка без записи неудачи), и при неудаче `recordFailure` в
   той же транзакции под тем же замком (счётчик, аудит, на пятой подряд — `lockOut`: `locked_until` +1 ч, сессии
   `locked`, событие `staff.locked`, письмо владельцам и админам не чаще раза в час по `lock_notified_at`).
   Отдельной транзакцией после отката неудачу не писать: параллельные попытки обходят порог «5 подряд»
@@ -59,8 +59,10 @@ paths:
   (`CityIDs`, `Permissions` — пустые, не nil), в `setup` — учётка без прав, права — копия `Grants` только в
   `active`. Свои сессии — `sessionViews(staffID, current)` (общая с карточкой 8b): живые, новые сверху, IP —
   `audit.MaskIP`, пустой User-Agent — nil. Каждый запрос привязан к `s.StaffID`: чужая сессия —
-  `staff.session_not_found`, как и несуществующая. Мутации — одна `db.InTx`, первым замком своя учётка
-  (`lockSelf`), аудит от учётки (`staff.session_revoked`, `staff.sessions_revoked`, `staff.password_changed`,
-  `staff.locale_changed`). Смена пароля: выбор фактора (`body.code`) и `password.Check` (`body.new_password`,
+  `staff.session_not_found`, как и несуществующая. Мутации принимают `staff.Meta` (IP и UA в аудит) — одна
+  `db.InTx`, `a.lockSelf`: замок своей учётки, затем перепроверка сессии запроса `lockLiveSession` (погашена —
+  `auth.ErrSessionInvalid`, заменена — `auth.ErrSessionReplaced`: «завершить остальные» по старой сессии не
+  гасит свежую, страж `TestSelfMutationsRecheckSession`); аудит от учётки (`staff.session_revoked`,
+  `staff.sessions_revoked`, `staff.password_changed`, `staff.locale_changed`). Смена пароля: выбор фактора (`body.code`) и `password.Check` (`body.new_password`,
   `passwordPolicyError`) и хэш нового — до транзакции; текущий пароль и фактор — в `withFactor`; успех гасит
   другие сессии (`password_changed`). Ошибки поля — `httpx.NewFieldError`.

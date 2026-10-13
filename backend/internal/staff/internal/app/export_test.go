@@ -35,6 +35,15 @@ type PasswordHasher = passwordHasher
 
 func (a *App) SetHasher(h PasswordHasher) { a.hasher = h }
 
+// FactorWith — проверка через withFactor, где check без проверки сессии сразу отвечает видом fail
+// (страж: withFactor засчитывает только известные виды неудачи).
+func (a *App) FactorWith(ctx context.Context, s *auth.Staff, step string, m staff.Meta, fail error) error {
+	return a.withFactor(ctx, s, step, m,
+		func(context.Context, pgx.Tx, *staffdb.Queries, staffdb.LockAccountRow, time.Time) (error, error) {
+			return fail, nil
+		})
+}
+
 // FailFactor — неудачная проверка через withFactor (путь 6b/7: смена пароля, перевыпуск кодов).
 func (a *App) FailFactor(ctx context.Context, s *auth.Staff, step string, m staff.Meta) error {
 	return a.withFactor(ctx, s, step, m,

@@ -419,8 +419,10 @@ func TestFactorMethodAudited(t *testing.T) {
 	}
 }
 
-// Неудача на уже закрытой учётке (путь withFactor из «Моего доступа», где сессия может пережить
-// гонку) считается, но блокировку не повторяет: ни второго события, ни второй записи staff.locked.
+// Неудача на уже закрытой учётке считается, но блокировку не повторяет: ни второго события, ни
+// второй записи staff.locked. Сценарии сюда не доходят — их check первым шагом зовёт
+// lockLiveSession и на закрытой учётке отвечает отказом сессии; путь достижим только через шов
+// FailFactor (check без проверки сессии) и сторожит защиту в recordFailure на будущее.
 func TestNoRelockWhileLocked(t *testing.T) {
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
