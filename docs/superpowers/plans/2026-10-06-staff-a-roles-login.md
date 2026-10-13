@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **С 13.10.2026 (решение пользователя):** код в подробных разделах задач (после «Tasks and Interfaces») —
+> черновик, местами устаревший, не требование. Исполнитель получает бриф без кода: цель, интерфейсы, тесты,
+> критерии, решения P/R и «Поправки»; как реализовать — решает сам по спеке и правилам. Авторитет — спека,
+> затем сводка «Tasks and Interfaces», решения и «Поправки».
+
 **Goal:** План A спеки среза — живая админка:
 - сотрудник по приглашению задаёт пароль и обязательно настраивает 2FA;
 - входит почтой, паролем и TOTP;
