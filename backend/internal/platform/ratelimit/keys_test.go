@@ -18,6 +18,8 @@ func TestKeys(t *testing.T) {
 		{ratelimit.IPKey("default", netip.MustParseAddr("2001:db8::1")), "ip:default:2001:db8::1"},
 		{ratelimit.SubjectKey("default", auth.Subject{Kind: auth.SubjectUser, ID: id}), "user:default:" + id.String()},
 		{ratelimit.SubjectKey("default", auth.Subject{Kind: auth.SubjectStaff, ID: id}), "staff:default:" + id.String()},
+		{ratelimit.SessionDeviceKey("default", id), "device:default:s:" + id.String()},
+		{ratelimit.BFFDeviceKey("auth", "dev-a"), "device:auth:b:dev-a"},
 		{ratelimit.EmailKey("staff_login", []byte{0xfb, 0xff, 0x00, 0x10}), "email:staff_login:-_8AEA"},
 	} {
 		if c.got != c.want {

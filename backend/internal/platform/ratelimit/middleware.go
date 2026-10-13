@@ -47,18 +47,18 @@ func Middleware(l Limiter, r Rules, log *slog.Logger) func(http.Handler) http.Ha
 			}
 			// устройство сессии (s:) и метка BFF (b:) — разные пространства ключей: метка из
 			// cookie, совпавшая строкой с чужим DeviceID, не расходует его лимит
-			device := ""
+			deviceKey := ""
 			if info.Device != "" {
-				device = "b:" + info.Device
+				deviceKey = BFFDeviceKey(class, info.Device)
 			}
 			if s, ok := auth.SubjectFrom(ctx); ok {
 				checks = append(checks, check{SubjectKey(class, s), cp.User})
 				if s.DeviceID != uuid.Nil {
-					device = "s:" + s.DeviceID.String()
+					deviceKey = SessionDeviceKey(class, s.DeviceID)
 				}
 			}
-			if device != "" {
-				checks = append(checks, check{"device:" + class + ":" + device, cp.Device})
+			if deviceKey != "" {
+				checks = append(checks, check{deviceKey, cp.Device})
 			}
 			for _, c := range checks {
 				res, err := l.Allow(ctx, c.key, c.p)
