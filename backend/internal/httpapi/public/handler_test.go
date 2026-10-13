@@ -385,7 +385,10 @@ func TestRateLimitClassesKnown(t *testing.T) {
 
 // Защита в глубину: chi сопоставляет {param} с пустым сегментом, а маршрутизатор контракта — нет,
 // поэтому без httpx.Route конвейер (валидатор, лимит, идемпотентность) пропущен. Такой запрос не
-// доходит до хендлера: у строкового параметра (slug) биндинг пустое значение принял бы.
+// доходит до хендлера: у обязательного параметра пути (slug) пустое значение — ошибка биндинга, её
+// отвечает httpx.NotFoundWithoutRoute (404 http.not_found). Тест идёт через это звено; звено
+// httpx.RequireRoute интеграционно на текущем контракте не воспроизвести — его стережёт юнит-тест
+// httpx.TestRequireRoute.
 func TestEmptyPathParamNeverReachesHandler(t *testing.T) {
 	o := testOptions(t)
 	geoFake := &fakeGeo{}
