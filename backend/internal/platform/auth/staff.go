@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"slices"
 
@@ -111,11 +112,19 @@ func AuthenticatedStaff(ctx context.Context) bool {
 	return ok
 }
 
+// ErrSessionReplaced — токен сотрудника недавно заменён новым (второй фактор, unlock,
+// recovery-codes/ack): запрос со старым токеном ушёл параллельно и вернулся позже. Клиенту — тот же
+// 401 auth.unauthenticated, но это не ErrSessionInvalid: конвейер admin-api не стирает cookie (в
+// браузере уже новая), не считает отказ в IP-лимите staff_auth и не кладёт токен в негативный кэш.
+// Льготу (сколько старый токен считается «заменённым», а не невалидным) держит загрузчик staff.
+var ErrSessionReplaced = errors.New("auth: токен сессии сотрудника заменён новым")
+
 // StaffSessions — загрузчик сессии сотрудника (реализует модуль staff: таблица staff_sessions —
 // его). Токен — значение cookie как есть, ip — адрес клиента из peer (смена подсети → Reauth),
 // background — запрос с X-WF-Background: 1 (опрос счётчиков): не продлевает бездействие
 // (решение D10). ErrSessionInvalid — сессии нет, она отозвана или истекла: 401
-// auth.unauthenticated; другая ошибка — сбой (500).
+// auth.unauthenticated; ErrSessionReplaced — токен только что заменён новым (401 без стирания
+// cookie); другая ошибка — сбой (500).
 type StaffSessions interface {
 	LoadStaff(ctx context.Context, token string, ip netip.Addr, background bool) (*Staff, error)
 }

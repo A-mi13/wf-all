@@ -24,6 +24,14 @@ func activeStaff(role string, cities ...uuid.UUID) *auth.Staff {
 		Stage: auth.StageActive, Grants: testGrants}
 }
 
+// Гонка смены токена: «токен заменён» — отдельная ошибка, не ErrSessionInvalid (по ней конвейер
+// стирает cookie и считает отказ в лимите) — и наоборот.
+func TestErrSessionReplacedIsNotInvalid(t *testing.T) {
+	if errors.Is(auth.ErrSessionReplaced, auth.ErrSessionInvalid) || errors.Is(auth.ErrSessionInvalid, auth.ErrSessionReplaced) {
+		t.Fatal("ErrSessionReplaced и ErrSessionInvalid не различаются")
+	}
+}
+
 func TestStaffGrantUnknownIsDeny(t *testing.T) {
 	s := activeStaff("admin")
 	if s.Grant("test.allow") != auth.GrantAllow || s.Grant("test.dual") != auth.GrantDual {

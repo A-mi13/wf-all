@@ -54,8 +54,11 @@ var errNilStaff = errors.New("admin: загрузчик сессии верну�
 //  2. токен невалиден (ErrSessionInvalid или недавний отказ из негативного кэша) — отказ
 //     считается в том же IP-лимите (Limiter.Add), ответ стирает cookie (Max-Age=0), запрос идёт
 //     дальше анонимно;
-//  3. сбой загрузчика — 500: недоступная база — не повод выкидывать сотрудника;
-//  4. сотрудник — в ctx (auth.WithStaff) до лимита и идемпотентности.
+//  3. токен только что заменён новым (auth.ErrSessionReplaced: параллельный запрос со старым
+//     токеном вернулся после второго фактора или unlock) — запрос идёт дальше анонимно, но cookie
+//     не стирается (в браузере уже новая), отказ не считается в лимите и не кэшируется;
+//  4. сбой загрузчика — 500: недоступная база — не повод выкидывать сотрудника;
+//  5. сотрудник — в ctx (auth.WithStaff) до лимита и идемпотентности.
 //
 // Положительного кэша нет: сессия сверяется с базой на каждый запрос.
 type sessionLayer struct {
@@ -100,6 +103,11 @@ func (s *sessionLayer) middleware(next http.Handler) http.Handler {
 		if !invalid {
 			st, err = s.sessions.LoadStaff(ctx, c.Value, ip, r.Header.Get(headerBackground) == "1")
 			switch {
+			case errors.Is(err, auth.ErrSessionReplaced):
+				// гонка смены токена: в браузере уже новая cookie — не стирать её, отказ не
+				// считать и не кэшировать; запрос идёт дальше анонимно (валидатор даст 401)
+				next.ServeHTTP(w, r)
+				return
 			case errors.Is(err, auth.ErrSessionInvalid):
 				invalid = true
 				s.neg.put(hash)
