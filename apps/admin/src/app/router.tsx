@@ -73,25 +73,25 @@ const indexRoute = createRoute({
 function Shell() {
   const s = useSession();
   if (s.status !== 'active') return null;
-  return <ActiveShell me={s.me} refresh={s.refresh} />;
+  return <ActiveShell me={s.me} afterLogout={s.afterLogout} />;
 }
 
-function ActiveShell({ me, refresh }: { me: Me; refresh: () => Promise<void> }) {
+function ActiveShell({ me, afterLogout }: { me: Me; afterLogout: () => Promise<void> }) {
   const api = useApi();
   const queryClient = useQueryClient();
   const toast = useToast();
   const errorText = useErrorText();
   const account = useAccountCard(me);
   // Выход: сессия гасится на сервере, данные прежнего сотрудника — из кэша, me перечитывается
-  // (401 → anonymous → вход). 401 auth.unauthenticated — сессии уже нет: me перечитывает
-  // QueryClient (query.ts), тост не нужен.
+  // (401 → anonymous → /login без return). 401 auth.unauthenticated — сессии уже нет: me
+  // перечитывает QueryClient (query.ts), тост не нужен.
   const logout = useAdminMutation(
     (_: void, key: string) =>
-      api.POST('/v1/staff/logout', { params: { header: { 'Idempotency-Key': key } } }),
+      api.POST('/v1/staff/auth/logout', { params: { header: { 'Idempotency-Key': key } } }),
     {
       onSuccess: async () => {
         queryClient.removeQueries({ predicate: (q) => !isMeKey(q.queryKey) });
-        await refresh();
+        await afterLogout();
       },
       onError: (e) => {
         if (e.code !== 'auth.unauthenticated') toast.error(errorText(e));
@@ -142,7 +142,9 @@ function createAppRouter(history?: RouterHistory) {
     routeTree,
     history,
     // настоящая сессия приходит из RouterProvider (AppRouter)
-    context: { session: { status: 'loading', refresh: async () => {} } },
+    context: {
+      session: { status: 'loading', refresh: async () => {}, afterLogout: async () => {} },
+    },
   });
 }
 

@@ -4,7 +4,8 @@ import type { SessionState } from './session';
 
 // Куда пускает стадия сессии (спека §9.3, P19). Решение — чистая функция: роутер вызывает её в
 // beforeLoad корневого маршрута на каждом переходе и при смене сессии.
-// - без сессии — только вход и принятие приглашения; остальное → /login?return=<исходный адрес>;
+// - без сессии — только вход и принятие приглашения; остальное → /login?return=<исходный адрес>
+//   (после явного выхода — /login без return);
 // - mfa_pending — только /login (шаг 2 входа), return сохраняется;
 // - setup — только /setup-2fa (и после перезагрузки);
 // - active — экраны входа и корень → ?return= или стартовая страница.
@@ -46,7 +47,8 @@ export function resolveRoute(session: SessionState, loc: Location): Redirect | n
       return null; // роутер в этих состояниях не показывается
     case 'anonymous':
       if (at === paths.login || at === paths.accept) return null;
-      return toLogin(loc);
+      // после явного выхода — без возврата: адрес прежнего сотрудника следующему не нужен
+      return session.signedOut ? { to: paths.login } : toLogin(loc);
     case 'mfa_pending':
       if (at === paths.login) return null;
       return toLogin(loc);

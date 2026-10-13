@@ -98,6 +98,16 @@ describe('ErrorState', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  test('retrying — «Повторить» занята, повторный клик не уходит', () => {
+    const retry = vi.fn();
+    renderWithIntl(<ErrorState error={new TypeError('x')} onRetry={retry} retrying />);
+    const button = screen.getByRole('button', { name: 'Повторить' });
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
   test('ошибка не от API (сеть) — общий текст без кода', () => {
     renderWithIntl(<ErrorState error={new TypeError('Failed to fetch')} onRetry={vi.fn()} />);
     expect(screen.getByRole('alert')).not.toHaveTextContent('Код ошибки');

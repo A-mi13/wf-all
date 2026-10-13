@@ -38,7 +38,16 @@ export function EmptyState({
 
 // Ошибка загрузки: текст по коду (errors.<код>, откат — errors.internal), код для поддержки
 // («Код ошибки: 500 · internal») и «Повторить». Ошибка не от API (нет сети) — без кода.
-export function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+// retrying — перезапрос идёт: кнопка занята, повторный клик не уходит.
+export function ErrorState({
+  error,
+  onRetry,
+  retrying,
+}: {
+  error: unknown;
+  onRetry: () => void;
+  retrying?: boolean;
+}) {
   const t = useTranslations('states.error');
   const errorText = useErrorText();
   const api = isApiError(error) ? error : null;
@@ -52,7 +61,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => 
         api && <p className={styles.code}>{t('code', { status: api.status, code: api.code })}</p>
       }
       action={
-        <Button variant="secondary" onClick={onRetry}>
+        <Button variant="secondary" loading={retrying} onClick={onRetry}>
           {t('retry')}
         </Button>
       }

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { safeReturn } from './guard';
+import { resolveRoute, safeReturn } from './guard';
 
 test('возврат — путь приложения с параметрами', () => {
   expect(safeReturn('/staff?tab=sessions')).toBe('/staff?tab=sessions');
@@ -28,4 +28,13 @@ test('управляющие символы отвергаются', () => {
   for (const v of ['/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '/staff\u0000']) {
     expect(safeReturn(v), JSON.stringify(v)).toBeUndefined();
   }
+});
+
+test('без сессии — вход с возвратом; после явного выхода — без возврата', () => {
+  const loc = { pathname: '/staff', href: '/staff?tab=sessions', search: {} };
+  expect(resolveRoute({ status: 'anonymous' }, loc)).toEqual({
+    to: '/login',
+    search: { return: '/staff?tab=sessions' },
+  });
+  expect(resolveRoute({ status: 'anonymous', signedOut: true }, loc)).toEqual({ to: '/login' });
 });

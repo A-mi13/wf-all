@@ -1,5 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo } from 'react';
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { isApiError, unwrap } from '../api/client';
 import { useApi } from '../api/context';
 import { can, decide, type Decision, type Me } from './permissions';
@@ -9,20 +17,25 @@ import { reauthBus } from './reauth';
 // Сессия на клиенте (спека сотрудников §9.3, R15, P20) — из GET /v1/staff/me; он же проверка
 // связи с admin-api (R13).
 // - loading — ответа ещё нет;
-// - anonymous — 401 auth.unauthenticated: экран входа с возвратом;
+// - anonymous — 401 auth.unauthenticated: экран входа с возвратом; signedOut — после явного
+//   выхода (afterLogout): вход без возврата, следующий сотрудник не попадёт в чужой раздел;
 // - mfa_pending — пароль принят, шаг 2 входа; me — минимум, учётки нет;
 // - setup — первый вход по приглашению: только настройка 2FA;
 // - active — работает; reauthRequired — сессия ждёт второй фактор (модалка разблокировки);
 // - error — admin-api не ответил (сеть, 5xx): экран «нет связи» с повтором.
 export type SessionState =
   | { status: 'loading' }
-  | { status: 'anonymous' }
+  | { status: 'anonymous'; signedOut?: boolean }
   | { status: 'mfa_pending' }
   | { status: 'setup'; me: Me }
   | { status: 'active'; me: Me; reauthRequired: boolean }
   | { status: 'error'; error: Error };
 
-export type Session = SessionState & { refresh(): Promise<void> };
+export type Session = SessionState & {
+  refresh(): Promise<void>;
+  // Сессия завершена выходом (204 staffLogout): me перечитывается, вход — без return.
+  afterLogout(): Promise<void>;
+};
 
 const SessionContext = createContext<Session | null>(null);
 
@@ -56,10 +69,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     () => queryClient.refetchQueries({ queryKey: ME_KEY, exact: true }),
     [queryClient],
   );
-  const value = useMemo(
-    () => ({ ...stateOf(q.data, q.error), refresh }),
-    [q.data, q.error, refresh],
-  );
+  // id сессии, завершённой выходом. Флаг держится, пока me — 401; любая другая сессия (новый
+  // вход) его снимает, и истёкшая потом сессия снова ведёт на вход с возвратом.
+  const [ended, setEnded] = useState<string | null>(null);
+  const base = stateOf(q.data, q.error);
+  const sid = base.status !== 'anonymous' && q.data ? (q.data.session?.id ?? '') : null;
+  if (ended !== null && sid !== null && sid !== ended) setEnded(null);
+  const signedOut = base.status === 'anonymous' && ended !== null;
+  const current = q.data?.session?.id ?? '';
+  const afterLogout = useCallback(async () => {
+    setEnded(current);
+    await refresh();
+  }, [current, refresh]);
+  const value = useMemo<Session>(() => {
+    const state = stateOf(q.data, q.error);
+    return state.status === 'anonymous' && signedOut
+      ? { ...state, signedOut: true, refresh, afterLogout }
+      : { ...state, refresh, afterLogout };
+  }, [q.data, q.error, signedOut, refresh, afterLogout]);
   const reauthRequired = value.status === 'active' && value.reauthRequired;
 
   // После перезагрузки с reauth_required модалка открывается сразу; разблокировка прошла —

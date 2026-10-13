@@ -1,8 +1,8 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
-import { expect, test } from 'vitest';
+import { useEffect, useState } from 'react';
+import { afterEach, expect, test, vi } from 'vitest';
 import type { components } from '../../api/gen/admin';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
@@ -49,7 +49,7 @@ function Accounts() {
             query: {
               q: q || undefined,
               role: role === 'all' ? undefined : (role as Account['role']),
-              status: blocked ? 'locked' : undefined,
+              status: blocked ? 'disabled' : undefined,
               cursor: pageParam,
             },
           },
@@ -84,7 +84,7 @@ function Accounts() {
               checked={blocked}
               onChange={(e) => setBlocked(e.target.checked)}
             />
-            Заблокированные
+            Выключенные
           </label>
         ),
       }}
@@ -124,6 +124,10 @@ function serve(pages: Record<string, { items: Account[]; next: string | null }>)
   );
   return seen;
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const table = () => screen.getByRole('table', { name: 'Сотрудники' });
 const bodyRows = () => within(table()).getAllByRole('row').slice(1);
@@ -165,9 +169,12 @@ test('пусто без фильтров — «Ничего не нашлось�
 test('ошибка загрузки — код и «Повторить», повтор перезапрашивает', async () => {
   let fail = true;
   let asked = 0;
+  let release = () => {};
+  const gate = new Promise<void>((r) => (release = r));
   server.use(
-    http.get('/v1/staff/accounts', ({ response }) => {
+    http.get('/v1/staff/accounts', async ({ response }) => {
       asked++;
+      if (!fail) await gate;
       return fail
         ? response.untyped(problem(500, 'internal'))
         : response(200).json({ items: [account(1)], next_cursor: null });
@@ -180,6 +187,10 @@ test('ошибка загрузки — код и «Повторить», пов
   expect(alert).toHaveTextContent('Код ошибки: 500 · internal');
   fail = false;
   await user.click(within(alert).getByRole('button', { name: 'Повторить' }));
+  // перезапрос виден сразу: вместо ошибки — скелетон (у запроса без данных статус pending)
+  expect(await screen.findByRole('status')).toHaveTextContent('Загрузка…');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  release();
   expect(await screen.findByText('Сотрудник 1')).toBeInTheDocument();
   expect(asked).toBe(2);
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -202,9 +213,11 @@ test('поиск, чип и раскрывающийся фильтр уходя
   expect(more).toHaveAttribute('aria-expanded', 'false');
   await user.click(more);
   expect(more).toHaveAttribute('aria-expanded', 'true');
-  await user.click(screen.getByRole('checkbox', { name: 'Заблокированные' }));
+  await user.click(screen.getByRole('checkbox', { name: 'Выключенные' }));
+  // число заданных фильтров слышно читалке — в имени кнопки
+  expect(more).toHaveAccessibleName('Ещё фильтры, задано: 1');
   await waitFor(() =>
-    expect(seen.at(-1)).toEqual({ q: 'zz', role: 'owner', status: 'locked', cursor: null }),
+    expect(seen.at(-1)).toEqual({ q: 'zz', role: 'owner', status: 'disabled', cursor: null }),
   );
   // поиск ждёт паузы в наборе: по запросу на слово, а не на каждую букву
   expect(seen.filter((s) => s.q === 'z')).toEqual([]);
@@ -217,6 +230,7 @@ test('поиск, чип и раскрывающийся фильтр уходя
   expect(screen.getByRole('searchbox', { name: 'Поиск' })).toHaveValue('');
   expect(screen.getByRole('button', { name: 'Все' })).toHaveAttribute('aria-pressed', 'true');
   expect(seen.at(-1)).toEqual({ q: null, role: null, status: null, cursor: null });
+  expect(more).toHaveAccessibleName('Ещё фильтры');
   expect(screen.queryByRole('button', { name: 'Сбросить фильтры' })).not.toBeInTheDocument();
 });
 
@@ -230,4 +244,70 @@ test('сортировка: столбец с кнопкой, aria-sort и см�
   await user.click(within(header).getByRole('button'));
   expect(header).toHaveAttribute('aria-sort', 'descending');
   expect(screen.getByRole('columnheader', { name: 'Почта' })).not.toHaveAttribute('aria-sort');
+});
+
+// Экран держит значение поиска с задержкой (например, search-параметр маршрута): эхо прежнего
+// значения не должно затирать то, что набрано после отправки.
+test('поиск: запоздавшее эхо отправленного значения не затирает новый набор', async () => {
+  const ctl: { sent: string[]; apply?: () => void; reset?: () => void } = { sent: [] };
+  function Delayed() {
+    const [q, setQ] = useState('');
+    const [pending, setPending] = useState('');
+    useEffect(() => {
+      ctl.apply = () => setQ(pending);
+      ctl.reset = () => setQ('');
+    });
+    return (
+      <DataTable
+        label="Сотрудники"
+        columns={columns}
+        rowKey={(a) => a.id}
+        rows={[]}
+        onRetry={() => {}}
+        search={{
+          value: q,
+          onChange: (v) => {
+            ctl.sent.push(v);
+            setPending(v);
+          },
+        }}
+      />
+    );
+  }
+  const user = userEvent.setup();
+  renderWithProviders(<Delayed />);
+  const box = screen.getByRole('searchbox', { name: 'Поиск' });
+  await user.type(box, 'ab');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab']));
+  await user.type(box, 'c');
+  act(() => ctl.apply?.());
+  expect(box).toHaveValue('abc');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab', 'abc']));
+  act(() => ctl.apply?.());
+  expect(box).toHaveValue('abc');
+  // настоящий сброс снаружи («Сбросить фильтры») — в поле сразу
+  act(() => ctl.reset?.());
+  expect(box).toHaveValue('');
+});
+
+test('телефон: строки-карточки сохраняют строки и ячейки, подпись столбца слышна', async () => {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })),
+  );
+  serve({ first: { items: [account(1)], next: null } });
+  renderWithProviders(<Accounts />);
+  await screen.findByText('Сотрудник 1');
+  const rows = bodyRows();
+  expect(rows).toHaveLength(1);
+  const cells = within(rows[0]!).getAllByRole('cell');
+  expect(cells).toHaveLength(2);
+  expect(cells[1]).toHaveTextContent('Почта');
+  expect(within(cells[1]!).getByText('Почта')).not.toHaveAttribute('aria-hidden');
+  expect(within(rows[0]!).getAllByRole('cell')[1]).toHaveTextContent('staff1@wf.example');
 });

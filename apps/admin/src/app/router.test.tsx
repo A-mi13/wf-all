@@ -241,13 +241,19 @@ describe('каркас AppShell', () => {
 
   test('«Выйти» завершает сессию и уводит на вход', async () => {
     let key: string | null = null;
+    // после выхода me — 401; signedIn — вход другим сотрудником (новая сессия)
+    let signedIn = false;
+    const next: Me = {
+      ...meOwner,
+      session: { id: 'другая-сессия', expires_at: '2026-10-13T18:00:00Z' },
+    };
     const app = mount('/audit', meOwner);
     server.use(
-      http.post('/v1/staff/logout', ({ request, response }) => {
+      http.post('/v1/staff/auth/logout', ({ request, response }) => {
         key = request.headers.get('Idempotency-Key');
         server.use(
           http.get('/v1/staff/me', ({ response: r }) =>
-            r.untyped(problem(401, 'auth.unauthenticated')),
+            signedIn ? r(200).json(next) : r.untyped(problem(401, 'auth.unauthenticated')),
           ),
         );
         return response(204).empty();
@@ -257,7 +263,15 @@ describe('каркас AppShell', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Выйти' }));
     await page('Вход');
     expect(key).toBeTruthy();
-    // как при истёкшей сессии: после входа — обратно на раздел (P19)
+    // явный выход — вход без return: следующий сотрудник не попадёт в чужой раздел
+    await waitFor(() => expect(app.at()).toBe('/login'));
+    // новый вход, затем истёкшая сессия — снова с возвратом (флаг выхода не залипает)
+    signedIn = true;
+    await app.login(next);
+    await page('Журнал действий');
+    signedIn = false;
+    await app.login(next);
+    await page('Вход');
     expect(app.at()).toBe('/login?return=%2Faudit');
   });
 

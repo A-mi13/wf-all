@@ -26,7 +26,11 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
   let body: ReactNode;
   if (rows === undefined) {
-    body = error ? <ErrorState error={error} onRetry={props.onRetry} /> : <LoadingRows />;
+    body = error ? (
+      <ErrorState error={error} onRetry={props.onRetry} retrying={props.retrying} />
+    ) : (
+      <LoadingRows />
+    );
   } else if (rows.length === 0) {
     body = dirty ? <EmptyState action={reset} /> : (props.empty ?? <EmptyState />);
   } else {
@@ -75,7 +79,11 @@ function Toolbar<T>({ search, chips, filters }: DataTableProps<T>) {
           <button
             type="button"
             className={cx(styles.moreButton, filters.active > 0 && styles.withCount)}
-            aria-label={t('more_filters')}
+            aria-label={
+              filters.active > 0
+                ? t('more_filters_active', { count: filters.active })
+                : t('more_filters')
+            }
             aria-expanded={open}
             aria-controls={panelId}
             onClick={() => setOpen((v) => !v)}
@@ -111,16 +119,22 @@ function SearchBox({
   const t = useTranslations('table');
   const [text, setText] = useState(value);
   const [outer, setOuter] = useState(value);
+  // последнее отправленное экрану: его эхо в value (экран применяет с задержкой — search-параметр
+  // маршрута) не затирает то, что набрано после отправки
+  const [sent, setSent] = useState<string | null>(null);
   if (outer !== value) {
     setOuter(value);
-    setText(value);
+    if (value !== sent) setText(value);
   }
-  const emit = useEffectEvent((v: string) => onChange(v));
+  const emit = useEffectEvent((v: string) => {
+    setSent(v);
+    onChange(v);
+  });
   useEffect(() => {
-    if (text === outer) return;
+    if (text === outer || text === sent) return;
     const timer = setTimeout(() => emit(text), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [text, outer]);
+  }, [text, outer, sent]);
 
   return (
     <div className={styles.search}>
@@ -149,6 +163,7 @@ function SearchBox({
           aria-label={t('clear_search')}
           onClick={() => {
             setText('');
+            setSent('');
             onChange('');
           }}
         >
@@ -192,13 +207,20 @@ function Rows<T>({
   return (
     <>
       <div className={styles.scroll}>
-        <table aria-label={label} className={cx(styles.table, stacked && styles.stacked)}>
-          <thead>
-            <tr>
+        {/* Роли — явно: на телефоне строки и ячейки становятся блоками (display: block), и часть
+            браузеров иначе снимает с них семантику таблицы. */}
+        <table
+          role="table"
+          aria-label={label}
+          className={cx(styles.table, stacked && styles.stacked)}
+        >
+          <thead role="rowgroup">
+            <tr role="row">
               {columns.map((c) => {
                 const sorted = sort?.column === c.id ? sort.direction : undefined;
                 return (
                   <th
+                    role="columnheader"
                     key={c.id}
                     scope="col"
                     aria-sort={
@@ -239,12 +261,13 @@ function Rows<T>({
               })}
             </tr>
           </thead>
-          <tbody>
+          <tbody role="rowgroup">
             {rows.map((row) => {
               const key = rowKey(row);
               return (
                 <tr
                   key={key}
+                  role="row"
                   className={cx(
                     styles.row,
                     onRowClick && styles.clickable,
@@ -266,11 +289,14 @@ function Rows<T>({
                   }
                 >
                   {columns.map((c) => (
-                    <td key={c.id} className={cx(styles.td, c.align === 'end' && styles.end)}>
+                    <td
+                      key={c.id}
+                      role="cell"
+                      className={cx(styles.td, c.align === 'end' && styles.end)}
+                    >
                       {stacked && (
-                        <span className={styles.cellLabel} aria-hidden="true">
-                          {c.header}
-                        </span>
+                        // шапка на телефоне скрыта — подпись столбца в ячейке и видна, и слышна
+                        <span className={styles.cellLabel}>{c.header}</span>
                       )}
                       {c.cell(row)}
                     </td>

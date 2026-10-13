@@ -23,6 +23,7 @@ export type DataTableProps<T> = {
   rows: T[] | undefined;
   error?: unknown; // ошибка первой загрузки: строк нет
   onRetry: () => void;
+  retrying?: boolean; // перезапрос после ошибки идёт — «Повторить» занята
   hasMore?: boolean;
   loadingMore?: boolean;
   loadMoreError?: unknown; // «Показать ещё» не удалось — строки остаются
@@ -52,12 +53,22 @@ export function infiniteTableProps<T, P, E>(
   q: UseInfiniteQueryResult<InfiniteData<CursorPage<T>, P>, E>,
 ): Pick<
   DataTableProps<T>,
-  'rows' | 'error' | 'onRetry' | 'hasMore' | 'loadingMore' | 'loadMoreError' | 'onLoadMore'
+  | 'rows'
+  | 'error'
+  | 'onRetry'
+  | 'retrying'
+  | 'hasMore'
+  | 'loadingMore'
+  | 'loadMoreError'
+  | 'onLoadMore'
 > {
   return {
     rows: q.data?.pages.flatMap((p) => p.items),
     error: q.data ? undefined : (q.error ?? undefined),
     onRetry: () => void q.refetch(),
+    // У TanStack Query перезапрос без данных сбрасывает ошибку (status pending) — таблица сразу
+    // показывает скелетон; retrying держит «Повторить» занятой, если ошибка остаётся на экране.
+    retrying: q.isFetching,
     hasMore: q.hasNextPage,
     loadingMore: q.isFetchingNextPage,
     loadMoreError: q.isFetchNextPageError ? q.error : undefined,
