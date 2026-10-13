@@ -79,8 +79,9 @@ func TestComposeLocked(t *testing.T) {
 	}
 }
 
-// Письмо не нужно — mail.ErrSkip (задача отменяется): нет сессии или она погашена не блокировкой,
-// получатель выключен, не владелец и не админ или не существует.
+// Письмо не нужно — mail.ErrSkip (задача отменяется): нет сессии или учётку не закрывали
+// (locked_until пуст; причину гашения сессии письмо не смотрит), получатель выключен, не владелец и не
+// админ или не существует.
 func TestComposeLockedSkips(t *testing.T) {
 	e := newEnv(t)
 	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
@@ -98,7 +99,7 @@ func TestComposeLockedSkips(t *testing.T) {
 		ref, recipient uuid.UUID
 	}{
 		{"нет сессии", uuid.New(), owner.ID},
-		{"сессия погашена выходом", logout.SessionID, owner.ID},
+		{"учётку не закрывали", logout.SessionID, owner.ID},
 		{"получатель — поддержка", ref, support.ID},
 		{"получатель выключен", ref, off.ID},
 		{"нет получателя", ref, uuid.New()},

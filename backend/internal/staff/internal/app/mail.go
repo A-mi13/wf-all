@@ -44,9 +44,14 @@ func (a *App) ComposeLocked(ctx context.Context, ref, recipient uuid.UUID) (mail
 		return mail.Message{}, err
 	}
 	args := map[string]any{
-		"name":   row.DisplayName,
-		"email":  row.Email,
-		"time":   row.LockedUntil.Add(-lockDuration).UTC().Format(mailTime), // когда закрылась
+		"name":  row.DisplayName,
+		"email": row.Email,
+		// когда закрылась: locked_until − 1 ч. Допущение: письма не чаще раза в час (lockNotifyEvery), а
+		// блокировка длится час (lockDuration), поэтому повторная блокировка наступает не раньше, чем
+		// истечёт первая, и задача письма о первой успевает уйти с её locked_until. Если задача застряла в
+		// повторах дольше часа и учётку закрыли заново, письмо покажет время последней блокировки: точное
+		// время потребовало бы новой колонки или связи с записью аудита (в письме — не нужно).
+		"time":   row.LockedUntil.Add(-lockDuration).UTC().Format(mailTime),
 		"ip":     audit.MaskIP(row.Ip),
 		"origin": a.origin,
 	}
