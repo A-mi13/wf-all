@@ -112,7 +112,7 @@ CI поднимает свою базу на 15432 (`.github/workflows/backend.y
 | Postgres | 15432 | `WF_PG_PORT` в `deploy/dev/.env` — его читают `scripts/pg.sh` (и напрямую, и через task) и тесты бэкенда (`WF_TEST_PG_PORT` → `WF_PG_PORT` → 15432; `WF_PG_PORT` в окружение подставляет корневой Taskfile, при голом `go test` задать самому); **плюс** порт в четырёх `*_DATABASE_URL` в `backend/.env` |
 | api | 8080 | `API_HTTP_ADDR` в `backend/.env` **и** `WF_API_ORIGIN` в `apps/web/.env.local` (куда Next проксирует `/v1`) |
 | admin-api | 8081 | `ADMIN_HTTP_ADDR` в `backend/.env` **и** `WF_ADMIN_API_ORIGIN` в `apps/admin/.env.local` (куда Vite проксирует `/v1`) |
-| веб (Next.js) | 3000 | скрипты `dev` и `start` в `apps/web/package.json` **и** `baseURL`/`webServer.url` в `apps/web/playwright.config.ts` |
+| веб (Next.js) | 3000 | скрипты `dev` и `start` в `apps/web/package.json`; сервер e2e — `WF_WEB_PORT` в окружении процесса (`WF_WEB_PORT=3100 pnpm e2e`; по умолчанию 3000; `baseURL`, `webServer.url` и команда в `apps/web/playwright.config.ts` берут его оттуда) |
 | админка (Vite) | 5173 | `server.port` в `apps/admin/vite.config.ts` |
 | Mailpit UI / SMTP | 18025 / 11025 | литералы в задаче `mail` корневого `Taskfile.yml` |
 
