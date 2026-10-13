@@ -1,3 +1,6 @@
+/// <reference types="node" />
+// Типы Node — только ради этого стража (читает исходники с диска); import.meta.glob не годится:
+// vitest отдаёт CSS-модуль прокси, а не текст.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
