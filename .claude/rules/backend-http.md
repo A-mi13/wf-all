@@ -18,7 +18,7 @@ paths:
 - Swagger UI — `internal/platform/apidocs` на `/docs` (контракт — `/docs/openapi.json`), включается `API_DOCS_ENABLED` / `ADMIN_DOCS_ENABLED` (`config.HTTP.DocsEnabled`, по умолчанию выкл.); `/docs` вне контракта — валидатор пропускает его к роутеру. Swagger UI грузится с jsDelivr; версия и SRI-хэши — в `apidocs.go`, обновлять вместе.
 - Пробы — `/healthz`, `/readyz` (`platform/health`) вне контракта. `/v1/health` удалён из обоих контрактов (public — спека `geo` §4.4, admin — план сотрудников R13; исключения — `contracts/oasdiff-err-ignore-{public,admin}.txt`). Проверка связи клиентов — запрос контракта (веб — `listCities` с `limit=1`, админка — `GET /v1/staff/me`).
 
-## Конвейер (спека §6.1)
+## Конвейер public (спека §6.1)
 
 peer → склейка строк заголовка `Accept-Language` (`httpx.CombineHeaders`: сгенерированный код принимает у заголовка-параметра одну строку) → лимит тела → таймаут → `httpx.Routes` → `auth.Middleware` (на операции без bearer в `security` —
 `Route.AcceptsBearer` — `Authorization` не читает) → `httpx.ValidateRequests` (вход — из
@@ -28,7 +28,42 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
 иначе API не стартует.
 
 - Перед peer `httpx.NewRouter` ставит `request_id`, лог доступа и recover; пробы — до роутера.
-- admin-api — тот же конвейер без `auth.Middleware` (вход сотрудников — спека «Сотрудники и админка geo», конвейер — Task 9b) и без
-  `humancheck.Middleware`. `admin.Server` встраивает `staff/admin.Handler` и `geo/admin.Handler` через псевдонимы
-  (`staffHandler`, `geoHandler`: оба типа называются `Handler`). Операция контракта, которую ещё не исполняет
-  сервер, — заглушка `501 http.not_implemented` (`httpx.CodeNotImplemented`; проверка — `apitest.NotImplemented`).
+- Нестроковый или пустой `x-rate-limit` — ошибка старта (`ratelimit.UnknownClasses`), а не тихий `default`.
+
+## Конвейер admin-api (спека сотрудников §5.1)
+
+peer → IP-аллоулист (`ADMIN_IP_ALLOWLIST`; пусто — выключен; вне списка — `403 auth.ip_not_allowed` на всё, включая
+статику и `/docs`) → склейка `Accept-Language` → лимит тела → таймаут → `httpx.Routes` → `Cache-Control: no-store` на
+ответах маршрутов контракта → сессия сотрудника по cookie (только маршруты контракта) → CSRF → `httpx.ValidateRequests`
+(вход — `auth.AuthenticatedStaff`) → права `x-permission` → `ratelimit.Middleware` → `idempotency.Middleware` →
+strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка — `internal/httpapi/admin` (`handler.go`, звенья — по
+файлам `allowlist.go`, `session.go`, `csrf.go`, `permission.go`, `static.go`).
+
+- **Сессия** (P7, R9): имя cookie — только `admin.CookieName(secure)` (`__Host-wf_admin_session`; без
+  `ADMIN_COOKIE_SECURE` — dev-имя `wf_admin_session`). Cookie есть → сначала `Limiter.Over(ratelimit.IPKey("staff_auth",
+  ip))`: исчерпан — `429 ratelimit.exceeded` без проверки cookie. Невалидный токен (`auth.ErrSessionInvalid` или
+  негативный кэш: 5 с по SHA-256 токена, не больше 10 000 записей) → `Limiter.Add` по тому же ключу, ответ стирает
+  cookie (`Max-Age=0`), запрос идёт дальше анонимно (валидатор даст 401 там, где нужен вход). Сбой загрузчика — 500.
+  Положительного кэша нет. `X-WF-Background: 1` → `LoadStaff(…, background=true)`. Сотрудник — `auth.WithStaff` до
+  лимита и идемпотентности.
+- **CSRF**: любой метод, кроме GET/HEAD/OPTIONS/TRACE, — ровно один `Origin`, равный `ADMIN_ORIGIN`, и `X-WF-Admin: 1`,
+  иначе `403 auth.csrf_failed` до разбора тела; анонимные мутации тоже. `ADMIN_ORIGIN` — в форме заголовка `Origin`
+  (`admin.ValidateOrigin`: схема http/https, нижний регистр, без пути и стандартного порта), аллоулист без `/0`
+  (`admin.ValidateAllowlist`) — проверка на старте, до подключения к базе.
+- **Права** (`x-permission`): правила строятся из контракта на старте — операция без `x-permission`, ключ вне каталога
+  или черновой, `handler` без `x-permission-any` — отказ старта; маршрут без правила в работе — 500 в лог (fail-closed).
+  `anonymous` — пропуск; `session` — любая стадия; `self`, ключ и `handler` — только `active`: `mfa_pending` → `401
+  auth.unauthenticated`, `setup` → `403 auth.setup_required`, `Reauth` → `401 auth.reauth_required`. Ключ: `{cityId}` в
+  пути — `Staff.Decide(ключ, город) != Deny` (`Route.Param`); без города — `Grant != Deny` (scoped-список фильтрует
+  ручка; `Decide(ключ, uuid.Nil)` дал бы Deny). `handler` — хоть одно право из `x-permission-any` не `Deny`, точно решает
+  сценарий. Нет права — `403 auth.forbidden`.
+- **Статика** (`ADMIN_STATIC_DIR`; пусто — не отдаётся): `NotFound` роутера — вне `/v1/*` файл каталога или
+  `index.html` (SPA), нет файла в `assets/` — 404; `/v1/*` — 404 Problem; только GET/HEAD. Файл — через
+  `os.OpenInRoot` (выход за каталог невозможен). Заголовки: CSP, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: no-referrer`; `index.html` — `no-store`, `assets/` — `immutable`, прочее — `no-cache`.
+- `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
+  `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
+  обязательны. Операция контракта, которую ещё не исполняет сервер, — заглушка `501 http.not_implemented`
+  (`httpx.CodeNotImplemented`; проверка — `apitest.NotImplemented`).
+- Тесты: cookie в запросе ставится руками (`net/http/cookiejar` не шлёт Secure-cookie по http, P24); проход конвейера
+  — 501 заглушки; `{cityId}` — на подменённом контракте (`admin.Permissions` в `export_test.go`).

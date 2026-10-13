@@ -127,3 +127,9 @@ type StaffSessionsFunc func(ctx context.Context, token string, ip netip.Addr, ba
 func (f StaffSessionsFunc) LoadStaff(ctx context.Context, token string, ip netip.Addr, background bool) (*Staff, error) {
 	return f(ctx, token, ip, background)
 }
+
+// NoStaffSessions — до модуля staff (сборка cmd/admin-api, Task 10c): сессий сотрудников нет,
+// любой токен — ErrSessionInvalid.
+var NoStaffSessions StaffSessions = StaffSessionsFunc(func(context.Context, string, netip.Addr, bool) (*Staff, error) {
+	return nil, ErrSessionInvalid
+})

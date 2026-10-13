@@ -163,12 +163,19 @@ func StrayClasses(spec *openapi3.T, r Rules) []string {
 }
 
 // UnknownClasses — операции, чей x-rate-limit не описан в правилах: «<МЕТОД> <путь>: x-rate-limit <класс>».
+// Расширение есть, но не непустая строка (5, "", список), — тоже нарушение (P22): Middleware
+// отправил бы такую операцию в default, и опечатка контракта молча снимала бы с неё лимит.
 func UnknownClasses(spec *openapi3.T, r Rules) []string {
 	var out []string
 	for path, item := range spec.Paths.Map() {
 		for method, op := range item.Operations() {
-			class, _ := op.Extensions["x-rate-limit"].(string)
+			raw, declared := op.Extensions["x-rate-limit"]
+			if !declared {
+				continue
+			}
+			class, _ := raw.(string)
 			if class == "" {
+				out = append(out, fmt.Sprintf("%s %s: x-rate-limit — не непустая строка", method, path))
 				continue
 			}
 			if _, ok := r[class]; !ok {

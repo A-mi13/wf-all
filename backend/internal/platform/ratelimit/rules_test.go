@@ -151,6 +151,39 @@ paths:
 	}
 }
 
+// Нестроковый или пустой x-rate-limit (P22, остаток фундамента 3/3) — нарушение: раньше такая
+// операция молча уходила в класс default (Route.Extension даёт ""), и опечатка в контракте
+// (x-rate-limit: 5, x-rate-limit: "") снимала с ручки её лимит без единого сигнала.
+func TestUnknownClassesNonString(t *testing.T) {
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(`
+openapi: 3.0.3
+info: {title: t, version: "1"}
+paths:
+  /num:
+    get: {operationId: num, x-rate-limit: 5, responses: {"200": {description: ok}}}
+  /empty:
+    get: {operationId: empty, x-rate-limit: "", responses: {"200": {description: ok}}}
+  /list:
+    post: {operationId: list, x-rate-limit: [auth], responses: {"200": {description: ok}}}
+  /ok:
+    get: {operationId: ok, x-rate-limit: auth, responses: {"200": {description: ok}}}
+  /none:
+    get: {operationId: none, responses: {"200": {description: ok}}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ratelimit.UnknownClasses(spec, ratelimit.DefaultRules())
+	want := []string{
+		"GET /empty: x-rate-limit — не непустая строка",
+		"GET /num: x-rate-limit — не непустая строка",
+		"POST /list: x-rate-limit — не непустая строка",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
 // Класс правил, которого нет ни в DefaultRules, ни в x-rate-limit контракта, — опечатка в
 // API_RATE_LIMITS / ADMIN_RATE_LIMITS: переопределение молча не действовало бы.
 func TestStrayClasses(t *testing.T) {

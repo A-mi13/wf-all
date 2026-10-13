@@ -63,6 +63,33 @@ func TestRoutesPutsOperationInContext(t *testing.T) {
 	}
 }
 
+// Param — значение параметра пути операции (P10): есть — значение как в пути, нет такого
+// параметра у маршрута — ("", false). Читает его проверка права со scoped-городом в admin-api.
+func TestRouteParam(t *testing.T) {
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(routesSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := httpx.Routes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *httpx.Route
+	h := routes(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got, _ = httpx.RouteFrom(r.Context())
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/things/42", nil))
+	if got == nil {
+		t.Fatal("нет маршрута")
+	}
+	if v, ok := got.Param("id"); !ok || v != "42" {
+		t.Fatalf("Param(id) = %q, %v", v, ok)
+	}
+	if v, ok := got.Param("cityId"); ok || v != "" {
+		t.Fatalf("Param(cityId) = %q, %v", v, ok)
+	}
+}
+
 // securedSpec — спека, где часть операций требует bearer. Имя без «bearer»: иначе gosec G101 принимает константу за секрет.
 const securedSpec = `
 openapi: 3.0.3

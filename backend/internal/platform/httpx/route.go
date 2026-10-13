@@ -28,6 +28,13 @@ func (r *Route) Extension(name string) string {
 	return s
 }
 
+// Param — значение параметра пути операции (P10), как в пути запроса; у маршрута нет такого
+// параметра — ("", false). Город из пути ({cityId}) — для проверки права scoped в admin-api.
+func (r *Route) Param(name string) (string, bool) {
+	v, ok := r.params[name]
+	return v, ok
+}
+
 // AcceptsBearer — есть ли в security операции (без своего — в общем security документа) схема
 // HTTP Bearer, обязательная или опциональная ([{}, {bearer: []}]). Нет — операция только
 // анонимная (security: [] или эквивалент): слой аутентификации заголовок Authorization не читает.

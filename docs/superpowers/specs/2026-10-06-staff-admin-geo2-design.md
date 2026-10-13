@@ -964,6 +964,12 @@ geo,versions,flags}/`, `src/api/`. Правила — новое `.claude/rules/
 
 - `__Host-` cookie с `Secure` на `http://127.0.0.1` в dev (Chrome, Firefox, Playwright). Не работает →
   в dev имя без префикса и `Secure` по флагу конфига, в проде — строго.
+  **Проверено 13.10.2026 (план A, Task 9b, R6) на движках Playwright 1.63:** Chromium 153.0.8010.12 и
+  Firefox 148.0.2 принимают `__Host-wf_admin_session` с `Secure; HttpOnly; SameSite=Strict; Path=/` от
+  `http://127.0.0.1:<порт>` и шлют её обратно; WebKit 26.6 (для сведения) — не принимает. Итог: в dev имя
+  `__Host-wf_admin_session`, `ADMIN_COOKIE_SECURE=true` (по умолчанию); `false` — запасной путь для браузера,
+  который не примет (dev-имя `wf_admin_session` без `Secure`, `admin.CookieName`), в проде — только `true`.
+  Настоящие браузеры (Chrome, Firefox, Safari) пользователь проверяет руками.
 - TOTP на Go: своя реализация по RFC 6238 с тестовыми векторами RFC или библиотека — решить по
   состоянию библиотек и версий.
 - Последние стабильные версии TanStack Router, react-hook-form, `@fontsource/*`, генератора QR —

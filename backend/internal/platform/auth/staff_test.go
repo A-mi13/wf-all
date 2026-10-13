@@ -147,3 +147,12 @@ func TestStaffSessionsFunc(t *testing.T) {
 		t.Fatalf("чужой токен: %v, фоновый %v", err, background)
 	}
 }
+
+// NoStaffSessions — до модуля staff (Task 6a/10c): сессий сотрудников нет, любой токен —
+// ErrSessionInvalid (конвейер admin-api стирает cookie и считает отказ в IP-лимите).
+func TestNoStaffSessions(t *testing.T) {
+	s, err := auth.NoStaffSessions.LoadStaff(context.Background(), "tok", netip.MustParseAddr("203.0.113.7"), false)
+	if s != nil || !errors.Is(err, auth.ErrSessionInvalid) {
+		t.Fatalf("NoStaffSessions: %v, %v", s, err)
+	}
+}

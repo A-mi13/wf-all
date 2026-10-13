@@ -13,12 +13,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin"
+	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/peer"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/server"
+	staffadmin "wf/backend/internal/staff/admin"
 )
 
 func main() {
@@ -48,6 +51,12 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	if err := pc.Validate(); err != nil {
 		return err
 	}
+	if err := admin.ValidateOrigin(cfg.Origin); err != nil {
+		return err
+	}
+	if err := admin.ValidateAllowlist(cfg.IPAllowlist); err != nil {
+		return err
+	}
 	return server.RunHTTP(ctx, "admin-api", server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB}, logOut,
 		func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error) {
 			return admin.NewHandler(log, admin.Options{
@@ -57,6 +66,16 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 				DB:             pool,
 				Limiter:        ratelimit.NewPG(pool, clock.System),
 				RateRules:      rules,
+				Origin:         cfg.Origin,
+				IPAllowlist:    cfg.IPAllowlist,
+				CookieSecure:   cfg.CookieSecure,
+				StaticDir:      cfg.StaticDir,
+				// модуль staff (загрузчик сессий и хендлеры) подключает сборка Task 10c; до неё
+				// сессий нет, операции отвечают 501
+				Sessions: auth.NoStaffSessions,
+				Staff:    &staffadmin.Handler{},
+				Geo:      &geoadmin.Handler{},
+				Clock:    clock.System,
 			})
 		})
 }

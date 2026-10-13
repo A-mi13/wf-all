@@ -10,7 +10,7 @@ import (
 	"wf/backend/internal/platform/httpx"
 )
 
-// Handler — операции тега geo; встраивается в internal/httpapi/admin.Server.
+// Handler — операции тега geo; встраивается в internal/httpapi/admin.Server указателем.
 //
 // Заглушка Task 9a: контракт admin заморожен раньше сценариев (план A, P16) — операция отвечает
 // 501 http.not_implemented, пока Task 10b не заменит её хендлером поверх чтения geo.Service.
@@ -19,6 +19,6 @@ type Handler struct{}
 var errNotImplemented = httpx.NewError(http.StatusNotImplemented, httpx.CodeNotImplemented)
 
 // ListGeoCities — GET /v1/geo/cities.
-func (Handler) ListGeoCities(context.Context, oapi.ListGeoCitiesRequestObject) (oapi.ListGeoCitiesResponseObject, error) {
+func (*Handler) ListGeoCities(context.Context, oapi.ListGeoCitiesRequestObject) (oapi.ListGeoCitiesResponseObject, error) {
 	return nil, errNotImplemented
 }

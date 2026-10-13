@@ -21,25 +21,17 @@ import (
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/testkit/apitest"
-	"wf/backend/internal/platform/testkit/dbtest"
 )
 
-// testOptions — рабочий набор зависимостей: лимиты пропускают всё, база — чистая
-// (идемпотентность). Входа сотрудников до спеки identity нет.
-func testOptions(t *testing.T) admin.Options {
-	t.Helper()
-	return admin.Options{
-		DB:        dbtest.NewPool(t),
-		Limiter:   ratelimit.Unlimited,
-		RateRules: ratelimit.DefaultRules(),
-	}
-}
+func quiet() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-// loginRequest — анонимный вход с телом по схеме: проходит валидатор и доходит до хендлера.
+// loginRequest — анонимный вход с телом по схеме: проходит CSRF (Origin админки и X-WF-Admin),
+// валидатор и доходит до хендлера.
 func loginRequest() *http.Request {
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/staff/auth/login",
 		strings.NewReader(`{"email":"olga.v@wf.example","password":"Жёлтая карточка на 90-й"}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", testOrigin)
 	req.Header.Set("X-WF-Admin", "1")
 	return req
 }
@@ -270,6 +262,15 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 		"без базы":     func(o *admin.Options) { o.DB = nil },
 		"без лимитера": func(o *admin.Options) { o.Limiter = nil },
 		"без правил":   func(o *admin.Options) { o.RateRules = nil },
+		"без сессий":   func(o *admin.Options) { o.Sessions = nil },
+		"без staff":    func(o *admin.Options) { o.Staff = nil },
+		"без geo":      func(o *admin.Options) { o.Geo = nil },
+		"без часов":    func(o *admin.Options) { o.Clock = nil },
+		"без класса staff_auth": func(o *admin.Options) {
+			r := ratelimit.DefaultRules()
+			delete(r, "staff_auth")
+			o.RateRules = r
+		},
 		"нет класса default": func(o *admin.Options) {
 			o.RateRules = ratelimit.Rules{"auth": ratelimit.DefaultRules()["auth"]} // нет default
 		},
