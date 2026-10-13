@@ -3,6 +3,7 @@ import {
   type KeyboardEvent,
   type Ref,
   useId,
+  useEffect,
   useImperativeHandle,
   useRef,
   useState,
@@ -62,14 +63,30 @@ export function OtpInput({
     el?.select();
   };
 
+  // Фокус, отложенный до включения ячеек: onError мутации зовёт reset(), пока ячейки ещё
+  // disabled (isPending снимается позже — оповещения query-core идут через setTimeout 0).
+  const pendingFocus = useRef<number | null>(null);
+  const requestFocus = (i: number) => {
+    const el = inputs.current[i];
+    if (el && !el.disabled) focusAt(i);
+    else pendingFocus.current = i;
+  };
+  useEffect(() => {
+    if (disabled || pendingFocus.current === null) return;
+    focusAt(pendingFocus.current);
+    pendingFocus.current = null;
+  });
+
   useImperativeHandle(ref, () => ({
     reset() {
       setCells(EMPTY);
-      inputs.current[0]?.focus();
+      requestFocus(0);
     },
     focus() {
+      // после reset() в том же такте cells ещё старые — ждём, если уже ждём первую
+      if (pendingFocus.current !== null) return;
       const empty = cells.findIndex((c) => !c);
-      focusAt(empty === -1 ? LENGTH - 1 : empty);
+      requestFocus(empty === -1 ? LENGTH - 1 : empty);
     },
   }));
 

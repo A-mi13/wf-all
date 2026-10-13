@@ -99,6 +99,10 @@ export function MultiSelectField({
           placeholder={searchPlaceholder}
           value={query}
           autoComplete="off"
+          // Enter в поиске — не отправка формы приглашения
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.preventDefault();
+          }}
           onChange={(e) => {
             setQuery(e.target.value);
             onSearch?.(e.target.value);

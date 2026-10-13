@@ -191,6 +191,7 @@
   line-height: var(--wf-text-xs-line);
   font-weight: 800;
   letter-spacing: 0.5px;
+  text-transform: uppercase;
   color: var(--wf-color-text-subtle);
 }
 

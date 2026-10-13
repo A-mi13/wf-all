@@ -1,4 +1,12 @@
-import { type ReactNode, type RefObject, useEffect, useEffectEvent, useId, useRef } from 'react';
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'use-intl';
 import { cx } from '../cx';
@@ -52,6 +60,11 @@ function Panel({
   const descriptionId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
+  // Открыватель — во время первого рендера, до монтирования содержимого: autoFocus поля внутри
+  // срабатывает раньше эффектов, и в эффекте activeElement был бы уже полем диалога.
+  const [opener] = useState(() =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
 
   const dismiss = () => {
     if (dismissible) onClose();
@@ -66,13 +79,14 @@ function Panel({
     }
   });
   const focusInitial = useEffectEvent(() => {
+    // фокус уже внутри (autoFocus содержимого) — не перебиваем
+    if (panel.current?.contains(document.activeElement)) return;
     const target = initialFocus?.current ?? focusables(body.current)[0] ?? panel.current;
     target?.focus();
   });
 
   useEffect(() => {
     const id = Symbol('overlay');
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const release = pushOverlay(id);
     const listener = (e: KeyboardEvent) => onKeyDown(e, id);
     document.addEventListener('keydown', listener);
@@ -83,7 +97,7 @@ function Panel({
       // фокус — туда, откуда открыли (кнопка в списке или в панели под подтверждением)
       if (opener?.isConnected) opener.focus();
     };
-  }, []);
+  }, [opener]);
 
   return (
     <div className={styles.root}>

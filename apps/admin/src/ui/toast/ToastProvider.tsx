@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'use-intl';
 import { cx } from '../cx';
+import { TOASTS_ATTR } from '../overlay/stack';
 import {
   TOAST_HIDE_MS,
   type ToastAction,
@@ -20,8 +21,15 @@ const TONE: Record<ToastTone, string | undefined> = {
   info: styles.info,
 };
 
-// Тосты админки (макеты 07 и 08): область — порталом в body, поверх оверлеев; внизу по центру, на телефоне — во всю ширину. Успех и
-// справка — role="status" (вежливо), ошибка — role="alert" и без таймера.
+// Тосты админки (макеты 07 и 08): область — порталом в body, поверх оверлеев; внизу по центру, на
+// телефоне — во всю ширину. Живые области постоянные (читалка экрана объявляет добавленное в уже
+// существующую область): успех и справка — aria-live="polite", ошибка — aria-live="assertive" и
+// без таймера. Роли status/alert не ставим: постоянный role="alert" путал бы getByRole('alert')
+// экранов (FormError, «нет связи»). При открытой модалке тосты входят в цикл Tab (overlay/stack.ts).
+const topDialog = () => {
+  const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]');
+  return dialogs[dialogs.length - 1] ?? null;
+};
 export function ToastProvider({ children }: { children: ReactNode }) {
   const t = useTranslations('ui.toast');
   const [items, setItems] = useState<Item[]>([]);
@@ -41,10 +49,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext value={api}>
       {children}
       {createPortal(
-        <section className={styles.region} aria-label={t('region')}>
-          {items.map((item) => (
-            <Toast key={item.id} item={item} closeLabel={t('close')} dismiss={api.dismiss} />
-          ))}
+        <section className={styles.region} aria-label={t('region')} {...{ [TOASTS_ATTR]: '' }}>
+          <div aria-live="polite" className={styles.list}>
+            {items
+              .filter((i) => i.tone !== 'error')
+              .map((item) => (
+                <Toast key={item.id} item={item} closeLabel={t('close')} dismiss={api.dismiss} />
+              ))}
+          </div>
+          <div aria-live="assertive" className={styles.list}>
+            {items
+              .filter((i) => i.tone === 'error')
+              .map((item) => (
+                <Toast key={item.id} item={item} closeLabel={t('close')} dismiss={api.dismiss} />
+              ))}
+          </div>
         </section>,
         document.body,
       )}
@@ -62,7 +81,14 @@ function Toast({
   dismiss: (id: number) => void; // стабильная: новый тост не перезапускает таймеры старых
 }) {
   const { id } = item;
-  const onDismiss = () => dismiss(id);
+  const self = useRef<HTMLDivElement>(null);
+  // Закрыли руками: фокус был на тосте — вернуть его в верхний модальный диалог (иначе он упал бы
+  // на body, за пределы ловушки).
+  const onDismiss = () => {
+    const hadFocus = Boolean(self.current?.contains(document.activeElement));
+    dismiss(id);
+    if (hadFocus) topDialog()?.focus();
+  };
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const autoHide = item.tone !== 'error';
@@ -77,7 +103,7 @@ function Toast({
 
   return (
     <div
-      role={item.tone === 'error' ? 'alert' : 'status'}
+      ref={self}
       className={cx(styles.toast, TONE[item.tone])}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

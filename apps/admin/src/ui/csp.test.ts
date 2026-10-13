@@ -2,22 +2,26 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
-// CSP сборки админки (admin-api, Task 9b): style-src 'self' без 'unsafe-inline'. Набор src/ui
-// не вставляет <style> во время работы и не пишет атрибут style — стили только CSS Modules,
-// цвета только токены --wf-* (правило frontend.md). Страж читает исходники как текст.
-const dir = import.meta.dirname;
+// CSP сборки админки (admin-api, Task 9b): style-src 'self' без 'unsafe-inline'. Код админки
+// (весь src, кроме тестов) не вставляет <style> и HTML строкой, не пишет атрибут style и
+// element.style — стили только CSS Modules, цвета только токены --wf-* (правило frontend.md).
+// Страж читает исходники как текст.
+const dir = join(import.meta.dirname, '..');
 const files = (readdirSync(dir, { recursive: true }) as string[]).map((f) =>
   f.replaceAll('\\', '/'),
 );
 const read = (f: string) => readFileSync(join(dir, f), 'utf8');
 const sources = files.filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f));
-const styles = files.filter((f) => f.endsWith('.module.css'));
+const styles = files.filter((f) => f.endsWith('.css'));
 
 test('стражу есть что читать', () => {
-  expect(sources).toContain('OtpInput.tsx');
-  expect(sources).toContain('overlay/Overlay.tsx');
-  expect(styles).toContain('Button.module.css');
-  expect(styles).toContain('toast/Toast.module.css');
+  expect(sources).toContain('ui/OtpInput.tsx');
+  expect(sources).toContain('ui/overlay/Overlay.tsx');
+  expect(sources).toContain('features/me/LocaleSwitcher.tsx');
+  expect(sources).toContain('app/router.tsx');
+  expect(sources).not.toContain('ui/csp.test.ts');
+  expect(styles).toContain('ui/Button.module.css');
+  expect(styles).toContain('ui/toast/Toast.module.css');
 });
 
 test('компоненты не пишут inline-стили и не вставляют <style>', () => {

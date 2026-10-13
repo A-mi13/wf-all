@@ -3,6 +3,7 @@ import { type ComponentType, type ReactNode, useState } from 'react';
 import { describe, expect, test, vi } from 'vitest';
 import { renderWithIntl } from '../../test/render';
 import { Button } from '../Button';
+import { useToast } from '../toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Drawer } from './Drawer';
 import { Modal } from './Modal';
@@ -129,4 +130,47 @@ test('вложенный диалог: Esc закрывает только ве�
   await user.keyboard('{Escape}');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(document.body).not.toHaveAttribute('data-wf-scroll-lock');
+});
+
+test('поле с autoFocus внутри: открыватель запомнен до него, Esc возвращает фокус на кнопку', async () => {
+  function AutoFocus() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <Button onClick={() => setOpen(true)}>Открыть</Button>
+        <Modal open={open} onClose={() => setOpen(false)} title="Разблокировка">
+          <Button>Раньше поля</Button>
+          <input aria-label="Код" autoFocus />
+        </Modal>
+      </>
+    );
+  }
+  const { user } = renderWithIntl(<AutoFocus />);
+  await user.click(screen.getByRole('button', { name: 'Открыть' }));
+  // focusInitial не перебивает autoFocus содержимого
+  expect(screen.getByLabelText('Код')).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Открыть' })).toHaveFocus();
+});
+
+test('тост-ошибка при открытой модалке закрывается с клавиатуры, фокус возвращается в диалог', async () => {
+  function WithToast() {
+    const toast = useToast();
+    return (
+      <Modal open onClose={vi.fn()} title="Сотрудник">
+        <Button onClick={() => toast.error('Не сохранилось')}>Сохранить</Button>
+      </Modal>
+    );
+  }
+  const { user } = renderWithIntl(<WithToast />);
+  const dialog = screen.getByRole('dialog', { name: 'Сотрудник' });
+  await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+  expect(screen.getByText('Не сохранилось')).toBeInTheDocument();
+  const close = screen.getByRole('button', { name: 'Закрыть уведомление' });
+  for (let i = 0; i < 4 && document.activeElement !== close; i++) await user.tab();
+  expect(close).toHaveFocus();
+  await user.keyboard('{Enter}');
+  expect(screen.queryByText('Не сохранилось')).not.toBeInTheDocument();
+  expect(dialog).toContainElement(document.activeElement as HTMLElement);
 });

@@ -62,6 +62,14 @@ describe('StatusChip, CountBadge, Avatar', () => {
     expect(screen.getByText('99+')).toBeInTheDocument();
   });
 
+  test('CountBadge с подписью: имя — визуально скрытым текстом, не aria-label', () => {
+    const { container } = renderWithIntl(<CountBadge count={3} label="3 ожидают решения" />);
+    const badge = container.querySelector('span');
+    expect(badge).not.toHaveAttribute('aria-label');
+    expect(screen.getByText('3 ожидают решения')).toBeInTheDocument();
+    expect(screen.getByText('3')).toHaveAttribute('aria-hidden', 'true');
+  });
+
   test('Avatar — инициалы из имени, декоративный', () => {
     const { rerender, container } = renderWithIntl(<Avatar name="Мария К." />);
     expect(container).toHaveTextContent('МК');

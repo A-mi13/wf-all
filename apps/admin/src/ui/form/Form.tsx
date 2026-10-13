@@ -1,4 +1,4 @@
-import { type FormHTMLAttributes, type ReactNode, useState } from 'react';
+import { type FormHTMLAttributes, type ReactNode, useRef, useState } from 'react';
 import { type FieldValues, FormProvider, type UseFormReturn } from 'react-hook-form';
 import { ApiError, isApiError } from '../../api/client';
 import { cx } from '../cx';
@@ -25,7 +25,8 @@ export type FormProps<T extends FieldValues> = Omit<
 // Форма админки (спека §9.1): react-hook-form + разбор ответа сервера. 400 validation.failed
 // раскладывается по полям (body.<поле> → setError), что не легло на поля, и прочие коды — общий
 // текст FormError по errors.<код> (useErrorText, откат на errors.internal). Новая отправка
-// стирает прошлую общую ошибку. Проверка браузера выключена (noValidate): тексты — наши.
+// стирает прошлую общую ошибку; повторная отправка, пока идёт первая (двойной клик, Enter), гасится.
+// Проверка браузера выключена (noValidate): тексты — наши.
 export function Form<T extends FieldValues>({
   form,
   onSubmit,
@@ -36,6 +37,7 @@ export function Form<T extends FieldValues>({
   ...rest
 }: FormProps<T>) {
   const [error, setError] = useState<ApiError | null>(null);
+  const busy = useRef(false);
 
   const submit = form.handleSubmit(
     async (values) => {
@@ -43,7 +45,10 @@ export function Form<T extends FieldValues>({
       try {
         await onSubmit(values);
       } catch (e) {
-        // не ApiError — сбой кода или сети до ответа: пользователю общий текст
+        // Не ApiError — сбой кода или сети до ответа: пользователю общий текст, разработчику —
+        // сама ошибка в консоли. Не пробрасываем: из обработчика submit это необработанный
+        // отказ промиса без текста на экране.
+        if (!isApiError(e)) console.error('Form: отправка упала не ответом API', e);
         const apiError = isApiError(e) ? e : new ApiError({ status: 0, code: 'internal' });
         if (onError?.(apiError) === true) return;
         if (applyFieldErrors(form, apiError)) return;
@@ -60,7 +65,16 @@ export function Form<T extends FieldValues>({
           noValidate
           {...rest}
           className={cx(styles.form, className)}
-          onSubmit={(e) => void submit(e)}
+          onSubmit={(e) => {
+            if (busy.current) {
+              e.preventDefault();
+              return;
+            }
+            busy.current = true;
+            void submit(e).finally(() => {
+              busy.current = false;
+            });
+          }}
         >
           {showError && <FormError />}
           {children}

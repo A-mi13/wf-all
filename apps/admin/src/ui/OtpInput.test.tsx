@@ -126,6 +126,34 @@ describe('OtpInput', () => {
     expect(onComplete).toHaveBeenLastCalledWith('222222');
   });
 
+  // Реальный сценарий: onError мутации зовёт reset(), пока ячейки ещё disabled (isPending), —
+  // фокус ставится, когда их включат.
+  test.each([
+    ['reset()', (h: OtpInputHandle) => h.reset()],
+    [
+      'reset() и focus()',
+      (h: OtpInputHandle) => {
+        h.reset();
+        h.focus();
+      },
+    ],
+  ] as const)('%s при disabled: фокус — после включения ячеек', async (_, call) => {
+    const onComplete = vi.fn();
+    const ref = createRef<OtpInputHandle>();
+    const ui = (disabled: boolean) => (
+      <OtpInput ref={ref} label="Код из приложения" onComplete={onComplete} disabled={disabled} />
+    );
+    const { user, rerender } = renderWithIntl(ui(false));
+    await user.click(cells()[0]!);
+    await user.paste('123456');
+    rerender(ui(true));
+    act(() => call(ref.current!));
+    expect(values()).toEqual(['', '', '', '', '', '']);
+    expect(cells()[0]).not.toHaveFocus();
+    rerender(ui(false));
+    expect(cells()[0]).toHaveFocus();
+  });
+
   test('ошибка помечает группу, disabled выключает ячейки', () => {
     const { rerender } = setup({ invalid: true });
     for (const c of cells()) expect(c).toHaveAttribute('aria-invalid', 'true');

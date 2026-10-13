@@ -132,6 +132,34 @@ describe('Form: поля и отправка', () => {
   });
 });
 
+describe('Form: отправка', () => {
+  test('Enter в поиске MultiSelectField не отправляет форму', async () => {
+    const onSubmit = vi.fn();
+    const { user } = renderWithIntl(<Invite onSubmit={onSubmit} />);
+    await user.type(screen.getByLabelText('Почта'), 'a@b.c');
+    await user.type(screen.getByRole('searchbox', { name: 'Города: поиск' }), 'нев{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole('checkbox', { name: 'Невинномысск' })).toBeInTheDocument();
+  });
+
+  test('повторная отправка, пока идёт первая, гасится', async () => {
+    let finish!: () => void;
+    const onSubmit = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    const { user } = renderWithIntl(<Invite onSubmit={onSubmit} />);
+    await user.type(screen.getByLabelText('Почта'), 'a@b.c');
+    const submit = screen.getByRole('button', { name: 'Отправить' });
+    await user.click(submit);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await user.click(submit);
+    await user.type(screen.getByLabelText('Имя'), '{Enter}');
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.click(submit);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+  });
+});
+
 describe('Form: ошибки сервера', () => {
   test('validation.failed раскладывается по полям (body.<поле>), общего текста нет', async () => {
     const { user } = renderWithIntl(
@@ -180,15 +208,17 @@ describe('Form: ошибки сервера', () => {
     );
   });
 
-  test('не ApiError (сбой кода, сеть) — тоже errors.internal', async () => {
-    const { user } = renderWithIntl(
-      <Invite onSubmit={() => Promise.reject(new TypeError('Failed to fetch'))} />,
-    );
+  test('не ApiError (сбой кода, сеть) — errors.internal, а сама ошибка — в console.error', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bug = new TypeError('Failed to fetch');
+    const { user } = renderWithIntl(<Invite onSubmit={() => Promise.reject(bug)} />);
     await user.type(screen.getByLabelText('Почта'), 'a@b.c');
     await user.click(screen.getByRole('button', { name: 'Отправить' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Что-то пошло не так. Попробуйте ещё раз',
     );
+    expect(spy).toHaveBeenCalledWith(expect.any(String), bug);
+    spy.mockRestore();
   });
 
   test('onError вернул true — экран показал ошибку сам, FormError молчит', async () => {
