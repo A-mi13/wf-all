@@ -11,9 +11,10 @@ LEFT JOIN staff_mfa m ON m.staff_id = a.id
 WHERE a.email = sqlc.arg(email)::citext;
 
 -- name: LockAccount :one
--- Учётка под замком на время проверки фактора или записи неудачи: роль и снимок имени — для аудита.
+-- Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
+-- снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите.
 SELECT a.id, a.status, a.display_name, a.mfa_failures, a.locked_until, a.lock_notified_at, a.version,
-       r.role::text AS role
+       a.password_hash, a.locale, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.id = sqlc.arg(id)

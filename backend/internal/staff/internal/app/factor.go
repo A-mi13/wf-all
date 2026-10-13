@@ -90,22 +90,25 @@ func (a *App) useRecoveryCode(ctx context.Context, q *staffdb.Queries, staffID u
 }
 
 // factorCheck — проверка второго фактора (или текущего пароля, 6b) под замком учётки acct, который
-// уже взял withFactor, в его транзакции. ok=false — неудача: withFactor запишет её в этой же
-// транзакции; ошибка — откат без записи неудачи (сессия погашена, не та стадия, сбой).
-type factorCheck func(ctx context.Context, tx pgx.Tx, q *staffdb.Queries, acct staffdb.LockAccountRow, now time.Time) (ok bool, err error)
+// уже взял withFactor, в его транзакции. fail — вид неудачи (staff.ErrMFAInvalid или
+// staff.ErrPasswordInvalid; nil — успех): withFactor запишет её в этой же транзакции. Ошибка err —
+// откат без записи неудачи (сессия погашена, не та стадия, сбой).
+type factorCheck func(ctx context.Context, tx pgx.Tx, q *staffdb.Queries, acct staffdb.LockAccountRow, now time.Time) (fail, err error)
 
-// withFactor — шаг с проверкой второго фактора (вход, unlock; 6b/7 — смена пароля, перевыпуск
-// кодов): одна транзакция, замок учётки, затем check. Неудача пишется recordFailure в той же
-// транзакции под тем же замком и коммитится до ответа (D8, раунд 1): параллельные попытки идут
-// строго по очереди, порог «5 подряд» не обойти, а под Idempotency-Key закоммичена ровно одна
-// транзакция. Транзакция идёт на ctx без отмены (detached): обрыв соединения не теряет неудачу.
-// Неудача — *staff.MFAError{AttemptsLeft, kind}; kind — ErrMFAInvalid или ErrPasswordInvalid.
-func (a *App) withFactor(ctx context.Context, s *auth.Staff, step string, m staff.Meta, kind error, check factorCheck) error {
+// withFactor — шаг с проверкой второго фактора (вход, unlock, смена пароля; 7 — перевыпуск кодов):
+// одна транзакция, замок учётки, затем check. Неудача пишется recordFailure в той же транзакции под
+// тем же замком и коммитится до ответа (D8, раунд 1): параллельные попытки идут строго по очереди,
+// порог «5 подряд» не обойти, а под Idempotency-Key закоммичена ровно одна транзакция. Транзакция
+// идёт на ctx без отмены (detached): обрыв соединения не теряет неудачу. Неудача —
+// *staff.MFAError{AttemptsLeft, вид от check}. Сессию и закрытость учётки check проверяет сам
+// (lockLiveSession) — withFactor их не навязывает: путь неудачи на уже закрытой учётке должен
+// оставаться без повторной блокировки (TestNoRelockWhileLocked).
+func (a *App) withFactor(ctx context.Context, s *auth.Staff, step string, m staff.Meta, check factorCheck) error {
 	dctx, cancel := detached(ctx)
 	defer cancel()
 	var (
-		failed bool
-		left   int
+		fail error
+		left int
 	)
 	err := db.InTx(dctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
@@ -117,21 +120,43 @@ func (a *App) withFactor(ctx context.Context, s *auth.Staff, step string, m staf
 			return err
 		}
 		now := a.clock.Now() // после замка: параллельная попытка могла ждать его
-		ok, err := check(ctx, tx, q, acct, now)
-		if err != nil || ok {
+		if fail, err = check(ctx, tx, q, acct, now); err != nil || fail == nil {
 			return err
 		}
-		failed = true
 		left, err = a.recordFailure(ctx, q, tx, acct, s, step, m, now)
 		return err
 	})
 	if err != nil {
 		return err
 	}
-	if failed {
-		return &staff.MFAError{AttemptsLeft: left, Err: kind}
+	if fail != nil {
+		return &staff.MFAError{AttemptsLeft: left, Err: fail}
 	}
 	return nil
+}
+
+// lockLiveSession — сессия запроса под замком учётки acct (порядок замков: учётка → сессия) и
+// проверка, что по ней ещё можно действовать: нет, чужая, погашена, истекла или учётка закрыта
+// (не active, locked_until в будущем) — auth.ErrSessionInvalid; заменена новой (вторая вкладка
+// успела раньше) — errReplaced. Стадию проверяет вызывающий. Первый шаг каждого factorCheck: отказ
+// здесь — без записи неудачи.
+func lockLiveSession(ctx context.Context, q *staffdb.Queries, s *auth.Staff, acct staffdb.LockAccountRow, now time.Time) (staffdb.LockSessionRow, error) {
+	sess, err := q.LockSession(ctx, s.SessionID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return sess, auth.ErrSessionInvalid
+	case err != nil:
+		return sess, err
+	case sess.StaffID != s.StaffID:
+		return sess, auth.ErrSessionInvalid
+	case sess.RevokedReason != nil && *sess.RevokedReason == reasonReplaced:
+		return sess, errReplaced
+	case sess.RevokedReason != nil || !now.Before(sess.ExpiresAt):
+		return sess, auth.ErrSessionInvalid
+	case acct.Status != statusActive || acct.LockedUntil != nil && now.Before(*acct.LockedUntil):
+		return sess, auth.ErrSessionInvalid
+	}
+	return sess, nil
 }
 
 // recordFailure — неудача второго фактора под уже взятым замком учётки acct: счётчик подряд +1,
@@ -224,28 +249,21 @@ func (a *App) passFactor(ctx context.Context, s *auth.Staff, code, recovery stri
 		raw      string
 		failures int32
 	)
-	err := a.withFactor(ctx, s, step, m, staff.ErrMFAInvalid, func(ctx context.Context, _ pgx.Tx, q *staffdb.Queries, acct staffdb.LockAccountRow, now time.Time) (bool, error) {
+	err := a.withFactor(ctx, s, step, m, func(ctx context.Context, _ pgx.Tx, q *staffdb.Queries, acct staffdb.LockAccountRow, now time.Time) (error, error) {
 		failures = acct.MfaFailures
-		sess, err := q.LockSession(ctx, s.SessionID)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			return false, auth.ErrSessionInvalid
-		case err != nil:
-			return false, err
-		case sess.StaffID != s.StaffID:
-			return false, auth.ErrSessionInvalid
-		case sess.RevokedReason != nil && *sess.RevokedReason == reasonReplaced:
-			return false, errReplaced
-		case sess.RevokedReason != nil || !now.Before(sess.ExpiresAt):
-			return false, auth.ErrSessionInvalid
-		case sess.Stage != wantStage:
-			return false, staff.ErrWrongStage
-		case acct.Status != statusActive || acct.LockedUntil != nil && now.Before(*acct.LockedUntil):
-			return false, auth.ErrSessionInvalid
+		sess, err := lockLiveSession(ctx, q, s, acct, now)
+		if err != nil {
+			return nil, err
+		}
+		if sess.Stage != wantStage {
+			return nil, staff.ErrWrongStage
 		}
 		ok, err := a.checkFactor(ctx, q, s.StaffID, code, recovery, now)
-		if err != nil || !ok {
-			return false, err
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return staff.ErrMFAInvalid, nil
 		}
 		created, expires := now, now.Add(sessionTTL)
 		var loginAt *time.Time
@@ -257,12 +275,12 @@ func (a *App) passFactor(ctx context.Context, s *auth.Staff, code, recovery stri
 		if raw, err = a.replaceSession(ctx, q, s.SessionID, newSession{
 			staffID: s.StaffID, stage: auth.StageActive, created: created, expires: expires, mfaAt: &now,
 		}, now, m); err != nil {
-			return false, err
+			return nil, err
 		}
 		if err := q.FactorSucceeded(ctx, staffdb.FactorSucceededParams{LoginAt: loginAt, ID: s.StaffID}); err != nil {
-			return false, err
+			return nil, err
 		}
-		return true, audit.Write(ctx, audit.Entry{
+		return nil, audit.Write(ctx, audit.Entry{
 			ActorStaffID: s.StaffID, ActorRole: acct.Role, ActorLabel: label(acct.DisplayName),
 			Action: action, ObjectType: objectAccount, ObjectID: s.StaffID,
 			After: map[string]any{"method": factorMethod(code)},

@@ -24,13 +24,20 @@ type Querier interface {
 	GetLoginAccount(ctx context.Context, email string) (GetLoginAccountRow, error)
 	// Получатель письма: адрес, язык, статус и роль (письмо уходит только активному адресату нужной роли).
 	GetMailRecipient(ctx context.Context, id uuid.UUID) (GetMailRecipientRow, error)
+	// «Мой доступ» (спека сотрудников §4.7): кто вошёл, свои сессии, пароль, язык. Каждый запрос
+	// привязан к staff_id сессии запроса — id из запроса без него не доверяется.
+	// Учётка и абсолютный срок текущей сессии для GET /v1/staff/me.
+	GetMe(ctx context.Context, arg GetMeParams) (GetMeRow, error)
 	// Сессии сотрудников (спека сотрудников §4.7). Токен — только SHA-256 (token_hash).
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
+	// Живые сессии сотрудника (не погашены, срок не истёк), новые сверху.
+	ListLiveSessions(ctx context.Context, arg ListLiveSessionsParams) ([]ListLiveSessionsRow, error)
 	// Кому письмо staff.locked: активные владельцы и админы.
 	ListLockRecipients(ctx context.Context) ([]uuid.UUID, error)
 	// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка, роль и города модератора.
 	LoadSession(ctx context.Context, tokenHash []byte) (LoadSessionRow, error)
-	// Учётка под замком на время проверки фактора или записи неудачи: роль и снимок имени — для аудита.
+	// Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
+	// снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите.
 	LockAccount(ctx context.Context, id uuid.UUID) (LockAccountRow, error)
 	LockMFA(ctx context.Context, staffID uuid.UUID) (LockMFARow, error)
 	// Пятая неудача второго фактора подряд: вход закрыт до locked_until; notified_at задан — письмо
@@ -39,10 +46,16 @@ type Querier interface {
 	// Живая или погашенная — решает сценарий (заменённая — гонка двух вкладок).
 	LockSession(ctx context.Context, id uuid.UUID) (LockSessionRow, error)
 	LockUnusedRecoveryCodes(ctx context.Context, staffID uuid.UUID) ([]LockUnusedRecoveryCodesRow, error)
+	// Гашение всех живых сессий сотрудника, кроме keep (текущей).
+	RevokeOtherSessions(ctx context.Context, arg RevokeOtherSessionsParams) (int64, error)
+	// Гашение одной живой сессии сотрудника: чужая, несуществующая, погашенная и истёкшая — 0 строк.
+	RevokeOwnSession(ctx context.Context, arg RevokeOwnSessionParams) (int64, error)
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error)
 	RevokeStaffSessions(ctx context.Context, arg RevokeStaffSessionsParams) (int64, error)
+	SetLocale(ctx context.Context, arg SetLocaleParams) error
 	// Шаг принятого кода TOTP: повтор и коды старше него отвергаются.
 	SetMFAStep(ctx context.Context, arg SetMFAStepParams) error
+	SetPassword(ctx context.Context, arg SetPasswordParams) error
 	// Отметка активности не чаще раза в минуту на сессию (seen_before — граница) и адрес клиента.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	// Резервный код сгорает при любом использовании.

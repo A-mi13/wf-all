@@ -18,14 +18,17 @@ paths:
   `LockSession`, `LockMFA`, `LockUnusedRecoveryCodes`). Иначе блокировка (гасит все сессии под замком учётки) и
   разблокировка в другой вкладке взаимно ждут.
 - **Неудача второго фактора (D8):** фиксируется и коммитится до ответа 4xx, бизнес-ошибка её не откатывает;
-  под `Idempotency-Key` — ровно одна закоммиченная транзакция. Любая проверка фактора (вход, unlock; 6b/7 —
-  смена пароля, перевыпуск кодов) — только через `a.withFactor(ctx, s, шаг, m, ErrMFAInvalid|ErrPasswordInvalid,
-  check)`: одна транзакция на ctx без отмены (`detached`), замок учётки, `check`, и при неудаче `recordFailure` в
+  под `Idempotency-Key` — ровно одна закоммиченная транзакция. Любая проверка фактора (вход, unlock, смена
+  пароля; 7 — перевыпуск кодов) — только через `a.withFactor(ctx, s, шаг, m, check)`: одна транзакция на ctx без
+  отмены (`detached`), замок учётки, `check` → `(fail, err)`, где `fail` — вид неудачи (`ErrMFAInvalid` |
+  `ErrPasswordInvalid`, nil — успех), и при неудаче `recordFailure` в
   той же транзакции под тем же замком (счётчик, аудит, на пятой подряд — `lockOut`: `locked_until` +1 ч, сессии
   `locked`, событие `staff.locked`, письмо владельцам и админам не чаще раза в час по `lock_notified_at`).
   Отдельной транзакцией после отката неудачу не писать: параллельные попытки обходят порог «5 подряд»
-  (страж `TestConcurrentFailuresLockOnce`). `check` сначала проверяет сессию и закрытость учётки (отказ — без
-  записи неудачи); на уже закрытой учётке `lockOut` не повторяется. Счётчик обнуляет только успех второго
+  (стражи `TestConcurrentFailuresLockOnce`, `TestChangePasswordConcurrentFailures`). `check` первым шагом зовёт
+  `lockLiveSession` (сессия чужая, погашена, истекла, учётка закрыта — `auth.ErrSessionInvalid`, заменена —
+  `errReplaced`; отказ — без записи неудачи), стадию проверяет сам; `withFactor` этого не навязывает (путь
+  `TestNoRelockWhileLocked`). На уже закрытой учётке `lockOut` не повторяется. Счётчик обнуляет только успех второго
   фактора: после истечения блокировки каждая неудача снова закрывает учётку. Неудача пароля учётку не трогает
   (D7): лимит по почте `ratelimit.EmailKey("staff_login", HMAC)` (10 за 15 мин, каждая попытка) и IP-лимит
   конвейера; закрытая учётка и несуществующая почта — `VerifyDummy` без `Verify` (страж
@@ -52,3 +55,12 @@ paths:
 - **Сессия (§4.7, P11, D10):** `LoadStaff` — один запрос на запрос, без кэша успеха. Истёк срок — гашение
   `expired`; Reauth — только в стадии `active` (бездействие > 20 мин или IP вне /24·/48); `last_seen_at` и `ip`
   — не чаще раза в минуту, не на фоновых запросах и не в Reauth (их меняет только Unlock).
+- **«Мой доступ» (§4.7, R15, P20; `internal/app/access.go`):** `Me` — в `mfa_pending` только стадия и сессия
+  (`CityIDs`, `Permissions` — пустые, не nil), в `setup` — учётка без прав, права — копия `Grants` только в
+  `active`. Свои сессии — `sessionViews(staffID, current)` (общая с карточкой 8b): живые, новые сверху, IP —
+  `audit.MaskIP`, пустой User-Agent — nil. Каждый запрос привязан к `s.StaffID`: чужая сессия —
+  `staff.session_not_found`, как и несуществующая. Мутации — одна `db.InTx`, первым замком своя учётка
+  (`lockSelf`), аудит от учётки (`staff.session_revoked`, `staff.sessions_revoked`, `staff.password_changed`,
+  `staff.locale_changed`). Смена пароля: выбор фактора (`body.code`) и `password.Check` (`body.new_password`,
+  `passwordPolicyError`) и хэш нового — до транзакции; текущий пароль и фактор — в `withFactor`; успех гасит
+  другие сессии (`password_changed`). Ошибки поля — `httpx.NewFieldError`.

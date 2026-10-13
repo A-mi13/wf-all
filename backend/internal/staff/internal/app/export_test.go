@@ -37,8 +37,8 @@ func (a *App) SetHasher(h PasswordHasher) { a.hasher = h }
 
 // FailFactor — неудачная проверка через withFactor (путь 6b/7: смена пароля, перевыпуск кодов).
 func (a *App) FailFactor(ctx context.Context, s *auth.Staff, step string, m staff.Meta) error {
-	return a.withFactor(ctx, s, step, m, staff.ErrPasswordInvalid,
-		func(context.Context, pgx.Tx, *staffdb.Queries, staffdb.LockAccountRow, time.Time) (bool, error) {
-			return false, nil
+	return a.withFactor(ctx, s, step, m,
+		func(context.Context, pgx.Tx, *staffdb.Queries, staffdb.LockAccountRow, time.Time) (error, error) {
+			return staff.ErrPasswordInvalid, nil
 		})
 }

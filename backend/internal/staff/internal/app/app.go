@@ -1,6 +1,7 @@
 // Package app — сценарии модуля staff (спека сотрудников §4): вход, второй фактор, блокировка,
-// загрузчик сессии admin-api, составители писем. Импортирует корень staff (ошибки, DTO, события) и
-// платформу; таблицы — только staff_* через staffdb. Транзакции — db.InTx, ровно одна закоммиченная
+// загрузчик сессии admin-api, «Мой доступ» (me, свои сессии, пароль, язык), составители писем.
+// Импортирует корень staff (ошибки, DTO, события) и платформу; таблицы — только staff_* через
+// staffdb. Транзакции — db.InTx, ровно одна закоммиченная
 // на сценарий под Idempotency-Key; неудача второго фактора пишется в транзакции проверки под замком
 // учётки и коммитится до ответа 4xx (D8, withFactor).
 package app
@@ -50,33 +51,41 @@ const (
 
 // Причины гашения сессии (CHECK staff_sessions_revoked_reason_check).
 const (
-	reasonLogout   = "logout"
-	reasonExpired  = "expired"
-	reasonLocked   = "locked"
-	reasonReplaced = "replaced"
+	reasonLogout          = "logout"
+	reasonExpired         = "expired"
+	reasonRevoked         = "revoked" // «Мой доступ»: завершена вручную
+	reasonLocked          = "locked"
+	reasonPasswordChanged = "password_changed" // другие сессии при смене пароля
+	reasonReplaced        = "replaced"
 )
 
 // Действия аудита и тип объекта.
 const (
-	actionLogin          = "staff.login"
-	actionLoginFailed    = "staff.login_failed"
-	actionFactorFailed   = "staff.factor_failed"
-	actionLocked         = "staff.locked"
-	actionUnlock         = "staff.unlock"
-	methodTOTP           = "totp"
-	methodRecovery       = "recovery"
-	objectAccount        = "staff_account"
-	roleAnonymous        = "anonymous"
-	roleSystem           = "system"
-	statusActive         = "active"
-	statusDisabled       = "disabled"
-	roleOwner, roleAdmin = "owner", "admin"
+	actionLogin           = "staff.login"
+	actionLoginFailed     = "staff.login_failed"
+	actionFactorFailed    = "staff.factor_failed"
+	actionLocked          = "staff.locked"
+	actionUnlock          = "staff.unlock"
+	actionSessionRevoked  = "staff.session_revoked"  // одна своя сессия
+	actionSessionsRevoked = "staff.sessions_revoked" // все сессии, кроме текущей (8b — все сессии учётки)
+	actionPasswordChanged = "staff.password_changed"
+	actionLocaleChanged   = "staff.locale_changed"
+	methodTOTP            = "totp"
+	methodRecovery        = "recovery"
+	objectAccount         = "staff_account"
+	roleAnonymous         = "anonymous"
+	roleSystem            = "system"
+	statusActive          = "active"
+	statusDisabled        = "disabled"
+	roleOwner, roleAdmin  = "owner", "admin"
 )
 
 // Шаги второго фактора: в какой операции случилась неудача (аудит, D7). Task 6b/7 добавляют свои.
 const (
 	stepMFA    = "mfa"    // вход: шаг после пароля
 	stepUnlock = "unlock" // разблокировка сессии после бездействия или смены сети
+	// смена своего пароля: неверный текущий пароль или второй фактор
+	stepPasswordChange = "password_change"
 )
 
 // passwordHasher — хэшер паролей сценариев (*password.Hasher; шов — страж выравнивания времени входа).
