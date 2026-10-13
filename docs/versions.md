@@ -19,7 +19,7 @@
 | openapi-typescript / openapi-fetch | 7.13.0 / 0.17.0 | `contracts/package.json` / `apps/{web,admin}/package.json` |
 | next-intl / use-intl | 4.14.7 / 4.14.7 | `apps/web/package.json` / `apps/admin/package.json` |
 | MSW | 2.15.0 | `apps/{web,admin}/package.json` |
-| TanStack Query / TanStack Router | 5.104.2 / 1.170.42 | `apps/admin/package.json`, Query ещё и `apps/web/package.json` (там 5.103.2 — в исключениях); Router — маршруты кодом, почему не 1.170.44 — в исключениях |
+| TanStack Query / TanStack Router | 5.104.2 / 1.170.42 | `apps/admin/package.json`, Query ещё и `apps/web/package.json`; Router — маршруты кодом, почему не 1.170.44 — в исключениях |
 | react-hook-form | 7.90.0 | `apps/admin/package.json` |
 | @fontsource/oswald / @fontsource/manrope | 5.3.0 / 5.3.0 | `apps/admin/package.json` (шрифты админки без внешних запросов, `src/app/fonts.ts`) |
 | GitHub Actions: checkout / setup-go / pnpm action-setup | 7.0.1 / 7.0.0 / 6.1.0 | полный SHA в `.github/workflows/*.yml`; плавающий тег `pnpm/action-setup@v6` указывал на 6.0.10 без поддержки pnpm 12 |
@@ -50,7 +50,6 @@
 | --- | --- | --- | --- | --- |
 | TypeScript (приложения) | 6.0.3 | 7.0.2 | typescript-eslint 8.70 поддерживает TS < 6.1; у 7.x нет классического JS API | когда typescript-eslint и eslint-config-next объявят поддержку TS 7 |
 | TypeScript (генератор) | 5.9.3 | 7.0.2 | openapi-typescript 7.13 требует `typescript ^5.x` | когда openapi-typescript поднимет peer |
-| TanStack Query (веб) | 5.103.2 | 5.104.2 | в Task 12a админку подняли до 5.104.2 одним разрешённым `pnpm install`; `apps/web` в него не вошёл | со следующим `pnpm install` (задача веба или сборка зависимостей) |
 | TanStack Router | 1.170.42 | 1.170.44 | 1.170.43 и 1.170.44 (с `router-core` 1.171.36–37) опубликованы 12.10.2026 23:20–23:58 UTC, моложе `minimumReleaseAge` (сутки) на момент Task 11 (13.10.2026); исключение в `minimumReleaseAgeExclude` ради патча не вводили | после 14.10.2026 00:00 UTC — поднять до последней патч-версии 1.170.x |
 | ESLint | 9.39.5 | 10.11.0 | eslint-config-next 16.3.6 тянет eslint-plugin-react 7.37.5 (ESLint ≤ 9) | когда eslint-config-next перейдёт на ESLint 10 |
 
