@@ -136,6 +136,7 @@ func TestNormalizeCode(t *testing.T) {
 		{"123456\u2060", "123456", true}, // word joiner (Cf)
 		{"12345", "", false},
 		{"1234567", "", false},
+		{"123​4567", "", false}, // Cf пропускается, но цифр после этого 7, а не 6
 		{"123-456", "", false},
 		{"12345a", "", false},
 		{"", "", false},
