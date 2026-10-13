@@ -4,5 +4,11 @@
   },
   "mail": {
     "footer": "This email was sent automatically, please do not reply."
+  },
+  "staff": {
+    "locked": {
+      "subject": "Sign-in for {name} is locked for an hour",
+      "body": "The staff account of {name} ({email}) is locked for an hour after five wrong second-factor codes in a row.\n\nWhen: {time}\nNetwork: {ip}\n\nIf this was not the staff member, contact them and reset their access in the admin panel if needed: {origin}"
+    }
   }
 }
