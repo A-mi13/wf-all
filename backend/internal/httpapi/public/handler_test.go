@@ -382,3 +382,24 @@ func TestRateLimitClassesKnown(t *testing.T) {
 		t.Error(v)
 	}
 }
+
+// Защита в глубину: chi сопоставляет {param} с пустым сегментом, а маршрутизатор контракта — нет,
+// поэтому без httpx.Route конвейер (валидатор, лимит, идемпотентность) пропущен. Такой запрос не
+// доходит до хендлера: у строкового параметра (slug) биндинг пустое значение принял бы.
+func TestEmptyPathParamNeverReachesHandler(t *testing.T) {
+	o := testOptions(t)
+	geoFake := &fakeGeo{}
+	o.Geo = geoFake
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/cities/by-slug/", nil))
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"http.not_found"`) {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(geoFake.calls) != 0 {
+		t.Fatalf("хендлер вызван: %v", geoFake.calls)
+	}
+}

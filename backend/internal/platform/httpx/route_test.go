@@ -2,8 +2,10 @@ package httpx_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,5 +170,63 @@ func TestTimeoutSetsDeadline(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil))
 	if !ok || left <= 0 || left > 3*time.Second {
 		t.Fatalf("крайний срок: ok=%v осталось %v", ok, left)
+	}
+}
+
+// RequireRoute: без Route в ctx — 404 http.not_found, следующий хендлер не вызывается; с Route —
+// проходит.
+func TestRequireRoute(t *testing.T) {
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(routesSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := httpx.Routes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	h := routes(httpx.RequireRoute(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/things/", nil))
+	if called || rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"http.not_found"`) {
+		t.Fatalf("без маршрута: called=%v status=%d body=%s", called, rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/things/42", nil))
+	if !called || rec.Code != http.StatusOK {
+		t.Fatalf("с маршрутом: called=%v status=%d", called, rec.Code)
+	}
+}
+
+// NotFoundWithoutRoute: ошибка биндинга без Route — 404 http.not_found, обработчик не вызывается;
+// с Route — отдаётся обработчику.
+func TestNotFoundWithoutRoute(t *testing.T) {
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(routesSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := httpx.Routes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handled := false
+	eh := httpx.NotFoundWithoutRoute(func(w http.ResponseWriter, _ *http.Request, _ error) {
+		handled = true
+		w.WriteHeader(http.StatusBadRequest)
+	})
+	h := routes(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { eh(w, r, errors.New("binding")) }))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/things/", nil))
+	if handled || rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"http.not_found"`) {
+		t.Fatalf("без маршрута: handled=%v status=%d body=%s", handled, rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/things/42", nil))
+	if !handled || rec.Code != http.StatusBadRequest {
+		t.Fatalf("с маршрутом: handled=%v status=%d", handled, rec.Code)
 	}
 }

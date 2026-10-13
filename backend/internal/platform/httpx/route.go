@@ -82,3 +82,33 @@ func Routes(spec *openapi3.T) (func(http.Handler) http.Handler, error) {
 		})
 	}, nil
 }
+
+// RequireRoute — звено на самом хендлере операции (ChiServerOptions.Middlewares генератора: после
+// биндинга параметров, перед вызовом хендлера): без Route в ctx отвечает 404 http.not_found и
+// хендлер не вызывает. chi сопоставляет {param} с пустым сегментом (PUT /v1/staff/accounts//role),
+// а маршрутизатор контракта (Routes) — нет: Route не ставится, и звенья сессии, валидации, прав,
+// лимита и идемпотентности пропущены. Защита в глубину: хендлер без этих звеньев недостижим.
+// Ошибка биндинга параметра на таком запросе (пустой uuid) приходит раньше — её закрывает
+// NotFoundWithoutRoute.
+func RequireRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := RouteFrom(r.Context()); !ok {
+			WriteProblem(w, r, http.StatusNotFound, CodeNotFound, "")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// NotFoundWithoutRoute — ErrorHandlerFunc генератора (ошибки биндинга параметров): запрос без
+// Route контракта получает 404 http.not_found, а не 400 про параметр, прочие — handle. Пара к
+// RequireRoute: тот ловит запрос, чей биндинг прошёл, этот — чей биндинг не прошёл.
+func NotFoundWithoutRoute(handle func(w http.ResponseWriter, r *http.Request, err error)) func(w http.ResponseWriter, r *http.Request, err error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		if _, ok := RouteFrom(r.Context()); !ok {
+			WriteProblem(w, r, http.StatusNotFound, CodeNotFound, "")
+			return
+		}
+		handle(w, r, err)
+	}
+}

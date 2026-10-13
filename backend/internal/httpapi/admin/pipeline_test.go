@@ -419,3 +419,17 @@ func TestNewHandlerRejectsBadOriginAndAllowlist(t *testing.T) {
 		}
 	}
 }
+
+// Защита в глубину: chi сопоставляет {staffId} с пустым сегментом, а маршрутизатор контракта —
+// нет, поэтому httpx.Route не ставится и звенья конвейера пропущены. Запрос не доходит до
+// хендлера: 404 http.not_found, а не 400 биндинга параметра (и не 501 заглушки) — и с сессией
+// владельца, и без неё.
+func TestEmptyPathParamNeverReachesHandler(t *testing.T) {
+	o := testOptions(t)
+	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok-owner": staffOf(perm.Owner, auth.StageActive, false)}}
+	h := newHandler(t, o)
+	for _, token := range []string{"tok-owner", ""} {
+		wantProblem(t, serve(h, call(http.MethodPut, "/v1/staff/accounts//role", token,
+			`{"role":"support","cityIds":[]}`)), http.StatusNotFound, httpx.CodeNotFound)
+	}
+}

@@ -159,9 +159,12 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	}
 	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
 		BaseRouter: router,
+		// без маршрута контракта (пустой сегмент {param}) хендлер недостижим: RequireRoute — на хендлере,
+		// NotFoundWithoutRoute — на ошибке биндинга параметра
+		Middlewares: []oapi.MiddlewareFunc{httpx.RequireRoute},
 		// ErrorHandlerFunc — ошибки биндинга параметров в chi-обёртке; по умолчанию oapi-codegen
 		// отвечает text/plain с текстом ошибки
-		ErrorHandlerFunc: requestErr,
+		ErrorHandlerFunc: httpx.NotFoundWithoutRoute(requestErr),
 	}), nil
 }
 
