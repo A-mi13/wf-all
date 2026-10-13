@@ -6,7 +6,7 @@ paths:
 # Бэкенд
 
 Узкие правила грузятся вместе с этим по своим путям: схема и стражи — `backend-schema.md`, платформа и
-воркер — `backend-platform.md`, HTTP-слой — `backend-http.md`.
+воркер — `backend-platform.md`, HTTP-слой — `backend-http.md`, модуль сотрудников — `backend-staff.md`.
 
 - Архитектура — `docs/superpowers/specs/2026-10-01-backend-architecture-design.md`: устройство модуля (§3: корневой пакет = API, `internal/{domain,app,store}`, `httpapi`, `admin`, `subscribers`, `jobs`, `intx`), владение таблицами (§4.1), граф слоёв (§4.3).
 - Общее — только в `internal/platform/*`. Чужую таблицу не писать никогда; читать чужое — только через экспортированные представления владельца `<модуль>_read_*` (§4.2). Синхронно — интерфейс корневого пакета; реакции — события outbox; транзакция между модулями — только `intx` из списка §4.4, транзакция явным параметром.

@@ -43,7 +43,10 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   `ADMIN_COOKIE_SECURE` — dev-имя `wf_admin_session`). Cookie есть → сначала `Limiter.Over(ratelimit.IPKey("staff_auth",
   ip))`: исчерпан — `429 ratelimit.exceeded` без проверки cookie. Невалидный токен (`auth.ErrSessionInvalid` или
   негативный кэш: 5 с по SHA-256 токена, не больше 10 000 записей) → `Limiter.Add` по тому же ключу, ответ стирает
-  cookie (`Max-Age=0`), запрос идёт дальше анонимно (валидатор даст 401 там, где нужен вход). Сбой загрузчика — 500.
+  cookie (`Max-Age=0`), запрос идёт дальше анонимно (валидатор даст 401 там, где нужен вход). Токен только что
+  заменён новым (`auth.ErrSessionReplaced`: параллельный запрос со старым токеном вернулся после второго фактора,
+  unlock или recovery-codes/ack) — тоже дальше анонимно, но cookie **не** стирается (в браузере уже новая), отказ
+  не считается в лимите и не кладётся в негативный кэш (страж `TestReplacedTokenKeepsCookie`). Сбой загрузчика — 500.
   Положительного кэша нет. `X-WF-Background: 1` → `LoadStaff(…, background=true)`. Сотрудник — `auth.WithStaff` до
   лимита и идемпотентности.
 - **CSRF**: любой метод, кроме GET/HEAD/OPTIONS/TRACE, — ровно один `Origin`, равный `ADMIN_ORIGIN`, и `X-WF-Admin: 1`,

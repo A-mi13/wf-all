@@ -24,7 +24,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`,
   `docs/05-ролевая-модель.md` (роли игроков и сотрудников, матрица прав — генерируется `./task gen`)
 - Архитектура бэкенда (модули, владение таблицами, платформа, стражи, порядок): `docs/superpowers/specs/2026-10-01-backend-architecture-design.md`
-- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`)
+- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`, модуль сотрудников — `backend-staff`)
 
 ## Skills и агенты
 Проектных скиллов нет: справочники восстанавливаются из `backend/migrations/README.md` и `design/README.md`.
