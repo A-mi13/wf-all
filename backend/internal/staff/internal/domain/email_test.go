@@ -175,3 +175,37 @@ func TestNormalizeEmailInvisible(t *testing.T) {
 		}
 	}
 }
+
+// Уборка minor №1 (Task 5): метки в домене — только Mn и Mc, как в IDNA2008 (RFC 5892, LetterDigits).
+// Охватывающие метки Me (кружок U+20DD, рамка U+20E3, кириллическая U+0488) профиль регистрации UTS #46
+// пропускает, а на вид они дорисовывают символ вокруг буквы — двойник адреса.
+func TestNormalizeEmailMarks(t *testing.T) {
+	enclosing := map[string]string{
+		"U+20DD охватывающий кружок": "\u20dd",
+		"U+20E3 охватывающая рамка":  "\u20e3",
+		"U+0488 кириллическая Me":    "\u0488",
+	}
+	for name, x := range enclosing {
+		for _, in := range []string{
+			"maria.k@exa" + x + "mple.com",
+			"maria.k@example" + x + ".com",
+		} {
+			if got, ok := domain.NormalizeEmail(in); ok {
+				t.Errorf("%s: NormalizeEmail(%+q) = %q, ждали отказ", name, in, got)
+			}
+		}
+	}
+
+	// Mn и Mc остаются допустимыми. Для латиницы берём «x» + U+0301: готовой буквы «x с акутом» нет, поэтому
+	// NFKC не склеит пару в одну букву и метка доходит до проверки (в отличие от «é»).
+	ok := []struct{ name, in, want string }{
+		{"Mn после латинской буквы без готовой формы", "maria.k@ex\u0301ample.com", "maria.k@xn--example-uge.com"},
+		{"Mn и Mc в деванагари", "maria.k@\u0939\u093f\u0928\u094d\u0926\u0940.com", "maria.k@xn--j2bd4cyah0f.com"},
+		{"Mc висарга", "maria.k@\u0915\u0903.com", "maria.k@xn--j1b9a.com"},
+	}
+	for _, c := range ok {
+		if got, valid := domain.NormalizeEmail(c.in); !valid || got != c.want {
+			t.Errorf("%s: NormalizeEmail(%+q) = %q %v, ждали %q true", c.name, c.in, got, valid, c.want)
+		}
+	}
+}

@@ -97,20 +97,24 @@ func isDotAtom(s string) bool {
 	return true
 }
 
-// domainRuneOK — символ декодированного домена (U-формы): буква, метка, десятичная цифра, '-' или
-// '.', и не невидимый. Символы категорий S и P (U+2800, эмодзи) IDNA2008 запрещает.
+// domainRuneOK — символ декодированного домена (U-формы): буква, неохватывающая метка (Mn, Mc),
+// десятичная цифра, '-' или '.', и не невидимый. IDNA2008 (RFC 5892, LetterDigits) допускает только
+// Mn и Mc: охватывающие метки Me (U+20DD, U+20E3, U+0488) дорисовывают символ вокруг буквы, а профиль
+// регистрации UTS #46 их пропускает. Символы категорий S и P (U+2800, эмодзи) IDNA2008 тоже запрещает.
 func domainRuneOK(r rune) bool {
-	if !unicode.IsLetter(r) && !unicode.Is(unicode.M, r) && !unicode.Is(unicode.Nd, r) && r != '-' && r != '.' {
+	if !unicode.IsLetter(r) && !unicode.Is(unicode.Mn, r) && !unicode.Is(unicode.Mc, r) &&
+		!unicode.Is(unicode.Nd, r) && r != '-' && r != '.' {
 		return false
 	}
 	return !isInvisible(r)
 }
 
 // isInvisible — невидимый или «пустой» символ, который делает домен двойником на вид.
-// Default_Ignorable_Code_Point в stdlib нет целиком; его основная часть — Other_Default_Ignorable_Code_Point
-// (CGJ, хангыльские заполнители U+115F, U+1160, U+3164, U+FFA0), Variation_Selector и Cf. Сверх неё —
-// явный список «пустых» символов, которые Default_Ignorable не входят, а профиль регистрации
-// UTS #46 пропускает или может пропустить.
+// Проверка — надмножество Default_Ignorable_Code_Point в той части, что доступна из stdlib: самого
+// свойства Default_Ignorable_Code_Point в unicode нет, поэтому берём его основную часть
+// Other_Default_Ignorable_Code_Point (CGJ, хангыльские заполнители U+115F, U+1160, U+3164, U+FFA0),
+// Variation_Selector и всю категорию Cf (она шире DICP). Сверх неё — явный список «пустых» символов,
+// которые в Default_Ignorable не входят, а профиль регистрации UTS #46 пропускает или может пропустить.
 func isInvisible(r rune) bool {
 	if unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Variation_Selector, r) ||
 		unicode.Is(unicode.Cf, r) {
