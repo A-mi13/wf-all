@@ -30,7 +30,8 @@ paths:
   (`country_code`, `error_code`: список `publicCode`).
   Роль обязательна всегда; `insert` повторяет CHECK `audit_log` из 0020 (роль из списка, служебная ⇔ нет автора, у
   сотрудника — роль сотрудника и `ActorLabel` 1–120 символов) и отвергает нарушение `ErrInvalidEntry` до SQL: поменял
-  CHECK — поменяй списки ролей в `audit/audit.go`. `Entry.ID` задан — запись получает его (ссылка из письма); одна
+  CHECK — поменяй списки ролей в `audit/audit.go`; расхождение списков и CHECK ловит `TestActorRolesMatchCheck`
+  (`audit/roles_test.go`). `Entry.ID` задан — запись получает его (ссылка из письма); одна
   запись — `audit.Get` (поля и маска IP как в `List`, нет — `ok=false`).
 
 ## Край платформы (план 3/3)

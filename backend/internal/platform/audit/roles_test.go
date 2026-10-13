@@ -40,6 +40,10 @@ func TestActorRolesMatchCheck(t *testing.T) {
 				got[m[1]] = true
 			}
 		}
+		// пустой разбор (сменился формат CHECK или литералов) не должен сойти за совпадение
+		if len(got) == 0 {
+			t.Fatalf("%s: из CHECK не разобрано ни одной роли, определение: %s", c.constraint, def)
+		}
 		if !maps.Equal(got, c.want) {
 			t.Errorf("%s: в CHECK %v, в audit.go %v", c.constraint, slices.Sorted(maps.Keys(got)),
 				slices.Sorted(maps.Keys(c.want)))
