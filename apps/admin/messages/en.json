@@ -1,25 +1,51 @@
 {
-  "app": { "title": "" },
-  "health": { "checking": "", "ok": "", "down": "" },
+  "app": { "title": "Administration" },
   "errors": {
-    "internal": "",
+    "internal": "Something went wrong. Please try again",
     "request": {
-      "invalid": "",
-      "too_large": ""
+      "invalid": "The request could not be processed",
+      "too_large": "The request is too large"
     },
-    "validation": { "failed": "" },
+    "validation": { "failed": "Check the form fields" },
     "http": {
-      "not_found": "",
-      "method_not_allowed": ""
+      "not_found": "Not found",
+      "method_not_allowed": "This action is not available",
+      "not_implemented": "This feature is still in development"
     },
-    "auth": { "unauthenticated": "" },
-    "ratelimit": { "exceeded": "" },
-    "humancheck": { "required": "" },
+    "auth": {
+      "unauthenticated": "Please sign in again",
+      "forbidden": "You don't have permission for this action",
+      "csrf_failed": "The request was rejected for security reasons. Reload the page",
+      "ip_not_allowed": "Admin sign-in from this address is blocked",
+      "reauth_required": "Confirm your sign-in with a code from your app",
+      "setup_required": "Finish setting up two-factor authentication first"
+    },
+    "ratelimit": { "exceeded": "Too many requests. Please wait a moment" },
+    "humancheck": { "required": "Please confirm you are not a robot" },
     "idempotency": {
-      "key_reused": "",
-      "in_progress": "",
-      "replay_unavailable": ""
+      "key_reused": "This action was already performed with different data. Reload the page",
+      "in_progress": "The action is still in progress. Please wait",
+      "replay_unavailable": "The action is done. Reload the page"
     },
-    "feature": { "disabled": "" }
+    "feature": { "disabled": "This feature is not available yet" },
+    "platform": {
+      "approval_not_found": "Approval request not found",
+      "approval_self": "You can't decide your own request or a request about you",
+      "approval_stale": "The data changed after the request — create it again",
+      "approval_closed": "The request is already decided, cancelled or expired"
+    },
+    "staff": {
+      "invalid_credentials": "Wrong email or password",
+      "mfa_invalid": "The code didn't work",
+      "password_invalid": "The current password is wrong",
+      "wrong_stage": "This action is not available right now. Reload the page",
+      "invite_invalid": "The invitation code didn't work or has expired",
+      "email_taken": "A staff member with this email already exists",
+      "not_found": "Staff member not found",
+      "session_not_found": "Session not found or already ended",
+      "city_not_found": "City not found",
+      "last_owner": "The platform can't be left without an owner",
+      "self_action": "You can't do this to yourself — use My access"
+    }
   }
 }

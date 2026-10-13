@@ -650,7 +650,7 @@ admin:e2e`, job в CI.
   | любая стадия | `staffVerifyMfa`, `staffUnlock`, `staffLogout`, `getStaffMe`, `staffMfaSetup`, `staffMfaConfirm`, `staffRecoveryAck` (`session`) |
   | своё | `getStaffMfa`, `regenerateStaffRecoveryCodes`, `changeStaffPassword`, `listStaffMySessions`, `revokeStaffMySession`, `revokeStaffOtherSessions`, `updateStaffMeLocale`, `listApprovals`, `cancelApproval` (`self`) |
   | `handler` | `createStaffInvite` [grant, grant_elevated]; `changeStaffRole` [grant, grant_elevated, revoke]; `disableStaffAccount` [revoke, revoke_admin, revoke_owner]; `resetStaffAccess` [access.reset, access.reset_elevated]; `approveApproval`, `rejectApproval` [все `dual`-права каталога] |
-  | ключ каталога | `listStaffAccounts`, `getStaffAccount` (`staff.accounts.read`); `resendStaffInvite` (`staff.invites.resend`); `listStaffAccountSessions`, `revokeStaffAccountSessions` (`staff.sessions.revoke`); `getStaffRoles` (`staff.roles.read`); `listAudit` (`audit.log.read`); `listGeoCities` (`geo.cities.read`) |
+  | ключ каталога | `listStaffAccounts`, `getStaffAccount` (`staff.accounts.read`); `resendStaffInvite` (`staff.invites.resend`); `listStaffAccountSessions` (`staff.accounts.read` — решение контроллера 13.10: чтение — правом чтения, страж GET ≠ mutating); `revokeStaffAccountSessions` (`staff.sessions.revoke`); `getStaffRoles` (`staff.roles.read`); `listAudit` (`audit.log.read`); `listGeoCities` (`geo.cities.read`) |
 
   Имена прав в квадратных скобках — без префикса `staff.roles.`/`staff.`.
 - **R9.** Отказ сессии — `Over` и `Add` по `ratelimit.IPKey("staff_auth", ip)`, негативный кэш 5 с (не

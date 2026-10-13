@@ -1,0 +1,602 @@
+# Схемы модуля staff (спека сотрудников §4, R15). Каждая регистрируется в ../root.yaml
+# components.schemas; ссылки между схемами — через реестр root.yaml.
+StaffRole:
+  type: string
+  description: >-
+    Роль сотрудника — одна на человека. owner — владелец, admin — админ, moderator — модератор
+    своих городов, support — поддержка. Список открытый — незнакомое значение клиент обязан пережить
+  enum: [owner, admin, moderator, support]
+  x-extensible-enum: true
+StaffStatus:
+  type: string
+  description: >-
+    Состояние учётки. invited — приглашение выслано, вход ещё не настроен (и после сброса доступа);
+    active — работает; disabled — выключена (роль снята), войти нельзя
+  enum: [invited, active, disabled]
+  x-extensible-enum: true
+StaffStage:
+  type: string
+  description: >-
+    Стадия сессии. mfa_pending — пароль принят, ждём второй фактор (5 минут); setup — первый вход по
+    приглашению, доступна только настройка 2FA; active — сессия работает
+  enum: [mfa_pending, setup, active]
+  x-extensible-enum: true
+StaffLocale:
+  type: string
+  description: Язык админки и писем сотруднику
+  enum: [ru, en]
+  x-extensible-enum: true
+PermissionGrant:
+  type: string
+  description: >-
+    Доступ сотрудника к праву. allow — можно сразу; scoped — только в своих городах (модератор);
+    dual — только вдвоём: действие создаёт запрос на подтверждение
+  enum: [allow, scoped, dual]
+  x-extensible-enum: true
+RoleGrant:
+  type: string
+  description: >-
+    Значение клетки матрицы ролей: allow — можно сразу; scoped — только в своих городах; dual —
+    вдвоём, через подтверждение; deny — нельзя
+  enum: [allow, scoped, dual, deny]
+  x-extensible-enum: true
+StaffActionReason:
+  type: string
+  description: >-
+    Причина выключения или сброса доступа — из списка: left_team — ушёл из команды, security —
+    безопасность (утечка, потерянное устройство), role_change — смена обязанностей, other — другое
+    (поясните в комментарии)
+  enum: [left_team, security, role_change, other]
+  x-extensible-enum: true
+StaffLoginRequest:
+  type: object
+  description: Вход сотрудника — первый шаг, почта и пароль
+  required: [email, password]
+  additionalProperties: false
+  properties:
+    email:
+      type: string
+      minLength: 3
+      maxLength: 320
+      description: >-
+        Рабочая почта сотрудника; регистр и пробелы по краям не важны, домен на кириллице
+        принимается
+      example: olga.v@wf.example
+    password:
+      type: string
+      description: Пароль сотрудника как введён, без обрезки пробелов
+      example: Жёлтая карточка на 90-й
+StaffFactorRequest:
+  type: object
+  description: >-
+    Второй фактор — ровно одно из полей: код из приложения-аутентификатора или резервный код.
+    Резервный код сгорает при использовании
+  minProperties: 1
+  maxProperties: 1
+  additionalProperties: false
+  properties:
+    code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: >-
+        Код из приложения-аутентификатора — 6 цифр; пробелы между цифрами допустимы (вставка из
+        буфера)
+      example: '492817'
+    recovery_code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: >-
+        Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны
+      example: k7m2q-x9p4t
+StaffCodeRequest:
+  type: object
+  description: Код из приложения-аутентификатора (резервные коды здесь не принимаются)
+  required: [code]
+  additionalProperties: false
+  properties:
+    code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: 6 цифр из приложения-аутентификатора; пробелы между цифрами допустимы
+      example: '492817'
+StaffAcceptInviteRequest:
+  type: object
+  description: Принятие приглашения — почта из письма, код из письма и новый пароль
+  required: [email, code, password]
+  additionalProperties: false
+  properties:
+    email:
+      type: string
+      minLength: 3
+      maxLength: 320
+      description: Почта, на которую пришло приглашение; регистр и пробелы по краям не важны
+      example: olga.v@wf.example
+    code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: 6 цифр из письма-приглашения; пробелы между цифрами допустимы
+      example: '305718'
+    password:
+      type: string
+      description: >-
+        Новый пароль: не короче 10 символов, не длиннее 128, не из списка распространённых.
+        Нарушение — 400 validation.failed по полю body.password с кодом too_short, too_long или
+        common
+      example: Жёлтая карточка на 90-й
+StaffEmailRequest:
+  type: object
+  description: Почта сотрудника — для повторной отправки кода приглашения
+  required: [email]
+  additionalProperties: false
+  properties:
+    email:
+      type: string
+      minLength: 3
+      maxLength: 320
+      description: Почта из приглашения; регистр и пробелы по краям не важны
+      example: olga.v@wf.example
+StaffStageResult:
+  type: object
+  description: Стадия новой сессии — что показать дальше (второй фактор или настройку 2FA)
+  required: [stage]
+  properties:
+    stage:
+      $ref: '../root.yaml#/components/schemas/StaffStage'
+StaffMeSession:
+  type: object
+  description: Текущая сессия — её id (отметка «это устройство» в «Моём доступе») и абсолютный срок
+  required: [id, expires_at]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id текущей сессии
+      example: 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+    expires_at:
+      type: string
+      format: date-time
+      description: Когда сессия закончится в любом случае (8 часов от входа; у mfa_pending — 5 минут)
+      example: '2026-10-13T17:00:00Z'
+StaffMe:
+  type: object
+  description: >-
+    Кто вошёл: учётка, роль, города, права и стадия сессии — по нему админка строит меню и кнопки.
+    В стадии mfa_pending приходят только stage, session, reauth_required и пустые city_ids и
+    permissions (поля учётки отсутствуют); в стадии setup — учётка без прав
+  required: [stage, reauth_required, city_ids, permissions, session]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id учётки сотрудника; нет в стадии mfa_pending
+      example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+    email:
+      type: string
+      description: Рабочая почта в каноническом виде (домен — в ASCII-форме xn--…); нет в стадии mfa_pending
+      example: olga.v@wf.example
+    display_name:
+      type: string
+      description: Отображаемое имя — его видят журнал и другие сотрудники; нет в стадии mfa_pending
+      example: Ольга В.
+    locale:
+      $ref: '../root.yaml#/components/schemas/StaffLocale'
+    role:
+      $ref: '../root.yaml#/components/schemas/StaffRole'
+    city_ids:
+      type: array
+      description: Города модератора; у остальных ролей и в стадии mfa_pending — пустой список
+      items:
+        type: string
+        format: uuid
+      example: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47]
+    stage:
+      $ref: '../root.yaml#/components/schemas/StaffStage'
+    reauth_required:
+      type: boolean
+      description: >-
+        Сессия ждёт второй фактор (бездействие или смена сети): до staffUnlock остальные операции
+        отвечают 401 auth.reauth_required
+      example: false
+    permissions:
+      type: object
+      description: >-
+        Права сотрудника — ключ права и доступ; права без доступа не перечисляются. Пусто в
+        стадиях mfa_pending и setup
+      additionalProperties:
+        $ref: '../root.yaml#/components/schemas/PermissionGrant'
+      example:
+        staff.roles.read: allow
+        staff.accounts.read: allow
+        staff.roles.grant: dual
+        audit.log.read: allow
+        geo.cities.read: allow
+    session:
+      type: object
+      nullable: true
+      description: Текущая сессия; null — сессия не определена
+      allOf:
+        - $ref: '../root.yaml#/components/schemas/StaffMeSession'
+StaffLocaleUpdate:
+  type: object
+  description: Новый язык админки и писем
+  required: [locale]
+  additionalProperties: false
+  properties:
+    locale:
+      $ref: '../root.yaml#/components/schemas/StaffLocale'
+StaffMfaStatus:
+  type: object
+  description: Состояние второго фактора — для «Моего доступа»
+  required: [confirmed_at, recovery_codes_left]
+  properties:
+    confirmed_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Когда настроено приложение-аутентификатор; null — ещё не настроено
+      example: '2026-10-01T09:12:00Z'
+    recovery_codes_left:
+      type: integer
+      minimum: 0
+      maximum: 10
+      description: Сколько резервных кодов из 10 ещё не использовано
+      example: 8
+StaffMfaSecret:
+  type: object
+  description: >-
+    Новый секрет приложения-аутентификатора. Показывается один раз; повторный вызов до
+    подтверждения выпускает новый секрет, старый перестаёт действовать
+  required: [secret, otpauth_uri]
+  properties:
+    secret:
+      type: string
+      description: Секрет base32 (RFC 4648, без =) — для ручного ввода в приложение
+      example: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+    otpauth_uri:
+      type: string
+      description: Ссылка otpauth://totp/… для QR-кода; QR рисует сама страница, ссылку никуда не отправлять
+      example: 'otpauth://totp/WF%20admin:olga.v%40wf.example?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=WF%20admin'
+StaffRecoveryCodes:
+  type: object
+  description: >-
+    Резервные коды — показываются один раз, сервер хранит только их отпечатки. Каждый код
+    работает вместо кода из приложения один раз
+  required: [recovery_codes]
+  properties:
+    recovery_codes:
+      type: array
+      minItems: 10
+      maxItems: 10
+      description: 10 кодов вида xxxxx-xxxxx
+      items:
+        type: string
+      example:
+        - k7m2q-x9p4t
+        - a3b5c-d7e2f
+        - m4n6p-q2r8s
+        - t5v7w-x3y9z
+        - b2c4d-f6g8h
+        - j3k5m-n7p2q
+        - r4s6t-v8w3x
+        - y5z7a-b2c9d
+        - e3f5g-h7j4k
+        - p6q8r-s2t5v
+StaffPasswordChange:
+  type: object
+  description: >-
+    Смена своего пароля: текущий пароль, второй фактор (ровно одно из code и recovery_code) и
+    новый пароль. Остальные свои сессии гасятся
+  required: [current_password, new_password]
+  additionalProperties: false
+  properties:
+    current_password:
+      type: string
+      description: Текущий пароль как введён
+      example: Жёлтая карточка на 90-й
+    code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: 6 цифр из приложения-аутентификатора; не вместе с recovery_code
+      example: '492817'
+    recovery_code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: Резервный код вида xxxxx-xxxxx вместо кода из приложения; сгорает
+      example: k7m2q-x9p4t
+    new_password:
+      type: string
+      description: >-
+        Новый пароль: не короче 10 символов, не длиннее 128, не из списка распространённых.
+        Нарушение — 400 validation.failed по полю body.new_password с кодом too_short, too_long или
+        common
+      example: Свисток на 46-й минуте
+StaffSession:
+  type: object
+  description: Сессия сотрудника — устройство, сеть и время работы
+  required: [id, stage, current, created_at, last_seen_at, expires_at, ip, user_agent]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id сессии — для завершения
+      example: 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+    stage:
+      $ref: '../root.yaml#/components/schemas/StaffStage'
+    current:
+      type: boolean
+      description: Это сессия, с которой сделан запрос («это устройство»)
+      example: true
+    created_at:
+      type: string
+      format: date-time
+      description: Когда сессия создана (вход)
+      example: '2026-10-13T09:00:00Z'
+    last_seen_at:
+      type: string
+      format: date-time
+      description: Последняя активность — с точностью до минуты, фоновые опросы её не двигают
+      example: '2026-10-13T10:41:00Z'
+    expires_at:
+      type: string
+      format: date-time
+      description: Когда сессия закончится в любом случае
+      example: '2026-10-13T17:00:00Z'
+    ip:
+      type: string
+      description: Сеть, из которой вошли, — подсеть /24 (IPv4) или /48 (IPv6); полный адрес не показывается
+      example: 203.0.113.0/24
+    user_agent:
+      type: string
+      nullable: true
+      description: Строка User-Agent браузера — устройство и браузер разбирает админка; null — браузер её не прислал
+      example: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36'
+StaffSessionList:
+  type: object
+  description: Живые сессии сотрудника, новые сверху
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: Сессии; текущая отмечена current
+      items:
+        $ref: '../root.yaml#/components/schemas/StaffSession'
+StaffRevoked:
+  type: object
+  description: Сколько сессий завершено
+  required: [revoked]
+  properties:
+    revoked:
+      type: integer
+      minimum: 0
+      description: Число завершённых сессий; 0 — других сессий не было
+      example: 2
+StaffInviteRequest:
+  type: object
+  description: Приглашение нового сотрудника — почта, имя, роль и города (у модератора)
+  required: [email, display_name, role]
+  additionalProperties: false
+  properties:
+    email:
+      type: string
+      minLength: 3
+      maxLength: 320
+      description: >-
+        Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же
+        учётку через сброс доступа
+      example: ivan.p@wf.example
+    display_name:
+      type: string
+      minLength: 1
+      maxLength: 80
+      description: Отображаемое имя — его видят журнал и другие сотрудники
+      example: Иван П.
+    role:
+      $ref: '../root.yaml#/components/schemas/StaffRole'
+    city_ids:
+      type: array
+      maxItems: 100
+      uniqueItems: true
+      description: >-
+        Города модератора — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids,
+        код min_items), у остальных ролей — пусто или нет поля
+      items:
+        type: string
+        format: uuid
+      example: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47]
+StaffRoleUpdate:
+  type: object
+  description: Новая роль и города сотрудника целиком (не разница)
+  required: [role, city_ids]
+  additionalProperties: false
+  properties:
+    role:
+      $ref: '../root.yaml#/components/schemas/StaffRole'
+    city_ids:
+      type: array
+      maxItems: 100
+      uniqueItems: true
+      description: >-
+        Города модератора целиком — у moderator хотя бы один (иначе 400 validation.failed по
+        body.city_ids, код min_items), у остальных ролей — пустой список
+      items:
+        type: string
+        format: uuid
+      example: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47, 7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65]
+StaffConfirmedAction:
+  type: object
+  description: >-
+    Разрушающее действие над сотрудником — причина из списка, комментарий и почта цели, введённая
+    руками
+  required: [reason, confirm]
+  additionalProperties: false
+  properties:
+    reason:
+      $ref: '../root.yaml#/components/schemas/StaffActionReason'
+    comment:
+      type: string
+      maxLength: 500
+      description: Пояснение к причине — попадает в журнал действий
+      example: Перешёл в другой проект
+    confirm:
+      type: string
+      minLength: 1
+      maxLength: 320
+      description: >-
+        Почта сотрудника-цели, введённая руками; регистр и пробелы по краям не важны. Не совпала —
+        400 validation.failed по body.confirm с кодом mismatch
+      example: ivan.p@wf.example
+StaffInviteState:
+  type: object
+  description: Живое приглашение учётки — пока сотрудник не настроил вход
+  required: [purpose, expires_at, expired]
+  properties:
+    purpose:
+      type: string
+      description: invite — первое приглашение; access_reset — после сброса доступа
+      enum: [invite, access_reset]
+      x-extensible-enum: true
+    expires_at:
+      type: string
+      format: date-time
+      description: Срок кода приглашения (24 часа от выпуска)
+      example: '2026-10-14T09:00:00Z'
+    expired:
+      type: boolean
+      description: Срок истёк — нужна повторная отправка
+      example: false
+StaffAccount:
+  type: object
+  description: Учётка сотрудника — строка списка «Роли и доступ» и карточка
+  required:
+    - id
+    - email
+    - display_name
+    - locale
+    - status
+    - role
+    - city_ids
+    - created_at
+    - last_login_at
+    - locked_until
+    - version
+    - invite
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id учётки
+      example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+    email:
+      type: string
+      description: Рабочая почта в каноническом виде (домен — в ASCII-форме xn--…)
+      example: ivan.p@wf.example
+    display_name:
+      type: string
+      description: Отображаемое имя
+      example: Иван П.
+    locale:
+      $ref: '../root.yaml#/components/schemas/StaffLocale'
+    status:
+      $ref: '../root.yaml#/components/schemas/StaffStatus'
+    role:
+      $ref: '../root.yaml#/components/schemas/StaffRole'
+    city_ids:
+      type: array
+      description: Города модератора; у остальных ролей — пустой список
+      items:
+        type: string
+        format: uuid
+      example: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47]
+    created_at:
+      type: string
+      format: date-time
+      description: Когда учётка создана
+      example: '2026-10-01T09:00:00Z'
+    last_login_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Последний вход; null — ещё не входил
+      example: '2026-10-13T09:00:00Z'
+    locked_until:
+      type: string
+      format: date-time
+      nullable: true
+      description: >-
+        До какого времени вход закрыт после пяти неверных кодов подряд; null — не закрыт
+      example: null
+    version:
+      type: integer
+      format: int64
+      description: Версия учётки — растёт при каждом изменении, в том числе роли и городов
+      example: 4
+    invite:
+      type: object
+      nullable: true
+      description: Живое приглашение («приглашение не принято / просрочено»); null — приглашения нет
+      allOf:
+        - $ref: '../root.yaml#/components/schemas/StaffInviteState'
+StaffAccountPage:
+  type: object
+  description: Страница списка сотрудников
+  required: [items, next_cursor]
+  properties:
+    items:
+      type: array
+      description: Сотрудники страницы
+      items:
+        $ref: '../root.yaml#/components/schemas/StaffAccount'
+    next_cursor:
+      type: string
+      nullable: true
+      description: Курсор следующей страницы; null — страниц больше нет
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+RoleGrants:
+  type: object
+  description: Доступ к праву у каждой роли — строка матрицы
+  required: [owner, admin, moderator, support]
+  properties:
+    owner:
+      $ref: '../root.yaml#/components/schemas/RoleGrant'
+    admin:
+      $ref: '../root.yaml#/components/schemas/RoleGrant'
+    moderator:
+      $ref: '../root.yaml#/components/schemas/RoleGrant'
+    support:
+      $ref: '../root.yaml#/components/schemas/RoleGrant'
+RolePermission:
+  type: object
+  description: Право матрицы — ключ, признак изменения и доступ ролей. Подпись права — в локалях админки (permissions.<ключ>)
+  required: [key, mutating, grants]
+  properties:
+    key:
+      type: string
+      description: Ключ права <модуль>.<ресурс>.<действие>
+      example: staff.roles.grant
+    mutating:
+      type: boolean
+      description: Право меняет данные (иначе — только чтение)
+      example: true
+    grants:
+      $ref: '../root.yaml#/components/schemas/RoleGrants'
+StaffRoles:
+  type: object
+  description: Роли и матрица прав — экран «Роли и доступ»; черновые права будущих модулей не входят
+  required: [roles, permissions]
+  properties:
+    roles:
+      type: array
+      description: Роли по старшинству
+      items:
+        $ref: '../root.yaml#/components/schemas/StaffRole'
+    permissions:
+      type: array
+      description: Права в порядке каталога
+      items:
+        $ref: '../root.yaml#/components/schemas/RolePermission'

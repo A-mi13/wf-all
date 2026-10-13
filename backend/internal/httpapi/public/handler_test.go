@@ -119,6 +119,35 @@ func TestPlatformCodesDocumented(t *testing.T) {
 	}
 }
 
+// Спека сотрудников §5.1 (D18): коды конвейера admin-api и подтверждений (httpx.AdminPlatformCodes)
+// в публичный контракт не попадают — ни в общие коды, ни в коды операций.
+func TestAdminCodesNotInPublic(t *testing.T) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byOp, err := apitest.OperationCodes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(spec.Extensions["x-error-codes-common"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var common []string
+	if err := json.Unmarshal(b, &common); err != nil {
+		t.Fatal(err)
+	}
+	byOp["x-error-codes-common"] = common
+	for where, codes := range byOp {
+		for _, c := range codes {
+			if slices.Contains(httpx.AdminPlatformCodes, c) {
+				t.Errorf("%s: код админки %s в публичном контракте", where, c)
+			}
+		}
+	}
+}
+
 // Страж «коды модуля задокументированы» (.claude/rules/backend-http.md): geo.Codes и x-error-codes
 // операций с тегом geo совпадают в обе стороны. Админские операции geo (этап 2) добавят свой
 // контракт в сверку.

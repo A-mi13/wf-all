@@ -1,0 +1,67 @@
+# Операции модуля geo в админке (спека сотрудников §6; план A — D24, P28, M10). Тег geo — реализует
+# internal/geo/admin (встроен в internal/httpapi/admin.Server). План B расширяет список, а не создаёт.
+cities:
+  get:
+    operationId: listGeoCities
+    tags: [geo]
+    x-permission: geo.cities.read
+    x-error-codes: []
+    summary: Города платформы
+    description: |
+      Города платформы всех статусов (`waitlist`, `pilot`, `live`) — выбор городов модератора в
+      «Ролях и доступе» и подписи уже назначенных городов. Владелец, админ и поддержка видят все
+      города; модератору — только его города (право `scoped`): фильтры сужают внутри них.
+
+      Порядок: статус (`live`, затем `pilot`, затем `waitlist`), население по убыванию, id.
+      Фильтры складываются: `q` — начало названия на любом поддерживаемом языке (ru, en) без учёта
+      регистра и ё/е; `ids` — только эти города (подписи назначенных модератору городов, до 100 id;
+      несуществующие id пропускаются).
+
+      `q`, пустой после нормализации (одни знаки препинания или пробелы), — 400
+      `validation.failed` по полю `query.q` с правилом `minLength`. Больше 100 `ids` — 400
+      `validation.failed` по `query.ids`. Названия — на языке из `Accept-Language`.
+    parameters:
+      - name: q
+        in: query
+        required: false
+        description: >-
+          Начало названия города на любом поддерживаемом языке (ru, en), без учёта регистра и ё/е
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+        example: став
+      - name: ids
+        in: query
+        required: false
+        description: >-
+          Только города с этими id; несколько значений — повторите параметр (ids=…&ids=…), до 100.
+          Без параметра — без фильтра
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+        example: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47, 7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65]
+      - $ref: '../root.yaml#/components/parameters/Cursor'
+      - $ref: '../root.yaml#/components/parameters/Limit'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    responses:
+      '200':
+        description: Страница городов
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoCityPage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'

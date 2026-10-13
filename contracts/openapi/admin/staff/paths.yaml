@@ -1,0 +1,853 @@
+# Операции модуля staff (спека сотрудников §4.3–4.9; план A — R8, R14, R15, P8). Тег staff — реализует
+# internal/staff/admin (встроен в internal/httpapi/admin.Server).
+auth-login:
+  post:
+    operationId: staffLogin
+    tags: [staff]
+    security: []
+    x-permission: anonymous
+    x-rate-limit: staff_auth
+    x-error-codes: [staff.invalid_credentials]
+    summary: Вход — почта и пароль
+    description: |
+      Первый шаг входа в админку. Без сессии. Успех — новая сессия в стадии `mfa_pending` на
+      5 минут (cookie в `Set-Cookie`) и ответ `{stage: "mfa_pending"}`: дальше — второй фактор
+      (`staffVerifyMfa`). Прежняя сессия из cookie, если была, гасится.
+
+      Коды ошибок:
+      - 400 `staff.invalid_credentials` — один ответ на всё: почты нет, пароль неверный, учётка не
+        активна, без настроенного второго фактора или вход закрыт после неверных кодов. Время
+        ответа одинаковое — по нему нельзя узнать, есть ли такая почта.
+      - 429 `ratelimit.exceeded` — слишком много попыток с этого адреса или для этой почты
+        (повторите через `Retry-After` секунд). Неверный пароль никого не блокирует.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Почта и пароль сотрудника
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffLoginRequest'
+    responses:
+      '200':
+        description: Пароль принят — нужен второй фактор
+        headers:
+          Set-Cookie:
+            $ref: '../root.yaml#/components/headers/SetSessionCookie'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffStageResult'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+auth-mfa:
+  post:
+    operationId: staffVerifyMfa
+    tags: [staff]
+    x-permission: session
+    x-rate-limit: staff_auth
+    x-error-codes: [staff.mfa_invalid, staff.wrong_stage]
+    summary: Вход — второй фактор
+    description: |
+      Второй шаг входа: код из приложения-аутентификатора или резервный код (ровно одно поле).
+      Только для сессии в стадии `mfa_pending`. Успех — **новый токен** в стадии `active`
+      (`Set-Cookie`, прежний токен больше не действует), ответ 204; резервный код сгорает.
+
+      Коды ошибок:
+      - 400 `staff.mfa_invalid` — код не подошёл; в `attempts_left` — сколько попыток осталось.
+        Пятая неудача подряд закрывает вход на час и завершает все сессии сотрудника
+        (`attempts_left: 0`).
+      - 409 `staff.wrong_stage` — сессия не в стадии `mfa_pending`.
+      - 401 `auth.unauthenticated` — сессии нет или 5 минут на второй фактор истекли: войдите
+        заново.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Код из приложения или резервный код
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffFactorRequest'
+    responses:
+      '204':
+        description: Вход выполнен — сессия активна
+        headers:
+          Set-Cookie:
+            $ref: '../root.yaml#/components/headers/SetSessionCookie'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+auth-unlock:
+  post:
+    operationId: staffUnlock
+    tags: [staff]
+    x-permission: session
+    x-rate-limit: staff_auth
+    x-error-codes: [staff.mfa_invalid, staff.wrong_stage]
+    summary: Разблокировка сессии вторым фактором
+    description: |
+      Подтверждение входа после 401 `auth.reauth_required` (бездействие дольше 20 минут или смена
+      сети): код из приложения или резервный код. Успех — **новый токен** (`Set-Cookie`), сессия
+      принимает текущую сеть, ответ 204; исходный запрос можно повторить. Резервный код сгорает.
+
+      Коды ошибок:
+      - 400 `staff.mfa_invalid` — код не подошёл, в `attempts_left` — остаток попыток; пятая
+        неудача подряд закрывает вход на час и завершает все сессии сотрудника.
+      - 409 `staff.wrong_stage` — сессия не ждёт разблокировки.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Код из приложения или резервный код
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffFactorRequest'
+    responses:
+      '204':
+        description: Сессия разблокирована
+        headers:
+          Set-Cookie:
+            $ref: '../root.yaml#/components/headers/SetSessionCookie'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+auth-logout:
+  post:
+    operationId: staffLogout
+    tags: [staff]
+    x-permission: session
+    x-rate-limit: staff_auth
+    x-error-codes: []
+    summary: Выход
+    description: |
+      Завершает текущую сессию в любой стадии и стирает cookie (`Set-Cookie` с `Max-Age=0`).
+      Ответ 204.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '204':
+        description: Сессия завершена, cookie стёрта
+        headers:
+          Set-Cookie:
+            $ref: '../root.yaml#/components/headers/ClearSessionCookie'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+auth-invite-accept:
+  post:
+    operationId: staffAcceptInvite
+    tags: [staff]
+    security: []
+    x-permission: anonymous
+    x-rate-limit: staff_auth
+    x-error-codes: [staff.invite_invalid]
+    summary: Принятие приглашения — первый вход
+    description: |
+      Первый вход по письму-приглашению (и после сброса доступа): почта, код из письма и новый
+      пароль. Без сессии. Успех — пароль сохранён, создаётся сессия в стадии `setup`
+      (`Set-Cookie`, прежняя сессия из cookie гасится), ответ `{stage: "setup"}`: дальше —
+      настройка 2FA (`staffMfaSetup`). Приглашение остаётся живым до завершения настройки —
+      потерянную сессию настройки можно возобновить повторным принятием тем же или новым кодом.
+
+      Коды ошибок:
+      - 400 `validation.failed` по полю `body.password` с кодом `too_short`, `too_long` или
+        `common` — пароль не подходит (проверяется первым, код приглашения при этом не тратится).
+      - 400 `staff.invite_invalid` — один ответ на всё: код неверный, почта не та, срок истёк или
+        приглашения нет. Пять неверных кодов стирают текущий код — нужна повторная отправка
+        (`staffResendInviteSelf`).
+      - 429 `ratelimit.exceeded` — слишком много попыток с этого адреса.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Почта, код из письма и новый пароль
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffAcceptInviteRequest'
+    responses:
+      '200':
+        description: Приглашение принято — нужна настройка 2FA
+        headers:
+          Set-Cookie:
+            $ref: '../root.yaml#/components/headers/SetSessionCookie'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffStageResult'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+auth-invite-resend:
+  post:
+    operationId: staffResendInviteSelf
+    tags: [staff]
+    security: []
+    x-permission: anonymous
+    x-rate-limit: staff_auth
+    x-error-codes: []
+    summary: Повторная отправка кода приглашения
+    description: |
+      Сотрудник сам просит новый код приглашения. Без сессии, ответ всегда 202 — по нему нельзя
+      узнать, есть ли такая почта. Новый код уходит письмом, только если приглашение живо, с
+      прошлой отправки прошло 60 секунд и за сутки отправок меньше пяти; срок приглашения (24 часа)
+      не продлевается. Клиент показывает отсчёт 60 секунд до следующей попытки.
+
+      Коды ошибок: 429 `ratelimit.exceeded` — слишком много запросов с этого адреса.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Почта из приглашения
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffEmailRequest'
+    responses:
+      '202':
+        description: Запрос принят; письмо уходит, если код можно выслать
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me:
+  get:
+    operationId: getStaffMe
+    tags: [staff]
+    x-permission: session
+    x-error-codes: []
+    summary: Кто вошёл
+    description: |
+      Учётка, роль, города, права и стадия текущей сессии — первый запрос админки при загрузке и
+      проверка связи. Работает в любой стадии сессии и под `reauth_required` (поле
+      `reauth_required: true`). Меню и кнопки строятся по `permissions`: раздела без права в меню
+      нет.
+
+      В стадии `mfa_pending` — только `stage`, `session`, `reauth_required` и пустые `city_ids` и
+      `permissions`; в стадии `setup` — учётка без прав. Нет сессии — 401 `auth.unauthenticated`
+      (экран входа).
+    responses:
+      '200':
+        description: Текущий сотрудник и сессия
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffMe'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-locale:
+  patch:
+    operationId: updateStaffMeLocale
+    tags: [staff]
+    x-permission: self
+    x-error-codes: []
+    summary: Сменить язык админки
+    description: |
+      Сохраняет язык админки и писем сотруднику — переключатель языка в меню профиля. Ответ 204;
+      новый язык приходит в `GET /v1/staff/me`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Новый язык
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffLocaleUpdate'
+    responses:
+      '204':
+        description: Язык сохранён
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-mfa:
+  get:
+    operationId: getStaffMfa
+    tags: [staff]
+    x-permission: self
+    x-error-codes: []
+    summary: Состояние второго фактора
+    description: |
+      «Мой доступ»: когда настроено приложение-аутентификатор и сколько резервных кодов осталось.
+      Секрет и сами коды не возвращаются никогда.
+    responses:
+      '200':
+        description: Состояние второго фактора
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffMfaStatus'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-mfa-setup:
+  post:
+    operationId: staffMfaSetup
+    tags: [staff]
+    x-permission: session
+    x-idempotency: no-store
+    x-error-codes: [staff.wrong_stage]
+    summary: Настройка 2FA — новый секрет
+    description: |
+      Первый шаг настройки второго фактора — только в стадии `setup` (после принятия
+      приглашения). Возвращает секрет и ссылку для QR; повторный вызов до подтверждения выпускает
+      новый секрет. Ответ не сохраняется для повтора по `Idempotency-Key` (повтор —
+      409 `idempotency.replay_unavailable`, вызовите заново с новым ключом) и не кэшируется.
+
+      Коды ошибок: 409 `staff.wrong_stage` — сессия не в стадии `setup` (2FA уже настроена).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '200':
+        description: Секрет приложения-аутентификатора
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffMfaSecret'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-mfa-confirm:
+  post:
+    operationId: staffMfaConfirm
+    tags: [staff]
+    x-permission: session
+    x-idempotency: no-store
+    x-error-codes: [staff.mfa_invalid, staff.wrong_stage]
+    summary: Настройка 2FA — подтверждение кодом
+    description: |
+      Второй шаг настройки: код из приложения сверяется с выданным секретом. Успех — 10 резервных
+      кодов, показываются один раз. Только в стадии `setup`. Ответ не сохраняется для повтора по
+      `Idempotency-Key` (повтор — 409 `idempotency.replay_unavailable`) и не кэшируется. Дальше —
+      `staffRecoveryAck`.
+
+      Коды ошибок:
+      - 400 `staff.mfa_invalid` — код не подошёл (проверьте время на телефоне).
+      - 409 `staff.wrong_stage` — сессия не в стадии `setup` или секрет ещё не выпущен.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Код из приложения-аутентификатора
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffCodeRequest'
+    responses:
+      '200':
+        description: Резервные коды
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffRecoveryCodes'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-mfa-recovery-codes-ack:
+  post:
+    operationId: staffRecoveryAck
+    tags: [staff]
+    x-permission: session
+    x-error-codes: [staff.wrong_stage]
+    summary: Настройка 2FA — коды сохранены
+    description: |
+      Последний шаг настройки: сотрудник подтвердил, что сохранил резервные коды. Приглашение
+      гасится, учётка становится активной, сессия получает **новый токен** в стадии `active`
+      (`Set-Cookie`, прежний токен больше не действует). Ответ 204. Без этого шага сессия остаётся
+      в `setup` и остальные операции отвечают 403 `auth.setup_required`.
+
+      Коды ошибок: 409 `staff.wrong_stage` — сессия не в стадии `setup` или 2FA ещё не
+      подтверждена (`staffMfaConfirm`).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '204':
+        description: Настройка завершена — сессия активна
+        headers:
+          Set-Cookie:
+            $ref: '../root.yaml#/components/headers/SetSessionCookie'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-mfa-recovery-codes:
+  post:
+    operationId: regenerateStaffRecoveryCodes
+    tags: [staff]
+    x-permission: self
+    x-idempotency: no-store
+    x-error-codes: [staff.mfa_invalid, staff.wrong_stage]
+    summary: Новые резервные коды
+    description: |
+      «Мой доступ»: выпускает 10 новых резервных кодов взамен всех прежних (прежние перестают
+      действовать). Подтверждается только кодом из приложения — резервный код здесь не
+      принимается. Ответ не сохраняется для повтора по `Idempotency-Key` (повтор — 409
+      `idempotency.replay_unavailable`) и не кэшируется.
+
+      Коды ошибок:
+      - 400 `staff.mfa_invalid` — код не подошёл, в `attempts_left` — остаток попыток; пятая
+        неудача подряд закрывает вход на час и завершает все сессии.
+      - 409 `staff.wrong_stage` — второй фактор не настроен.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Код из приложения-аутентификатора
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffCodeRequest'
+    responses:
+      '200':
+        description: Новые резервные коды
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffRecoveryCodes'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-password:
+  post:
+    operationId: changeStaffPassword
+    tags: [staff]
+    x-permission: self
+    x-error-codes: [staff.password_invalid, staff.mfa_invalid]
+    summary: Сменить свой пароль
+    description: |
+      «Мой доступ»: текущий пароль, второй фактор (код из приложения или резервный код — ровно
+      одно) и новый пароль. Успех — 204, все остальные сессии сотрудника завершаются (текущая
+      остаётся).
+
+      Коды ошибок:
+      - 400 `staff.password_invalid` — текущий пароль неверный; 400 `staff.mfa_invalid` — второй
+        фактор не подошёл. Обе неудачи считаются вместе с неудачами второго фактора, в
+        `attempts_left` — остаток; пятая подряд закрывает вход на час.
+      - 400 `validation.failed` по полю `body.new_password` с кодом `too_short`, `too_long` или
+        `common` — новый пароль не подходит; по `body.code` — не передан ни код, ни резервный код
+        или переданы оба.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Текущий пароль, второй фактор и новый пароль
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffPasswordChange'
+    responses:
+      '204':
+        description: Пароль изменён, другие сессии завершены
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-sessions:
+  get:
+    operationId: listStaffMySessions
+    tags: [staff]
+    x-permission: self
+    x-error-codes: []
+    summary: Мои сессии
+    description: |
+      «Мой доступ»: живые сессии сотрудника — устройство и браузер (из `user_agent`), сеть
+      (подсеть /24 или /48), время входа и последней активности. Город по адресу не определяется.
+    responses:
+      '200':
+        description: Живые сессии
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffSessionList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-sessions-revoke-others:
+  post:
+    operationId: revokeStaffOtherSessions
+    tags: [staff]
+    x-permission: self
+    x-error-codes: []
+    summary: Завершить остальные мои сессии
+    description: |
+      «Мой доступ»: завершает все свои сессии, кроме текущей. Ответ — сколько завершено.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '200':
+        description: Остальные сессии завершены
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffRevoked'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+me-session:
+  delete:
+    operationId: revokeStaffMySession
+    tags: [staff]
+    x-permission: self
+    x-error-codes: [staff.session_not_found]
+    summary: Завершить мою сессию
+    description: |
+      «Мой доступ»: завершает одну свою сессию (например, на забытом компьютере); текущую тоже
+      можно — тогда следующий запрос ответит 401. Ответ 204.
+
+      Коды ошибок: 404 `staff.session_not_found` — сессии нет, она уже завершена или чужая.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/SessionId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '204':
+        description: Сессия завершена
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+invites:
+  post:
+    operationId: createStaffInvite
+    tags: [staff]
+    x-permission: handler
+    x-permission-any: [staff.roles.grant, staff.roles.grant_elevated]
+    x-error-codes: [staff.email_taken, staff.city_not_found]
+    summary: Пригласить сотрудника
+    description: |
+      «Роли и доступ»: приглашение нового сотрудника. Право зависит от роли: владельца и админа
+      приглашает только владелец (`staff.roles.grant_elevated`), модератора и поддержку — владелец
+      или админ (`staff.roles.grant`). Приглашение всегда подтверждает второй сотрудник: ответ
+      202 с запросом на подтверждение. После подтверждения создаётся учётка в статусе `invited` и
+      уходит письмо с кодом; почта выключенной учётки возвращает ту же учётку через сброс доступа.
+
+      Коды ошибок:
+      - 403 `auth.forbidden` — нет права выдать эту роль.
+      - 409 `staff.email_taken` — почта уже у действующей учётки.
+      - 422 `staff.city_not_found` — города из `city_ids` нет.
+      - 400 `validation.failed` по `body.city_ids` с кодом `min_items` — модератор без городов.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Почта, имя, роль и города нового сотрудника
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffInviteRequest'
+    responses:
+      '202':
+        description: Создан запрос на подтверждение приглашения
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ApprovalAccepted'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+accounts:
+  get:
+    operationId: listStaffAccounts
+    tags: [staff]
+    x-permission: staff.accounts.read
+    x-error-codes: []
+    summary: Список сотрудников
+    description: |
+      «Роли и доступ»: сотрудники с ролью, городами, статусом, последним входом и состоянием
+      приглашения («не принято / просрочено»). Порядок — новые сверху. Фильтры складываются:
+      `status`, `role`, `q` — начало имени или почты без учёта регистра.
+    parameters:
+      - name: status
+        in: query
+        required: false
+        description: Только учётки в этом состоянии; без параметра — все
+        schema:
+          $ref: '../root.yaml#/components/schemas/StaffStatus'
+        example: active
+      - name: role
+        in: query
+        required: false
+        description: Только сотрудники с этой ролью; без параметра — все роли
+        schema:
+          $ref: '../root.yaml#/components/schemas/StaffRole'
+        example: moderator
+      - name: q
+        in: query
+        required: false
+        description: Начало имени или почты, без учёта регистра
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+        example: ива
+      - $ref: '../root.yaml#/components/parameters/Cursor'
+      - $ref: '../root.yaml#/components/parameters/Limit'
+    responses:
+      '200':
+        description: Страница сотрудников
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffAccountPage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+account:
+  get:
+    operationId: getStaffAccount
+    tags: [staff]
+    x-permission: staff.accounts.read
+    x-error-codes: [staff.not_found]
+    summary: Карточка сотрудника
+    description: |
+      «Роли и доступ»: учётка сотрудника — роль, города, статус, приглашение, блокировка входа.
+
+      Коды ошибок: 404 `staff.not_found` — учётки нет.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+    responses:
+      '200':
+        description: Учётка сотрудника
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffAccount'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+account-role:
+  put:
+    operationId: changeStaffRole
+    tags: [staff]
+    x-permission: handler
+    x-permission-any: [staff.roles.grant, staff.roles.grant_elevated, staff.roles.revoke]
+    x-error-codes: [staff.not_found, staff.self_action, staff.city_not_found, staff.last_owner]
+    summary: Сменить роль и города сотрудника
+    description: |
+      «Роли и доступ»: новая роль и города целиком. Право — по изменению:
+      - старая или новая роль `owner` или `admin` — `staff.roles.grant_elevated`, вдвоём;
+      - роль меняется или добавлен хотя бы один город — `staff.roles.grant`, вдвоём;
+      - только снятие городов (остаётся хотя бы один) — `staff.roles.revoke`, сразу.
+
+      Сразу — 200 с обновлённой учёткой; вдвоём — 202 с запросом на подтверждение. Смена роли
+      гасит ожидающие запросы сотрудника на подтверждение.
+
+      Коды ошибок:
+      - 403 `auth.forbidden` — нет права на такое изменение.
+      - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свою роль менять нельзя.
+      - 422 `staff.city_not_found` — города из `city_ids` нет; 400 `validation.failed` по
+        `body.city_ids` с кодом `min_items` — модератор без городов.
+      - 409 `staff.last_owner` — понижение последнего активного владельца.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Новая роль и города
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffRoleUpdate'
+    responses:
+      '200':
+        description: Роль изменена сразу
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffAccount'
+      '202':
+        description: Создан запрос на подтверждение смены роли
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ApprovalAccepted'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+account-disable:
+  post:
+    operationId: disableStaffAccount
+    tags: [staff]
+    x-permission: handler
+    x-permission-any: [staff.roles.revoke, staff.roles.revoke_admin, staff.roles.revoke_owner]
+    x-error-codes: [staff.not_found, staff.self_action, staff.wrong_stage, staff.last_owner]
+    summary: Выключить учётку (снять роль)
+    description: |
+      «Роли и доступ»: снимает роль — учётка выключается, все её сессии и ожидающие запросы на
+      подтверждение гасятся, история и журнал сохраняются. Право — по роли цели: модератор и
+      поддержка — `staff.roles.revoke`, админ — `staff.roles.revoke_admin` (сразу; остальным
+      владельцам уходит письмо), владелец — `staff.roles.revoke_owner` (вдвоём). Сразу — 200 с
+      учёткой; вдвоём — 202 с запросом на подтверждение. В `confirm` — почта цели, введённая
+      руками.
+
+      Коды ошибок:
+      - 403 `auth.forbidden` — нет права снять эту роль.
+      - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — себя выключить нельзя;
+        409 `staff.wrong_stage` — учётка уже выключена.
+      - 409 `staff.last_owner` — последнего активного владельца выключить нельзя.
+      - 400 `validation.failed` по `body.confirm` с кодом `mismatch` — почта не совпала.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Причина, комментарий и почта цели
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffConfirmedAction'
+    responses:
+      '200':
+        description: Учётка выключена сразу
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffAccount'
+      '202':
+        description: Создан запрос на подтверждение выключения владельца
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ApprovalAccepted'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+account-access-reset:
+  post:
+    operationId: resetStaffAccess
+    tags: [staff]
+    x-permission: handler
+    x-permission-any: [staff.access.reset, staff.access.reset_elevated]
+    x-error-codes: [staff.not_found, staff.self_action, staff.last_owner]
+    summary: Сбросить доступ сотрудника
+    description: |
+      «Роли и доступ»: когда сотрудник потерял пароль или телефон. Всегда вдвоём — ответ 202 с
+      запросом на подтверждение. После подтверждения пароль, второй фактор, резервные коды и
+      сессии гасятся, учётка возвращается в `invited`, сотруднику уходит новое приглашение.
+      Самостоятельного «забыл пароль» у сотрудников нет. Право — по роли цели: модератор и
+      поддержка — `staff.access.reset`, владелец и админ — `staff.access.reset_elevated`. В
+      `confirm` — почта цели, введённая руками.
+
+      Коды ошибок:
+      - 403 `auth.forbidden` — нет права сбросить доступ этой роли.
+      - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свой доступ — через «Мой
+        доступ».
+      - 409 `staff.last_owner` — сброс доступа единственному активному владельцу.
+      - 400 `validation.failed` по `body.confirm` с кодом `mismatch` — почта не совпала.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Причина, комментарий и почта цели
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffConfirmedAction'
+    responses:
+      '202':
+        description: Создан запрос на подтверждение сброса доступа
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ApprovalAccepted'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+account-invite-resend:
+  post:
+    operationId: resendStaffInvite
+    tags: [staff]
+    x-permission: staff.invites.resend
+    x-error-codes: [staff.not_found, staff.self_action, staff.wrong_stage]
+    summary: Отправить приглашение повторно
+    description: |
+      «Роли и доступ»: новый код приглашения сотруднику, который ещё не настроил вход; срок
+      24 часа начинается заново. Ответ 204.
+
+      Коды ошибок:
+      - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — себе нельзя.
+      - 409 `staff.wrong_stage` — учётка не в статусе `invited` (вход уже настроен или выключена).
+      - 429 `ratelimit.exceeded` — с прошлой отправки не прошло 60 секунд (повторите через
+        `Retry-After` секунд).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '204':
+        description: Новый код отправлен
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+account-sessions:
+  get:
+    operationId: listStaffAccountSessions
+    tags: [staff]
+    x-permission: staff.accounts.read
+    x-error-codes: [staff.not_found]
+    summary: Сессии сотрудника
+    description: |
+      «Роли и доступ»: живые сессии другого сотрудника — перед их завершением
+      (`revokeStaffAccountSessions`). Чтение — правом чтения `staff.accounts.read`. Админ видит
+      сессии только модераторов и поддержки: роль цели проверяет сценарий, как и у завершения.
+
+      Коды ошибок: 404 `staff.not_found` — учётки нет; 403 `auth.forbidden` — сессии владельца или
+      админа, а вы админ.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+    responses:
+      '200':
+        description: Живые сессии сотрудника
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffSessionList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+account-sessions-revoke-all:
+  post:
+    operationId: revokeStaffAccountSessions
+    tags: [staff]
+    x-permission: staff.sessions.revoke
+    x-error-codes: [staff.not_found, staff.self_action]
+    summary: Завершить все сессии сотрудника
+    description: |
+      «Роли и доступ»: завершает все сессии другого сотрудника сразу (подозрение на захват).
+      Учётка остаётся активной — сотрудник войдёт заново. Ответ — сколько сессий завершено.
+
+      Коды ошибок: 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свои сессии — через
+      «Мой доступ»; 403 `auth.forbidden` — сессии владельца или админа, а вы админ.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '200':
+        description: Сессии завершены
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffRevoked'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+roles:
+  get:
+    operationId: getStaffRoles
+    tags: [staff]
+    x-permission: staff.roles.read
+    x-error-codes: []
+    summary: Роли и матрица прав
+    description: |
+      «Роли и доступ»: роли и права с доступом каждой роли — та же матрица, что в документе
+      ролевой модели; черновые права будущих модулей не входят. Подписи прав — в локалях админки
+      (`permissions.<ключ>`).
+    responses:
+      '200':
+        description: Роли и матрица прав
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffRoles'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'

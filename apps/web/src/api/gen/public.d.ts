@@ -204,6 +204,16 @@ export interface components {
                  */
                 code: string;
             }[];
+            /**
+             * @description Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
+             * @example 3
+             */
+            attempts_left?: number;
+            /**
+             * @description Через сколько секунд повторить — у ошибок с ожиданием; то же значение, что в заголовке Retry-After, для клиента, которому заголовок недоступен
+             * @example 60
+             */
+            retry_after?: number;
             /** @description Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature) */
             challenge?: {
                 /**

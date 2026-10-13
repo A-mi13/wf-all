@@ -459,7 +459,8 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
 | `PUT /v1/staff/accounts/{id}/role {role, city_ids}` | `handler`: grant, grant_elevated, revoke | `200` или `202` по таблице §2.6 |
 | `POST /v1/staff/accounts/{id}/disable {reason, comment?, confirm}` | `handler`: revoke, revoke_admin, revoke_owner | `200` или `202` |
 | `POST /v1/staff/accounts/{id}/access-reset {reason, comment?, confirm}` | `handler`: access.reset, reset_elevated | `202` |
-| `GET /v1/staff/accounts/{id}/sessions`, `POST …/sessions/revoke-all` | `staff.sessions.revoke` | |
+| `GET /v1/staff/accounts/{id}/sessions` | `staff.accounts.read` | сессии сотрудника; админ — только модераторов и поддержки (проверяет сценарий). Решение контроллера 13.10: чтение — правом чтения, страж GET ≠ mutating |
+| `POST /v1/staff/accounts/{id}/sessions/revoke-all` | `staff.sessions.revoke` | |
 | `GET /v1/staff/roles` | `staff.roles.read` | роли, права, матрица |
 | `GET /v1/staff/me` | `session` | учётка, роль, города, **права**, стадия, сессия |
 
@@ -692,6 +693,7 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 | `platform.approval_self` | 409 | подтвердить свой запрос или запрос о себе |
 | `platform.approval_stale` | 409 | цель изменилась после запроса |
 | `platform.approval_closed` | 409 | запрос уже решён, отменён или просрочен |
+| `http.not_implemented` | 501 | общий код admin: операция объявлена в контракте, но ещё не реализована; только admin |
 
 Коды модуля `staff`:
 

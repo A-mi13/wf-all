@@ -1,0 +1,55 @@
+# Схемы модуля geo в админке. Каждая регистрируется в ../root.yaml components.schemas. Контракты
+# admin и public версионируются независимо: CityStatus — своя копия, не ссылка на public.
+CityStatus:
+  type: string
+  description: >-
+    Статус города. waitlist — игр пока нет; pilot — первые команды и модератор; live — город
+    работает. Список открытый — незнакомое значение клиент обязан пережить
+  enum: [waitlist, pilot, live]
+  x-extensible-enum: true
+GeoCity:
+  type: object
+  description: Город платформы в списке админки — для выбора и подписи городов модератора
+  required: [id, slug, name, status, country_code, region_name]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id города
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    slug:
+      type: string
+      pattern: '^[a-z0-9-]+$'
+      description: Текущий адрес города в вебе
+      example: stavropol
+    name:
+      type: string
+      description: Название на языке ответа; перевода нет — каноническое, на языке страны
+      example: Ставрополь
+    status:
+      $ref: '../root.yaml#/components/schemas/CityStatus'
+    country_code:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Код страны ISO 3166-1 alpha-2
+      example: RU
+    region_name:
+      type: string
+      nullable: true
+      description: Регион на языке ответа — различает одноимённые города; null — регион не задан
+      example: Ставропольский край
+GeoCityPage:
+  type: object
+  description: Страница городов
+  required: [items, next_cursor]
+  properties:
+    items:
+      type: array
+      description: Города страницы
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoCity'
+    next_cursor:
+      type: string
+      nullable: true
+      description: Курсор следующей страницы; null — страниц больше нет
+      example: eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiXX0

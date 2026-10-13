@@ -12,7 +12,7 @@ import (
 
 func TestDefaultRulesValid(t *testing.T) {
 	r := ratelimit.DefaultRules()
-	for _, class := range []string{"default", "auth", "geo_nearest"} {
+	for _, class := range []string{"default", "auth", "geo_nearest", "staff_auth"} {
 		cp, ok := r[class]
 		if !ok {
 			t.Fatalf("нет класса %s", class)
@@ -39,6 +39,27 @@ func TestDefaultRulesGeoNearest(t *testing.T) {
 	want := ratelimit.ClassPolicy{IP: ratelimit.Policy{Limit: 30, Period: time.Minute, Burst: 10}}
 	if cp != want {
 		t.Fatalf("geo_nearest = %+v, want %+v", cp, want)
+	}
+}
+
+// Спека сотрудников §4.6, §5.1: вход в админку и шаги второго фактора (/v1/staff/auth/*) — класс
+// staff_auth: по IP 30 в минуту со всплеском 15, по сотруднику 20 в минуту со всплеском 10. Тот же
+// IP-ключ считает отказы сессии (перебор cookie). Правило — раньше класса в контракте admin: иначе
+// admin-api не стартует (ratelimit.UnknownClasses).
+func TestDefaultRulesStaffAuth(t *testing.T) {
+	cp, ok := ratelimit.DefaultRules()["staff_auth"]
+	if !ok {
+		t.Fatal("нет класса staff_auth")
+	}
+	want := ratelimit.ClassPolicy{
+		IP:   ratelimit.Policy{Limit: 30, Period: time.Minute, Burst: 15},
+		User: ratelimit.Policy{Limit: 20, Period: time.Minute, Burst: 10},
+	}
+	if cp != want {
+		t.Fatalf("staff_auth = %+v, want %+v", cp, want)
+	}
+	if err := ratelimit.DefaultRules().Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 

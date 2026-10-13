@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -180,4 +181,31 @@ func funcName(e ast.Expr) string {
 		return v.Sel.Name
 	}
 	return ""
+}
+
+// Спека сотрудников §5.1, §7 (D18): коды конвейера admin-api и подтверждений — отдельный список,
+// в публичный контракт они не попадают (PlatformCodes их не содержит). Общие коды admin
+// (x-error-codes-common контракта admin вместе с PlatformCodes) — AdminCommonCodes, коды операций
+// подтверждений — AdminApprovalCodes.
+func TestAdminPlatformCodes(t *testing.T) {
+	common := []string{"auth.forbidden", "auth.csrf_failed", "auth.ip_not_allowed",
+		"auth.reauth_required", "auth.setup_required", "http.not_implemented"}
+	approvals := []string{"platform.approval_not_found", "platform.approval_self",
+		"platform.approval_stale", "platform.approval_closed"}
+	if !slices.Equal(AdminCommonCodes, common) {
+		t.Errorf("AdminCommonCodes = %v, want %v", AdminCommonCodes, common)
+	}
+	if !slices.Equal(AdminApprovalCodes, approvals) {
+		t.Errorf("AdminApprovalCodes = %v, want %v", AdminApprovalCodes, approvals)
+	}
+	if want := slices.Concat(common, approvals); !slices.Equal(AdminPlatformCodes, want) {
+		t.Errorf("AdminPlatformCodes = %v, want %v", AdminPlatformCodes, want)
+	}
+	seen := map[string]bool{}
+	for _, c := range slices.Concat(PlatformCodes, AdminPlatformCodes) {
+		if seen[c] {
+			t.Errorf("код %s повторяется в PlatformCodes и AdminPlatformCodes", c)
+		}
+		seen[c] = true
+	}
 }

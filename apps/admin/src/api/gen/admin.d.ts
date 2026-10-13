@@ -4,7 +4,171 @@
  */
 
 export interface paths {
-    "/v1/health": {
+    "/v1/staff/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Вход — почта и пароль
+         * @description Первый шаг входа в админку. Без сессии. Успех — новая сессия в стадии `mfa_pending` на
+         *     5 минут (cookie в `Set-Cookie`) и ответ `{stage: "mfa_pending"}`: дальше — второй фактор
+         *     (`staffVerifyMfa`). Прежняя сессия из cookie, если была, гасится.
+         *
+         *     Коды ошибок:
+         *     - 400 `staff.invalid_credentials` — один ответ на всё: почты нет, пароль неверный, учётка не
+         *       активна, без настроенного второго фактора или вход закрыт после неверных кодов. Время
+         *       ответа одинаковое — по нему нельзя узнать, есть ли такая почта.
+         *     - 429 `ratelimit.exceeded` — слишком много попыток с этого адреса или для этой почты
+         *       (повторите через `Retry-After` секунд). Неверный пароль никого не блокирует.
+         */
+        post: operations["staffLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/auth/mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Вход — второй фактор
+         * @description Второй шаг входа: код из приложения-аутентификатора или резервный код (ровно одно поле).
+         *     Только для сессии в стадии `mfa_pending`. Успех — **новый токен** в стадии `active`
+         *     (`Set-Cookie`, прежний токен больше не действует), ответ 204; резервный код сгорает.
+         *
+         *     Коды ошибок:
+         *     - 400 `staff.mfa_invalid` — код не подошёл; в `attempts_left` — сколько попыток осталось.
+         *       Пятая неудача подряд закрывает вход на час и завершает все сессии сотрудника
+         *       (`attempts_left: 0`).
+         *     - 409 `staff.wrong_stage` — сессия не в стадии `mfa_pending`.
+         *     - 401 `auth.unauthenticated` — сессии нет или 5 минут на второй фактор истекли: войдите
+         *       заново.
+         */
+        post: operations["staffVerifyMfa"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/auth/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Разблокировка сессии вторым фактором
+         * @description Подтверждение входа после 401 `auth.reauth_required` (бездействие дольше 20 минут или смена
+         *     сети): код из приложения или резервный код. Успех — **новый токен** (`Set-Cookie`), сессия
+         *     принимает текущую сеть, ответ 204; исходный запрос можно повторить. Резервный код сгорает.
+         *
+         *     Коды ошибок:
+         *     - 400 `staff.mfa_invalid` — код не подошёл, в `attempts_left` — остаток попыток; пятая
+         *       неудача подряд закрывает вход на час и завершает все сессии сотрудника.
+         *     - 409 `staff.wrong_stage` — сессия не ждёт разблокировки.
+         */
+        post: operations["staffUnlock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Выход
+         * @description Завершает текущую сессию в любой стадии и стирает cookie (`Set-Cookie` с `Max-Age=0`).
+         *     Ответ 204.
+         */
+        post: operations["staffLogout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/auth/invite/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Принятие приглашения — первый вход
+         * @description Первый вход по письму-приглашению (и после сброса доступа): почта, код из письма и новый
+         *     пароль. Без сессии. Успех — пароль сохранён, создаётся сессия в стадии `setup`
+         *     (`Set-Cookie`, прежняя сессия из cookie гасится), ответ `{stage: "setup"}`: дальше —
+         *     настройка 2FA (`staffMfaSetup`). Приглашение остаётся живым до завершения настройки —
+         *     потерянную сессию настройки можно возобновить повторным принятием тем же или новым кодом.
+         *
+         *     Коды ошибок:
+         *     - 400 `validation.failed` по полю `body.password` с кодом `too_short`, `too_long` или
+         *       `common` — пароль не подходит (проверяется первым, код приглашения при этом не тратится).
+         *     - 400 `staff.invite_invalid` — один ответ на всё: код неверный, почта не та, срок истёк или
+         *       приглашения нет. Пять неверных кодов стирают текущий код — нужна повторная отправка
+         *       (`staffResendInviteSelf`).
+         *     - 429 `ratelimit.exceeded` — слишком много попыток с этого адреса.
+         */
+        post: operations["staffAcceptInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/auth/invite/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Повторная отправка кода приглашения
+         * @description Сотрудник сам просит новый код приглашения. Без сессии, ответ всегда 202 — по нему нельзя
+         *     узнать, есть ли такая почта. Новый код уходит письмом, только если приглашение живо, с
+         *     прошлой отправки прошло 60 секунд и за сутки отправок меньше пяти; срок приглашения (24 часа)
+         *     не продлевается. Клиент показывает отсчёт 60 секунд до следующей попытки.
+         *
+         *     Коды ошибок: 429 `ratelimit.exceeded` — слишком много запросов с этого адреса.
+         */
+        post: operations["staffResendInviteSelf"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me": {
         parameters: {
             query?: never;
             header?: never;
@@ -12,14 +176,694 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Проверка живости сервиса
-         * @description Отвечает 200, пока процесс жив и принимает запросы; база данных не проверяется.
-         *     Без аутентификации. Используется хостингом для health check; клиентам — чтобы
-         *     разбудить dev-стенд после простоя (первый запрос может идти до минуты).
+         * Кто вошёл
+         * @description Учётка, роль, города, права и стадия текущей сессии — первый запрос админки при загрузке и
+         *     проверка связи. Работает в любой стадии сессии и под `reauth_required` (поле
+         *     `reauth_required: true`). Меню и кнопки строятся по `permissions`: раздела без права в меню
+         *     нет.
+         *
+         *     В стадии `mfa_pending` — только `stage`, `session`, `reauth_required` и пустые `city_ids` и
+         *     `permissions`; в стадии `setup` — учётка без прав. Нет сессии — 401 `auth.unauthenticated`
+         *     (экран входа).
          */
-        get: operations["getHealth"];
+        get: operations["getStaffMe"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Сменить язык админки
+         * @description Сохраняет язык админки и писем сотруднику — переключатель языка в меню профиля. Ответ 204;
+         *     новый язык приходит в `GET /v1/staff/me`.
+         */
+        patch: operations["updateStaffMeLocale"];
+        trace?: never;
+    };
+    "/v1/staff/me/mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Состояние второго фактора
+         * @description «Мой доступ»: когда настроено приложение-аутентификатор и сколько резервных кодов осталось.
+         *     Секрет и сами коды не возвращаются никогда.
+         */
+        get: operations["getStaffMfa"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/mfa/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Настройка 2FA — новый секрет
+         * @description Первый шаг настройки второго фактора — только в стадии `setup` (после принятия
+         *     приглашения). Возвращает секрет и ссылку для QR; повторный вызов до подтверждения выпускает
+         *     новый секрет. Ответ не сохраняется для повтора по `Idempotency-Key` (повтор —
+         *     409 `idempotency.replay_unavailable`, вызовите заново с новым ключом) и не кэшируется.
+         *
+         *     Коды ошибок: 409 `staff.wrong_stage` — сессия не в стадии `setup` (2FA уже настроена).
+         */
+        post: operations["staffMfaSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/mfa/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Настройка 2FA — подтверждение кодом
+         * @description Второй шаг настройки: код из приложения сверяется с выданным секретом. Успех — 10 резервных
+         *     кодов, показываются один раз. Только в стадии `setup`. Ответ не сохраняется для повтора по
+         *     `Idempotency-Key` (повтор — 409 `idempotency.replay_unavailable`) и не кэшируется. Дальше —
+         *     `staffRecoveryAck`.
+         *
+         *     Коды ошибок:
+         *     - 400 `staff.mfa_invalid` — код не подошёл (проверьте время на телефоне).
+         *     - 409 `staff.wrong_stage` — сессия не в стадии `setup` или секрет ещё не выпущен.
+         */
+        post: operations["staffMfaConfirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/mfa/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Новые резервные коды
+         * @description «Мой доступ»: выпускает 10 новых резервных кодов взамен всех прежних (прежние перестают
+         *     действовать). Подтверждается только кодом из приложения — резервный код здесь не
+         *     принимается. Ответ не сохраняется для повтора по `Idempotency-Key` (повтор — 409
+         *     `idempotency.replay_unavailable`) и не кэшируется.
+         *
+         *     Коды ошибок:
+         *     - 400 `staff.mfa_invalid` — код не подошёл, в `attempts_left` — остаток попыток; пятая
+         *       неудача подряд закрывает вход на час и завершает все сессии.
+         *     - 409 `staff.wrong_stage` — второй фактор не настроен.
+         */
+        post: operations["regenerateStaffRecoveryCodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/mfa/recovery-codes/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Настройка 2FA — коды сохранены
+         * @description Последний шаг настройки: сотрудник подтвердил, что сохранил резервные коды. Приглашение
+         *     гасится, учётка становится активной, сессия получает **новый токен** в стадии `active`
+         *     (`Set-Cookie`, прежний токен больше не действует). Ответ 204. Без этого шага сессия остаётся
+         *     в `setup` и остальные операции отвечают 403 `auth.setup_required`.
+         *
+         *     Коды ошибок: 409 `staff.wrong_stage` — сессия не в стадии `setup` или 2FA ещё не
+         *     подтверждена (`staffMfaConfirm`).
+         */
+        post: operations["staffRecoveryAck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Сменить свой пароль
+         * @description «Мой доступ»: текущий пароль, второй фактор (код из приложения или резервный код — ровно
+         *     одно) и новый пароль. Успех — 204, все остальные сессии сотрудника завершаются (текущая
+         *     остаётся).
+         *
+         *     Коды ошибок:
+         *     - 400 `staff.password_invalid` — текущий пароль неверный; 400 `staff.mfa_invalid` — второй
+         *       фактор не подошёл. Обе неудачи считаются вместе с неудачами второго фактора, в
+         *       `attempts_left` — остаток; пятая подряд закрывает вход на час.
+         *     - 400 `validation.failed` по полю `body.new_password` с кодом `too_short`, `too_long` или
+         *       `common` — новый пароль не подходит; по `body.code` — не передан ни код, ни резервный код
+         *       или переданы оба.
+         */
+        post: operations["changeStaffPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Мои сессии
+         * @description «Мой доступ»: живые сессии сотрудника — устройство и браузер (из `user_agent`), сеть
+         *     (подсеть /24 или /48), время входа и последней активности. Город по адресу не определяется.
+         */
+        get: operations["listStaffMySessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Завершить остальные мои сессии
+         * @description «Мой доступ»: завершает все свои сессии, кроме текущей. Ответ — сколько завершено.
+         */
+        post: operations["revokeStaffOtherSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/me/sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Завершить мою сессию
+         * @description «Мой доступ»: завершает одну свою сессию (например, на забытом компьютере); текущую тоже
+         *     можно — тогда следующий запрос ответит 401. Ответ 204.
+         *
+         *     Коды ошибок: 404 `staff.session_not_found` — сессии нет, она уже завершена или чужая.
+         */
+        delete: operations["revokeStaffMySession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Пригласить сотрудника
+         * @description «Роли и доступ»: приглашение нового сотрудника. Право зависит от роли: владельца и админа
+         *     приглашает только владелец (`staff.roles.grant_elevated`), модератора и поддержку — владелец
+         *     или админ (`staff.roles.grant`). Приглашение всегда подтверждает второй сотрудник: ответ
+         *     202 с запросом на подтверждение. После подтверждения создаётся учётка в статусе `invited` и
+         *     уходит письмо с кодом; почта выключенной учётки возвращает ту же учётку через сброс доступа.
+         *
+         *     Коды ошибок:
+         *     - 403 `auth.forbidden` — нет права выдать эту роль.
+         *     - 409 `staff.email_taken` — почта уже у действующей учётки.
+         *     - 422 `staff.city_not_found` — города из `city_ids` нет.
+         *     - 400 `validation.failed` по `body.city_ids` с кодом `min_items` — модератор без городов.
+         */
+        post: operations["createStaffInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Список сотрудников
+         * @description «Роли и доступ»: сотрудники с ролью, городами, статусом, последним входом и состоянием
+         *     приглашения («не принято / просрочено»). Порядок — новые сверху. Фильтры складываются:
+         *     `status`, `role`, `q` — начало имени или почты без учёта регистра.
+         */
+        get: operations["listStaffAccounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/accounts/{staffId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Карточка сотрудника
+         * @description «Роли и доступ»: учётка сотрудника — роль, города, статус, приглашение, блокировка входа.
+         *
+         *     Коды ошибок: 404 `staff.not_found` — учётки нет.
+         */
+        get: operations["getStaffAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/accounts/{staffId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Сменить роль и города сотрудника
+         * @description «Роли и доступ»: новая роль и города целиком. Право — по изменению:
+         *     - старая или новая роль `owner` или `admin` — `staff.roles.grant_elevated`, вдвоём;
+         *     - роль меняется или добавлен хотя бы один город — `staff.roles.grant`, вдвоём;
+         *     - только снятие городов (остаётся хотя бы один) — `staff.roles.revoke`, сразу.
+         *
+         *     Сразу — 200 с обновлённой учёткой; вдвоём — 202 с запросом на подтверждение. Смена роли
+         *     гасит ожидающие запросы сотрудника на подтверждение.
+         *
+         *     Коды ошибок:
+         *     - 403 `auth.forbidden` — нет права на такое изменение.
+         *     - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свою роль менять нельзя.
+         *     - 422 `staff.city_not_found` — города из `city_ids` нет; 400 `validation.failed` по
+         *       `body.city_ids` с кодом `min_items` — модератор без городов.
+         *     - 409 `staff.last_owner` — понижение последнего активного владельца.
+         */
+        put: operations["changeStaffRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/accounts/{staffId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Выключить учётку (снять роль)
+         * @description «Роли и доступ»: снимает роль — учётка выключается, все её сессии и ожидающие запросы на
+         *     подтверждение гасятся, история и журнал сохраняются. Право — по роли цели: модератор и
+         *     поддержка — `staff.roles.revoke`, админ — `staff.roles.revoke_admin` (сразу; остальным
+         *     владельцам уходит письмо), владелец — `staff.roles.revoke_owner` (вдвоём). Сразу — 200 с
+         *     учёткой; вдвоём — 202 с запросом на подтверждение. В `confirm` — почта цели, введённая
+         *     руками.
+         *
+         *     Коды ошибок:
+         *     - 403 `auth.forbidden` — нет права снять эту роль.
+         *     - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — себя выключить нельзя;
+         *       409 `staff.wrong_stage` — учётка уже выключена.
+         *     - 409 `staff.last_owner` — последнего активного владельца выключить нельзя.
+         *     - 400 `validation.failed` по `body.confirm` с кодом `mismatch` — почта не совпала.
+         */
+        post: operations["disableStaffAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/accounts/{staffId}/access-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Сбросить доступ сотрудника
+         * @description «Роли и доступ»: когда сотрудник потерял пароль или телефон. Всегда вдвоём — ответ 202 с
+         *     запросом на подтверждение. После подтверждения пароль, второй фактор, резервные коды и
+         *     сессии гасятся, учётка возвращается в `invited`, сотруднику уходит новое приглашение.
+         *     Самостоятельного «забыл пароль» у сотрудников нет. Право — по роли цели: модератор и
+         *     поддержка — `staff.access.reset`, владелец и админ — `staff.access.reset_elevated`. В
+         *     `confirm` — почта цели, введённая руками.
+         *
+         *     Коды ошибок:
+         *     - 403 `auth.forbidden` — нет права сбросить доступ этой роли.
+         *     - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свой доступ — через «Мой
+         *       доступ».
+         *     - 409 `staff.last_owner` — сброс доступа единственному активному владельцу.
+         *     - 400 `validation.failed` по `body.confirm` с кодом `mismatch` — почта не совпала.
+         */
+        post: operations["resetStaffAccess"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/accounts/{staffId}/invite/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отправить приглашение повторно
+         * @description «Роли и доступ»: новый код приглашения сотруднику, который ещё не настроил вход; срок
+         *     24 часа начинается заново. Ответ 204.
+         *
+         *     Коды ошибок:
+         *     - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — себе нельзя.
+         *     - 409 `staff.wrong_stage` — учётка не в статусе `invited` (вход уже настроен или выключена).
+         *     - 429 `ratelimit.exceeded` — с прошлой отправки не прошло 60 секунд (повторите через
+         *       `Retry-After` секунд).
+         */
+        post: operations["resendStaffInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/accounts/{staffId}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Сессии сотрудника
+         * @description «Роли и доступ»: живые сессии другого сотрудника — перед их завершением
+         *     (`revokeStaffAccountSessions`). Чтение — правом чтения `staff.accounts.read`. Админ видит
+         *     сессии только модераторов и поддержки: роль цели проверяет сценарий, как и у завершения.
+         *
+         *     Коды ошибок: 404 `staff.not_found` — учётки нет; 403 `auth.forbidden` — сессии владельца или
+         *     админа, а вы админ.
+         */
+        get: operations["listStaffAccountSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/accounts/{staffId}/sessions/revoke-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Завершить все сессии сотрудника
+         * @description «Роли и доступ»: завершает все сессии другого сотрудника сразу (подозрение на захват).
+         *     Учётка остаётся активной — сотрудник войдёт заново. Ответ — сколько сессий завершено.
+         *
+         *     Коды ошибок: 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свои сессии — через
+         *     «Мой доступ»; 403 `auth.forbidden` — сессии владельца или админа, а вы админ.
+         */
+        post: operations["revokeStaffAccountSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/staff/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Роли и матрица прав
+         * @description «Роли и доступ»: роли и права с доступом каждой роли — та же матрица, что в документе
+         *     ролевой модели; черновые права будущих модулей не входят. Подписи прав — в локалях админки
+         *     (`permissions.<ключ>`).
+         */
+        get: operations["getStaffRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/cities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Города платформы
+         * @description Города платформы всех статусов (`waitlist`, `pilot`, `live`) — выбор городов модератора в
+         *     «Ролях и доступе» и подписи уже назначенных городов. Владелец, админ и поддержка видят все
+         *     города; модератору — только его города (право `scoped`): фильтры сужают внутри них.
+         *
+         *     Порядок: статус (`live`, затем `pilot`, затем `waitlist`), население по убыванию, id.
+         *     Фильтры складываются: `q` — начало названия на любом поддерживаемом языке (ru, en) без учёта
+         *     регистра и ё/е; `ids` — только эти города (подписи назначенных модератору городов, до 100 id;
+         *     несуществующие id пропускаются).
+         *
+         *     `q`, пустой после нормализации (одни знаки препинания или пробелы), — 400
+         *     `validation.failed` по полю `query.q` с правилом `minLength`. Больше 100 `ids` — 400
+         *     `validation.failed` по `query.ids`. Названия — на языке из `Accept-Language`.
+         */
+        get: operations["listGeoCities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Журнал действий
+         * @description Записи журнала: кто, что и над чем сделал, было/стало, причина, сеть и браузер. Новые
+         *     сверху (время записи, затем id). Модератор видит записи своих городов и свои собственные —
+         *     фильтры сужают внутри них; остальные роли с правом видят весь журнал.
+         *
+         *     «Кто» — снимок имени на момент действия (`actor_label`): `operator` — оператор сервера,
+         *     `system` — сама платформа. Персональные данные в `before`/`after` замаскированы при записи,
+         *     адрес — до подсети /24 или /48. Чтение журнала само в журнал не пишется.
+         *
+         *     Фильтры складываются. `from` не раньше `to` — 400 `validation.failed` по `query.from` с
+         *     правилом `range`.
+         */
+        get: operations["listAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Запросы на подтверждение
+         * @description «Подтверждения»: `box=incoming` — запросы, которые вы можете подтвердить (у вас есть право
+         *     запроса, город в ваших, вы не инициатор и не цель); `box=mine` — запросы, которые создали вы.
+         *     Новые сверху. Счётчик в меню — `box=incoming&status=pending` раз в минуту с заголовком
+         *     `X-WF-Background: 1` (фоновый опрос не продлевает сессию).
+         */
+        get: operations["listApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/approvals/{approvalId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Подтвердить запрос
+         * @description Второй сотрудник подтверждает действие «вдвоём» — оно исполняется сразу, в той же
+         *     транзакции. Нужно право запроса (любое из прав «вдвоём»; точное — право самого запроса) и
+         *     город в ваших; подтверждающий — не инициатор и не цель. Ответ — запрос в итоговом состоянии
+         *     (`executed` или `failed` с причиной в `error`).
+         *
+         *     Коды ошибок:
+         *     - 404 `platform.approval_not_found` — запроса нет; 403 `auth.forbidden` — нет права запроса.
+         *     - 409 `platform.approval_self` — свой запрос или запрос о вас.
+         *     - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен (24 часа).
+         *     - 409 `platform.approval_stale` — цель изменилась после запроса (запрос помечен `failed`).
+         *     - Отказ исполнения — код действия: 409 `staff.last_owner`, 409 `staff.email_taken`,
+         *       422 `staff.city_not_found`, 404 `staff.not_found`.
+         */
+        post: operations["approveApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/approvals/{approvalId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отклонить запрос
+         * @description Второй сотрудник отклоняет действие «вдвоём» с обязательным комментарием — действие не
+         *     исполняется. Права — как у подтверждения. Ответ — запрос в состоянии `rejected`.
+         *
+         *     Коды ошибок:
+         *     - 404 `platform.approval_not_found` — запроса нет; 403 `auth.forbidden` — нет права запроса.
+         *     - 409 `platform.approval_self` — свой запрос или запрос о вас.
+         *     - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен.
+         */
+        post: operations["rejectApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/approvals/{approvalId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отменить свой запрос
+         * @description Инициатор отзывает свой запрос, пока его не решили. Ответ — запрос в состоянии `cancelled`.
+         *
+         *     Коды ошибок:
+         *     - 404 `platform.approval_not_found` — запроса нет или он не ваш.
+         *     - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен.
+         */
+        post: operations["cancelApproval"];
         delete?: never;
         options?: never;
         head?: never;
@@ -75,6 +919,16 @@ export interface components {
                  */
                 code: string;
             }[];
+            /**
+             * @description Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
+             * @example 3
+             */
+            attempts_left?: number;
+            /**
+             * @description Через сколько секунд повторить — у ошибок с ожиданием; то же значение, что в заголовке Retry-After, для клиента, которому заголовок недоступен
+             * @example 60
+             */
+            retry_after?: number;
             /** @description Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature) */
             challenge?: {
                 /**
@@ -105,13 +959,735 @@ export interface components {
                 signature: string;
             };
         };
-        /** @description Состояние сервиса */
-        Health: {
+        /**
+         * @description Роль сотрудника — одна на человека. owner — владелец, admin — админ, moderator — модератор своих городов, support — поддержка. Список открытый — незнакомое значение клиент обязан пережить
+         * @enum {string}
+         */
+        StaffRole: "owner" | "admin" | "moderator" | "support";
+        /**
+         * @description Состояние учётки. invited — приглашение выслано, вход ещё не настроен (и после сброса доступа); active — работает; disabled — выключена (роль снята), войти нельзя
+         * @enum {string}
+         */
+        StaffStatus: "invited" | "active" | "disabled";
+        /**
+         * @description Стадия сессии. mfa_pending — пароль принят, ждём второй фактор (5 минут); setup — первый вход по приглашению, доступна только настройка 2FA; active — сессия работает
+         * @enum {string}
+         */
+        StaffStage: "mfa_pending" | "setup" | "active";
+        /**
+         * @description Язык админки и писем сотруднику
+         * @enum {string}
+         */
+        StaffLocale: "ru" | "en";
+        /**
+         * @description Доступ сотрудника к праву. allow — можно сразу; scoped — только в своих городах (модератор); dual — только вдвоём: действие создаёт запрос на подтверждение
+         * @enum {string}
+         */
+        PermissionGrant: "allow" | "scoped" | "dual";
+        /**
+         * @description Значение клетки матрицы ролей: allow — можно сразу; scoped — только в своих городах; dual — вдвоём, через подтверждение; deny — нельзя
+         * @enum {string}
+         */
+        RoleGrant: "allow" | "scoped" | "dual" | "deny";
+        /**
+         * @description Причина выключения или сброса доступа — из списка: left_team — ушёл из команды, security — безопасность (утечка, потерянное устройство), role_change — смена обязанностей, other — другое (поясните в комментарии)
+         * @enum {string}
+         */
+        StaffActionReason: "left_team" | "security" | "role_change" | "other";
+        /** @description Вход сотрудника — первый шаг, почта и пароль */
+        StaffLoginRequest: {
             /**
-             * @description Всегда ok — иначе сервис не ответил бы
+             * @description Рабочая почта сотрудника; регистр и пробелы по краям не важны, домен на кириллице принимается
+             * @example olga.v@wf.example
+             */
+            email: string;
+            /**
+             * @description Пароль сотрудника как введён, без обрезки пробелов
+             * @example Жёлтая карточка на 90-й
+             */
+            password: string;
+        };
+        /** @description Второй фактор — ровно одно из полей: код из приложения-аутентификатора или резервный код. Резервный код сгорает при использовании */
+        StaffFactorRequest: {
+            /**
+             * @description Код из приложения-аутентификатора — 6 цифр; пробелы между цифрами допустимы (вставка из буфера)
+             * @example 492817
+             */
+            code?: string;
+            /**
+             * @description Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны
+             * @example k7m2q-x9p4t
+             */
+            recovery_code?: string;
+        };
+        /** @description Код из приложения-аутентификатора (резервные коды здесь не принимаются) */
+        StaffCodeRequest: {
+            /**
+             * @description 6 цифр из приложения-аутентификатора; пробелы между цифрами допустимы
+             * @example 492817
+             */
+            code: string;
+        };
+        /** @description Принятие приглашения — почта из письма, код из письма и новый пароль */
+        StaffAcceptInviteRequest: {
+            /**
+             * @description Почта, на которую пришло приглашение; регистр и пробелы по краям не важны
+             * @example olga.v@wf.example
+             */
+            email: string;
+            /**
+             * @description 6 цифр из письма-приглашения; пробелы между цифрами допустимы
+             * @example 305718
+             */
+            code: string;
+            /**
+             * @description Новый пароль: не короче 10 символов, не длиннее 128, не из списка распространённых. Нарушение — 400 validation.failed по полю body.password с кодом too_short, too_long или common
+             * @example Жёлтая карточка на 90-й
+             */
+            password: string;
+        };
+        /** @description Почта сотрудника — для повторной отправки кода приглашения */
+        StaffEmailRequest: {
+            /**
+             * @description Почта из приглашения; регистр и пробелы по краям не важны
+             * @example olga.v@wf.example
+             */
+            email: string;
+        };
+        /** @description Стадия новой сессии — что показать дальше (второй фактор или настройку 2FA) */
+        StaffStageResult: {
+            stage: components["schemas"]["StaffStage"];
+        };
+        /** @description Кто вошёл: учётка, роль, города, права и стадия сессии — по нему админка строит меню и кнопки. В стадии mfa_pending приходят только stage, session, reauth_required и пустые city_ids и permissions (поля учётки отсутствуют); в стадии setup — учётка без прав */
+        StaffMe: {
+            /**
+             * Format: uuid
+             * @description Id учётки сотрудника; нет в стадии mfa_pending
+             * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+             */
+            id?: string;
+            /**
+             * @description Рабочая почта в каноническом виде (домен — в ASCII-форме xn--…); нет в стадии mfa_pending
+             * @example olga.v@wf.example
+             */
+            email?: string;
+            /**
+             * @description Отображаемое имя — его видят журнал и другие сотрудники; нет в стадии mfa_pending
+             * @example Ольга В.
+             */
+            display_name?: string;
+            locale?: components["schemas"]["StaffLocale"];
+            role?: components["schemas"]["StaffRole"];
+            /**
+             * @description Города модератора; у остальных ролей и в стадии mfa_pending — пустой список
+             * @example [
+             *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47"
+             *     ]
+             */
+            city_ids: string[];
+            stage: components["schemas"]["StaffStage"];
+            /**
+             * @description Сессия ждёт второй фактор (бездействие или смена сети): до staffUnlock остальные операции отвечают 401 auth.reauth_required
+             * @example false
+             */
+            reauth_required: boolean;
+            /**
+             * @description Права сотрудника — ключ права и доступ; права без доступа не перечисляются. Пусто в стадиях mfa_pending и setup
+             * @example {
+             *       "staff.roles.read": "allow",
+             *       "staff.accounts.read": "allow",
+             *       "staff.roles.grant": "dual",
+             *       "audit.log.read": "allow",
+             *       "geo.cities.read": "allow"
+             *     }
+             */
+            permissions: {
+                [key: string]: components["schemas"]["PermissionGrant"];
+            };
+            /** @description Текущая сессия; null — сессия не определена */
+            session: components["schemas"]["StaffMeSession"] | null;
+        };
+        /** @description Текущая сессия — её id (отметка «это устройство» в «Моём доступе») и абсолютный срок */
+        StaffMeSession: {
+            /**
+             * Format: uuid
+             * @description Id текущей сессии
+             * @example 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description Когда сессия закончится в любом случае (8 часов от входа; у mfa_pending — 5 минут)
+             * @example 2026-10-13T17:00:00Z
+             */
+            expires_at: string;
+        };
+        /** @description Новый язык админки и писем */
+        StaffLocaleUpdate: {
+            locale: components["schemas"]["StaffLocale"];
+        };
+        /** @description Состояние второго фактора — для «Моего доступа» */
+        StaffMfaStatus: {
+            /**
+             * Format: date-time
+             * @description Когда настроено приложение-аутентификатор; null — ещё не настроено
+             * @example 2026-10-01T09:12:00Z
+             */
+            confirmed_at: string | null;
+            /**
+             * @description Сколько резервных кодов из 10 ещё не использовано
+             * @example 8
+             */
+            recovery_codes_left: number;
+        };
+        /** @description Новый секрет приложения-аутентификатора. Показывается один раз; повторный вызов до подтверждения выпускает новый секрет, старый перестаёт действовать */
+        StaffMfaSecret: {
+            /**
+             * @description Секрет base32 (RFC 4648, без =) — для ручного ввода в приложение
+             * @example JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+             */
+            secret: string;
+            /**
+             * @description Ссылка otpauth://totp/… для QR-кода; QR рисует сама страница, ссылку никуда не отправлять
+             * @example otpauth://totp/WF%20admin:olga.v%40wf.example?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=WF%20admin
+             */
+            otpauth_uri: string;
+        };
+        /** @description Резервные коды — показываются один раз, сервер хранит только их отпечатки. Каждый код работает вместо кода из приложения один раз */
+        StaffRecoveryCodes: {
+            /**
+             * @description 10 кодов вида xxxxx-xxxxx
+             * @example [
+             *       "k7m2q-x9p4t",
+             *       "a3b5c-d7e2f",
+             *       "m4n6p-q2r8s",
+             *       "t5v7w-x3y9z",
+             *       "b2c4d-f6g8h",
+             *       "j3k5m-n7p2q",
+             *       "r4s6t-v8w3x",
+             *       "y5z7a-b2c9d",
+             *       "e3f5g-h7j4k",
+             *       "p6q8r-s2t5v"
+             *     ]
+             */
+            recovery_codes: string[];
+        };
+        /** @description Смена своего пароля: текущий пароль, второй фактор (ровно одно из code и recovery_code) и новый пароль. Остальные свои сессии гасятся */
+        StaffPasswordChange: {
+            /**
+             * @description Текущий пароль как введён
+             * @example Жёлтая карточка на 90-й
+             */
+            current_password: string;
+            /**
+             * @description 6 цифр из приложения-аутентификатора; не вместе с recovery_code
+             * @example 492817
+             */
+            code?: string;
+            /**
+             * @description Резервный код вида xxxxx-xxxxx вместо кода из приложения; сгорает
+             * @example k7m2q-x9p4t
+             */
+            recovery_code?: string;
+            /**
+             * @description Новый пароль: не короче 10 символов, не длиннее 128, не из списка распространённых. Нарушение — 400 validation.failed по полю body.new_password с кодом too_short, too_long или common
+             * @example Свисток на 46-й минуте
+             */
+            new_password: string;
+        };
+        /** @description Сессия сотрудника — устройство, сеть и время работы */
+        StaffSession: {
+            /**
+             * Format: uuid
+             * @description Id сессии — для завершения
+             * @example 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+             */
+            id: string;
+            stage: components["schemas"]["StaffStage"];
+            /**
+             * @description Это сессия, с которой сделан запрос («это устройство»)
+             * @example true
+             */
+            current: boolean;
+            /**
+             * Format: date-time
+             * @description Когда сессия создана (вход)
+             * @example 2026-10-13T09:00:00Z
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Последняя активность — с точностью до минуты, фоновые опросы её не двигают
+             * @example 2026-10-13T10:41:00Z
+             */
+            last_seen_at: string;
+            /**
+             * Format: date-time
+             * @description Когда сессия закончится в любом случае
+             * @example 2026-10-13T17:00:00Z
+             */
+            expires_at: string;
+            /**
+             * @description Сеть, из которой вошли, — подсеть /24 (IPv4) или /48 (IPv6); полный адрес не показывается
+             * @example 203.0.113.0/24
+             */
+            ip: string;
+            /**
+             * @description Строка User-Agent браузера — устройство и браузер разбирает админка; null — браузер её не прислал
+             * @example Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36
+             */
+            user_agent: string | null;
+        };
+        /** @description Живые сессии сотрудника, новые сверху */
+        StaffSessionList: {
+            /** @description Сессии; текущая отмечена current */
+            items: components["schemas"]["StaffSession"][];
+        };
+        /** @description Сколько сессий завершено */
+        StaffRevoked: {
+            /**
+             * @description Число завершённых сессий; 0 — других сессий не было
+             * @example 2
+             */
+            revoked: number;
+        };
+        /** @description Приглашение нового сотрудника — почта, имя, роль и города (у модератора) */
+        StaffInviteRequest: {
+            /**
+             * @description Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же учётку через сброс доступа
+             * @example ivan.p@wf.example
+             */
+            email: string;
+            /**
+             * @description Отображаемое имя — его видят журнал и другие сотрудники
+             * @example Иван П.
+             */
+            display_name: string;
+            role: components["schemas"]["StaffRole"];
+            /**
+             * @description Города модератора — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пусто или нет поля
+             * @example [
+             *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47"
+             *     ]
+             */
+            city_ids?: string[];
+        };
+        /** @description Новая роль и города сотрудника целиком (не разница) */
+        StaffRoleUpdate: {
+            role: components["schemas"]["StaffRole"];
+            /**
+             * @description Города модератора целиком — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пустой список
+             * @example [
+             *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47",
+             *       "7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65"
+             *     ]
+             */
+            city_ids: string[];
+        };
+        /** @description Разрушающее действие над сотрудником — причина из списка, комментарий и почта цели, введённая руками */
+        StaffConfirmedAction: {
+            reason: components["schemas"]["StaffActionReason"];
+            /**
+             * @description Пояснение к причине — попадает в журнал действий
+             * @example Перешёл в другой проект
+             */
+            comment?: string;
+            /**
+             * @description Почта сотрудника-цели, введённая руками; регистр и пробелы по краям не важны. Не совпала — 400 validation.failed по body.confirm с кодом mismatch
+             * @example ivan.p@wf.example
+             */
+            confirm: string;
+        };
+        /** @description Живое приглашение учётки — пока сотрудник не настроил вход */
+        StaffInviteState: {
+            /**
+             * @description invite — первое приглашение; access_reset — после сброса доступа
              * @enum {string}
              */
-            status: "ok";
+            purpose: "invite" | "access_reset";
+            /**
+             * Format: date-time
+             * @description Срок кода приглашения (24 часа от выпуска)
+             * @example 2026-10-14T09:00:00Z
+             */
+            expires_at: string;
+            /**
+             * @description Срок истёк — нужна повторная отправка
+             * @example false
+             */
+            expired: boolean;
+        };
+        /** @description Учётка сотрудника — строка списка «Роли и доступ» и карточка */
+        StaffAccount: {
+            /**
+             * Format: uuid
+             * @description Id учётки
+             * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+             */
+            id: string;
+            /**
+             * @description Рабочая почта в каноническом виде (домен — в ASCII-форме xn--…)
+             * @example ivan.p@wf.example
+             */
+            email: string;
+            /**
+             * @description Отображаемое имя
+             * @example Иван П.
+             */
+            display_name: string;
+            locale: components["schemas"]["StaffLocale"];
+            status: components["schemas"]["StaffStatus"];
+            role: components["schemas"]["StaffRole"];
+            /**
+             * @description Города модератора; у остальных ролей — пустой список
+             * @example [
+             *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47"
+             *     ]
+             */
+            city_ids: string[];
+            /**
+             * Format: date-time
+             * @description Когда учётка создана
+             * @example 2026-10-01T09:00:00Z
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Последний вход; null — ещё не входил
+             * @example 2026-10-13T09:00:00Z
+             */
+            last_login_at: string | null;
+            /**
+             * Format: date-time
+             * @description До какого времени вход закрыт после пяти неверных кодов подряд; null — не закрыт
+             * @example null
+             */
+            locked_until: string | null;
+            /**
+             * Format: int64
+             * @description Версия учётки — растёт при каждом изменении, в том числе роли и городов
+             * @example 4
+             */
+            version: number;
+            /** @description Живое приглашение («приглашение не принято / просрочено»); null — приглашения нет */
+            invite: components["schemas"]["StaffInviteState"] | null;
+        };
+        /** @description Страница списка сотрудников */
+        StaffAccountPage: {
+            /** @description Сотрудники страницы */
+            items: components["schemas"]["StaffAccount"][];
+            /**
+             * @description Курсор следующей страницы; null — страниц больше нет
+             * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+             */
+            next_cursor: string | null;
+        };
+        /** @description Доступ к праву у каждой роли — строка матрицы */
+        RoleGrants: {
+            owner: components["schemas"]["RoleGrant"];
+            admin: components["schemas"]["RoleGrant"];
+            moderator: components["schemas"]["RoleGrant"];
+            support: components["schemas"]["RoleGrant"];
+        };
+        /** @description Право матрицы — ключ, признак изменения и доступ ролей. Подпись права — в локалях админки (permissions.<ключ>) */
+        RolePermission: {
+            /**
+             * @description Ключ права <модуль>.<ресурс>.<действие>
+             * @example staff.roles.grant
+             */
+            key: string;
+            /**
+             * @description Право меняет данные (иначе — только чтение)
+             * @example true
+             */
+            mutating: boolean;
+            grants: components["schemas"]["RoleGrants"];
+        };
+        /** @description Роли и матрица прав — экран «Роли и доступ»; черновые права будущих модулей не входят */
+        StaffRoles: {
+            /** @description Роли по старшинству */
+            roles: components["schemas"]["StaffRole"][];
+            /** @description Права в порядке каталога */
+            permissions: components["schemas"]["RolePermission"][];
+        };
+        /**
+         * @description Статус города. waitlist — игр пока нет; pilot — первые команды и модератор; live — город работает. Список открытый — незнакомое значение клиент обязан пережить
+         * @enum {string}
+         */
+        CityStatus: "waitlist" | "pilot" | "live";
+        /** @description Город платформы в списке админки — для выбора и подписи городов модератора */
+        GeoCity: {
+            /**
+             * Format: uuid
+             * @description Id города
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            id: string;
+            /**
+             * @description Текущий адрес города в вебе
+             * @example stavropol
+             */
+            slug: string;
+            /**
+             * @description Название на языке ответа; перевода нет — каноническое, на языке страны
+             * @example Ставрополь
+             */
+            name: string;
+            status: components["schemas"]["CityStatus"];
+            /**
+             * @description Код страны ISO 3166-1 alpha-2
+             * @example RU
+             */
+            country_code: string;
+            /**
+             * @description Регион на языке ответа — различает одноимённые города; null — регион не задан
+             * @example Ставропольский край
+             */
+            region_name: string | null;
+        };
+        /** @description Страница городов */
+        GeoCityPage: {
+            /** @description Города страницы */
+            items: components["schemas"]["GeoCity"][];
+            /**
+             * @description Курсор следующей страницы; null — страниц больше нет
+             * @example eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiXX0
+             */
+            next_cursor: string | null;
+        };
+        /**
+         * @description Действие запроса на подтверждение — подпись берётся из локалей админки (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца
+         * @enum {string}
+         */
+        ApprovalAction: "staff.invite" | "staff.role_change" | "staff.access_reset" | "staff.revoke_owner";
+        /**
+         * @description Состояние запроса. pending — ждёт решения (24 часа); executed — подтверждён и исполнен; rejected — отклонён; cancelled — отозван инициатором или погашен системой; expired — истёк срок; failed — подтверждён, но не исполнился (причина в error)
+         * @enum {string}
+         */
+        ApprovalStatus: "pending" | "executed" | "rejected" | "cancelled" | "expired" | "failed";
+        /** @description Сотрудник в запросе — id и снимок имени на момент действия */
+        ApprovalActor: {
+            /**
+             * Format: uuid
+             * @description Id учётки сотрудника
+             * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+             */
+            id: string;
+            /**
+             * @description Имя сотрудника на момент действия
+             * @example Ольга В.
+             */
+            label: string;
+        };
+        /** @description Запрос на подтверждение действия «вдвоём» */
+        Approval: {
+            /**
+             * Format: uuid
+             * @description Id запроса
+             * @example 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+             */
+            id: string;
+            action: components["schemas"]["ApprovalAction"];
+            /**
+             * @description Право, которое нужно подтверждающему (ключ матрицы)
+             * @example staff.roles.grant
+             */
+            permission: string;
+            status: components["schemas"]["ApprovalStatus"];
+            /**
+             * @description Что именно будет сделано — поля зависят от действия (почта, имя, роль, города, причина); v — версия формата
+             * @example {
+             *       "v": 1,
+             *       "email": "ivan.p@wf.example",
+             *       "display_name": "Иван П.",
+             *       "role": "moderator",
+             *       "city_ids": [
+             *         "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47"
+             *       ]
+             *     }
+             */
+            payload: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format: uuid
+             * @description Сотрудник-цель; null — цели ещё нет (приглашение новой учётки)
+             * @example null
+             */
+            target_id: string | null;
+            /**
+             * Format: uuid
+             * @description Город запроса — подтверждают сотрудники с этим городом; null — без города
+             * @example null
+             */
+            scope_city_id: string | null;
+            requested_by: components["schemas"]["ApprovalActor"];
+            /**
+             * Format: date-time
+             * @description Когда запрос создан
+             * @example 2026-10-13T09:15:00Z
+             */
+            requested_at: string;
+            /**
+             * Format: date-time
+             * @description До какого времени запрос можно решить (24 часа)
+             * @example 2026-10-14T09:15:00Z
+             */
+            expires_at: string;
+            /** @description Кто решил (подтвердил, отклонил или отменил); null — ещё не решён или решила система */
+            decided_by: components["schemas"]["ApprovalActor"] | null;
+            /**
+             * Format: date-time
+             * @description Когда решён; null — ещё ждёт решения
+             * @example null
+             */
+            decided_at: string | null;
+            /**
+             * @description Комментарий к решению; null — без комментария
+             * @example null
+             */
+            comment: string | null;
+            /**
+             * @description Почему не исполнился (status failed) или почему погашен системой; null — без ошибки
+             * @example null
+             */
+            error: string | null;
+        };
+        /** @description Действие не исполнено сразу — создан запрос на подтверждение вторым сотрудником */
+        ApprovalAccepted: {
+            approval: components["schemas"]["Approval"];
+        };
+        /** @description Страница запросов на подтверждение */
+        ApprovalPage: {
+            /** @description Запросы страницы */
+            items: components["schemas"]["Approval"][];
+            /**
+             * @description Курсор следующей страницы; null — страниц больше нет
+             * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMTNUMDk6MTU6MDBaIiwiMDE5MmYxZTIiXX0
+             */
+            next_cursor: string | null;
+        };
+        /** @description Решение «подтвердить» */
+        ApprovalApprove: {
+            /**
+             * @description Комментарий к подтверждению — попадает в журнал
+             * @example Проверила с Иваном лично
+             */
+            comment?: string;
+        };
+        /** @description Решение «отклонить» */
+        ApprovalReject: {
+            /**
+             * @description Почему отклонено — увидит инициатор, попадает в журнал
+             * @example Город модератору выдаём после испытательного срока
+             */
+            comment: string;
+        };
+        /** @description Запись журнала действий */
+        AuditRecord: {
+            /**
+             * Format: uuid
+             * @description Id записи
+             * @example 0192f1f0-8a9b-7c0d-9e1f-2a3b4c5d6e7f
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description Когда сделано
+             * @example 2026-10-13T09:20:00Z
+             */
+            created_at: string;
+            /**
+             * @description Код действия <модуль>.<действие> — подпись в локалях админки
+             * @example staff.role_granted
+             */
+            action: string;
+            /**
+             * @description Вид объекта действия
+             * @example staff_account
+             */
+            object_type: string;
+            /**
+             * Format: uuid
+             * @description Id объекта; null — действие без объекта (например, неудачный вход)
+             * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+             */
+            object_id: string | null;
+            /**
+             * Format: uuid
+             * @description Игрок-автор действия; null — автор не игрок
+             * @example null
+             */
+            actor_user_id: string | null;
+            /**
+             * Format: uuid
+             * @description Сотрудник-автор действия; null — автор не сотрудник
+             * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+             */
+            actor_staff_id: string | null;
+            /**
+             * @description Роль автора на момент действия (роль сотрудника или игрока) либо system, operator, anonymous — без автора-человека
+             * @example owner
+             */
+            actor_role: string | null;
+            /**
+             * @description «Кто» — имя на момент действия; operator — оператор сервера, system — платформа
+             * @example Ольга В.
+             */
+            actor_label: string | null;
+            /**
+             * Format: uuid
+             * @description Город записи — по нему модератор видит журнал своих городов; null — без города
+             * @example null
+             */
+            scope_city_id: string | null;
+            /**
+             * @description Причина действия (код причины и комментарий); null — без причины
+             * @example left_team: перешёл в другой проект
+             */
+            reason: string | null;
+            /**
+             * @description Сеть автора — подсеть /24 (IPv4) или /48 (IPv6); null — неизвестна
+             * @example 203.0.113.0/24
+             */
+            ip: string | null;
+            /**
+             * @description Браузер автора (User-Agent); null — неизвестен
+             * @example Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15
+             */
+            user_agent: string | null;
+            /**
+             * @description Было — значимые поля до действия, персональные данные замаскированы; null — объекта не было
+             * @example {
+             *       "role": "support",
+             *       "city_ids": []
+             *     }
+             */
+            before: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * @description Стало — значимые поля после действия, персональные данные замаскированы; null — объект удалён
+             * @example {
+             *       "role": "moderator",
+             *       "city_ids": [
+             *         "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47"
+             *       ]
+             *     }
+             */
+            after: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** @description Страница журнала действий */
+        AuditPage: {
+            /** @description Записи страницы, новые сверху */
+            items: components["schemas"]["AuditRecord"][];
+            /**
+             * @description Курсор следующей страницы; null — страниц больше нет
+             * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMTNUMDk6MjA6MDBaIiwiMDE5MmYxZjAiXX0
+             */
+            next_cursor: string | null;
         };
     };
     responses: {
@@ -136,14 +1712,279 @@ export interface components {
          * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
          */
         IdempotencyKey: string;
+        /**
+         * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+         * @example 1
+         */
+        AdminHeader: string;
+        /**
+         * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+         * @example ru-RU,ru;q=0.9,en;q=0.8
+         */
+        AcceptLanguage: string;
+        /**
+         * @description Id учётки сотрудника
+         * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+         */
+        StaffId: string;
+        /**
+         * @description Id сессии сотрудника — из списка «Мой доступ»
+         * @example 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+         */
+        SessionId: string;
+        /**
+         * @description Id запроса на подтверждение
+         * @example 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+         */
+        ApprovalId: string;
+        /**
+         * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+         * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+         */
+        Cursor: string;
+        /**
+         * @description Размер страницы, от 1 до 100; без параметра — 20
+         * @example 20
+         */
+        Limit: number;
     };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /**
+         * @description Новый токен сессии: прежний больше не действует. Имя — __Host-wf_admin_session, cookie сессионная (без Max-Age и Expires) — сроки держит сервер
+         * @example __Host-wf_admin_session=k3Jd9Qx2Lm7Vb4Np8Rt1Zw6Yc0Hs5Ae; Path=/; HttpOnly; Secure; SameSite=Strict
+         */
+        SetSessionCookie: string;
+        /**
+         * @description Стирание cookie сессии — браузер удаляет её сразу (Max-Age=0)
+         * @example __Host-wf_admin_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict
+         */
+        ClearSessionCookie: string;
+        /**
+         * @description Ответ с секретом — не кэшируется нигде, в том числе браузером
+         * @example no-store
+         */
+        CacheNoStore: string;
+        /**
+         * @description Ответ зависит от сотрудника и его прав — общим кэшам и браузеру его не хранить
+         * @example private, no-store
+         */
+        CachePrivate: string;
+        /**
+         * @description Всегда Accept-Language — ответ зависит от языка
+         * @example Accept-Language
+         */
+        Vary: string;
+        /**
+         * @description Язык названий в ответе (ru или en). Заголовка нет — поддерживаемый язык не выбран, названия на языке страны каждой записи
+         * @example ru
+         */
+        ContentLanguage: string;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    getHealth: {
+    staffLogin: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Почта и пароль сотрудника */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Пароль принят — нужен второй фактор */
+            200: {
+                headers: {
+                    "Set-Cookie": components["headers"]["SetSessionCookie"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffStageResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    staffVerifyMfa: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код из приложения или резервный код */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffFactorRequest"];
+            };
+        };
+        responses: {
+            /** @description Вход выполнен — сессия активна */
+            204: {
+                headers: {
+                    "Set-Cookie": components["headers"]["SetSessionCookie"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    staffUnlock: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код из приложения или резервный код */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffFactorRequest"];
+            };
+        };
+        responses: {
+            /** @description Сессия разблокирована */
+            204: {
+                headers: {
+                    "Set-Cookie": components["headers"]["SetSessionCookie"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    staffLogout: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сессия завершена, cookie стёрта */
+            204: {
+                headers: {
+                    "Set-Cookie": components["headers"]["ClearSessionCookie"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    staffAcceptInvite: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Почта, код из письма и новый пароль */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffAcceptInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Приглашение принято — нужна настройка 2FA */
+            200: {
+                headers: {
+                    "Set-Cookie": components["headers"]["SetSessionCookie"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffStageResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    staffResendInviteSelf: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Почта из приглашения */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Запрос принят; письмо уходит, если код можно выслать */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getStaffMe: {
         parameters: {
             query?: never;
             header?: never;
@@ -152,13 +1993,992 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Сервис жив */
+            /** @description Текущий сотрудник и сессия */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Health"];
+                    "application/json": components["schemas"]["StaffMe"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateStaffMeLocale: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Новый язык */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffLocaleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Язык сохранён */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getStaffMfa: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Состояние второго фактора */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMfaStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    staffMfaSetup: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Секрет приложения-аутентификатора */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMfaSecret"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    staffMfaConfirm: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код из приложения-аутентификатора */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Резервные коды */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffRecoveryCodes"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    regenerateStaffRecoveryCodes: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код из приложения-аутентификатора */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Новые резервные коды */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffRecoveryCodes"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    staffRecoveryAck: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Настройка завершена — сессия активна */
+            204: {
+                headers: {
+                    "Set-Cookie": components["headers"]["SetSessionCookie"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    changeStaffPassword: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Текущий пароль, второй фактор и новый пароль */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffPasswordChange"];
+            };
+        };
+        responses: {
+            /** @description Пароль изменён, другие сессии завершены */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listStaffMySessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Живые сессии */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSessionList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeStaffOtherSessions: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Остальные сессии завершены */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffRevoked"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeStaffMySession: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id сессии сотрудника — из списка «Мой доступ»
+                 * @example 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+                 */
+                sessionId: components["parameters"]["SessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сессия завершена */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createStaffInvite: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Почта, имя, роль и города нового сотрудника */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Создан запрос на подтверждение приглашения */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalAccepted"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listStaffAccounts: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Только учётки в этом состоянии; без параметра — все
+                 * @example active
+                 */
+                status?: components["schemas"]["StaffStatus"];
+                /**
+                 * @description Только сотрудники с этой ролью; без параметра — все роли
+                 * @example moderator
+                 */
+                role?: components["schemas"]["StaffRole"];
+                /**
+                 * @description Начало имени или почты, без учёта регистра
+                 * @example ива
+                 */
+                q?: string;
+                /**
+                 * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+                 * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Размер страницы, от 1 до 100; без параметра — 20
+                 * @example 20
+                 */
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница сотрудников */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffAccountPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getStaffAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Id учётки сотрудника
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                staffId: components["parameters"]["StaffId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Учётка сотрудника */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffAccount"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    changeStaffRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id учётки сотрудника
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                staffId: components["parameters"]["StaffId"];
+            };
+            cookie?: never;
+        };
+        /** @description Новая роль и города */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffRoleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Роль изменена сразу */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffAccount"];
+                };
+            };
+            /** @description Создан запрос на подтверждение смены роли */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalAccepted"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    disableStaffAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id учётки сотрудника
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                staffId: components["parameters"]["StaffId"];
+            };
+            cookie?: never;
+        };
+        /** @description Причина, комментарий и почта цели */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffConfirmedAction"];
+            };
+        };
+        responses: {
+            /** @description Учётка выключена сразу */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffAccount"];
+                };
+            };
+            /** @description Создан запрос на подтверждение выключения владельца */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalAccepted"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    resetStaffAccess: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id учётки сотрудника
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                staffId: components["parameters"]["StaffId"];
+            };
+            cookie?: never;
+        };
+        /** @description Причина, комментарий и почта цели */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffConfirmedAction"];
+            };
+        };
+        responses: {
+            /** @description Создан запрос на подтверждение сброса доступа */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalAccepted"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    resendStaffInvite: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id учётки сотрудника
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                staffId: components["parameters"]["StaffId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Новый код отправлен */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listStaffAccountSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Id учётки сотрудника
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                staffId: components["parameters"]["StaffId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Живые сессии сотрудника */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSessionList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeStaffAccountSessions: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id учётки сотрудника
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                staffId: components["parameters"]["StaffId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сессии завершены */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffRevoked"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getStaffRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Роли и матрица прав */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffRoles"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listGeoCities: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Начало названия города на любом поддерживаемом языке (ru, en), без учёта регистра и ё/е
+                 * @example став
+                 */
+                q?: string;
+                /**
+                 * @description Только города с этими id; несколько значений — повторите параметр (ids=…&ids=…), до 100. Без параметра — без фильтра
+                 * @example [
+                 *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47",
+                 *       "7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65"
+                 *     ]
+                 */
+                ids?: string[];
+                /**
+                 * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+                 * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Размер страницы, от 1 до 100; без параметра — 20
+                 * @example 20
+                 */
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: {
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница городов */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCityPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listAudit: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Только действия этого сотрудника
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                actor_staff_id?: string;
+                /**
+                 * @description Начало кода действия: staff. — все действия сотрудников, staff.login — входы. Совпадение с начала строки, без шаблонов
+                 * @example staff.
+                 */
+                action_prefix?: string;
+                /**
+                 * @description Только записи об объектах этого вида (staff_account, approval, city…)
+                 * @example staff_account
+                 */
+                object_type?: string;
+                /**
+                 * @description Только записи об этом объекте
+                 * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+                 */
+                object_id?: string;
+                /**
+                 * @description Записи с этого момента включительно
+                 * @example 2026-10-01T00:00:00Z
+                 */
+                from?: string;
+                /**
+                 * @description Записи до этого момента, не включая его
+                 * @example 2026-10-14T00:00:00Z
+                 */
+                to?: string;
+                /**
+                 * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+                 * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Размер страницы, от 1 до 100; без параметра — 20
+                 * @example 20
+                 */
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница журнала */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listApprovals: {
+        parameters: {
+            query: {
+                /** @description incoming — ждут вашего решения; mine — созданные вами */
+                box: "incoming" | "mine";
+                /**
+                 * @description Только запросы в этом состоянии; без параметра — все
+                 * @example pending
+                 */
+                status?: components["schemas"]["ApprovalStatus"];
+                /**
+                 * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+                 * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Размер страницы, от 1 до 100; без параметра — 20
+                 * @example 20
+                 */
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница запросов */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    approveApproval: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id запроса на подтверждение
+                 * @example 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+                 */
+                approvalId: components["parameters"]["ApprovalId"];
+            };
+            cookie?: never;
+        };
+        /** @description Комментарий к решению — необязателен */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApprovalApprove"];
+            };
+        };
+        responses: {
+            /** @description Запрос подтверждён и исполнен */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    rejectApproval: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id запроса на подтверждение
+                 * @example 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+                 */
+                approvalId: components["parameters"]["ApprovalId"];
+            };
+            cookie?: never;
+        };
+        /** @description Причина отказа */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalReject"];
+            };
+        };
+        responses: {
+            /** @description Запрос отклонён */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    cancelApproval: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id запроса на подтверждение
+                 * @example 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+                 */
+                approvalId: components["parameters"]["ApprovalId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Запрос отменён */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
                 };
             };
             default: components["responses"]["Problem"];

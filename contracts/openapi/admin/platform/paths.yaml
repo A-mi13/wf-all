@@ -1,21 +1,249 @@
-# Операции платформы, не модуля: их реализует internal/httpapi/admin.Server напрямую.
-health:
+# Операции платформы админки (спека сотрудников §4.8, §5.3): журнал действий и подтверждения вдвоём.
+# Не модуль — их реализует internal/httpapi/admin.Server напрямую (тег platform).
+audit:
   get:
-    operationId: getHealth
+    operationId: listAudit
     tags: [platform]
-    security: []
+    x-permission: audit.log.read
     x-error-codes: []
-    summary: Проверка живости сервиса
+    summary: Журнал действий
     description: |
-      Отвечает 200, пока процесс жив и принимает запросы; база данных не проверяется.
-      Без аутентификации. Используется хостингом для health check; клиентам — чтобы
-      разбудить dev-стенд после простоя (первый запрос может идти до минуты).
+      Записи журнала: кто, что и над чем сделал, было/стало, причина, сеть и браузер. Новые
+      сверху (время записи, затем id). Модератор видит записи своих городов и свои собственные —
+      фильтры сужают внутри них; остальные роли с правом видят весь журнал.
+
+      «Кто» — снимок имени на момент действия (`actor_label`): `operator` — оператор сервера,
+      `system` — сама платформа. Персональные данные в `before`/`after` замаскированы при записи,
+      адрес — до подсети /24 или /48. Чтение журнала само в журнал не пишется.
+
+      Фильтры складываются. `from` не раньше `to` — 400 `validation.failed` по `query.from` с
+      правилом `range`.
+    parameters:
+      - name: actor_staff_id
+        in: query
+        required: false
+        description: Только действия этого сотрудника
+        schema:
+          type: string
+          format: uuid
+        example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+      - name: action_prefix
+        in: query
+        required: false
+        description: >-
+          Начало кода действия: staff. — все действия сотрудников, staff.login — входы. Совпадение
+          с начала строки, без шаблонов
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+        example: staff.
+      - name: object_type
+        in: query
+        required: false
+        description: Только записи об объектах этого вида (staff_account, approval, city…)
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+        example: staff_account
+      - name: object_id
+        in: query
+        required: false
+        description: Только записи об этом объекте
+        schema:
+          type: string
+          format: uuid
+        example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+      - name: from
+        in: query
+        required: false
+        description: Записи с этого момента включительно
+        schema:
+          type: string
+          format: date-time
+        example: '2026-10-01T00:00:00Z'
+      - name: to
+        in: query
+        required: false
+        description: Записи до этого момента, не включая его
+        schema:
+          type: string
+          format: date-time
+        example: '2026-10-14T00:00:00Z'
+      - $ref: '../root.yaml#/components/parameters/Cursor'
+      - $ref: '../root.yaml#/components/parameters/Limit'
     responses:
       '200':
-        description: Сервис жив
+        description: Страница журнала
         content:
           application/json:
             schema:
-              $ref: '../root.yaml#/components/schemas/Health'
+              $ref: '../root.yaml#/components/schemas/AuditPage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+approvals:
+  get:
+    operationId: listApprovals
+    tags: [platform]
+    x-permission: self
+    x-error-codes: []
+    summary: Запросы на подтверждение
+    description: |
+      «Подтверждения»: `box=incoming` — запросы, которые вы можете подтвердить (у вас есть право
+      запроса, город в ваших, вы не инициатор и не цель); `box=mine` — запросы, которые создали вы.
+      Новые сверху. Счётчик в меню — `box=incoming&status=pending` раз в минуту с заголовком
+      `X-WF-Background: 1` (фоновый опрос не продлевает сессию).
+    parameters:
+      - name: box
+        in: query
+        required: true
+        description: incoming — ждут вашего решения; mine — созданные вами
+        schema:
+          type: string
+          enum: [incoming, mine]
+          x-extensible-enum: true
+      - name: status
+        in: query
+        required: false
+        description: Только запросы в этом состоянии; без параметра — все
+        schema:
+          $ref: '../root.yaml#/components/schemas/ApprovalStatus'
+        example: pending
+      - $ref: '../root.yaml#/components/parameters/Cursor'
+      - $ref: '../root.yaml#/components/parameters/Limit'
+    responses:
+      '200':
+        description: Страница запросов
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ApprovalPage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+approval-approve:
+  post:
+    operationId: approveApproval
+    tags: [platform]
+    x-permission: handler
+    x-permission-any:
+      - staff.roles.grant_elevated
+      - staff.roles.grant
+      - staff.roles.revoke_owner
+      - staff.access.reset_elevated
+      - staff.access.reset
+    x-error-codes:
+      - platform.approval_not_found
+      - platform.approval_self
+      - platform.approval_stale
+      - platform.approval_closed
+      - staff.last_owner
+      - staff.email_taken
+      - staff.city_not_found
+      - staff.not_found
+    summary: Подтвердить запрос
+    description: |
+      Второй сотрудник подтверждает действие «вдвоём» — оно исполняется сразу, в той же
+      транзакции. Нужно право запроса (любое из прав «вдвоём»; точное — право самого запроса) и
+      город в ваших; подтверждающий — не инициатор и не цель. Ответ — запрос в итоговом состоянии
+      (`executed` или `failed` с причиной в `error`).
+
+      Коды ошибок:
+      - 404 `platform.approval_not_found` — запроса нет; 403 `auth.forbidden` — нет права запроса.
+      - 409 `platform.approval_self` — свой запрос или запрос о вас.
+      - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен (24 часа).
+      - 409 `platform.approval_stale` — цель изменилась после запроса (запрос помечен `failed`).
+      - Отказ исполнения — код действия: 409 `staff.last_owner`, 409 `staff.email_taken`,
+        422 `staff.city_not_found`, 404 `staff.not_found`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ApprovalId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Комментарий к решению — необязателен
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/ApprovalApprove'
+    responses:
+      '200':
+        description: Запрос подтверждён и исполнен
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Approval'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+approval-reject:
+  post:
+    operationId: rejectApproval
+    tags: [platform]
+    x-permission: handler
+    x-permission-any:
+      - staff.roles.grant_elevated
+      - staff.roles.grant
+      - staff.roles.revoke_owner
+      - staff.access.reset_elevated
+      - staff.access.reset
+    x-error-codes:
+      - platform.approval_not_found
+      - platform.approval_self
+      - platform.approval_closed
+    summary: Отклонить запрос
+    description: |
+      Второй сотрудник отклоняет действие «вдвоём» с обязательным комментарием — действие не
+      исполняется. Права — как у подтверждения. Ответ — запрос в состоянии `rejected`.
+
+      Коды ошибок:
+      - 404 `platform.approval_not_found` — запроса нет; 403 `auth.forbidden` — нет права запроса.
+      - 409 `platform.approval_self` — свой запрос или запрос о вас.
+      - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ApprovalId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Причина отказа
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/ApprovalReject'
+    responses:
+      '200':
+        description: Запрос отклонён
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Approval'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+approval-cancel:
+  post:
+    operationId: cancelApproval
+    tags: [platform]
+    x-permission: self
+    x-error-codes:
+      - platform.approval_not_found
+      - platform.approval_closed
+    summary: Отменить свой запрос
+    description: |
+      Инициатор отзывает свой запрос, пока его не решили. Ответ — запрос в состоянии `cancelled`.
+
+      Коды ошибок:
+      - 404 `platform.approval_not_found` — запроса нет или он не ваш.
+      - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ApprovalId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '200':
+        description: Запрос отменён
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Approval'
       default:
         $ref: '../root.yaml#/components/responses/Problem'

@@ -1,17 +1,35 @@
-# API админки (admin-api) — исходник контракта (спека бэкенда §8.1). Потребитель — только
-# apps/admin. Бандл ../admin.yaml собирает `pnpm --filter @wf/contracts bundle` (redocly);
-# он коммитится и руками не правится. Операции модуля — <модуль>/paths.yaml, тег = имя
-# модуля-реализатора (internal/<модуль>/admin); схемы — <модуль>/schemas.yaml, каждая
-# регистрируется ниже в components.schemas.
-# Схема Problem продублирована в public/root.yaml намеренно (контракты версионируются
+# API админки (admin-api) — исходник контракта (спека бэкенда §8.1, спека сотрудников §8). Потребитель —
+# только apps/admin. Бандл ../admin.yaml собирает `pnpm --filter @wf/contracts bundle` (redocly); он
+# коммитится и руками не правится. Операции модуля — <модуль>/paths.yaml, тег = имя модуля-реализатора
+# (internal/<модуль>/admin; platform — internal/httpapi/admin.Server); схемы — <модуль>/schemas.yaml,
+# каждая регистрируется ниже в components.schemas.
+# Каждая операция объявляет право x-permission (страж contracts/src/permissions.mjs по каталогу
+# admin/permissions.json — его генерирует ./task gen из backend/internal/platform/perm).
+# После Task 9a плана A контракт заморожен (P16): правка — только через контроллера плана.
+# Схема Problem и ответ Problem продублированы в public/root.yaml намеренно (контракты версионируются
 # независимо); тест бандлов в contracts/ падает после сборки, если копии разошлись.
 openapi: 3.0.3
 info:
   title: WF admin API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    API админки (admin-api); потребитель — только apps/admin. Аутентификация — cookie сессии
-    `wf_admin_session`, которую ставит вход в админку.
+    API админки (admin-api); потребитель — только apps/admin, с того же origin, что и сам API.
+
+    **Вход и сессия.** Сотрудник входит почтой и паролем (`staffLogin`), затем вторым фактором —
+    кодом из приложения-аутентификатора или резервным кодом (`staffVerifyMfa`). Сессия — cookie
+    `__Host-wf_admin_session` (`HttpOnly; Secure; SameSite=Strict; Path=/`, без `Domain` и срока):
+    её ставят и меняют ответы с заголовком `Set-Cookie`, браузер шлёт её сам. Сроки — на сервере:
+    8 часов от входа; бездействие дольше 20 минут или смена сети — 401 `auth.reauth_required`
+    (сессия жива, нужен второй фактор — `staffUnlock`). Стадии сессии: `mfa_pending` (пароль
+    принят, ждём второй фактор, 5 минут), `setup` (первый вход по приглашению — только настройка
+    2FA), `active`. Клиент узнаёт стадию, роль и права из `GET /v1/staff/me`.
+
+    **Права.** У каждой операции — расширение `x-permission`: ключ права из матрицы ролей
+    (`GET /v1/staff/roles`) или служебное значение — `anonymous` (без сессии), `session` (сессия в
+    любой стадии), `self` (активная сессия, только своё), `handler` (право зависит от тела или
+    цели запроса; возможные права — в `x-permission-any`). Нет права — 403 `auth.forbidden`.
+    Действие с правом «вдвоём» не исполняется сразу, а создаёт запрос на подтверждение: ответ
+    `202` с `approval`, второй сотрудник решает его в «Подтверждениях» (`/v1/approvals`).
 
     Общие правила для всех операций:
 
@@ -27,21 +45,44 @@ info:
       использован с другим запросом), `idempotency.in_progress` (409 — запрос с этим ключом ещё
       выполняется), `idempotency.replay_unavailable` (409 — действие выполнено, перечитайте
       состояние), `feature.disabled` (403 — функция выключена флагом).
-    - **Idempotency-Key** — обязательный заголовок мутирующих операций: новый ключ (UUID) на
-      каждое действие пользователя, тот же ключ при повторе после обрыва сети — действие не
-      выполнится дважды: повтор отдаёт сохранённый ответ с заголовком `Idempotency-Replayed: true`.
+      Конвейер админки: `auth.forbidden` (403 — нет права на операцию или город вне ваших),
+      `auth.csrf_failed` (403 — запрос не со страницы админки: нет `Origin` админки или заголовка
+      `X-WF-Admin`), `auth.ip_not_allowed` (403 — вход в админку с этого адреса закрыт),
+      `auth.reauth_required` (401 — подтвердите вход вторым фактором, `staffUnlock`),
+      `auth.setup_required` (403 — сначала завершите настройку 2FA), `http.not_implemented`
+      (501 — операция описана в контракте, но сервер её ещё не исполняет).
+    - **X-WF-Admin: 1** — обязательный заголовок каждого изменяющего запроса (POST, PUT, PATCH,
+      DELETE) вместе с `Origin` админки — защита от подделки запроса с чужого сайта.
+    - **Idempotency-Key** — обязательный заголовок изменяющих операций, кроме анонимных (вход,
+      принятие приглашения, повторная отправка кода): новый ключ (UUID) на каждое действие
+      пользователя, тот же ключ при повторе после обрыва сети — действие не выполнится дважды:
+      повтор отдаёт сохранённый ответ с заголовком `Idempotency-Replayed: true`. Ответы с
+      секретами (`x-idempotency: no-store`) не сохраняются: их повтор — 409
+      `idempotency.replay_unavailable`.
     - **Время** — ISO 8601 в UTC (`2026-10-01T17:00:00Z`); местное время матча считается по
       таймзоне города или поля.
     - **Деньги** — целое число в минорных единицах (копейки) плюс код валюты ISO 4217.
+    - **Списки** — страницы по курсору: `next_cursor` ответа передайте в `cursor` следующего
+      запроса, `null` — страниц больше нет; курсор непрозрачный, испорченный — 400
+      `validation.failed` по полю `query.cursor`.
     - **Тело запроса** — не больше 1 МиБ.
     - Поле `request_id` в ошибке — назовите его, сообщая о проблеме: по нему находится запрос в логах.
 tags:
+  - name: staff
+    description: >-
+      Сотрудники админки — вход, второй фактор, сессии, «Мой доступ», приглашения, роли и доступ
+      других сотрудников
+  - name: geo
+    description: Справочник городов в админке — выбор городов модератора
   - name: platform
-    description: Служебные операции платформы — живость сервиса и подобное, не сценарии админки
-# Аутентификация по умолчанию; анонимная операция объявляет `security: []`.
+    description: >-
+      Механизмы платформы админки — журнал действий и подтверждения вдвоём
+# Аутентификация по умолчанию; анонимная операция объявляет `security: []` и `x-permission: anonymous`.
 security:
   - session: []
 # Коды ошибок платформы — их может вернуть любая операция; у операций — свои x-error-codes.
+# Первые 13 — httpx.PlatformCodes (общие с public), остальные — коды конвейера admin-api
+# (httpx.AdminCommonCodes, только в этом контракте); сверка — TestPlatformCodesDocumented.
 x-error-codes-common:
   - internal
   - request.invalid
@@ -56,19 +97,95 @@ x-error-codes-common:
   - idempotency.in_progress
   - idempotency.replay_unavailable
   - feature.disabled
-# Анонимные мутирующие операции — закрытый список operationId. В админке он пуст:
-# Idempotency-Key обязателен у всех мутирующих операций (спека бэкенда §6.4).
-x-anonymous-mutations: []
+  - auth.forbidden
+  - auth.csrf_failed
+  - auth.ip_not_allowed
+  - auth.reauth_required
+  - auth.setup_required
+  - http.not_implemented
+# Анонимные мутирующие операции — закрытый список operationId: ровно операции с security: [] (D15).
+# Остальные мутации, включая второй фактор и разблокировку, требуют сессию и Idempotency-Key.
+x-anonymous-mutations:
+  - staffLogin
+  - staffAcceptInvite
+  - staffResendInviteSelf
 paths:
-  /v1/health:
-    $ref: './platform/paths.yaml#/health'
+  /v1/staff/auth/login:
+    $ref: './staff/paths.yaml#/auth-login'
+  /v1/staff/auth/mfa:
+    $ref: './staff/paths.yaml#/auth-mfa'
+  /v1/staff/auth/unlock:
+    $ref: './staff/paths.yaml#/auth-unlock'
+  /v1/staff/auth/logout:
+    $ref: './staff/paths.yaml#/auth-logout'
+  /v1/staff/auth/invite/accept:
+    $ref: './staff/paths.yaml#/auth-invite-accept'
+  /v1/staff/auth/invite/resend:
+    $ref: './staff/paths.yaml#/auth-invite-resend'
+  /v1/staff/me:
+    $ref: './staff/paths.yaml#/me'
+  /v1/staff/me/locale:
+    $ref: './staff/paths.yaml#/me-locale'
+  /v1/staff/me/mfa:
+    $ref: './staff/paths.yaml#/me-mfa'
+  /v1/staff/me/mfa/setup:
+    $ref: './staff/paths.yaml#/me-mfa-setup'
+  /v1/staff/me/mfa/confirm:
+    $ref: './staff/paths.yaml#/me-mfa-confirm'
+  /v1/staff/me/mfa/recovery-codes:
+    $ref: './staff/paths.yaml#/me-mfa-recovery-codes'
+  /v1/staff/me/mfa/recovery-codes/ack:
+    $ref: './staff/paths.yaml#/me-mfa-recovery-codes-ack'
+  /v1/staff/me/password:
+    $ref: './staff/paths.yaml#/me-password'
+  /v1/staff/me/sessions:
+    $ref: './staff/paths.yaml#/me-sessions'
+  /v1/staff/me/sessions/revoke-others:
+    $ref: './staff/paths.yaml#/me-sessions-revoke-others'
+  /v1/staff/me/sessions/{sessionId}:
+    $ref: './staff/paths.yaml#/me-session'
+  /v1/staff/invites:
+    $ref: './staff/paths.yaml#/invites'
+  /v1/staff/accounts:
+    $ref: './staff/paths.yaml#/accounts'
+  /v1/staff/accounts/{staffId}:
+    $ref: './staff/paths.yaml#/account'
+  /v1/staff/accounts/{staffId}/role:
+    $ref: './staff/paths.yaml#/account-role'
+  /v1/staff/accounts/{staffId}/disable:
+    $ref: './staff/paths.yaml#/account-disable'
+  /v1/staff/accounts/{staffId}/access-reset:
+    $ref: './staff/paths.yaml#/account-access-reset'
+  /v1/staff/accounts/{staffId}/invite/resend:
+    $ref: './staff/paths.yaml#/account-invite-resend'
+  /v1/staff/accounts/{staffId}/sessions:
+    $ref: './staff/paths.yaml#/account-sessions'
+  /v1/staff/accounts/{staffId}/sessions/revoke-all:
+    $ref: './staff/paths.yaml#/account-sessions-revoke-all'
+  /v1/staff/roles:
+    $ref: './staff/paths.yaml#/roles'
+  /v1/geo/cities:
+    $ref: './geo/paths.yaml#/cities'
+  /v1/audit:
+    $ref: './platform/paths.yaml#/audit'
+  /v1/approvals:
+    $ref: './platform/paths.yaml#/approvals'
+  /v1/approvals/{approvalId}/approve:
+    $ref: './platform/paths.yaml#/approval-approve'
+  /v1/approvals/{approvalId}/reject:
+    $ref: './platform/paths.yaml#/approval-reject'
+  /v1/approvals/{approvalId}/cancel:
+    $ref: './platform/paths.yaml#/approval-cancel'
 components:
   securitySchemes:
     session:
       type: apiKey
       in: cookie
-      name: wf_admin_session
-      description: Cookie сессии админки; ставится при входе
+      name: __Host-wf_admin_session
+      description: >-
+        Cookie сессии сотрудника (HttpOnly; Secure; SameSite=Strict; Path=/). Ставят и меняют ответы
+        входа, второго фактора, разблокировки, принятия приглашения и завершения настройки 2FA;
+        стирает выход. Скрипту страницы недоступна — браузер шлёт её сам
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -80,6 +197,116 @@ components:
         minLength: 16
         maxLength: 128
       example: 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+    AdminHeader:
+      name: X-WF-Admin
+      in: header
+      required: true
+      description: >-
+        Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие
+        запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+      schema:
+        type: string
+        pattern: '^1$'
+      example: '1'
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      required: false
+      description: >-
+        Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион
+        отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи.
+        Админка шлёт язык своего интерфейса
+      schema:
+        type: string
+      example: 'ru-RU,ru;q=0.9,en;q=0.8'
+    StaffId:
+      name: staffId
+      in: path
+      required: true
+      description: Id учётки сотрудника
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: Id сессии сотрудника — из списка «Мой доступ»
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+    ApprovalId:
+      name: approvalId
+      in: path
+      required: true
+      description: Id запроса на подтверждение
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+      schema:
+        type: string
+        maxLength: 1024
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Размер страницы, от 1 до 100; без параметра — 20
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      example: 20
+  headers:
+    SetSessionCookie:
+      description: >-
+        Новый токен сессии: прежний больше не действует. Имя — __Host-wf_admin_session, cookie
+        сессионная (без Max-Age и Expires) — сроки держит сервер
+      required: true
+      schema:
+        type: string
+      example: '__Host-wf_admin_session=k3Jd9Qx2Lm7Vb4Np8Rt1Zw6Yc0Hs5Ae; Path=/; HttpOnly; Secure; SameSite=Strict'
+    ClearSessionCookie:
+      description: Стирание cookie сессии — браузер удаляет её сразу (Max-Age=0)
+      required: true
+      schema:
+        type: string
+      example: '__Host-wf_admin_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict'
+    CacheNoStore:
+      description: Ответ с секретом — не кэшируется нигде, в том числе браузером
+      required: true
+      schema:
+        type: string
+      example: no-store
+    CachePrivate:
+      description: Ответ зависит от сотрудника и его прав — общим кэшам и браузеру его не хранить
+      required: true
+      schema:
+        type: string
+      example: 'private, no-store'
+    Vary:
+      description: Всегда Accept-Language — ответ зависит от языка
+      required: true
+      schema:
+        type: string
+      example: Accept-Language
+    ContentLanguage:
+      description: >-
+        Язык названий в ответе (ru или en). Заголовка нет — поддерживаемый язык не выбран, названия
+        на языке страны каждой записи
+      required: false
+      schema:
+        type: string
+      example: ru
   responses:
     Problem:
       description: Ошибка в формате RFC 9457
@@ -140,6 +367,20 @@ components:
                 type: string
                 description: 'Нарушенное правило схемы: required, minLength, maximum, enum, format…'
                 example: minLength
+        attempts_left:
+          type: integer
+          minimum: 0
+          description: >-
+            Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после
+            которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
+          example: 3
+        retry_after:
+          type: integer
+          minimum: 1
+          description: >-
+            Через сколько секунд повторить — у ошибок с ожиданием; то же значение, что в заголовке
+            Retry-After, для клиента, которому заголовок недоступен
+          example: 60
         challenge:
           type: object
           description: >-
@@ -171,5 +412,96 @@ components:
               type: string
               description: HMAC-SHA-256 задачи на ключе сервера, hex
               example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
-    Health:
-      $ref: './platform/schemas.yaml#/Health'
+    # staff
+    StaffRole:
+      $ref: './staff/schemas.yaml#/StaffRole'
+    StaffStatus:
+      $ref: './staff/schemas.yaml#/StaffStatus'
+    StaffStage:
+      $ref: './staff/schemas.yaml#/StaffStage'
+    StaffLocale:
+      $ref: './staff/schemas.yaml#/StaffLocale'
+    PermissionGrant:
+      $ref: './staff/schemas.yaml#/PermissionGrant'
+    RoleGrant:
+      $ref: './staff/schemas.yaml#/RoleGrant'
+    StaffActionReason:
+      $ref: './staff/schemas.yaml#/StaffActionReason'
+    StaffLoginRequest:
+      $ref: './staff/schemas.yaml#/StaffLoginRequest'
+    StaffFactorRequest:
+      $ref: './staff/schemas.yaml#/StaffFactorRequest'
+    StaffCodeRequest:
+      $ref: './staff/schemas.yaml#/StaffCodeRequest'
+    StaffAcceptInviteRequest:
+      $ref: './staff/schemas.yaml#/StaffAcceptInviteRequest'
+    StaffEmailRequest:
+      $ref: './staff/schemas.yaml#/StaffEmailRequest'
+    StaffStageResult:
+      $ref: './staff/schemas.yaml#/StaffStageResult'
+    StaffMe:
+      $ref: './staff/schemas.yaml#/StaffMe'
+    StaffMeSession:
+      $ref: './staff/schemas.yaml#/StaffMeSession'
+    StaffLocaleUpdate:
+      $ref: './staff/schemas.yaml#/StaffLocaleUpdate'
+    StaffMfaStatus:
+      $ref: './staff/schemas.yaml#/StaffMfaStatus'
+    StaffMfaSecret:
+      $ref: './staff/schemas.yaml#/StaffMfaSecret'
+    StaffRecoveryCodes:
+      $ref: './staff/schemas.yaml#/StaffRecoveryCodes'
+    StaffPasswordChange:
+      $ref: './staff/schemas.yaml#/StaffPasswordChange'
+    StaffSession:
+      $ref: './staff/schemas.yaml#/StaffSession'
+    StaffSessionList:
+      $ref: './staff/schemas.yaml#/StaffSessionList'
+    StaffRevoked:
+      $ref: './staff/schemas.yaml#/StaffRevoked'
+    StaffInviteRequest:
+      $ref: './staff/schemas.yaml#/StaffInviteRequest'
+    StaffRoleUpdate:
+      $ref: './staff/schemas.yaml#/StaffRoleUpdate'
+    StaffConfirmedAction:
+      $ref: './staff/schemas.yaml#/StaffConfirmedAction'
+    StaffInviteState:
+      $ref: './staff/schemas.yaml#/StaffInviteState'
+    StaffAccount:
+      $ref: './staff/schemas.yaml#/StaffAccount'
+    StaffAccountPage:
+      $ref: './staff/schemas.yaml#/StaffAccountPage'
+    RoleGrants:
+      $ref: './staff/schemas.yaml#/RoleGrants'
+    RolePermission:
+      $ref: './staff/schemas.yaml#/RolePermission'
+    StaffRoles:
+      $ref: './staff/schemas.yaml#/StaffRoles'
+    # geo
+    CityStatus:
+      $ref: './geo/schemas.yaml#/CityStatus'
+    GeoCity:
+      $ref: './geo/schemas.yaml#/GeoCity'
+    GeoCityPage:
+      $ref: './geo/schemas.yaml#/GeoCityPage'
+    # platform
+    ApprovalAction:
+      $ref: './platform/schemas.yaml#/ApprovalAction'
+    ApprovalStatus:
+      $ref: './platform/schemas.yaml#/ApprovalStatus'
+    ApprovalActor:
+      $ref: './platform/schemas.yaml#/ApprovalActor'
+    Approval:
+      $ref: './platform/schemas.yaml#/Approval'
+    ApprovalAccepted:
+      $ref: './platform/schemas.yaml#/ApprovalAccepted'
+    ApprovalPage:
+      $ref: './platform/schemas.yaml#/ApprovalPage'
+    ApprovalApprove:
+      $ref: './platform/schemas.yaml#/ApprovalApprove'
+    ApprovalReject:
+      $ref: './platform/schemas.yaml#/ApprovalReject'
+    AuditRecord:
+      $ref: './platform/schemas.yaml#/AuditRecord'
+    AuditPage:
+      $ref: './platform/schemas.yaml#/AuditPage'

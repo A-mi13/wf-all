@@ -16,7 +16,7 @@ paths:
 - Сгенерированные типы API — `internal/httpapi/{public,admin}/oapi`; `httpapi/{public,admin}.Server` встраивает хендлеры модулей; операции платформы (тег `platform`) реализует сам. Тег операции в контракте = модуль-реализатор (`apitest.TagViolations`).
 - Ошибки клиенту — `httpx.WriteProblem` с кодом `<модуль>.<ошибка>`; клиенты переводят по `code`, `title` — техническая сводка, не для показа. Код ошибки платформы — константа в `internal/platform/httpx/codes.go` (и в `PlatformCodes`) вместе с контрактом и локалями (`.claude/rules/contracts.md`); литерал кода ловит `TestProblemCodesAreConstants` — он обходит все пакеты `internal/platform/*`; вне httpx код ошибки — только константа `httpx.Code…`. Коды модуля (`<модуль>.<ошибка>`) — константы в корневом пакете модуля (`internal/geo/codes.go`: `Code…` и список `Codes`), перечисляются в `x-error-codes` его операций; сверка в обе стороны — `TestGeoCodesDocumented` (`internal/httpapi/public`), следующий модуль добавляет такой же тест. Проверка хендлера сверх схемы (`q` из одних знаков, явная проверка точки до PostGIS) — `httpx.NewFieldError(поле, правило)`: 400 `validation.failed` с полем, как у валидатора.
 - Swagger UI — `internal/platform/apidocs` на `/docs` (контракт — `/docs/openapi.json`), включается `API_DOCS_ENABLED` / `ADMIN_DOCS_ENABLED` (`config.HTTP.DocsEnabled`, по умолчанию выкл.); `/docs` вне контракта — валидатор пропускает его к роутеру. Swagger UI грузится с jsDelivr; версия и SRI-хэши — в `apidocs.go`, обновлять вместе.
-- Пробы — `/healthz`, `/readyz` (`platform/health`) вне контракта. `/v1/health` из публичного контракта удалён (спека `geo` §4.4, исключение — `contracts/oasdiff-err-ignore-public.txt`); из админского удаляется на этапе 2 `geo` вместе с первой админской операцией (через `oasdiff-err-ignore-admin.txt`). Проверка связи клиентов — любой анонимный запрос контракта (веб — `listCities` с `limit=1`).
+- Пробы — `/healthz`, `/readyz` (`platform/health`) вне контракта. `/v1/health` удалён из обоих контрактов (public — спека `geo` §4.4, admin — план сотрудников R13; исключения — `contracts/oasdiff-err-ignore-{public,admin}.txt`). Проверка связи клиентов — запрос контракта (веб — `listCities` с `limit=1`, админка — `GET /v1/staff/me`).
 
 ## Конвейер (спека §6.1)
 
@@ -28,5 +28,7 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
 иначе API не стартует.
 
 - Перед peer `httpx.NewRouter` ставит `request_id`, лог доступа и recover; пробы — до роутера.
-- admin-api — тот же конвейер без `auth.Middleware` (вход сотрудников — спека `identity`) и без
-  `humancheck.Middleware`.
+- admin-api — тот же конвейер без `auth.Middleware` (вход сотрудников — спека «Сотрудники и админка geo», конвейер — Task 9b) и без
+  `humancheck.Middleware`. `admin.Server` встраивает `staff/admin.Handler` и `geo/admin.Handler` через псевдонимы
+  (`staffHandler`, `geoHandler`: оба типа называются `Handler`). Операция контракта, которую ещё не исполняет
+  сервер, — заглушка `501 http.not_implemented` (`httpx.CodeNotImplemented`; проверка — `apitest.NotImplemented`).
