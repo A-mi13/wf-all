@@ -8,7 +8,8 @@ const ci = Boolean(process.env.CI);
 function webPort(): number {
   const raw = process.env.WF_WEB_PORT?.trim();
   if (!raw) return 3000;
-  const port = Number(raw);
+  // только десятичные цифры: Number() принял бы и «0x10», «1e3», «3000.0»
+  const port = /^\d+$/.test(raw) ? Number(raw) : NaN;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`WF_WEB_PORT: ожидается порт 1–65535, получено «${raw}»`);
   }
