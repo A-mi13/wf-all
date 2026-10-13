@@ -104,7 +104,10 @@ func (a *App) passwordFailed(ctx context.Context, acct *staffdb.GetLoginAccountR
 	if acct != nil {
 		object = acct.ID
 	}
-	err := db.InTx(ctx, a.pool, func(ctx context.Context, _ pgx.Tx) error {
+	// обрыв соединения клиента не теряет запись неудачи
+	dctx, cancel := detached(ctx)
+	defer cancel()
+	err := db.InTx(dctx, a.pool, func(ctx context.Context, _ pgx.Tx) error {
 		return audit.Write(ctx, audit.Entry{
 			ActorRole: roleAnonymous, Action: actionLoginFailed, ObjectType: objectAccount, ObjectID: object,
 			After: map[string]any{"email": email, "step": "password"},

@@ -5,12 +5,14 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/staff"
+	"wf/backend/internal/staff/internal/app"
 )
 
 // Успех пароля — новая сессия mfa_pending на 5 минут; через 5 минут она недействительна.
@@ -186,5 +188,52 @@ func TestLogout(t *testing.T) {
 	}
 	if n := e.count(`SELECT count(*) FROM staff_sessions WHERE id = $1 AND revoked_reason = 'logout'`, s.SessionID); n != 1 {
 		t.Fatal("сессия не погашена как logout")
+	}
+}
+
+// countingHasher — хэшер, считающий вызовы Verify и VerifyDummy.
+type countingHasher struct {
+	app.PasswordHasher
+	verify, dummy atomic.Int32
+}
+
+func (h *countingHasher) Verify(ctx context.Context, pw, encoded string) (bool, bool, error) {
+	h.verify.Add(1)
+	return h.PasswordHasher.Verify(ctx, pw, encoded)
+}
+
+func (h *countingHasher) VerifyDummy(ctx context.Context, pw string) error {
+	h.dummy.Add(1)
+	return h.PasswordHasher.VerifyDummy(ctx, pw)
+}
+
+// Выравнивание времени (D7): закрытая учётка и несуществующая почта проходят VerifyDummy и не
+// вызывают Verify; верный путь — Verify без VerifyDummy.
+func TestLoginTimingEqualized(t *testing.T) {
+	e := newEnv(t)
+	base, err := sharedHasher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := e.addMember("locked@wf.example", memberOpts{})
+	e.exec(`UPDATE staff_accounts SET locked_until = $2 WHERE id = $1`, locked.ID, t0.Add(time.Hour))
+	ok := e.addMember("ok@wf.example", memberOpts{})
+	for _, c := range []struct {
+		name          string
+		email         string
+		verify, dummy int32
+	}{
+		{"закрытая учётка", locked.Email, 0, 1},
+		{"нет почты", "ghost@wf.example", 0, 1},
+		{"неверный пароль", ok.Email, 1, 0},
+	} {
+		h := &countingHasher{PasswordHasher: base}
+		e.app.SetHasher(h)
+		if _, err := e.app.Login(context.Background(), c.email, testPassword+"?", metaWeb); !errors.Is(err, staff.ErrInvalidCredentials) {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if h.verify.Load() != c.verify || h.dummy.Load() != c.dummy {
+			t.Errorf("%s: Verify %d, VerifyDummy %d; ждали %d и %d", c.name, h.verify.Load(), h.dummy.Load(), c.verify, c.dummy)
+		}
 	}
 }

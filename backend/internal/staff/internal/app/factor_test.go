@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -207,10 +208,11 @@ func TestLockoutAfterFiveFailures(t *testing.T) {
 	}
 }
 
-// D8: запись неудачи переживает откат основной транзакции — бизнес-ошибка (4xx) не откатывает
-// счётчик и аудит. Под Idempotency-Key это и есть единственная закоммиченная транзакция запроса:
-// хук идемпотентности видит откат проверки и коммит записи неудачи.
-func TestFailureSurvivesRollback(t *testing.T) {
+// D8 (раунд 1): неудача фиксируется в той же транзакции, что и проверка, под замком учётки, и
+// коммитится до ответа 4xx — бизнес-ошибка её не откатывает. Под Idempotency-Key это ровно одна
+// закоммиченная транзакция: хук идемпотентности видит один коммит. Обрыв соединения (отмена ctx
+// запроса) неудачу не теряет.
+func TestFailureCommittedBeforeAnswer(t *testing.T) {
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.pending(m)
@@ -220,14 +222,22 @@ func TestFailureSurvivesRollback(t *testing.T) {
 	})
 	_, err := e.app.VerifyMFA(ctx, s, "000000", "", metaWeb)
 	wantMFAInvalid(t, err, 4)
-	if len(outcomes) != 2 || outcomes[0] || !outcomes[1] {
-		t.Fatalf("исходы транзакций %v, ждали [откат проверки, коммит неудачи]", outcomes)
+	if len(outcomes) != 1 || !outcomes[0] {
+		t.Fatalf("исходы транзакций %v, ждали [коммит проверки с неудачей]", outcomes)
 	}
 	if n := e.count(`SELECT mfa_failures FROM staff_accounts WHERE id = $1`, m.ID); n != 1 {
 		t.Fatalf("счётчик %d", n)
 	}
 	if len(e.audits("staff.login_failed")) != 1 {
 		t.Fatal("аудит неудачи откатился")
+	}
+	// запрос оборвался (ctx отменён) — неудача всё равно записана
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = e.app.VerifyMFA(gone, s, "000000", "", metaWeb)
+	wantMFAInvalid(t, err, 3)
+	if n := e.count(`SELECT mfa_failures FROM staff_accounts WHERE id = $1`, m.ID); n != 2 {
+		t.Fatalf("неудача при отменённом ctx потеряна: счётчик %d", n)
 	}
 	// успех сбрасывает счётчик
 	if _, err := e.app.VerifyMFA(context.Background(), s, e.totp(m), "", metaWeb); err != nil {
@@ -331,11 +341,106 @@ func TestUnlockReplacesToken(t *testing.T) {
 		AND expires_at = $3`, ns.SessionID, t0.Add(30*time.Second), t0.Add(8*time.Hour)); n != 1 {
 		t.Fatal("новая сессия: IP, mfa_at или абсолютный срок")
 	}
-	if len(e.audits("staff.session_unlocked")) != 1 {
+	if len(e.audits("staff.unlock")) != 1 {
 		t.Fatal("нет аудита разблокировки")
 	}
 	// Unlock — только в стадии active
 	if _, err := e.app.Unlock(context.Background(), e.pending(m), e.totp(m), "", metaWeb); !errors.Is(err, staff.ErrWrongStage) {
 		t.Fatalf("Unlock в mfa_pending: %v", err)
+	}
+}
+
+// I1 (ревью 6a): параллельные неверные коды не обходят порог «5 подряд». Неудача пишется под замком
+// учётки в транзакции проверки: из 8 одновременных попыток ровно 5 получают staff.mfa_invalid
+// (attempts_left 4…0), остальные упираются в закрытую учётку и погашенную сессию —
+// auth.ErrSessionInvalid; счётчик 5, блокировка и её событие — одни.
+func TestConcurrentFailuresLockOnce(t *testing.T) {
+	e := newEnv(t)
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+	s := e.pending(m)
+	const tries = 8
+	var (
+		wg   sync.WaitGroup
+		errs [tries]error
+	)
+	for i := range tries {
+		wg.Go(func() { _, errs[i] = e.app.VerifyMFA(context.Background(), s, "000000", "", metaWeb) })
+	}
+	wg.Wait()
+	var left []int
+	invalid := 0
+	for i, err := range errs {
+		if me, ok := errors.AsType[*staff.MFAError](err); ok && errors.Is(err, staff.ErrMFAInvalid) {
+			left = append(left, me.AttemptsLeft)
+			continue
+		}
+		if !errors.Is(err, auth.ErrSessionInvalid) {
+			t.Fatalf("попытка %d: %v", i, err)
+		}
+		invalid++
+	}
+	slices.Sort(left)
+	if !slices.Equal(left, []int{0, 1, 2, 3, 4}) || invalid != tries-5 {
+		t.Fatalf("attempts_left %v, отказов сессии %d", left, invalid)
+	}
+	if n := e.count(`SELECT mfa_failures FROM staff_accounts WHERE id = $1`, m.ID); n != 5 {
+		t.Fatalf("счётчик %d, ждали 5", n)
+	}
+	if n := e.count(`SELECT count(*) FROM outbox WHERE event_type = 'staff.locked'`); n != 1 {
+		t.Fatalf("событий staff.locked %d", n)
+	}
+	if n := len(e.audits("staff.locked")); n != 1 {
+		t.Fatalf("записей блокировки %d", n)
+	}
+	if n := len(e.audits("staff.login_failed")); n != 5 {
+		t.Fatalf("неудач в аудите %d", n)
+	}
+}
+
+// Аудит входа и разблокировки: способ второго фактора — After["method"] = totp | recovery.
+func TestFactorMethodAudited(t *testing.T) {
+	e := newEnv(t)
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+	ctx := context.Background()
+	tok, err := e.app.VerifyMFA(ctx, e.pending(m), "", m.Codes[0], metaWeb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Advance(21 * time.Minute)
+	if _, err := e.app.Unlock(ctx, e.load(tok), e.totp(m), "", metaWeb); err != nil {
+		t.Fatal(err)
+	}
+	login, unlock := e.audits("staff.login"), e.audits("staff.unlock")
+	if len(login) != 1 || !strings.Contains(login[0].After, `"method": "recovery"`) {
+		t.Fatalf("аудит входа %+v", login)
+	}
+	if len(unlock) != 1 || !strings.Contains(unlock[0].After, `"method": "totp"`) {
+		t.Fatalf("аудит разблокировки %+v", unlock)
+	}
+}
+
+// Неудача на уже закрытой учётке (путь withFactor из «Моего доступа», где сессия может пережить
+// гонку) считается, но блокировку не повторяет: ни второго события, ни второй записи staff.locked.
+func TestNoRelockWhileLocked(t *testing.T) {
+	e := newEnv(t)
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+	s := e.load(e.signIn(m))
+	for range 5 {
+		if err := e.app.FailFactor(context.Background(), s, "password", metaWeb); !errors.Is(err, staff.ErrPasswordInvalid) {
+			t.Fatal(err)
+		}
+	}
+	err := e.app.FailFactor(context.Background(), s, "password", metaWeb)
+	if me, ok := errors.AsType[*staff.MFAError](err); !ok || me.AttemptsLeft != 0 {
+		t.Fatalf("шестая неудача: %v", err)
+	}
+	if n := e.count(`SELECT mfa_failures FROM staff_accounts WHERE id = $1`, m.ID); n != 6 {
+		t.Fatalf("счётчик %d", n)
+	}
+	if n := e.count(`SELECT count(*) FROM outbox WHERE event_type = 'staff.locked'`); n != 1 {
+		t.Fatalf("событий staff.locked %d — блокировка повторилась", n)
+	}
+	if n := len(e.audits("staff.locked")); n != 1 {
+		t.Fatalf("записей блокировки %d", n)
 	}
 }

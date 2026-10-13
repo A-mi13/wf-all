@@ -21,9 +21,9 @@ import (
 const mailTime = "2006-01-02 15:04 UTC"
 
 // ComposeLocked — письмо staff.locked (§4.12) получателю recipient: кто закрыт (имя и почта),
-// когда и из какой сети (IP маскирован до /24 или /48) — из учётки и строки сессии ref, на которой
-// учётка закрылась. Язык — staff_accounts.locale получателя (mailLocale). Письмо больше не нужно
-// (сессии нет или она погашена не блокировкой; получатель не активный владелец или админ) —
+// когда (locked_until − 1 ч) и из какой сети (IP сессии ref, на которой учётка закрылась,
+// маскирован до /24 или /48). Язык — staff_accounts.locale получателя (mailLocale). Письмо больше
+// не нужно (сессии нет, учётку не закрывали; получатель не активный владелец или админ) —
 // mail.ErrSkip: задача отменяется без повторов.
 func (a *App) ComposeLocked(ctx context.Context, ref, recipient uuid.UUID) (mail.Message, error) {
 	q := staffdb.New(a.pool)
@@ -34,7 +34,9 @@ func (a *App) ComposeLocked(ctx context.Context, ref, recipient uuid.UUID) (mail
 	if err != nil {
 		return mail.Message{}, err
 	}
-	if row.RevokedReason == nil || *row.RevokedReason != reasonLocked || row.RevokedAt == nil {
+	// учётку никогда не закрывали — письмо не о чем; причину гашения сессии не смотрим: сессию
+	// неудачи мог погасить и не lockOut (её заменил вход)
+	if row.LockedUntil == nil {
 		return mail.Message{}, mail.ErrSkip
 	}
 	to, ok, err := a.recipient(ctx, q, recipient, roleOwner, roleAdmin)
@@ -44,7 +46,7 @@ func (a *App) ComposeLocked(ctx context.Context, ref, recipient uuid.UUID) (mail
 	args := map[string]any{
 		"name":   row.DisplayName,
 		"email":  row.Email,
-		"time":   row.RevokedAt.UTC().Format(mailTime),
+		"time":   row.LockedUntil.Add(-lockDuration).UTC().Format(mailTime), // когда закрылась
 		"ip":     audit.MaskIP(row.Ip),
 		"origin": a.origin,
 	}

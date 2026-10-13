@@ -40,8 +40,9 @@ UPDATE staff_sessions SET last_seen_at = sqlc.arg(now), ip = sqlc.arg(ip)
 WHERE id = sqlc.arg(id) AND revoked_at IS NULL AND last_seen_at <= sqlc.arg(seen_before);
 
 -- name: GetLockedMail :one
--- Письмо staff.locked: кто закрыт и откуда — по сессии, на которой закрылась учётка.
-SELECT s.ip, s.revoked_at, s.revoked_reason, a.display_name, a.email::text AS email, a.locked_until
+-- Письмо staff.locked: кто закрыт (учётка и её locked_until) и откуда — адрес сессии, на которой
+-- закрылась учётка (причину гашения сессии письмо не смотрит: её мог заменить вход).
+SELECT s.ip, a.display_name, a.email::text AS email, a.locked_until
 FROM staff_sessions s
 JOIN staff_accounts a ON a.id = s.staff_id
 WHERE s.id = sqlc.arg(id);

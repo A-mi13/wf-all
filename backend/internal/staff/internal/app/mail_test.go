@@ -69,6 +69,14 @@ func TestComposeLocked(t *testing.T) {
 	if xx, err := e.app.ComposeLocked(context.Background(), ref, ruOwner.ID); err != nil || xx.Subject != ru.Subject {
 		t.Fatalf("неизвестный язык: %q (%v)", xx.Subject, err)
 	}
+
+	// сессию неудачи мог погасить и не lockOut (например, заменил вход): письмо опирается на
+	// учётку и её locked_until, а не на причину гашения сессии
+	e.exec(`UPDATE staff_sessions SET revoked_reason = 'replaced' WHERE id = $1`, ref)
+	rep, err := e.app.ComposeLocked(context.Background(), ref, enAdmin.ID)
+	if err != nil || rep.Text != en.Text {
+		t.Fatalf("сессия replaced: %v\n%s", err, rep.Text)
+	}
 }
 
 // Письмо не нужно — mail.ErrSkip (задача отменяется): нет сессии или она погашена не блокировкой,

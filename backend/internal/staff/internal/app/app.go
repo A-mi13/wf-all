@@ -1,11 +1,12 @@
 // Package app — сценарии модуля staff (спека сотрудников §4): вход, второй фактор, блокировка,
 // загрузчик сессии admin-api, составители писем. Импортирует корень staff (ошибки, DTO, события) и
 // платформу; таблицы — только staff_* через staffdb. Транзакции — db.InTx, ровно одна закоммиченная
-// на сценарий под Idempotency-Key; запись неудачи второго фактора — своей транзакцией (D8).
+// на сценарий под Idempotency-Key; неудача второго фактора пишется в транзакции проверки под замком
+// учётки и коммитится до ответа 4xx (D8, withFactor).
 package app
 
 import (
-	"errors"
+	"context"
 	"io"
 	"log/slog"
 	"time"
@@ -17,7 +18,6 @@ import (
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/i18n"
 	"wf/backend/internal/platform/keys"
-	"wf/backend/internal/platform/password"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/staff"
 )
@@ -32,6 +32,7 @@ const (
 	maxFactorFailures = 5                // неудач второго фактора подряд до блокировки
 	lockDuration      = time.Hour        // блокировка учётки
 	lockNotifyEvery   = time.Hour        // письмо staff.locked — не чаще раза в час на учётку
+	detachedTimeout   = 15 * time.Second // срок записи неудачи после обрыва соединения клиента
 )
 
 // loginEmailPolicy — лимит входа по нормализованной почте (D7): 10 попыток за 15 минут, одинаково и
@@ -61,7 +62,9 @@ const (
 	actionLoginFailed    = "staff.login_failed"
 	actionFactorFailed   = "staff.factor_failed"
 	actionLocked         = "staff.locked"
-	actionSessionUnlock  = "staff.session_unlocked"
+	actionUnlock         = "staff.unlock"
+	methodTOTP           = "totp"
+	methodRecovery       = "recovery"
 	objectAccount        = "staff_account"
 	roleAnonymous        = "anonymous"
 	roleSystem           = "system"
@@ -76,16 +79,19 @@ const (
 	stepUnlock = "unlock" // разблокировка сессии после бездействия или смены сети
 )
 
-// errFactorFailed — внутренний сигнал «фактор не подошёл»: откатывает транзакцию проверки, после
-// чего неудача пишется своей транзакцией (failure).
-var errFactorFailed = errors.New("staff: второй фактор не подошёл")
+// passwordHasher — хэшер паролей сценариев (*password.Hasher; шов — страж выравнивания времени входа).
+type passwordHasher interface {
+	Hash(ctx context.Context, pw string) (string, error)
+	Verify(ctx context.Context, pw, encoded string) (ok, needsRehash bool, err error)
+	VerifyDummy(ctx context.Context, pw string) error
+}
 
 // App — сценарии staff.
 type App struct {
 	pool    *pgxpool.Pool
 	clock   clock.Clock
 	keys    *keys.Ring
-	hasher  *password.Hasher
+	hasher  passwordHasher
 	limiter ratelimit.Limiter
 	river   *river.Client[pgx.Tx]
 	rand    io.Reader

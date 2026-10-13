@@ -14,29 +14,26 @@ import (
 )
 
 const getLockedMail = `-- name: GetLockedMail :one
-SELECT s.ip, s.revoked_at, s.revoked_reason, a.display_name, a.email::text AS email, a.locked_until
+SELECT s.ip, a.display_name, a.email::text AS email, a.locked_until
 FROM staff_sessions s
 JOIN staff_accounts a ON a.id = s.staff_id
 WHERE s.id = $1
 `
 
 type GetLockedMailRow struct {
-	Ip            netip.Addr
-	RevokedAt     *time.Time
-	RevokedReason *string
-	DisplayName   string
-	Email         string
-	LockedUntil   *time.Time
+	Ip          netip.Addr
+	DisplayName string
+	Email       string
+	LockedUntil *time.Time
 }
 
-// Письмо staff.locked: кто закрыт и откуда — по сессии, на которой закрылась учётка.
+// Письмо staff.locked: кто закрыт (учётка и её locked_until) и откуда — адрес сессии, на которой
+// закрылась учётка (причину гашения сессии письмо не смотрит: её мог заменить вход).
 func (q *Queries) GetLockedMail(ctx context.Context, id uuid.UUID) (GetLockedMailRow, error) {
 	row := q.db.QueryRow(ctx, getLockedMail, id)
 	var i GetLockedMailRow
 	err := row.Scan(
 		&i.Ip,
-		&i.RevokedAt,
-		&i.RevokedReason,
 		&i.DisplayName,
 		&i.Email,
 		&i.LockedUntil,

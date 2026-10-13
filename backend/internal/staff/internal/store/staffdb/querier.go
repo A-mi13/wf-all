@@ -14,7 +14,8 @@ type Querier interface {
 	AddFactorFailure(ctx context.Context, id uuid.UUID) (int32, error)
 	// Успех второго фактора: счётчик неудач подряд — 0; при входе — last_login_at.
 	FactorSucceeded(ctx context.Context, arg FactorSucceededParams) error
-	// Письмо staff.locked: кто закрыт и откуда — по сессии, на которой закрылась учётка.
+	// Письмо staff.locked: кто закрыт (учётка и её locked_until) и откуда — адрес сессии, на которой
+	// закрылась учётка (причину гашения сессии письмо не смотрит: её мог заменить вход).
 	GetLockedMail(ctx context.Context, id uuid.UUID) (GetLockedMailRow, error)
 	// Вход и второй фактор (спека сотрудников §4.6). Блокировки строк — всегда в порядке
 	// учётка → сессия → staff_mfa → резервные коды: иначе блокировка учётки (гасит все сессии) и
