@@ -28,6 +28,10 @@ const (
 	Maintenance = "maintenance" // чистка, сроки, сверки, отложенные действия админки
 )
 
+// Staff — очередь писем сотрудникам (staff.mail, D3): её обслуживает только admin-api (у роли БД
+// worker прав на staff_* нет), поэтому в Config воркера её нет — конфигурация очереди у admin-api.
+const Staff = "staff"
+
 // PingArgs — проверка живости очереди: мониторинг ставит задачу и ждёт её выполнения.
 type PingArgs struct{}
 
