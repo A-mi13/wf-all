@@ -1,9 +1,13 @@
 import { render } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
+import { IntlProvider } from 'use-intl';
 import { createApi } from '../api/client';
 import type { Me } from '../app/permissions';
 import { AppProviders } from '../app/providers';
 import { createQueryClient, ME_KEY } from '../app/query';
+import { type Locale, messagesFor } from '../i18n/messages';
+import { ToastProvider } from '../ui/toast';
 import { meOwner } from './me';
 import { TEST_API } from './server';
 
@@ -29,4 +33,17 @@ export function providers({ me = meOwner }: ProvidersOptions = {}) {
 export function renderWithProviders(ui: ReactElement, opts: ProvidersOptions = {}) {
   const wrapper = providers(opts);
   return { ...render(ui, { wrapper }), queryClient: wrapper.queryClient };
+}
+
+// Компонент src/ui без API и сессии: только язык (по умолчанию ru) и тосты. Возвращает и user
+// (user-event). С vi.useFakeTimers user-event зависает (RTL ждёт настоящий setTimeout) — там
+// события через fireEvent.
+export function renderWithIntl(ui: ReactElement, { locale = 'ru' }: { locale?: Locale } = {}) {
+  const user = userEvent.setup();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <IntlProvider locale={locale} messages={messagesFor(locale)}>
+      <ToastProvider>{children}</ToastProvider>
+    </IntlProvider>
+  );
+  return { ...render(ui, { wrapper }), user };
 }

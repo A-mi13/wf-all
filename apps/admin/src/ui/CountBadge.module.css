@@ -1,0 +1,20 @@
+.badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--wf-space-5);
+  padding: 2px var(--wf-space-2);
+  border-radius: var(--wf-radius-full);
+  background: var(--wf-color-chip-bg);
+  color: var(--wf-color-text-muted);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+}
+
+.active {
+  background: var(--wf-color-chip-accent-bg);
+  color: var(--wf-color-accent);
+}

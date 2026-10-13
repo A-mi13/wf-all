@@ -3,15 +3,15 @@ import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import { useApplyLocale, useLocale } from '../../i18n/locale';
 import type { Locale } from '../../i18n/messages';
+import { FormError } from '../../ui';
 
 const LOCALES: Locale[] = ['ru', 'en'];
 
 // Переключатель языка (спека §9.1; место — меню профиля в AppShell, Task 12b): выбор сохраняется
-// PATCH /v1/staff/me/locale и после 204 сразу меняет тексты, без перезагрузки. Вид — временный,
-// компоненты src/ui появятся в Task 12a.
+// PATCH /v1/staff/me/locale и после 204 сразу меняет тексты, без перезагрузки. Кнопки-сегменты —
+// временные, до AppShell (Task 12b); ошибка — FormError (текст по коду, откат на errors.internal).
 export function LocaleSwitcher() {
   const t = useTranslations('locale');
-  const te = useTranslations('errors');
   const api = useApi();
   const current = useLocale();
   const apply = useApplyLocale();
@@ -38,12 +38,7 @@ export function LocaleSwitcher() {
           {t(l)}
         </button>
       ))}
-      {save.error && (
-        <p role="alert">
-          {/* код без текста (список кодов открытый) — общий текст */}
-          {te(te.has(save.error.code) ? save.error.code : 'internal')}
-        </p>
-      )}
+      <FormError error={save.error} />
     </div>
   );
 }

@@ -1,0 +1,36 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--wf-space-1) var(--wf-space-3);
+  border-radius: var(--wf-radius-sm);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.neutral {
+  background: var(--wf-color-chip-bg);
+  color: var(--wf-color-text-muted);
+}
+
+.accent {
+  background: var(--wf-color-chip-accent-bg);
+  color: var(--wf-color-accent);
+}
+
+.success {
+  background: var(--wf-color-success-bg);
+  color: var(--wf-color-accent);
+}
+
+.warning {
+  background: var(--wf-color-warning-bg);
+  color: var(--wf-color-warning);
+}
+
+.danger {
+  background: var(--wf-color-danger-bg);
+  color: var(--wf-color-danger);
+}

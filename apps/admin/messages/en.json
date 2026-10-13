@@ -41,6 +41,52 @@
     "ru": "Русский",
     "en": "English"
   },
+  "ui": {
+    "close": "Close",
+    "password": {
+      "show": "Show password",
+      "hide": "Hide password"
+    },
+    "otp": {
+      "digit": "Digit {index} of {count}"
+    },
+    "multiselect": {
+      "search": "{label}: search",
+      "remove": "Remove “{label}”",
+      "empty": "Nothing found"
+    },
+    "confirm": {
+      "prompt": "Type “{word}” to confirm",
+      "cancel": "Cancel"
+    },
+    "toast": {
+      "region": "Notifications",
+      "close": "Dismiss notification"
+    },
+    "field_errors": {
+      "invalid": "Check this value",
+      "required": "This field is required",
+      "minLength": "Too short",
+      "maxLength": "Too long",
+      "min": "Value is too small",
+      "max": "Value is too large",
+      "minimum": "Value is too small",
+      "maximum": "Value is too large",
+      "pattern": "Invalid format",
+      "format": "Invalid format",
+      "type": "Invalid format",
+      "enum": "Choose a value from the list",
+      "minItems": "Select at least one option",
+      "maxItems": "Too many selected",
+      "min_items": "Select at least one option",
+      "max_items": "More selected than allowed",
+      "too_short": "Password is too short",
+      "too_long": "Password is too long",
+      "common": "This password is too common — choose another one",
+      "mismatch": "Does not match",
+      "range": "Invalid period"
+    }
+  },
   "permissions": {
     "staff": {
       "roles": {
