@@ -4,6 +4,9 @@ import { isApiError } from '../api/client';
 // Ключ запроса GET /v1/staff/me — состояние сессии (session.tsx).
 export const ME_KEY = ['staff', 'me'] as const;
 
+export const isMeKey = (key: readonly unknown[]): boolean =>
+  key.length === ME_KEY.length && key[0] === ME_KEY[0] && key[1] === ME_KEY[1];
+
 // Ответы 4xx — решение сервера, повтор их не изменит; сеть и 5xx — до двух повторов.
 function retryQuery(failures: number, error: unknown): boolean {
   if (isApiError(error) && error.status < 500) return false;
@@ -23,8 +26,7 @@ export function createQueryClient(opts: { retry?: boolean } = {}): QueryClient {
   };
   const client: QueryClient = new QueryClient({
     queryCache: new QueryCache({
-      onError: (error, query) =>
-        onError(error, query.queryKey[0] === ME_KEY[0] && query.queryKey[1] === ME_KEY[1]),
+      onError: (error, query) => onError(error, isMeKey(query.queryKey)),
     }),
     mutationCache: new MutationCache({ onError: (error) => onError(error, false) }),
     defaultOptions: {

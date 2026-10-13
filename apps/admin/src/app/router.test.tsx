@@ -1,8 +1,9 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { act, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, test } from 'vitest';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createApi } from '../api/client';
-import { meModerator, meMfaPending, meOwner, meSetup } from '../test/me';
+import { CITY_OWN, meModerator, meMfaPending, meOwner, meSetup } from '../test/me';
 import { problem } from '../test/problem';
 import { http, server, TEST_API } from '../test/server';
 import type { Me } from './permissions';
@@ -11,12 +12,34 @@ import { createQueryClient } from './query';
 import { reauthBus } from './reauth';
 import { AppRouter } from './router';
 
-afterEach(() => reauthBus.reject());
+afterEach(() => {
+  reauthBus.reject();
+  vi.unstubAllGlobals();
+});
+
+// Города для карточки сотрудника: id → название (GET /v1/geo/cities?ids=…).
+const CITY_NAMES: Record<string, string> = { [CITY_OWN]: 'Ставрополь' };
+const citiesHandler = () =>
+  http.get('/v1/geo/cities', ({ request, response }) => {
+    const ids = new URL(request.url).searchParams.getAll('ids');
+    return response(200).json({
+      items: ids.map((id) => ({
+        id,
+        slug: 'city',
+        name: CITY_NAMES[id] ?? id,
+        status: 'live' as const,
+        country_code: 'RU',
+        region_name: null,
+      })),
+      next_cursor: null,
+    });
+  });
 
 // me отдаёт текущее значение state.me; null — 401 auth.unauthenticated.
 function mount(path: string, me: Me | null) {
   const state = { me };
   server.use(
+    citiesHandler(),
     http.get('/v1/staff/me', ({ response }) =>
       state.me
         ? response(200).json(state.me)
@@ -154,7 +177,7 @@ describe('права разделов', () => {
   });
 });
 
-test('нет связи с admin-api — экран с повтором', async () => {
+test('стадия error (нет связи с admin-api) — экран с понятным текстом и «Повторить»', async () => {
   let up = false;
   server.use(
     http.get('/v1/staff/me', ({ response }) =>
@@ -167,10 +190,91 @@ test('нет связи с admin-api — экран с повтором', async 
     </AppProviders>,
   );
   const retry = await screen.findByRole('button', { name: 'Повторить' });
-  expect(screen.getByRole('alert')).toHaveTextContent('Нет связи с сервером');
+  const alert = screen.getByRole('alert');
+  expect(alert).toHaveTextContent('Нет связи с сервером');
+  expect(alert).toHaveTextContent('Админка не получила ответ от сервера');
   up = true;
   act(() => retry.click());
   await waitFor(() =>
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Журнал действий'),
   );
+});
+
+describe('каркас AppShell', () => {
+  // Модератор без права на «Роли и доступ»: в каталоге оно у всех ролей, здесь проверяется
+  // механизм меню по правам.
+  const meNoRoles: Me = { ...meModerator, permissions: { 'audit.log.read': 'scoped' } };
+
+  test('модератор без права не видит «Роли и доступ», прямой адрес — ForbiddenState', async () => {
+    const app = mount('/staff', meNoRoles);
+    await page('Нет доступа к разделу');
+    expect(app.at()).toBe('/staff');
+    const nav = screen.getByRole('navigation', { name: 'Разделы' });
+    expect(nav).toHaveTextContent('Журнал действий');
+    expect(nav).not.toHaveTextContent('Роли и доступ');
+  });
+
+  test('карточка сотрудника: имя, роль · города (названия из geo)', async () => {
+    mount('/audit', meModerator);
+    await page('Журнал действий');
+    expect(screen.getByText('Ольга В.')).toBeInTheDocument();
+    expect(await screen.findByText('модератор · Ставрополь')).toBeInTheDocument();
+  });
+
+  test('без права на города — их число вместо названий', async () => {
+    mount('/audit', { ...meModerator, permissions: { 'audit.log.read': 'scoped' } });
+    await page('Журнал действий');
+    expect(screen.getByText('модератор · 1 город')).toBeInTheDocument();
+  });
+
+  test('владелец без городов — только роль', async () => {
+    mount('/audit', meOwner);
+    await page('Журнал действий');
+    expect(screen.getByText('владелец')).toBeInTheDocument();
+  });
+
+  test('переключатель языка — в меню профиля', async () => {
+    mount('/audit', meOwner);
+    await page('Журнал действий');
+    expect(screen.getByRole('group', { name: 'Язык интерфейса' })).toBeInTheDocument();
+  });
+
+  test('«Выйти» завершает сессию и уводит на вход', async () => {
+    let key: string | null = null;
+    const app = mount('/audit', meOwner);
+    server.use(
+      http.post('/v1/staff/logout', ({ request, response }) => {
+        key = request.headers.get('Idempotency-Key');
+        server.use(
+          http.get('/v1/staff/me', ({ response: r }) =>
+            r.untyped(problem(401, 'auth.unauthenticated')),
+          ),
+        );
+        return response(204).empty();
+      }),
+    );
+    await page('Журнал действий');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Выйти' }));
+    await page('Вход');
+    expect(key).toBeTruthy();
+    // как при истёкшей сессии: после входа — обратно на раздел (P19)
+    expect(app.at()).toBe('/login?return=%2Faudit');
+  });
+
+  test('телефон: desktopOnly-раздел — «только с компьютера», таббар с «Ещё»', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })),
+    );
+    mount('/me', meOwner);
+    await page('Только с компьютера');
+    const tabbar = screen.getByRole('navigation', { name: 'Разделы' });
+    expect(within(tabbar).getByRole('button', { name: 'Ещё' })).toBeInTheDocument();
+    expect(within(tabbar).queryByRole('link', { name: 'Мой доступ' })).not.toBeInTheDocument();
+  });
 });

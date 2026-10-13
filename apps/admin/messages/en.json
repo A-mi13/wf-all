@@ -1,6 +1,7 @@
 {
   "app": {
-    "title": "Administration"
+    "title": "Administration",
+    "brand": "WHEREFOOTBALL"
   },
   "nav": {
     "groups": {
@@ -9,7 +10,14 @@
     "audit": "Audit log",
     "staff": "Roles and access",
     "approvals": "Approvals",
-    "me": "My access"
+    "me": "My access",
+    "label": "Sections",
+    "more": "More",
+    "more_title": "Sections and access",
+    "logout": "Sign out",
+    "counts": {
+      "approvals": "{count, plural, one {# request awaits a decision} other {# requests await a decision}}"
+    }
   },
   "pages": {
     "login": {
@@ -26,7 +34,8 @@
     "loading": "Loading…",
     "connection": {
       "title": "No connection to the server",
-      "retry": "Retry"
+      "retry": "Retry",
+      "text": "The admin panel got no response from the server. Check your connection and retry."
     },
     "forbidden": {
       "title": "No access to this section",
@@ -34,6 +43,33 @@
     },
     "not_found": {
       "title": "Page not found"
+    },
+    "empty": {
+      "title": "Nothing found",
+      "text": "No records match this search and filter. This is not an error — it is just empty."
+    },
+    "error": {
+      "title": "Could not load",
+      "code": "Error code: {status} · {code}",
+      "retry": "Retry"
+    },
+    "offline": {
+      "text": "No network. Decisions will not be sent; showing the last loaded data."
+    },
+    "desktop_only": {
+      "title": "Desktop only",
+      "text": "This section opens only on a computer: it changes access and settings that cannot be undone from a phone on the go."
+    },
+    "rate_limited": {
+      "title": "Too many requests",
+      "text": "The server slowed requests down to protect data. You can retry in {seconds} s.",
+      "ready": "You can retry now.",
+      "wait": "Wait {seconds} s",
+      "retry": "Retry"
+    },
+    "pending_approval": {
+      "title": "Sent for approval",
+      "text": "The action runs once a second staff member with the right approves it. The request lives 24 hours; track it in Approvals."
     }
   },
   "locale": {
@@ -214,5 +250,24 @@
       "last_owner": "The platform can't be left without an owner",
       "self_action": "You can't do this to yourself — use My access"
     }
+  },
+  "roles": {
+    "owner": "owner",
+    "admin": "admin",
+    "moderator": "moderator",
+    "support": "support",
+    "unknown": "staff member"
+  },
+  "account": {
+    "cities": "{count, plural, one {# city} other {# cities}}"
+  },
+  "table": {
+    "search": "Search",
+    "clear_search": "Clear search",
+    "more_filters": "More filters",
+    "shown": "Showing {count}",
+    "reset": "Reset filters",
+    "load_more": "Show more",
+    "load_more_failed": "Could not load more. Try again"
   }
 }

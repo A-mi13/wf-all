@@ -3,13 +3,14 @@ import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import { useApplyLocale, useLocale } from '../../i18n/locale';
 import type { Locale } from '../../i18n/messages';
-import { FormError } from '../../ui';
+import { Button, FormError } from '../../ui';
+import styles from './LocaleSwitcher.module.css';
 
 const LOCALES: Locale[] = ['ru', 'en'];
 
-// Переключатель языка (спека §9.1; место — меню профиля в AppShell, Task 12b): выбор сохраняется
-// PATCH /v1/staff/me/locale и после 204 сразу меняет тексты, без перезагрузки. Кнопки-сегменты —
-// временные, до AppShell (Task 12b); ошибка — FormError (текст по коду, откат на errors.internal).
+// Переключатель языка (спека §9.1) — в меню профиля AppShell (карточка сотрудника, «Ещё» на
+// телефоне): выбор сохраняется PATCH /v1/staff/me/locale и после 204 сразу меняет тексты, без
+// перезагрузки. Ошибка — FormError (текст по коду, откат на errors.internal).
 export function LocaleSwitcher() {
   const t = useTranslations('locale');
   const api = useApi();
@@ -26,18 +27,21 @@ export function LocaleSwitcher() {
 
   return (
     <div role="group" aria-label={t('label')}>
-      {LOCALES.map((l) => (
-        <button
-          key={l}
-          type="button"
-          lang={l}
-          aria-pressed={l === current}
-          disabled={save.isPending}
-          onClick={() => l !== current && save.mutate(l)}
-        >
-          {t(l)}
-        </button>
-      ))}
+      <div className={styles.segments}>
+        {LOCALES.map((l) => (
+          <Button
+            key={l}
+            variant={l === current ? 'primary' : 'secondary'}
+            className={styles.segment}
+            lang={l}
+            aria-pressed={l === current}
+            disabled={save.isPending}
+            onClick={() => l !== current && save.mutate(l)}
+          >
+            {t(l)}
+          </Button>
+        ))}
+      </div>
       <FormError error={save.error} />
     </div>
   );

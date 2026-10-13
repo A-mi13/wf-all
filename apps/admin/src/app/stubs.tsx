@@ -1,24 +1,15 @@
 import { useTranslations } from 'use-intl';
+import { PageHeader } from '../ui';
 
 // Временные страницы каркаса (Task 11): маршруты есть, экранов ещё нет. Заменяются экранами
-// Task 13–15 (вход, «Мой доступ», «Роли и доступ», подтверждения, журнал) и состояниями Task 12b
-// (ForbiddenState, загрузка, нет связи).
+// Task 13–15 (вход, «Мой доступ», «Роли и доступ», подтверждения, журнал). Нет доступа, нет
+// связи и «только с компьютера» — состояния из src/ui (Task 12b).
 
 export function PageStub({ titleKey }: { titleKey: string }) {
   const t = useTranslations();
   return (
     <main>
       <h1>{t(titleKey)}</h1>
-    </main>
-  );
-}
-
-export function ForbiddenStub() {
-  const t = useTranslations('states.forbidden');
-  return (
-    <main>
-      <h1>{t('title')}</h1>
-      <p>{t('text')}</p>
     </main>
   );
 }
@@ -41,14 +32,8 @@ export function LoadingStub() {
   );
 }
 
-export function ConnectionErrorStub({ onRetry }: { onRetry: () => void }) {
-  const t = useTranslations('states.connection');
-  return (
-    <main>
-      <p role="alert">{t('title')}</p>
-      <button type="button" onClick={onRetry}>
-        {t('retry')}
-      </button>
-    </main>
-  );
+// Раздел внутри AppShell: страница уже в его <main>, здесь — только шапка.
+export function SectionStub({ titleKey }: { titleKey: string }) {
+  const t = useTranslations();
+  return <PageHeader title={t(titleKey)} />;
 }

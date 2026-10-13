@@ -1,25 +1,31 @@
+import { useQueryClient } from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
-  Link,
   Outlet,
   redirect,
   RouterProvider,
   type RouterHistory,
 } from '@tanstack/react-router';
-import { type ReactNode, useEffect, useState } from 'react';
-import { useTranslations } from 'use-intl';
+import { useEffect, useState } from 'react';
+import { useApi } from '../api/context';
+import { useAdminMutation } from '../api/mutation';
 import { LocaleSwitcher } from '../features/me/LocaleSwitcher';
+import { AppShell, ConnectionErrorState, useErrorText, useToast } from '../ui';
+import { useAccountCard } from './account';
 import { resolveRoute } from './guard';
-import { canOpen, navFor, navItem } from './nav';
+import { NAV } from './nav';
+import type { Me } from './permissions';
 import { paths } from './paths';
+import { isMeKey } from './query';
 import { type Session, useSession } from './session';
-import { ConnectionErrorStub, ForbiddenStub, LoadingStub, NotFoundStub, PageStub } from './stubs';
+import { LoadingStub, NotFoundStub, PageStub, SectionStub } from './stubs';
 
 // Роутер админки (спека §9.1, §9.3–9.4): TanStack Router, маршруты кодом, пути — paths.ts.
-// Стадия сессии решает, куда пускать (guard.ts, beforeLoad корня); право раздела — сам маршрут:
-// без права — ForbiddenState (D23). Экраны пока — заглушки (Task 13–15).
+// Стадия сессии решает, куда пускать (guard.ts, beforeLoad корня); разделы — внутри AppShell: он
+// строит меню по правам и сам показывает ForbiddenState на прямой адрес без права (D23) и
+// DesktopOnlyState на телефоне (D22). Экраны пока — заглушки (Task 13–15).
 
 export interface RouterContext {
   session: Session;
@@ -63,27 +69,45 @@ const indexRoute = createRoute({
   component: () => null,
 });
 
-// Каркас разделов до AppShell (Task 12b): меню по правам и переключатель языка.
+// Каркас активной стадии: AppShell с меню из NAV, карточкой сотрудника, языком и выходом.
 function Shell() {
-  const t = useTranslations();
   const s = useSession();
   if (s.status !== 'active') return null;
+  return <ActiveShell me={s.me} refresh={s.refresh} />;
+}
+
+function ActiveShell({ me, refresh }: { me: Me; refresh: () => Promise<void> }) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const errorText = useErrorText();
+  const account = useAccountCard(me);
+  // Выход: сессия гасится на сервере, данные прежнего сотрудника — из кэша, me перечитывается
+  // (401 → anonymous → вход). 401 auth.unauthenticated — сессии уже нет: me перечитывает
+  // QueryClient (query.ts), тост не нужен.
+  const logout = useAdminMutation(
+    (_: void, key: string) =>
+      api.POST('/v1/staff/logout', { params: { header: { 'Idempotency-Key': key } } }),
+    {
+      onSuccess: async () => {
+        queryClient.removeQueries({ predicate: (q) => !isMeKey(q.queryKey) });
+        await refresh();
+      },
+      onError: (e) => {
+        if (e.code !== 'auth.unauthenticated') toast.error(errorText(e));
+      },
+    },
+  );
   return (
-    <>
-      <nav>
-        {navFor(s.me).map((g) => (
-          <section key={g.labelKey} aria-label={t(g.labelKey)}>
-            {g.items.map((i) => (
-              <Link key={i.path} to={i.path}>
-                {t(i.labelKey)}
-              </Link>
-            ))}
-          </section>
-        ))}
-      </nav>
-      <LocaleSwitcher />
+    <AppShell
+      groups={NAV}
+      account={account}
+      onLogout={() => logout.mutate()}
+      loggingOut={logout.isPending}
+      profileMenu={<LocaleSwitcher />}
+    >
       <Outlet />
-    </>
+    </AppShell>
   );
 }
 
@@ -93,23 +117,11 @@ const shellRoute = createRoute({
   component: Shell,
 });
 
-// Раздел меню: без права на прямой адрес — ForbiddenState (в меню такого раздела нет).
-function Section({ path, children }: { path: string; children: ReactNode }) {
-  const s = useSession();
-  const item = navItem(path);
-  if (s.status !== 'active' || (item && !canOpen(s.me, item))) return <ForbiddenStub />;
-  return children;
-}
-
 const section = (path: string, titleKey: string) =>
   createRoute({
     getParentRoute: () => shellRoute,
     path,
-    component: () => (
-      <Section path={path}>
-        <PageStub titleKey={titleKey} />
-      </Section>
-    ),
+    component: () => <SectionStub titleKey={titleKey} />,
   });
 
 const routeTree = rootRoute.addChildren([
@@ -145,6 +157,10 @@ export function AppRouter({ history }: { history?: RouterHistory }) {
 
   if (session.status === 'loading') return <LoadingStub />;
   if (session.status === 'error')
-    return <ConnectionErrorStub onRetry={() => void session.refresh()} />;
+    return (
+      <main>
+        <ConnectionErrorState onRetry={() => void session.refresh()} />
+      </main>
+    );
   return <RouterProvider router={router} context={{ session }} />;
 }

@@ -4,7 +4,7 @@ import { createReauthBus } from '../app/reauth';
 import { meOwner } from '../test/me';
 import { problem } from '../test/problem';
 import { http, server, TEST_API } from '../test/server';
-import { ApiError, background, createApi } from './client';
+import { ApiError, background, createApi, unwrap } from './client';
 
 // ключ идемпотентности действия — его даёт useAdminMutation, клиент только передаёт
 const KEY = crypto.randomUUID();
@@ -346,4 +346,30 @@ test('запросы — с credentials same-origin', async () => {
   );
   await createApi(TEST_API).GET('/v1/staff/me');
   expect(creds).toBe('same-origin');
+});
+
+describe('unwrap — данные ответа без ! и as', () => {
+  test('2xx с телом — данные', async () => {
+    server.use(http.get('/v1/staff/me', ({ response }) => response(200).json(meOwner)));
+    const me = await unwrap(createApi(TEST_API).GET('/v1/staff/me'));
+    expect(me.email).toBe(meOwner.email);
+  });
+
+  test('не-2xx — ApiError клиента пробрасывается как есть', async () => {
+    server.use(
+      http.get('/v1/staff/me', ({ response }) =>
+        response.untyped(problem(401, 'auth.unauthenticated')),
+      ),
+    );
+    const e = await caught(unwrap(createApi(TEST_API).GET('/v1/staff/me')));
+    expect(e).toBeInstanceOf(ApiError);
+    expect(e.code).toBe('auth.unauthenticated');
+  });
+
+  test('2xx без тела там, где его ждут, — ApiError internal со статусом ответа', async () => {
+    server.use(http.get('/v1/staff/me', () => new HttpResponse(null, { status: 204 })));
+    const e = await caught(unwrap(createApi(TEST_API).GET('/v1/staff/me')));
+    expect(e).toBeInstanceOf(ApiError);
+    expect(e).toMatchObject({ status: 204, code: 'internal' });
+  });
 });

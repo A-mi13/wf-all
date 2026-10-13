@@ -1,0 +1,274 @@
+/* Каркас по макетам 07 (сайдбар) и 08 (таббар и «Ещё» на телефоне) */
+
+.shell {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--wf-color-bg);
+  color: var(--wf-color-text);
+  font-family: var(--wf-font-body);
+}
+
+.page {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.main {
+  flex-grow: 1;
+  min-width: 0;
+  padding: var(--wf-space-5) var(--wf-space-6);
+}
+
+/* ---------- сайдбар ---------- */
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 236px;
+  height: 100dvh;
+  padding: var(--wf-space-5) var(--wf-space-3);
+  overflow-y: auto;
+  border-right: 1px solid var(--wf-color-slot-empty);
+  background: var(--wf-color-surface-sunken);
+}
+
+.brand {
+  padding: 0 var(--wf-space-2);
+}
+
+.brandName {
+  margin: 0;
+  color: var(--wf-color-accent);
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  letter-spacing: 2.4px;
+}
+
+.brandTitle {
+  margin: 2px 0 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.nav {
+  flex-grow: 1;
+  margin-top: var(--wf-space-5);
+}
+
+.group + .group {
+  margin-top: var(--wf-space-2);
+}
+
+.groupLabel {
+  margin: 0;
+  padding: var(--wf-space-3) var(--wf-space-3) var(--wf-space-1);
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+  min-height: var(--wf-size-touch-min);
+  box-sizing: border-box;
+  padding: var(--wf-space-2) var(--wf-space-3);
+  border-radius: var(--wf-radius-sm);
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  color: var(--wf-color-text);
+}
+
+.link.active {
+  background: var(--wf-color-pitch);
+  color: var(--wf-color-text);
+  font-weight: 800;
+}
+
+.mark {
+  flex-shrink: 0;
+  width: 3px;
+  height: 17px;
+  border-radius: var(--wf-radius-full);
+}
+
+.active .mark {
+  background: var(--wf-color-accent);
+}
+
+.linkLabel {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.link:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--wf-color-accent);
+  outline-offset: 2px;
+}
+
+.account {
+  margin-top: var(--wf-space-4);
+  padding: var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg-elevated);
+}
+
+.accountName {
+  margin: 0;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 800;
+}
+
+.accountDetails {
+  margin: 2px 0 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+}
+
+.profileMenu {
+  margin-top: var(--wf-space-3);
+}
+
+.logout {
+  margin-top: var(--wf-space-3);
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-xs);
+}
+
+/* ---------- телефон ---------- */
+
+.mobile {
+  flex-direction: column;
+}
+
+.mobile .main {
+  padding: var(--wf-space-4) var(--wf-space-4) calc(var(--wf-size-control) * 2);
+}
+
+.tabbar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 100;
+  display: flex;
+  padding: var(--wf-space-2) var(--wf-space-1)
+    calc(var(--wf-space-2) + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--wf-color-slot-empty);
+  background: var(--wf-color-surface-sunken);
+}
+
+.tab {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--wf-space-1);
+  min-height: var(--wf-size-touch-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wf-color-text-subtle);
+  font-family: var(--wf-font-body);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tab.active {
+  color: var(--wf-color-accent);
+}
+
+.tabIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border-radius: var(--wf-radius-sm);
+}
+
+.tab.active .tabIcon {
+  background: var(--wf-color-pitch);
+}
+
+.tabLabel {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab.active .tabLabel {
+  font-weight: 800;
+}
+
+/* счётчик — на углу иконки */
+.tabBadge {
+  position: absolute;
+  top: -4px;
+  left: calc(50% + 6px);
+}
+
+.icon {
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.moreAccount {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-3);
+  padding: var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-bg-elevated);
+}
+
+.moreAccount + .nav {
+  margin: var(--wf-space-2) 0 var(--wf-space-3);
+}

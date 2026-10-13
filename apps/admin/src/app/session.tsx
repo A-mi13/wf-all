@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo } from 'react';
-import { isApiError } from '../api/client';
+import { isApiError, unwrap } from '../api/client';
 import { useApi } from '../api/context';
 import { can, decide, type Decision, type Me } from './permissions';
 import { ME_KEY } from './query';
@@ -48,7 +48,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const q = useQuery({
     queryKey: ME_KEY,
-    queryFn: async () => (await api.GET('/v1/staff/me')).data as Me,
+    queryFn: () => unwrap(api.GET('/v1/staff/me')),
     // me перечитывается явно: refresh() после входа и смены языка, и при 401 других запросов
     staleTime: 60_000,
   });
@@ -85,8 +85,15 @@ export function useSession(): Session {
 // Вне стадии active прав нет.
 // eslint-disable-next-line react-refresh/only-export-components
 export function useCan(permission: string, cityId?: string): boolean {
+  return usePermissionCheck()(permission, cityId);
+}
+
+// То же, что useCan, для многих прав разом (меню AppShell: хук нельзя звать в цикле).
+// eslint-disable-next-line react-refresh/only-export-components
+export function usePermissionCheck(): (permission: string, cityId?: string) => boolean {
   const s = useSession();
-  return s.status === 'active' && can(s.me, permission, cityId);
+  const me = s.status === 'active' ? s.me : null;
+  return useCallback((permission, cityId) => me !== null && can(me, permission, cityId), [me]);
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

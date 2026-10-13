@@ -150,3 +150,14 @@ export function createApi(baseUrl: string, opts: { reauth?: ReauthBus } = {}) {
 }
 
 export type Api = ReturnType<typeof createApi>;
+
+// Данные ответа openapi-fetch без `!` и `as`: middleware бросает ApiError на любой не-2xx, поэтому
+// у дошедшего сюда ответа data есть — кроме 2xx без тела там, где тело ожидалось (сломанный
+// прокси, расхождение с контрактом); это ApiError internal со статусом ответа, а не undefined в
+// данных. Операции с 204 (выход, язык) unwrap не нужен. Использование:
+// queryFn: () => unwrap(api.GET('/v1/staff/me')).
+export async function unwrap<T>(request: Promise<{ data?: T; response: Response }>): Promise<T> {
+  const { data, response } = await request;
+  if (data === undefined) throw new ApiError({ status: response.status, code: 'internal' });
+  return data;
+}

@@ -1,5 +1,5 @@
 // Набор компонентов админки (спека §9.2). Экраны (src/features) берут кнопки, поля, оверлеи и
-// тосты только отсюда (.claude/rules/admin.md). Каркас, таблица и состояния — Task 12b.
+// тосты, каркас, таблицу и состояния только отсюда (.claude/rules/admin.md).
 export { Avatar } from './Avatar';
 export { Button, type ButtonProps, type ButtonVariant } from './Button';
 export { CountBadge } from './CountBadge';
@@ -19,6 +19,7 @@ export {
   useFieldErrorText,
 } from './form';
 export { useIsMobile } from './media';
+export { useOnline } from './online';
 export { OtpInput, type OtpInputHandle, type OtpInputProps } from './OtpInput';
 export {
   ConfirmDialog,
@@ -28,5 +29,35 @@ export {
   type OverlayProps,
   Sheet,
 } from './overlay';
+export {
+  AppShell,
+  type AppShellProps,
+  type NavGroup,
+  type NavIcon,
+  type NavItem,
+  PageHeader,
+  type TabItem,
+  Tabs,
+} from './shell';
+export {
+  ConnectionErrorState,
+  DesktopOnlyState,
+  EmptyState,
+  ErrorState,
+  ForbiddenState,
+  LoadingRows,
+  OfflineBanner,
+  PendingApprovalNotice,
+  RateLimitedState,
+} from './states';
 export { type ChipTone, StatusChip } from './StatusChip';
+export {
+  type ChipOption,
+  type Column,
+  DataTable,
+  type DataTableProps,
+  infiniteTableProps,
+  SEARCH_DEBOUNCE_MS,
+  type SortState,
+} from './table';
 export { TOAST_HIDE_MS, type ToastApi, ToastProvider, useToast } from './toast';
