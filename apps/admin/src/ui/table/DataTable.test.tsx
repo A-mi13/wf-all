@@ -311,3 +311,104 @@ test('телефон: строки-карточки сохраняют стро�
   expect(within(cells[1]!).getByText('Почта')).not.toHaveAttribute('aria-hidden');
   expect(within(rows[0]!).getAllByRole('cell')[1]).toHaveTextContent('staff1@wf.example');
 });
+
+test('поиск: после сброса снаружи тот же текст, набранный снова, уходит в запрос', async () => {
+  const ctl: { sent: string[]; reset?: () => void } = { sent: [] };
+  function Immediate() {
+    const [q, setQ] = useState('');
+    useEffect(() => {
+      ctl.reset = () => setQ('');
+    });
+    return (
+      <DataTable
+        label="Сотрудники"
+        columns={columns}
+        rowKey={(a) => a.id}
+        rows={[]}
+        onRetry={() => {}}
+        search={{
+          value: q,
+          onChange: (v) => {
+            ctl.sent.push(v);
+            setQ(v);
+          },
+        }}
+      />
+    );
+  }
+  const user = userEvent.setup();
+  renderWithProviders(<Immediate />);
+  const box = screen.getByRole('searchbox', { name: 'Поиск' });
+  await user.type(box, 'ab');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab']));
+  act(() => ctl.reset?.());
+  expect(box).toHaveValue('');
+  await user.type(box, 'ab');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab', 'ab']));
+});
+
+test('поиск: эхо пришло не по порядку — набранное не затирается', async () => {
+  const ctl: { sent: string[]; set?: (v: string) => void } = { sent: [] };
+  function OutOfOrder() {
+    const [q, setQ] = useState('');
+    useEffect(() => {
+      ctl.set = setQ;
+    }, []);
+    return (
+      <DataTable
+        label="Сотрудники"
+        columns={columns}
+        rowKey={(a) => a.id}
+        rows={[]}
+        onRetry={() => {}}
+        search={{ value: q, onChange: (v) => ctl.sent.push(v) }}
+      />
+    );
+  }
+  const user = userEvent.setup();
+  renderWithProviders(<OutOfOrder />);
+  const box = screen.getByRole('searchbox', { name: 'Поиск' });
+  await user.type(box, 'ab');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab']));
+  await user.type(box, 'c');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab', 'abc']));
+  await user.type(box, 'd');
+  // эхо «ab» запоздало и пришло после отправки «abc»
+  act(() => ctl.set?.('ab'));
+  expect(box).toHaveValue('abcd');
+  act(() => ctl.set?.('abc'));
+  expect(box).toHaveValue('abcd');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab', 'abc', 'abcd']));
+});
+
+test('поиск: внешнее значение до эха (переход «Назад») снимает отправленное — повтор уходит', async () => {
+  const ctl: { sent: string[]; set?: (v: string) => void } = { sent: [] };
+  function NoEcho() {
+    const [q, setQ] = useState('');
+    useEffect(() => {
+      ctl.set = setQ;
+    }, []);
+    return (
+      <DataTable
+        label="Сотрудники"
+        columns={columns}
+        rowKey={(a) => a.id}
+        rows={[]}
+        onRetry={() => {}}
+        search={{ value: q, onChange: (v) => ctl.sent.push(v) }}
+      />
+    );
+  }
+  const user = userEvent.setup();
+  renderWithProviders(<NoEcho />);
+  const box = screen.getByRole('searchbox', { name: 'Поиск' });
+  await user.type(box, 'ab');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab']));
+  // эха «ab» не было: экран сам перешёл на другой адрес, затем фильтры сброшены
+  act(() => ctl.set?.('zz'));
+  expect(box).toHaveValue('zz');
+  act(() => ctl.set?.(''));
+  expect(box).toHaveValue('');
+  await user.type(box, 'ab');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab', 'ab']));
+});

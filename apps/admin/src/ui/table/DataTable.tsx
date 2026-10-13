@@ -119,22 +119,27 @@ function SearchBox({
   const t = useTranslations('table');
   const [text, setText] = useState(value);
   const [outer, setOuter] = useState(value);
-  // последнее отправленное экрану: его эхо в value (экран применяет с задержкой — search-параметр
-  // маршрута) не затирает то, что набрано после отправки
-  const [sent, setSent] = useState<string | null>(null);
+  // Отправленное экрану, но ещё не вернувшееся в value (экран применяет с задержкой —
+  // search-параметр маршрута). Эхо из этого списка не трогает набранное после отправки и снимает
+  // себя и более ранние отправки; любое другое value (сброс фильтров, «Назад») — внешнее: оно
+  // идёт в поле, а список очищается, чтобы тот же текст, набранный снова, ушёл в запрос.
+  const [sent, setSent] = useState<string[]>([]);
   if (outer !== value) {
     setOuter(value);
-    if (value !== sent) setText(value);
+    const echo = sent.indexOf(value);
+    if (echo === -1) setText(value);
+    setSent(echo === -1 ? [] : sent.slice(echo + 1));
   }
   const emit = useEffectEvent((v: string) => {
-    setSent(v);
+    setSent((list) => [...list, v]);
     onChange(v);
   });
+  const last = sent.at(-1);
   useEffect(() => {
-    if (text === outer || text === sent) return;
+    if (text === outer || text === last) return;
     const timer = setTimeout(() => emit(text), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [text, outer, sent]);
+  }, [text, outer, last]);
 
   return (
     <div className={styles.search}>
@@ -163,7 +168,7 @@ function SearchBox({
           aria-label={t('clear_search')}
           onClick={() => {
             setText('');
-            setSent('');
+            setSent((list) => [...list, '']);
             onChange('');
           }}
         >

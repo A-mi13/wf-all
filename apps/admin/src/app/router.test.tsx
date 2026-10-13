@@ -54,11 +54,13 @@ function mount(path: string, me: Me | null) {
     </AppProviders>,
   );
   const at = () => history.location.pathname + history.location.search;
+  // me перечитывается (как после входа, разблокировки или 401 любого запроса)
+  const refetchMe = () => act(() => queryClient.refetchQueries({ queryKey: ['staff', 'me'] }));
   const login = async (next: Me) => {
     state.me = next;
-    await act(() => queryClient.refetchQueries({ queryKey: ['staff', 'me'] }));
+    await refetchMe();
   };
-  return { at, login };
+  return { at, login, refetchMe };
 }
 
 const page = (name: string) => screen.findByRole('heading', { level: 1, name });
@@ -239,40 +241,61 @@ describe('каркас AppShell', () => {
     expect(screen.getByRole('group', { name: 'Язык интерфейса' })).toBeInTheDocument();
   });
 
-  test('«Выйти» завершает сессию и уводит на вход', async () => {
-    let key: string | null = null;
-    // после выхода me — 401; signedIn — вход другим сотрудником (новая сессия)
-    let signedIn = false;
+  // После выхода me — 401; signedIn — вход другим сотрудником (новая сессия).
+  function logoutServer(logout: 204 | 401) {
+    const ctl = { key: null as string | null, signedIn: false };
     const next: Me = {
       ...meOwner,
       session: { id: 'другая-сессия', expires_at: '2026-10-13T18:00:00Z' },
     };
-    const app = mount('/audit', meOwner);
     server.use(
       http.post('/v1/staff/auth/logout', ({ request, response }) => {
-        key = request.headers.get('Idempotency-Key');
+        ctl.key = request.headers.get('Idempotency-Key');
         server.use(
           http.get('/v1/staff/me', ({ response: r }) =>
-            signedIn ? r(200).json(next) : r.untyped(problem(401, 'auth.unauthenticated')),
+            ctl.signedIn ? r(200).json(next) : r.untyped(problem(401, 'auth.unauthenticated')),
           ),
         );
-        return response(204).empty();
+        return logout === 204
+          ? response(204).empty()
+          : response.untyped(problem(401, 'auth.unauthenticated'));
       }),
     );
-    await page('Журнал действий');
+    return ctl;
+  }
+
+  test('«Выйти» из раздела — вход без return; новый вход — стартовая; истечение — с возвратом', async () => {
+    // раздел не стартовый: возврат в него после нового входа отличим от стартовой страницы
+    const app = mount('/staff', meOwner);
+    const ctl = logoutServer(204);
+    await page('Роли и доступ');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Выйти' }));
     await page('Вход');
-    expect(key).toBeTruthy();
-    // явный выход — вход без return: следующий сотрудник не попадёт в чужой раздел
+    expect(ctl.key).toBeTruthy();
+    // явный выход — без return: следующий сотрудник не попадёт в чужой раздел
     await waitFor(() => expect(app.at()).toBe('/login'));
-    // новый вход, затем истёкшая сессия — снова с возвратом (флаг выхода не залипает)
-    signedIn = true;
-    await app.login(next);
+
+    // новый вход — стартовая страница, а не раздел прежнего сотрудника
+    ctl.signedIn = true;
+    await app.refetchMe();
     await page('Журнал действий');
-    signedIn = false;
-    await app.login(next);
+    expect(app.at()).toBe('/audit');
+
+    // сессия нового входа истекла — вход с возвратом (флаг выхода не залипает)
+    ctl.signedIn = false;
+    await app.refetchMe();
     await page('Вход');
     expect(app.at()).toBe('/login?return=%2Faudit');
+  });
+
+  test('выход ответил 401 (сессии уже нет) — тоже вход без return и без тоста', async () => {
+    const app = mount('/staff', meOwner);
+    logoutServer(401);
+    await page('Роли и доступ');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Выйти' }));
+    await page('Вход');
+    await waitFor(() => expect(app.at()).toBe('/login'));
+    expect(screen.queryByText('Войдите в аккаунт заново')).not.toBeInTheDocument();
   });
 
   test('телефон: desktopOnly-раздел — «только с компьютера», таббар с «Ещё»', async () => {

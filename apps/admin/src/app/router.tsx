@@ -83,18 +83,20 @@ function ActiveShell({ me, afterLogout }: { me: Me; afterLogout: () => Promise<v
   const errorText = useErrorText();
   const account = useAccountCard(me);
   // Выход: сессия гасится на сервере, данные прежнего сотрудника — из кэша, me перечитывается
-  // (401 → anonymous → /login без return). 401 auth.unauthenticated — сессии уже нет: me
-  // перечитывает QueryClient (query.ts), тост не нужен.
+  // (401 → anonymous → /login без return). 401 auth.unauthenticated — сессии уже нет: итог тот
+  // же, что у выхода (вход без return), тост не нужен.
+  const signedOut = async () => {
+    queryClient.removeQueries({ predicate: (q) => !isMeKey(q.queryKey) });
+    await afterLogout();
+  };
   const logout = useAdminMutation(
     (_: void, key: string) =>
       api.POST('/v1/staff/auth/logout', { params: { header: { 'Idempotency-Key': key } } }),
     {
-      onSuccess: async () => {
-        queryClient.removeQueries({ predicate: (q) => !isMeKey(q.queryKey) });
-        await afterLogout();
-      },
+      onSuccess: signedOut,
       onError: (e) => {
-        if (e.code !== 'auth.unauthenticated') toast.error(errorText(e));
+        if (e.code === 'auth.unauthenticated') return signedOut();
+        toast.error(errorText(e));
       },
     },
   );
