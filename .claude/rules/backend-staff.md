@@ -63,6 +63,7 @@ paths:
   `db.InTx`, `a.lockSelf`: замок своей учётки, затем перепроверка сессии запроса `lockLiveSession` (погашена —
   `auth.ErrSessionInvalid`, заменена — `auth.ErrSessionReplaced`: «завершить остальные» по старой сессии не
   гасит свежую, страж `TestSelfMutationsRecheckSession`); аудит от учётки (`staff.session_revoked`,
-  `staff.sessions_revoked`, `staff.password_changed`, `staff.locale_changed`). Смена пароля: выбор фактора (`body.code`) и `password.Check` (`body.new_password`,
+  `staff.sessions_revoked`, `staff.password_changed`, `staff.locale_changed`). Смена пароля: выбор фактора
+  (`body.code`) и `password.Check` (`body.new_password`,
   `passwordPolicyError`) и хэш нового — до транзакции; текущий пароль и фактор — в `withFactor`; успех гасит
   другие сессии (`password_changed`). Ошибки поля — `httpx.NewFieldError`.

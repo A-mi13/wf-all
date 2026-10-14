@@ -261,6 +261,9 @@ func (a *App) lockSelf(ctx context.Context, q *staffdb.Queries, s *auth.Staff) (
 }
 
 // replacedAsSession — errReplaced (сессию запроса только что заменили) как auth.ErrSessionReplaced.
+// Окно replacedGrace здесь осознанно не проверяется: lockLiveSession видит замену, случившуюся
+// между загрузкой в конвейере и замком, то есть только что — старше минуты она быть не может
+// (конвейер такую сессию уже не загрузил бы).
 func replacedAsSession(err error) error {
 	if errors.Is(err, errReplaced) {
 		return auth.ErrSessionReplaced
