@@ -101,6 +101,25 @@ func TestRateLimitError(t *testing.T) {
 	}
 }
 
+// Повторная отправка приглашения админом раньше 60 с (§4.3 п.4) — 429 ratelimit.exceeded с
+// Retry-After остатка паузы: ошибка сама знает ответ.
+func TestResendTooSoonError(t *testing.T) {
+	err := error(&staff.ResendTooSoonError{RetryAfter: 41200 * time.Millisecond})
+	if !errors.Is(err, staff.ErrResendTooSoon) || errors.Is(err, staff.ErrRateLimited) {
+		t.Fatal("не ErrResendTooSoon")
+	}
+	pe, ok := errors.AsType[httpx.ProblemError](err)
+	if !ok {
+		t.Fatal("не httpx.ProblemError")
+	}
+	if p := pe.Problem(); p.Status != http.StatusTooManyRequests || p.Code != httpx.CodeRateLimited || p.RetryAfter != 42 {
+		t.Fatalf("problem %+v", p)
+	}
+	if p := (&staff.ResendTooSoonError{}).Problem(); p.RetryAfter != 1 {
+		t.Fatalf("Retry-After меньше секунды: %d", p.RetryAfter)
+	}
+}
+
 // P1: корень staff не импортирует internal/app, admin и jobs — иначе цикл (их пакеты импортируют
 // корень).
 func TestRootDoesNotImportInnerPackages(t *testing.T) {

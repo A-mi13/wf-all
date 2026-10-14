@@ -66,9 +66,27 @@ func (e *RateLimitError) Error() string { return ErrRateLimited.Error() }
 func (e *RateLimitError) Unwrap() error { return ErrRateLimited }
 
 // Problem — 429 ratelimit.exceeded; Retry-After — в целых секундах вверх, не меньше 1.
-func (e *RateLimitError) Problem() httpx.Problem {
+func (e *RateLimitError) Problem() httpx.Problem { return tooManyRequests(e.RetryAfter) }
+
+// ErrResendTooSoon — повторная отправка приглашения админом раньше паузы 60 с (§4.3 п.4). Ответ —
+// ResendTooSoonError.
+var ErrResendTooSoon = errors.New("staff: повторная отправка раньше паузы")
+
+// ResendTooSoonError — 429 ratelimit.exceeded с Retry-After: остаток паузы повторной отправки
+// приглашения (контракт resendStaffInvite). Сама знает ответ клиенту (httpx.ProblemError).
+type ResendTooSoonError struct{ RetryAfter time.Duration }
+
+func (e *ResendTooSoonError) Error() string { return ErrResendTooSoon.Error() }
+
+func (e *ResendTooSoonError) Unwrap() error { return ErrResendTooSoon }
+
+// Problem — 429 ratelimit.exceeded; Retry-After — в целых секундах вверх, не меньше 1.
+func (e *ResendTooSoonError) Problem() httpx.Problem { return tooManyRequests(e.RetryAfter) }
+
+// tooManyRequests — 429 ratelimit.exceeded с Retry-After в целых секундах вверх, не меньше 1.
+func tooManyRequests(retry time.Duration) httpx.Problem {
 	return httpx.Problem{
 		Status: http.StatusTooManyRequests, Code: httpx.CodeRateLimited,
-		RetryAfter: max(1, int(math.Ceil(e.RetryAfter.Seconds()))),
+		RetryAfter: max(1, int(math.Ceil(retry.Seconds()))),
 	}
 }

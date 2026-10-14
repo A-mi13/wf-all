@@ -58,6 +58,70 @@ func (a *App) ComposeLocked(ctx context.Context, ref, recipient uuid.UUID) (mail
 	return a.compose(to, staff.MailLocked, args)
 }
 
+// ComposeInvite — письмо staff.invite или staff.access_reset (§4.3, §4.12) о приглашении ref
+// получателю recipient: имя, код, ссылка ADMIN_ORIGIN/accept (почты в адресе нет — её вводят на
+// странице) и срок кода. Язык — staff_accounts.locale учётки. Письмо больше не нужно — mail.ErrSkip:
+// приглашения нет, получатель — не его учётка или учётка уже не invited, вид письма не соответствует
+// назначению, приглашение погашено или принято-и-закрыто, срок истёк, код стёрт.
+func (a *App) ComposeInvite(ctx context.Context, ref, recipient uuid.UUID, kind string) (mail.Message, error) {
+	row, err := staffdb.New(a.pool).GetInviteMail(ctx, ref)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mail.Message{}, mail.ErrSkip
+	}
+	if err != nil {
+		return mail.Message{}, err
+	}
+	want, err := inviteMailKind(row.Purpose)
+	if err != nil {
+		return mail.Message{}, err
+	}
+	if row.StaffID != recipient || row.Status != statusInvited || want != kind ||
+		row.ConsumedAt != nil || row.RevokedAt != nil || !a.clock.Now().Before(row.ExpiresAt) ||
+		row.CodeEnc == nil || row.CodeKeyID == nil {
+		return mail.Message{}, mail.ErrSkip
+	}
+	code, err := a.openInviteCode(ref, row.CodeEnc, *row.CodeKeyID)
+	if err != nil {
+		return mail.Message{}, err
+	}
+	args := map[string]any{
+		"name":    row.DisplayName,
+		"code":    code,
+		"link":    strings.TrimSuffix(a.origin, "/") + "/accept",
+		"expires": row.ExpiresAt.UTC().Format(mailTime),
+	}
+	return a.compose(mailTo{email: row.Email, locale: mailLocale(row.Locale)}, kind, args)
+}
+
+// ComposeBootstrapped — письмо staff.bootstrapped (U2) получателю recipient: кого добавил оператор
+// сервера (имя и почта новой учётки ref) и когда (created_at). Язык — staff_accounts.locale
+// получателя. mail.ErrSkip: учётки ref нет, она не владелец или создана не оператором (created_by
+// задан); получатель — не активный владелец.
+func (a *App) ComposeBootstrapped(ctx context.Context, ref, recipient uuid.UUID) (mail.Message, error) {
+	q := staffdb.New(a.pool)
+	row, err := q.GetBootstrappedMail(ctx, ref)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mail.Message{}, mail.ErrSkip
+	}
+	if err != nil {
+		return mail.Message{}, err
+	}
+	if row.Role != roleOwner || row.CreatedBy != nil {
+		return mail.Message{}, mail.ErrSkip
+	}
+	to, ok, err := a.recipient(ctx, q, recipient, roleOwner)
+	if err != nil || !ok {
+		return mail.Message{}, err
+	}
+	args := map[string]any{
+		"name":   row.DisplayName,
+		"email":  row.Email,
+		"time":   row.CreatedAt.UTC().Format(mailTime),
+		"origin": a.origin,
+	}
+	return a.compose(to, staff.MailBootstrapped, args)
+}
+
 // mailTo — адрес и язык получателя письма.
 type mailTo struct{ email, locale string }
 

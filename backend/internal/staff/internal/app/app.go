@@ -1,5 +1,7 @@
 // Package app — сценарии модуля staff (спека сотрудников §4): вход, второй фактор, блокировка,
-// загрузчик сессии admin-api, «Мой доступ» (me, свои сессии, пароль, язык), составители писем.
+// загрузчик сессии admin-api, «Мой доступ» (me, свои сессии, пароль, язык), приглашения и их
+// принятие, настройка 2FA и перевыпуск резервных кодов, операции оператора (bootstrap,
+// invite-resend, rekey), составители писем.
 // Импортирует корень staff (ошибки, DTO, события) и платформу; таблицы — только staff_* через
 // staffdb. Транзакции — db.InTx, ровно одна закоммиченная
 // на сценарий под Idempotency-Key; неудача второго фактора пишется в транзакции проверки под замком
@@ -34,6 +36,11 @@ const (
 	lockDuration      = time.Hour        // блокировка учётки
 	lockNotifyEvery   = time.Hour        // письмо staff.locked — не чаще раза в час на учётку
 	detachedTimeout   = 15 * time.Second // срок записи неудачи после обрыва соединения клиента
+
+	inviteTTL         = 24 * time.Hour // срок приглашения (§4.3)
+	resendPause       = time.Minute    // пауза между отправками кода приглашения
+	maxInviteSends    = 5              // отправок кода за жизнь приглашения (сутки) — самим сотрудником
+	maxInviteAttempts = 5              // неверных вводов кода до его стирания (D12)
 )
 
 // loginEmailPolicy — лимит входа по нормализованной почте (D7): 10 попыток за 15 минут, одинаково и
@@ -70,14 +77,32 @@ const (
 	actionSessionsRevoked = "staff.sessions_revoked" // все сессии, кроме текущей (8b — все сессии учётки)
 	actionPasswordChanged = "staff.password_changed"
 	actionLocaleChanged   = "staff.locale_changed"
-	methodTOTP            = "totp"
-	methodRecovery        = "recovery"
-	objectAccount         = "staff_account"
-	roleAnonymous         = "anonymous"
-	roleSystem            = "system"
-	statusActive          = "active"
-	statusDisabled        = "disabled"
-	roleOwner, roleAdmin  = "owner", "admin"
+	// приглашения, настройка 2FA, оператор (Task 7)
+	actionInviteAccepted      = "staff.invite_accepted"
+	actionInviteAcceptFailed  = "staff.invite_accept_failed" // неверный код приглашения (anonymous)
+	actionInviteResent        = "staff.invite_resent"        // самим (anonymous), админом, оператором
+	actionMFAEnabled          = "staff.mfa_enabled"          // recovery-codes/ack
+	actionRecoveryRegenerated = "staff.recovery_regenerated"
+	actionBootstrapped        = "staff.bootstrapped"
+	actionRekeyed             = "staff.rekeyed"
+	methodTOTP                = "totp"
+	methodRecovery            = "recovery"
+	objectAccount             = "staff_account"
+	roleAnonymous             = "anonymous"
+	roleSystem                = "system"
+	roleOperator              = "operator" // подкоманды admin-api staff …: роль и метка автора аудита
+	statusActive              = "active"
+	statusInvited             = "invited"
+	statusDisabled            = "disabled"
+	roleOwner, roleAdmin      = "owner", "admin"
+	objectStaffKeys           = "staff_keys" // объект аудита rekey: кольцо ADMIN_STAFF_SECRET_KEYS
+)
+
+// Назначения приглашения (staff_invite_purpose) и право повторной отправки админом.
+const (
+	purposeInvite      = "invite"
+	purposeAccessReset = "access_reset"
+	permInvitesResend  = "staff.invites.resend"
 )
 
 // Шаги второго фактора: в какой операции случилась неудача (аудит, D7). Task 6b/7 добавляют свои.
@@ -86,6 +111,8 @@ const (
 	stepUnlock = "unlock" // разблокировка сессии после бездействия или смены сети
 	// смена своего пароля: неверный текущий пароль или второй фактор
 	stepPasswordChange = "password_change"
+	// перевыпуск резервных кодов: неверный TOTP
+	stepRecoveryRegenerate = "recovery_regenerate"
 )
 
 // passwordHasher — хэшер паролей сценариев (*password.Hasher; шов — страж выравнивания времени входа).

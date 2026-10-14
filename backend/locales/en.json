@@ -6,6 +6,18 @@
     "footer": "This email was sent automatically, please do not reply."
   },
   "staff": {
+    "invite": {
+      "subject": "Admin panel invitation",
+      "body": "Hello, {name}!\n\nYou have been invited to the admin panel. To sign in, open {link}, enter this email, the code {code} and choose a password. Then set up an authenticator app.\n\nThe code is valid until {expires}. If it has expired or does not work, request a new one on the same page.\n\nIf you did not expect this invitation, just ignore this email."
+    },
+    "access_reset": {
+      "subject": "Admin panel access reset",
+      "body": "Hello, {name}!\n\nYour admin panel access has been reset: your password, second factor and recovery codes no longer work. To sign in again, open {link}, enter this email, the code {code} and choose a new password. Then set up an authenticator app again.\n\nThe code is valid until {expires}. If it has expired or does not work, request a new one on the same page.\n\nIf you did not expect this reset, tell an admin panel owner."
+    },
+    "bootstrapped": {
+      "subject": "The server operator added owner {name}",
+      "body": "The server operator added a new owner to the admin panel: {name} ({email}).\n\nWhen: {time}\n\nThe new owner will receive an invitation and sign in after setting up a second factor. If you did not expect this, check the activity log in the admin panel: {origin}"
+    },
     "locked": {
       "subject": "Sign-in for {name} is locked for an hour",
       "body": "The staff account of {name} ({email}) is locked for an hour after five wrong second-factor codes in a row.\n\nWhen: {time}\nNetwork: {ip}\n\nIf this was not the staff member, contact them and reset their access in the admin panel if needed: {origin}"

@@ -12,9 +12,10 @@ WHERE a.email = sqlc.arg(email)::citext;
 
 -- name: LockAccount :one
 -- Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
--- снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите.
+-- снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите,
+-- почта — аккаунт в ссылке otpauth (настройка 2FA).
 SELECT a.id, a.status, a.display_name, a.mfa_failures, a.locked_until, a.lock_notified_at, a.version,
-       a.password_hash, a.locale, r.role::text AS role
+       a.password_hash, a.locale, r.role::text AS role, a.email::text AS email
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.id = sqlc.arg(id)

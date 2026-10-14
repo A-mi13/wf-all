@@ -11,9 +11,39 @@ import (
 )
 
 type Querier interface {
+	// Принятие приглашения: новый пароль; прежняя блокировка второго фактора снимается — второй фактор
+	// учётки настраивается заново.
+	AcceptInvitePassword(ctx context.Context, arg AcceptInvitePasswordParams) error
+	// recovery-codes/ack: учётка активна, вход — сейчас.
+	ActivateAccount(ctx context.Context, arg ActivateAccountParams) error
 	AddFactorFailure(ctx context.Context, id uuid.UUID) (int32, error)
+	// Подтверждение секрета кодом: принятый шаг — в last_used_step.
+	ConfirmMFA(ctx context.Context, arg ConfirmMFAParams) error
+	// recovery-codes/ack: приглашение погашено, код стирается.
+	ConsumeInvite(ctx context.Context, arg ConsumeInviteParams) error
+	// Неиспользованные резервные коды не на текущем ключе: перехэшировать нельзя (исходника нет), старый
+	// ключ убирается, когда счёт = 0.
+	CountRecoveryOnOldKeys(ctx context.Context, currentKey string) (int64, error)
+	// Принятие приглашения: второй фактор учётки invited ещё не действует — настраивается заново.
+	DeleteMFA(ctx context.Context, staffID uuid.UUID) error
+	// Новое поколение резервных кодов (и принятие приглашения) удаляет все прежние.
+	DeleteRecoveryCodes(ctx context.Context, staffID uuid.UUID) error
 	// Успех второго фактора: счётчик неудач подряд — 0; при входе — last_login_at.
 	FactorSucceeded(ctx context.Context, arg FactorSucceededParams) error
+	// Неверный код приглашения: попытка +1; пятая стирает код (CHECK staff_invites_code_wiped),
+	// приглашение остаётся живым.
+	FailInviteCode(ctx context.Context, arg FailInviteCodeParams) (int32, error)
+	// Снимок имени сотрудника-автора для аудита.
+	GetActorLabel(ctx context.Context, id uuid.UUID) (string, error)
+	// Письмо staff.bootstrapped: новая учётка, её роль и кто создал (NULL — оператор).
+	GetBootstrappedMail(ctx context.Context, id uuid.UUID) (GetBootstrappedMailRow, error)
+	// Письмо staff.invite / staff.access_reset: приглашение и его учётка.
+	GetInviteMail(ctx context.Context, id uuid.UUID) (GetInviteMailRow, error)
+	// Последнее приглашение учётки (живое или закрытое): назначение и время последней отправки —
+	// повторная отправка админом и оператором берёт назначение отсюда.
+	GetLastInvite(ctx context.Context, staffID uuid.UUID) (GetLastInviteRow, error)
+	// Сессия старой cookie при принятии приглашения: живая (не погашена, срок не истёк), чья угодно.
+	GetLiveSessionByToken(ctx context.Context, arg GetLiveSessionByTokenParams) (uuid.UUID, error)
 	// Письмо staff.locked: кто закрыт (учётка и её locked_until) и откуда — адрес сессии, на которой
 	// закрылась учётка (причину гашения сессии письмо не смотрит: её мог заменить вход).
 	GetLockedMail(ctx context.Context, id uuid.UUID) (GetLockedMailRow, error)
@@ -22,23 +52,51 @@ type Querier interface {
 	// разблокировка в другой вкладке взаимно ждут.
 	// Учётка для шага пароля: статус, хэш, закрыта ли и подтверждён ли второй фактор.
 	GetLoginAccount(ctx context.Context, email string) (GetLoginAccountRow, error)
+	// GET /me/mfa: когда подтверждён второй фактор и сколько резервных кодов не использовано.
+	GetMFAStatus(ctx context.Context, staffID uuid.UUID) (GetMFAStatusRow, error)
 	// Получатель письма: адрес, язык, статус и роль (письмо уходит только активному адресату нужной роли).
 	GetMailRecipient(ctx context.Context, id uuid.UUID) (GetMailRecipientRow, error)
 	// «Мой доступ» (спека сотрудников §4.7): кто вошёл, свои сессии, пароль, язык. Каждый запрос
 	// привязан к staff_id сессии запроса — id из запроса без него не доверяется.
 	// Учётка и абсолютный срок текущей сессии для GET /v1/staff/me.
 	GetMe(ctx context.Context, arg GetMeParams) (GetMeRow, error)
+	InsertInvite(ctx context.Context, arg InsertInviteParams) error
+	// Новая учётка в статусе invited; почта занята (любой статус) — нет строки.
+	InsertInvitedAccount(ctx context.Context, arg InsertInvitedAccountParams) (int64, error)
+	// Поколение резервных кодов: HMAC нормализованного кода ключом key_id (один ключ на поколение).
+	InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) error
+	InsertRole(ctx context.Context, arg InsertRoleParams) error
+	// Города модератора (отложенный триггер «модератор ⇔ хотя бы один город» проверит на коммите).
+	InsertRoleCities(ctx context.Context, arg InsertRoleCitiesParams) error
 	// Сессии сотрудников (спека сотрудников §4.7). Токен — только SHA-256 (token_hash).
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
+	// Кому письмо staff.bootstrapped: активные владельцы.
+	ListActiveOwners(ctx context.Context) ([]uuid.UUID, error)
+	// Перешифровка: приглашения с кодом не на текущем ключе (код есть только у живых).
+	ListInvitesOnOldKeys(ctx context.Context, currentKey string) ([]ListInvitesOnOldKeysRow, error)
 	// Живые сессии сотрудника (не погашены, срок не истёк), новые сверху.
 	ListLiveSessions(ctx context.Context, arg ListLiveSessionsParams) ([]ListLiveSessionsRow, error)
 	// Кому письмо staff.locked: активные владельцы и админы.
 	ListLockRecipients(ctx context.Context) ([]uuid.UUID, error)
+	// Перешифровка (§4.11): учётки с секретом TOTP не на текущем ключе.
+	ListMFAOnOldKeys(ctx context.Context, currentKey string) ([]uuid.UUID, error)
 	// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка, роль и города модератора.
 	LoadSession(ctx context.Context, tokenHash []byte) (LoadSessionRow, error)
 	// Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
-	// снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите.
+	// снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите,
+	// почта — аккаунт в ссылке otpauth (настройка 2FA).
 	LockAccount(ctx context.Context, id uuid.UUID) (LockAccountRow, error)
+	// Приглашения и оператор (спека сотрудников §4.2–4.4, §4.11). Код приглашения — только шифротекст
+	// (keys.Ring, aad = id приглашения). Сценарии с приглашением сначала берут замок учётки
+	// (LockAccount / LockAccountByEmail), затем строку приглашения: учётка сериализует принятие,
+	// recovery-codes/ack, повторные отправки, выпуск нового приглашения и перешифровку.
+	// Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор.
+	LockAccountByEmail(ctx context.Context, email string) (LockAccountByEmailRow, error)
+	// Код приглашения под замком (перешифровка после замка учётки).
+	LockInviteCode(ctx context.Context, id uuid.UUID) (LockInviteCodeRow, error)
+	// Живое (не погашенное и не принятое-и-закрытое) приглашение учётки под замком; срок проверяет
+	// сценарий.
+	LockLiveInvite(ctx context.Context, staffID uuid.UUID) (LockLiveInviteRow, error)
 	LockMFA(ctx context.Context, staffID uuid.UUID) (LockMFARow, error)
 	// Пятая неудача второго фактора подряд: вход закрыт до locked_until; notified_at задан — письмо
 	// о блокировке уходит сейчас (не чаще раза в час на учётку). Версия агрегата растёт (событие).
@@ -46,6 +104,15 @@ type Querier interface {
 	// Живая или погашенная — решает сценарий (заменённая — гонка двух вкладок).
 	LockSession(ctx context.Context, id uuid.UUID) (LockSessionRow, error)
 	LockUnusedRecoveryCodes(ctx context.Context, staffID uuid.UUID) ([]LockUnusedRecoveryCodesRow, error)
+	RekeyInvite(ctx context.Context, arg RekeyInviteParams) error
+	RekeyMFA(ctx context.Context, arg RekeyMFAParams) error
+	// Повторная отправка самим (§4.3 п.3): новый код в той же строке, попытки с нуля, срок не меняется.
+	ResendInviteCode(ctx context.Context, arg ResendInviteCodeParams) (int32, error)
+	// Верный код: попытки с нуля (приглашение живо до recovery-codes/ack — accept можно повторить).
+	ResetInviteAttempts(ctx context.Context, id uuid.UUID) error
+	// Гашение живого приглашения учётки перед выпуском нового: код стирается (CHECK
+	// staff_invites_closed_no_code).
+	RevokeLiveInvite(ctx context.Context, arg RevokeLiveInviteParams) (int64, error)
 	// Гашение всех живых сессий сотрудника, кроме keep (текущей).
 	RevokeOtherSessions(ctx context.Context, arg RevokeOtherSessionsParams) (int64, error)
 	// Гашение одной живой сессии сотрудника: чужая, несуществующая, погашенная и истёкшая — 0 строк.
@@ -58,6 +125,11 @@ type Querier interface {
 	SetPassword(ctx context.Context, arg SetPasswordParams) error
 	// Отметка активности не чаще раза в минуту на сессию (seen_before — граница) и адрес клиента.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	// Настройка второго фактора и резервные коды (спека сотрудников §4.5, §4.7). Порядок замков — как во
+	// входе: учётка → сессия → staff_mfa → резервные коды.
+	// Новый неподтверждённый секрет TOTP (MFASetup): повторный вызов до подтверждения заменяет секрет.
+	// Подтверждённый секрет не трогается — его отсекает сценарий под замком строки.
+	UpsertPendingMFA(ctx context.Context, arg UpsertPendingMFAParams) error
 	// Резервный код сгорает при любом использовании.
 	UseRecoveryCode(ctx context.Context, arg UseRecoveryCodeParams) (int64, error)
 }

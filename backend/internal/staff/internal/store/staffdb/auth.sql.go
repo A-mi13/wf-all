@@ -108,7 +108,7 @@ func (q *Queries) ListLockRecipients(ctx context.Context) ([]uuid.UUID, error) {
 
 const lockAccount = `-- name: LockAccount :one
 SELECT a.id, a.status, a.display_name, a.mfa_failures, a.locked_until, a.lock_notified_at, a.version,
-       a.password_hash, a.locale, r.role::text AS role
+       a.password_hash, a.locale, r.role::text AS role, a.email::text AS email
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.id = $1
@@ -126,10 +126,12 @@ type LockAccountRow struct {
 	PasswordHash   *string
 	Locale         string
 	Role           string
+	Email          string
 }
 
 // Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
-// снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите.
+// снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите,
+// почта — аккаунт в ссылке otpauth (настройка 2FA).
 func (q *Queries) LockAccount(ctx context.Context, id uuid.UUID) (LockAccountRow, error) {
 	row := q.db.QueryRow(ctx, lockAccount, id)
 	var i LockAccountRow
@@ -144,6 +146,7 @@ func (q *Queries) LockAccount(ctx context.Context, id uuid.UUID) (LockAccountRow
 		&i.PasswordHash,
 		&i.Locale,
 		&i.Role,
+		&i.Email,
 	)
 	return i, err
 }

@@ -30,6 +30,14 @@ const (
 	ReplacedGrace     = replacedGrace
 )
 
+// CreateInvited — помощник 8b: учётка invited с ролью и городами; createdBy uuid.Nil — оператор.
+func (a *App) CreateInvited(ctx context.Context, tx pgx.Tx, email, name, role string, cities []uuid.UUID, createdBy uuid.UUID) (uuid.UUID, error) {
+	inv, err := a.createInvited(ctx, staffdb.New(tx), newAccount{
+		email: email, name: name, role: role, cities: cities, by: createdBy,
+	}, a.clock.Now())
+	return inv.id, err
+}
+
 // PasswordHasher — шов хэшера паролей (страж выравнивания времени входа).
 type PasswordHasher = passwordHasher
 

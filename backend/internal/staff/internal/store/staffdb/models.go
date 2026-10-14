@@ -9,6 +9,48 @@ import (
 	"fmt"
 )
 
+type StaffInvitePurpose string
+
+const (
+	StaffInvitePurposeInvite      StaffInvitePurpose = "invite"
+	StaffInvitePurposeAccessReset StaffInvitePurpose = "access_reset"
+)
+
+func (e *StaffInvitePurpose) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = StaffInvitePurpose(s)
+	case string:
+		*e = StaffInvitePurpose(s)
+	default:
+		return fmt.Errorf("unsupported scan type for StaffInvitePurpose: %T", src)
+	}
+	return nil
+}
+
+type NullStaffInvitePurpose struct {
+	StaffInvitePurpose StaffInvitePurpose
+	Valid              bool // Valid is true if StaffInvitePurpose is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullStaffInvitePurpose) Scan(value interface{}) error {
+	if value == nil {
+		ns.StaffInvitePurpose, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.StaffInvitePurpose.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullStaffInvitePurpose) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.StaffInvitePurpose), nil
+}
+
 type StaffSessionStage string
 
 const (
