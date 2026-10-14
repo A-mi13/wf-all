@@ -41,7 +41,7 @@ paths:
 - **Секреты:** секрет TOTP — `sealTOTP`/`openTOTP` (`keys.Ring`, aad = id сотрудника); резервный код —
   `a.recoveryMAC(key_id строки, staffID, domain.NormalizeRecoveryCode)` (метка `staff-recovery`) — одна функция
   для выдачи и входа; сравнения — `hmac.Equal`/`subtle`. Ввод: почта — `domain.NormalizeEmail`, коды —
-  `domain.NormalizeCode`/`NormalizeRecoveryCode`; своих `strings.ToLower` по почте не писать.
+  `domain.NormalizeCode` (TOTP)/`NormalizeRecoveryCode`/`NormalizeInviteCode`; своих `strings.ToLower` по почте не писать.
 - **Аудит:** действие сотрудника — `ActorStaffID`, роль учётки, `ActorLabel` = `display_name`; неудача пароля —
   без автора (`anonymous`), почта в `After["email"]` (маскирует `audit.Mask`); неудача второго фактора — от
   учётки (шаг `mfa` входа — `staff.login_failed`, прочие — `staff.factor_failed`); блокировка — `system`;
@@ -67,22 +67,31 @@ paths:
   (`body.code`) и `password.Check` (`body.new_password`,
   `passwordPolicyError`) и хэш нового — до транзакции; текущий пароль и фактор — в `withFactor`; успех гасит
   другие сессии (`password_changed`). Ошибки поля — `httpx.NewFieldError`.
-- **Приглашения (§4.3–4.4, D4, D12; `internal/app/invite.go`):** код — `domain.NewInviteCode`, в базе только
-  `keys.Ring.Seal(код, aad = id приглашения)` (`code_enc`, `code_key_id`), сверка — `Open` +
-  `subtle.ConstantTimeCompare`; открытого кода нет в базе, аргументах задач и аудите (страж
-  `TestNoSecretsInAuditAndJobs`). Анонимные `ResendInviteSelf` и `AcceptInvite` сначала читают кандидата без
+- **Приглашения (§4.3–4.4, D4, D12; решение пользователя 14.10.2026; `internal/app/invite.go`):** код —
+  `domain.NewInviteCode` (`xxxxx-xxxxx`, 10 символов base32 RFC 4648 строчными, 50 бит; общий генератор с
+  резервными кодами), ввод — `domain.NormalizeInviteCode` (нормализация резервных кодов); в базе только
+  `keys.Ring.Seal(код, aad = id приглашения)` (`code_enc`, `code_key_id`), сверка — `inviteCodeMatches` (`Open`,
+  нормализация, `subtle.ConstantTimeCompare`); открытого кода нет в базе, аргументах задач и аудите (страж
+  `TestNoSecretsInAuditAndJobs`). Неверный код ничего не стирает и в строке не считается (счётчика попыток в
+  `staff_invites` нет): иначе знающий почту анонимно срывал приглашение. Анонимные `ResendInviteSelf` и `AcceptInvite` сначала читают кандидата без
   замков (`GetInviteCandidate`): делать нечего — ответ без замков и записей (время не выдаёт существование
   почты, страж `TestInviteIneligibleTakesNoLocks`); подходящему — замок учётки, затем строки приглашения, и
   проверка заново. Остальные сценарии с приглашением берут замок учётки, затем строку приглашения. `IssueInvite(ctx, tx, staffID, purpose)` — в транзакции вызывающего (учётка уже под замком):
   гасит живое (код стирается), новое на 24 ч, `sends = 1`, письмо `staff.NewMailArgs(вид по назначению, id
-  приглашения, учётка)`. Повторная отправка самим (`ResendInviteSelf`) — всегда nil; новый код в той же
-  строке (попытки 0, `sends + 1`, срок прежний) только при живом приглашении, паузе 60 с и `sends < 5`
-  («сутки» = жизнь строки: самостоятельная отправка срок не продлевает); аудит `anonymous`. Админом
+  приглашения, учётка)`. Повторная отправка самим (`ResendInviteSelf`) — всегда nil; ТОТ ЖЕ код
+  (`MarkInviteResent`: `sends + 1`, `last_sent_at`, строка не перешифровывается, срок прежний; составитель
+  расшифрует код сам) только при живом приглашении с кодом, паузе 60 с и `sends < 5` («сутки» = жизнь строки:
+  самостоятельная отправка срок не продлевает); аудит `anonymous`; страж ротации — `TestResendInviteSelfSameCode`. Админом
   (`ResendInvite`) — `Decide(staff.invites.resend) == Allow`, не над собой, только `invited`, пауза —
   `*staff.ResendTooSoonError` (429 с остатком), новое приглашение того же назначения на 24 ч. Принятие
-  (`AcceptInvite`): `password.Check` (`body.password`) и хэш — до транзакции; почта, статус, срок, стёртый
-  и неверный код — один `staff.ErrInviteInvalid`; стёртый код отвергается до подсчёта (иначе 23514);
-  неверный — `code_attempts + 1` в закоммиченной транзакции на `detached`, пятый стирает код. Успех: пароль,
+  (`AcceptInvite`): `password.Check` (`body.password`) и хэш — до транзакции; почта, статус, срок, нет кода
+  и неверный код — один `staff.ErrInviteInvalid`. Сверка — по чтению без замков (`GetInviteCandidate` отдаёт
+  шифротекст): неверный — только аудит `staff.invite_accept_failed` (`anonymous`, `After = {email}`) в
+  короткой транзакции БЕЗ замков на `detached` (стражи `TestAcceptInviteWrongCodeKeepsCode`,
+  `TestAcceptInviteConcurrentWrong`, `TestAcceptInviteCanceledAfterHash`, путь «неверный код» в
+  `TestInviteIneligibleTakesNoLocks`); верный — замки учётки и строки, `lockAcceptable` и сверка с кодом
+  закрытой замком строки (перевыпуск во время ожидания — старый код неверен,
+  `TestAcceptInviteReissuedWhileWaiting`). Успех: пароль,
   блокировка второго фактора снята, `staff_mfa` и коды удалены, все сессии учётки и сессия старой cookie
   (чья угодно) — `replaced`, новая — `setup` на 8 ч; приглашение живо до ack. Учётка `invited` с ролью и
   городами — `createInvited` (почта и имя — `validateInvitee`, занята — `ErrEmailTaken`); автор аудита —
