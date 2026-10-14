@@ -205,6 +205,12 @@ func TestStaff0020Secrets(t *testing.T) {
 	wantArgsError(t, db, "23514", "staff_invites_code_pair", inv, s2, nil, keyID, nil)
 	wantArgsError(t, db, "23514", "staff_invites_code_key_id_format", inv, s2, "0a", "bad", nil)
 	wantArgsError(t, db, "23514", "staff_invites_closed_no_code", inv, s2, "0a", keyID, ts)
+	// живое приглашение без кода не бывает: код стирается только вместе с закрытием (revoked_at)
+	wantArgsError(t, db, "23514", "staff_invites_live_has_code", inv, s2, nil, nil, nil)
+	execArgs(t, db, inv, s2, "0a", keyID, nil)
+	wantArgsError(t, db, "23514", "staff_invites_live_has_code",
+		`UPDATE staff_invites SET code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, s2)
+	execArgs(t, db, `UPDATE staff_invites SET revoked_at = now(), code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, s2)
 	// неверные вводы кода не считаются и не стирают его (решение пользователя 14.10.2026): счётчика
 	// попыток в строке нет
 	var attempts int

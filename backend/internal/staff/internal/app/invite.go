@@ -67,28 +67,62 @@ func (a *App) openInviteCode(inviteID uuid.UUID, ct []byte, keyID string) (strin
 }
 
 // inviteCodeMatches — совпадает ли нормализованный ввод input (domain.NormalizeInviteCode; кривой ввод —
-// "") с кодом приглашения inviteID; сравнение за постоянное время. Открытый код, который не
-// нормализуется, — ошибка данных, а не «неверный код».
-func (a *App) inviteCodeMatches(inviteID uuid.UUID, ct []byte, keyID, input string) (bool, error) {
-	plain, err := a.openInviteCode(inviteID, ct, keyID)
-	if err != nil {
-		return false, err
-	}
-	want, ok := domain.NormalizeInviteCode(plain)
-	if !ok {
-		return false, fmt.Errorf("staff: код приглашения %s не в формате xxxxx-xxxxx", inviteID)
-	}
-	return subtle.ConstantTimeCompare([]byte(want), []byte(input)) == 1, nil
+// "") с кодом приглашения inviteID; сравнение за постоянное время. Нечитаемый код (readInviteCode) —
+// не совпал: принятие отвечает staff.invite_invalid, а не 500.
+func (a *App) inviteCodeMatches(ctx context.Context, inviteID uuid.UUID, ct []byte, keyID, input string) bool {
+	_, want, ok := a.readInviteCode(ctx, inviteID, ct, keyID)
+	return ok && subtle.ConstantTimeCompare([]byte(want), []byte(input)) == 1
 }
 
-// auditAcceptFailed — неверный код приглашения учётки staffID: запись аудита без автора (почта
-// маскируется, кода нет) в транзакции ctx. Строку приглашения неудача не меняет.
-func auditAcceptFailed(ctx context.Context, staffID uuid.UUID, email string, m staff.Meta) error {
-	return audit.Write(ctx, audit.Entry{
-		ActorRole: roleAnonymous, Action: actionInviteAcceptFailed, ObjectType: objectAccount, ObjectID: staffID,
-		After: map[string]any{"email": email},
-		IP:    m.IP, UserAgent: m.UserAgent,
-	})
+// readInviteCode — код приглашения: plain — показанная форма (письмо), norm — нормализованная (сверка);
+// ok=false — код нечитаем (ключ убран из кольца
+// раньше rekey, шифротекст повреждён, открытый код не в формате xxxxx-xxxxx): предупреждение в журнал
+// сервера с id приглашения и ключа, без кода. Исправление — вернуть ключ в ADMIN_STAFF_SECRET_KEYS или
+// выпустить новое приглашение (админ, оператор).
+func (a *App) readInviteCode(ctx context.Context, inviteID uuid.UUID, ct []byte, keyID string) (plain, norm string, ok bool) {
+	plain, err := a.openInviteCode(inviteID, ct, keyID)
+	if err != nil {
+		a.log.WarnContext(ctx, "staff: код приглашения не расшифровался — нужен ключ или новое приглашение",
+			"invite_id", inviteID.String(), "key_id", keyID, "err", err)
+		return "", "", false
+	}
+	if norm, ok = domain.NormalizeInviteCode(plain); !ok {
+		a.log.WarnContext(ctx, "staff: код приглашения не в формате xxxxx-xxxxx — нужно новое приглашение",
+			"invite_id", inviteID.String())
+		return "", "", false
+	}
+	return plain, norm, true
+}
+
+// acceptFailed — принять нечего (кривая или чужая почта, учётка не invited, нет приглашения, срок,
+// неверный или нечитаемый код): одна запись аудита staff.invite_accept_failed без автора (почта
+// маскируется, кода нет), как у неудачного входа, — пути «нет приглашения» и «неверный код» пишут
+// одинаково. Объект — учётка, если она есть (uuid.Nil — нет). Журнал не засыпать: не больше
+// inviteAuditPolicy записей на почту (ratelimit.EmailKey от HMAC почты), сверх потолка — без записи.
+// Хранилище лимитов недоступно — запись идёт (лучше лишняя, чем потерянная). Без замков учётки и
+// строки; ctx — detached (D8). Ответ всегда staff.ErrInviteInvalid (или ошибка записи).
+func (a *App) acceptFailed(ctx context.Context, object uuid.UUID, email string, m staff.Meta) error {
+	key, err := a.emailKey(classInviteAudit, email)
+	if err != nil {
+		return err
+	}
+	res, err := a.limiter.Allow(ctx, key, inviteAuditPolicy)
+	switch {
+	case err != nil:
+		a.log.ErrorContext(ctx, "staff: потолок аудита приглашения недоступен", "err", err)
+	case !res.Allowed:
+		return staff.ErrInviteInvalid
+	}
+	if err := db.InTx(ctx, a.pool, func(ctx context.Context, _ pgx.Tx) error {
+		return audit.Write(ctx, audit.Entry{
+			ActorRole: roleAnonymous, Action: actionInviteAcceptFailed, ObjectType: objectAccount, ObjectID: object,
+			After: map[string]any{"email": email},
+			IP:    m.IP, UserAgent: m.UserAgent,
+		})
+	}); err != nil {
+		return err
+	}
+	return staff.ErrInviteInvalid
 }
 
 // inviteMailKind — вид письма по назначению приглашения: invite — staff.invite, access_reset —
@@ -204,8 +238,8 @@ func (a *App) ResendInviteSelf(ctx context.Context, email string, m staff.Meta) 
 
 // ResendInvite — повторная отправка приглашения админом (§4.3 п.4): право staff.invites.resend
 // (иначе 403 auth.forbidden), не над собой (staff.self_action), учётка есть (staff.not_found) и в
-// статусе invited (staff.wrong_stage); с последней отправки меньше 60 с — *staff.ResendTooSoonError с
-// остатком паузы. Новое приглашение (IssueInvite) с назначением последнего приглашения учётки — срок
+// статусе invited (staff.wrong_stage); с выпуска последнего приглашения меньше 60 с —
+// *staff.ResendTooSoonError с остатком паузы. Новое приглашение (IssueInvite) с назначением последнего приглашения учётки — срок
 // 24 ч заново; аудит staff.invite_resent от сотрудника.
 func (a *App) ResendInvite(ctx context.Context, s *auth.Staff, staffID uuid.UUID, m staff.Meta) error {
 	if s.Decide(permInvitesResend, uuid.Nil) != auth.Allow {
@@ -232,8 +266,8 @@ func (a *App) ResendInvite(ctx context.Context, s *auth.Staff, staffID uuid.UUID
 }
 
 // lockForResend — учётка staffID под замком для нового приглашения админом или оператором: нет —
-// staff.not_found, не invited — staff.wrong_stage; pause — отказ раньше 60 с с прошлой отправки
-// (*staff.ResendTooSoonError). Назначение — последнего приглашения учётки (нет приглашений — invite).
+// staff.not_found, не invited — staff.wrong_stage; pause — отказ раньше 60 с с выпуска последнего
+// приглашения (*staff.ResendTooSoonError; анонимные самоотправки паузу админа не двигают). Назначение — последнего приглашения учётки (нет приглашений — invite).
 func (a *App) lockForResend(ctx context.Context, q *staffdb.Queries, staffID uuid.UUID, pause bool) (string, error) {
 	acct, err := q.LockAccount(ctx, staffID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -252,7 +286,7 @@ func (a *App) lockForResend(ctx context.Context, q *staffdb.Queries, staffID uui
 	if err != nil {
 		return "", err
 	}
-	if wait := resendPause - a.clock.Now().Sub(last.LastSentAt); pause && wait > 0 {
+	if wait := resendPause - a.clock.Now().Sub(last.CreatedAt); pause && wait > 0 {
 		return "", &staff.ResendTooSoonError{RetryAfter: wait}
 	}
 	return last.Purpose, nil
@@ -286,59 +320,45 @@ func (a *App) AcceptInvite(ctx context.Context, email, code, pw, oldToken string
 	if err != nil {
 		return "", err
 	}
+	// обрыв соединения клиента не теряет запись неудачи
+	dctx, cancel := detached(ctx)
+	defer cancel()
 	norm, ok := domain.NormalizeEmail(email)
 	if !ok {
-		return "", staff.ErrInviteInvalid
+		return "", a.acceptFailed(dctx, uuid.Nil, email, m) // кривая почта — в журнал как есть (маскируется)
 	}
-	input, _ := domain.NormalizeInviteCode(code) // кривой код — "": неверный код (неудача пишется)
+	input, _ := domain.NormalizeInviteCode(code) // кривой код — "": неверный код
 	var oldHash []byte
 	if oldToken != "" {
 		oldHash = token.HashRefresh(oldToken)
 	}
-	// обрыв соединения клиента не теряет запись неудачи
-	dctx, cancel := detached(ctx)
-	defer cancel()
-	// без замков: принимать нечего — ответ без замков и записей (время не выдаёт почту)
-	c, ok, err := a.inviteCandidate(dctx, norm)
+	// без замков: принимать нечего или код неверен — ответ без замков, только запись неудачи
+	c, found, err := a.inviteCandidate(dctx, norm)
 	if err != nil {
 		return "", err
 	}
-	if !ok || c.CodeEnc == nil || c.CodeKeyID == nil || !a.clock.Now().Before(*c.ExpiresAt) {
-		return "", staff.ErrInviteInvalid
-	}
-	match, err := a.inviteCodeMatches(*c.InviteID, c.CodeEnc, *c.CodeKeyID, input)
-	if err != nil {
-		return "", err
-	}
-	if !match {
-		// неверный код: ни замков, ни правки строки — только запись неудачи
-		if err := db.InTx(dctx, a.pool, func(ctx context.Context, _ pgx.Tx) error {
-			return auditAcceptFailed(ctx, c.ID, norm, m)
-		}); err != nil {
-			return "", err
-		}
-		return "", staff.ErrInviteInvalid
+	if !found || c.CodeEnc == nil || c.CodeKeyID == nil || !a.clock.Now().Before(*c.ExpiresAt) ||
+		!a.inviteCodeMatches(dctx, *c.InviteID, c.CodeEnc, *c.CodeKeyID, input) {
+		return "", a.acceptFailed(dctx, c.ID, norm, m) // учётки нет — c.ID нулевой, объекта нет
 	}
 	var (
 		raw     string
 		invalid bool
+		object  uuid.UUID
 	)
 	err = db.InTx(dctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
 		acct, inv, ok, err := a.lockAcceptable(ctx, q, norm)
+		object = acct.ID
 		if err != nil || !ok {
 			invalid = !ok
 			return err
 		}
 		now := a.clock.Now()
 		// под замком — код этой строки: приглашение могли перевыпустить, пока ждали замок
-		match, err := a.inviteCodeMatches(inv.ID, inv.CodeEnc, *inv.CodeKeyID, input)
-		if err != nil {
-			return err
-		}
-		if !match {
-			invalid = true
-			return auditAcceptFailed(ctx, acct.ID, norm, m)
+		if !a.inviteCodeMatches(ctx, inv.ID, inv.CodeEnc, *inv.CodeKeyID, input) {
+			invalid = true // запись неудачи — после транзакции, без замков
+			return nil
 		}
 		if err := q.AcceptInvitePassword(ctx, staffdb.AcceptInvitePasswordParams{PasswordHash: &hash, ID: acct.ID}); err != nil {
 			return err
@@ -373,7 +393,7 @@ func (a *App) AcceptInvite(ctx context.Context, email, code, pw, oldToken string
 		return "", err
 	}
 	if invalid {
-		return "", staff.ErrInviteInvalid
+		return "", a.acceptFailed(dctx, object, norm, m)
 	}
 	return raw, nil
 }

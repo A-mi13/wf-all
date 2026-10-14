@@ -168,7 +168,8 @@ CREATE TABLE staff_recovery_codes (
 CREATE INDEX staff_recovery_codes_key_idx ON staff_recovery_codes (key_id) WHERE used_at IS NULL;
 
 -- Приглашения и сброс доступа. Код (xxxxx-xxxxx, 50 бит) зашифрован кольцом ключей, aad = id
--- приглашения (D4): письмо собирает составитель admin-api по id. NULL — кода нет: приглашение закрыто.
+-- приглашения (D4): письмо собирает составитель admin-api по id. NULL — кода нет: приглашение закрыто
+-- (живое без кода не бывает — staff_invites_live_has_code).
 -- Неверные вводы код не стирают и в строке не считаются (решение пользователя 14.10.2026: иначе знающий
 -- почту срывал приглашение анонимно; перебор 50 бит под IP-лимитом недостижим за 24 ч).
 CREATE TABLE staff_invites (
@@ -188,6 +189,9 @@ CREATE TABLE staff_invites (
     CONSTRAINT staff_invites_code_pair CHECK ((code_enc IS NULL) = (code_key_id IS NULL)),
     CONSTRAINT staff_invites_code_key_id_format CHECK (code_key_id ~ '^[A-Za-z0-9_-]{11}$'),
     CONSTRAINT staff_invites_closed_no_code CHECK ((consumed_at IS NULL AND revoked_at IS NULL) OR code_enc IS NULL),
+    -- живое приглашение всегда с кодом (код ⇔ живое вместе с closed_no_code): неверные вводы код не стирают;
+    -- стереть код у живого (в том числе истёкшего) можно только закрыв его — revoked_at
+    CONSTRAINT staff_invites_live_has_code CHECK (consumed_at IS NOT NULL OR revoked_at IS NOT NULL OR code_enc IS NOT NULL),
     CONSTRAINT staff_invites_sends_check CHECK (sends >= 0)
 );
 

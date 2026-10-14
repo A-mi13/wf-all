@@ -641,6 +641,33 @@ func TestResendInvite(t *testing.T) {
 	}
 }
 
+// Пауза админской повторной отправки считается от выпуска приглашения (админом, оператором,
+// исполнителем), а не от last_sent_at: анонимные самоотправки (их может жать кто угодно, знающий
+// почту) не блокируют админа. Две админские отправки за 60 с — ResendTooSoonError.
+func TestResendInvitePauseFromIssue(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
+	s := e.load(e.signIn(owner))
+	m, _ := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	e.clock.Advance(61 * time.Second)
+	if err := e.app.ResendInviteSelf(ctx, m.Email, metaWeb); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.liveInvite(m.ID); got.Sends != 2 {
+		t.Fatalf("самоотправка не прошла: %+v", got)
+	}
+	e.clock.Advance(10 * time.Second)
+	if err := e.app.ResendInvite(ctx, s, m.ID, metaWeb); err != nil {
+		t.Fatalf("самоотправка 10 с назад, выпуск 71 с назад: %v", err)
+	}
+	e.clock.Advance(30 * time.Second)
+	err := e.app.ResendInvite(ctx, s, m.ID, metaWeb)
+	if tooSoon, ok := errors.AsType[*staff.ResendTooSoonError](err); !ok || tooSoon.RetryAfter != 30*time.Second {
+		t.Fatalf("вторая админская через 30 с: %v", err)
+	}
+}
+
 // Секреты (код приглашения, секрет TOTP, резервные коды) не попадают ни в журнал, ни в аргументы
 // задач River.
 func TestNoSecretsInAuditAndJobs(t *testing.T) {

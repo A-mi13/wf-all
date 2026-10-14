@@ -65,11 +65,10 @@ type AccountView struct {
 
 // InviteState — живое приглашение учётки (схема StaffInviteState и служебные поля карточки).
 type InviteState struct {
-	Purpose    string // invite | access_reset
-	ExpiresAt  time.Time
-	Expired    bool
-	LastSentAt time.Time // пауза повторной отправки
-	CodeErased bool      // 5 неверных вводов стёрли код — нужна повторная отправка
+	Purpose   string // invite | access_reset
+	ExpiresAt time.Time
+	Expired   bool
+	IssuedAt  time.Time // выпуск (created_at): от него пауза повторной отправки админом
 }
 
 // MFAView — состояние второго фактора (схема StaffMfaStatus).

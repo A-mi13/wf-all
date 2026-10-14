@@ -51,7 +51,7 @@ func TestComposeInvite(t *testing.T) {
 }
 
 // ComposeInvite отменяет письмо (mail.ErrSkip): не тот получатель, не тот вид, погашено (новым
-// приглашением), код стёрт, срок истёк, приглашение принято-и-закрыто, нет приглашения.
+// приглашением), срок истёк, приглашение принято-и-закрыто, нет приглашения.
 func TestComposeInviteSkips(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
@@ -63,10 +63,6 @@ func TestComposeInviteSkips(t *testing.T) {
 	oldRef := e.liveInvite(old.ID).ID
 	e.issue(old.ID, purposeInvite)
 
-	// живое приглашение без кода сценарии не создают (неверные вводы код не стирают) — защита
-	// составителя на случай ручной правки строки
-	wiped, _ := e.invitee("wiped@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	e.exec(`UPDATE staff_invites SET code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, wiped.ID)
 	done, doneCode := e.invitee("done@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	doneRef := e.liveInvite(done.ID).ID
 	_, s := e.accept(done, doneCode)
@@ -80,7 +76,6 @@ func TestComposeInviteSkips(t *testing.T) {
 		{"не тот получатель", live.ID, other.ID, staff.MailInvite},
 		{"не тот вид", live.ID, m.ID, staff.MailAccessReset},
 		{"погашено", oldRef, old.ID, staff.MailInvite},
-		{"код стёрт", e.liveInvite(wiped.ID).ID, wiped.ID, staff.MailInvite},
 		{"закрыто ack", doneRef, done.ID, staff.MailInvite},
 		{"нет приглашения", uuid.New(), m.ID, staff.MailInvite},
 	}

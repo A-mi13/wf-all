@@ -30,20 +30,21 @@ func (e *env) holdAccount(staffID uuid.UUID) (release func()) {
 }
 
 // I-1 ревью: повторной отправке и принятию нечего делать (учётка active или disabled, приглашение в
-// паузе, истекло, кода нет) — ответ без замков и записей: учётка под чужим замком не задерживает
-// ответ. Иначе время ответа выдавало бы существование почты сильнее, чем у входа. Неверный код к
-// годному приглашению (14.10.2026) — тоже без замков: только запись аудита неудачи.
+// паузе, истекло, закрыто, неверный код к годному) — ответ без замков: учётка под чужим замком не
+// задерживает ответ. Иначе время ответа выдавало бы существование почты сильнее, чем у входа.
+// Записи (раунд 1, 14.10.2026) у всех путей принятия одинаковые — одна запись неудачи, как у входа;
+// у повторной отправки — никаких.
 func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 	e := newEnv(t)
 	active := e.addMember("active@wf.example", memberOpts{})
 	off := e.addMember("off@wf.example", memberOpts{Status: "disabled"})
 	paused, _ := e.invitee("paused@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	noCode, _ := e.invitee("nocode@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	e.exec(`UPDATE staff_invites SET code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, noCode.ID)
+	closed, _ := e.invitee("closed@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	e.exec(`UPDATE staff_invites SET revoked_at = $2, code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, closed.ID, t0)
 	expired, _ := e.invitee("expired@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	e.exec(`UPDATE staff_invites SET expires_at = $2 WHERE staff_id = $1`, expired.ID, t0)
 	valid, validCode := e.invitee("valid@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	for _, m := range []member{active, off, paused, noCode, expired, valid} {
+	for _, m := range []member{active, off, paused, closed, expired, valid} {
 		e.holdAccount(m.ID)
 	}
 	// неверный код к годному приглашению: ответ без замка учётки и строки, неудача — в аудите
@@ -66,7 +67,7 @@ func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 			t.Fatalf("повторная отправка %s: %v", m.Email, err)
 		}
 	}
-	for _, m := range []member{active, off, noCode, expired} {
+	for _, m := range []member{active, off, closed, expired} {
 		start := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, err := e.app.AcceptInvite(ctx, m.Email, "k7m2p-x4q6d", newPassword, "", metaWeb)
@@ -75,8 +76,12 @@ func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 			t.Fatalf("принятие %s: %v за %v", m.Email, err, time.Since(start))
 		}
 	}
-	if n := len(e.audits("staff.invite_accept_failed")); n != 1 {
-		t.Fatalf("записи у негодных: аудит неудач %d", n)
+	// у каждого негодного — ровно одна запись, как у неверного кода к годному
+	if n := len(e.audits("staff.invite_accept_failed")); n != 5 {
+		t.Fatalf("записи у негодных: аудит неудач %d, ждали 5", n)
+	}
+	if n := len(e.audits("staff.invite_resent")); n != 0 {
+		t.Fatalf("записи повторной отправки %d", n)
 	}
 }
 

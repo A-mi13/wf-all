@@ -226,7 +226,7 @@ func (q *Queries) GetInviteMail(ctx context.Context, id uuid.UUID) (GetInviteMai
 }
 
 const getLastInvite = `-- name: GetLastInvite :one
-SELECT purpose::text AS purpose, last_sent_at
+SELECT purpose::text AS purpose, created_at
 FROM staff_invites
 WHERE staff_id = $1
 ORDER BY created_at DESC, id DESC
@@ -234,16 +234,17 @@ LIMIT 1
 `
 
 type GetLastInviteRow struct {
-	Purpose    string
-	LastSentAt time.Time
+	Purpose   string
+	CreatedAt time.Time
 }
 
-// Последнее приглашение учётки (живое или закрытое): назначение и время последней отправки —
-// повторная отправка админом и оператором берёт назначение отсюда.
+// Последнее приглашение учётки (живое или закрытое): назначение и время выпуска — повторная отправка
+// админом и оператором берёт назначение отсюда, пауза админа считается от выпуска (created_at), а не от
+// last_sent_at: его двигают анонимные самоотправки, и чужое нажатие не должно блокировать админа.
 func (q *Queries) GetLastInvite(ctx context.Context, staffID uuid.UUID) (GetLastInviteRow, error) {
 	row := q.db.QueryRow(ctx, getLastInvite, staffID)
 	var i GetLastInviteRow
-	err := row.Scan(&i.Purpose, &i.LastSentAt)
+	err := row.Scan(&i.Purpose, &i.CreatedAt)
 	return i, err
 }
 

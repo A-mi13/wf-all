@@ -62,7 +62,8 @@ func (a *App) ComposeLocked(ctx context.Context, ref, recipient uuid.UUID) (mail
 // получателю recipient: имя, код, ссылка ADMIN_ORIGIN/accept (почты в адресе нет — её вводят на
 // странице) и срок кода. Язык — staff_accounts.locale учётки. Письмо больше не нужно — mail.ErrSkip:
 // приглашения нет, получатель — не его учётка или учётка уже не invited, вид письма не соответствует
-// назначению, приглашение погашено или принято-и-закрыто, срок истёк, код стёрт.
+// назначению, приглашение погашено или принято-и-закрыто, срок истёк; код нечитаем (ключ убран из
+// кольца раньше rekey) — тоже mail.ErrSkip с предупреждением: повторы задачи этого не исправят.
 func (a *App) ComposeInvite(ctx context.Context, ref, recipient uuid.UUID, kind string) (mail.Message, error) {
 	row, err := staffdb.New(a.pool).GetInviteMail(ctx, ref)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -80,9 +81,11 @@ func (a *App) ComposeInvite(ctx context.Context, ref, recipient uuid.UUID, kind 
 		row.CodeEnc == nil || row.CodeKeyID == nil {
 		return mail.Message{}, mail.ErrSkip
 	}
-	code, err := a.openInviteCode(ref, row.CodeEnc, *row.CodeKeyID)
-	if err != nil {
-		return mail.Message{}, err
+	// нечитаемый код (ключ убран раньше rekey) повторами не исправить — письмо отменяется с
+	// предупреждением, а не уходит в «мёртвые» задачи
+	code, _, ok := a.readInviteCode(ctx, ref, row.CodeEnc, *row.CodeKeyID)
+	if !ok {
+		return mail.Message{}, mail.ErrSkip
 	}
 	args := map[string]any{
 		"name":    row.DisplayName,

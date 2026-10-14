@@ -47,8 +47,9 @@ type Querier interface {
 	GetInviteCandidate(ctx context.Context, email string) (GetInviteCandidateRow, error)
 	// Письмо staff.invite / staff.access_reset: приглашение и его учётка.
 	GetInviteMail(ctx context.Context, id uuid.UUID) (GetInviteMailRow, error)
-	// Последнее приглашение учётки (живое или закрытое): назначение и время последней отправки —
-	// повторная отправка админом и оператором берёт назначение отсюда.
+	// Последнее приглашение учётки (живое или закрытое): назначение и время выпуска — повторная отправка
+	// админом и оператором берёт назначение отсюда, пауза админа считается от выпуска (created_at), а не от
+	// last_sent_at: его двигают анонимные самоотправки, и чужое нажатие не должно блокировать админа.
 	GetLastInvite(ctx context.Context, staffID uuid.UUID) (GetLastInviteRow, error)
 	// Сессия старой cookie при принятии приглашения: живая (не погашена, срок не истёк), чья угодно.
 	GetLiveSessionByToken(ctx context.Context, arg GetLiveSessionByTokenParams) (uuid.UUID, error)

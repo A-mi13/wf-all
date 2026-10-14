@@ -32,9 +32,10 @@ WHERE staff_id = sqlc.arg(staff_id) AND consumed_at IS NULL AND revoked_at IS NU
 FOR UPDATE;
 
 -- name: GetLastInvite :one
--- Последнее приглашение учётки (живое или закрытое): назначение и время последней отправки —
--- повторная отправка админом и оператором берёт назначение отсюда.
-SELECT purpose::text AS purpose, last_sent_at
+-- Последнее приглашение учётки (живое или закрытое): назначение и время выпуска — повторная отправка
+-- админом и оператором берёт назначение отсюда, пауза админа считается от выпуска (created_at), а не от
+-- last_sent_at: его двигают анонимные самоотправки, и чужое нажатие не должно блокировать админа.
+SELECT purpose::text AS purpose, created_at
 FROM staff_invites
 WHERE staff_id = sqlc.arg(staff_id)
 ORDER BY created_at DESC, id DESC

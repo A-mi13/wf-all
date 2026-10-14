@@ -32,14 +32,17 @@ func (a *App) recoveryMAC(keyID string, staffID uuid.UUID, norm string) ([]byte,
 	return a.keys.MAC(keyID, labelRecovery, msg)
 }
 
-// loginEmailKey — ключ лимита входа по почте (D7): HMAC почты текущим ключом кольца, сама почта в
+// loginEmailKey — ключ лимита входа по почте (D7).
+func (a *App) loginEmailKey(email string) (string, error) { return a.emailKey(classStaffLogin, email) }
+
+// emailKey — ключ лимита класса class по почте: HMAC почты текущим ключом кольца, сама почта в
 // rate_limits не попадает.
-func (a *App) loginEmailKey(email string) (string, error) {
+func (a *App) emailKey(class, email string) (string, error) {
 	mac, err := a.keys.MAC(a.keys.CurrentID(), labelLoginEmail, []byte(email))
 	if err != nil {
 		return "", err
 	}
-	return ratelimit.EmailKey(classStaffLogin, mac), nil
+	return ratelimit.EmailKey(class, mac), nil
 }
 
 // macEqual — сравнение HMAC за постоянное время.
