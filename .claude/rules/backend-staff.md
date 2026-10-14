@@ -9,8 +9,8 @@ paths:
 `.superpowers/sdd/2026-10-06-staff-a/decisions-r2.md` (D7–D12) и приложение Б плана (P1–P11).
 
 - **Пакеты без циклов (P1–P5).** Корень `staff` — только `Deps`, `Meta`, DTO, ошибки (`Err*`, `MFAError`,
-  `RateLimitError`, `CodeOf`), коды (`codes.go`, сверка с контрактом — `TestStaffCodesDocumented` в `admin`),
-  события (`events.go`) и задача письма (`MailArgs`, `NewMailArgs`, очередь `queue.Staff`); корень не
+  `RateLimitError`, `ResendTooSoonError`, `CodeOf`), коды (`codes.go`, сверка с контрактом —
+  `TestStaffCodesDocumented` в `admin`), события (`events.go`) и задача письма (`MailArgs`, `NewMailArgs`, очередь `queue.Staff`); корень не
   импортирует `internal/app`, `admin`, `jobs` (страж `TestRootDoesNotImportInnerPackages`). SQL — только
   `staff_*` (`queries/` → `internal/store/staffdb`, генерация — `go tool -modfile=tools/go.mod sqlc generate`).
 - **Права** — `perm.Grants(role)` при загрузке сессии (`LoadStaff`); модуль своих матриц не держит.
@@ -67,3 +67,36 @@ paths:
   (`body.code`) и `password.Check` (`body.new_password`,
   `passwordPolicyError`) и хэш нового — до транзакции; текущий пароль и фактор — в `withFactor`; успех гасит
   другие сессии (`password_changed`). Ошибки поля — `httpx.NewFieldError`.
+- **Приглашения (§4.3–4.4, D4, D12; `internal/app/invite.go`):** код — `domain.NewInviteCode`, в базе только
+  `keys.Ring.Seal(код, aad = id приглашения)` (`code_enc`, `code_key_id`), сверка — `Open` +
+  `subtle.ConstantTimeCompare`; открытого кода нет в базе, аргументах задач и аудите (страж
+  `TestNoSecretsInAuditAndJobs`). Сценарий с приглашением сначала берёт замок учётки, затем строку
+  приглашения. `IssueInvite(ctx, tx, staffID, purpose)` — в транзакции вызывающего (учётка уже под замком):
+  гасит живое (код стирается), новое на 24 ч, `sends = 1`, письмо `staff.NewMailArgs(вид по назначению, id
+  приглашения, учётка)`. Повторная отправка самим (`ResendInviteSelf`) — всегда nil; новый код в той же
+  строке (попытки 0, `sends + 1`, срок прежний) только при живом приглашении, паузе 60 с и `sends < 5`
+  («сутки» = жизнь строки: самостоятельная отправка срок не продлевает); аудит `anonymous`. Админом
+  (`ResendInvite`) — `Decide(staff.invites.resend) == Allow`, не над собой, только `invited`, пауза —
+  `*staff.ResendTooSoonError` (429 с остатком), новое приглашение того же назначения на 24 ч. Принятие
+  (`AcceptInvite`): `password.Check` (`body.password`) и хэш — до транзакции; почта, статус, срок, стёртый
+  и неверный код — один `staff.ErrInviteInvalid`; стёртый код отвергается до подсчёта (иначе 23514);
+  неверный — `code_attempts + 1` в закоммиченной транзакции на `detached`, пятый стирает код. Успех: пароль,
+  блокировка второго фактора снята, `staff_mfa` и коды удалены, все сессии учётки и сессия старой cookie
+  (чья угодно) — `replaced`, новая — `setup` на 8 ч; приглашение живо до ack. Учётка `invited` с ролью и
+  городами — `createInvited` (почта и имя — `validateInvitee`, занята — `ErrEmailTaken`); автор аудита —
+  `actor` (`staffActor(s)` или `operatorActor`).
+- **Настройка 2FA (§4.5; `internal/app/setup.go`):** стадия `setup` — `lockSetup` (учётка → сессия;
+  `lockLiveSession` не подходит — он требует `active`): погашена — `ErrSessionInvalid`, заменена —
+  `ErrSessionReplaced`, не та стадия — `staff.wrong_stage`. `MFASetup` заменяет неподтверждённый секрет
+  (`sealTOTP`), подтверждённый — `wrong_stage`; издатель otpauth — хост `ADMIN_ORIGIN` без порта. `MFAConfirm`:
+  неверный код — `staff.ErrMFAInvalid` без счётчика (не `withFactor`: учётка ещё `invited`); успех —
+  `last_used_step`, `confirmed_at`, коды `issueRecoveryCodes` (тот же `recoveryMAC`, что при входе).
+  `RecoveryAck`: гасит приглашение (истекло — `invite_invalid`), учётка `active`, новый токен через
+  `replaceSession` (срок — от принятия), аудит `staff.mfa_enabled`. Перевыпуск кодов (`RegenerateRecovery`) —
+  только TOTP через `withFactor` (шаг `recovery_regenerate`), страж погашенной сессии
+  `TestRegenerateRecoveryRevokedSession`.
+- **Оператор (§4.2, §4.11; `internal/app/operator.go`):** аудит — `actor_role = operator`, метка `operator`.
+  `OperatorBootstrap` — учётка `owner` (`invited`), приглашение, `staff.bootstrapped`, событие `staff.invited`,
+  письмо `staff.bootstrapped` каждому активному владельцу; доступен всегда. `OperatorInviteResend` — без паузы и
+  прав. `Rekey` — каждая строка (секрет TOTP, код приглашения) не на текущем ключе — своей транзакцией под
+  замком учётки; резервные коды только считаются (`RecoveryOnOldKeys`), итог — аудит `staff.rekeyed`.
