@@ -91,7 +91,8 @@ paths:
   (`sealTOTP`), подтверждённый — `wrong_stage`; издатель otpauth — хост `ADMIN_ORIGIN` без порта. `MFAConfirm`:
   неверный код — `staff.ErrMFAInvalid` без счётчика (не `withFactor`: учётка ещё `invited`); успех —
   `last_used_step`, `confirmed_at`, коды `issueRecoveryCodes` (тот же `recoveryMAC`, что при входе).
-  `RecoveryAck`: гасит приглашение (истекло — `invite_invalid`), учётка `active`, новый токен через
+  `RecoveryAck`: гасит не погашенное приглашение без проверки срока (владение кодом доказано на accept, у
+  сессии setup свой срок — иначе тупик на границе 24 ч); живого нет — `wrong_stage`; учётка `active`, новый токен через
   `replaceSession` (срок — от принятия), аудит `staff.mfa_enabled`. Перевыпуск кодов (`RegenerateRecovery`) —
   только TOTP через `withFactor` (шаг `recovery_regenerate`), страж погашенной сессии
   `TestRegenerateRecoveryRevokedSession`.

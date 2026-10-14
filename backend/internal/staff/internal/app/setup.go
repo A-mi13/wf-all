@@ -180,8 +180,11 @@ func (a *App) issueRecoveryCodes(ctx context.Context, q *staffdb.Queries, staffI
 }
 
 // RecoveryAck — последний шаг настройки (§4.5, D9, D12): только в стадии setup с подтверждённым TOTP
-// (иначе staff.ErrWrongStage). Гасит приглашение (живое и не истёкшее, иначе staff.ErrInviteInvalid),
-// учётка — active (вход — сейчас, счётчик неудач 0), сессия — active с новым токеном через
+// (иначе staff.ErrWrongStage). Гасит приглашение, если оно не погашено и не принято-закрыто, даже
+// когда срок уже прошёл: владение кодом доказано на accept, у сессии setup свой срок, а проверка срока
+// здесь оставляла бы тупик на границе 24 ч (TOTP подтверждён, «Готово» отказывает). Живого
+// приглашения нет — staff.ErrWrongStage (на практике сюда не попасть: сброс доступа и выключение
+// гасят сессии). Учётка — active (вход — сейчас, счётчик неудач 0), сессия — active с новым токеном через
 // replaceSession (старая — replaced), mfa_at — сейчас; абсолютный срок — от принятия приглашения (как у
 // unlock — от входа). Аудит staff.mfa_enabled; события §4.12 для этого шага нет. Одна транзакция —
 // ровно одна закоммиченная под Idempotency-Key.
@@ -202,14 +205,13 @@ func (a *App) RecoveryAck(ctx context.Context, s *auth.Staff, m staff.Meta) (str
 		case mfa.ConfirmedAt == nil:
 			return staff.ErrWrongStage
 		}
+		// срок приглашения не проверяется: владение кодом доказано на accept, у сессии setup свой срок
 		inv, err := q.LockLiveInvite(ctx, s.StaffID)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			return staff.ErrInviteInvalid
-		case err != nil:
+		if errors.Is(err, pgx.ErrNoRows) {
+			return staff.ErrWrongStage
+		}
+		if err != nil {
 			return err
-		case !now.Before(inv.ExpiresAt):
-			return staff.ErrInviteInvalid
 		}
 		if err := q.ConsumeInvite(ctx, staffdb.ConsumeInviteParams{Now: now, ID: inv.ID}); err != nil {
 			return err

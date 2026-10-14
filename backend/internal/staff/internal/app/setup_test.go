@@ -241,23 +241,54 @@ func TestRecoveryAck(t *testing.T) {
 	}
 }
 
-// RecoveryAck с истёкшим приглашением (сессия setup ещё жива) — staff.invite_invalid.
-func TestRecoveryAckExpiredInvite(t *testing.T) {
-	e := newEnv(t)
-	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	e.clock.Advance(23 * time.Hour)
+// confirmedSetup — принятое приглашение (через after после выпуска) и подтверждённый TOTP: сессия
+// setup перед ack.
+func (e *env) confirmedSetup(email string, after time.Duration) (member, *auth.Staff) {
+	e.t.Helper()
+	m, code := e.invitee(email, memberOpts{Role: "support"}, purposeInvite)
+	e.clock.Advance(after)
 	_, s := e.accept(m, code)
 	b32, _, err := e.app.MFASetup(context.Background(), s)
 	if err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
-	m.Secret = decodeSecret(t, b32)
+	m.Secret = decodeSecret(e.t, b32)
 	if _, err := e.app.MFAConfirm(context.Background(), s, e.totp(m), metaWeb); err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
-	e.clock.Advance(time.Hour)
-	if _, err := e.app.RecoveryAck(context.Background(), s, metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+	return m, s
+}
+
+// Решение контроллера (раунд 0): ack не проверяет срок приглашения — владение кодом доказано на
+// accept, у сессии setup свой срок; иначе тупик на границе 24 ч (TOTP подтверждён, «Готово»
+// отказывает). Истёкшее, но не погашенное приглашение гасится, учётка active.
+func TestRecoveryAckExpiredInvite(t *testing.T) {
+	e := newEnv(t)
+	m, s := e.confirmedSetup("ivan.p@wf.example", 23*time.Hour)
+	e.clock.Advance(2 * time.Hour) // за expires_at, сессия setup ещё жива
+	tok, err := e.app.RecoveryAck(context.Background(), s, metaWeb)
+	if err != nil {
 		t.Fatalf("истёкшее приглашение: %v", err)
+	}
+	if e.load(tok).Stage != auth.StageActive {
+		t.Fatal("сессия не active")
+	}
+	if n := e.count(`SELECT count(*) FROM staff_accounts WHERE id = $1 AND status = 'active'`, m.ID); n != 1 {
+		t.Fatal("учётка не активирована")
+	}
+	if n := e.count(`SELECT count(*) FROM staff_invites WHERE staff_id = $1 AND consumed_at = $2 AND code_enc IS NULL`,
+		m.ID, e.clock.Now()); n != 1 {
+		t.Fatal("приглашение не погашено")
+	}
+}
+
+// Нет живого приглашения (погашено) — staff.wrong_stage, учётка остаётся invited.
+func TestRecoveryAckRevokedInvite(t *testing.T) {
+	e := newEnv(t)
+	m, s := e.confirmedSetup("ivan.p@wf.example", 0)
+	e.exec(`UPDATE staff_invites SET revoked_at = $2, code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, m.ID, t0)
+	if _, err := e.app.RecoveryAck(context.Background(), s, metaWeb); !errors.Is(err, staff.ErrWrongStage) {
+		t.Fatalf("погашенное приглашение: %v", err)
 	}
 	if n := e.count(`SELECT count(*) FROM staff_accounts WHERE id = $1 AND status = 'invited'`, m.ID); n != 1 {
 		t.Fatal("учётка активирована")
