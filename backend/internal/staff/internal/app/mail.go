@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -83,7 +84,7 @@ func (a *App) ComposeInvite(ctx context.Context, ref, recipient uuid.UUID, kind 
 	}
 	// нечитаемый код (ключ убран раньше rekey) повторами не исправить — письмо отменяется с
 	// предупреждением, а не уходит в «мёртвые» задачи
-	code, _, ok := a.readInviteCode(ctx, ref, row.CodeEnc, *row.CodeKeyID)
+	code, _, ok := a.readInviteCode(ctx, ref, row.CodeEnc, *row.CodeKeyID, slog.LevelWarn)
 	if !ok {
 		return mail.Message{}, mail.ErrSkip
 	}

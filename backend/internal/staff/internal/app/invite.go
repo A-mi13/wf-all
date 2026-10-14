@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -70,24 +71,26 @@ func (a *App) openInviteCode(inviteID uuid.UUID, ct []byte, keyID string) (strin
 // "") с кодом приглашения inviteID; сравнение за постоянное время. Нечитаемый код (readInviteCode) —
 // не совпал: принятие отвечает staff.invite_invalid, а не 500.
 func (a *App) inviteCodeMatches(ctx context.Context, inviteID uuid.UUID, ct []byte, keyID, input string) bool {
-	_, want, ok := a.readInviteCode(ctx, inviteID, ct, keyID)
+	_, want, ok := a.readInviteCode(ctx, inviteID, ct, keyID, slog.LevelDebug) // анонимный путь
 	return ok && subtle.ConstantTimeCompare([]byte(want), []byte(input)) == 1
 }
 
 // readInviteCode — код приглашения: plain — показанная форма (письмо), norm — нормализованная (сверка);
-// ok=false — код нечитаем (ключ убран из кольца
-// раньше rekey, шифротекст повреждён, открытый код не в формате xxxxx-xxxxx): предупреждение в журнал
-// сервера с id приглашения и ключа, без кода. Исправление — вернуть ключ в ADMIN_STAFF_SECRET_KEYS или
-// выпустить новое приглашение (админ, оператор).
-func (a *App) readInviteCode(ctx context.Context, inviteID uuid.UUID, ct []byte, keyID string) (plain, norm string, ok bool) {
+// ok=false — код нечитаем (ключ убран из кольца раньше rekey, шифротекст повреждён, открытый код не в
+// формате xxxxx-xxxxx): запись в журнал сервера уровня level с id приглашения и ключа, без кода.
+// Уровень выбирает вызывающий: анонимное принятие — Debug (иначе любой, знающий почту, засыпал бы
+// журнал предупреждениями под IP-лимитом), письмо и rekey — Warn (раз на задачу или прогон),
+// самоотправка — Debug и своё Warn о перевыпуске. Исправление — вернуть ключ в ADMIN_STAFF_SECRET_KEYS,
+// самоотправка (перевыпуск в той же строке) или новое приглашение (админ, оператор).
+func (a *App) readInviteCode(ctx context.Context, inviteID uuid.UUID, ct []byte, keyID string, level slog.Level) (plain, norm string, ok bool) {
 	plain, err := a.openInviteCode(inviteID, ct, keyID)
 	if err != nil {
-		a.log.WarnContext(ctx, "staff: код приглашения не расшифровался — нужен ключ или новое приглашение",
+		a.log.Log(ctx, level, "staff: код приглашения не расшифровался — нужен ключ или новый код",
 			"invite_id", inviteID.String(), "key_id", keyID, "err", err)
 		return "", "", false
 	}
 	if norm, ok = domain.NormalizeInviteCode(plain); !ok {
-		a.log.WarnContext(ctx, "staff: код приглашения не в формате xxxxx-xxxxx — нужно новое приглашение",
+		a.log.Log(ctx, level, "staff: код приглашения не в формате xxxxx-xxxxx — нужен новый код",
 			"invite_id", inviteID.String())
 		return "", "", false
 	}
@@ -177,7 +180,8 @@ func (a *App) IssueInvite(ctx context.Context, tx pgx.Tx, staffID uuid.UUID, pur
 // у приглашения меньше 5 (строка живёт не дольше суток: срок 24 ч самостоятельная отправка не
 // продлевает, поэтому sends строки — отправки за её сутки). Код ТОТ ЖЕ (решение пользователя
 // 14.10.2026): строка не перешифровывается, sends + 1, срок прежний — чужое нажатие лишь присылает
-// приглашённому копию его кода и не делает недействительным уже полученное письмо. Код в аргументы
+// приглашённому копию его кода и не делает недействительным уже полученное письмо. Исключение —
+// нечитаемый код (ключ убран раньше rekey): healInviteCode выпускает новый в той же строке. Код в аргументы
 // задачи не идёт: составитель расшифровывает его по id приглашения. Сначала чтение без замков:
 // отправлять нечего — ответ без замков и записей (иначе существующая почта отвечала бы дольше
 // несуществующей). Подходящему кандидату — замки учётки и строки и проверка заново: две быстрые
@@ -221,6 +225,9 @@ func (a *App) ResendInviteSelf(ctx context.Context, email string, m staff.Meta) 
 		if err != nil {
 			return err
 		}
+		if err := a.healInviteCode(ctx, q, inv.ID, inv.CodeEnc, *inv.CodeKeyID); err != nil {
+			return err
+		}
 		sends, err := q.MarkInviteResent(ctx, staffdb.MarkInviteResentParams{Now: now, ID: inv.ID})
 		if err != nil {
 			return err
@@ -234,6 +241,27 @@ func (a *App) ResendInviteSelf(ctx context.Context, email string, m staff.Meta) 
 			IP:    m.IP, UserAgent: m.UserAgent,
 		})
 	})
+}
+
+// healInviteCode — самолечение нечитаемого кода при самоотправке (раунд 2): ключ убран из кольца раньше
+// rekey — в той же строке новый код текущим ключом (срок прежний), иначе письмо отменилось бы
+// (mail.ErrSkip), а приглашённый остался бы без кода до админа. Аноним сделать код нечитаемым не
+// может — это не срыв приглашения, а восстановление после ошибки оператора; предупреждение в журнал
+// сервера (одно на отправку: пауза 60 с и не больше 5 отправок). Читаемый код не трогается.
+func (a *App) healInviteCode(ctx context.Context, q *staffdb.Queries, inviteID uuid.UUID, ct []byte, keyID string) error {
+	if _, _, ok := a.readInviteCode(ctx, inviteID, ct, keyID, slog.LevelDebug); ok {
+		return nil
+	}
+	_, nct, nkey, err := a.newInviteCode(inviteID)
+	if err != nil {
+		return err
+	}
+	if err := q.RekeyInvite(ctx, staffdb.RekeyInviteParams{CodeEnc: nct, CodeKeyID: nkey, ID: inviteID}); err != nil {
+		return err
+	}
+	a.log.WarnContext(ctx, "staff: нечитаемый код приглашения перевыпущен самоотправкой",
+		"invite_id", inviteID.String(), "old_key_id", keyID, "key_id", nkey)
+	return nil
 }
 
 // ResendInvite — повторная отправка приглашения админом (§4.3 п.4): право staff.invites.resend

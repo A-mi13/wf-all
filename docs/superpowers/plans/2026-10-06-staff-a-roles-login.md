@@ -833,6 +833,10 @@ admin:e2e`, job в CI.
     (`GetLastInvite` отдаёт `created_at`); нечитаемый код (ключ убран раньше rekey) — `staff.invite_invalid` и
     `mail.ErrSkip` с предупреждением в журнал сервера, не 500 и не «мёртвая» задача; `staff.InviteState` — без
     `CodeErased`, `LastSentAt` → `IssuedAt`.
+  - Раунд 2 (14.10.2026): потолок аудита — `Policy{Limit: 1, Period: 1h, Burst: 20}` (всплеск 20, затем одна в
+    час — не больше 20 за час); хранилище лимитов недоступно — запись идёт (и у входа); нечитаемый код на
+    анонимном принятии — Debug, в письме — Warn; самоотправка с нечитаемым кодом выпускает новый код в той же
+    строке (`healInviteCode`); письма за окно без ключа отменяются (`mail.ErrSkip`), не повторяются.
   - Устарели также: Task 6a — `InviteState` с `LastSentAt`/`CodeErased` (~8353–8360); Task 8b — `code_erased` и
     `LastSentAt` в списке и карточке (~15312, ~15350, ~15364, `ManageLiveInvites` с `(code_enc IS NULL) AS
     code_erased` ~15403, ~15451–15454, `CodeErased: inv.CodeErased` ~16770) — у живого приглашения код есть

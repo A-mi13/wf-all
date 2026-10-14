@@ -50,11 +50,12 @@ var loginEmailPolicy = ratelimit.Policy{Limit: 10, Period: 15 * time.Minute, Bur
 const classStaffLogin = "staff_login"
 
 // inviteAuditPolicy — потолок записей staff.invite_accept_failed на почту (класс classInviteAudit):
-// 20 в час. Человеку с опечатками хватает единиц; 20 подряд — уже видный в журнале сигнал перебора,
-// а сам перебор сдерживают IP-лимит staff_auth (30 в минуту) и 50 бит кода. Сверх потолка — без
-// записи (не больше 480 записей на почту в сутки), ответ тот же; верный код принимается всегда —
-// потолок только на запись.
-var inviteAuditPolicy = ratelimit.Policy{Limit: 20, Period: time.Hour, Burst: 20}
+// не больше 20 за час — всплеск до 20 записей, затем одна в час (ведро восстанавливается за 20 ч;
+// GCRA с Limit 20/ч и Burst 20 дал бы до 40 за первый час — расходилось бы с документом). Человеку с
+// опечатками хватает единиц; 20 подряд — уже видный в журнале сигнал перебора, а сам перебор сдерживают
+// IP-лимит staff_auth (30 в минуту) и 50 бит кода. Сверх потолка — без записи, ответ тот же; верный
+// код принимается всегда — потолок только на запись.
+var inviteAuditPolicy = ratelimit.Policy{Limit: 1, Period: time.Hour, Burst: 20}
 
 // classInviteAudit — класс ключа потолка аудита неудачного принятия приглашения (ratelimit.EmailKey).
 const classInviteAudit = "staff_invite_audit"

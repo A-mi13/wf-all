@@ -75,8 +75,10 @@ paths:
   `TestNoSecretsInAuditAndJobs`). Неверный код ничего не стирает и в строке не считается (счётчика попыток в
   `staff_invites` нет): иначе знающий почту анонимно срывал приглашение; живое приглашение всегда с кодом
   (`CHECK staff_invites_live_has_code`, стереть — только с `revoked_at`). Нечитаемый код (ключ убран раньше
-  rekey) — `readInviteCode` ok=false с предупреждением без кода: принятие — `staff.invite_invalid`, письмо —
-  `mail.ErrSkip` (страж `TestInviteUnreadableCode`). Анонимные `ResendInviteSelf` и `AcceptInvite` сначала читают кандидата без
+  rekey) — `readInviteCode` ok=false с записью в журнал сервера без кода (анонимное принятие — Debug, письмо —
+  Warn): принятие — `staff.invite_invalid`, письмо — `mail.ErrSkip` (страж `TestInviteUnreadableCode`);
+  самоотправка лечит его — `healInviteCode`: новый код текущим ключом в той же строке, срок прежний, Warn
+  (`TestResendInviteSelfHealsUnreadableCode`). Анонимные `ResendInviteSelf` и `AcceptInvite` сначала читают кандидата без
   замков (`GetInviteCandidate`): делать нечего — ответ без замков (у принятия — одна запись неудачи, у
   повторной отправки — ни одной; время не выдаёт существование почты, страж `TestInviteIneligibleTakesNoLocks`); подходящему — замок учётки, затем строки приглашения, и
   проверка заново. Остальные сценарии с приглашением берут замок учётки, затем строку приглашения. `IssueInvite(ctx, tx, staffID, purpose)` — в транзакции вызывающего (учётка уже под замком):
@@ -93,9 +95,9 @@ paths:
   и неверный код — один `staff.ErrInviteInvalid`. Сверка — по чтению без замков (`GetInviteCandidate` отдаёт
   шифротекст): ЛЮБОЙ исход «принять нечего» (кривая или чужая почта, не `invited`, нет приглашения, срок,
   неверный или нечитаемый код) — `a.acceptFailed`: одна запись `staff.invite_accept_failed` (`anonymous`,
-  `After = {email}`) в короткой транзакции БЕЗ замков на `detached`, не больше `inviteAuditPolicy` (20 в час)
-  на почту по `ratelimit.EmailKey("staff_invite_audit", HMAC)`, сверх — без записи; верный код потолок не
-  трогает (стражи `TestAcceptInviteFailureAuditedAlways`, `TestAcceptInviteFailureAuditCap`, `TestAcceptInviteWrongCodeKeepsCode`,
+  `After = {email}`) в короткой транзакции БЕЗ замков на `detached`, не больше `inviteAuditPolicy` (всплеск 20,
+  затем одна в час — не больше 20 за час, `TestAcceptInviteFailureAuditHourly`) на почту по `ratelimit.EmailKey("staff_invite_audit", HMAC)`, сверх — без записи; верный код потолок не
+  трогает; хранилище лимитов недоступно — запись идёт (`TestLimiterDownStillAudits`, там же вход) (стражи `TestAcceptInviteFailureAuditedAlways`, `TestAcceptInviteFailureAuditCap`, `TestAcceptInviteWrongCodeKeepsCode`,
   `TestAcceptInviteConcurrentWrong`, `TestAcceptInviteCanceledAfterHash`, путь «неверный код» в
   `TestInviteIneligibleTakesNoLocks`); верный — замки учётки и строки, `lockAcceptable` и сверка с кодом
   закрытой замком строки (перевыпуск во время ожидания — старый код неверен,
@@ -125,3 +127,6 @@ paths:
   `ADMIN_STAFF_SECRET_KEYS` во всех экземплярах admin-api (старый — вторым) → `rekey` → перед удалением
   старого ключа повторный `rekey` (экземпляр прежнего релиза при скользящем деплое мог зашифровать новые
   строки старым ключом) — убирать только при нулях во всех трёх счётчиках и пустых списках нечитаемых.
+  Ключ убран раньше времени: письма приглашений за это окно отменяются (`mail.ErrSkip`, предупреждение в
+  журнал сервера), не повторяются; восстановление — самоотправка сотрудника (код перевыпускается в той же
+  строке) или повторная отправка админом/оператором.

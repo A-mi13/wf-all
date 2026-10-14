@@ -85,13 +85,14 @@ func (e *env) logApp(ring *keys.Ring) (*app.App, *bytes.Buffer) {
 	var buf bytes.Buffer
 	d := e.deps
 	d.Keys = ring
-	d.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	d.Log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	return app.New(d), &buf
 }
 
 // Ключ кода убран из кольца раньше rekey (непредусмотренный отказ №1 ревью): принятие отвечает
 // staff.invite_invalid (не 500) с записью неудачи, составитель письма — mail.ErrSkip (не «мёртвая»
-// задача с повторами); оба — предупреждение в журнал сервера без кода.
+// задача с повторами). Журнал сервера без кода: письмо — WARN (одно на задачу), анонимное принятие —
+// только DEBUG (раунд 2: кто угодно, знающий почту, иначе засыпал бы журнал предупреждениями).
 func TestInviteUnreadableCode(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
@@ -110,7 +111,7 @@ func TestInviteUnreadableCode(t *testing.T) {
 		t.Fatalf("письмо с нечитаемым кодом: %v", err)
 	}
 	out := logs.String()
-	if strings.Count(out, "level=WARN") != 2 || !strings.Contains(out, inv.ID.String()) {
+	if strings.Count(out, "level=WARN") != 1 || strings.Count(out, "level=DEBUG") != 1 || !strings.Contains(out, inv.ID.String()) {
 		t.Fatalf("предупреждения:\n%s", out)
 	}
 	if strings.Contains(out, code) || strings.Contains(out, strings.ReplaceAll(code, "-", "")) || strings.Contains(out, m.Email) {
