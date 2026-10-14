@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,6 +128,10 @@ func TestResendInviteSelfHealsUnreadableCode(t *testing.T) {
 	}
 	if !regexp.MustCompile(`level=WARN.*` + after.ID.String()).MatchString(logs.String()) {
 		t.Fatalf("нет предупреждения о перевыпуске:\n%s", logs.String())
+	}
+	// новый код — секрет: в журнал сервера не попадает ни в каком виде
+	if s := logs.String(); strings.Contains(s, newCode) || strings.Contains(s, strings.ReplaceAll(newCode, "-", "")) {
+		t.Fatalf("код в журнале сервера:\n%s", s)
 	}
 	if _, err := a.AcceptInvite(ctx, m.Email, newCode, newPassword, "", metaWeb); err != nil {
 		t.Fatalf("принятие новым кодом: %v", err)
