@@ -3,6 +3,7 @@
 export { Avatar } from './Avatar';
 export { Button, type ButtonProps, type ButtonVariant } from './Button';
 export { CountBadge } from './CountBadge';
+export { useCountdown } from './countdown';
 export { useErrorText } from './errorText';
 export {
   applyFieldErrors,
@@ -50,6 +51,7 @@ export {
   PendingApprovalNotice,
   RateLimitedState,
 } from './states';
+export { QrCode } from './QrCode';
 export { type ChipTone, StatusChip } from './StatusChip';
 export {
   type ChipOption,

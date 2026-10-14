@@ -40,6 +40,10 @@ function mount(path: string, me: Me | null) {
   const state = { me };
   server.use(
     citiesHandler(),
+    // экран настройки 2FA сам выпускает секрет (Task 13)
+    http.post('/v1/staff/me/mfa/setup', ({ response }) =>
+      response(200).json({ secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://totp/WF:x' }),
+    ),
     http.get('/v1/staff/me', ({ response }) =>
       state.me
         ? response(200).json(state.me)
@@ -68,7 +72,7 @@ const page = (name: string) => screen.findByRole('heading', { level: 1, name });
 describe('без сессии', () => {
   test('защищённый раздел → /login?return=…, после входа — возврат на исходный адрес', async () => {
     const app = mount('/staff?tab=sessions', null);
-    await page('Вход');
+    await page('Вход администратора');
     expect(app.at()).toBe('/login?return=%2Fstaff%3Ftab%3Dsessions');
 
     await app.login(meOwner);
@@ -84,13 +88,13 @@ describe('без сессии', () => {
 
   test('корень → вход без return', async () => {
     const app = mount('/', null);
-    await page('Вход');
+    await page('Вход администратора');
     expect(app.at()).toBe('/login');
   });
 
   test('чужой адрес в return игнорируется — стартовая страница', async () => {
     const app = mount('/login?return=%2F%2Fevil.example%2Fx', null);
-    await page('Вход');
+    await page('Вход администратора');
     await app.login(meOwner);
     await page('Журнал действий');
     expect(app.at()).toBe('/audit');
@@ -146,13 +150,13 @@ describe('стадии', () => {
 
   test('без сессии /setup-2fa — вход', async () => {
     const app = mount('/setup-2fa', null);
-    await page('Вход');
+    await page('Вход администратора');
     expect(app.at()).toBe('/login');
   });
 
   test('mfa_pending — шаг 2 входа, возврат сохраняется', async () => {
     const app = mount('/audit', meMfaPending);
-    await page('Вход');
+    await page('Вход администратора');
     expect(app.at()).toBe('/login?return=%2Faudit');
   });
 });
@@ -270,7 +274,7 @@ describe('каркас AppShell', () => {
     const ctl = logoutServer(204);
     await page('Роли и доступ');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Выйти' }));
-    await page('Вход');
+    await page('Вход администратора');
     expect(ctl.key).toBeTruthy();
     // явный выход — без return: следующий сотрудник не попадёт в чужой раздел
     await waitFor(() => expect(app.at()).toBe('/login'));
@@ -284,7 +288,7 @@ describe('каркас AppShell', () => {
     // сессия нового входа истекла — вход с возвратом (флаг выхода не залипает)
     ctl.signedIn = false;
     await app.refetchMe();
-    await page('Вход');
+    await page('Вход администратора');
     expect(app.at()).toBe('/login?return=%2Faudit');
   });
 
@@ -293,7 +297,7 @@ describe('каркас AppShell', () => {
     logoutServer(401);
     await page('Роли и доступ');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Выйти' }));
-    await page('Вход');
+    await page('Вход администратора');
     await waitFor(() => expect(app.at()).toBe('/login'));
     expect(screen.queryByText('Войдите в аккаунт заново')).not.toBeInTheDocument();
   });

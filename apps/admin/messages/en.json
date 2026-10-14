@@ -21,13 +21,86 @@
   },
   "pages": {
     "login": {
-      "title": "Sign in"
+      "title": "Admin sign-in"
     },
     "accept": {
       "title": "Accept invitation"
     },
     "setup2fa": {
       "title": "Two-factor setup"
+    }
+  },
+  "auth": {
+    "common": {
+      "footnote": "Sign-in only with a work email and a second factor. Every sign-in is written to the audit log — together with everything you do afterwards."
+    },
+    "login": {
+      "lead": "A separate sign-in system: a player account doesn't work here — not even your own.",
+      "email": "Work email",
+      "password": "Password",
+      "submit": "Sign in",
+      "wait": "Wait {seconds} s",
+      "expired": "Time for the authenticator code ran out — you get five minutes. Enter your email and password again."
+    },
+    "mfa": {
+      "lead": "Password accepted. Enter the six digits from your authenticator app — you have five minutes.",
+      "as": "Signing in as {email}",
+      "code": "Authenticator app code",
+      "recovery": "Recovery code",
+      "recovery_hint": "Looks like xxxxx-xxxxx. Each code works once and is used up after sign-in.",
+      "use_recovery": "Use a recovery code",
+      "use_app": "Enter the app code",
+      "submit": "Sign in",
+      "wait": "Wait {seconds} s",
+      "invalid": "The code didn't work. {count, plural, one {# attempt} other {# attempts}} left, then access is closed for an hour and we notify the admins.",
+      "locked": "The code didn't work — access is closed for an hour, and we've notified the admins. If it wasn't you, contact an owner or admin.",
+      "to_login": "Back to sign-in",
+      "restart": "Different email or password"
+    },
+    "reauth": {
+      "title": "Confirm sign-in",
+      "text": "20 minutes passed without activity, or your network changed. Enter the app code — you'll continue where you left off, nothing you typed is lost.",
+      "submit": "Continue working",
+      "logout": "Sign out"
+    },
+    "accept": {
+      "lead": "First sign-in by invitation: the email from the letter, a new password and the code from the letter. Then — second-factor setup.",
+      "email": "Work email",
+      "password": "New password",
+      "password_hint": "From 10 to 128 characters; common passwords are rejected. A phrase of several words is easier to remember than random characters.",
+      "passwordRepeat": "Repeat password",
+      "code": "Code from the email",
+      "code_hint": "6 digits from the invitation email. The invitation lives for 24 hours.",
+      "submit": "Accept invitation",
+      "wait": "Wait {seconds} s",
+      "resend": "Send the code again",
+      "resend_wait": "Send again in {seconds} s",
+      "resent": "If the invitation for this email is still active, a new code is on its way — the previous one no longer works. No email? Check spam."
+    },
+    "setup": {
+      "lead": "Scan the QR code in Google Authenticator, 1Password or any other authenticator app and enter the six digits. Until the second factor is set up, the admin opens only this screen.",
+      "qr": "QR code for the authenticator app",
+      "secret": "Can't scan? Enter the secret manually",
+      "copy": "Copy",
+      "copy_secret": "Copy the secret",
+      "copied": "Copied",
+      "copy_failed": "Couldn't copy — select the text and copy it manually",
+      "code": "Authenticator app code",
+      "confirm": "Confirm",
+      "invalid": "The code didn't work. Make sure the time on your phone is set automatically and enter a new code.",
+      "codes_title": "Recovery codes",
+      "codes_text": "Each code works once instead of the app code. We show them exactly once — later you can only regenerate them in My access, and the old ones stop working at once.",
+      "copy_codes": "Copy codes",
+      "download": "Download .txt",
+      "file_name": "admin-recovery-codes.txt",
+      "file_header": "Admin recovery codes. Each code works once.",
+      "saved": "I saved the codes",
+      "finish": "Done",
+      "confirmed_title": "The second factor is already confirmed",
+      "confirmed_text": "The authenticator app is connected; only the last step is left. Recovery codes are shown once and won't appear here again — you can issue new ones in My access.",
+      "continue": "Continue",
+      "replay": "A response with a secret isn't stored, so it can't be repeated. Start the setup again — the app will get a new QR code.",
+      "restart": "Start again"
     }
   },
   "states": {

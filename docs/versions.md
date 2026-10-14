@@ -21,6 +21,7 @@
 | MSW | 2.15.0 | `apps/{web,admin}/package.json` |
 | TanStack Query / TanStack Router | 5.104.2 / 1.170.42 | `apps/admin/package.json`, Query ещё и `apps/web/package.json`; Router — маршруты кодом, почему не 1.170.44 — в исключениях |
 | react-hook-form | 7.90.0 | `apps/admin/package.json` |
+| uqr | 0.1.3 | `apps/admin/package.json` (QR секрета 2FA — SVG на клиенте, без сети и зависимостей; R11) |
 | @fontsource/oswald / @fontsource/manrope | 5.3.0 / 5.3.0 | `apps/admin/package.json` (шрифты админки без внешних запросов, `src/app/fonts.ts`) |
 | GitHub Actions: checkout / setup-go / pnpm action-setup | 7.0.1 / 7.0.0 / 6.1.0 | полный SHA в `.github/workflows/*.yml`; плавающий тег `pnpm/action-setup@v6` указывал на 6.0.10 без поддержки pnpm 12 |
 | Flutter / Dart | фиксируется в wf-native | в репо wf-native проекта Flutter пока нет — версии появятся с мобильной спекой |

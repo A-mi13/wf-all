@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
   createRoute,
@@ -9,23 +8,26 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { useApi } from '../api/context';
-import { useAdminMutation } from '../api/mutation';
+import { AcceptInvitePage } from '../features/auth/AcceptInvitePage';
+import { LoginPage } from '../features/auth/LoginPage';
+import { ReauthModal } from '../features/auth/ReauthModal';
+import { SetupMfaPage } from '../features/auth/SetupMfaPage';
 import { LocaleSwitcher } from '../features/me/LocaleSwitcher';
-import { AppShell, ConnectionErrorState, useErrorText, useToast } from '../ui';
+import { AppShell, ConnectionErrorState } from '../ui';
 import { useAccountCard } from './account';
 import { resolveRoute } from './guard';
+import { useLogout } from './logout';
 import { NAV } from './nav';
 import type { Me } from './permissions';
 import { paths } from './paths';
-import { isMeKey } from './query';
 import { type Session, useSession } from './session';
-import { LoadingStub, NotFoundStub, PageStub, SectionStub } from './stubs';
+import { LoadingStub, NotFoundStub, SectionStub } from './stubs';
 
 // Роутер админки (спека §9.1, §9.3–9.4): TanStack Router, маршруты кодом, пути — paths.ts.
 // Стадия сессии решает, куда пускать (guard.ts, beforeLoad корня); разделы — внутри AppShell: он
 // строит меню по правам и сам показывает ForbiddenState на прямой адрес без права (D23) и
-// DesktopOnlyState на телефоне (D22). Экраны пока — заглушки (Task 13–15).
+// DesktopOnlyState на телефоне (D22). Экраны входа — features/auth (Task 13), разделы пока —
+// заглушки (Task 14–15). Окно разблокировки (ReauthModal) стоит поверх любой страницы.
 
 export interface RouterContext {
   session: Session;
@@ -47,19 +49,19 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: paths.login,
   validateSearch: searchReturn,
-  component: () => <PageStub titleKey="pages.login.title" />,
+  component: LoginPage,
 });
 
 const acceptRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: paths.accept,
-  component: () => <PageStub titleKey="pages.accept.title" />,
+  component: AcceptInvitePage,
 });
 
 const setupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: paths.setup2fa,
-  component: () => <PageStub titleKey="pages.setup2fa.title" />,
+  component: SetupMfaPage,
 });
 
 // Корень всегда уводит (guard): на стартовую или ко входу.
@@ -73,33 +75,13 @@ const indexRoute = createRoute({
 function Shell() {
   const s = useSession();
   if (s.status !== 'active') return null;
-  return <ActiveShell me={s.me} afterLogout={s.afterLogout} />;
+  return <ActiveShell me={s.me} />;
 }
 
-function ActiveShell({ me, afterLogout }: { me: Me; afterLogout: () => Promise<void> }) {
-  const api = useApi();
-  const queryClient = useQueryClient();
-  const toast = useToast();
-  const errorText = useErrorText();
+function ActiveShell({ me }: { me: Me }) {
   const account = useAccountCard(me);
-  // Выход: сессия гасится на сервере, данные прежнего сотрудника — из кэша, me перечитывается
-  // (401 → anonymous → /login без return). 401 auth.unauthenticated — сессии уже нет: итог тот
-  // же, что у выхода (вход без return), тост не нужен.
-  const signedOut = async () => {
-    queryClient.removeQueries({ predicate: (q) => !isMeKey(q.queryKey) });
-    await afterLogout();
-  };
-  const logout = useAdminMutation(
-    (_: void, key: string) =>
-      api.POST('/v1/staff/auth/logout', { params: { header: { 'Idempotency-Key': key } } }),
-    {
-      onSuccess: signedOut,
-      onError: (e) => {
-        if (e.code === 'auth.unauthenticated') return signedOut();
-        toast.error(errorText(e));
-      },
-    },
-  );
+  // Выход — вход без return (logout.ts)
+  const logout = useLogout();
   return (
     <AppShell
       groups={NAV}
@@ -166,5 +148,11 @@ export function AppRouter({ history }: { history?: RouterHistory }) {
         <ConnectionErrorState onRetry={() => void session.refresh()} />
       </main>
     );
-  return <RouterProvider router={router} context={{ session }} />;
+  return (
+    <>
+      <RouterProvider router={router} context={{ session }} />
+      {/* 401 auth.reauth_required любого запроса — окно поверх текущей страницы (§9.3) */}
+      <ReauthModal />
+    </>
+  );
 }

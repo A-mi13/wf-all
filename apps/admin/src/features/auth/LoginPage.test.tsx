@@ -1,0 +1,218 @@
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { reauthBus } from '../../app/reauth';
+import { renderApp, storageDump } from '../../test/app';
+import { meMfaPending, meOwner } from '../../test/me';
+import { problem } from '../../test/problem';
+import { http, server } from '../../test/server';
+
+// Экран входа (спека §9.4 п. 1, §4.6): шаг 1 — почта и пароль, шаг 2 — второй фактор. Стадию
+// ведёт сессия: 200 staffLogin → me = mfa_pending → шаг 2; 204 staffVerifyMfa → me = active →
+// ?return= или стартовая.
+
+afterEach(() => {
+  reauthBus.reject();
+  sessionStorage.clear();
+  vi.useRealTimers();
+});
+
+const page = (name: string) => screen.findByRole('heading', { level: 1, name });
+const CODE = 'Код из приложения-аутентификатора';
+
+type Seen = {
+  login: { body: unknown; key: string | null }[];
+  mfa: { body: unknown; key: string | null }[];
+};
+
+// Сервер входа: пароль «верный пароль 1» принят → mfa_pending; код 492817 → active.
+function loginServer(app: ReturnType<typeof renderApp>) {
+  const seen: Seen = { login: [], mfa: [] };
+  server.use(
+    http.post('/v1/staff/auth/login', async ({ request, response }) => {
+      const body = await request.json();
+      seen.login.push({ body, key: request.headers.get('Idempotency-Key') });
+      if (body.password !== 'верный пароль 1')
+        return response.untyped(problem(400, 'staff.invalid_credentials'));
+      app.me.current = meMfaPending;
+      return response(200).json({ stage: 'mfa_pending' });
+    }),
+    http.post('/v1/staff/auth/mfa', async ({ request, response }) => {
+      const body = await request.json();
+      seen.mfa.push({ body, key: request.headers.get('Idempotency-Key') });
+      if (body.code !== '492817' && body.recovery_code !== 'k7m2q-x9p4t')
+        return response.untyped(problem(400, 'staff.mfa_invalid', { attempts_left: 4 }));
+      app.me.current = meOwner;
+      return response(204).empty();
+    }),
+  );
+  return seen;
+}
+
+async function submitPassword(user: UserEvent, password = 'верный пароль 1') {
+  await user.type(screen.getByLabelText('Рабочая почта'), 'olga.v@wf.example');
+  await user.type(screen.getByLabelText('Пароль'), password);
+  await user.click(screen.getByRole('button', { name: 'Войти' }));
+}
+
+async function enterCode(user: UserEvent, code: string) {
+  const group = await screen.findByRole('group', { name: CODE });
+  await user.click(within(group).getAllByRole('textbox')[0]!);
+  await user.keyboard(code);
+}
+
+describe('шаг 1 → шаг 2 → раздел', () => {
+  test('почта и пароль → код → стартовая; анонимный вход без Idempotency-Key', async () => {
+    const app = renderApp('/login');
+    const seen = loginServer(app);
+    const user = userEvent.setup();
+    await page('Вход администратора');
+    expect(
+      screen.getByText(/Вход только с рабочей почты и со вторым фактором/),
+    ).toBeInTheDocument();
+
+    await submitPassword(user);
+    await screen.findByRole('group', { name: CODE });
+    expect(seen.login).toEqual([
+      { body: { email: 'olga.v@wf.example', password: 'верный пароль 1' }, key: null },
+    ]);
+
+    await enterCode(user, '492817');
+    await page('Журнал действий');
+    expect(app.at()).toBe('/audit');
+    expect(seen.mfa).toHaveLength(1);
+    expect(seen.mfa[0]!.body).toEqual({ code: '492817' });
+    expect(seen.mfa[0]!.key).toBeTruthy();
+    // пароль не попал в черновик, почта — можно
+    expect(storageDump()).not.toContain('верный пароль 1');
+    expect(storageDump()).toContain('olga.v@wf.example');
+  });
+
+  test('после входа — возврат на исходный адрес (?return=)', async () => {
+    const app = renderApp('/staff?tab=sessions');
+    loginServer(app);
+    const user = userEvent.setup();
+    await page('Вход администратора');
+    expect(app.at()).toBe('/login?return=%2Fstaff%3Ftab%3Dsessions');
+    await submitPassword(user);
+    await enterCode(user, '492817');
+    await page('Роли и доступ');
+    expect(app.at()).toBe('/staff?tab=sessions');
+  });
+
+  test('перезагрузка в mfa_pending открывает шаг 2', async () => {
+    const app = renderApp('/login', { me: meMfaPending });
+    loginServer(app);
+    expect(await screen.findByRole('group', { name: CODE })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Пароль')).not.toBeInTheDocument();
+  });
+});
+
+describe('ошибки шага 1', () => {
+  test('staff.invalid_credentials — общий текст под формой, не по полю', async () => {
+    const app = renderApp('/login');
+    loginServer(app);
+    const user = userEvent.setup();
+    await page('Вход администратора');
+    await submitPassword(user, 'не тот');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Неверная почта или пароль');
+    expect(screen.getByLabelText('Рабочая почта')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('Пароль')).not.toHaveAttribute('aria-invalid');
+  });
+
+  test('429 — отсчёт по Retry-After, «Войти» недоступна до конца', async () => {
+    renderApp('/login');
+    let asked = 0;
+    server.use(
+      http.post('/v1/staff/auth/login', ({ response }) => {
+        asked++;
+        return response.untyped(
+          problem(429, 'ratelimit.exceeded', { retry_after: 30 }, { 'Retry-After': '30' }),
+        );
+      }),
+    );
+    await page('Вход администратора');
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.change(screen.getByLabelText('Рабочая почта'), {
+      target: { value: 'olga.v@wf.example' },
+    });
+    fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'пароль' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Слишком много запросов');
+    const wait = await screen.findByRole('button', { name: /^Подождать 30 с$/ });
+    expect(wait).toBeDisabled();
+    // Enter в поле тоже не уходит, пока идёт отсчёт
+    fireEvent.submit(wait.closest('form')!);
+    await act(() => new Promise((r) => setTimeout(r, 100)));
+    expect(asked).toBe(1);
+    expect(screen.getByRole('alert')).toHaveTextContent('Слишком много запросов');
+    act(() => vi.advanceTimersByTime(29_000));
+    expect(screen.getByRole('button', { name: /^Подождать \d+ с$/ })).toBeDisabled();
+    act(() => vi.advanceTimersByTime(1_500));
+    expect(screen.getByRole('button', { name: 'Войти' })).toBeEnabled();
+    expect(asked).toBe(1);
+  });
+});
+
+describe('шаг 2', () => {
+  test('staff.mfa_invalid — «Осталось N попыток», ячейки очищены', async () => {
+    const app = renderApp('/login', { me: meMfaPending });
+    loginServer(app);
+    const user = userEvent.setup();
+    await enterCode(user, '111111');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Код не подошёл. Осталось 4 попытки, потом доступ закроется на час',
+    );
+    const cells = within(screen.getByRole('group', { name: CODE })).getAllByRole('textbox');
+    await waitFor(() => expect(cells.map((c) => (c as HTMLInputElement).value).join('')).toBe(''));
+  });
+
+  test('attempts_left = 0 — доступ закрыт на час, ввод недоступен, «Ко входу» → шаг 1', async () => {
+    const app = renderApp('/login', { me: meMfaPending });
+    server.use(
+      http.post('/v1/staff/auth/mfa', ({ response }) => {
+        app.me.current = null; // пятая неудача гасит все сессии сотрудника
+        return response.untyped(problem(400, 'staff.mfa_invalid', { attempts_left: 0 }));
+      }),
+    );
+    const user = userEvent.setup();
+    await enterCode(user, '111111');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('доступ закрыт на час, мы сообщили администраторам');
+    for (const cell of within(screen.getByRole('group', { name: CODE })).getAllByRole('textbox'))
+      expect(cell).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Использовать резервный код' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Ко входу' }));
+    expect(await screen.findByLabelText('Пароль')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: CODE })).not.toBeInTheDocument();
+  });
+
+  test('резервный код — поле вместо ячеек, уходит recovery_code', async () => {
+    const app = renderApp('/login', { me: meMfaPending });
+    const seen = loginServer(app);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Использовать резервный код' }));
+    expect(screen.queryByRole('group', { name: CODE })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Резервный код'), 'k7m2q-x9p4t');
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+    await page('Журнал действий');
+    expect(seen.mfa.map((m) => m.body)).toEqual([{ recovery_code: 'k7m2q-x9p4t' }]);
+    expect(storageDump()).not.toContain('k7m2q-x9p4t');
+  });
+
+  test('5 минут на шаг 2 истекли (401 auth.unauthenticated) — шаг 1 с понятным текстом', async () => {
+    const app = renderApp('/login?return=%2Faudit', { me: meMfaPending });
+    server.use(
+      http.post('/v1/staff/auth/mfa', ({ response }) => {
+        app.me.current = null;
+        return response.untyped(problem(401, 'auth.unauthenticated'));
+      }),
+    );
+    const user = userEvent.setup();
+    await enterCode(user, '492817');
+    expect(await screen.findByLabelText('Пароль')).toBeInTheDocument();
+    expect(screen.getByText(/Время на код из приложения вышло/)).toBeInTheDocument();
+    expect(app.at()).toBe('/login?return=%2Faudit');
+  });
+});
