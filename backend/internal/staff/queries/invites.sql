@@ -11,6 +11,17 @@ JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.email = sqlc.arg(email)::citext
 FOR UPDATE OF a;
 
+-- name: GetInviteCandidate :one
+-- Учётка по почте и её живое приглашение БЕЗ замков: повторной отправке и принятию нечего делать
+-- (учётка не invited, приглашения нет, срок, пауза, лимит, код стёрт) — ответ без замков и записей,
+-- время ответа не выдаёт существование почты. Подходящему кандидату сценарий берёт замки и
+-- проверяет заново.
+SELECT a.id, a.status::text AS status, i.id AS invite_id, i.expires_at, i.last_sent_at, i.sends,
+       coalesce(i.code_enc IS NOT NULL, false)::bool AS has_code
+FROM staff_accounts a
+LEFT JOIN staff_invites i ON i.staff_id = a.id AND i.consumed_at IS NULL AND i.revoked_at IS NULL
+WHERE a.email = sqlc.arg(email)::citext;
+
 -- name: LockLiveInvite :one
 -- Живое (не погашенное и не принятое-и-закрытое) приглашение учётки под замком; срок проверяет
 -- сценарий.
@@ -156,3 +167,12 @@ WHERE id = sqlc.arg(id);
 -- Неиспользованные резервные коды не на текущем ключе: перехэшировать нельзя (исходника нет), старый
 -- ключ убирается, когда счёт = 0.
 SELECT count(*) FROM staff_recovery_codes WHERE used_at IS NULL AND key_id <> sqlc.arg(current_key)::text;
+
+-- name: CountMFAOnOldKeys :one
+-- Итог перешифровки: секреты TOTP не на текущем ключе (нечитаемые и записанные старым ключом
+-- экземпляром прежнего релиза при скользящем деплое).
+SELECT count(*) FROM staff_mfa WHERE key_id <> sqlc.arg(current_key)::text;
+
+-- name: CountInvitesOnOldKeys :one
+-- Итог перешифровки: коды приглашений не на текущем ключе.
+SELECT count(*) FROM staff_invites WHERE code_enc IS NOT NULL AND code_key_id <> sqlc.arg(current_key)::text;

@@ -64,6 +64,31 @@ func (q *Queries) ConsumeInvite(ctx context.Context, arg ConsumeInviteParams) er
 	return err
 }
 
+const countInvitesOnOldKeys = `-- name: CountInvitesOnOldKeys :one
+SELECT count(*) FROM staff_invites WHERE code_enc IS NOT NULL AND code_key_id <> $1::text
+`
+
+// Итог перешифровки: коды приглашений не на текущем ключе.
+func (q *Queries) CountInvitesOnOldKeys(ctx context.Context, currentKey string) (int64, error) {
+	row := q.db.QueryRow(ctx, countInvitesOnOldKeys, currentKey)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMFAOnOldKeys = `-- name: CountMFAOnOldKeys :one
+SELECT count(*) FROM staff_mfa WHERE key_id <> $1::text
+`
+
+// Итог перешифровки: секреты TOTP не на текущем ключе (нечитаемые и записанные старым ключом
+// экземпляром прежнего релиза при скользящем деплое).
+func (q *Queries) CountMFAOnOldKeys(ctx context.Context, currentKey string) (int64, error) {
+	row := q.db.QueryRow(ctx, countMFAOnOldKeys, currentKey)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRecoveryOnOldKeys = `-- name: CountRecoveryOnOldKeys :one
 SELECT count(*) FROM staff_recovery_codes WHERE used_at IS NULL AND key_id <> $1::text
 `
@@ -137,6 +162,43 @@ func (q *Queries) GetBootstrappedMail(ctx context.Context, id uuid.UUID) (GetBoo
 		&i.CreatedAt,
 		&i.CreatedBy,
 		&i.Role,
+	)
+	return i, err
+}
+
+const getInviteCandidate = `-- name: GetInviteCandidate :one
+SELECT a.id, a.status::text AS status, i.id AS invite_id, i.expires_at, i.last_sent_at, i.sends,
+       coalesce(i.code_enc IS NOT NULL, false)::bool AS has_code
+FROM staff_accounts a
+LEFT JOIN staff_invites i ON i.staff_id = a.id AND i.consumed_at IS NULL AND i.revoked_at IS NULL
+WHERE a.email = $1::citext
+`
+
+type GetInviteCandidateRow struct {
+	ID         uuid.UUID
+	Status     string
+	InviteID   *uuid.UUID
+	ExpiresAt  *time.Time
+	LastSentAt *time.Time
+	Sends      *int32
+	HasCode    bool
+}
+
+// Учётка по почте и её живое приглашение БЕЗ замков: повторной отправке и принятию нечего делать
+// (учётка не invited, приглашения нет, срок, пауза, лимит, код стёрт) — ответ без замков и записей,
+// время ответа не выдаёт существование почты. Подходящему кандидату сценарий берёт замки и
+// проверяет заново.
+func (q *Queries) GetInviteCandidate(ctx context.Context, email string) (GetInviteCandidateRow, error) {
+	row := q.db.QueryRow(ctx, getInviteCandidate, email)
+	var i GetInviteCandidateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.InviteID,
+		&i.ExpiresAt,
+		&i.LastSentAt,
+		&i.Sends,
+		&i.HasCode,
 	)
 	return i, err
 }

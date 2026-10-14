@@ -62,7 +62,9 @@ func TestOperatorBootstrap(t *testing.T) {
 	rows := e.audits("staff.bootstrapped")
 	if len(rows) != 1 || rows[0].Role != "operator" || rows[0].StaffID != nil || rows[0].Label == nil ||
 		*rows[0].Label != "operator" || rows[0].ObjectID == nil || *rows[0].ObjectID != id ||
-		strings.Contains(rows[0].After, "new.owner@wf.example") {
+		!strings.Contains(rows[0].After, `"email": "n***@wf.example"`) {
+		// нормализованная почта под маскируемым ключом: сырой ввод дал бы " ***@WF.example ",
+		// немаскируемый ключ — почту открытым текстом
 		t.Fatalf("аудит %+v", rows)
 	}
 	if n := e.count(`SELECT count(*) FROM outbox WHERE event_type = 'staff.invited' AND aggregate_id = $1
@@ -217,7 +219,8 @@ func TestRekey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep != (app.RekeyReport{MFA: 2, Invites: 1, RecoveryOnOldKeys: 20}) {
+	if rep.MFA != 2 || rep.Invites != 1 || rep.RecoveryOnOldKeys != 20 || rep.MFAOnOldKeys != 0 || rep.InvitesOnOldKeys != 0 ||
+		len(rep.UnreadableMFA) != 0 || len(rep.UnreadableInvites) != 0 {
 		t.Fatalf("отчёт %+v", rep)
 	}
 	if n := e.count(`SELECT count(*) FROM staff_mfa WHERE key_id = $1`, rotated.CurrentID()); n != 2 {
@@ -249,7 +252,46 @@ func TestRekey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.MFA != 0 || rep.Invites != 0 {
+	if rep.MFA != 0 || rep.Invites != 0 || rep.MFAOnOldKeys != 0 || rep.InvitesOnOldKeys != 0 {
 		t.Fatalf("повтор %+v", rep)
+	}
+}
+
+// M-1 ревью: ключ убрали из кольца раньше времени — нечитаемые строки пропускаются и
+// перечисляются (id), остальные перешифровываются, итог (и счёт строк не на текущем ключе) — в отчёте
+// и аудите staff.rekeyed.
+func TestRekeyUnreadable(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	use := func(r *keys.Ring) {
+		e.deps.Keys, e.ring = r, r
+		e.app = app.New(e.deps)
+	}
+	lostRing, _ := newRing(t)
+	use(lostRing) // этот ключ потом потеряют
+	lost := e.addMember("lost@wf.example", memberOpts{})
+	inv, _ := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	lostInvite := e.liveInvite(inv.ID).ID
+	oldRing, oldKey := newRing(t)
+	use(oldRing)
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+
+	rotated, _ := newRing(t, oldKey) // потерянного ключа в кольце нет
+	rep, err := e.withRing(rotated).Rekey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.MFA != 1 || rep.Invites != 0 || rep.MFAOnOldKeys != 1 || rep.InvitesOnOldKeys != 1 || rep.RecoveryOnOldKeys != 20 ||
+		len(rep.UnreadableMFA) != 1 || rep.UnreadableMFA[0] != lost.ID ||
+		len(rep.UnreadableInvites) != 1 || rep.UnreadableInvites[0] != lostInvite {
+		t.Fatalf("отчёт %+v", rep)
+	}
+	if n := e.count(`SELECT count(*) FROM staff_mfa WHERE staff_id = $1 AND key_id = $2`, m.ID, rotated.CurrentID()); n != 1 {
+		t.Fatal("читаемый секрет не перешифрован")
+	}
+	rows := e.audits("staff.rekeyed")
+	if len(rows) != 1 || !strings.Contains(rows[0].After, `"unreadable_count": 2`) ||
+		!strings.Contains(rows[0].After, `"mfa_on_old_keys_count": 1`) {
+		t.Fatalf("аудит %+v", rows)
 	}
 }

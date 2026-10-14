@@ -38,7 +38,7 @@ func (a *App) OperatorBootstrap(ctx context.Context, email, name string) (string
 			return err
 		}
 		if err := audit.Write(ctx, operatorActor.entry(actionBootstrapped, c.id, nil,
-			map[string]any{"role": roleOwner, "email": email}, staff.Meta{})); err != nil {
+			map[string]any{"role": roleOwner, "email": c.email}, staff.Meta{})); err != nil {
 			return err
 		}
 		if err := publishInvited(ctx, c, roleOwner); err != nil {
@@ -99,29 +99,67 @@ func (a *App) OperatorInviteResend(ctx context.Context, email string) (string, e
 // ADMIN_STAFF_SECRET_KEYS, только когда это число 0).
 type RekeyReport struct {
 	MFA, Invites, RecoveryOnOldKeys int
+	// MFAOnOldKeys, InvitesOnOldKeys — сколько строк после прогона всё ещё не на текущем ключе
+	// (нечитаемые и зашифрованные старым ключом экземпляром прежнего релиза при скользящем деплое):
+	// ключ убирают, только когда все три счётчика — 0.
+	MFAOnOldKeys, InvitesOnOldKeys int
+	// UnreadableMFA (id сотрудников) и UnreadableInvites (id приглашений) — строки, которые не
+	// расшифровались: их ключа нет в кольце (убран раньше времени) или шифротекст повреждён.
+	UnreadableMFA, UnreadableInvites []uuid.UUID
 }
 
 // Rekey — перешифровка текущим ключом кольца (§4.11, синхронно, без River): секреты TOTP (staff_mfa)
 // и коды приглашений (code_enc не NULL), которые не на текущем ключе. Каждая строка — своей короткой
 // транзакцией под замком учётки (порядок как у сценариев: учётка → staff_mfa | приглашение): гонки с
 // настройкой 2FA и принятием нет, а строка, которую успели перезаписать текущим ключом, повторно не
-// трогается. Резервные коды перехэшировать нельзя (исходника нет) — только счёт. Итог — запись аудита
-// staff.rekeyed от оператора (ротация ключей — действие оператора, журнал должен её показать).
+// трогается. Нечитаемая строка (ключ убрали из кольца раньше времени, шифротекст повреждён) не
+// останавливает прогон: пропускается и перечисляется в UnreadableMFA / UnreadableInvites. Резервные
+// коды перехэшировать нельзя (исходника нет) — только счёт. После прогона — сколько строк всё ещё не
+// на текущем ключе (MFAOnOldKeys, InvitesOnOldKeys, RecoveryOnOldKeys): ключ убирают, только когда
+// все три — 0. Итог — запись аудита staff.rekeyed от оператора (ротация — действие оператора), и при
+// частичном прогоне: сбой базы посреди прогона — запись с partial = true на detached, ошибка — как
+// есть.
 func (a *App) Rekey(ctx context.Context) (RekeyReport, error) {
-	var rep RekeyReport
 	cur := a.keys.CurrentID()
+	rep, runErr := a.rekeyRows(ctx, cur)
+	if runErr == nil {
+		runErr = a.rekeyCounts(ctx, cur, &rep)
+	}
+	actx, cancel := detached(ctx) // итог пишется и после обрыва
+	defer cancel()
+	err := db.InTx(actx, a.pool, func(ctx context.Context, _ pgx.Tx) error {
+		e := operatorActor.entry(actionRekeyed, uuid.Nil, nil, map[string]any{
+			"key_id": cur, "mfa_count": rep.MFA, "invites_count": rep.Invites,
+			"recovery_codes_count":      rep.RecoveryOnOldKeys,
+			"mfa_on_old_keys_count":     rep.MFAOnOldKeys,
+			"invites_on_old_keys_count": rep.InvitesOnOldKeys,
+			"unreadable_count":          len(rep.UnreadableMFA) + len(rep.UnreadableInvites),
+			"partial":                   runErr != nil,
+		}, staff.Meta{})
+		e.ObjectType = objectStaffKeys
+		return audit.Write(ctx, e)
+	})
+	return rep, errors.Join(runErr, err)
+}
+
+// rekeyRows — перешифровка строк не на ключе cur; нечитаемые — в отчёт, не в ошибку.
+func (a *App) rekeyRows(ctx context.Context, cur string) (RekeyReport, error) {
+	var rep RekeyReport
 	q := staffdb.New(a.pool)
 	staffIDs, err := q.ListMFAOnOldKeys(ctx, cur)
 	if err != nil {
 		return rep, err
 	}
 	for _, sid := range staffIDs {
-		done, err := a.rekeyMFA(ctx, sid)
+		res, err := a.rekeyMFA(ctx, sid)
 		if err != nil {
 			return rep, err
 		}
-		if done {
+		switch res {
+		case rekeyDone:
 			rep.MFA++
+		case rekeyUnreadable:
+			rep.UnreadableMFA = append(rep.UnreadableMFA, sid)
 		}
 	}
 	invites, err := q.ListInvitesOnOldKeys(ctx, cur)
@@ -129,34 +167,51 @@ func (a *App) Rekey(ctx context.Context) (RekeyReport, error) {
 		return rep, err
 	}
 	for _, inv := range invites {
-		done, err := a.rekeyInvite(ctx, inv.StaffID, inv.ID)
+		res, err := a.rekeyInvite(ctx, inv.StaffID, inv.ID)
 		if err != nil {
 			return rep, err
 		}
-		if done {
+		switch res {
+		case rekeyDone:
 			rep.Invites++
+		case rekeyUnreadable:
+			rep.UnreadableInvites = append(rep.UnreadableInvites, inv.ID)
 		}
 	}
-	n, err := q.CountRecoveryOnOldKeys(ctx, cur)
-	if err != nil {
-		return rep, err
-	}
-	rep.RecoveryOnOldKeys = int(n)
-	err = db.InTx(ctx, a.pool, func(ctx context.Context, _ pgx.Tx) error {
-		e := operatorActor.entry(actionRekeyed, uuid.Nil, nil, map[string]any{
-			"key_id": cur, "mfa_count": rep.MFA, "invites_count": rep.Invites,
-			"recovery_codes_count": rep.RecoveryOnOldKeys,
-		}, staff.Meta{})
-		e.ObjectType = objectStaffKeys
-		return audit.Write(ctx, e)
-	})
-	return rep, err
+	return rep, nil
 }
 
-// rekeyMFA — секрет TOTP сотрудника staffID текущим ключом под замком учётки; уже на текущем ключе
-// (успела настройка) или строки нет — false.
-func (a *App) rekeyMFA(ctx context.Context, staffID uuid.UUID) (bool, error) {
-	done := false
+// rekeyCounts — сколько строк после прогона ещё не на ключе cur.
+func (a *App) rekeyCounts(ctx context.Context, cur string, rep *RekeyReport) error {
+	q := staffdb.New(a.pool)
+	mfa, err := q.CountMFAOnOldKeys(ctx, cur)
+	if err != nil {
+		return err
+	}
+	inv, err := q.CountInvitesOnOldKeys(ctx, cur)
+	if err != nil {
+		return err
+	}
+	rec, err := q.CountRecoveryOnOldKeys(ctx, cur)
+	if err != nil {
+		return err
+	}
+	rep.MFAOnOldKeys, rep.InvitesOnOldKeys, rep.RecoveryOnOldKeys = int(mfa), int(inv), int(rec)
+	return nil
+}
+
+// rekeyResult — исход перешифровки одной строки.
+type rekeyResult int
+
+const (
+	rekeySkipped    rekeyResult = iota // строки нет или она уже на текущем ключе
+	rekeyDone                          // перешифрована
+	rekeyUnreadable                    // не расшифровалась: ключа нет в кольце или шифротекст повреждён
+)
+
+// rekeyMFA — секрет TOTP сотрудника staffID текущим ключом под замком учётки.
+func (a *App) rekeyMFA(ctx context.Context, staffID uuid.UUID) (rekeyResult, error) {
+	res := rekeySkipped
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
 		if _, err := q.LockAccount(ctx, staffID); err != nil {
@@ -171,22 +226,24 @@ func (a *App) rekeyMFA(ctx context.Context, staffID uuid.UUID) (bool, error) {
 		}
 		secret, err := a.openTOTP(staffID, mfa.SecretEnc, mfa.KeyID)
 		if err != nil {
-			return fmt.Errorf("staff: секрет TOTP %s: %w", staffID, err)
+			res = rekeyUnreadable
+			a.log.WarnContext(ctx, "staff: rekey — секрет TOTP не расшифровался", "staff_id", staffID.String(), "key_id", mfa.KeyID, "err", err)
+			return nil //nolint:nilerr // нечитаемая строка — в отчёт (UnreadableMFA), прогон продолжается
 		}
 		ct, keyID, err := a.sealTOTP(staffID, secret)
 		if err != nil {
-			return err
+			return fmt.Errorf("staff: секрет TOTP сотрудника %s: %w", staffID, err)
 		}
-		done = true
+		res = rekeyDone
 		return q.RekeyMFA(ctx, staffdb.RekeyMFAParams{SecretEnc: ct, KeyID: keyID, StaffID: staffID})
 	})
-	return done, err
+	return res, err
 }
 
 // rekeyInvite — код приглашения inviteID текущим ключом под замком учётки staffID; кода уже нет
-// (стёрт, приглашение закрыто) или он на текущем ключе — false.
-func (a *App) rekeyInvite(ctx context.Context, staffID, inviteID uuid.UUID) (bool, error) {
-	done := false
+// (стёрт, приглашение закрыто) или он на текущем ключе — rekeySkipped.
+func (a *App) rekeyInvite(ctx context.Context, staffID, inviteID uuid.UUID) (rekeyResult, error) {
+	res := rekeySkipped
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
 		if _, err := q.LockAccount(ctx, staffID); err != nil {
@@ -201,16 +258,18 @@ func (a *App) rekeyInvite(ctx context.Context, staffID, inviteID uuid.UUID) (boo
 		}
 		code, err := a.openInviteCode(inviteID, row.CodeEnc, *row.CodeKeyID)
 		if err != nil {
-			return err
+			res = rekeyUnreadable
+			a.log.WarnContext(ctx, "staff: rekey — код приглашения не расшифровался", "invite_id", inviteID.String(), "key_id", *row.CodeKeyID, "err", err)
+			return nil //nolint:nilerr // нечитаемая строка — в отчёт (UnreadableInvites), прогон продолжается
 		}
 		ct, keyID, err := a.keys.Seal([]byte(code), inviteAAD(inviteID))
 		if err != nil {
-			return err
+			return fmt.Errorf("staff: код приглашения %s: %w", inviteID, err)
 		}
-		done = true
+		res = rekeyDone
 		return q.RekeyInvite(ctx, staffdb.RekeyInviteParams{CodeEnc: ct, CodeKeyID: keyID, ID: inviteID})
 	})
-	return done, err
+	return res, err
 }
 
 // ignoreNoRows — строки нет (удалили между списком и замком) — не ошибка.

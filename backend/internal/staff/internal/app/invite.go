@@ -116,13 +116,22 @@ func (a *App) IssueInvite(ctx context.Context, tx pgx.Tx, staffID uuid.UUID, pur
 // учётка invited, приглашение живо и не истекло, с прошлой отправки прошло 60 с и отправок у
 // приглашения меньше 5 (строка живёт не дольше суток: срок 24 ч самостоятельная отправка не
 // продлевает, поэтому sends строки — отправки за её сутки). Новый код — в той же строке: попытки с
-// нуля, sends + 1, срок прежний. Учётка и строка — под замком: две быстрые отправки дают одно письмо.
+// нуля, sends + 1, срок прежний. Сначала чтение без замков: отправлять нечего — ответ без замков и
+// записей (иначе существующая почта отвечала бы дольше несуществующей). Подходящему кандидату — замки
+// учётки и строки и проверка заново: две быстрые отправки дают одно письмо.
 // Аудит отправки — без автора (anonymous), почта маскируется.
 func (a *App) ResendInviteSelf(ctx context.Context, email string, m staff.Meta) error {
 	norm, ok := domain.NormalizeEmail(email)
 	if !ok {
 		return nil
 	}
+	// без замков: отправлять нечего — ответ без замков и записей (время не выдаёт почту)
+	c, ok, err := a.inviteCandidate(ctx, norm)
+	if err != nil || !ok || !selfResendable(*c.ExpiresAt, *c.LastSentAt, *c.Sends, a.clock.Now()) {
+		return err
+	}
+	// кандидат подходит — под замками учётки и строки проверка заново: две быстрые отправки дают
+	// одно письмо
 	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
 		acct, err := q.LockAccountByEmail(ctx, norm)
@@ -143,7 +152,7 @@ func (a *App) ResendInviteSelf(ctx context.Context, email string, m staff.Meta) 
 			return err
 		}
 		now := a.clock.Now() // после замков: параллельная отправка могла их держать
-		if !now.Before(inv.ExpiresAt) || now.Sub(inv.LastSentAt) < resendPause || inv.Sends >= maxInviteSends {
+		if !selfResendable(inv.ExpiresAt, inv.LastSentAt, inv.Sends, now) {
 			return nil
 		}
 		kind, err := inviteMailKind(inv.Purpose)
@@ -232,7 +241,9 @@ func (a *App) lockForResend(ctx context.Context, q *staffdb.Queries, staffID uui
 // Почта, учётка не invited, нет живого приглашения, срок, стёртый или неверный код — один
 // staff.ErrInviteInvalid. Неверный код — попытка +1 в закоммиченной транзакции (D8: ответ-ошибка её
 // не откатывает), пятая стирает код (приглашение живо, новый код — повторной отправкой); аудит
-// неудачи — без автора, почта маскируется. Стёртый код отвергается до подсчёта попытки.
+// неудачи — без автора, почта маскируется. Стёртый код отвергается до подсчёта попытки. Замки
+// берутся, только если чтение без замков нашло учётку invited с живым, не истёкшим приглашением и
+// кодом (иначе — ответ без замков и записей); под замками проверка повторяется (lockAcceptable).
 //
 // Успех: пароль сохранён, блокировка второго фактора снята (учётка настраивает его заново),
 // staff_mfa и резервные коды удалены, попытки кода — с нуля; все сессии учётки и сессия oldToken
@@ -258,6 +269,14 @@ func (a *App) AcceptInvite(ctx context.Context, email, code, pw, oldToken string
 	// обрыв соединения клиента не теряет попытку неверного кода
 	dctx, cancel := detached(ctx)
 	defer cancel()
+	// без замков: принимать нечего — ответ без замков и записей (время не выдаёт почту)
+	c, ok, err := a.inviteCandidate(dctx, norm)
+	if err != nil {
+		return "", err
+	}
+	if !ok || !c.HasCode || !a.clock.Now().Before(*c.ExpiresAt) {
+		return "", staff.ErrInviteInvalid
+	}
 	var (
 		raw     string
 		invalid bool
@@ -325,6 +344,25 @@ func (a *App) AcceptInvite(ctx context.Context, email, code, pw, oldToken string
 		return "", staff.ErrInviteInvalid
 	}
 	return raw, nil
+}
+
+// inviteCandidate — учётка по почте и её живое приглашение без замков (GetInviteCandidate); ok=false —
+// учётки нет, она не invited или живого приглашения нет: делать нечего.
+func (a *App) inviteCandidate(ctx context.Context, email string) (staffdb.GetInviteCandidateRow, bool, error) {
+	c, err := staffdb.New(a.pool).GetInviteCandidate(ctx, email)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c, false, nil
+	}
+	if err != nil {
+		return c, false, err
+	}
+	return c, c.Status == statusInvited && c.InviteID != nil && c.ExpiresAt != nil && c.LastSentAt != nil && c.Sends != nil, nil
+}
+
+// selfResendable — можно ли самому выслать новый код (§4.3 п.3): приглашение не истекло, с прошлой
+// отправки прошло 60 с, отправок меньше 5.
+func selfResendable(expires, lastSent time.Time, sends int32, now time.Time) bool {
+	return now.Before(expires) && now.Sub(lastSent) >= resendPause && sends < maxInviteSends
 }
 
 // lockAcceptable — учётка по почте и её живое приглашение под замками (учётка, затем приглашение),
@@ -406,10 +444,12 @@ type newAccount struct {
 	by                uuid.UUID
 }
 
-// created — созданная учётка: id и версия агрегата (для события staff.invited).
+// created — созданная учётка: id, версия агрегата (для события staff.invited) и нормализованная почта
+// (для аудита).
 type created struct {
 	id      uuid.UUID
 	version int64
+	email   string
 }
 
 // validateInvitee — почта и имя приглашаемого по правилам контракта (StaffInviteRequest): почта —
@@ -444,7 +484,7 @@ func (a *App) createInvited(ctx context.Context, q *staffdb.Queries, na newAccou
 	if na.by != uuid.Nil {
 		by = &na.by
 	}
-	c := created{id: id.New()}
+	c := created{id: id.New(), email: email}
 	c.version, err = q.InsertInvitedAccount(ctx, staffdb.InsertInvitedAccountParams{
 		ID: c.id, Email: email, DisplayName: name, Now: now, CreatedBy: by,
 	})

@@ -21,6 +21,11 @@ type Querier interface {
 	ConfirmMFA(ctx context.Context, arg ConfirmMFAParams) error
 	// recovery-codes/ack: приглашение погашено, код стирается.
 	ConsumeInvite(ctx context.Context, arg ConsumeInviteParams) error
+	// Итог перешифровки: коды приглашений не на текущем ключе.
+	CountInvitesOnOldKeys(ctx context.Context, currentKey string) (int64, error)
+	// Итог перешифровки: секреты TOTP не на текущем ключе (нечитаемые и записанные старым ключом
+	// экземпляром прежнего релиза при скользящем деплое).
+	CountMFAOnOldKeys(ctx context.Context, currentKey string) (int64, error)
 	// Неиспользованные резервные коды не на текущем ключе: перехэшировать нельзя (исходника нет), старый
 	// ключ убирается, когда счёт = 0.
 	CountRecoveryOnOldKeys(ctx context.Context, currentKey string) (int64, error)
@@ -37,6 +42,11 @@ type Querier interface {
 	GetActorLabel(ctx context.Context, id uuid.UUID) (string, error)
 	// Письмо staff.bootstrapped: новая учётка, её роль и кто создал (NULL — оператор).
 	GetBootstrappedMail(ctx context.Context, id uuid.UUID) (GetBootstrappedMailRow, error)
+	// Учётка по почте и её живое приглашение БЕЗ замков: повторной отправке и принятию нечего делать
+	// (учётка не invited, приглашения нет, срок, пауза, лимит, код стёрт) — ответ без замков и записей,
+	// время ответа не выдаёт существование почты. Подходящему кандидату сценарий берёт замки и
+	// проверяет заново.
+	GetInviteCandidate(ctx context.Context, email string) (GetInviteCandidateRow, error)
 	// Письмо staff.invite / staff.access_reset: приглашение и его учётка.
 	GetInviteMail(ctx context.Context, id uuid.UUID) (GetInviteMailRow, error)
 	// Последнее приглашение учётки (живое или закрытое): назначение и время последней отправки —
