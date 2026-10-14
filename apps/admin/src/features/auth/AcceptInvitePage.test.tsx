@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { reauthBus } from '../../app/reauth';
@@ -160,4 +160,35 @@ test('успех → стадия setup → /setup-2fa; пароль и код �
   expect(app.at()).toBe('/setup-2fa');
   expect(storageDump()).not.toContain('Жёлтая карточка');
   expect(storageDump()).not.toContain('305718');
+  // пароль и код не остаются в кэше мутаций после экрана
+  await waitFor(() => {
+    const vars = JSON.stringify(
+      app.queryClient
+        .getMutationCache()
+        .getAll()
+        .map((m) => m.state.variables),
+    );
+    expect(vars).not.toContain('Жёлтая карточка');
+    expect(vars).not.toContain('305718');
+  });
+});
+
+test('повторная отправка — 429: текст и отсчёт; по концу отсчёта текст снят', async () => {
+  renderApp('/accept');
+  server.use(
+    http.post('/v1/staff/auth/invite/resend', ({ response }) =>
+      response.untyped(problem(429, 'ratelimit.exceeded', { retry_after: 5 })),
+    ),
+  );
+  await page('Принятие приглашения');
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  fireEvent.change(screen.getByLabelText('Рабочая почта'), {
+    target: { value: 'olga.v@wf.example' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить код ещё раз' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Слишком много запросов');
+  expect(screen.getByRole('button', { name: 'Отправить ещё раз через 5 с' })).toBeDisabled();
+  act(() => vi.advanceTimersByTime(6_000));
+  expect(screen.getByRole('button', { name: 'Отправить код ещё раз' })).toBeEnabled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });

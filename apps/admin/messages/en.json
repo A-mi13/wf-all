@@ -100,7 +100,8 @@
       "confirmed_text": "The authenticator app is connected; only the last step is left. Recovery codes are shown once and won't appear here again — you can issue new ones in My access.",
       "continue": "Continue",
       "replay": "A response with a secret isn't stored, so it can't be repeated. Start the setup again — the app will get a new QR code.",
-      "restart": "Start again"
+      "restart": "Start again",
+      "logout": "Sign out"
     }
   },
   "states": {

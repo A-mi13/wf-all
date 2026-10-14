@@ -18,7 +18,7 @@ const isDigit = (s: string) => s.length === 1 && s >= '0' && s <= '9';
 const digitsOf = (s: string) => s.replace(/\D/g, '');
 
 export type OtpInputHandle = {
-  reset(): void; // после ошибки кода: ячейки пусты, фокус на первой
+  reset(): void; // после ошибки кода: ячейки пусты (и onChange('')), фокус на первой
   focus(): void;
 };
 
@@ -80,6 +80,9 @@ export function OtpInput({
   useImperativeHandle(ref, () => ({
     reset() {
       setCells(EMPTY);
+      // экран держит текущий код (onChange) — пустые ячейки должны дойти и до него, иначе
+      // кнопка отправки повторит стёртый код
+      onChange?.('');
       requestFocus(0);
     },
     focus() {

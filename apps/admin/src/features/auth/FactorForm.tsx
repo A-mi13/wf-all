@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import type { ApiError } from '../../api/client';
@@ -32,8 +32,10 @@ export type FactorFormProps = {
 // - 6 ячеек OtpInput с автоотправкой или «Использовать резервный код» — обычное поле;
 // - staff.mfa_invalid — «Осталось N попыток…» по attempts_left; 0 — доступ закрыт на час: ввод
 //   недоступен, вместо отправки — «Ко входу» (сервер уже погасил все сессии сотрудника);
-// - 429 — отсчёт по Retry-After, отправка недоступна до конца;
-// - код и резервный код никуда не сохраняются (черновиков у этой формы нет).
+// - 429 — отсчёт по Retry-After, отправка недоступна до конца (поле ввода остаётся доступным —
+//   фокус не уходит на body); по концу отсчёта текст ошибки снимается;
+// - код и резервный код никуда не сохраняются: черновиков нет, мутация — gcTime 0 (переменные не
+//   лежат в кэше мутаций после экрана).
 export function FactorForm({
   send,
   submitLabel,
@@ -54,6 +56,7 @@ export function FactorForm({
   const recovery = useForm<{ recovery_code: string }>({ defaultValues: { recovery_code: '' } });
 
   const m = useAdminMutation(send, {
+    gcTime: 0,
     onSuccess: () => onSuccess(),
     onError: (e) => {
       if (e.code === 'auth.unauthenticated' && onExpired) return onExpired();
@@ -61,12 +64,19 @@ export function FactorForm({
       if (e.code === 'ratelimit.exceeded') wait.start(e.retryAfter ?? 60);
       setFailure(e);
       otp.current?.reset();
+      if (mode === 'recovery' && !isLock(e)) recovery.setFocus('recovery_code');
     },
   });
 
-  const locked = failure?.code === 'staff.mfa_invalid' && failure.attemptsLeft === 0;
+  const locked = failure !== null && isLock(failure);
   const limited = wait.left > 0;
   const blocked = locked || limited;
+
+  // Блокировка: единственное действие — «Ко входу», фокус на него (ячейки уже недоступны).
+  const toLogin = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (locked) toLogin.current?.focus();
+  }, [locked]);
 
   // Код из ячеек: ошибку разбирает onError мутации. Резервный код — через Form (mutateAsync).
   const sendCode = (c: string) => {
@@ -75,16 +85,17 @@ export function FactorForm({
     m.mutate({ code: c });
   };
 
-  const message = !failure
-    ? null
-    : failure.code === 'staff.mfa_invalid' && failure.attemptsLeft !== undefined
-      ? failure.attemptsLeft === 0
-        ? t('locked')
-        : t('invalid', { count: failure.attemptsLeft })
-      : errorText(failure);
+  const message =
+    !failure || (failure.code === 'ratelimit.exceeded' && !limited)
+      ? null
+      : failure.code === 'staff.mfa_invalid' && failure.attemptsLeft !== undefined
+        ? failure.attemptsLeft === 0
+          ? t('locked')
+          : t('invalid', { count: failure.attemptsLeft })
+        : errorText(failure);
 
   const submitButton = locked ? (
-    <Button size="lg" block onClick={onLocked}>
+    <Button ref={toLogin} size="lg" block onClick={onLocked}>
       {t('to_login')}
     </Button>
   ) : (
@@ -119,8 +130,8 @@ export function FactorForm({
               label={t('code')}
               onComplete={sendCode}
               onChange={setCode}
-              invalid={Boolean(failure)}
-              disabled={m.isPending || blocked}
+              invalid={Boolean(message)}
+              disabled={m.isPending || locked}
               autoFocus
               describedBy={message ? errorId : undefined}
             />
@@ -148,7 +159,7 @@ export function FactorForm({
             autoCapitalize="off"
             spellCheck={false}
             autoFocus
-            disabled={blocked}
+            disabled={locked}
             rules={{ required: true }}
           />
           {alert}
@@ -171,4 +182,9 @@ export function FactorForm({
       </div>
     </>
   );
+}
+
+// Пятая неудача подряд: доступ закрыт на час (attempts_left = 0).
+function isLock(e: ApiError): boolean {
+  return e.code === 'staff.mfa_invalid' && e.attemptsLeft === 0;
 }

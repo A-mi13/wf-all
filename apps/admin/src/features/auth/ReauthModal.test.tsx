@@ -205,8 +205,25 @@ describe('разблокировка', () => {
 });
 
 describe('в приложении', () => {
-  test('«Выйти» в окне — выход каркаса: вход без return', async () => {
+  test('«Выйти» в окне — выход каркаса: вход без return; черновики и мутации стёрты', async () => {
     const app = renderApp('/staff', { me: { ...meOwner, reauth_required: true } });
+    sessionStorage.setItem('wf-admin:draft:/staff', '{"email":"ivan.p@wf.example"}');
+    // переменные прежних мутаций (пароль, код) в кэше дольше экрана
+    app.queryClient.getMutationCache().build(
+      app.queryClient,
+      { gcTime: Infinity },
+      {
+        context: undefined,
+        data: undefined,
+        error: null,
+        failureCount: 0,
+        failureReason: null,
+        isPaused: false,
+        status: 'success',
+        variables: { password: 'пароль прежнего' },
+        submittedAt: 0,
+      },
+    );
     let key: string | null = null;
     server.use(
       http.post('/v1/staff/auth/logout', ({ request, response }) => {
@@ -224,6 +241,52 @@ describe('в приложении', () => {
     await waitFor(() => expect(app.at()).toBe('/login'));
     expect(key).toBeTruthy();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem('wf-admin:draft:/staff')).toBeNull();
+    expect(
+      JSON.stringify(
+        app.queryClient
+          .getMutationCache()
+          .getAll()
+          .map((m) => m.state.variables),
+      ),
+    ).not.toContain('пароль прежнего');
+  });
+
+  test('сессия стала anonymous, пока окно открыто (401 другого запроса) — окно закрыто, вход с return', async () => {
+    const app = renderApp('/staff', { me: { ...meOwner, reauth_required: true } });
+    await dialog();
+    app.me.current = null;
+    await app.refetchMe();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Вход администратора' }),
+    ).toBeInTheDocument();
+    expect(app.at()).toBe('/login?return=%2Fstaff');
+  });
+
+  test('сессия уже не ждёт разблокировки (409 staff.wrong_stage: другая вкладка успела) — окно закрыто, запрос повторён', async () => {
+    const ctl = { patches: 0 };
+    let unlocked = false;
+    server.use(
+      http.get('/v1/staff/me', ({ response }) => response(200).json(meOwner)),
+      http.patch('/v1/staff/me/locale', ({ response }) => {
+        ctl.patches++;
+        return unlocked
+          ? response(204).empty()
+          : response.untyped(problem(401, 'auth.reauth_required'));
+      }),
+      http.post('/v1/staff/auth/unlock', ({ response }) => {
+        unlocked = true; // разблокировала другая вкладка — cookie общая
+        return response.untyped(problem(409, 'staff.wrong_stage'));
+      }),
+    );
+    const user = userEvent.setup();
+    mount();
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await enterCode(user, '492817');
+    expect(await screen.findByText('Сохранено')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(ctl.patches).toBe(2);
   });
 
   test('сессия кончилась, пока окно открыто (401 auth.unauthenticated) — окно закрывается, вход', async () => {

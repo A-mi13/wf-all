@@ -1,10 +1,13 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import { isApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
+import { useLogout } from '../../app/logout';
+import type { Me } from '../../app/permissions';
+import { ME_KEY } from '../../app/query';
 import { useSession } from '../../app/session';
 import {
   Button,
@@ -37,11 +40,28 @@ export function SetupMfaPage() {
   const t = useTranslations('auth.setup');
   const tp = useTranslations('pages');
   const [view, setView] = useState<View>({ kind: 'scan' });
+  // ack ответил wrong_stage, а стадия всё ещё setup: второй фактор не подтверждён (секрет сброшен
+  // повторным принятием приглашения в другой вкладке) — снова сканирование с новым секретом.
+  // Один раз: если и новый выпуск, и ack снова отвечают wrong_stage, — ошибка, а не петля.
+  const [rescanned, setRescanned] = useState(false);
+  const rescan = () => {
+    if (rescanned) return false;
+    setRescanned(true);
+    setView({ kind: 'scan' });
+    return true;
+  };
+  // общий компьютер: брошенную настройку можно закрыть — сервер разрешает выход в стадии setup
+  const logout = useLogout();
   return (
     <AuthLayout
       title={tp('setup2fa.title')}
       lead={view.kind === 'scan' ? t('lead') : undefined}
       wide
+      below={
+        <Button variant="link" loading={logout.isPending} onClick={() => logout.mutate()}>
+          {t('logout')}
+        </Button>
+      }
     >
       {view.kind === 'scan' && (
         <ScanStep
@@ -49,8 +69,8 @@ export function SetupMfaPage() {
           onAlreadyConfirmed={() => setView({ kind: 'confirmed' })}
         />
       )}
-      {view.kind === 'codes' && <CodesStep codes={view.codes} />}
-      {view.kind === 'confirmed' && <ConfirmedStep />}
+      {view.kind === 'codes' && <CodesStep codes={view.codes} onRescan={rescan} />}
+      {view.kind === 'confirmed' && <ConfirmedStep onRescan={rescan} />}
     </AuthLayout>
   );
 }
@@ -72,10 +92,12 @@ function useCopy() {
 }
 
 // recovery-codes/ack: 204 — новая cookie стадии active (D9), клиент только перечитывает me.
-// staff.wrong_stage — настройка уже завершена (другая вкладка): тоже перечитать me.
-function useAck() {
+// staff.wrong_stage: me перечитывается — настройка завершена (другая вкладка) → роутер уводит на
+// стартовую; стадия всё ещё setup (2FA не подтверждена) → onRescan; false — ошибка остаётся.
+function useAck(onRescan: () => boolean) {
   const api = useApi();
   const session = useSession();
+  const queryClient = useQueryClient();
   return useAdminMutation(
     (_: void, key: string) =>
       api.POST('/v1/staff/me/mfa/recovery-codes/ack', {
@@ -83,8 +105,10 @@ function useAck() {
       }),
     {
       onSuccess: () => session.refresh(),
-      onError: (e) => {
-        if (e.code === 'staff.wrong_stage') return session.refresh();
+      onError: async (e) => {
+        if (e.code !== 'staff.wrong_stage') return;
+        await session.refresh();
+        if (queryClient.getQueryData<Me>(ME_KEY)?.stage === 'setup') onRescan();
       },
     },
   );
@@ -233,10 +257,10 @@ function ScanStep({
   );
 }
 
-function CodesStep({ codes }: { codes: string[] }) {
+function CodesStep({ codes, onRescan }: { codes: string[]; onRescan: () => boolean }) {
   const t = useTranslations('auth.setup');
   const copy = useCopy();
-  const ack = useAck();
+  const ack = useAck(onRescan);
   const form = useForm<{ saved: boolean }>({ defaultValues: { saved: false } });
   const saved = useWatch({ control: form.control, name: 'saved' });
 
@@ -281,9 +305,9 @@ function CodesStep({ codes }: { codes: string[] }) {
 
 // Второй фактор подтверждён, но коды не подтверждены (перезагрузка после confirm): коды не
 // вернуть — их перевыпуск в «Моём доступе»; «Продолжить» завершает настройку (ack).
-function ConfirmedStep() {
+function ConfirmedStep({ onRescan }: { onRescan: () => boolean }) {
   const t = useTranslations('auth.setup');
-  const ack = useAck();
+  const ack = useAck(onRescan);
   return (
     <>
       <h2 className={styles.stepTitle}>{t('confirmed_title')}</h2>

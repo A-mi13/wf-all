@@ -40,7 +40,8 @@ export function AcceptInvitePage() {
   const accept = useAdminMutation(
     (v: { email: string; code: string; password: string }) =>
       unwrap(api.POST('/v1/staff/auth/invite/accept', { body: v })),
-    { onSuccess: () => session.refresh() },
+    // gcTime 0: пароль и код в переменных мутации не остаются в кэше после экрана
+    { gcTime: 0, onSuccess: () => session.refresh() },
   );
 
   const resendWait = useCountdown();
@@ -129,7 +130,14 @@ export function AcceptInvitePage() {
             {t('resent')}
           </p>
         )}
-        <FormError error={resend.error} />
+        {/* 429 повторной отправки — только пока идёт отсчёт; новая попытка сама снимает ошибку */}
+        <FormError
+          error={
+            resend.error?.code === 'ratelimit.exceeded' && resendWait.left === 0
+              ? null
+              : resend.error
+          }
+        />
         {limited && <FormError error={limit} />}
         <Button type="submit" size="lg" block loading={accept.isPending} disabled={limited}>
           {limited ? t('wait', { seconds: submitWait.left }) : t('submit')}

@@ -126,6 +126,16 @@ describe('OtpInput', () => {
     expect(onComplete).toHaveBeenLastCalledWith('222222');
   });
 
+  test('reset() сообщает пустой код через onChange — экран не отправит стёртый код', async () => {
+    const onChange = vi.fn();
+    const { user, ref } = setup({ onChange });
+    await user.click(cells()[0]!);
+    await user.paste('111111');
+    expect(onChange).toHaveBeenLastCalledWith('111111');
+    act(() => ref.current?.reset());
+    expect(onChange).toHaveBeenLastCalledWith('');
+  });
+
   // Реальный сценарий: onError мутации зовёт reset(), пока ячейки ещё disabled (isPending), —
   // фокус ставится, когда их включат.
   test.each([

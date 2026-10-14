@@ -26,12 +26,15 @@ export function LoginPage() {
   const session = useSession();
   const [draft, saveDraft] = useDraft<LoginDraft>(paths.login);
   const [expired, setExpired] = useState(false);
-  // «Ко входу» после блокировки и «Другая почта или пароль»: шаг 1, даже если сессия ещё
-  // mfa_pending (новый вход гасит прежнюю сессию на сервере).
-  const [restarted, setRestarted] = useState(false);
-  const step2 = session.status === 'mfa_pending' && !restarted;
+  // «Ко входу» после блокировки и «Другая почта или пароль»: брошенная сессия mfa_pending
+  // запоминается по id, и её шаг 2 больше не показывается — шаг 1, пока не придёт другая
+  // сессия (успешный вход гасит прежнюю на сервере). Неудачный вход оставляет прежнюю сессию — и
+  // экран остаётся на шаге 1 с ошибкой.
+  const [abandoned, setAbandoned] = useState<{ id: string | null } | null>(null);
+  const step2 =
+    session.status === 'mfa_pending' && !(abandoned && abandoned.id === session.sessionId);
   const restart = () => {
-    setRestarted(true);
+    setAbandoned({ id: session.status === 'mfa_pending' ? session.sessionId : null });
     void session.refresh();
   };
 
@@ -50,7 +53,6 @@ export function LoginPage() {
           onSubmit={(email) => {
             saveDraft({ email });
             setExpired(false);
-            setRestarted(false);
           }}
         />
       )}
@@ -80,8 +82,9 @@ function PasswordStep({
   // Анонимная мутация (security: []): без Idempotency-Key, ключ хука не используется.
   const login = useAdminMutation(
     (v: Credentials) => unwrap(api.POST('/v1/staff/auth/login', { body: v })),
-    // 200 {stage: mfa_pending} — me перечитывается, и экран переходит к шагу 2
-    { onSuccess: () => session.refresh() },
+    // 200 {stage: mfa_pending} — me перечитывается, и экран переходит к шагу 2. gcTime 0 — пароль
+    // в переменных мутации не остаётся в кэше после шага.
+    { gcTime: 0, onSuccess: () => session.refresh() },
   );
 
   return (

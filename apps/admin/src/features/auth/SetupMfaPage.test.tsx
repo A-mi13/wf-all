@@ -37,7 +37,10 @@ const page = (name: string) => screen.findByRole('heading', { level: 1, name });
 type Ctl = { setup: (string | null)[]; confirm: number; ack: number };
 
 // Сервер настройки: setup выдаёт секрет, confirm с 492817 — коды, ack — стадия active.
-function setupServer(app: ReturnType<typeof renderApp>, over: { setup?: () => Response } = {}) {
+function setupServer(
+  app: ReturnType<typeof renderApp>,
+  over: { setup?: () => Response; ack?: () => Response } = {},
+) {
   const ctl: Ctl = { setup: [], confirm: 0, ack: 0 };
   server.use(
     http.post('/v1/staff/me/mfa/setup', ({ request, response }) => {
@@ -56,6 +59,7 @@ function setupServer(app: ReturnType<typeof renderApp>, over: { setup?: () => Re
     }),
     http.post('/v1/staff/me/mfa/recovery-codes/ack', ({ response }) => {
       ctl.ack++;
+      if (over.ack) return response.untyped(over.ack());
       app.me.current = meOwner;
       return response(204).empty();
     }),
@@ -71,6 +75,11 @@ async function enterCode(user: UserEvent, code: string) {
 
 describe('настройка 2FA', () => {
   test('секрет выпускается один раз и в StrictMode; QR (SVG) и секрет текстом', async () => {
+    // запросы считаются в момент отправки: fetch зовётся синхронно с выпуском, задолго до ответа
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const sentSetup = () =>
+      fetchSpy.mock.calls.filter(([r]) => r instanceof Request && r.url.includes('/mfa/setup'))
+        .length;
     const app = renderApp('/setup-2fa', { me: meSetup, strict: true });
     const ctl = setupServer(app);
     await page('Настройка двухфакторной защиты');
@@ -78,8 +87,9 @@ describe('настройка 2FA', () => {
     expect(qr.tagName.toLowerCase()).toBe('svg');
     expect(qr.querySelector('path')?.getAttribute('d')).toMatch(/^M\d/);
     expect(screen.getByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')).toBeInTheDocument();
-    // дать StrictMode и Query шанс на повтор
-    await new Promise((r) => setTimeout(r, 50));
+    // все отправленные выпуски дошли до сервера — и он один
+    await waitFor(() => expect(ctl.setup).toHaveLength(sentSetup()));
+    expect(sentSetup()).toBe(1);
     expect(ctl.setup).toHaveLength(1);
     expect(ctl.setup[0]).toBeTruthy();
   });
@@ -180,14 +190,38 @@ describe('настройка 2FA', () => {
     for (const c of CODES) expect(text).toContain(c);
   });
 
-  test('код не подошёл — текст и ячейки очищены', async () => {
+  test('код не подошёл — текст и ячейки очищены, стёртый код не уходит', async () => {
     const app = renderApp('/setup-2fa', { me: meSetup });
-    setupServer(app);
+    const ctl = setupServer(app);
     const user = userEvent.setup();
     await enterCode(user, '111111');
     expect(await screen.findByRole('alert')).toHaveTextContent('Код не подошёл');
     const cells = within(screen.getByRole('group', { name: CODE })).getAllByRole('textbox');
     await waitFor(() => expect(cells.map((c) => (c as HTMLInputElement).value).join('')).toBe(''));
+    // стёртый код не уходит повторно
+    const confirm = screen.getByRole('button', { name: 'Подтвердить' });
+    expect(confirm).toBeDisabled();
+    await user.click(confirm);
+    expect(ctl.confirm).toBe(1);
+  });
+
+  test('«Выйти» на экране настройки — выход без return (брошенная настройка на общем компьютере)', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    setupServer(app);
+    let out = 0;
+    server.use(
+      http.post('/v1/staff/auth/logout', ({ response }) => {
+        out++;
+        app.me.current = null;
+        return response(204).empty();
+      }),
+    );
+    const user = userEvent.setup();
+    await screen.findByRole('img', { name: 'QR-код для приложения-аутентификатора' });
+    await user.click(screen.getByRole('button', { name: 'Выйти' }));
+    await page('Вход администратора');
+    await waitFor(() => expect(app.at()).toBe('/login'));
+    expect(out).toBe(1);
   });
 });
 
@@ -199,6 +233,55 @@ describe('перезагрузки и повторы', () => {
     expect(await screen.findByText('Второй фактор уже подтверждён')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: CODE })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Продолжить' }));
+    await page('Журнал действий');
+    expect(ctl.ack).toBe(1);
+  });
+
+  test('ack → 409 wrong_stage, а me всё ещё setup (секрет не выпущен: повторный accept) — снова сканирование', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    const ctl = setupServer(app, { ack: () => problem(409, 'staff.wrong_stage') });
+    server.use(
+      http.post('/v1/staff/me/mfa/confirm', ({ response }) =>
+        response.untyped(problem(409, 'staff.wrong_stage')),
+      ),
+    );
+    const user = userEvent.setup();
+    await enterCode(user, '492817');
+    await user.click(await screen.findByRole('button', { name: 'Продолжить' }));
+    // новый секрет — снова QR и ячейки
+    expect(
+      await screen.findByRole('img', { name: 'QR-код для приложения-аутентификатора' }),
+    ).toBeInTheDocument();
+    expect(ctl.setup).toHaveLength(2);
+    expect(ctl.ack).toBe(1);
+  });
+
+  test('ack и setup оба отвечают wrong_stage — без петли: второй раз ошибка, а не новое сканирование', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    const ctl = setupServer(app, {
+      setup: () => problem(409, 'staff.wrong_stage'),
+      ack: () => problem(409, 'staff.wrong_stage'),
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Продолжить' }));
+    await waitFor(() => expect(ctl.setup).toHaveLength(2));
+    await user.click(await screen.findByRole('button', { name: 'Продолжить' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Это действие сейчас недоступно');
+    expect(ctl.ack).toBe(2);
+    expect(ctl.setup).toHaveLength(2);
+  });
+
+  test('ack → 409 wrong_stage, а настройка уже завершена (другая вкладка) — стартовая', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    const ctl = setupServer(app, {
+      setup: () => problem(409, 'staff.wrong_stage'),
+      ack: () => {
+        app.me.current = meOwner;
+        return problem(409, 'staff.wrong_stage');
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Продолжить' }));
     await page('Журнал действий');
     expect(ctl.ack).toBe(1);
   });

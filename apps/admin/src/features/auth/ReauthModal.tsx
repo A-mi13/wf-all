@@ -52,7 +52,9 @@ export function ReauthModal() {
         onSuccess={() => reauthBus.resolve()}
         // 401 auth.unauthenticated: me перечитывает кэш запросов (query.ts), эффект выше — тоже
         onExpired={() => reauthBus.reject()}
-        // сессия уже не ждёт разблокировки (другая вкладка успела) — запросы можно повторять
+        // 409: сессия уже не ждёт разблокировки (другая вкладка успела — cookie общая) — запросы
+        // можно повторять. Две вкладки одним кодом одновременно: вторая получает staff.mfa_invalid
+        // без счёта неудачи — обычный текст «Код не подошёл».
         onWrongStage={() => {
           reauthBus.resolve();
           void session.refresh();

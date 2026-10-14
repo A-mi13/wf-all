@@ -38,3 +38,14 @@ export function useDraft<T>(key: string): [T | undefined, (v: T) => void, () => 
   }, [key]);
   return [value, save, clear];
 }
+
+// Явный выход (useLogout): черновики прежнего сотрудника не достаются следующему за этим же
+// компьютером. Стираются только ключи админки.
+export function clearDrafts() {
+  try {
+    const keys = Array.from({ length: sessionStorage.length }, (_, i) => sessionStorage.key(i));
+    for (const k of keys) if (k?.startsWith(PREFIX)) sessionStorage.removeItem(k);
+  } catch {
+    // хранилище недоступно — и черновиков в нём нет
+  }
+}

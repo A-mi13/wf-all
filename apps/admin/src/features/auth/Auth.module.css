@@ -201,3 +201,9 @@
   line-height: var(--wf-text-xl-line);
   font-weight: 600;
 }
+
+.below {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--wf-space-4);
+}

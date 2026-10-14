@@ -19,14 +19,15 @@ import { reauthBus } from './reauth';
 // - loading — ответа ещё нет;
 // - anonymous — 401 auth.unauthenticated: экран входа с возвратом; signedOut — после явного
 //   выхода (afterLogout): вход без возврата, следующий сотрудник не попадёт в чужой раздел;
-// - mfa_pending — пароль принят, шаг 2 входа; me — минимум, учётки нет;
+// - mfa_pending — пароль принят, шаг 2 входа; me — минимум, учётки нет; sessionId — какой
+//   именно вход ждёт код (экран входа не показывает шаг 2 брошенной сессии);
 // - setup — первый вход по приглашению: только настройка 2FA;
 // - active — работает; reauthRequired — сессия ждёт второй фактор (модалка разблокировки);
 // - error — admin-api не ответил (сеть, 5xx): экран «нет связи» с повтором.
 export type SessionState =
   | { status: 'loading' }
   | { status: 'anonymous'; signedOut?: boolean }
-  | { status: 'mfa_pending' }
+  | { status: 'mfa_pending'; sessionId: string | null }
   | { status: 'setup'; me: Me }
   | { status: 'active'; me: Me; reauthRequired: boolean }
   | { status: 'error'; error: Error };
@@ -44,7 +45,7 @@ function stateOf(data: Me | undefined, error: Error | null): SessionState {
   if (data) {
     switch (data.stage) {
       case 'mfa_pending':
-        return { status: 'mfa_pending' };
+        return { status: 'mfa_pending', sessionId: data.session?.id ?? null };
       case 'setup':
         return { status: 'setup', me: data };
       case 'active':

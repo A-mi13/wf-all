@@ -25,16 +25,25 @@ type Seen = {
   mfa: { body: unknown; key: string | null }[];
 };
 
-// Сервер входа: пароль «верный пароль 1» принят → mfa_pending; код 492817 → active.
+// Сервер входа: пароль «верный пароль 1» принят → новая сессия mfa_pending; код 492817 → active.
 function loginServer(app: ReturnType<typeof renderApp>) {
   const seen: Seen = { login: [], mfa: [] };
+  let n = 0;
   server.use(
     http.post('/v1/staff/auth/login', async ({ request, response }) => {
       const body = await request.json();
       seen.login.push({ body, key: request.headers.get('Idempotency-Key') });
       if (body.password !== 'верный пароль 1')
         return response.untyped(problem(400, 'staff.invalid_credentials'));
-      app.me.current = meMfaPending;
+      // каждый вход — новая сессия (прежняя гасится)
+      n++;
+      app.me.current = {
+        ...meMfaPending,
+        session: {
+          id: `0192f1d0-0000-7000-8000-00000000000${n}`,
+          expires_at: '2026-10-13T17:00:00Z',
+        },
+      };
       return response(200).json({ stage: 'mfa_pending' });
     }),
     http.post('/v1/staff/auth/mfa', async ({ request, response }) => {
@@ -49,8 +58,13 @@ function loginServer(app: ReturnType<typeof renderApp>) {
   return seen;
 }
 
-async function submitPassword(user: UserEvent, password = 'верный пароль 1') {
-  await user.type(screen.getByLabelText('Рабочая почта'), 'olga.v@wf.example');
+async function submitPassword(
+  user: UserEvent,
+  password = 'верный пароль 1',
+  email = 'olga.v@wf.example',
+) {
+  await user.clear(screen.getByLabelText('Рабочая почта'));
+  await user.type(screen.getByLabelText('Рабочая почта'), email);
   await user.type(screen.getByLabelText('Пароль'), password);
   await user.click(screen.getByRole('button', { name: 'Войти' }));
 }
@@ -86,6 +100,17 @@ describe('шаг 1 → шаг 2 → раздел', () => {
     // пароль не попал в черновик, почта — можно
     expect(storageDump()).not.toContain('верный пароль 1');
     expect(storageDump()).toContain('olga.v@wf.example');
+    // пароль и код не остаются в кэше мутаций после шагов
+    await waitFor(() => {
+      const vars = JSON.stringify(
+        app.queryClient
+          .getMutationCache()
+          .getAll()
+          .map((m) => m.state.variables),
+      );
+      expect(vars).not.toContain('верный пароль 1');
+      expect(vars).not.toContain('492817');
+    });
   });
 
   test('после входа — возврат на исходный адрес (?return=)', async () => {
@@ -98,6 +123,28 @@ describe('шаг 1 → шаг 2 → раздел', () => {
     await enterCode(user, '492817');
     await page('Роли и доступ');
     expect(app.at()).toBe('/staff?tab=sessions');
+  });
+
+  test('«Другая почта или пароль» + неверный пароль — ошибка на шаге 1, шаг 2 прежней сессии не открывается', async () => {
+    const app = renderApp('/login', { me: meMfaPending });
+    const seen = loginServer(app);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Другая почта или пароль' }));
+    await submitPassword(user, 'не тот', 'ivan.p@wf.example');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Неверная почта или пароль');
+    expect(screen.queryByRole('group', { name: CODE })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Пароль')).toBeInTheDocument();
+    expect(seen.login).toHaveLength(1);
+  });
+
+  test('«Другая почта или пароль» → вход другой почтой → шаг 2 новой сессии', async () => {
+    const app = renderApp('/login', { me: meMfaPending });
+    loginServer(app);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Другая почта или пароль' }));
+    await submitPassword(user, 'верный пароль 1', 'ivan.p@wf.example');
+    expect(await screen.findByRole('group', { name: CODE })).toBeInTheDocument();
+    expect(screen.getByText('Вход как ivan.p@wf.example')).toBeInTheDocument();
   });
 
   test('перезагрузка в mfa_pending открывает шаг 2', async () => {
@@ -143,21 +190,25 @@ describe('ошибки шага 1', () => {
     expect(wait).toBeDisabled();
     // Enter в поле тоже не уходит, пока идёт отсчёт
     fireEvent.submit(wait.closest('form')!);
-    await act(() => new Promise((r) => setTimeout(r, 100)));
-    expect(asked).toBe(1);
+    // отправка формы асинхронна (валидация react-hook-form) — дать ей закончиться
+    await act(async () => {});
     expect(screen.getByRole('alert')).toHaveTextContent('Слишком много запросов');
     act(() => vi.advanceTimersByTime(29_000));
     expect(screen.getByRole('button', { name: /^Подождать \d+ с$/ })).toBeDisabled();
     act(() => vi.advanceTimersByTime(1_500));
-    expect(screen.getByRole('button', { name: 'Войти' })).toBeEnabled();
-    expect(asked).toBe(1);
+    const again = screen.getByRole('button', { name: 'Войти' });
+    expect(again).toBeEnabled();
+    // следующий запрос после отсчёта; дождались его ответа (снова 429) — Enter выше не ушёл
+    fireEvent.click(again);
+    expect(await screen.findByRole('button', { name: 'Подождать 30 с' })).toBeDisabled();
+    expect(asked).toBe(2);
   });
 });
 
 describe('шаг 2', () => {
-  test('staff.mfa_invalid — «Осталось N попыток», ячейки очищены', async () => {
+  test('staff.mfa_invalid — «Осталось N попыток», ячейки очищены, стёртый код не уходит', async () => {
     const app = renderApp('/login', { me: meMfaPending });
-    loginServer(app);
+    const seen = loginServer(app);
     const user = userEvent.setup();
     await enterCode(user, '111111');
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -165,6 +216,42 @@ describe('шаг 2', () => {
     );
     const cells = within(screen.getByRole('group', { name: CODE })).getAllByRole('textbox');
     await waitFor(() => expect(cells.map((c) => (c as HTMLInputElement).value).join('')).toBe(''));
+    // стёртый код не уходит повторно: «Войти» недоступна, клик — без запроса
+    const submit = screen.getByRole('button', { name: 'Войти' });
+    expect(submit).toBeDisabled();
+    await user.click(submit);
+    expect(seen.mfa).toHaveLength(1);
+  });
+
+  test('429 на шаге 2 — отсчёт, фокус в ячейках; после отсчёта текст снят, код снова уходит', async () => {
+    const app = renderApp('/login', { me: meMfaPending });
+    let asked = 0;
+    server.use(
+      http.post('/v1/staff/auth/mfa', ({ response }) => {
+        asked++;
+        if (asked > 1) {
+          app.me.current = meOwner;
+          return response(204).empty();
+        }
+        return response.untyped(problem(429, 'ratelimit.exceeded', { retry_after: 30 }));
+      }),
+    );
+    const group = await screen.findByRole('group', { name: CODE });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const paste = (code: string) =>
+      fireEvent.paste(within(group).getAllByRole('textbox')[0]!, {
+        clipboardData: { getData: () => code },
+      });
+    paste('492817');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Слишком много запросов');
+    expect(screen.getByRole('button', { name: 'Подождать 30 с' })).toBeDisabled();
+    // фокус не потерян на body — в первой ячейке
+    await waitFor(() => expect(within(group).getAllByRole('textbox')[0]).toHaveFocus());
+    act(() => vi.advanceTimersByTime(31_000));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    paste('492817');
+    await page('Журнал действий');
+    expect(asked).toBe(2);
   });
 
   test('attempts_left = 0 — доступ закрыт на час, ввод недоступен, «Ко входу» → шаг 1', async () => {
@@ -182,6 +269,8 @@ describe('шаг 2', () => {
     for (const cell of within(screen.getByRole('group', { name: CODE })).getAllByRole('textbox'))
       expect(cell).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Использовать резервный код' })).toBeDisabled();
+    // фокус — на единственном действии
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ко входу' })).toHaveFocus());
 
     await user.click(screen.getByRole('button', { name: 'Ко входу' }));
     expect(await screen.findByLabelText('Пароль')).toBeInTheDocument();
