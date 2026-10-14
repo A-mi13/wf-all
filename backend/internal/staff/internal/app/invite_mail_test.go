@@ -63,10 +63,10 @@ func TestComposeInviteSkips(t *testing.T) {
 	oldRef := e.liveInvite(old.ID).ID
 	e.issue(old.ID, purposeInvite)
 
+	// живое приглашение без кода сценарии не создают (неверные вводы код не стирают) — защита
+	// составителя на случай ручной правки строки
 	wiped, _ := e.invitee("wiped@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	for range 5 {
-		_, _ = e.app.AcceptInvite(ctx, wiped.Email, "abc", newPassword, "", metaWeb)
-	}
+	e.exec(`UPDATE staff_invites SET code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, wiped.ID)
 	done, doneCode := e.invitee("done@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	doneRef := e.liveInvite(done.ID).ID
 	_, s := e.accept(done, doneCode)

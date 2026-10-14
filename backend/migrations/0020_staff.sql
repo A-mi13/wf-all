@@ -167,9 +167,10 @@ CREATE TABLE staff_recovery_codes (
 -- ротация ключей (D5): сколько неиспользованных кодов ещё на старых ключах
 CREATE INDEX staff_recovery_codes_key_idx ON staff_recovery_codes (key_id) WHERE used_at IS NULL;
 
--- Приглашения и сброс доступа. Код (6 цифр) зашифрован кольцом ключей, aad = id приглашения (D4):
--- письмо собирает составитель admin-api по id. NULL — кода нет: стёрт после 5 неверных вводов
--- (приглашение живо, новый код — повторной отправкой, D12) или приглашение закрыто.
+-- Приглашения и сброс доступа. Код (xxxxx-xxxxx, 50 бит) зашифрован кольцом ключей, aad = id
+-- приглашения (D4): письмо собирает составитель admin-api по id. NULL — кода нет: приглашение закрыто.
+-- Неверные вводы код не стирают и в строке не считаются (решение пользователя 14.10.2026: иначе знающий
+-- почту срывал приглашение анонимно; перебор 50 бит под IP-лимитом недостижим за 24 ч).
 CREATE TABLE staff_invites (
     id           uuid                 PRIMARY KEY,
     staff_id     uuid                 NOT NULL REFERENCES staff_accounts (id) ON DELETE CASCADE,
@@ -177,8 +178,6 @@ CREATE TABLE staff_invites (
     code_enc     bytea,
     code_key_id  text,
     expires_at   timestamptz          NOT NULL,
-    -- неверные вводы текущего кода
-    code_attempts int                 NOT NULL DEFAULT 0,
     sends        int                  NOT NULL DEFAULT 0,
     -- последняя отправка кода (пауза 60 с); пишется вместе со строкой (InviteInsert, Task 7)
     last_sent_at timestamptz          NOT NULL,
@@ -189,9 +188,6 @@ CREATE TABLE staff_invites (
     CONSTRAINT staff_invites_code_pair CHECK ((code_enc IS NULL) = (code_key_id IS NULL)),
     CONSTRAINT staff_invites_code_key_id_format CHECK (code_key_id ~ '^[A-Za-z0-9_-]{11}$'),
     CONSTRAINT staff_invites_closed_no_code CHECK ((consumed_at IS NULL AND revoked_at IS NULL) OR code_enc IS NULL),
-    CONSTRAINT staff_invites_code_attempts_check CHECK (code_attempts BETWEEN 0 AND 5),
-    -- 5 неверных вводов стирают код (D12): код с исчерпанными попытками не живёт; новый код — с code_attempts = 0
-    CONSTRAINT staff_invites_code_wiped CHECK (code_attempts < 5 OR code_enc IS NULL),
     CONSTRAINT staff_invites_sends_check CHECK (sends >= 0)
 );
 

@@ -207,10 +207,9 @@ func TestRekey(t *testing.T) {
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	e.addMember("anna.k@wf.example", memberOpts{Role: "owner"})
 	inv, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	wiped, _ := e.invitee("wiped@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	for range 5 {
-		_, _ = e.app.AcceptInvite(ctx, wiped.Email, "abc", newPassword, "", metaWeb)
-	}
+	// приглашение без кода (закрыто): перешифровывать нечего
+	closed, _ := e.invitee("closed@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	e.exec(`UPDATE staff_invites SET revoked_at = $2, code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, closed.ID, t0)
 	oldID := oldRing.CurrentID()
 
 	rotated, newKey := newRing(t, oldKey)

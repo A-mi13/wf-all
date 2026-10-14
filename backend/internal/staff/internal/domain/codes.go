@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -12,34 +11,44 @@ import (
 )
 
 const (
-	// inviteModulo — 10^6: код приглашения — 6 цифр.
-	inviteModulo = 1_000_000
-	// inviteLimit — наибольшее кратное 10^6, не превышающее 2^32: значения не ниже отбрасываются,
-	// иначе младшие коды выпадали бы чаще (смещение остатка).
-	inviteLimit = (1 << 32) / inviteModulo * inviteModulo
-
-	// recoveryCount — резервных кодов в поколении, recoveryLen — символов в коде (спека §4.1).
+	// codeLen — символов в резервном коде и коде приглашения (спека §4.1): 10 × 5 бит = 50 бит.
+	codeLen = 10
+	// recoveryCount — резервных кодов в поколении (спека §4.1).
 	recoveryCount = 10
-	recoveryLen   = 10
-	// recoveryAlphabet — base32 RFC 4648 строчными: 32 символа, байт & 31 — равномерно.
-	recoveryAlphabet = "abcdefghijklmnopqrstuvwxyz234567"
+	// codeAlphabet — base32 RFC 4648 строчными: 32 символа, байт & 31 — равномерно.
+	codeAlphabet = "abcdefghijklmnopqrstuvwxyz234567"
 )
 
 // errRepeat — источник случайности выдал повтор кода в одном поколении: с crypto/rand это
 // невозможно на практике, значит источник сломан.
 var errRepeat = errors.New("domain: повтор резервного кода — источник случайности неисправен")
 
-// NewInviteCode — код приглашения: 6 цифр, равномерно (отбор с отказом по 4 байтам rnd).
-func NewInviteCode(rnd io.Reader) (string, error) {
-	var b [4]byte
-	for {
-		if _, err := io.ReadFull(rnd, b[:]); err != nil {
-			return "", fmt.Errorf("domain: код приглашения: %w", err)
-		}
-		if v := binary.BigEndian.Uint32(b[:]); v < inviteLimit {
-			return fmt.Sprintf("%06d", v%inviteModulo), nil
-		}
+// newCode — код вида "xxxxx-xxxxx" из codeLen байт rnd (алфавит RFC 4648 строчными, 50 бит).
+// Общий для резервных кодов и кода приглашения: один формат и одна нормализация ввода (normalizeCode).
+func newCode(rnd io.Reader) (string, error) {
+	buf := make([]byte, codeLen)
+	if _, err := io.ReadFull(rnd, buf); err != nil {
+		return "", err
 	}
+	var b strings.Builder
+	for i, x := range buf {
+		if i == codeLen/2 {
+			b.WriteByte('-')
+		}
+		b.WriteByte(codeAlphabet[x&31])
+	}
+	return b.String(), nil
+}
+
+// NewInviteCode — код приглашения вида "xxxxx-xxxxx" (решение пользователя 14.10.2026): 50 бит, перебор
+// под IP-лимитом недостижим за жизнь приглашения (24 ч), поэтому неверные вводы код не стирают.
+// В базе — только шифротекст показанной формы (keys.Ring), сверка — по NormalizeInviteCode.
+func NewInviteCode(rnd io.Reader) (string, error) {
+	c, err := newCode(rnd)
+	if err != nil {
+		return "", fmt.Errorf("domain: код приглашения: %w", err)
+	}
+	return c, nil
 }
 
 // NewRecoveryCodes — 10 резервных кодов вида "xxxxx-xxxxx" (алфавит RFC 4648 строчными, 50 бит
@@ -47,19 +56,11 @@ func NewInviteCode(rnd io.Reader) (string, error) {
 func NewRecoveryCodes(rnd io.Reader) ([]string, error) {
 	codes := make([]string, 0, recoveryCount)
 	seen := make(map[string]bool, recoveryCount)
-	buf := make([]byte, recoveryLen)
 	for len(codes) < recoveryCount {
-		if _, err := io.ReadFull(rnd, buf); err != nil {
+		c, err := newCode(rnd)
+		if err != nil {
 			return nil, fmt.Errorf("domain: резервные коды: %w", err)
 		}
-		var b strings.Builder
-		for i, x := range buf {
-			if i == recoveryLen/2 {
-				b.WriteByte('-')
-			}
-			b.WriteByte(recoveryAlphabet[x&31])
-		}
-		c := b.String()
 		if seen[c] {
 			return nil, errRepeat
 		}
@@ -69,11 +70,18 @@ func NewRecoveryCodes(rnd io.Reader) ([]string, error) {
 	return codes, nil
 }
 
-// NormalizeRecoveryCode — резервный код в каноническом виде: 10 символов алфавита без дефиса.
+// NormalizeRecoveryCode — резервный код в каноническом виде (normalizeCode).
+func NormalizeRecoveryCode(s string) (string, bool) { return normalizeCode(s) }
+
+// NormalizeInviteCode — код приглашения в каноническом виде (normalizeCode): та же нормализация,
+// что у резервных кодов.
+func NormalizeInviteCode(s string) (string, bool) { return normalizeCode(s) }
+
+// normalizeCode — код вида "xxxxx-xxxxx" в каноническом виде: 10 символов алфавита без дефиса.
 // Ввод «как попало» (Review Focus 5): регистр, пробелы, дефисы и тире, переводы строк из .txt
-// (\r\n), BOM и невидимые символы при копировании (isFiller), полноширинные символы (NFKC).
+// (CR LF), BOM и невидимые символы при копировании (isFiller), полноширинные символы (NFKC).
 // Любой другой символ или не та длина — ok=false.
-func NormalizeRecoveryCode(s string) (string, bool) {
+func normalizeCode(s string) (string, bool) {
 	var b strings.Builder
 	for _, r := range strings.ToLower(norm.NFKC.String(s)) {
 		switch {
@@ -85,13 +93,13 @@ func NormalizeRecoveryCode(s string) (string, bool) {
 			return "", false
 		}
 	}
-	if b.Len() != recoveryLen {
+	if b.Len() != codeLen {
 		return "", false
 	}
 	return b.String(), true
 }
 
-// NormalizeCode — 6 цифр кода (TOTP, приглашение) после NFKC и удаления пробелов и невидимых
+// NormalizeCode — 6 цифр кода TOTP после NFKC и удаления пробелов и невидимых
 // символов (isFiller); иначе ok=false.
 func NormalizeCode(s string) (string, bool) {
 	var b strings.Builder

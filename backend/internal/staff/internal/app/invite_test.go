@@ -53,7 +53,7 @@ type inviteRow struct {
 	ID                    uuid.UUID
 	Purpose               string
 	HasCode, Live         bool
-	Attempts, Sends       int
+	Sends                 int
 	ExpiresAt, LastSentAt time.Time
 	CreatedAt             time.Time
 }
@@ -62,14 +62,14 @@ type inviteRow struct {
 func (e *env) invites(staffID uuid.UUID) []inviteRow {
 	e.t.Helper()
 	rows, err := e.owner.Query(context.Background(), `SELECT id, purpose::text, code_enc IS NOT NULL,
-		consumed_at IS NULL AND revoked_at IS NULL, code_attempts, sends, expires_at, last_sent_at, created_at
+		consumed_at IS NULL AND revoked_at IS NULL, sends, expires_at, last_sent_at, created_at
 		FROM staff_invites WHERE staff_id = $1 ORDER BY created_at, id`, staffID)
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (inviteRow, error) {
 		var i inviteRow
-		err := r.Scan(&i.ID, &i.Purpose, &i.HasCode, &i.Live, &i.Attempts, &i.Sends, &i.ExpiresAt, &i.LastSentAt, &i.CreatedAt)
+		err := r.Scan(&i.ID, &i.Purpose, &i.HasCode, &i.Live, &i.Sends, &i.ExpiresAt, &i.LastSentAt, &i.CreatedAt)
 		return i, err
 	})
 	if err != nil {
@@ -106,6 +106,36 @@ func nilUUID(u uuid.UUID) *uuid.UUID {
 		return nil
 	}
 	return &u
+}
+
+// inviteCodeFormat — код приглашения в письме: base32 RFC 4648 строчными, xxxxx-xxxxx.
+var inviteCodeFormat = regexp.MustCompile(`^[a-z2-7]{5}-[a-z2-7]{5}$`)
+
+// otherCode — неверный код того же формата, гарантированно не равный code (первый символ заменён).
+func otherCode(code string) string {
+	if code[0] == 'a' {
+		return "b" + code[1:]
+	}
+	return "a" + code[1:]
+}
+
+// inviteSecretRow — шифротекст и ключ кода живого приглашения: неверный ввод и самоотправка их не
+// меняют.
+type inviteSecretRow struct {
+	ID      uuid.UUID
+	CodeEnc string
+	KeyID   string
+}
+
+func (e *env) inviteSecret(staffID uuid.UUID) inviteSecretRow {
+	e.t.Helper()
+	var r inviteSecretRow
+	if err := e.owner.QueryRow(context.Background(), `SELECT id, encode(code_enc, 'hex'), code_key_id
+		FROM staff_invites WHERE staff_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL`, staffID).
+		Scan(&r.ID, &r.CodeEnc, &r.KeyID); err != nil {
+		e.t.Fatal(err)
+	}
+	return r
 }
 
 // currentCode — код живого приглашения учётки, расшифрованный кольцом теста (код повторной
@@ -156,17 +186,17 @@ func (e *env) passwordIs(staffID uuid.UUID, pw string) bool {
 	return ok
 }
 
-// IssueInvite (§4.3): живое приглашение на 24 ч с одной отправкой и шифрованным кодом (6 цифр);
+// IssueInvite (§4.3): живое приглашение на 24 ч с одной отправкой и шифрованным кодом (xxxxx-xxxxx);
 // прежнее живое гасится (код стирается); письмо — задача staff.mail вида по назначению с ref =
 // id приглашения и recipient = учётка в той же транзакции.
 func TestIssueInvite(t *testing.T) {
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	if len(code) != 6 || strings.Trim(code, "0123456789") != "" {
+	if !inviteCodeFormat.MatchString(code) {
 		t.Fatalf("код %q", code)
 	}
 	first := e.liveInvite(m.ID)
-	if first.Purpose != purposeInvite || !first.HasCode || first.Sends != 1 || first.Attempts != 0 ||
+	if first.Purpose != purposeInvite || !first.HasCode || first.Sends != 1 ||
 		!first.ExpiresAt.Equal(t0.Add(24*time.Hour)) || !first.LastSentAt.Equal(t0) || !first.CreatedAt.Equal(t0) {
 		t.Fatalf("приглашение %+v", first)
 	}
@@ -237,7 +267,7 @@ func TestAcceptInvite(t *testing.T) {
 		t.Fatalf("второй фактор не сброшен: %d", n)
 	}
 	inv := e.liveInvite(m.ID)
-	if !inv.HasCode || inv.Attempts != 0 {
+	if !inv.HasCode || e.currentCode(m.ID) != code {
 		t.Fatalf("приглашение %+v", inv)
 	}
 	if n := e.count(`SELECT count(*) FROM staff_accounts WHERE id = $1 AND status = 'invited'`, m.ID); n != 1 {
@@ -261,58 +291,67 @@ func TestAcceptInvite(t *testing.T) {
 	}
 }
 
-// 5 неверных кодов стирают код (D12), приглашение живо; шестая попытка — даже верным кодом — тот же
-// staff.invite_invalid без нарушения CHECK (23514). Каждая неудача закоммичена (D8) и в аудите
-// без автора с маскированной почтой.
-func TestAcceptInviteWrongCodeErases(t *testing.T) {
+// Неверный код ничего не стирает и не считается в строке приглашения (решение пользователя 14.10.2026:
+// иначе знающий почту срывал приглашение анонимно): после 7 неверных вводов (в том числе пустого,
+// шестизначного и кривого) строка приглашения не изменилась, верный код принимается. Каждая неудача
+// закоммичена (D8) и в аудите без автора, с маскированной почтой и без кода.
+func TestAcceptInviteWrongCodeKeepsCode(t *testing.T) {
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	wrong := "000000"
-	if code == wrong {
-		wrong = "111111"
+	before, beforeRow := e.inviteSecret(m.ID), e.liveInvite(m.ID)
+	wrong := []string{
+		otherCode(code), otherCode(code), "", "305718", "не код", otherCode(code), strings.ToUpper(otherCode(code)),
 	}
-	for i := 1; i <= 5; i++ {
-		_, err := e.app.AcceptInvite(context.Background(), m.Email, wrong, newPassword, "", metaWeb)
+	for i, w := range wrong {
+		_, err := e.app.AcceptInvite(context.Background(), m.Email, w, newPassword, "", metaWeb)
 		if !errors.Is(err, staff.ErrInviteInvalid) {
-			t.Fatalf("попытка %d: %v", i, err)
+			t.Fatalf("попытка %d: %v", i+1, err)
 		}
-		inv := e.liveInvite(m.ID)
-		if inv.Attempts != i || inv.HasCode != (i < 5) {
-			t.Fatalf("после %d неудач: %+v", i, inv)
+		if got := e.inviteSecret(m.ID); got != before || e.liveInvite(m.ID) != beforeRow {
+			t.Fatalf("после %d неудач строка изменилась: %+v → %+v", i+1, before, got)
 		}
-	}
-	_, err := e.app.AcceptInvite(context.Background(), m.Email, code, newPassword, "", metaWeb)
-	if !errors.Is(err, staff.ErrInviteInvalid) {
-		t.Fatalf("верный код после стирания: %v", err)
-	}
-	if inv := e.liveInvite(m.ID); inv.Attempts != 5 || inv.HasCode {
-		t.Fatalf("после стирания %+v", inv)
 	}
 	rows := e.audits("staff.invite_accept_failed")
-	if len(rows) != 5 {
-		t.Fatalf("аудит неудач %d", len(rows))
+	if len(rows) != len(wrong) {
+		t.Fatalf("аудит неудач %d, ждали %d", len(rows), len(wrong))
 	}
+	norm := strings.ReplaceAll(code, "-", "")
 	for _, r := range rows {
 		if r.Role != "anonymous" || r.StaffID != nil || r.ObjectID == nil || *r.ObjectID != m.ID ||
-			strings.Contains(r.After, m.Email) || !strings.Contains(r.After, "attempts_left") {
+			strings.Contains(r.After, m.Email) || !strings.Contains(r.After, `"email"`) ||
+			strings.Contains(r.After, code) || strings.Contains(r.After, norm) {
 			t.Fatalf("запись %+v", r)
 		}
 	}
+	e.wantAuditMeta("staff.invite_accept_failed")
 	if n := e.count(`SELECT count(*) FROM staff_sessions WHERE staff_id = $1`, m.ID); n != 0 {
 		t.Fatalf("сессий %d", n)
 	}
-	// новый код повторной отправкой снова работает (попытки с нуля)
-	e.clock.Advance(time.Minute)
-	if err := e.app.ResendInviteSelf(context.Background(), m.Email, metaWeb); err != nil {
-		t.Fatal(err)
+	// верный код после серии неверных — принимается
+	e.accept(m, code)
+}
+
+// Код из письма вводится «как попало» — заглавными, без дефиса, с пробелами, с переводом строки из
+// буфера — и принимается (нормализация как у резервных кодов).
+func TestAcceptInviteCodeFormats(t *testing.T) {
+	e := newEnv(t)
+	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	for _, in := range []string{
+		strings.ToUpper(code),
+		strings.ReplaceAll(code, "-", ""),
+		" " + code[:3] + " " + code[3:] + " ",
+		code + "\r\n",
+	} {
+		e.clock.Advance(time.Minute)
+		e.accept(m, in)
 	}
-	if inv := e.liveInvite(m.ID); inv.Attempts != 0 || !inv.HasCode || inv.Sends != 2 {
-		t.Fatalf("после повторной отправки %+v", inv)
+	if n := len(e.audits("staff.invite_accept_failed")); n != 0 {
+		t.Fatalf("неудач %d", n)
 	}
 }
 
 // Политика пароля — ошибка поля body.password до обращения к базе: сценарий без пула не падает,
-// попытка кода не тратится.
+// неудача кода не записывается.
 func TestAcceptInvitePasswordPolicy(t *testing.T) {
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -325,15 +364,16 @@ func TestAcceptInvitePasswordPolicy(t *testing.T) {
 		strings.Repeat("я", 129):  "too_long",
 		strings.Repeat("ю", 2000): "too_long",
 	} {
-		_, err := a.AcceptInvite(context.Background(), m.Email, "000000", pw, "", metaWeb)
+		_, err := a.AcceptInvite(context.Background(), m.Email, otherCode(code), pw, "", metaWeb)
 		wantFieldError(t, err, "body.password", rule)
 	}
 	if _, err := e.app.AcceptInvite(context.Background(), m.Email, code, "короткий", "", metaWeb); err == nil {
 		t.Fatal("короткий пароль принят")
 	}
-	if inv := e.liveInvite(m.ID); inv.Attempts != 0 {
-		t.Fatalf("попытка потрачена: %+v", inv)
+	if n := len(e.audits("staff.invite_accept_failed")); n != 0 {
+		t.Fatalf("неудача записана: %d", n)
 	}
+	e.accept(m, code)
 }
 
 // Истёкшее, погашенное, чужая почта, учётка не invited, нет почты, кривая почта — один и тот же
@@ -358,6 +398,7 @@ func TestAcceptInviteInvalid(t *testing.T) {
 		{"нет почты", "nobody@wf.example", code},
 		{"кривая почта", "не почта", code},
 		{"кривой код", m.Email, "12a456"},
+		{"шесть цифр", m.Email, "305718"},
 	}
 	for _, c := range cases {
 		if _, err := e.app.AcceptInvite(ctx, c.email, c.code, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
@@ -387,8 +428,9 @@ func TestAcceptInviteClearsStaleLock(t *testing.T) {
 }
 
 // Повторная отправка самим (§4.3 п.3): пауза 60 с, не больше 5 отправок за жизнь приглашения
-// (сутки), срок не продлевается, новый код в той же строке; несуществующая и кривая почта — nil
-// без письма. Аудит отправки — без автора, почта маскирована.
+// (сутки), срок не продлевается, код тот же (решение пользователя 14.10.2026: отправка не выпускает
+// новый код — чужое нажатие лишь присылает приглашённому копию его кода); несуществующая и кривая
+// почта — nil без письма. Аудит отправки — без автора, почта маскирована.
 func TestResendInviteSelf(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
@@ -414,9 +456,9 @@ func TestResendInviteSelf(t *testing.T) {
 	if n := e.mails(staff.MailInvite, inv.ID, m.ID); n != 5 {
 		t.Fatalf("писем %d", n)
 	}
-	// старый код заменён
-	if _, err := e.app.AcceptInvite(ctx, m.Email, code, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
-		t.Fatalf("старый код: %v", err)
+	// код тот же
+	if got := e.currentCode(m.ID); got != code {
+		t.Fatalf("код сменился: %q → %q", code, got)
 	}
 	// шестая за сутки — без письма
 	e.clock.Advance(time.Hour)
@@ -464,10 +506,38 @@ func TestResendInviteSelf(t *testing.T) {
 	}
 }
 
+// Самоотправка присылает тот же код: строка не перешифровывается, письмо новой задачи собирается с
+// прежним кодом, код первого письма остаётся годным.
+func TestResendInviteSelfSameCode(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	before := e.inviteSecret(m.ID)
+	e.clock.Advance(61 * time.Second)
+	if err := e.app.ResendInviteSelf(ctx, m.Email, metaWeb); err != nil {
+		t.Fatal(err)
+	}
+	if after := e.inviteSecret(m.ID); after != before {
+		t.Fatalf("код перешифрован или заменён: %+v → %+v", before, after)
+	}
+	inv := e.liveInvite(m.ID)
+	if inv.Sends != 2 || e.mails(staff.MailInvite, inv.ID, m.ID) != 2 {
+		t.Fatalf("после отправки %+v", inv)
+	}
+	msg, err := e.app.ComposeInvite(ctx, inv.ID, m.ID, staff.MailInvite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(msg.Text, code) {
+		t.Fatalf("в письме нет прежнего кода %q:\n%s", code, msg.Text)
+	}
+	e.accept(m, code)
+}
+
 // Две быстрые повторные отправки одновременно — одно письмо (строка под замком).
 func TestResendInviteSelfRace(t *testing.T) {
 	e := newEnv(t)
-	m, _ := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	e.clock.Advance(61 * time.Second)
 	var (
 		wg   sync.WaitGroup
@@ -488,6 +558,9 @@ func TestResendInviteSelfRace(t *testing.T) {
 	if n := e.mails(staff.MailInvite, uuid.Nil, m.ID); n != 2 {
 		t.Fatalf("писем %d", n)
 	}
+	if got := e.currentCode(m.ID); got != code {
+		t.Fatalf("код сменился: %q → %q", code, got)
+	}
 }
 
 // Повторная отправка админом (§4.3 п.4): право staff.invites.resend, не над собой, только invited,
@@ -498,7 +571,7 @@ func TestResendInvite(t *testing.T) {
 	ctx := context.Background()
 	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner", Name: "Анна В."})
 	s := e.load(e.signIn(owner))
-	m, _ := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeReset)
+	m, oldCode := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeReset)
 	first := e.liveInvite(m.ID)
 
 	err := e.app.ResendInvite(ctx, s, m.ID, metaWeb)
@@ -531,6 +604,15 @@ func TestResendInvite(t *testing.T) {
 		t.Fatalf("аудит %+v", rows)
 	}
 	e.wantAuditMeta("staff.invite_resent")
+	// новый код; старый больше не принимается
+	newCode := e.currentCode(m.ID)
+	if newCode == oldCode {
+		t.Fatal("код не сменился")
+	}
+	if _, err := e.app.AcceptInvite(ctx, m.Email, oldCode, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+		t.Fatalf("старый код: %v", err)
+	}
+	e.accept(m, newCode)
 
 	// ошибки сценария
 	active := e.addMember("active@wf.example", memberOpts{Role: "support"})
@@ -574,7 +656,7 @@ func TestNoSecretsInAuditAndJobs(t *testing.T) {
 	if err := e.owner.QueryRow(ctx, `SELECT id FROM staff_accounts WHERE email = $1`, nm.Email).Scan(&nm.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.app.AcceptInvite(ctx, nm.Email, "999999", newPassword, "", metaWeb); err == nil && code != "999999" {
+	if _, err := e.app.AcceptInvite(ctx, nm.Email, otherCode(code), newPassword, "", metaWeb); err == nil {
 		t.Fatal("неверный код принят")
 	}
 	_, s := e.accept(nm, code)
@@ -631,7 +713,7 @@ func TestNoSecretsInAuditAndJobs(t *testing.T) {
 		t.Fatalf("записей %d — проверка вхолостую", len(texts))
 	}
 	for _, sec := range secrets {
-		// секрет — отдельным словом: 6 цифр кода могут случайно встретиться внутри uuid
+		// секрет — отдельным словом (и без дефиса): 6 цифр TOTP могут случайно встретиться внутри uuid
 		norm := strings.ReplaceAll(sec, "-", "")
 		re := regexp.MustCompile(`(?i)(^|[^0-9a-z])(` + regexp.QuoteMeta(sec) + `|` + regexp.QuoteMeta(norm) + `)([^0-9a-z]|$)`)
 		for _, txt := range texts {

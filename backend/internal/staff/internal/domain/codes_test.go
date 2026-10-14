@@ -12,19 +12,19 @@ import (
 	"wf/backend/internal/staff/internal/domain"
 )
 
+var recoveryFormat = regexp.MustCompile(`^[a-z2-7]{5}-[a-z2-7]{5}$`)
+
+// Код приглашения (решение пользователя 14.10.2026): 10 символов base32 RFC 4648 строчными в виде
+// xxxxx-xxxxx (50 бит) — перебор под IP-лимитом недостижим, неверные вводы код не стирают.
 func TestNewInviteCode(t *testing.T) {
 	cases := []struct {
 		name string
 		src  []byte
 		want string
 	}{
-		{"ноль", []byte{0, 0, 0, 0}, "000000"},
-		{"ведущие нули", []byte{0, 0, 0, 42}, "000042"},
-		{"10^6 → остаток 0", []byte{0x00, 0x0f, 0x42, 0x40}, "000000"},
-		{"последнее допустимое 4293999999", []byte{0xff, 0xf1, 0x3d, 0x7f}, "999999"},
-		// 4294000000 и выше отбрасываются (смещение остатка), берутся следующие 4 байта
-		{"отбор с отказом", []byte{0xff, 0xf1, 0x3d, 0x80, 0, 0, 0, 7}, "000007"},
-		{"максимум uint32 отброшен", []byte{0xff, 0xff, 0xff, 0xff, 0, 0, 0x30, 0x39}, "012345"},
+		// байт b → алфавит[b & 31]
+		{"подряд", []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, "abcde-fghij"},
+		{"старшие биты отброшены", []byte{32, 33, 255, 30, 31, 0, 0, 0, 0, 0}, "ab767-aaaaa"},
 	}
 	for _, c := range cases {
 		got, err := domain.NewInviteCode(bytes.NewReader(c.src))
@@ -32,12 +32,36 @@ func TestNewInviteCode(t *testing.T) {
 			t.Errorf("%s: NewInviteCode = %q %v, ждали %q", c.name, got, err, c.want)
 		}
 	}
-	if _, err := domain.NewInviteCode(bytes.NewReader([]byte{0xff, 0xff, 0xff, 0xff})); !errors.Is(err, io.EOF) {
-		t.Fatalf("источник иссяк на отказе: %v, ждали io.EOF", err)
+	src := []byte{0, 37, 74, 111, 148, 185, 222, 3, 40, 77}
+	got, err := domain.NewInviteCode(bytes.NewReader(src))
+	if err != nil || !recoveryFormat.MatchString(got) {
+		t.Fatalf("код %q %v не в формате xxxxx-xxxxx", got, err)
+	}
+	if norm, ok := domain.NormalizeInviteCode(got); !ok || norm != got[:5]+got[6:] {
+		t.Fatalf("сгенерированный %q нормализован в %q %v", got, norm, ok)
+	}
+	if _, err := domain.NewInviteCode(bytes.NewReader(src[:9])); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("короткий источник: %v, ждали io.ErrUnexpectedEOF", err)
 	}
 }
 
-var recoveryFormat = regexp.MustCompile(`^[a-z2-7]{5}-[a-z2-7]{5}$`)
+// Ввод кода приглашения нормализуется так же, как резервный код: регистр, дефис и тире, пробелы,
+// \r\n, NFKC; цифры TOTP-формата (6 цифр) и мусор — отказ.
+func TestInviteCodeNormalize(t *testing.T) {
+	for _, in := range []string{
+		"k7m2p-x4q6d", "K7M2P-X4Q6D", "k7m2px4q6d", "  k7m2p x4q6d  ", "k7m2p-x4q6d\r\n",
+		"K7M2P – X4Q6D", "Ｋ７Ｍ２Ｐ－Ｘ４Ｑ６Ｄ", "\ufeffk7m2p-x4q6d",
+	} {
+		if got, ok := domain.NormalizeInviteCode(in); !ok || got != "k7m2px4q6d" {
+			t.Errorf("NormalizeInviteCode(%q) = %q %v, ждали k7m2px4q6d true", in, got, ok)
+		}
+	}
+	for _, in := range []string{"", "305718", "k7m2p-x4q9", "k7m2p-x4q6dd", "k7m1p-x4q6d", "k7m2p_x4q6d", "к7м2р-х4q9d"} {
+		if got, ok := domain.NormalizeInviteCode(in); ok {
+			t.Errorf("NormalizeInviteCode(%q) = %q, ждали отказ", in, got)
+		}
+	}
+}
 
 func TestNewRecoveryCodes(t *testing.T) {
 	src := make([]byte, 100)

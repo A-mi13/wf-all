@@ -194,23 +194,24 @@ func TestStaff0020Secrets(t *testing.T) {
 	wantArgsError(t, db, "23514", "staff_recovery_codes_code_mac_check", rc, s, strings.Repeat("ab", 31), keyID)
 	wantArgsError(t, db, "23514", "staff_recovery_codes_key_id_format", rc, s, strings.Repeat("cd", 32), "short")
 
-	const inv = `INSERT INTO staff_invites (id, staff_id, purpose, code_enc, code_key_id, expires_at, code_attempts,
+	const inv = `INSERT INTO staff_invites (id, staff_id, purpose, code_enc, code_key_id, expires_at,
 		last_sent_at, created_at, consumed_at) VALUES (gen_random_uuid(), $1, 'invite', decode($2, 'hex'), $3,
-		now() + interval '24 hours', $4, now(), now(), $5::timestamptz)`
-	execArgs(t, db, inv, s, "0a0b", keyID, 0, nil)
-	wantArgsError(t, db, "23505", "staff_invites_live_key", inv, s, "0c0d", keyID, 0, nil)
-	execArgs(t, db, inv, s, nil, nil, 0, ts) // погашенное не мешает живому
+		now() + interval '24 hours', now(), now(), $4::timestamptz)`
+	execArgs(t, db, inv, s, "0a0b", keyID, nil)
+	wantArgsError(t, db, "23505", "staff_invites_live_key", inv, s, "0c0d", keyID, nil)
+	execArgs(t, db, inv, s, nil, nil, ts) // погашенное не мешает живому
 	s2 := newStaff(t, db, "invite2@example.com")
-	wantArgsError(t, db, "23514", "staff_invites_code_pair", inv, s2, "0a", nil, 0, nil)
-	wantArgsError(t, db, "23514", "staff_invites_code_pair", inv, s2, nil, keyID, 0, nil)
-	wantArgsError(t, db, "23514", "staff_invites_code_key_id_format", inv, s2, "0a", "bad", 0, nil)
-	wantArgsError(t, db, "23514", "staff_invites_code_attempts_check", inv, s2, "0a", keyID, 6, nil)
-	wantArgsError(t, db, "23514", "staff_invites_closed_no_code", inv, s2, "0a", keyID, 0, ts)
-	// 5 неверных вводов стирают код (D12): код с пятью попытками — нарушение, четыре — ещё можно
-	wantArgsError(t, db, "23514", "staff_invites_code_wiped", inv, s2, "0a", keyID, 5, nil)
-	execArgs(t, db, inv, s2, "0a", keyID, 4, nil)
-	execArgs(t, db, `UPDATE staff_invites SET revoked_at = now(), code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, s2)
-	execArgs(t, db, inv, s2, nil, nil, 5, nil) // 5 неверных кодов: код стёрт, приглашение живо (D12)
+	wantArgsError(t, db, "23514", "staff_invites_code_pair", inv, s2, "0a", nil, nil)
+	wantArgsError(t, db, "23514", "staff_invites_code_pair", inv, s2, nil, keyID, nil)
+	wantArgsError(t, db, "23514", "staff_invites_code_key_id_format", inv, s2, "0a", "bad", nil)
+	wantArgsError(t, db, "23514", "staff_invites_closed_no_code", inv, s2, "0a", keyID, ts)
+	// неверные вводы кода не считаются и не стирают его (решение пользователя 14.10.2026): счётчика
+	// попыток в строке нет
+	var attempts int
+	if err := db.QueryRowContext(context.Background(), `SELECT count(*) FROM information_schema.columns
+		WHERE table_name = 'staff_invites' AND column_name = 'code_attempts'`).Scan(&attempts); err != nil || attempts != 0 {
+		t.Fatalf("колонка code_attempts: %d %v", attempts, err)
+	}
 
 	const ses = `INSERT INTO staff_sessions (id, staff_id, token_hash, stage, created_at, last_seen_at, mfa_at,
 		expires_at, ip, user_agent, revoked_at, revoked_reason) VALUES (gen_random_uuid(), $1, decode($2, 'hex'),

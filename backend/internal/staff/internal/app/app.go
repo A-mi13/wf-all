@@ -37,10 +37,9 @@ const (
 	lockNotifyEvery   = time.Hour        // письмо staff.locked — не чаще раза в час на учётку
 	detachedTimeout   = 15 * time.Second // срок записи неудачи после обрыва соединения клиента
 
-	inviteTTL         = 24 * time.Hour // срок приглашения (§4.3)
-	resendPause       = time.Minute    // пауза между отправками кода приглашения
-	maxInviteSends    = 5              // отправок кода за жизнь приглашения (сутки) — самим сотрудником
-	maxInviteAttempts = 5              // неверных вводов кода до его стирания (D12)
+	inviteTTL      = 24 * time.Hour // срок приглашения (§4.3)
+	resendPause    = time.Minute    // пауза между отправками кода приглашения
+	maxInviteSends = 5              // отправок кода за жизнь приглашения (сутки) — самим сотрудником
 )
 
 // loginEmailPolicy — лимит входа по нормализованной почте (D7): 10 попыток за 15 минут, одинаково и

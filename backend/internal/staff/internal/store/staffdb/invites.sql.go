@@ -102,29 +102,6 @@ func (q *Queries) CountRecoveryOnOldKeys(ctx context.Context, currentKey string)
 	return count, err
 }
 
-const failInviteCode = `-- name: FailInviteCode :one
-UPDATE staff_invites
-SET code_attempts = code_attempts + 1,
-    code_enc = CASE WHEN code_attempts + 1 >= $1::int THEN NULL ELSE code_enc END,
-    code_key_id = CASE WHEN code_attempts + 1 >= $1::int THEN NULL ELSE code_key_id END
-WHERE id = $2
-RETURNING code_attempts
-`
-
-type FailInviteCodeParams struct {
-	MaxAttempts int32
-	ID          uuid.UUID
-}
-
-// Неверный код приглашения: попытка +1; пятая стирает код (CHECK staff_invites_code_wiped),
-// приглашение остаётся живым.
-func (q *Queries) FailInviteCode(ctx context.Context, arg FailInviteCodeParams) (int32, error) {
-	row := q.db.QueryRow(ctx, failInviteCode, arg.MaxAttempts, arg.ID)
-	var code_attempts int32
-	err := row.Scan(&code_attempts)
-	return code_attempts, err
-}
-
 const getActorLabel = `-- name: GetActorLabel :one
 SELECT display_name FROM staff_accounts WHERE id = $1
 `
@@ -168,7 +145,7 @@ func (q *Queries) GetBootstrappedMail(ctx context.Context, id uuid.UUID) (GetBoo
 
 const getInviteCandidate = `-- name: GetInviteCandidate :one
 SELECT a.id, a.status::text AS status, i.id AS invite_id, i.expires_at, i.last_sent_at, i.sends,
-       coalesce(i.code_enc IS NOT NULL, false)::bool AS has_code
+       i.code_enc, i.code_key_id
 FROM staff_accounts a
 LEFT JOIN staff_invites i ON i.staff_id = a.id AND i.consumed_at IS NULL AND i.revoked_at IS NULL
 WHERE a.email = $1::citext
@@ -181,12 +158,14 @@ type GetInviteCandidateRow struct {
 	ExpiresAt  *time.Time
 	LastSentAt *time.Time
 	Sends      *int32
-	HasCode    bool
+	CodeEnc    []byte
+	CodeKeyID  *string
 }
 
 // Учётка по почте и её живое приглашение БЕЗ замков: повторной отправке и принятию нечего делать
-// (учётка не invited, приглашения нет, срок, пауза, лимит, код стёрт) — ответ без замков и записей,
-// время ответа не выдаёт существование почты. Подходящему кандидату сценарий берёт замки и
+// (учётка не invited, приглашения нет, срок, пауза, лимит, кода нет) — ответ без замков и записей,
+// время ответа не выдаёт существование почты. Шифротекст кода — для сверки без замков: неверный код
+// пишет только аудит неудачи. Подходящему кандидату (и верному коду) сценарий берёт замки и
 // проверяет заново.
 func (q *Queries) GetInviteCandidate(ctx context.Context, email string) (GetInviteCandidateRow, error) {
 	row := q.db.QueryRow(ctx, getInviteCandidate, email)
@@ -198,7 +177,8 @@ func (q *Queries) GetInviteCandidate(ctx context.Context, email string) (GetInvi
 		&i.ExpiresAt,
 		&i.LastSentAt,
 		&i.Sends,
-		&i.HasCode,
+		&i.CodeEnc,
+		&i.CodeKeyID,
 	)
 	return i, err
 }
@@ -521,21 +501,20 @@ func (q *Queries) LockInviteCode(ctx context.Context, id uuid.UUID) (LockInviteC
 }
 
 const lockLiveInvite = `-- name: LockLiveInvite :one
-SELECT id, purpose::text AS purpose, code_enc, code_key_id, expires_at, code_attempts, sends, last_sent_at
+SELECT id, purpose::text AS purpose, code_enc, code_key_id, expires_at, sends, last_sent_at
 FROM staff_invites
 WHERE staff_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
 FOR UPDATE
 `
 
 type LockLiveInviteRow struct {
-	ID           uuid.UUID
-	Purpose      string
-	CodeEnc      []byte
-	CodeKeyID    *string
-	ExpiresAt    time.Time
-	CodeAttempts int32
-	Sends        int32
-	LastSentAt   time.Time
+	ID         uuid.UUID
+	Purpose    string
+	CodeEnc    []byte
+	CodeKeyID  *string
+	ExpiresAt  time.Time
+	Sends      int32
+	LastSentAt time.Time
 }
 
 // Живое (не погашенное и не принятое-и-закрытое) приглашение учётки под замком; срок проверяет
@@ -549,11 +528,31 @@ func (q *Queries) LockLiveInvite(ctx context.Context, staffID uuid.UUID) (LockLi
 		&i.CodeEnc,
 		&i.CodeKeyID,
 		&i.ExpiresAt,
-		&i.CodeAttempts,
 		&i.Sends,
 		&i.LastSentAt,
 	)
 	return i, err
+}
+
+const markInviteResent = `-- name: MarkInviteResent :one
+UPDATE staff_invites
+SET sends = sends + 1, last_sent_at = $1::timestamptz
+WHERE id = $2
+RETURNING sends
+`
+
+type MarkInviteResentParams struct {
+	Now time.Time
+	ID  uuid.UUID
+}
+
+// Повторная отправка самим (§4.3 п.3): тот же код (строка не перешифровывается — решение
+// пользователя 14.10.2026), отправка +1, срок не меняется.
+func (q *Queries) MarkInviteResent(ctx context.Context, arg MarkInviteResentParams) (int32, error) {
+	row := q.db.QueryRow(ctx, markInviteResent, arg.Now, arg.ID)
+	var sends int32
+	err := row.Scan(&sends)
+	return sends, err
 }
 
 const rekeyInvite = `-- name: RekeyInvite :exec
@@ -585,44 +584,6 @@ type RekeyMFAParams struct {
 
 func (q *Queries) RekeyMFA(ctx context.Context, arg RekeyMFAParams) error {
 	_, err := q.db.Exec(ctx, rekeyMFA, arg.SecretEnc, arg.KeyID, arg.StaffID)
-	return err
-}
-
-const resendInviteCode = `-- name: ResendInviteCode :one
-UPDATE staff_invites
-SET code_enc = $1, code_key_id = $2::text, code_attempts = 0,
-    sends = sends + 1, last_sent_at = $3::timestamptz
-WHERE id = $4
-RETURNING sends
-`
-
-type ResendInviteCodeParams struct {
-	CodeEnc   []byte
-	CodeKeyID string
-	Now       time.Time
-	ID        uuid.UUID
-}
-
-// Повторная отправка самим (§4.3 п.3): новый код в той же строке, попытки с нуля, срок не меняется.
-func (q *Queries) ResendInviteCode(ctx context.Context, arg ResendInviteCodeParams) (int32, error) {
-	row := q.db.QueryRow(ctx, resendInviteCode,
-		arg.CodeEnc,
-		arg.CodeKeyID,
-		arg.Now,
-		arg.ID,
-	)
-	var sends int32
-	err := row.Scan(&sends)
-	return sends, err
-}
-
-const resetInviteAttempts = `-- name: ResetInviteAttempts :exec
-UPDATE staff_invites SET code_attempts = 0 WHERE id = $1
-`
-
-// Верный код: попытки с нуля (приглашение живо до recovery-codes/ack — accept можно повторить).
-func (q *Queries) ResetInviteAttempts(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, resetInviteAttempts, id)
 	return err
 }
 

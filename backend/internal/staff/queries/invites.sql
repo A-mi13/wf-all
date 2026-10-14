@@ -13,11 +13,12 @@ FOR UPDATE OF a;
 
 -- name: GetInviteCandidate :one
 -- Учётка по почте и её живое приглашение БЕЗ замков: повторной отправке и принятию нечего делать
--- (учётка не invited, приглашения нет, срок, пауза, лимит, код стёрт) — ответ без замков и записей,
--- время ответа не выдаёт существование почты. Подходящему кандидату сценарий берёт замки и
+-- (учётка не invited, приглашения нет, срок, пауза, лимит, кода нет) — ответ без замков и записей,
+-- время ответа не выдаёт существование почты. Шифротекст кода — для сверки без замков: неверный код
+-- пишет только аудит неудачи. Подходящему кандидату (и верному коду) сценарий берёт замки и
 -- проверяет заново.
 SELECT a.id, a.status::text AS status, i.id AS invite_id, i.expires_at, i.last_sent_at, i.sends,
-       coalesce(i.code_enc IS NOT NULL, false)::bool AS has_code
+       i.code_enc, i.code_key_id
 FROM staff_accounts a
 LEFT JOIN staff_invites i ON i.staff_id = a.id AND i.consumed_at IS NULL AND i.revoked_at IS NULL
 WHERE a.email = sqlc.arg(email)::citext;
@@ -25,7 +26,7 @@ WHERE a.email = sqlc.arg(email)::citext;
 -- name: LockLiveInvite :one
 -- Живое (не погашенное и не принятое-и-закрытое) приглашение учётки под замком; срок проверяет
 -- сценарий.
-SELECT id, purpose::text AS purpose, code_enc, code_key_id, expires_at, code_attempts, sends, last_sent_at
+SELECT id, purpose::text AS purpose, code_enc, code_key_id, expires_at, sends, last_sent_at
 FROM staff_invites
 WHERE staff_id = sqlc.arg(staff_id) AND consumed_at IS NULL AND revoked_at IS NULL
 FOR UPDATE;
@@ -51,27 +52,13 @@ INSERT INTO staff_invites (id, staff_id, purpose, code_enc, code_key_id, expires
 VALUES (sqlc.arg(id), sqlc.arg(staff_id), sqlc.arg(purpose)::staff_invite_purpose, sqlc.arg(code_enc),
         sqlc.arg(code_key_id)::text, sqlc.arg(expires_at), 1, sqlc.arg(now), sqlc.arg(now));
 
--- name: ResendInviteCode :one
--- Повторная отправка самим (§4.3 п.3): новый код в той же строке, попытки с нуля, срок не меняется.
+-- name: MarkInviteResent :one
+-- Повторная отправка самим (§4.3 п.3): тот же код (строка не перешифровывается — решение
+-- пользователя 14.10.2026), отправка +1, срок не меняется.
 UPDATE staff_invites
-SET code_enc = sqlc.arg(code_enc), code_key_id = sqlc.arg(code_key_id)::text, code_attempts = 0,
-    sends = sends + 1, last_sent_at = sqlc.arg(now)::timestamptz
+SET sends = sends + 1, last_sent_at = sqlc.arg(now)::timestamptz
 WHERE id = sqlc.arg(id)
 RETURNING sends;
-
--- name: FailInviteCode :one
--- Неверный код приглашения: попытка +1; пятая стирает код (CHECK staff_invites_code_wiped),
--- приглашение остаётся живым.
-UPDATE staff_invites
-SET code_attempts = code_attempts + 1,
-    code_enc = CASE WHEN code_attempts + 1 >= sqlc.arg(max_attempts)::int THEN NULL ELSE code_enc END,
-    code_key_id = CASE WHEN code_attempts + 1 >= sqlc.arg(max_attempts)::int THEN NULL ELSE code_key_id END
-WHERE id = sqlc.arg(id)
-RETURNING code_attempts;
-
--- name: ResetInviteAttempts :exec
--- Верный код: попытки с нуля (приглашение живо до recovery-codes/ack — accept можно повторить).
-UPDATE staff_invites SET code_attempts = 0 WHERE id = sqlc.arg(id);
 
 -- name: ConsumeInvite :exec
 -- recovery-codes/ack: приглашение погашено, код стирается.

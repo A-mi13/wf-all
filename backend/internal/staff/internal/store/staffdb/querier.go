@@ -35,16 +35,14 @@ type Querier interface {
 	DeleteRecoveryCodes(ctx context.Context, staffID uuid.UUID) error
 	// Успех второго фактора: счётчик неудач подряд — 0; при входе — last_login_at.
 	FactorSucceeded(ctx context.Context, arg FactorSucceededParams) error
-	// Неверный код приглашения: попытка +1; пятая стирает код (CHECK staff_invites_code_wiped),
-	// приглашение остаётся живым.
-	FailInviteCode(ctx context.Context, arg FailInviteCodeParams) (int32, error)
 	// Снимок имени сотрудника-автора для аудита.
 	GetActorLabel(ctx context.Context, id uuid.UUID) (string, error)
 	// Письмо staff.bootstrapped: новая учётка, её роль и кто создал (NULL — оператор).
 	GetBootstrappedMail(ctx context.Context, id uuid.UUID) (GetBootstrappedMailRow, error)
 	// Учётка по почте и её живое приглашение БЕЗ замков: повторной отправке и принятию нечего делать
-	// (учётка не invited, приглашения нет, срок, пауза, лимит, код стёрт) — ответ без замков и записей,
-	// время ответа не выдаёт существование почты. Подходящему кандидату сценарий берёт замки и
+	// (учётка не invited, приглашения нет, срок, пауза, лимит, кода нет) — ответ без замков и записей,
+	// время ответа не выдаёт существование почты. Шифротекст кода — для сверки без замков: неверный код
+	// пишет только аудит неудачи. Подходящему кандидату (и верному коду) сценарий берёт замки и
 	// проверяет заново.
 	GetInviteCandidate(ctx context.Context, email string) (GetInviteCandidateRow, error)
 	// Письмо staff.invite / staff.access_reset: приглашение и его учётка.
@@ -114,12 +112,11 @@ type Querier interface {
 	// Живая или погашенная — решает сценарий (заменённая — гонка двух вкладок).
 	LockSession(ctx context.Context, id uuid.UUID) (LockSessionRow, error)
 	LockUnusedRecoveryCodes(ctx context.Context, staffID uuid.UUID) ([]LockUnusedRecoveryCodesRow, error)
+	// Повторная отправка самим (§4.3 п.3): тот же код (строка не перешифровывается — решение
+	// пользователя 14.10.2026), отправка +1, срок не меняется.
+	MarkInviteResent(ctx context.Context, arg MarkInviteResentParams) (int32, error)
 	RekeyInvite(ctx context.Context, arg RekeyInviteParams) error
 	RekeyMFA(ctx context.Context, arg RekeyMFAParams) error
-	// Повторная отправка самим (§4.3 п.3): новый код в той же строке, попытки с нуля, срок не меняется.
-	ResendInviteCode(ctx context.Context, arg ResendInviteCodeParams) (int32, error)
-	// Верный код: попытки с нуля (приглашение живо до recovery-codes/ack — accept можно повторить).
-	ResetInviteAttempts(ctx context.Context, id uuid.UUID) error
 	// Гашение живого приглашения учётки перед выпуском нового: код стирается (CHECK
 	// staff_invites_closed_no_code).
 	RevokeLiveInvite(ctx context.Context, arg RevokeLiveInviteParams) (int64, error)
