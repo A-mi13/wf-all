@@ -166,7 +166,7 @@ test('пусто без фильтров — «Ничего не нашлось�
   expect(screen.queryByRole('button', { name: 'Сбросить фильтры' })).not.toBeInTheDocument();
 });
 
-test('ошибка загрузки — код и «Повторить», повтор перезапрашивает', async () => {
+test('ошибка загрузки — код и «Повторить»; повтор сразу снимает ошибку и показывает скелетон, затем строки', async () => {
   let fail = true;
   let asked = 0;
   let release = () => {};
@@ -411,4 +411,39 @@ test('поиск: внешнее значение до эха (переход «
   expect(box).toHaveValue('');
   await user.type(box, 'ab');
   await waitFor(() => expect(ctl.sent).toEqual(['ab', 'ab']));
+});
+
+test('поиск: одно значение отправлено дважды — эхо снимает по последней отправке', async () => {
+  const ctl: { sent: string[]; set?: (v: string) => void } = { sent: [] };
+  function Twice() {
+    const [q, setQ] = useState('');
+    useEffect(() => {
+      ctl.set = setQ;
+    }, []);
+    return (
+      <DataTable
+        label="Сотрудники"
+        columns={columns}
+        rowKey={(a) => a.id}
+        rows={[]}
+        onRetry={() => {}}
+        search={{ value: q, onChange: (v) => ctl.sent.push(v) }}
+      />
+    );
+  }
+  const user = userEvent.setup();
+  renderWithProviders(<Twice />);
+  const box = screen.getByRole('searchbox', { name: 'Поиск' });
+  await user.type(box, 'ab');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab']));
+  await user.type(box, 'c');
+  await waitFor(() => expect(ctl.sent).toEqual(['ab', 'abc']));
+  await user.type(box, '{Backspace}');
+  // навигации схлопнулись: экран применил только последнюю отправку «ab»
+  await waitFor(() => expect(ctl.sent).toEqual(['ab', 'abc', 'ab']));
+  act(() => ctl.set?.('ab'));
+  expect(box).toHaveValue('ab');
+  // «abc» после эха последней отправки — внешнее значение («Назад»), а не запоздавшее эхо
+  act(() => ctl.set?.('abc'));
+  expect(box).toHaveValue('abc');
 });
