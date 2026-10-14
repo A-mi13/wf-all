@@ -70,12 +70,12 @@
       "password_hint": "From 10 to 128 characters; common passwords are rejected. A phrase of several words is easier to remember than random characters.",
       "passwordRepeat": "Repeat password",
       "code": "Code from the email",
-      "code_hint": "6 digits from the invitation email. The invitation lives for 24 hours.",
+      "code_hint": "The code from the invitation email, like xxxxx-xxxxx: 10 Latin letters and digits; case, dashes and spaces don't matter. The invitation lives for 24 hours.",
       "submit": "Accept invitation",
       "wait": "Wait {seconds} s",
-      "resend": "Send the code again",
-      "resend_wait": "Send again in {seconds} s",
-      "resent": "If the invitation for this email is still active, a new code is on its way — the previous one no longer works. No email? Check spam."
+      "resend": "Email the code again",
+      "resend_wait": "Email it again in {seconds} s",
+      "resent": "If the invitation for this email is still active, an email with the same code is on its way — the code from earlier emails works too. No email? Check spam."
     },
     "setup": {
       "lead": "Scan the QR code in Google Authenticator, 1Password or any other authenticator app and enter the six digits. Until the second factor is set up, the admin opens only this screen.",

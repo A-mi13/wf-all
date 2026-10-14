@@ -83,7 +83,7 @@ describe('Problem → ApiError', () => {
     );
     const err = await caught(
       createApi(TEST_API).POST('/v1/staff/auth/invite/accept', {
-        body: { email: 'olga.v@wf.example', code: '305718', password: 'коротко' },
+        body: { email: 'olga.v@wf.example', code: 'k7m2p-x4q6d', password: 'коротко' },
       }),
     );
     expect(err).toBeInstanceOf(ApiError);

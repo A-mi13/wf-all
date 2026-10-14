@@ -11,8 +11,8 @@ import { Button, Form, FormError, PasswordField, TextField, useCountdown } from 
 import styles from './Auth.module.css';
 import { AuthLayout } from './AuthLayout';
 
-// Пауза между повторными отправками кода приглашения (спека §4.3): сервер всегда отвечает 202 и
-// сам не шлёт чаще; отсчёт на клиенте — чтобы не жать впустую.
+// Пауза между повторными отправками кода приглашения (спека §4.3): сервер всегда отвечает 202, шлёт
+// тот же код и сам не шлёт чаще; отсчёт на клиенте — чтобы не жать впустую.
 const RESEND_PAUSE_S = 60;
 
 type Values = { email: string; password: string; passwordRepeat: string; code: string };
@@ -107,12 +107,16 @@ export function AcceptInvitePage() {
             validate: { mismatch: (v) => v === form.getValues('password') },
           }}
         />
+        {/* код xxxxx-xxxxx (буквы и цифры): обычная клавиатура без автозамены; уходит как введён —
+            регистр, дефис и пробелы нормализует сервер */}
         <TextField
           name="code"
           label={t('code')}
           hint={t('code_hint')}
-          inputMode="numeric"
           autoComplete="one-time-code"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           rules={{ required: true }}
         />
         <div className={styles.actions}>

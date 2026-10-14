@@ -118,8 +118,10 @@ StaffAcceptInviteRequest:
       type: string
       minLength: 1
       maxLength: 64
-      description: 6 цифр из письма-приглашения; пробелы между цифрами допустимы
-      example: '305718'
+      description: >-
+        Код из письма-приглашения: 10 символов base32 (буквы a–z и цифры 2–7) в виде xxxxx-xxxxx.
+        Регистр, дефис, пробелы и перевод строки при вставке не важны — сервер нормализует ввод
+      example: k7m2p-x4q6d
     password:
       type: string
       description: >-

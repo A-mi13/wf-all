@@ -8,7 +8,8 @@ import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
 
 // Принятие приглашения (спека §9.4 п. 2, §4.3–4.4): почта (не из адреса), пароль дважды, код из
-// письма; «Отправить код ещё раз» — всегда 202, отсчёт 60 с. Успех → стадия setup → /setup-2fa.
+// письма (xxxxx-xxxxx, решение 14.10.2026); «Прислать код ещё раз» — всегда 202, тот же код, отсчёт
+// 60 с. Успех → стадия setup → /setup-2fa.
 
 afterEach(() => {
   reauthBus.reject();
@@ -28,7 +29,7 @@ async function fill(
     screen.getByLabelText('Пароль ещё раз'),
     v.repeat ?? v.password ?? 'Жёлтая карточка на 90-й',
   );
-  await user.type(screen.getByLabelText('Код из письма'), v.code ?? '305718');
+  await user.type(screen.getByLabelText('Код из письма'), v.code ?? 'k7m2p-x4q6d');
 }
 
 const submit = (user: UserEvent) =>
@@ -96,13 +97,17 @@ test('staff.invite_invalid — общий текст; анонимный зап�
   );
   expect(seen).toEqual([
     {
-      body: { email: 'olga.v@wf.example', code: '305718', password: 'Жёлтая карточка на 90-й' },
+      body: {
+        email: 'olga.v@wf.example',
+        code: 'k7m2p-x4q6d',
+        password: 'Жёлтая карточка на 90-й',
+      },
       key: null,
     },
   ]);
 });
 
-test('«Отправить код ещё раз» — 202, текст и отсчёт 60 с', async () => {
+test('«Прислать код ещё раз» — 202, текст про тот же код и отсчёт 60 с', async () => {
   renderApp('/accept');
   const sent: unknown[] = [];
   server.use(
@@ -114,27 +119,27 @@ test('«Отправить код ещё раз» — 202, текст и отс�
   await page('Принятие приглашения');
   // без почты — ошибка поля, запроса нет
   vi.useFakeTimers({ shouldAdvanceTime: true });
-  fireEvent.click(screen.getByRole('button', { name: 'Отправить код ещё раз' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Прислать код ещё раз' }));
   expect(await screen.findByText('Заполните поле')).toBeInTheDocument();
   expect(sent).toEqual([]);
 
   fireEvent.change(screen.getByLabelText('Рабочая почта'), {
     target: { value: 'olga.v@wf.example' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Отправить код ещё раз' }));
-  expect(await screen.findByText(/Если приглашение на эту почту живо/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Прислать код ещё раз' }));
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    'Если приглашение на эту почту живо, письмо с тем же кодом уже в пути',
+  );
   expect(sent).toEqual([{ email: 'olga.v@wf.example' }]);
-  expect(screen.getByRole('button', { name: 'Отправить ещё раз через 60 с' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Прислать ещё раз через 60 с' })).toBeDisabled();
   act(() => vi.advanceTimersByTime(59_000));
-  expect(screen.getByRole('button', { name: /^Отправить ещё раз через \d+ с$/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /^Прислать ещё раз через \d+ с$/ })).toBeDisabled();
   act(() => vi.advanceTimersByTime(1_500));
-  const again = screen.getByRole('button', { name: 'Отправить код ещё раз' });
+  const again = screen.getByRole('button', { name: 'Прислать код ещё раз' });
   expect(again).toBeEnabled();
   // повтор — снова отсчёт с 60 с
   fireEvent.click(again);
-  expect(
-    await screen.findByRole('button', { name: 'Отправить ещё раз через 60 с' }),
-  ).toBeDisabled();
+  expect(await screen.findByRole('button', { name: 'Прислать ещё раз через 60 с' })).toBeDisabled();
   expect(sent).toHaveLength(2);
 });
 
@@ -159,7 +164,7 @@ test('успех → стадия setup → /setup-2fa; пароль и код �
   await page('Настройка двухфакторной защиты');
   expect(app.at()).toBe('/setup-2fa');
   expect(storageDump()).not.toContain('Жёлтая карточка');
-  expect(storageDump()).not.toContain('305718');
+  expect(storageDump()).not.toContain('k7m2p-x4q6d');
   // пароль и код не остаются в кэше мутаций после экрана
   await waitFor(() => {
     const vars = JSON.stringify(
@@ -169,7 +174,7 @@ test('успех → стадия setup → /setup-2fa; пароль и код �
         .map((m) => m.state.variables),
     );
     expect(vars).not.toContain('Жёлтая карточка');
-    expect(vars).not.toContain('305718');
+    expect(vars).not.toContain('k7m2p-x4q6d');
   });
 });
 
@@ -185,10 +190,37 @@ test('повторная отправка — 429: текст и отсчёт; �
   fireEvent.change(screen.getByLabelText('Рабочая почта'), {
     target: { value: 'olga.v@wf.example' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Отправить код ещё раз' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Прислать код ещё раз' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Слишком много запросов');
-  expect(screen.getByRole('button', { name: 'Отправить ещё раз через 5 с' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Прислать ещё раз через 5 с' })).toBeDisabled();
   act(() => vi.advanceTimersByTime(6_000));
-  expect(screen.getByRole('button', { name: 'Отправить код ещё раз' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Прислать код ещё раз' })).toBeEnabled();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('поле кода — текст формата xxxxx-xxxxx: не цифровая клавиатура, без автозамены; уходит как введён', async () => {
+  renderApp('/accept');
+  const seen: unknown[] = [];
+  server.use(
+    http.post('/v1/staff/auth/invite/accept', async ({ request, response }) => {
+      seen.push(await request.json());
+      return response.untyped(problem(400, 'staff.invite_invalid'));
+    }),
+  );
+  const user = userEvent.setup();
+  await page('Принятие приглашения');
+  const code = screen.getByLabelText('Код из письма');
+  expect(code).toHaveAttribute('type', 'text');
+  expect(code).not.toHaveAttribute('inputmode', 'numeric');
+  expect(code).toHaveAttribute('autocomplete', 'one-time-code');
+  expect(code).toHaveAttribute('autocapitalize', 'none');
+  expect(code).toHaveAttribute('spellcheck', 'false');
+  expect(code).toHaveAccessibleDescription(/xxxxx-xxxxx/);
+  // заглавными и с пробелом — как в письме на телефоне; нормализует сервер
+  await fill(user, { code: 'K7M2P x4q6d' });
+  await submit(user);
+  await screen.findByRole('alert');
+  expect(seen).toEqual([
+    { email: 'olga.v@wf.example', code: 'K7M2P x4q6d', password: 'Жёлтая карточка на 90-й' },
+  ]);
 });
