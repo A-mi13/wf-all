@@ -41,7 +41,8 @@ export const meModerator: Me = {
   },
 };
 
-// Активный владелец: выдача ролей — вдвоём.
+// Активный владелец (спека §2.5): выдача ролей и сброс доступа — вдвоём, снятие админа и
+// модератора — сразу, снятие владельца — вдвоём.
 export const meOwner: Me = {
   ...meSetup,
   role: 'owner',
@@ -50,8 +51,39 @@ export const meOwner: Me = {
   permissions: {
     'staff.roles.read': 'allow',
     'staff.accounts.read': 'allow',
+    'staff.roles.grant_elevated': 'dual',
+    'staff.roles.grant': 'dual',
+    'staff.roles.revoke_owner': 'dual',
+    'staff.roles.revoke_admin': 'allow',
+    'staff.roles.revoke': 'allow',
+    'staff.access.reset_elevated': 'dual',
+    'staff.access.reset': 'dual',
+    'staff.invites.resend': 'allow',
+    'staff.sessions.revoke': 'allow',
+    'audit.log.read': 'allow',
+    'geo.cities.read': 'allow',
+  },
+};
+
+// Активный админ (спека §2.5): владельцев и админов не назначает и не снимает, их доступ не
+// сбрасывает, их сессии не видит.
+export const meAdmin: Me = {
+  ...meSetup,
+  id: '0192f1c4-0000-7b21-9c5d-0000000000ad',
+  email: 'igor.l@wf.example',
+  display_name: 'Игорь Л.',
+  role: 'admin',
+  city_ids: [],
+  stage: 'active',
+  permissions: {
+    'staff.roles.read': 'allow',
+    'staff.accounts.read': 'allow',
     'staff.roles.grant': 'dual',
     'staff.roles.revoke': 'allow',
+    'staff.access.reset': 'dual',
+    'staff.invites.resend': 'allow',
+    'staff.sessions.revoke': 'allow',
     'audit.log.read': 'allow',
+    'geo.cities.read': 'allow',
   },
 };

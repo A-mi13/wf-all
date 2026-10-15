@@ -13,6 +13,7 @@ import { LoginPage } from '../features/auth/LoginPage';
 import { ReauthModal } from '../features/auth/ReauthModal';
 import { SetupMfaPage } from '../features/auth/SetupMfaPage';
 import { LocaleSwitcher } from '../features/me/LocaleSwitcher';
+import { MyAccessPage } from '../features/me/MyAccessPage';
 import { AppShell, ConnectionErrorState } from '../ui';
 import { useAccountCard } from './account';
 import { resolveRoute } from './guard';
@@ -117,7 +118,7 @@ const routeTree = rootRoute.addChildren([
     section(paths.audit, 'nav.audit'),
     section(paths.staff, 'nav.staff'),
     section(paths.approvals, 'nav.approvals'),
-    section(paths.me, 'nav.me'),
+    createRoute({ getParentRoute: () => shellRoute, path: paths.me, component: MyAccessPage }),
   ]),
 ]);
 

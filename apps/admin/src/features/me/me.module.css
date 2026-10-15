@@ -1,0 +1,183 @@
+/* «Мой доступ» по макету 07: слева второй фактор и резервные коды, справа активные сеансы; ниже —
+   смена пароля (*). Раздел только с компьютера (desktopOnly), колонки переносятся сами (grid
+   auto-fit), без @media. */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: var(--wf-space-4);
+  align-items: start;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  padding: var(--wf-space-5);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-bg-elevated);
+  color: var(--wf-color-text);
+  font-family: var(--wf-font-body);
+}
+
+/* Заголовок карточки — подпись капсом, как «ВТОРОЙ ФАКТОР» в макете */
+.cardTitle {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.headline {
+  margin: 0;
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-lg);
+  line-height: var(--wf-text-lg-line);
+  font-weight: 600;
+}
+
+.text {
+  margin: 0;
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 500;
+}
+
+.note {
+  margin: 0;
+  padding-top: var(--wf-space-3);
+  border-top: 1px solid var(--wf-color-border);
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+}
+
+.spread {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-2);
+}
+
+/* «Потерял доступ» — раскрытый текст */
+.lost {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+}
+
+.lostTitle {
+  margin: 0;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+}
+
+/* Мало резервных кодов */
+.warning {
+  margin: 0;
+  padding: var(--wf-space-3);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-warning-bg);
+  color: var(--wf-color-warning);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+}
+
+/* Неудача кода или пароля с остатком попыток — как FormError, свой текст */
+.error {
+  margin: 0;
+  padding: var(--wf-space-3);
+  border: 1px solid var(--wf-color-danger-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-danger-bg);
+  color: var(--wf-color-danger);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+}
+
+.fieldLabel {
+  margin: 0;
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+}
+
+.factor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+}
+
+/* Сеансы */
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--wf-space-1) var(--wf-space-3);
+  align-items: center;
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg);
+}
+
+.current {
+  border-color: var(--wf-color-border-strong);
+}
+
+.device {
+  margin: 0;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+}
+
+.details {
+  grid-column: 1;
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.sessionAction {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}

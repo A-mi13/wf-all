@@ -1,6 +1,8 @@
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import { useTranslations } from 'use-intl';
+import type { ApiError } from '../../api/client';
 import { Button } from '../Button';
+import { FormError } from '../form/FormError';
 import { useIsMobile } from '../media';
 import { Modal } from './Modal';
 import styles from './Overlay.module.css';
@@ -18,6 +20,11 @@ export type ConfirmDialogProps = {
   confirmLabel: string; // подпись кнопки подтверждения
   note?: ReactNode; // мелкий текст под кнопками («Действие попадёт в журнал…»)
   loading?: boolean; // запрос идёт: подтверждение недоступно, закрыть нельзя
+  // Поля над вводом слова (причина и комментарий разрушающего действия над сотрудником). Их значения
+  // экран держит сам (FormProvider снаружи); onConfirm проверяет их перед запросом.
+  children?: ReactNode;
+  // Ошибка запроса: текст по коду внутри диалога. Диалог остаётся открытым, введённое не теряется.
+  error?: ApiError | null;
   // modal — по центру, sheet — шторкой снизу; по умолчанию по ширине экрана (08: шторка).
   variant?: 'modal' | 'sheet';
 };
@@ -50,6 +57,8 @@ function ConfirmBody({
   confirmLabel,
   note,
   loading,
+  children,
+  error,
 }: Omit<ConfirmDialogProps, 'variant'>) {
   const t = useTranslations('ui.confirm');
   const id = useId();
@@ -70,6 +79,7 @@ function ConfirmBody({
           ))}
         </ul>
       )}
+      {children}
       <label htmlFor={id} className={styles.prompt}>
         {t('prompt', { word: confirmWord })}
       </label>
@@ -83,6 +93,7 @@ function ConfirmBody({
         spellCheck={false}
         disabled={loading}
       />
+      <FormError error={error ?? null} />
       <div className={styles.actions}>
         <Button variant="secondary" onClick={onClose} disabled={loading}>
           {t('cancel')}

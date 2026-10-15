@@ -20,10 +20,11 @@ import {
   type OtpInputHandle,
   QrCode,
   useErrorText,
-  useToast,
 } from '../../ui';
 import styles from './Auth.module.css';
 import { AuthLayout } from './AuthLayout';
+import { useCopy } from './copy';
+import { RecoveryCodesPanel } from './RecoveryCodesPanel';
 
 // Выпуск секрета: POST, но читается как запрос — один раз на экран. Ключ кэша свой; gcTime 0 —
 // секрет уходит из кэша, как только шаг сканирования закрыт (коды или уход с экрана).
@@ -77,19 +78,6 @@ export function SetupMfaPage() {
 
 // Секрет base32 группами по 4 — легче вводить руками; копируется без пробелов.
 const grouped = (secret: string) => secret.replace(/(.{4})(?=.)/g, '$1 ');
-
-function useCopy() {
-  const t = useTranslations('auth.setup');
-  const toast = useToast();
-  return async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(t('copied'));
-    } catch {
-      toast.error(t('copy_failed'));
-    }
-  };
-}
 
 // recovery-codes/ack: 204 — новая cookie стадии active (D9), клиент только перечитывает me.
 // staff.wrong_stage: me перечитывается — настройка завершена (другая вкладка) → роутер уводит на
@@ -259,40 +247,13 @@ function ScanStep({
 
 function CodesStep({ codes, onRescan }: { codes: string[]; onRescan: () => boolean }) {
   const t = useTranslations('auth.setup');
-  const copy = useCopy();
   const ack = useAck(onRescan);
   const form = useForm<{ saved: boolean }>({ defaultValues: { saved: false } });
   const saved = useWatch({ control: form.control, name: 'saved' });
 
-  // Файл собирается на клиенте (Blob) — коды не уходят в сеть.
-  const download = () => {
-    const text = [t('file_header'), '', ...codes, ''].join('\n');
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = t('file_name');
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-  };
-
   return (
     <>
-      <h2 className={styles.sectionTitle}>{t('codes_title')}</h2>
-      <p className={styles.note}>{t('codes_text')}</p>
-      {/* role="list": Safari снимает семантику списка с list-style: none */}
-      <ul role="list" aria-label={t('codes_title')} className={styles.codes}>
-        {codes.map((c) => (
-          <li key={c}>{c}</li>
-        ))}
-      </ul>
-      <div className={styles.row}>
-        <Button variant="secondary" onClick={() => void copy(codes.join('\n'))}>
-          {t('copy_codes')}
-        </Button>
-        <Button variant="secondary" onClick={download}>
-          {t('download')}
-        </Button>
-      </div>
+      <RecoveryCodesPanel codes={codes} />
       <Form form={form} onSubmit={(v) => (v.saved ? ack.mutateAsync() : undefined)}>
         <CheckboxField name="saved" label={t('saved')} />
         <Button type="submit" size="lg" block disabled={!saved} loading={ack.isPending}>

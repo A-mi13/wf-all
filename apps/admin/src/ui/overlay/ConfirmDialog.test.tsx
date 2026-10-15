@@ -1,6 +1,7 @@
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { expect, test, vi } from 'vitest';
+import { ApiError } from '../../api/client';
 import { renderWithIntl } from '../../test/render';
 import { Button } from '../Button';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -95,4 +96,43 @@ test('loading: подтверждение недоступно, повторны
   await user.type(screen.getByLabelText(/Введите/), 'ДА{Enter}');
   expect(screen.getByRole('button', { name: 'Выключить' })).toBeDisabled();
   expect(onConfirm).not.toHaveBeenCalled();
+});
+
+// Разрушающее действие над сотрудником (Task 14): поля причины — в самом диалоге, над вводом почты;
+// ошибка запроса показывается внутри, диалог не закрывается, набранная почта не теряется.
+test('children — над вводом слова; error — текст по коду внутри диалога, набранное цело', async () => {
+  function WithError() {
+    const [error, setError] = useState<ApiError | null>(null);
+    return (
+      <ConfirmDialog
+        open
+        onClose={vi.fn()}
+        onConfirm={() => setError(new ApiError({ status: 409, code: 'staff.last_owner' }))}
+        title="Выключить?"
+        confirmWord="ivan@xn--d1acufc.xn--p1ai"
+        confirmLabel="Выключить"
+        error={error}
+      >
+        <label>
+          Причина
+          <select defaultValue="security">
+            <option value="security">Безопасность</option>
+          </select>
+        </label>
+      </ConfirmDialog>
+    );
+  }
+  const { user } = renderWithIntl(<WithError />);
+  const dialog = screen.getByRole('dialog', { name: 'Выключить?' });
+  const select = within(dialog).getByLabelText('Причина');
+  const input = within(dialog).getByLabelText(/Введите/);
+  // поле причины стоит раньше ввода почты (порядок фокуса и чтения)
+  expect(select.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+  await user.type(input, 'ivan@xn--d1acufc.xn--p1ai');
+  await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
+  expect(within(dialog).getByRole('alert')).toHaveTextContent(
+    'Нельзя оставить платформу без владельца',
+  );
+  expect(input).toHaveValue('ivan@xn--d1acufc.xn--p1ai');
 });

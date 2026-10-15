@@ -344,5 +344,228 @@
     "load_more": "Show more",
     "load_more_failed": "Could not load more. Try again",
     "more_filters_active": "More filters, set: {count}"
+  },
+  "me": {
+    "subtitle": "Second factor, recovery codes and active sessions",
+    "mfa_on": "2FA on",
+    "locked": "Access is closed for an hour: five wrong codes or passwords in a row. We have notified the administrators. If it was not you, contact an owner or an admin.",
+    "mfa": {
+      "title": "Second factor",
+      "on": "Second factor is on",
+      "since": "Authenticator app connected {date}. The code is asked at sign-in and after 20 minutes of inactivity. A new device can only be set up through a second staff member.",
+      "off": "Second factor is not set up",
+      "regenerate": "Reissue codes",
+      "lost": "Lost access",
+      "lost_title": "Recovery takes two people",
+      "lost_text": "Access is restored by an owner or an admin: one requests an access reset, a second one confirms it. Your password, second factor, recovery codes and sessions are revoked, and a new invitation is sent to your work email. There is no self-service “forgot password” — nobody can take over sign-in through email."
+    },
+    "codes": {
+      "title": "Recovery codes",
+      "left": "{count} of 10 unused",
+      "low": "Almost no codes left — reissue them while you still have your authenticator app.",
+      "text": "Each code works once. The codes are shown only when issued — after that only a reissue, and the old ones stop working at once."
+    },
+    "regenerate": {
+      "title": "New recovery codes",
+      "text": "The old codes stop working immediately. Confirm with a code from your authenticator app — a recovery code is not accepted here.",
+      "code": "Authenticator app code",
+      "submit": "Issue codes",
+      "wait": "Wait {seconds} s",
+      "done": "Done",
+      "issued": "Recovery codes reissued. The old ones no longer work."
+    },
+    "sessions": {
+      "title": "Active sessions",
+      "label": "Sessions",
+      "current": "Current session",
+      "revoke": "End",
+      "revoke_label": "End session: {device}, signed in {created}",
+      "revoke_others": "End all other sessions",
+      "device": "{browser} · {os}",
+      "unknown_device": "Unknown device",
+      "details": "Network {ip} · signed in {created} · active {seen}",
+      "revoked": "Session ended. That device will need to sign in again.",
+      "revoked_others": "{count, plural, =0 {There were no other sessions} one {# session ended} other {# sessions ended}}",
+      "empty": "No active sessions",
+      "note": "A session lives 8 hours and ends when the network changes. After 20 minutes of inactivity the admin asks for the second factor again — inconvenient by design.",
+      "browsers": {
+        "chrome": "Chrome",
+        "edge": "Edge",
+        "firefox": "Firefox",
+        "safari": "Safari",
+        "opera": "Opera",
+        "yandex": "Yandex Browser",
+        "other": "Browser"
+      },
+      "systems": {
+        "windows": "Windows",
+        "macos": "macOS",
+        "ios": "iOS",
+        "android": "Android",
+        "linux": "Linux",
+        "other": "Unknown OS"
+      }
+    },
+    "password": {
+      "title": "Change password",
+      "text": "Current password, the new one twice and the second factor. Your other sessions will end — this one stays.",
+      "current": "Current password",
+      "new": "New password",
+      "new_hint": "10 to 128 characters; common passwords are not accepted. A phrase of several words is easier to remember than a jumble of characters.",
+      "repeat": "New password again",
+      "code": "Authenticator app code",
+      "recovery": "Recovery code",
+      "recovery_hint": "Looks like xxxxx-xxxxx. The code is used up even if the password is not changed.",
+      "use_recovery": "Use a recovery code",
+      "use_app": "Enter an app code",
+      "submit": "Change password",
+      "done": "Password changed. Other sessions ended.",
+      "password_invalid": "The current password is wrong. {count, plural, one {# attempt left} other {# attempts left}}, then access closes for an hour and we notify the administrators.",
+      "mfa_invalid": "The code did not match. {count, plural, one {# attempt left} other {# attempts left}}, then access closes for an hour and we notify the administrators."
+    }
+  },
+  "staff": {
+    "subtitle": "Who can do what",
+    "matrix": {
+      "label": "Permission matrix",
+      "permission": "Permission",
+      "grants": {
+        "allow": "yes",
+        "scoped": "own cities",
+        "dual": "two people",
+        "deny": "no",
+        "unknown": "—"
+      }
+    },
+    "two_hands": {
+      "title": "Two-person rule",
+      "text": "One staff member can only request these actions — they run after a second staff member with the same permission confirms. Nobody does them alone, not even an owner.",
+      "item": "{permission} — {roles}",
+      "none": "The matrix has no two-person actions right now."
+    },
+    "list": {
+      "title": "Who has access",
+      "label": "Staff",
+      "search": "Name or email",
+      "columns": {
+        "person": "Staff member",
+        "role": "Role",
+        "status": "Status",
+        "last_login": "Last sign-in",
+        "actions": "Actions"
+      },
+      "status_filter": "Status",
+      "status_all": "All",
+      "statuses": {
+        "active": "Active",
+        "invited": "Invited",
+        "disabled": "Disabled"
+      },
+      "role_filter": "Role",
+      "role_all": "All roles",
+      "never": "never signed in",
+      "you": "you",
+      "manage": "Manage",
+      "manage_label": "Manage: {name}"
+    },
+    "status": {
+      "active": "active",
+      "invited": "invitation not accepted",
+      "expired": "invitation expired",
+      "disabled": "disabled",
+      "locked": "sign-in closed",
+      "unknown": "unknown status"
+    },
+    "invite": {
+      "open": "Invite staff member",
+      "title": "Invite a staff member",
+      "text": "A second staff member with the permission confirms the invitation. After that a code goes to the work email; it lives 24 hours, and the second factor is set up at first sign-in.",
+      "email": "Work email",
+      "name": "Name",
+      "name_hint": "Shown in the audit log and to other staff.",
+      "role": "Role",
+      "role_placeholder": "Choose a role",
+      "cities": "Moderator cities",
+      "cities_search": "Find a city",
+      "cities_hint": "A moderator needs at least one city.",
+      "submit": "Send for confirmation",
+      "again": "Invite another",
+      "close": "Close"
+    },
+    "drawer": {
+      "title": "Staff member",
+      "email": "Email",
+      "role": "Role",
+      "status": "Status",
+      "cities": "Cities",
+      "last_login": "Last sign-in",
+      "created": "Account created",
+      "locked_until": "Sign-in closed until {time}",
+      "invite_until": "Invitation valid until {time}",
+      "reason": "Reason",
+      "reason_placeholder": "Choose a reason",
+      "comment": "Comment",
+      "comment_hint": "Goes to the audit log. Required for “Other”.",
+      "journal": "The action goes to the audit log.",
+      "resend": {
+        "title": "Invitation",
+        "text": "A new invitation code: the previous one stops working, and the 24-hour period starts again.",
+        "button": "Resend invitation",
+        "wait": "Retry in {seconds} s",
+        "done": "A new invitation code was sent; the previous one no longer works."
+      },
+      "role_change": {
+        "title": "Role and cities",
+        "role": "Role",
+        "cities": "Moderator cities",
+        "save": "Save",
+        "request": "Send for confirmation",
+        "saved": "Role and cities saved.",
+        "denied": "You cannot make this change."
+      },
+      "sessions": {
+        "title": "Sessions",
+        "label": "Staff member sessions",
+        "empty": "No active sessions.",
+        "revoke_all": "End all sessions",
+        "confirm_title": "End all sessions — {name}?",
+        "confirm_text": "The staff member is signed out on every device and signs in again. The account stays active.",
+        "confirm": "End all",
+        "done": "{count, plural, =0 {There were no active sessions} one {# session ended} other {# sessions ended}}"
+      },
+      "reset": {
+        "title": "Access reset",
+        "text": "When a staff member lost their password or phone. Takes two people.",
+        "button": "Request access reset",
+        "confirm_title": "Reset access — {name}?",
+        "consequences": {
+          "secrets": "Password, second factor and recovery codes stop working",
+          "sessions": "All the staff member’s sessions end",
+          "invite": "A new invitation is sent to the work email"
+        },
+        "confirm": "Send for confirmation"
+      },
+      "disable": {
+        "title": "Disable account",
+        "text": "Removes the role: sign-in closes, sessions and pending requests are cancelled. History and the audit log stay.",
+        "button": "Disable",
+        "request": "Request disabling",
+        "confirm_title": "Disable — {name}?",
+        "consequences": {
+          "role": "The role is removed, sign-in is closed",
+          "sessions": "All sessions and pending requests of the staff member are cancelled",
+          "history": "History and the audit log are kept"
+        },
+        "confirm_now": "Disable",
+        "confirm_request": "Send for confirmation",
+        "done": "Account disabled."
+      }
+    }
+  },
+  "reasons": {
+    "left_team": "Left the team",
+    "security": "Security (leak, lost device)",
+    "role_change": "Change of duties",
+    "other": "Other"
   }
 }
