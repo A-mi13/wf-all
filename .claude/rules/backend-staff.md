@@ -118,10 +118,46 @@ paths:
   `replaceSession` (срок — от принятия), аудит `staff.mfa_enabled`. Перевыпуск кодов (`RegenerateRecovery`) —
   только TOTP через `withFactor` (шаг `recovery_regenerate`), страж погашенной сессии
   `TestRegenerateRecoveryRevokedSession`.
+- **Управление (§2.5–2.6, §4.9, D16, D17, P13; `internal/app/{manage,actions,accounts}.go`):** сценарий решает
+  по `Decide`: `Allow` — сразу, `NeedsApproval` — запрос `a.request` (202), `Deny` — 403 `errForbidden`.
+  Приглашение — всегда запрос (почта active/invited — `email_taken`, выключенной — `existing_id` + её версия,
+  исполнение возвращает ту же учётку сбросом доступа с новой ролью, именем и приглашением `invite`); смена роли —
+  таблица D16 (`rolePermission`; без изменений — `nil, nil`); выключение — право по роли цели (владелец — только
+  запрос `staff.revoke_owner`); сброс доступа — всегда запрос. Выключенная цель смены роли и сброса — 403 (вернуть
+  её — только приглашением). Над собой — `self_action`; `confirm` — `domain.NormalizeEmail` и сравнение с почтой
+  цели (`mismatch`); `reason` — `staff.Reasons`, комментарий ≤ 500 — только в `audit_log.reason`
+  («код: комментарий»), не в before/after.
+  - **Порядок замков (m7, M-4):** `lockOwners` (`pg_advisory_xact_lock(ownersLockKey)` — только где возможен страж
+    последнего владельца: выключение, сброс, смена роли, `OperatorDisable`; всегда первым) → `lockAccounts` — учётки
+    по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`) → сессии → `staff_mfa` →
+    коды → приглашения. Автор и подтверждающий — `checkActor` под замком: учётка не active/закрыта, сессия погашена
+    или истекла — `auth.ErrSessionInvalid`, роль сменилась — 403 (стражи `TestManageActorRechecked`,
+    `TestManageActorAccountState`, `TestManageActorSessionRevoked`, `TestApproverRechecked`); тот же шаблон в
+    `ResendInvite`. Встречные действия без 40P01 — `TestCounterRevokeSessionsQueued`,
+    `TestCounterRequestsQueuedOnOwnersLock`.
+  - **Страж последнего владельца** — `ownerGuard` после `lockOwners`: при запросе (ранний отказ) и в исполнении,
+    в `disable` (и `OperatorDisable`), понижении (`applyRole`), сбросе; кроме `OperatorResetAccess` (выход из тупика).
+    В пути подтверждения он защита в глубину: инициатор и подтверждающий — активные владельцы под замком, поэтому
+    `last_owner` там недостижим; достижим у оператора (`TestLastOwnerConcurrent`, `-count=30`).
+  - **Версия учётки** растёт при выключении, сбросе, смене роли/городов, повторном приглашении (и `LockOut`).
+    payload каждого действия — `v`, `init_id`, `init_ver` (+ цель и её `version`). `checkInitiator`
+    (`InitiatorCheck`) — без замка; исполнитель (`execLocks`) повторяет её под `FOR SHARE` и перепроверяет
+    подтверждающего; цель другой версии — `ErrStale`. Блокировка (`LockOut`) инициатора или цели валит запрос —
+    осознанно (`TestLockOutTargetStale`). Бизнес-отказ исполнителя — только `approvals.Fail` (`business`:
+    `last_owner`, `email_taken`, `city_not_found` — в т.ч. FK 23503 города) или `ErrStale`.
+  - Выключение, сброс и смена роли гасят ожидающие запросы сотрудника (`cancelRequests` → `CancelByInitiator`).
+  - **Письмо U1** — `disable` админа: `staff.NewMailArgs(MailAdminDisabled, auditID, владелец)` каждому активному
+    владельцу, кроме инициатора (оператор — всем); `auditID` — `Entry.ID` записи `staff.disabled`.
+    `ComposeAdminDisabled` — `audit.Get`, причина — метка `staff.reasons.<код>` (код до `": "`), `operator` —
+    «оператор сервера», неизвестный код — без строки причины; `ErrSkip`: не `staff.disabled`, нет учётки,
+    получатель не активный владелец.
+  - Список — новые сверху, `page.Keyset{Set: "staff.accounts(created_at,id)"}`, `q` — начало почты или имени
+    (`likePrefix`: `\`, `%`, `_` буквально); чужие сессии владельца и админа — только при `grant_elevated` не Deny.
 - **Оператор (§4.2, §4.11; `internal/app/operator.go`):** аудит — `actor_role = operator`, метка `operator`.
   `OperatorBootstrap` — учётка `owner` (`invited`), приглашение, `staff.bootstrapped`, событие `staff.invited`,
   письмо `staff.bootstrapped` каждому активному владельцу; доступен всегда. `OperatorInviteResend` — без паузы и
-  прав. `Rekey` — каждая строка (секрет TOTP, код приглашения) не на текущем ключе — своей транзакцией под
+  прав. `OperatorResetAccess` — сброс без стража последнего владельца (любой статус); `OperatorDisable` — под
+  стражем, письмо U1 о выключенном админе всем активным владельцам. `Rekey` — каждая строка (секрет TOTP, код приглашения) не на текущем ключе — своей транзакцией под
   замком учётки; нечитаемая (ключ убран раньше времени) не роняет прогон — `UnreadableMFA`/`UnreadableInvites`
   с id; резервные коды только считаются; после прогона — `MFAOnOldKeys`, `InvitesOnOldKeys`,
   `RecoveryOnOldKeys`; итог (и частичный) — аудит `staff.rekeyed`. Ротация ключа — двухфазная, чтобы при

@@ -132,5 +132,6 @@ paths:
   инициатора». Если то решение откатится (чужой approve → `ErrSelf`, чужой cancel → 404, 500), запрос останется
   `pending` — его отсечёт `InitiatorCheck` при следующем подтверждении по контракту выше (страж
   `TestSkippedCancelFailsAfterReactivation`). Порядок замков: строка `approvals` раньше строк модуля.
-- **Чистка** — тикер admin-api (10c): `ExpireDue` (порции `SKIP LOCKED`, своя транзакция на порцию) и
+- **Чистка** — тикер admin-api (10c): `ExpireDue` (порции `SKIP LOCKED`, своя транзакция на порцию; у истёкшего
+  `decided_at = expires_at` — и у тика, и у клика approve/reject/cancel, как в списках) и
   `PurgeDecided(ctx, approvals.DecidedRetention)` (решённые старше 180 суток; `pending` не трогает).
