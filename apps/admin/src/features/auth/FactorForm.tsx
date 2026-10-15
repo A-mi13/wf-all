@@ -72,6 +72,15 @@ export function FactorForm({
   const limited = wait.left > 0;
   const blocked = locked || limited;
 
+  // Конец отсчёта 429 (N1): код, набранный за время ожидания, стирается — иначе «Войти» после
+  // отсчёта отправила бы устаревший код и сожгла попытку. Ячейки очищаются вместе с onChange(''),
+  // фокус — снова в первой ячейке. Резервный код от времени не зависит и остаётся.
+  const wasLimited = useRef(false);
+  useEffect(() => {
+    if (wasLimited.current && !limited) otp.current?.reset();
+    wasLimited.current = limited;
+  }, [limited]);
+
   // Блокировка: единственное действие — «Ко входу», фокус на него (ячейки уже недоступны).
   const toLogin = useRef<HTMLButtonElement>(null);
   useEffect(() => {

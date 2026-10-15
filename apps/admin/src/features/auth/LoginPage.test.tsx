@@ -254,6 +254,43 @@ describe('шаг 2', () => {
     expect(asked).toBe(2);
   });
 
+  // N1 (уборка №5): код, набранный во время отсчёта 429, не уходит сам и не остаётся в ячейках —
+  // иначе после отсчёта «Войти» отправила бы устаревший код и сожгла попытку.
+  test('код, набранный во время отсчёта 429, по концу отсчёта стёрт и не уходит', async () => {
+    renderApp('/login', { me: meMfaPending });
+    let asked = 0;
+    server.use(
+      http.post('/v1/staff/auth/mfa', ({ response }) => {
+        asked++;
+        return response.untyped(problem(429, 'ratelimit.exceeded', { retry_after: 30 }));
+      }),
+    );
+    const group = await screen.findByRole('group', { name: CODE });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const paste = (code: string) =>
+      fireEvent.paste(within(group).getAllByRole('textbox')[0]!, {
+        clipboardData: { getData: () => code },
+      });
+    const digits = () =>
+      within(group)
+        .getAllByRole('textbox')
+        .map((c) => (c as HTMLInputElement).value)
+        .join('');
+    paste('492817');
+    expect(await screen.findByRole('button', { name: 'Подождать 30 с' })).toBeDisabled();
+    // во время отсчёта набран новый код: он не уходит, но виден в ячейках
+    paste('135790');
+    expect(digits()).toBe('135790');
+    expect(asked).toBe(1);
+    act(() => vi.advanceTimersByTime(31_000));
+    // отсчёт кончился: ячейки пусты, «Войти» недоступна — устаревший код не уйдёт
+    await waitFor(() => expect(digits()).toBe(''));
+    const submit = screen.getByRole('button', { name: 'Войти' });
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(asked).toBe(1);
+  });
+
   test('attempts_left = 0 — доступ закрыт на час, ввод недоступен, «Ко входу» → шаг 1', async () => {
     const app = renderApp('/login', { me: meMfaPending });
     server.use(
