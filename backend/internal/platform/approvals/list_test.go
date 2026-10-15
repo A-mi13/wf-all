@@ -104,7 +104,7 @@ func TestListBoxes(t *testing.T) {
 		t.Errorf("мои модератора: %v", got)
 	}
 	// фильтр статуса
-	if _, err := e.svc.Reject(context.Background(), owner, "Ольга", plain.ID, "нет"); err != nil {
+	if _, err := e.svc.Reject(context.Background(), owner, "Ольга", metaWeb, plain.ID, "нет"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(must(e.list(admin, approvals.BoxIncoming, approvals.StatusRejected, "", 50))); !slices.Equal(got, []uuid.UUID{plain.ID}) {

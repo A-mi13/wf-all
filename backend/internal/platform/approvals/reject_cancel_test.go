@@ -16,16 +16,16 @@ func TestReject(t *testing.T) {
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
 	for _, c := range []string{"", "   ", "\n\t"} {
-		_, err := e.svc.Reject(context.Background(), b, "Борис", ap.ID, c)
+		_, err := e.svc.Reject(context.Background(), b, "Борис", metaWeb, ap.ID, c)
 		assertField(t, err, "body.comment", "required")
 	}
-	_, err := e.svc.Reject(context.Background(), b, "Борис", ap.ID, strings.Repeat("ж", 501))
+	_, err := e.svc.Reject(context.Background(), b, "Борис", metaWeb, ap.ID, strings.Repeat("ж", 501))
 	assertField(t, err, "body.comment", "maxLength")
 	if e.row(ap.ID).Status != "pending" {
 		t.Fatal("отказ проверки изменил запрос")
 	}
 	e.disable(a.StaffID)
-	res, err := e.svc.Reject(context.Background(), b, "Борис", ap.ID, " рано ")
+	res, err := e.svc.Reject(context.Background(), b, "Борис", metaWeb, ap.ID, " рано ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,10 +50,10 @@ func TestCancel(t *testing.T) {
 	e := newEnv(t)
 	a, b, tgt := e.member(perm.Owner), e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1, Target: &tgt.StaffID})
-	if _, err := e.svc.Cancel(context.Background(), b, "Борис", ap.ID); !isErr(err, approvals.ErrNotFound) {
+	if _, err := e.svc.Cancel(context.Background(), b, "Борис", metaWeb, ap.ID); !isErr(err, approvals.ErrNotFound) {
 		t.Fatalf("чужой: %v", err)
 	}
-	if _, err := e.svc.Cancel(context.Background(), tgt, "Цель", ap.ID); !isErr(err, approvals.ErrNotFound) {
+	if _, err := e.svc.Cancel(context.Background(), tgt, "Цель", metaWeb, ap.ID); !isErr(err, approvals.ErrNotFound) {
 		t.Fatalf("цель: %v", err)
 	}
 	if e.row(ap.ID).Status != "pending" {
@@ -61,10 +61,10 @@ func TestCancel(t *testing.T) {
 	}
 	reauth := *a
 	reauth.Reauth = true
-	if _, err := e.svc.Cancel(context.Background(), &reauth, "Анна", ap.ID); !isErr(err, approvals.ErrForbidden) {
+	if _, err := e.svc.Cancel(context.Background(), &reauth, "Анна", metaWeb, ap.ID); !isErr(err, approvals.ErrForbidden) {
 		t.Fatalf("под reauth: %v", err)
 	}
-	res, err := e.svc.Cancel(context.Background(), a, "Анна", ap.ID)
+	res, err := e.svc.Cancel(context.Background(), a, "Анна", metaWeb, ap.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestCancel(t *testing.T) {
 		AND actor_staff_id = $2`, ap.ID, a.StaffID) != 1 || e.decided(ap.ID) != 1 {
 		t.Fatal("нет аудита или события отмены")
 	}
-	if _, err := e.svc.Cancel(context.Background(), a, "Анна", ap.ID); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Cancel(context.Background(), a, "Анна", metaWeb, ap.ID); !isErr(err, approvals.ErrClosed) {
 		t.Fatalf("повторная отмена: %v", err)
 	}
 }

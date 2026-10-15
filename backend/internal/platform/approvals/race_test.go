@@ -82,8 +82,8 @@ func TestApproveConcurrentOnce(t *testing.T) {
 	var errB, errC error
 	done := make(chan struct{})
 	go func() {
-		race(func() { _, errB = e.svc.Approve(context.Background(), b, "Борис", ap.ID, "") },
-			func() { _, errC = e.svc.Approve(context.Background(), c, "Вера", ap.ID, "") })
+		race(func() { _, errB = e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "") },
+			func() { _, errC = e.svc.Approve(context.Background(), c, "Вера", metaWeb, ap.ID, "") })
 		close(done)
 	}()
 	e.mustBlocked(2)
@@ -115,8 +115,8 @@ func TestApproveCancelRace(t *testing.T) {
 	var errApprove, errCancel error
 	done := make(chan struct{})
 	go func() {
-		race(func() { _, errApprove = e.svc.Approve(context.Background(), b, "Борис", ap.ID, "") },
-			func() { _, errCancel = e.svc.Cancel(context.Background(), a, "Анна", ap.ID) })
+		race(func() { _, errApprove = e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "") },
+			func() { _, errCancel = e.svc.Cancel(context.Background(), a, "Анна", metaWeb, ap.ID) })
 		close(done)
 	}()
 	e.mustBlocked(2)
@@ -149,7 +149,7 @@ func TestApproveExpireRace(t *testing.T) {
 	e.clock.Set(ap.ExpiresAt)
 	var errApprove, errExpire error
 	var n int
-	race(func() { _, errApprove = e.svc.Approve(context.Background(), b, "Борис", ap.ID, "") },
+	race(func() { _, errApprove = e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "") },
 		func() { n, errExpire = e.svc.ExpireDue(context.Background()) })
 	if errExpire != nil || !isErr(errApprove, approvals.ErrClosed) || n > 1 {
 		t.Fatalf("approve=%v expire=%v n=%d", errApprove, errExpire, n)
@@ -175,7 +175,7 @@ func TestExpireDueSkipsLocked(t *testing.T) {
 		t.Fatalf("ExpireDue под замком: n=%d err=%v", n, err)
 	}
 	release()
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, ""); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, ""); !isErr(err, approvals.ErrClosed) {
 		t.Fatalf("approve: %v", err)
 	}
 	if e.audits(ap.ID, "platform.approval_expired") != 1 {
@@ -196,7 +196,7 @@ func TestCancelByInitiatorNoDeadlock(t *testing.T) {
 	ap := e.request(a, actGrant, payload{V: 1})
 	inCheck := make(chan struct{})
 	e.mu.Lock()
-	e.check = func(ctx context.Context, tx pgx.Tx, staffID uuid.UUID, permission string) error {
+	e.check = func(ctx context.Context, tx pgx.Tx, a approvals.Approval) error {
 		close(inCheck) // строка запроса уже под замком Approve
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, staffLock); err != nil {
 			return err
@@ -204,7 +204,7 @@ func TestCancelByInitiatorNoDeadlock(t *testing.T) {
 		e.mu.Lock()
 		e.check = nil
 		e.mu.Unlock()
-		return e.initiatorCheck(ctx, tx, staffID, permission)
+		return e.initiatorCheck(ctx, tx, a)
 	}
 	e.mu.Unlock()
 
@@ -230,7 +230,7 @@ func TestCancelByInitiatorNoDeadlock(t *testing.T) {
 		})
 	}()
 	<-locked
-	res, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, "")
+	res, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "")
 	<-disabled
 	if errDisable != nil {
 		t.Fatalf("выключение: %v", errDisable)

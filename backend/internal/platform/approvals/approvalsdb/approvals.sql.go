@@ -239,22 +239,28 @@ func (q *Queries) InsertApproval(ctx context.Context, arg InsertApprovalParams) 
 
 const listApprovals = `-- name: ListApprovals :many
 SELECT id, action, permission, payload, target_id, scope_city_id, requested_by, requested_by_label, requested_at, expires_at, status, decided_by, decided_by_label, decided_at, decision_comment, error FROM approvals
-WHERE ($1::text IS NULL OR status = ($1::text)::approval_status)
-  AND CASE WHEN $2::bool THEN requested_by = $3::uuid
-      ELSE requested_by <> $3::uuid
-       AND target_id IS DISTINCT FROM $3::uuid
-       AND (permission = ANY ($4::text[])
-            OR (permission = ANY ($5::text[]) AND scope_city_id IS NOT NULL
-                AND ($6::bool OR scope_city_id = ANY ($7::uuid[]))))
+WHERE ($1::text IS NULL
+       OR ($1::text = 'pending' AND status = 'pending' AND expires_at > $2::timestamptz)
+       OR ($1::text = 'expired'
+           AND (status = 'expired' OR (status = 'pending' AND expires_at <= $2::timestamptz)))
+       OR ($1::text NOT IN ('pending', 'expired')
+           AND status = ($1::text)::approval_status))
+  AND CASE WHEN $3::bool THEN requested_by = $4::uuid
+      ELSE requested_by <> $4::uuid
+       AND target_id IS DISTINCT FROM $4::uuid
+       AND (permission = ANY ($5::text[])
+            OR (permission = ANY ($6::text[]) AND scope_city_id IS NOT NULL
+                AND ($7::bool OR scope_city_id = ANY ($8::uuid[]))))
       END
-  AND (NOT $8::bool
-       OR (requested_at, id) < ($9::timestamptz, $10::uuid))
+  AND (NOT $9::bool
+       OR (requested_at, id) < ($10::timestamptz, $11::uuid))
 ORDER BY requested_at DESC, id DESC
-LIMIT $11
+LIMIT $12
 `
 
 type ListApprovalsParams struct {
 	Status        *string
+	Now           time.Time
 	Mine          bool
 	Viewer        uuid.UUID
 	Allowed       []string
@@ -270,10 +276,13 @@ type ListApprovalsParams struct {
 // Страница запросов, новые сверху, keyset (requested_at, id). mine — созданные смотрящим; иначе
 // входящие: не его и не о нём, право запроса у смотрящего allow|dual (allowed) или scoped (scoped) и
 // город запроса задан и в его скоупе (scoped_any_city — глобальная роль, иначе city_ids). Фильтр
-// прав — в SQL: страница не «худеет», лимит и курсор честные.
+// прав — в SQL: страница не «худеет», лимит и курсор честные. Ожидающий с вышедшим сроком
+// (expires_at <= now, ExpireDue ещё не дошёл) — фактически истёкший: в фильтре pending его нет, в
+// фильтре expired он есть (решить его уже нельзя — Approve ответит approval_closed).
 func (q *Queries) ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]Approval, error) {
 	rows, err := q.db.Query(ctx, listApprovals,
 		arg.Status,
+		arg.Now,
 		arg.Mine,
 		arg.Viewer,
 		arg.Allowed,

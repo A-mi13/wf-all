@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"wf/backend/internal/platform/approvals"
@@ -16,7 +15,7 @@ import (
 
 func noop(context.Context, pgx.Tx, json.RawMessage, *auth.Staff) error { return nil }
 
-func noCheck(context.Context, pgx.Tx, uuid.UUID, string) error { return nil }
+func noCheck(context.Context, pgx.Tx, approvals.Approval) error { return nil }
 
 // mustPanic — f паникует с сообщением, содержащим want.
 func mustPanic(t *testing.T, name, want string, f func()) {

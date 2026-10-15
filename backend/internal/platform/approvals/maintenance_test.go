@@ -24,7 +24,7 @@ func TestCancelByInitiator(t *testing.T) {
 		e.request(a, actGrant, payload{V: 1, Elevated: true}),
 	}
 	done := e.request(a, actGrant, payload{V: 1})
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", done.ID, ""); err != nil {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, done.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	foreign := e.request(b, actGrant, payload{V: 1})
@@ -85,7 +85,7 @@ func TestExpireDue(t *testing.T) {
 		due = append(due, e.request(a, actGrant, payload{V: 1}))
 	}
 	done := e.request(a, actGrant, payload{V: 1})
-	if _, err := e.svc.Reject(context.Background(), b, "Борис", done.ID, "нет"); err != nil {
+	if _, err := e.svc.Reject(context.Background(), b, "Борис", metaWeb, done.ID, "нет"); err != nil {
 		t.Fatal(err)
 	}
 	e.clock.Advance(time.Hour)
@@ -121,7 +121,7 @@ func TestPurgeDecided(t *testing.T) {
 
 	for range 3 {
 		ap := e.request(a, actGrant, payload{V: 1})
-		if _, err := e.svc.Reject(context.Background(), b, "Борис", ap.ID, "нет"); err != nil {
+		if _, err := e.svc.Reject(context.Background(), b, "Борис", metaWeb, ap.ID, "нет"); err != nil {
 			t.Fatal(err)
 		}
 
@@ -129,7 +129,7 @@ func TestPurgeDecided(t *testing.T) {
 	oldExpired := e.request(a, actGrant, payload{V: 1})
 	oldPending := e.request(a, actGrant, payload{V: 1})
 	e.clock.Advance(approvals.TTL)
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", oldExpired.ID, ""); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, oldExpired.ID, ""); !isErr(err, approvals.ErrClosed) {
 		t.Fatal(err)
 	}
 	// oldPending — ожидает (в базе), хотя давно истёк: чистка его не трогает
@@ -138,7 +138,7 @@ func TestPurgeDecided(t *testing.T) {
 	}
 	e.clock.Advance(approvals.DecidedRetention - approvals.TTL)
 	fresh := e.request(a, actGrant, payload{V: 1})
-	if _, err := e.svc.Reject(context.Background(), b, "Борис", fresh.ID, "нет"); err != nil {
+	if _, err := e.svc.Reject(context.Background(), b, "Борис", metaWeb, fresh.ID, "нет"); err != nil {
 		t.Fatal(err)
 	}
 	e.clock.Advance(approvals.TTL + time.Second)

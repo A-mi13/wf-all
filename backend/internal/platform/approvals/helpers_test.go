@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,6 +40,8 @@ type payload struct {
 	City     *uuid.UUID `json:"city,omitempty"`
 	Elevated bool       `json:"elevated,omitempty"`
 	Note     string     `json:"note,omitempty"` // свободный текст: в аудит не попадает
+	// InitVer — версия учётки инициатора на момент запроса (как у staff в 8b); nil — без сверки версии
+	InitVer *int `json:"init_ver,omitempty"`
 }
 
 // env — сервис под ролью прода admin, часы, реестр с тестовыми действиями и подменяемым
@@ -55,15 +58,16 @@ type env struct {
 	exec  approvals.Executor        // исполнитель обоих действий; nil — успех с записью аудита
 	staff map[uuid.UUID]*auth.Staff // учётки для проверки инициатора
 	off   map[uuid.UUID]bool        // выключенные инициаторы
+	ver   map[uuid.UUID]int         // версия учётки: растёт при выключении, сбросе, смене роли
 	execs atomic.Int32              // сколько раз исполнитель вызван
-	check func(ctx context.Context, tx pgx.Tx, staffID uuid.UUID, permission string) error
+	check approvals.InitiatorCheck  // подмена проверки инициатора; nil — модель staff ниже
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	e := &env{t: t, pool: pools.As, owner: pools.Owner, clock: clocktest.New(t0),
-		staff: map[uuid.UUID]*auth.Staff{}, off: map[uuid.UUID]bool{}}
+		staff: map[uuid.UUID]*auth.Staff{}, off: map[uuid.UUID]bool{}, ver: map[uuid.UUID]int{}}
 	e.reg = approvals.NewRegistry()
 	e.reg.Register(approvals.Action{
 		Name: actGrant, Permission: "staff.roles.grant",
@@ -127,20 +131,42 @@ func (e *env) setExec(ex approvals.Executor) {
 	e.exec = ex
 }
 
-// initiatorCheck — как у staff: учётка активна и право запроса не deny.
-func (e *env) initiatorCheck(ctx context.Context, tx pgx.Tx, staffID uuid.UUID, permission string) error {
+// initiatorCheck — модель проверки staff (8b): учётка активна, право запроса в городе запроса не deny
+// и версия учётки не менялась с момента запроса (payload.init_ver; нет — без сверки).
+func (e *env) initiatorCheck(ctx context.Context, tx pgx.Tx, a approvals.Approval) error {
 	e.mu.Lock()
-	st, ok := e.staff[staffID]
-	off := e.off[staffID]
+	st, ok := e.staff[a.RequestedBy]
+	off := e.off[a.RequestedBy]
+	ver := e.ver[a.RequestedBy]
 	check := e.check
 	e.mu.Unlock()
 	if check != nil {
-		return check(ctx, tx, staffID, permission)
+		return check(ctx, tx, a)
 	}
-	if !ok || off || st.Decide(permission, uuid.Nil) == auth.Deny {
+	var p payload
+	if err := json.Unmarshal(a.Payload, &p); err != nil {
+		return err
+	}
+	if !ok || off || st.Decide(a.Permission, a.ScopeCityID) == auth.Deny || (p.InitVer != nil && *p.InitVer != ver) {
 		return approvals.Fail(errors.New("staff.initiator_inactive"))
 	}
 	return nil
+}
+
+// version — текущая версия учётки (для payload.init_ver).
+func (e *env) version(staffID uuid.UUID) *int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	v := e.ver[staffID]
+	return &v
+}
+
+// reactivate — учётка снова активна после выключения или сброса доступа: версия выросла.
+func (e *env) reactivate(staffID uuid.UUID) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.off, staffID)
+	e.ver[staffID]++
 }
 
 // member — активный сотрудник роли с городами (модератор).
@@ -173,7 +199,7 @@ func (e *env) tryRequest(by *auth.Staff, action string, p any) (approvals.Approv
 	var ap approvals.Approval
 	err := db.InTx(context.Background(), e.pool, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		ap, err = e.svc.Request(ctx, tx, by, "Инициатор "+by.Role, action, p)
+		ap, err = e.svc.Request(ctx, tx, by, "Инициатор "+by.Role, metaWeb, action, p)
 		return err
 	})
 	return ap, err
@@ -233,3 +259,6 @@ func (e *env) moduleWrites() int {
 
 // isCode — ошибка с кодом клиента.
 func isErr(err, want error) bool { return errors.Is(err, want) }
+
+// metaWeb — IP и User-Agent запроса сотрудника (аудит).
+var metaWeb = approvals.Meta{IP: netip.MustParseAddr("203.0.113.7"), UserAgent: "Firefox/140 test"}

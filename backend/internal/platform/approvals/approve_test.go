@@ -42,7 +42,7 @@ func TestApproveExecutes(t *testing.T) {
 		return moduleWrite(ctx, approver)
 	})
 	e.clock.Advance(time.Hour)
-	res, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, "  проверил лично  ")
+	res, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "  проверил лично  ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +83,10 @@ func TestApproveSelf(t *testing.T) {
 	a, tgt := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1, Target: &tgt.StaffID})
 	for name, st := range map[string]*auth.Staff{"инициатор": a, "цель": tgt} {
-		if _, err := e.svc.Approve(context.Background(), st, "Я", ap.ID, ""); !isErr(err, approvals.ErrSelf) {
+		if _, err := e.svc.Approve(context.Background(), st, "Я", metaWeb, ap.ID, ""); !isErr(err, approvals.ErrSelf) {
 			t.Errorf("approve %s: %v", name, err)
 		}
-		if _, err := e.svc.Reject(context.Background(), st, "Я", ap.ID, "нет"); !isErr(err, approvals.ErrSelf) {
+		if _, err := e.svc.Reject(context.Background(), st, "Я", metaWeb, ap.ID, "нет"); !isErr(err, approvals.ErrSelf) {
 			t.Errorf("reject %s: %v", name, err)
 		}
 	}
@@ -120,17 +120,17 @@ func TestApproveForbidden(t *testing.T) {
 		{"без сотрудника", nil, grant.ID},
 	}
 	for _, c := range cases {
-		if _, err := e.svc.Approve(context.Background(), c.st, "Кто-то", c.apID, ""); !isErr(err, approvals.ErrForbidden) {
+		if _, err := e.svc.Approve(context.Background(), c.st, "Кто-то", metaWeb, c.apID, ""); !isErr(err, approvals.ErrForbidden) {
 			t.Errorf("approve %s: %v", c.name, err)
 		}
-		if _, err := e.svc.Reject(context.Background(), c.st, "Кто-то", c.apID, "нет"); !isErr(err, approvals.ErrForbidden) {
+		if _, err := e.svc.Reject(context.Background(), c.st, "Кто-то", metaWeb, c.apID, "нет"); !isErr(err, approvals.ErrForbidden) {
 			t.Errorf("reject %s: %v", c.name, err)
 		}
 	}
 	if e.execs.Load() != 0 || e.row(grant.ID).Status != "pending" || e.row(rename.ID).Status != "pending" {
 		t.Fatal("отказ что-то изменил")
 	}
-	if _, err := e.svc.Approve(context.Background(), e.member(perm.Moderator, cityA), "Мод", rename.ID, ""); err != nil {
+	if _, err := e.svc.Approve(context.Background(), e.member(perm.Moderator, cityA), "Мод", metaWeb, rename.ID, ""); err != nil {
 		t.Fatalf("модератор своего города: %v", err)
 	}
 }
@@ -147,10 +147,10 @@ func TestApproveUsesStoredPermission(t *testing.T) {
 		CASE WHEN id = $1 THEN 'false'::jsonb ELSE 'true'::jsonb END) WHERE id IN ($1, $2)`, elevated.ID, plain.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Approve(context.Background(), admin, "Админ", elevated.ID, ""); !isErr(err, approvals.ErrForbidden) {
+	if _, err := e.svc.Approve(context.Background(), admin, "Админ", metaWeb, elevated.ID, ""); !isErr(err, approvals.ErrForbidden) {
 		t.Fatalf("админ подтвердил grant_elevated: %v", err)
 	}
-	if _, err := e.svc.Approve(context.Background(), admin, "Админ", plain.ID, ""); err != nil {
+	if _, err := e.svc.Approve(context.Background(), admin, "Админ", metaWeb, plain.ID, ""); err != nil {
 		t.Fatalf("админ и обычная выдача: %v", err)
 	}
 }
@@ -164,7 +164,7 @@ func TestApproveExpired(t *testing.T) {
 	e.clock.Advance(time.Microsecond)
 	early := e.request(a, actGrant, payload{V: 1})
 	e.clock.Set(late.ExpiresAt) // early истекает через 1 мкс
-	res, err := e.svc.Approve(context.Background(), b, "Борис", late.ID, "")
+	res, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, late.ID, "")
 	if !isErr(err, approvals.ErrClosed) || res.Status != approvals.StatusExpired {
 		t.Fatalf("ровно в срок: %v %+v", err, res)
 	}
@@ -177,7 +177,7 @@ func TestApproveExpired(t *testing.T) {
 		AND actor_staff_id IS NULL AND actor_role = 'system' AND actor_label = 'system'`, late.ID); n != 1 || e.decided(late.ID) != 1 {
 		t.Fatalf("аудит %d, событий %d", n, e.decided(late.ID))
 	}
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", early.ID, ""); err != nil {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, early.ID, ""); err != nil {
 		t.Fatalf("за микросекунду до срока: %v", err)
 	}
 	if e.execs.Load() != 1 {
@@ -187,10 +187,10 @@ func TestApproveExpired(t *testing.T) {
 	rej := e.request(a, actGrant, payload{V: 1})
 	can := e.request(a, actGrant, payload{V: 1})
 	e.clock.Advance(approvals.TTL)
-	if _, err := e.svc.Reject(context.Background(), b, "Борис", rej.ID, "поздно"); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Reject(context.Background(), b, "Борис", metaWeb, rej.ID, "поздно"); !isErr(err, approvals.ErrClosed) {
 		t.Fatalf("reject просроченного: %v", err)
 	}
-	if _, err := e.svc.Cancel(context.Background(), a, "Анна", can.ID); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Cancel(context.Background(), a, "Анна", metaWeb, can.ID); !isErr(err, approvals.ErrClosed) {
 		t.Fatalf("cancel просроченного: %v", err)
 	}
 	if e.row(rej.ID).Status != "expired" || e.row(can.ID).Status != "expired" {
@@ -203,22 +203,22 @@ func TestApproveTwiceClosed(t *testing.T) {
 	e := newEnv(t)
 	a, b, c := e.member(perm.Owner), e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, ""); err != nil {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, ""); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, ""); !isErr(err, approvals.ErrClosed) {
 		t.Fatalf("повтор: %v", err)
 	}
-	if _, err := e.svc.Approve(context.Background(), c, "Вера", ap.ID, ""); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Approve(context.Background(), c, "Вера", metaWeb, ap.ID, ""); !isErr(err, approvals.ErrClosed) {
 		t.Fatalf("второй подтверждающий: %v", err)
 	}
-	if _, err := e.svc.Reject(context.Background(), c, "Вера", ap.ID, "нет"); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Reject(context.Background(), c, "Вера", metaWeb, ap.ID, "нет"); !isErr(err, approvals.ErrClosed) {
 		t.Fatalf("отклонение решённого: %v", err)
 	}
-	if _, err := e.svc.Cancel(context.Background(), a, "Анна", ap.ID); !isErr(err, approvals.ErrClosed) {
+	if _, err := e.svc.Cancel(context.Background(), a, "Анна", metaWeb, ap.ID); !isErr(err, approvals.ErrClosed) {
 		t.Fatalf("отмена решённого: %v", err)
 	}
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", id.New(), ""); !isErr(err, approvals.ErrNotFound) {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, id.New(), ""); !isErr(err, approvals.ErrNotFound) {
 		t.Fatalf("нет запроса: %v", err)
 	}
 	if e.execs.Load() != 1 || e.decided(ap.ID) != 1 {
@@ -233,7 +233,7 @@ func TestApproveInitiatorChanged(t *testing.T) {
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	off := e.request(a, actGrant, payload{V: 1})
 	e.disable(a.StaffID)
-	res, err := e.svc.Approve(context.Background(), b, "Борис", off.ID, "")
+	res, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, off.ID, "")
 	if !isErr(err, approvals.ErrStale) || res.Status != approvals.StatusFailed || res.Error != approvals.ErrorInitiatorChanged {
 		t.Fatalf("выключенный инициатор: %v %+v", err, res)
 	}
@@ -249,7 +249,7 @@ func TestApproveInitiatorChanged(t *testing.T) {
 	e.mu.Lock()
 	e.staff[o.StaffID] = &auth.Staff{StaffID: o.StaffID, Role: "admin", Stage: auth.StageActive, Grants: perm.Grants(perm.Admin)}
 	e.mu.Unlock()
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", elevated.ID, ""); !isErr(err, approvals.ErrStale) {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, elevated.ID, ""); !isErr(err, approvals.ErrStale) {
 		t.Fatalf("инициатор без права: %v", err)
 	}
 	if e.execs.Load() != 0 {
@@ -273,7 +273,7 @@ func TestApproveExecutorFail(t *testing.T) {
 		}
 		return approvals.Fail(fmt.Errorf("исполнитель: %w", errBiz))
 	})
-	res, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, "ок")
+	res, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "ок")
 	if !errors.Is(err, errBiz) || isErr(err, approvals.ErrStale) {
 		t.Fatalf("ошибка наружу: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestApproveExecutorFail(t *testing.T) {
 		}
 		return fmt.Errorf("версия цели: %w", approvals.ErrStale)
 	})
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", stale.ID, ""); !isErr(err, approvals.ErrStale) {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, stale.ID, ""); !isErr(err, approvals.ErrStale) {
 		t.Fatalf("ErrStale исполнителя: %v", err)
 	}
 	if r := e.row(stale.ID); r.Status != "failed" || r.Error != httpx.CodeApprovalStale {
@@ -321,7 +321,7 @@ func TestApproveFailureRollsBack(t *testing.T) {
 		}
 		return errDB
 	})
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, ""); !errors.Is(err, errDB) {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, ""); !errors.Is(err, errDB) {
 		t.Fatalf("прочая ошибка: %v", err)
 	}
 	assertUntouched(t, e, ap.ID)
@@ -338,15 +338,15 @@ func TestApproveFailureRollsBack(t *testing.T) {
 				t.Fatalf("паника: %v", p)
 			}
 		}()
-		_, _ = e.svc.Approve(context.Background(), b, "Борис", ap.ID, "")
+		_, _ = e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "")
 	}()
 	assertUntouched(t, e, ap.ID)
 
 	e.setExec(nil)
 	e.mu.Lock()
-	e.check = func(context.Context, pgx.Tx, uuid.UUID, string) error { return errDB }
+	e.check = func(context.Context, pgx.Tx, approvals.Approval) error { return errDB }
 	e.mu.Unlock()
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, ""); !errors.Is(err, errDB) {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, ""); !errors.Is(err, errDB) {
 		t.Fatalf("ошибка проверки инициатора: %v", err)
 	}
 	assertUntouched(t, e, ap.ID)
@@ -373,7 +373,7 @@ func TestApproveWithoutInitiatorCheck(t *testing.T) {
 	svc := approvals.New(e.pool, e.clock, reg)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
-	_, err := svc.Approve(context.Background(), b, "Борис", ap.ID, "")
+	_, err := svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "")
 	if err == nil || isErr(err, approvals.ErrStale) || isErr(err, approvals.ErrForbidden) {
 		t.Fatalf("без проверки инициатора: %v", err)
 	}
@@ -388,12 +388,12 @@ func TestApproveComment(t *testing.T) {
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
-	_, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, strings.Repeat("ж", 501))
+	_, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, strings.Repeat("ж", 501))
 	assertField(t, err, "body.comment", "maxLength")
 	if e.row(ap.ID).Status != "pending" {
 		t.Fatal("длинный комментарий изменил запрос")
 	}
-	if _, err := e.svc.Approve(context.Background(), b, "Борис", ap.ID, " \n\t "); err != nil {
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, " \n\t "); err != nil {
 		t.Fatal(err)
 	}
 	var isNull bool
@@ -402,7 +402,7 @@ func TestApproveComment(t *testing.T) {
 	}
 	// пустая метка решившего — ошибка до решения
 	ap2 := e.request(a, actGrant, payload{V: 1})
-	if _, err := e.svc.Approve(context.Background(), b, "  ", ap2.ID, ""); err == nil {
+	if _, err := e.svc.Approve(context.Background(), b, "  ", metaWeb, ap2.ID, ""); err == nil {
 		t.Fatal("пустая метка решившего прошла")
 	}
 	if e.row(ap2.ID).Status != "pending" {

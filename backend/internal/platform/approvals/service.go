@@ -22,7 +22,6 @@ import (
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/id"
-	"wf/backend/internal/platform/peer"
 )
 
 const (
@@ -30,8 +29,6 @@ const (
 	commentMax = 500
 	// labelMax — снимок имени (CHECK approvals_*_label_check: 1–120 без крайних пробелов).
 	labelMax = 120
-	// errorMax — потолок текста error у failed, если ошибка исполнителя без кода.
-	errorMax = 200
 
 	auditPrefix = "platform.approval_"
 )
@@ -67,7 +64,7 @@ type Decided struct {
 // (или Action.Permission) из каталога; инициатор: Decide(право, город цели) != Deny, иначе
 // ErrForbidden. Срок — now + TTL, byLabel — снимок имени инициатора. Аудит — без payload (в нём
 // свободный текст).
-func (s *Service) Request(ctx context.Context, tx pgx.Tx, by *auth.Staff, byLabel, action string, payload any) (Approval, error) {
+func (s *Service) Request(ctx context.Context, tx pgx.Tx, by *auth.Staff, byLabel string, m Meta, action string, payload any) (Approval, error) {
 	a, ok := s.reg.action(action)
 	if !ok {
 		return Approval{}, fmt.Errorf("approvals: действие %q не зарегистрировано", action)
@@ -110,7 +107,7 @@ func (s *Service) Request(ctx context.Context, tx pgx.Tx, by *auth.Staff, byLabe
 		Action: auditPrefix + "requested", ObjectType: AggregateApproval, ObjectID: row.ID, ScopeCityID: cityID,
 		After: map[string]any{"action": action, "permission": permission, "target_id": optUUID(targetID),
 			"expires_at": row.ExpiresAt},
-		IP: peer.From(ctx).IP,
+		IP: m.IP, UserAgent: m.UserAgent,
 	}); err != nil {
 		return Approval{}, err
 	}
@@ -118,14 +115,15 @@ func (s *Service) Request(ctx context.Context, tx pgx.Tx, by *auth.Staff, byLabe
 }
 
 // Approve — подтверждение (D17, P13) одной транзакцией. Сессия active без Reauth; строка под
-// замком; нет — ErrNotFound; не pending — ErrClosed; срок вышел — expired от системы коммитится и
-// ErrClosed (D8); подтверждающий — инициатор или цель — ErrSelf; право — сохранённое право запроса
-// в его городе, Deny — ErrForbidden; проверка инициатора: отказ — failed (initiator_changed)
-// коммитится и ErrStale; исполнитель под savepoint: Fail(err) или ErrStale — изменения исполнителя
-// откатываются, failed с кодом ошибки коммитится, наружу — исходная ошибка; иная ошибка или паника —
-// откат всего (запрос остаётся pending). Успех — executed. При failed и expired возвращается и
-// запрос в итоговом состоянии, и ошибка.
-func (s *Service) Approve(ctx context.Context, st *auth.Staff, label string, apID uuid.UUID, comment string) (Approval, error) {
+// замком; нет — ErrNotFound; право — сохранённое право запроса в его городе, Deny — ErrForbidden (до
+// любых других ответов и записей); подтверждающий — инициатор или цель — ErrSelf; не pending —
+// ErrClosed; срок вышел — expired от системы коммитится и ErrClosed (D8); проверка инициатора
+// (InitiatorCheck с запросом целиком): отказ — failed (initiator_changed) коммитится и ErrStale;
+// исполнитель под savepoint: Fail(err) или ErrStale — изменения исполнителя откатываются, failed с
+// кодом ошибки коммитится, наружу — исходная ошибка; иная ошибка или паника — откат всего (запрос
+// остаётся pending). Успех — executed. При failed и expired возвращается и запрос в итоговом
+// состоянии, и ошибка. m — IP и User-Agent решившего для аудита.
+func (s *Service) Approve(ctx context.Context, st *auth.Staff, label string, m Meta, apID uuid.UUID, comment string) (Approval, error) {
 	if !active(st) {
 		return Approval{}, ErrForbidden
 	}
@@ -156,8 +154,8 @@ func (s *Service) Approve(ctx context.Context, st *auth.Staff, label string, apI
 		if !ok {
 			return fmt.Errorf("approvals: действие %q запроса %s не зарегистрировано", row.Action, row.ID)
 		}
-		decider := &actor{staff: st, label: lbl}
-		if err := check(ctx, tx, row.RequestedBy, row.Permission); err != nil {
+		decider := &actor{staff: st, label: lbl, meta: m}
+		if err := check(ctx, tx, toApproval(row)); err != nil {
 			if business(err) == nil {
 				return fmt.Errorf("approvals: проверка инициатора: %w", err)
 			}
@@ -195,7 +193,7 @@ func (s *Service) Approve(ctx context.Context, st *auth.Staff, label string, apI
 
 // Reject — отклонение: проверки Approve без проверки инициатора и исполнителя; комментарий
 // обязателен (400 validation.failed по body.comment).
-func (s *Service) Reject(ctx context.Context, st *auth.Staff, label string, apID uuid.UUID, comment string) (Approval, error) {
+func (s *Service) Reject(ctx context.Context, st *auth.Staff, label string, m Meta, apID uuid.UUID, comment string) (Approval, error) {
 	if !active(st) {
 		return Approval{}, ErrForbidden
 	}
@@ -221,7 +219,7 @@ func (s *Service) Reject(ctx context.Context, st *auth.Staff, label string, apID
 			out, bizErr = *closed, ErrClosed
 			return nil
 		}
-		out, err = s.decide(ctx, tx, row, StatusRejected, &actor{staff: st, label: lbl}, cm, nil)
+		out, err = s.decide(ctx, tx, row, StatusRejected, &actor{staff: st, label: lbl, meta: m}, cm, nil)
 		return err
 	})
 	if err != nil {
@@ -234,7 +232,7 @@ func (s *Service) Reject(ctx context.Context, st *auth.Staff, label string, apID
 // ErrNotFound: существование чужих запросов не раскрывается (контракт cancelApproval); решённый —
 // ErrClosed; просроченный — expired от системы коммитится и ErrClosed. label — снимок имени
 // отменяющего (CHECK approvals_decider_label, ActorLabel аудита).
-func (s *Service) Cancel(ctx context.Context, st *auth.Staff, label string, apID uuid.UUID) (Approval, error) {
+func (s *Service) Cancel(ctx context.Context, st *auth.Staff, label string, m Meta, apID uuid.UUID) (Approval, error) {
 	if !active(st) {
 		return Approval{}, ErrForbidden
 	}
@@ -260,7 +258,7 @@ func (s *Service) Cancel(ctx context.Context, st *auth.Staff, label string, apID
 			out, err = s.decide(ctx, tx, row, StatusExpired, nil, nil, nil)
 			return err
 		}
-		out, err = s.decide(ctx, tx, row, StatusCancelled, &actor{staff: st, label: lbl}, nil, nil)
+		out, err = s.decide(ctx, tx, row, StatusCancelled, &actor{staff: st, label: lbl, meta: m}, nil, nil)
 		return err
 	})
 	if err != nil {
@@ -273,8 +271,10 @@ func (s *Service) Cancel(ctx context.Context, st *auth.Staff, label string, apID
 // инициатора: cancelled от системы с причиной initiator_changed, аудит и событие на каждый. Зовёт
 // staff при выключении, сбросе доступа и смене роли инициатора (D17). Запросы, где он цель, не
 // гасятся — их отсекает проверка версии цели в исполнителе (ErrStale). Строку под замком
-// параллельного решения пропускает (SKIP LOCKED): её доводит до конца это решение — его проверка
-// инициатора увидит изменение; ожидание дало бы взаимную блокировку с путём «замок учётки → гашение».
+// параллельного решения пропускает (SKIP LOCKED): ожидание дало бы взаимную блокировку с путём «замок
+// учётки → гашение». Если то решение откатится, запрос останется pending — его отсечёт InitiatorCheck
+// при следующем подтверждении: по контракту InitiatorCheck отказывает, если инициатор после
+// requested_at выключался, сбрасывался или менял роль (даже если снова активен).
 func (s *Service) CancelByInitiator(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) (int, error) {
 	rows, err := approvalsdb.New(tx).CancelPendingByInitiator(ctx, approvalsdb.CancelPendingByInitiatorParams{
 		Now: s.now(), RequestedBy: staffID,
@@ -347,8 +347,10 @@ func (s *Service) PurgeDecided(ctx context.Context, olderThan time.Duration) (in
 	}
 }
 
-// lockForDecision — строка под замком для Approve и Reject и общие проверки решения. closed != nil —
-// срок вышел: запрос переведён в expired (коммитится вызывающим), решать нечего.
+// lockForDecision — строка под замком для Approve и Reject и общие проверки решения. Сначала право:
+// сотрудник без права запроса получает 403 — не узнаёт состояние запроса (closed, self) и ничего в нём
+// не меняет (не переводит просроченный в expired). closed != nil — срок вышел: запрос переведён в
+// expired (коммитится вызывающим), решать нечего.
 func (s *Service) lockForDecision(ctx context.Context, tx pgx.Tx, st *auth.Staff, apID uuid.UUID) (approvalsdb.Approval, *Approval, error) {
 	row, err := approvalsdb.New(tx).LockApproval(ctx, apID)
 	switch {
@@ -356,6 +358,11 @@ func (s *Service) lockForDecision(ctx context.Context, tx pgx.Tx, st *auth.Staff
 		return row, nil, ErrNotFound
 	case err != nil:
 		return row, nil, fmt.Errorf("approvals: запрос %s: %w", apID, err)
+	case st.Decide(row.Permission, val(row.ScopeCityID)) == auth.Deny:
+		// право — сохранённое при запросе, не пересчёт Permit по payload
+		return row, nil, ErrForbidden
+	case row.RequestedBy == st.StaffID || (row.TargetID != nil && *row.TargetID == st.StaffID):
+		return row, nil, ErrSelf
 	case row.Status != approvalsdb.ApprovalStatusPending:
 		return row, nil, ErrClosed
 	case s.expired(row):
@@ -364,11 +371,6 @@ func (s *Service) lockForDecision(ctx context.Context, tx pgx.Tx, st *auth.Staff
 			return row, nil, err
 		}
 		return row, &ap, nil
-	case row.RequestedBy == st.StaffID || (row.TargetID != nil && *row.TargetID == st.StaffID):
-		return row, nil, ErrSelf
-	case st.Decide(row.Permission, val(row.ScopeCityID)) == auth.Deny:
-		// право — сохранённое при запросе, не пересчёт Permit по payload
-		return row, nil, ErrForbidden
 	}
 	return row, nil, nil
 }
@@ -377,6 +379,7 @@ func (s *Service) lockForDecision(ctx context.Context, tx pgx.Tx, st *auth.Staff
 type actor struct {
 	staff *auth.Staff
 	label string
+	meta  Meta
 }
 
 // decide — переход ожидающего запроса в status с аудитом и событием в транзакции tx (ctx — её).
@@ -408,7 +411,8 @@ func (s *Service) record(ctx context.Context, r approvalsdb.Approval, by *actor)
 		Reason: deref(r.DecisionComment),
 	}
 	if by != nil {
-		e.ActorStaffID, e.ActorRole, e.ActorLabel, e.IP = by.staff.StaffID, by.staff.Role, by.label, peer.From(ctx).IP
+		e.ActorStaffID, e.ActorRole, e.ActorLabel = by.staff.StaffID, by.staff.Role, by.label
+		e.IP, e.UserAgent = by.meta.IP, by.meta.UserAgent
 	}
 	if err := audit.Write(ctx, e); err != nil {
 		return fmt.Errorf("approvals: аудит %s: %w", e.Action, err)
@@ -493,8 +497,8 @@ type coder interface {
 	Code() string
 }
 
-// errorText — текст error у failed: код клиента (ProblemError или Code()), иначе текст ошибки с
-// потолком длины — модульные ошибки исполнителей несут код, а не свободный текст.
+// errorText — error у failed (и error_code в аудите): код клиента (ProblemError или Code()), иначе
+// общий ErrorExecutionFailed — свободный текст ошибки может нести ПД (почту), а его видят «Входящие».
 func errorText(err error) string {
 	if pe, ok := errors.AsType[httpx.ProblemError](err); ok {
 		return pe.Problem().Code
@@ -502,11 +506,7 @@ func errorText(err error) string {
 	if c, ok := errors.AsType[coder](err); ok {
 		return c.Code()
 	}
-	t := err.Error()
-	if utf8.RuneCountInString(t) > errorMax {
-		t = string([]rune(t)[:errorMax])
-	}
-	return t
+	return ErrorExecutionFailed
 }
 
 func toApproval(r approvalsdb.Approval) Approval {

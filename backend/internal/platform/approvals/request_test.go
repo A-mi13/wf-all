@@ -115,7 +115,7 @@ func TestRequestPayload(t *testing.T) {
 		}
 	}
 	err := db.InTx(context.Background(), e.pool, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := e.svc.Request(ctx, tx, owner, "   ", actGrant, payload{V: 1})
+		_, err := e.svc.Request(ctx, tx, owner, "   ", metaWeb, actGrant, payload{V: 1})
 		return err
 	})
 	if err == nil {
@@ -136,7 +136,7 @@ func TestRequestInModuleTx(t *testing.T) {
 	e := newEnv(t)
 	owner := e.member(perm.Owner)
 	err := db.InTx(context.Background(), e.pool, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := e.svc.Request(ctx, tx, owner, "Ольга", actGrant, payload{V: 1}); err != nil {
+		if _, err := e.svc.Request(ctx, tx, owner, "Ольга", metaWeb, actGrant, payload{V: 1}); err != nil {
 			return err
 		}
 		if n := e.count(`SELECT count(*) FROM approvals`); n != 0 {
@@ -152,7 +152,7 @@ func TestRequestInModuleTx(t *testing.T) {
 	}
 	errRollback := errFake("откат модуля")
 	err = db.InTx(context.Background(), e.pool, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := e.svc.Request(ctx, tx, owner, "Ольга", actGrant, payload{V: 1}); err != nil {
+		if _, err := e.svc.Request(ctx, tx, owner, "Ольга", metaWeb, actGrant, payload{V: 1}); err != nil {
 			return err
 		}
 		return errRollback

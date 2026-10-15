@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"slices"
 	"sync"
@@ -53,6 +54,9 @@ const (
 	// ErrorInitiatorChanged — причина у погашенного системой (CancelByInitiator) и у failed по
 	// InitiatorCheck: инициатор выключен, сброшен или лишился права запроса.
 	ErrorInitiatorChanged = "initiator_changed"
+	// ErrorExecutionFailed — причина failed, если отказ исполнителя без кода клиента (ProblemError или
+	// Code()): свободный текст ошибки в строку и аудит не пишется — в нём могут быть ПД.
+	ErrorExecutionFailed = "execution_failed"
 	// SystemLabel — метка решившего у просрочки и гашения системой (CHECK approvals_system_decider).
 	SystemLabel = "system"
 )
@@ -118,10 +122,16 @@ type Action struct {
 	Target func(payload json.RawMessage) (targetID, cityID uuid.UUID)
 }
 
-// InitiatorCheck — инициатор на момент подтверждения ещё активен и имеет право permission (без
-// города: scoped-действий у staff нет; модулю со scoped-действиями сигнатуру придётся расширить).
-// Отказ — Fail(…) или ErrStale: запрос становится failed, наружу ErrStale. Иная ошибка — сбой.
-type InitiatorCheck func(ctx context.Context, tx pgx.Tx, staffID uuid.UUID, permission string) error
+// InitiatorCheck — проверка инициатора a.RequestedBy в транзакции подтверждения (регистрирует staff).
+// Получает запрос целиком: право (a.Permission), город (a.ScopeCityID — для scoped-действий), payload и
+// время запроса (a.RequestedAt). КОНТРАКТ: проверка обязана отказать, если инициатор сейчас не активен
+// или без права запроса, И если с момента requested_at он выключался, сбрасывался или менял роль — даже
+// если сейчас снова активен с тем же правом (staff кладёт версию учётки инициатора в payload при Request
+// и сравнивает с текущей). На это полагается CancelByInitiator: строку под замком параллельного решения
+// он пропускает (SKIP LOCKED), и если то решение откатится, запрос останется pending — отсечь его при
+// следующем подтверждении может только эта проверка. Отказ — Fail(…) или ErrStale: запрос становится
+// failed (initiator_changed), наружу ErrStale. Иная ошибка — сбой (откат, запрос pending).
+type InitiatorCheck func(ctx context.Context, tx pgx.Tx, a Approval) error
 
 // Registry — действия «вдвоём» и проверка инициатора. Заполняется при сборке admin-api.
 type Registry struct {
@@ -236,4 +246,11 @@ type Approval struct {
 	DecidedByLabel     string
 	DecidedAt          *time.Time
 	Comment, Error     string
+}
+
+// Meta — откуда пришёл запрос сотрудника: IP и User-Agent для аудита (спека §4.12). Нулевые
+// значения — NULL в журнале. Модуль передаёт свой staff.Meta, ручки 10b — из запроса.
+type Meta struct {
+	IP        netip.Addr
+	UserAgent string
 }

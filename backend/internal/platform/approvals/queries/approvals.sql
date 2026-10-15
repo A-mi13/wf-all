@@ -60,10 +60,17 @@ WHERE id IN (SELECT a.id FROM approvals a
 -- Страница запросов, новые сверху, keyset (requested_at, id). mine — созданные смотрящим; иначе
 -- входящие: не его и не о нём, право запроса у смотрящего allow|dual (allowed) или scoped (scoped) и
 -- город запроса задан и в его скоупе (scoped_any_city — глобальная роль, иначе city_ids). Фильтр
--- прав — в SQL: страница не «худеет», лимит и курсор честные.
+-- прав — в SQL: страница не «худеет», лимит и курсор честные. Ожидающий с вышедшим сроком
+-- (expires_at <= now, ExpireDue ещё не дошёл) — фактически истёкший: в фильтре pending его нет, в
+-- фильтре expired он есть (решить его уже нельзя — Approve ответит approval_closed).
 -- name: ListApprovals :many
 SELECT * FROM approvals
-WHERE (sqlc.narg(status)::text IS NULL OR status = (sqlc.narg(status)::text)::approval_status)
+WHERE (sqlc.narg(status)::text IS NULL
+       OR (sqlc.narg(status)::text = 'pending' AND status = 'pending' AND expires_at > sqlc.arg(now)::timestamptz)
+       OR (sqlc.narg(status)::text = 'expired'
+           AND (status = 'expired' OR (status = 'pending' AND expires_at <= sqlc.arg(now)::timestamptz)))
+       OR (sqlc.narg(status)::text NOT IN ('pending', 'expired')
+           AND status = (sqlc.narg(status)::text)::approval_status))
   AND CASE WHEN sqlc.arg(mine)::bool THEN requested_by = sqlc.arg(viewer)::uuid
       ELSE requested_by <> sqlc.arg(viewer)::uuid
        AND target_id IS DISTINCT FROM sqlc.arg(viewer)::uuid

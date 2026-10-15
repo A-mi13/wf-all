@@ -21,8 +21,10 @@ var listKinds = []page.Kind{page.KindTime, page.KindUUID}
 // List — страница запросов (GET /v1/approvals): новые сверху (requested_at DESC, id DESC), next —
 // курсор следующей страницы ("" — страниц больше нет). box: BoxMine — созданные смотрящим;
 // BoxIncoming — которые он может решить: не его и не о нём, право запроса у него allow|dual, или
-// scoped и город запроса в его скоупе (как Decide). status "" — все состояния. Фильтр прав — в SQL:
-// страница не «худеет», лимит честный. limit — page.Limit (0 — 20, больше 100 — 100).
+// scoped и город запроса в его скоупе (как Decide). status "" — все состояния; ожидающий с
+// вышедшим сроком считается истёкшим в обоих ящиках (в pending его нет, в expired и без фильтра — со
+// статусом expired): решить его уже нельзя, а счётчик меню не должен звать к нему. Фильтр прав — в
+// SQL: страница не «худеет», лимит честный. limit — page.Limit (0 — 20, больше 100 — 100).
 func (s *Service) List(ctx context.Context, st *auth.Staff, box, status, cursor string, limit int) ([]Approval, string, error) {
 	if !active(st) {
 		return nil, "", ErrForbidden
@@ -34,8 +36,9 @@ func (s *Service) List(ctx context.Context, st *auth.Staff, box, status, cursor 
 		return nil, "", httpx.NewFieldError("query.status", "enum")
 	}
 	lim := page.Limit(&limit)
+	now := s.now()
 	arg := approvalsdb.ListApprovalsParams{
-		Mine: box == BoxMine, Viewer: st.StaffID,
+		Now: now, Mine: box == BoxMine, Viewer: st.StaffID,
 		Allowed: []string{}, Scoped: []string{}, CityIds: []uuid.UUID{},
 		Lim: int32(lim + 1), //nolint:gosec // page.Limit ≤ 100
 	}
@@ -75,7 +78,17 @@ func (s *Service) List(ctx context.Context, st *auth.Staff, box, status, cursor 
 	}
 	items := make([]Approval, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, toApproval(r))
+		items = append(items, effective(toApproval(r), now))
 	}
 	return items, next, nil
+}
+
+// effective — запрос, каким его видит список: ожидающий с вышедшим сроком (ExpireDue ещё не дошёл)
+// показывается истёкшим, как его и решит Approve (expired от системы в момент expires_at).
+func effective(a Approval, now time.Time) Approval {
+	if a.Status == StatusPending && !now.Before(a.ExpiresAt) {
+		at := a.ExpiresAt
+		a.Status, a.DecidedAt, a.DecidedByLabel = StatusExpired, &at, SystemLabel
+	}
+	return a
 }
