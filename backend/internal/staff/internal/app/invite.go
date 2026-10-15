@@ -265,7 +265,8 @@ func (a *App) healInviteCode(ctx context.Context, q *staffdb.Queries, inviteID u
 }
 
 // ResendInvite — повторная отправка приглашения админом (§4.3 п.4): право staff.invites.resend
-// (иначе 403 auth.forbidden), не над собой (staff.self_action), учётка есть (staff.not_found) и в
+// (иначе 403 auth.forbidden), не над собой (staff.self_action), автор в момент действия active с живой
+// сессией (M-4, checkActor), учётка есть (staff.not_found) и в
 // статусе invited (staff.wrong_stage); с выпуска последнего приглашения меньше 60 с —
 // *staff.ResendTooSoonError с остатком паузы. Новое приглашение (IssueInvite) с назначением последнего приглашения учётки — срок
 // 24 ч заново; аудит staff.invite_resent от сотрудника.
@@ -278,6 +279,14 @@ func (a *App) ResendInvite(ctx context.Context, s *auth.Staff, staffID uuid.UUID
 	}
 	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
+		// автор перепроверяется в момент действия (M-4): учётки по id — цель FOR UPDATE, автор FOR SHARE
+		locked, err := lockAccounts(ctx, q, staffID, s.StaffID)
+		if err != nil {
+			return err
+		}
+		if _, err := checkActor(ctx, q, s, locked, a.clock.Now()); err != nil {
+			return err
+		}
 		purpose, err := a.lockForResend(ctx, q, staffID, true)
 		if err != nil {
 			return err

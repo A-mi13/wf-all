@@ -7,6 +7,8 @@ package staffdb
 import (
 	"database/sql/driver"
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 type StaffInvitePurpose string
@@ -135,4 +137,9 @@ func (ns NullStaffStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.StaffStatus), nil
+}
+
+type StaffRoleCity struct {
+	StaffID uuid.UUID
+	CityID  uuid.UUID
 }

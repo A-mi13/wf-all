@@ -172,3 +172,54 @@ func mailLocale(locale string) string {
 	}
 	return i18n.Default
 }
+
+// ComposeAdminDisabled — письмо staff.admin_disabled (U1, §4.12) получателю recipient: кто выключил
+// (снимок имени автора записи; оператор — «оператор сервера»), кого (имя и почта учётки object_id
+// записи), когда (created_at записи) и причина — переведённая метка кода (staff.reasons.<код>; код —
+// часть Record.Reason до первого ": "; комментарий в письмо не попадает никогда; неизвестный код —
+// письмо без строки причины). ref — id записи аудита staff.disabled (audit.Get). mail.ErrSkip: записи
+// нет или она не staff.disabled, учётки нет, получатель — не активный владелец.
+func (a *App) ComposeAdminDisabled(ctx context.Context, ref, recipient uuid.UUID) (mail.Message, error) {
+	rec, ok, err := audit.Get(ctx, a.pool, ref)
+	if err != nil {
+		return mail.Message{}, err
+	}
+	if !ok || rec.Action != actionDisabled {
+		return mail.Message{}, mail.ErrSkip
+	}
+	q := staffdb.New(a.pool)
+	target, err := q.ManageAccountMail(ctx, rec.ObjectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mail.Message{}, mail.ErrSkip
+	}
+	if err != nil {
+		return mail.Message{}, err
+	}
+	to, ok, err := a.recipient(ctx, q, recipient, roleOwner)
+	if err != nil || !ok {
+		return mail.Message{}, err
+	}
+	byLabel := rec.ActorLabel
+	if rec.ActorRole == roleOperator {
+		if byLabel, err = a.locales.Text(to.locale, "staff.reasons."+reasonByOper, nil); err != nil {
+			return mail.Message{}, err
+		}
+	}
+	reason, hasReason := "", "no"
+	if code, _, _ := strings.Cut(rec.Reason, ": "); code == reasonByOper || slices.Contains(staff.Reasons, code) {
+		if reason, err = a.locales.Text(to.locale, "staff.reasons."+code, nil); err != nil {
+			return mail.Message{}, err
+		}
+		hasReason = "yes"
+	}
+	args := map[string]any{
+		"actor":      byLabel,
+		"name":       target.DisplayName,
+		"email":      target.Email,
+		"time":       rec.CreatedAt.UTC().Format(mailTime),
+		"has_reason": hasReason,
+		"reason":     reason,
+		"origin":     a.origin,
+	}
+	return a.compose(to, staff.MailAdminDisabled, args)
+}

@@ -21,6 +21,17 @@
     "locked": {
       "subject": "Sign-in for {name} is locked for an hour",
       "body": "The staff account of {name} ({email}) is locked for an hour after five wrong second-factor codes in a row.\n\nWhen: {time}\nNetwork: {ip}\n\nIf this was not the staff member, contact them and reset their access in the admin panel if needed: {origin}"
+    },
+    "admin_disabled": {
+      "subject": "Admin account of {name} disabled",
+      "body": "The admin account of {name} ({email}) has been disabled: sign-in and all its sessions are closed.\n\nDisabled by: {actor}\nWhen: {time}{has_reason, select, yes {\nReason: {reason}} other {}}\n\nIf you did not expect this, check the activity log in the admin panel: {origin}"
+    },
+    "reasons": {
+      "left_team": "Left the team",
+      "security": "Security (leak, lost device)",
+      "role_change": "Change of duties",
+      "other": "Other",
+      "operator": "server operator"
     }
   }
 }

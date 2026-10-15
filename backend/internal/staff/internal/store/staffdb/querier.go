@@ -113,6 +113,54 @@ type Querier interface {
 	// Живая или погашенная — решает сценарий (заменённая — гонка двух вкладок).
 	LockSession(ctx context.Context, id uuid.UUID) (LockSessionRow, error)
 	LockUnusedRecoveryCodes(ctx context.Context, staffID uuid.UUID) ([]LockUnusedRecoveryCodesRow, error)
+	// Письмо staff.admin_disabled: кого выключили.
+	ManageAccountMail(ctx context.Context, id uuid.UUID) (ManageAccountMailRow, error)
+	// Инициатор запроса без замка (предварительная проверка инициатора; под замком её повторяет
+	// исполнитель).
+	ManageAccountState(ctx context.Context, id uuid.UUID) (ManageAccountStateRow, error)
+	// Смена роли или городов: версия агрегата растёт (сверка подтверждений, D17).
+	ManageBumpVersion(ctx context.Context, id uuid.UUID) (int64, error)
+	// Города модераторов ids.
+	ManageCitiesOf(ctx context.Context, ids []uuid.UUID) ([]StaffRoleCity, error)
+	// Активные владельцы, кроме staff_id.
+	ManageCountOtherActiveOwners(ctx context.Context, staffID uuid.UUID) (int64, error)
+	// Все города сотрудника (перед записью нового списка; отложенный триггер проверит итог на коммите).
+	ManageDeleteCities(ctx context.Context, staffID uuid.UUID) error
+	// Выключение (снять роль): вход закрыт, версия растёт.
+	ManageDisable(ctx context.Context, id uuid.UUID) (int64, error)
+	// Учётка по нормализованной почте без замка (приглашение: занята ли почта, выключенная — вернуть её).
+	ManageFindByEmail(ctx context.Context, email string) (ManageFindByEmailRow, error)
+	// Карточка сотрудника.
+	ManageGetAccount(ctx context.Context, id uuid.UUID) (ManageGetAccountRow, error)
+	// Сколько городов из ids существует. Города — справочник geo: только экспортированное представление
+	// (спека бэкенда §4.2).
+	ManageKnownCities(ctx context.Context, ids []uuid.UUID) (int32, error)
+	// Страница «Роли и доступ»: новые сверху, keyset (created_at, id). q — начало почты или имени без учёта
+	// регистра (шаблон LIKE с экранированными % и _ строит сценарий).
+	ManageListAccounts(ctx context.Context, arg ManageListAccountsParams) ([]ManageListAccountsRow, error)
+	// Живые приглашения учёток ids: назначение, срок и выпуск (у живого код есть всегда).
+	ManageLiveInvites(ctx context.Context, ids []uuid.UUID) ([]ManageLiveInvitesRow, error)
+	// Цель управления под замком (выключение, сброс, роль, сессии, приглашение).
+	ManageLockAccount(ctx context.Context, id uuid.UUID) (ManageLockAccountRow, error)
+	// Управление сотрудниками (спека сотрудников §2.6, §4.9, D16, D17): список и карточка, роль и города,
+	// выключение, сброс доступа, страж последнего владельца, исполнители подтверждений staff.*.
+	// Порядок замков: pg_advisory_xact_lock(staff_owners) (где возможен страж последнего владельца) →
+	// учётки по возрастанию id (цель — FOR UPDATE, автор, инициатор и подтверждающий — FOR SHARE) →
+	// сессии → staff_mfa → резервные коды → приглашения.
+	// Страж последнего владельца (D17): все пути снятия, выключения, сброса и понижения активного
+	// владельца сериализуются этим замком до коммита; счёт владельцев — следующим оператором, уже после
+	// замка (READ COMMITTED: свежий снимок видит коммит соседа).
+	ManageOwnersLock(ctx context.Context, key int64) error
+	// Сброс доступа: пароля нет, блокировка второго фактора снята, статус invited, версия растёт;
+	// display_name задан — новое имя (повторное приглашение выключенной учётки).
+	ManageResetAccess(ctx context.Context, arg ManageResetAccessParams) (int64, error)
+	// Сессия автора или подтверждающего: жива ли (учётка уже под замком — гашение сессий идёт под ним же).
+	ManageSessionState(ctx context.Context, id uuid.UUID) (ManageSessionStateRow, error)
+	// Новая роль (granted_by — кто выдал; NULL — оператор).
+	ManageSetRole(ctx context.Context, arg ManageSetRoleParams) error
+	// Автор, инициатор или подтверждающий под разделяемым замком: пока действие идёт, его нельзя
+	// выключить, сбросить или сменить ему роль (M-4, m4).
+	ManageShareAccount(ctx context.Context, id uuid.UUID) (ManageShareAccountRow, error)
 	// Повторная отправка самим (§4.3 п.3): тот же код (строка не перешифровывается — решение
 	// пользователя 14.10.2026), отправка +1, срок не меняется.
 	MarkInviteResent(ctx context.Context, arg MarkInviteResentParams) (int32, error)

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
+	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/i18n"
 	"wf/backend/internal/platform/keys"
@@ -74,6 +75,8 @@ const (
 	reasonLocked          = "locked"
 	reasonPasswordChanged = "password_changed" // другие сессии при смене пароля
 	reasonReplaced        = "replaced"
+	reasonDisabled        = "disabled"     // выключение учётки (8b)
+	reasonAccessReset     = "access_reset" // сброс доступа (8b)
 )
 
 // Действия аудита и тип объекта.
@@ -95,17 +98,22 @@ const (
 	actionRecoveryRegenerated = "staff.recovery_regenerated"
 	actionBootstrapped        = "staff.bootstrapped"
 	actionRekeyed             = "staff.rekeyed"
-	methodTOTP                = "totp"
-	methodRecovery            = "recovery"
-	objectAccount             = "staff_account"
-	roleAnonymous             = "anonymous"
-	roleSystem                = "system"
-	roleOperator              = "operator" // подкоманды admin-api staff …: роль и метка автора аудита
-	statusActive              = "active"
-	statusInvited             = "invited"
-	statusDisabled            = "disabled"
-	roleOwner, roleAdmin      = "owner", "admin"
-	objectStaffKeys           = "staff_keys" // объект аудита rekey: кольцо ADMIN_STAFF_SECRET_KEYS
+	// управление сотрудниками (Task 8b)
+	actionInvited        = "staff.invited"      // исполнено приглашение (новая учётка или выключенная — снова)
+	actionRoleChanged    = "staff.role_changed" // роль и города (было/стало)
+	actionDisabled       = "staff.disabled"     // учётка выключена; id записи — ref письма staff.admin_disabled
+	actionAccessReset    = "staff.access_reset" // доступ сброшен
+	methodTOTP           = "totp"
+	methodRecovery       = "recovery"
+	objectAccount        = "staff_account"
+	roleAnonymous        = "anonymous"
+	roleSystem           = "system"
+	roleOperator         = "operator" // подкоманды admin-api staff …: роль и метка автора аудита
+	statusActive         = "active"
+	statusInvited        = "invited"
+	statusDisabled       = "disabled"
+	roleOwner, roleAdmin = "owner", "admin"
+	objectStaffKeys      = "staff_keys" // объект аудита rekey: кольцо ADMIN_STAFF_SECRET_KEYS
 )
 
 // Назначения приглашения (staff_invite_purpose) и право повторной отправки админом.
@@ -144,6 +152,8 @@ type App struct {
 	origin  string
 	locales *i18n.Catalog
 	log     *slog.Logger
+	// approvals — подтверждения вдвоём; задаёт RegisterApprovals (сборка admin-api, 10c)
+	approvals *approvals.Service
 }
 
 // New — сценарии на зависимостях admin-api.

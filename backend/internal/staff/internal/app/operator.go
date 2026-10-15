@@ -10,6 +10,7 @@ import (
 
 	"wf/backend/internal/platform/audit"
 	"wf/backend/internal/platform/db"
+	"wf/backend/internal/platform/events"
 	"wf/backend/internal/staff"
 	"wf/backend/internal/staff/internal/domain"
 	"wf/backend/internal/staff/internal/store/staffdb"
@@ -17,7 +18,7 @@ import (
 
 // Операции оператора (спека §4.2): подкоманды admin-api staff … — доступ к серверу корень доверия,
 // матрицей прав они не ограничены, аудит — actor_role = operator. Обёртки с --print-code — 10c;
-// OperatorResetAccess и OperatorDisable — 8b.
+// OperatorResetAccess и OperatorDisable — ниже (Task 8b).
 
 // OperatorBootstrap — новый владелец (§4.2, U2) в одной транзакции: учётка owner в статусе invited
 // (почта и имя — по правилам приглашения, validateInvitee; почта занята в любом статусе —
@@ -278,4 +279,68 @@ func ignoreNoRows(err error) error {
 		return nil
 	}
 	return err
+}
+
+// operatorTarget — учётка по почте под замком для подкоманды оператора; кривая почта или нет учётки —
+// staff.ErrNotFound.
+func operatorTarget(ctx context.Context, q *staffdb.Queries, email string) (acct, error) {
+	norm, ok := domain.NormalizeEmail(email)
+	if !ok {
+		return acct{}, staff.ErrNotFound
+	}
+	r, err := q.LockAccountByEmail(ctx, norm)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return acct{}, staff.ErrNotFound
+	}
+	if err != nil {
+		return acct{}, err
+	}
+	return acct{id: r.ID, status: r.Status, role: r.Role, name: r.DisplayName, email: norm, version: r.Version}, nil
+}
+
+// OperatorResetAccess — сброс доступа оператором (§4.2: единственный владелец потерял 2FA): как
+// исполнение staff.access_reset, но без прав, без подтверждения и БЕЗ стража последнего владельца
+// (выход из тупика, §2.6). Учётка любого статуса (выключенная — тоже: оператор — корень доверия).
+// Аудит staff.access_reset от оператора (причина operator). Возвращает код приглашения (печатается
+// только с --print-code).
+func (a *App) OperatorResetAccess(ctx context.Context, email string) (string, error) {
+	var code string
+	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
+		q := staffdb.New(tx)
+		t, err := operatorTarget(ctx, q, email)
+		if err != nil {
+			return err
+		}
+		code, err = a.resetAccess(ctx, tx, q, t, resetSpec{
+			by: operatorActor, action: actionAccessReset, reason: reasonByOper,
+			after: map[string]any{"status": statusInvited}, purpose: purposeAccessReset,
+			event: func(v int64) events.Event { return staff.AccessResetEvent(t.id, v) },
+		})
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+// OperatorDisable — выключение оператором (§4.2: снять одного из двух владельцев, когда подтвердить
+// некому): без прав и подтверждения, но под стражем последнего владельца (staff.ErrLastOwner). Уже
+// выключена — staff.ErrWrongStage. Аудит staff.disabled от оператора (причина operator); выключен
+// админ — письмо staff.admin_disabled всем активным владельцам (U1).
+func (a *App) OperatorDisable(ctx context.Context, email string) error {
+	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
+		q := staffdb.New(tx)
+		if err := lockOwners(ctx, q); err != nil {
+			return err
+		}
+		t, err := operatorTarget(ctx, q, email)
+		if err != nil {
+			return err
+		}
+		if t.status == statusDisabled {
+			return staff.ErrWrongStage
+		}
+		return a.disable(ctx, tx, q, t, operatorActor, uuid.Nil, reasonByOper, staff.Meta{})
+	})
 }

@@ -59,3 +59,11 @@ func (a *App) FailFactor(ctx context.Context, s *auth.Staff, step string, m staf
 			return staff.ErrPasswordInvalid, nil
 		})
 }
+
+// InitiatorValid — предикат проверки инициатора (D17, I1): статус, закрытость, версия и право по роли.
+func InitiatorValid(status, role string, version int64, lockedUntil *time.Time, initID uuid.UUID, initVer int64, permission string, now time.Time) bool {
+	return initiatorValid(status, role, version, lockedUntil, payloadBase{V: 1, InitID: initID, InitVer: initVer}, permission, uuid.Nil, now)
+}
+
+// OwnersLockKey — ключ замка стража последнего владельца (тест держит его, чтобы выстроить очередь).
+const OwnersLockKey = ownersLockKey
