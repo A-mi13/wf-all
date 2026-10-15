@@ -18,7 +18,8 @@ type Querier interface {
 	// Решение ожидающего запроса; строка уже под замком LockApproval, условие pending — страховка.
 	DecideApproval(ctx context.Context, arg DecideApprovalParams) (Approval, error)
 	// Порция просроченных ожидающих (expires_at <= now) → expired от системы. SKIP LOCKED: строку под
-	// замком решения переводит само решение (Approve/Reject/Cancel проверяют срок под замком).
+	// замком решения переводит само решение (Approve/Reject/Cancel проверяют срок под замком). Время решения
+	// истёкшего — его срок (expires_at), а не время тика: список показывает тот же срок до тика и после.
 	ExpireDueBatch(ctx context.Context, arg ExpireDueBatchParams) ([]Approval, error)
 	// Подтверждение вдвоём (спека сотрудников §4.8, D2, D17): таблица платформы approvals, роль admin.
 	// Статус пишется текстом с приведением к approval_status: запросы не зависят от Go-типа перечисления.

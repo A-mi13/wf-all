@@ -382,11 +382,16 @@ type actor struct {
 	meta  Meta
 }
 
-// decide — переход ожидающего запроса в status с аудитом и событием в транзакции tx (ctx — её).
+// decide — переход ожидающего запроса в status с аудитом и событием в транзакции tx (ctx — её). Время
+// решения истёкшего — его срок (expires_at), как у ExpireDue и в списках, а не время клика.
 func (s *Service) decide(ctx context.Context, tx pgx.Tx, row approvalsdb.Approval, status string, by *actor,
 	comment, errText *string) (Approval, error) {
+	at := s.now()
+	if status == StatusExpired {
+		at = row.ExpiresAt
+	}
 	arg := approvalsdb.DecideApprovalParams{ID: row.ID, Status: status, DecidedByLabel: SystemLabel,
-		DecidedAt: s.now(), DecisionComment: comment, Error: errText}
+		DecidedAt: at, DecisionComment: comment, Error: errText}
 	if by != nil {
 		arg.DecidedBy, arg.DecidedByLabel = &by.staff.StaffID, by.label
 	}

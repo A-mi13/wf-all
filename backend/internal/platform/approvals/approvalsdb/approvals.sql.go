@@ -124,7 +124,7 @@ func (q *Queries) DecideApproval(ctx context.Context, arg DecideApprovalParams) 
 
 const expireDueBatch = `-- name: ExpireDueBatch :many
 UPDATE approvals
-SET status = 'expired', decided_by_label = 'system', decided_at = $1::timestamptz
+SET status = 'expired', decided_by_label = 'system', decided_at = expires_at
 WHERE id IN (SELECT a.id FROM approvals a
              WHERE a.status = 'pending' AND a.expires_at <= $1::timestamptz
              ORDER BY a.expires_at, a.id
@@ -140,7 +140,8 @@ type ExpireDueBatchParams struct {
 }
 
 // Порция просроченных ожидающих (expires_at <= now) → expired от системы. SKIP LOCKED: строку под
-// замком решения переводит само решение (Approve/Reject/Cancel проверяют срок под замком).
+// замком решения переводит само решение (Approve/Reject/Cancel проверяют срок под замком). Время решения
+// истёкшего — его срок (expires_at), а не время тика: список показывает тот же срок до тика и после.
 func (q *Queries) ExpireDueBatch(ctx context.Context, arg ExpireDueBatchParams) ([]Approval, error) {
 	rows, err := q.db.Query(ctx, expireDueBatch, arg.Now, arg.Lim)
 	if err != nil {
