@@ -10,9 +10,10 @@ paths:
 
 - **Пакеты без циклов (P1–P5).** Корень `staff` — только `Deps`, `Meta`, DTO, ошибки (`Err*`, `MFAError`,
   `RateLimitError`, `ResendTooSoonError`, `CodeOf`), коды (`codes.go`, сверка с контрактом —
-  `TestStaffCodesDocumented` в `admin`), события (`events.go`) и задача письма (`MailArgs`, `NewMailArgs`, очередь `queue.Staff`); корень не
-  импортирует `internal/app`, `admin`, `jobs` (страж `TestRootDoesNotImportInnerPackages`). SQL — только
-  `staff_*` (`queries/` → `internal/store/staffdb`, генерация — `go tool -modfile=tools/go.mod sqlc generate`).
+  `TestStaffCodesDocumented` в `admin`), события (`events.go`) и задача письма (`MailArgs`, `NewMailArgs`,
+  очередь `queue.Staff`); корень не импортирует `internal/app`, `admin`, `jobs` (страж
+  `TestRootDoesNotImportInnerPackages`). SQL — только `staff_*` (`queries/` → `internal/store/staffdb`,
+  генерация — `go tool -modfile=tools/go.mod sqlc generate`).
 - **Права** — `perm.Grants(role)` при загрузке сессии (`LoadStaff`); модуль своих матриц не держит.
 - **Блокировки строк — всегда в порядке учётка → сессия → `staff_mfa` → резервные коды** (`LockAccount`,
   `LockSession`, `LockMFA`, `LockUnusedRecoveryCodes`). Иначе блокировка (гасит все сессии под замком учётки) и
