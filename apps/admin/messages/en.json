@@ -349,6 +349,7 @@
     "subtitle": "Second factor, recovery codes and active sessions",
     "mfa_on": "2FA on",
     "locked": "Access is closed for an hour: five wrong codes or passwords in a row. We have notified the administrators. If it was not you, contact an owner or an admin.",
+    "reauth_retry": "Sign-in confirmed. A second-factor code works only once — enter a new code: the action has not been done yet.",
     "mfa": {
       "title": "Second factor",
       "on": "Second factor is on",

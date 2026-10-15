@@ -15,7 +15,7 @@ export type ConfirmDialogProps = {
   title: ReactNode; // «Сбросить доступ Марии?»
   text?: ReactNode; // что произойдёт, aria-describedby
   consequences?: ReactNode[]; // список последствий (макет 07: точки danger)
-  // Что ввести руками: слово («СБРОСИТЬ») или почта цели. Совпадение — точное, с учётом регистра.
+  // Что ввести руками: слово («СБРОСИТЬ») или почта цели. Совпадение — точное, с учётом регистра; пробелы по краям не считаются.
   confirmWord: string;
   confirmLabel: string; // подпись кнопки подтверждения
   note?: ReactNode; // мелкий текст под кнопками («Действие попадёт в журнал…»)
@@ -63,7 +63,8 @@ function ConfirmBody({
   const t = useTranslations('ui.confirm');
   const id = useId();
   const [value, setValue] = useState('');
-  const matches = value === confirmWord;
+  // пробелы по краям (вставка почты из письма) не мешают; регистр — строго, как задумано для слова
+  const matches = value.trim() === confirmWord;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -91,7 +92,7 @@ function ConfirmBody({
         autoComplete="off"
         autoCapitalize="off"
         spellCheck={false}
-        disabled={loading}
+        readOnly={loading} // не disabled: фокус в поле не падает на body, пока идёт запрос
       />
       <FormError error={error ?? null} />
       <div className={styles.actions}>

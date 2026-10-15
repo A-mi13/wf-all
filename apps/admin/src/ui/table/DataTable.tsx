@@ -40,9 +40,11 @@ export function DataTable<T>(props: DataTableProps<T>) {
   return (
     <div className={styles.root}>
       <Toolbar {...props} />
-      {rows !== undefined && (
+      {rows !== undefined && (props.summary !== false || reset) && (
         <div className={styles.summary}>
-          <span className={styles.shown}>{t('shown', { count: rows.length })}</span>
+          {props.summary !== false && (
+            <span className={styles.shown}>{t('shown', { count: rows.length })}</span>
+          )}
           {reset}
         </div>
       )}

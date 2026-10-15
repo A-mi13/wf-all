@@ -38,6 +38,8 @@ export type DataTableProps<T> = {
   onSortChange?: (sort: SortState) => void;
   // Пусто без фильтров — своё состояние экрана («Очередь пуста»); по умолчанию «Ничего не нашлось».
   empty?: ReactNode;
+  // «Показано N» под панелью; false — статичная таблица (матрица прав), где число строк не нужно.
+  summary?: boolean;
   onRowClick?: (row: T) => void;
   activeRowKey?: string; // строка, открытая в панели справа
 };

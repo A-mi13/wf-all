@@ -18,18 +18,48 @@ describe('Button', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  test('loading: недоступна, aria-busy, клик не доходит', async () => {
+  // Ревью Task 14: disabled снимает фокус с нажатой кнопки — в браузере он падает на body (WCAG
+  // 2.4.3), в оверлее — мимо диалога. Поэтому loading — aria-disabled: кнопка остаётся в порядке
+  // фокуса, а клик (мышью, Enter, неявная отправка формы) гасится.
+  test('loading: aria-disabled и aria-busy без disabled — фокус остаётся, клик и отправка гасятся', async () => {
     const onClick = vi.fn();
-    const { user } = renderWithIntl(
-      <Button loading onClick={onClick}>
+    const onSubmit = vi.fn((e: { preventDefault(): void }) => e.preventDefault());
+    const { user, rerender } = renderWithIntl(
+      <form onSubmit={onSubmit}>
+        <input aria-label="Поле" />
+        <Button type="submit" onClick={onClick}>
+          Сохранить
+        </Button>
+      </form>,
+    );
+    const b = screen.getByRole('button', { name: 'Сохранить' });
+    b.focus();
+    rerender(
+      <form onSubmit={onSubmit}>
+        <input aria-label="Поле" />
+        <Button type="submit" loading onClick={onClick}>
+          Сохранить
+        </Button>
+      </form>,
+    );
+    expect(b).not.toHaveAttribute('disabled');
+    expect(b).toHaveAttribute('aria-disabled', 'true');
+    expect(b).toHaveAttribute('aria-busy', 'true');
+    expect(b).toHaveFocus();
+    await user.click(b);
+    await user.keyboard('{Enter}');
+    await user.type(screen.getByLabelText('Поле'), 'x{Enter}');
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test('loading и disabled вместе — disabled', () => {
+    renderWithIntl(
+      <Button loading disabled>
         Сохранить
       </Button>,
     );
-    const b = screen.getByRole('button', { name: 'Сохранить' });
-    expect(b).toBeDisabled();
-    expect(b).toHaveAttribute('aria-busy', 'true');
-    await user.click(b);
-    expect(onClick).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
   });
 
   test('disabled и варианты', () => {

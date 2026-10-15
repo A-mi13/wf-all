@@ -136,3 +136,51 @@ test('children — над вводом слова; error — текст по к�
   );
   expect(input).toHaveValue('ivan@xn--d1acufc.xn--p1ai');
 });
+
+// Ревью Task 14 (M2, дефект 1): во время запроса фокус не падает на body — поле только для чтения,
+// кнопка aria-disabled; повторное подтверждение не уходит.
+test('loading: поле readOnly, кнопка aria-disabled — фокус остаётся в диалоге', async () => {
+  const onConfirm = vi.fn();
+  function Flow() {
+    const [loading, setLoading] = useState(false);
+    return (
+      <ConfirmDialog
+        open
+        onClose={vi.fn()}
+        onConfirm={() => {
+          onConfirm();
+          setLoading(true);
+        }}
+        title="Выключить?"
+        confirmWord="ДА"
+        confirmLabel="Выключить"
+        loading={loading}
+      />
+    );
+  }
+  const { user } = renderWithIntl(<Flow />);
+  const input = screen.getByLabelText(/Введите/);
+  await user.type(input, 'ДА{Enter}');
+  const confirm = screen.getByRole('button', { name: 'Выключить' });
+  expect(input).not.toBeDisabled();
+  expect(input).toHaveAttribute('readonly');
+  expect(input).toHaveFocus();
+  expect(confirm).toHaveAttribute('aria-disabled', 'true');
+  await user.click(confirm);
+  await user.type(input, '{Enter}');
+  expect(onConfirm).toHaveBeenCalledTimes(1);
+});
+
+// Ревью Task 14, M6: почта, вставленная из письма с пробелом по краю, — та же почта.
+test('пробелы по краям не мешают, регистр — мешает', async () => {
+  const { user, onConfirm } = await open('ivan@xn--d1acufc.xn--p1ai');
+  const input = screen.getByLabelText(/Введите/);
+  const confirm = screen.getByRole('button', { name: 'Сбросить' });
+  await user.type(input, ' IVAN@xn--d1acufc.xn--p1ai ');
+  expect(confirm).toBeDisabled();
+  await user.clear(input);
+  await user.type(input, ' ivan@xn--d1acufc.xn--p1ai ');
+  expect(confirm).toBeEnabled();
+  await user.click(confirm);
+  expect(onConfirm).toHaveBeenCalledTimes(1);
+});

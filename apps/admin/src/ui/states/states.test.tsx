@@ -103,7 +103,7 @@ describe('ErrorState', () => {
     renderWithIntl(<ErrorState error={new TypeError('x')} onRetry={retry} retrying />);
     const button = screen.getByRole('button', { name: 'Повторить' });
     expect(button).toHaveAttribute('aria-busy', 'true');
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-disabled', 'true'); // loading — aria-disabled (фокус не теряется)
     fireEvent.click(button);
     expect(retry).not.toHaveBeenCalled();
   });

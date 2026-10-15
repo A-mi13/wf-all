@@ -112,6 +112,8 @@ describe('кто имеет доступ', () => {
     expect(screen.queryByRole('table', { name: 'Сотрудники' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Пригласить сотрудника' })).toBeNull();
     expect(seen.list).toHaveLength(0);
+    // у матрицы нет «Показано N» — число прав ничего не говорит
+    expect(screen.queryByText(/Показано/)).toBeNull();
   });
 
   test('статусы из invite и status; своя строка — «это вы» без действий', async () => {
@@ -158,6 +160,9 @@ describe('кто имеет доступ', () => {
     await within(table).findByText('Мария К.');
     expect(within(rowOf(table, 'Ольга В.')).queryByRole('button')).toBeNull();
     expect(within(rowOf(table, 'Игорь Л.')).queryByRole('button')).toBeNull();
+    // своя строка админа — «это вы» (id строки = meAdmin.id)
+    expect(rowOf(table, 'Игорь Л.')).toHaveTextContent('это вы');
+    expect(rowOf(table, 'Ольга В.')).not.toHaveTextContent('это вы');
     expect(
       within(rowOf(table, 'Мария К.')).getByRole('button', { name: 'Управлять: Мария К.' }),
     ).toBeInTheDocument();

@@ -247,6 +247,55 @@ describe('перевыпуск резервных кодов', () => {
 
   // Сервер мог уже выпустить новые коды (старые сгорели): окно, закрытое посреди запроса, потеряло
   // бы их навсегда.
+  // Ревью I1: разблокировка кодом из приложения сдвигает last_used_step — повтор того же кода сервер
+  // отверг бы как staff.mfa_invalid и засчитал неудачу. Запрос не повторяется, код стёрт, просим новый.
+  test('после разблокировки запрос с тем же кодом не повторяется — ячейки пусты, «введите новый код»', async () => {
+    const seen = regenServer(() =>
+      seen.regen.length === 1 ? problem(401, 'auth.reauth_required') : null,
+    );
+    let unlocks = 0;
+    server.use(
+      http.post('/v1/staff/auth/unlock', ({ response }) => {
+        unlocks++;
+        return response(204).empty();
+      }),
+    );
+    renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Перевыпустить коды' }));
+    const dialog = screen.getByRole('dialog', { name: 'Новые резервные коды' });
+    await enterCode(user, dialog, '492817');
+    const reauth = await screen.findByRole('dialog', { name: 'Подтвердите вход' });
+    await enterCode(user, reauth, '730415');
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Подтвердите вход' })).toBeNull(),
+    );
+    expect(unlocks).toBe(1);
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/введите новый код/);
+    await waitFor(() => expect(digits(dialog)).toBe(''));
+    expect(seen.regen).toEqual([{ code: '492817' }]);
+
+    // новый код — новый запрос
+    await enterCode(user, dialog, '118274');
+    expect(await within(dialog).findByRole('list', { name: 'Резервные коды' })).toBeInTheDocument();
+    expect(seen.regen).toEqual([{ code: '492817' }, { code: '118274' }]);
+  });
+
+  test('коды на экране — Esc, фон и «×» окно не закрывают, только «Готово»', async () => {
+    regenServer(() => null);
+    renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Перевыпустить коды' }));
+    const dialog = screen.getByRole('dialog', { name: 'Новые резервные коды' });
+    await enterCode(user, dialog, '492817');
+    await within(dialog).findByRole('list', { name: 'Резервные коды' });
+    await user.keyboard('{Escape}');
+    expect(within(dialog).getByRole('list', { name: 'Резервные коды' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Закрыть' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Готово' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   test('пока запрос идёт, окно не закрывается; ответ показывает коды', async () => {
     accessServer();
     let release: () => void = () => {};
@@ -491,6 +540,37 @@ describe('смена пароля', () => {
     await waitFor(() => expect(digits(form)).toBe(''));
     // пароли остались — ошибся только код
     expect(within(form).getByLabelText('Текущий пароль')).toHaveValue('Жёлтая карточка на 90-й');
+  });
+
+  test('password_invalid без attempts_left — общий текст по коду, а не немая ошибка', async () => {
+    passwordServer(() => problem(400, 'staff.password_invalid'));
+    renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    await page();
+    const form = card('Смена пароля');
+    await fill(user, form);
+    await user.click(within(form).getByRole('button', { name: 'Сменить пароль' }));
+    expect(await within(form).findByRole('alert')).toHaveTextContent('Текущий пароль неверный');
+  });
+
+  test('после разблокировки смена пароля не повторяется: код стёрт, пароли на месте, «введите новый код»', async () => {
+    const seen = passwordServer(() =>
+      seen.password.length === 1 ? problem(401, 'auth.reauth_required') : null,
+    );
+    server.use(http.post('/v1/staff/auth/unlock', ({ response }) => response(204).empty()));
+    renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    await page();
+    const form = card('Смена пароля');
+    await fill(user, form);
+    await user.click(within(form).getByRole('button', { name: 'Сменить пароль' }));
+    const reauth = await screen.findByRole('dialog', { name: 'Подтвердите вход' });
+    await enterCode(user, reauth, '730415');
+    expect(await within(form).findByRole('alert')).toHaveTextContent(/введите новый код/);
+    await waitFor(() => expect(digits(form)).toBe(''));
+    expect(within(form).getByLabelText('Текущий пароль')).toHaveValue('Жёлтая карточка на 90-й');
+    expect(within(form).getByLabelText('Новый пароль')).toHaveValue('Свисток на 46-й минуте');
+    expect(seen.password).toHaveLength(1);
   });
 
   test('attempts_left = 0 — тост «доступ закрыт на час» и refresh() → вход', async () => {

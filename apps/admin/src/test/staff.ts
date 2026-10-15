@@ -1,5 +1,5 @@
 import type { components } from '../api/gen/admin';
-import { CITY_OTHER, CITY_OWN, meOwner } from './me';
+import { CITY_OTHER, CITY_OWN, meAdmin, meOwner } from './me';
 import { problem } from './problem';
 import { http, server } from './server';
 
@@ -44,8 +44,9 @@ export const TEAM = [
   ME_ROW,
   account(),
   account({
-    id: '0192f1c4-1111-7b21-9c5d-000000000002',
-    email: 'igor.l@wf.example',
+    // строка самого админа (meAdmin): для админа — «это вы»
+    id: meAdmin.id ?? '',
+    email: meAdmin.email ?? '',
     display_name: 'Игорь Л.',
     role: 'admin',
     city_ids: [],

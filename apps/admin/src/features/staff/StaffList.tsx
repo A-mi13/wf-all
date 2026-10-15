@@ -1,5 +1,4 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
@@ -22,6 +21,7 @@ import {
 import { ACCOUNTS_KEY, useRoleLabel } from './queries';
 import { hasActions, ROLES, type StaffAccount, staffActions } from './roles';
 import { type StaffSearch, STATUSES } from './search';
+import { useStaffStatus } from './status';
 import styles from './staff.module.css';
 
 const ROLE_TONE: Record<string, ChipTone> = {
@@ -52,8 +52,7 @@ export function StaffList({
   const roleLabel = useRoleLabel();
   const dateTime = useDateTime();
   const { q, status, role } = search;
-  // «сейчас» для «вход закрыт»: locked_until в прошлом — вход уже открыт
-  const [now] = useState(() => Date.now());
+  const statusOf = useStaffStatus();
 
   const list = useInfiniteQuery({
     queryKey: [...ACCOUNTS_KEY, 'list', { q, status, role }],
@@ -78,19 +77,6 @@ export function StaffList({
 
   // Роль — поле «Ещё фильтры». Значение формы — из адреса; изменение сразу уходит в адрес.
   const roleForm = useForm<{ role: string }>({ values: { role: role ?? '' } });
-
-  const statusOf = (a: StaffAccount): { tone: ChipTone; text: string } => {
-    if (a.status === 'disabled') return { tone: 'neutral', text: t('status.disabled') };
-    if (a.status === 'invited')
-      return a.invite?.expired
-        ? { tone: 'danger', text: t('status.expired') }
-        : { tone: 'warning', text: t('status.invited') };
-    if (a.status === 'active')
-      return a.locked_until && Date.parse(a.locked_until) > now
-        ? { tone: 'danger', text: t('status.locked') }
-        : { tone: 'success', text: t('status.active') };
-    return { tone: 'neutral', text: t('status.unknown') };
-  };
 
   const columns: Column<StaffAccount>[] = [
     {

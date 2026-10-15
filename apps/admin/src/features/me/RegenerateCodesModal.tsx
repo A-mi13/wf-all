@@ -1,7 +1,7 @@
 import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
-import { type ApiError, unwrap } from '../../api/client';
+import { type ApiError, noReplay, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import { Button, Modal, OtpInput, type OtpInputHandle, useCountdown, useErrorText } from '../../ui';
@@ -16,7 +16,10 @@ import { MY_MFA_KEY } from './queries';
 // состоянии (закрытый оверлей не рендерится), мутация — gcTime 0 (ни кодов, ни TOTP в кэше
 // мутаций после окна). Неудачи считаются в блокировку: attempts_left = 0 — useLockout. Пока запрос
 // идёт, окно не закрывается: сервер уже мог выпустить новые коды (старые сгорели), и закрытое окно
-// потеряло бы их.
+// потеряло бы их. Пока коды на экране, окно закрывает только «Готово» (Esc, фон и «×» — нет): старые
+// коды уже сгорели, и случайное закрытие оставило бы сотрудника без кодов при «10 из 10».
+// После разблокировки сессии запрос не повторяется (noReplay, ревью I1): код из приложения
+// одноразовый — экран стирает его и просит новый.
 const REGENERATE_KEY = ['staff', 'my', 'recovery-codes'] as const;
 
 export function RegenerateCodesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -26,7 +29,7 @@ export function RegenerateCodesModal({ open, onClose }: { open: boolean; onClose
   return (
     <Modal
       open={open}
-      dismissible={!busy}
+      dismissible={!busy && !codes}
       onClose={() => {
         setCodes(null);
         onClose();
@@ -54,6 +57,7 @@ export function RegenerateCodesModal({ open, onClose }: { open: boolean; onClose
 function CodeStep({ onIssued }: { onIssued: (codes: string[]) => void }) {
   const t = useTranslations('me.regenerate');
   const tm = useTranslations('auth.mfa');
+  const tme = useTranslations('me');
   const api = useApi();
   const queryClient = useQueryClient();
   const errorText = useErrorText();
@@ -71,6 +75,7 @@ function CodeStep({ onIssued }: { onIssued: (codes: string[]) => void }) {
         api.POST('/v1/staff/me/mfa/recovery-codes', {
           params: { header: { 'Idempotency-Key': key } },
           body: v,
+          ...noReplay(),
         }),
       ),
     {
@@ -105,9 +110,11 @@ function CodeStep({ onIssued }: { onIssued: (codes: string[]) => void }) {
   const message =
     !failure || (failure.code === 'ratelimit.exceeded' && !limited)
       ? null
-      : failure.code === 'staff.mfa_invalid' && failure.attemptsLeft !== undefined
-        ? tm('invalid', { count: failure.attemptsLeft })
-        : errorText(failure);
+      : failure.code === 'auth.reauth_required'
+        ? tme('reauth_retry')
+        : failure.code === 'staff.mfa_invalid' && failure.attemptsLeft !== undefined
+          ? tm('invalid', { count: failure.attemptsLeft })
+          : errorText(failure);
 
   return (
     <div className={styles.factor}>

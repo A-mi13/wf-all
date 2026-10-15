@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { type ReactNode, useEffect } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { IntlProvider } from 'use-intl';
 import type { Me } from '../app/permissions';
 import { ME_KEY } from '../app/query';
@@ -25,13 +25,16 @@ export function useApplyLocale(): (locale: Locale) => void {
   return (locale) => queryClient.setQueryData<Me>(ME_KEY, (me) => (me ? { ...me, locale } : me));
 }
 
+// Часовой пояс дат — браузера сотрудника: журнал и сеансы читаются в его местном времени. Задан явно:
+// без него use-intl на каждом форматировании пишет ENVIRONMENT_FALLBACK в консоль.
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const locale = useLocale();
+  const [timeZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
   return (
-    <IntlProvider locale={locale} messages={messagesFor(locale)}>
+    <IntlProvider locale={locale} messages={messagesFor(locale)} timeZone={timeZone}>
       {children}
     </IntlProvider>
   );

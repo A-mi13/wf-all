@@ -447,3 +447,20 @@ test('поиск: одно значение отправлено дважды �
   act(() => ctl.set?.('abc'));
   expect(box).toHaveValue('abc');
 });
+
+// Статичная таблица (матрица прав, Task 14): число строк ничего не говорит — сводку можно убрать.
+test('summary={false} — без «Показано N», строки на месте', () => {
+  renderWithProviders(
+    <DataTable
+      label="Матрица"
+      columns={columns}
+      rowKey={(a) => a.id}
+      rows={[account(1), account(2)]}
+      onRetry={() => {}}
+      summary={false}
+    />,
+  );
+  expect(screen.getByRole('table', { name: 'Матрица' })).toBeInTheDocument();
+  expect(screen.getAllByRole('row')).toHaveLength(3);
+  expect(screen.queryByText(/Показано/)).toBeNull();
+});

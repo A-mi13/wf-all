@@ -14,7 +14,7 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
   size?: 'md' | 'lg'; // lg — кнопка экрана входа (Oswald, высота control)
   block?: boolean; // во всю ширину
-  loading?: boolean; // запрос идёт: кнопка недоступна, повторный клик не уходит
+  loading?: boolean; // запрос идёт: aria-disabled (фокус остаётся), повторный клик не уходит
   ref?: Ref<HTMLButtonElement>;
 };
 
@@ -35,15 +35,22 @@ export function Button({
   type = 'button',
   className,
   children,
+  onClick,
   ...rest
 }: ButtonProps) {
+  // loading — aria-disabled, а не disabled: disabled снимает фокус с нажатой кнопки (в браузере он
+  // падает на body, в оверлее — мимо диалога, WCAG 2.4.3). Клик, Enter и неявная отправка формы
+  // (браузер «нажимает» кнопку отправки) гасятся здесь.
+  const busy = Boolean(loading) && !disabled;
   return (
     <button
       {...rest}
       // type по умолчанию button: кнопка внутри формы не отправляет её случайно
       type={type}
-      disabled={disabled || loading}
+      disabled={disabled}
+      aria-disabled={busy || undefined}
       aria-busy={loading || undefined}
+      onClick={busy ? (e) => e.preventDefault() : onClick}
       className={cx(
         styles.button,
         VARIANT[variant],

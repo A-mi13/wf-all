@@ -29,7 +29,7 @@
   color: var(--wf-color-text-inverse);
 }
 
-.primary:hover:enabled {
+.primary:hover:enabled:not([aria-disabled='true']) {
   background: var(--wf-color-accent-hover);
 }
 
@@ -39,7 +39,7 @@
   color: var(--wf-color-text-secondary);
 }
 
-.secondary:hover:enabled {
+.secondary:hover:enabled:not([aria-disabled='true']) {
   border-color: var(--wf-color-border-strong);
   color: var(--wf-color-text);
 }
@@ -55,7 +55,7 @@
   color: var(--wf-color-danger);
 }
 
-.dangerOutline:hover:enabled {
+.dangerOutline:hover:enabled:not([aria-disabled='true']) {
   background: var(--wf-color-danger-bg);
 }
 
@@ -67,19 +67,22 @@
   color: var(--wf-color-accent);
 }
 
-.link:hover:enabled {
+.link:hover:enabled:not([aria-disabled='true']) {
   color: var(--wf-color-accent-hover);
 }
 
-/* Недоступная — как в макете подтверждения: фон slot-empty, текст ghost (только disabled) */
-.button:disabled {
+/* Недоступная — как в макете подтверждения: фон slot-empty, текст ghost (только disabled; loading —
+   aria-disabled, фокус остаётся на кнопке) */
+.button:disabled,
+.button[aria-disabled='true'] {
   background: var(--wf-color-slot-empty);
   border-color: transparent;
   color: var(--wf-color-text-ghost);
   cursor: not-allowed;
 }
 
-.link:disabled {
+.link:disabled,
+.link[aria-disabled='true'] {
   background: none;
 }
 

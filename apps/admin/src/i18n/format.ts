@@ -1,16 +1,13 @@
 import { useCallback } from 'react';
-import { useLocale } from './locale';
+import { useFormatter } from 'use-intl';
 
-// Дата и время на языке интерфейса, в часовом поясе браузера сотрудника («вход 13 окт. 2026 г.,
-// 12:00»). Intl напрямую, а не useFormatter use-intl: тот без заданного timeZone пишет ошибку
-// ENVIRONMENT_FALLBACK в консоль на каждом вызове.
+// Дата и время на языке интерфейса в поясе браузера сотрудника («13 окт. 2026 г., 12:15») —
+// единственный способ форматировать даты в админке (журнал, сеансы, сотрудники). Пояс задаёт
+// LocaleProvider (IntlProvider timeZone): без него use-intl пишет ENVIRONMENT_FALLBACK в консоль.
 export function useDateTime(): (iso: string) => string {
-  const locale = useLocale();
+  const format = useFormatter();
   return useCallback(
-    (iso: string) =>
-      new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(
-        new Date(iso),
-      ),
-    [locale],
+    (iso: string) => format.dateTime(new Date(iso), { dateStyle: 'medium', timeStyle: 'short' }),
+    [format],
   );
 }

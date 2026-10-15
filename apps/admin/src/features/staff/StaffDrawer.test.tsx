@@ -192,7 +192,8 @@ describe('выключение и сброс доступа', () => {
   });
 
   test('ошибка выключения — текст в диалоге, диалог открыт, почта и причина целы', async () => {
-    const sent = destructiveServer({ disable: () => problem(409, 'staff.last_owner') });
+    // права сменились между показом кнопки и запросом — сервер решает (403)
+    const sent = destructiveServer({ disable: () => problem(403, 'auth.forbidden') });
     renderApp('/staff', { me: meOwner });
     const user = userEvent.setup();
     const panel = await manage(user, 'Иван П.');
@@ -205,11 +206,96 @@ describe('выключение и сброс доступа', () => {
     await user.type(input, 'ivan@xn--d1acufc.xn--p1ai');
     await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      'Нельзя оставить платформу без владельца',
+      'Недостаточно прав для этого действия',
     );
     expect(input).toHaveValue('ivan@xn--d1acufc.xn--p1ai');
     expect(within(dialog).getByLabelText('Причина')).toHaveValue('security');
     expect(sent).toHaveLength(1);
+  });
+
+  // Ревью M2: браузер сбрасывает фокус на body (здесь — blur вручную, jsdom этого не делает); ответ
+  // перерисовывает панель — фокус не уходит на панель ПОД открытым диалогом.
+  test('ответ при фокусе на body — фокус не уходит на панель под диалогом', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    destructiveServer();
+    server.use(
+      http.post('/v1/staff/accounts/{staffId}/disable', async ({ response }) => {
+        await gate;
+        return response.untyped(problem(403, 'auth.forbidden'));
+      }),
+    );
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const panel = await manage(user, 'Иван П.');
+    await user.click(
+      within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
+    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'security');
+    await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
+    await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
+    act(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    release();
+    await within(dialog).findByRole('alert');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Выключить' })).not.toHaveAttribute(
+        'aria-busy',
+      ),
+    );
+    expect(panel.contains(document.activeElement)).toBe(false);
+  });
+
+  // Ревью M3: учётку уже выключил другой сотрудник — диалог с ошибкой исчезает вместе с блоком;
+  // текст — тостом, статус в панели — свежий.
+  test('409 wrong_stage (выключена другим) — тост и статус «выключен» в панели', async () => {
+    const sent = destructiveServer({ disable: () => problem(409, 'staff.wrong_stage') });
+    server.use(
+      http.get('/v1/staff/accounts/{staffId}', ({ params, response }) =>
+        response(200).json(
+          sent.length > 0
+            ? { ...IDN, status: 'disabled' as const }
+            : { ...IDN, id: params.staffId },
+        ),
+      ),
+    );
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const panel = await manage(user, 'Иван П.');
+    await user.click(
+      within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
+    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'security');
+    await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
+    await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
+    expect(
+      await screen.findByText('Это действие сейчас недоступно. Обновите страницу'),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(within(panel).getByText('выключен')).toBeInTheDocument());
+    expect(within(panel).queryByRole('region', { name: 'Выключить учётку' })).toBeNull();
+  });
+
+  // Ревью M4: комментарий длиннее предела контракта (500) не уходит.
+  test('комментарий длиннее 500 символов — до запроса не уходит длиннее предела', async () => {
+    const sent = destructiveServer();
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const panel = await manage(user, 'Иван П.');
+    await user.click(
+      within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
+    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'other');
+    await user.click(within(dialog).getByLabelText('Комментарий'));
+    await user.paste('я'.repeat(501));
+    await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
+    await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
+    await screen.findByText('Учётка выключена.');
+    const body = sent[0]?.body as { comment?: string };
+    expect(body.comment?.length).toBe(500);
   });
 
   test('сброс доступа — всегда вдвоём: xn-- почта → 202 → «Отправлено на подтверждение»', async () => {

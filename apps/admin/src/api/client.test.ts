@@ -4,7 +4,7 @@ import { createReauthBus } from '../app/reauth';
 import { meOwner } from '../test/me';
 import { problem } from '../test/problem';
 import { http, server, TEST_API } from '../test/server';
-import { ApiError, background, createApi, unwrap } from './client';
+import { ApiError, background, createApi, NO_REPLAY_HEADER, noReplay, unwrap } from './client';
 
 // ключ идемпотентности действия — его даёт useAdminMutation, клиент только передаёт
 const KEY = crypto.randomUUID();
@@ -226,6 +226,51 @@ describe('reauth_required → разблокировка и повтор (P20)',
       expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required' });
     }
     expect(state.hits).toBe(2);
+  });
+
+  // Ревью Task 14, I1: код второго фактора в теле одноразовый — разблокировка кодом из приложения
+  // сдвигает last_used_step, и повтор того же тела сервер отвергнет как staff.mfa_invalid (и
+  // засчитает неудачу). Такие запросы после разблокировки не повторяются: экран получает исходный
+  // 401 auth.reauth_required и просит новый код. Обычные запросы повторяются, как раньше.
+  test('noReplay(): после разблокировки не повторяется — исходный 401; метка на сервер не уходит', async () => {
+    const { state, bus, api } = setup();
+    const seen: (string | null)[] = [];
+    server.use(
+      http.post('/v1/staff/me/password', async ({ request, response }) => {
+        state.hits++;
+        seen.push(request.headers.get(NO_REPLAY_HEADER));
+        state.bodies.push(await request.json());
+        return state.unlocked ? response(204).empty() : response.untyped(reauth());
+      }),
+    );
+    const done = caught(
+      api.POST('/v1/staff/me/password', {
+        params: { header: { 'Idempotency-Key': KEY } },
+        body,
+        ...noReplay(),
+      }),
+    );
+    await until(() => state.hits === 1 && bus.pending());
+    state.unlocked = true;
+    bus.resolve();
+    const err = await done;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required' });
+    expect(state.hits).toBe(1);
+    expect(seen).toEqual([null]);
+  });
+
+  test('без noReplay() тот же POST после разблокировки повторяется', async () => {
+    const { state, bus, api } = setup();
+    const done = api.POST('/v1/staff/me/password', {
+      params: { header: { 'Idempotency-Key': KEY } },
+      body,
+    });
+    await until(() => state.hits === 1 && bus.pending());
+    state.unlocked = true;
+    bus.resolve();
+    expect((await done).response.status).toBe(204);
+    expect(state.bodies).toEqual([body, body]);
   });
 
   test('повтор снова получил reauth_required — ошибка, без второго круга', async () => {

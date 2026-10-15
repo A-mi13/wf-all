@@ -57,6 +57,18 @@ export function background(headers?: HeadersInit): { headers: Record<string, str
   };
 }
 
+// Метка «не повторять после разблокировки» (ревью Task 14, I1) — для мутаций с кодом второго
+// фактора в теле (перевыпуск резервных кодов, смена пароля). Код из приложения одноразовый:
+// разблокировка кодом сдвигает last_used_step, и повтор того же тела сервер отверг бы как
+// staff.mfa_invalid, засчитав неудачу в блокировку. Такой запрос после разблокировки падает исходным
+// 401 auth.reauth_required — экран стирает код и просит новый. Заголовок служебный: клиент снимает
+// его до отправки, на сервер он не уходит. Использование: api.POST(path, { params, body, ...noReplay() }).
+export const NO_REPLAY_HEADER = 'X-WF-No-Replay';
+
+export function noReplay(): { headers: Record<string, string> } {
+  return { headers: { [NO_REPLAY_HEADER]: '1' } };
+}
+
 const nonNegative = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
 
@@ -90,15 +102,22 @@ async function toApiError(res: Response): Promise<ApiError> {
 function adminMiddleware(bus: ReauthBus): Middleware {
   // Клоны исходных запросов до отправки: тело Request читается один раз.
   const originals = new Map<string, Request>();
+  // Запросы с меткой noReplay(): после разблокировки не повторяются.
+  const once = new Set<string>();
   return {
     onRequest({ request, id }) {
       if (MUTATING.has(request.method)) request.headers.set(ADMIN_HEADER, '1');
+      if (request.headers.has(NO_REPLAY_HEADER)) {
+        request.headers.delete(NO_REPLAY_HEADER);
+        once.add(id);
+      }
       originals.set(id, request.clone());
       return request;
     },
     async onResponse({ response, id, options }) {
       const original = originals.get(id);
       originals.delete(id);
+      const replay = !once.delete(id);
       let res = response;
       if (res.status === 401 && original) {
         const p = await readProblem(res);
@@ -109,8 +128,9 @@ function adminMiddleware(bus: ReauthBus): Middleware {
             () => true,
             () => false,
           );
-          // Повтор — один раз: снова reauth_required уходит ошибкой, без второго круга.
-          if (unlocked) res = await options.fetch(original);
+          // Повтор — один раз: снова reauth_required уходит ошибкой, без второго круга. Запрос с
+          // noReplay() не повторяется: экран получает исходный 401 и просит новый код.
+          if (unlocked && replay) res = await options.fetch(original);
         }
       }
       if (!res.ok) throw await toApiError(res);
@@ -118,6 +138,7 @@ function adminMiddleware(bus: ReauthBus): Middleware {
     },
     onError({ id }) {
       originals.delete(id);
+      once.delete(id);
     },
   };
 }

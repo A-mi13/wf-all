@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
-import type { ApiError } from '../../api/client';
+import { type ApiError, noReplay } from '../../api/client';
 import type { components } from '../../api/gen/admin';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
@@ -14,6 +14,7 @@ import {
   type OtpInputHandle,
   PasswordField,
   TextField,
+  useErrorText,
   useToast,
 } from '../../ui';
 import { isLock, useLockout } from './lockout';
@@ -45,6 +46,8 @@ const EMPTY: Values = {
 // Пароли и коды — только в памяти формы: без черновика, мутация — gcTime 0.
 export function ChangePasswordCard() {
   const t = useTranslations('me.password');
+  const tme = useTranslations('me');
+  const errorText = useErrorText();
   const titleId = useId();
   const codeId = useId();
   const errorId = useId();
@@ -64,6 +67,8 @@ export function ChangePasswordCard() {
       api.POST('/v1/staff/me/password', {
         params: { header: { 'Idempotency-Key': key } },
         body,
+        // код второго фактора одноразовый: после разблокировки не повторять (ревью I1)
+        ...noReplay(),
       }),
     {
       // пароли и код — не в кэше мутаций: gcTime 0 и reset() после ответа (карточка остаётся на
@@ -100,7 +105,8 @@ export function ChangePasswordCard() {
       form.setFocus('current_password');
       return true;
     }
-    if (e.code === 'staff.mfa_invalid') {
+    // неверный код или разблокировка посреди запроса (код уже использован, запрос не повторён)
+    if (e.code === 'staff.mfa_invalid' || e.code === 'auth.reauth_required') {
       setFailure(e);
       clearFactor(true);
       return true;
@@ -108,12 +114,15 @@ export function ChangePasswordCard() {
     return false; // validation.failed — по полям, остальное — FormError
   };
 
-  const message =
-    failure?.attemptsLeft === undefined
-      ? null
-      : failure.code === 'staff.password_invalid'
-        ? t('password_invalid', { count: failure.attemptsLeft })
-        : t('mfa_invalid', { count: failure.attemptsLeft });
+  const message = !failure
+    ? null
+    : failure.code === 'auth.reauth_required'
+      ? tme('reauth_retry')
+      : failure.attemptsLeft === undefined
+        ? errorText(failure) // без остатка попыток — общий текст по коду, не немая ошибка
+        : failure.code === 'staff.password_invalid'
+          ? t('password_invalid', { count: failure.attemptsLeft })
+          : t('mfa_invalid', { count: failure.attemptsLeft });
 
   return (
     <section aria-labelledby={titleId} className={styles.card}>

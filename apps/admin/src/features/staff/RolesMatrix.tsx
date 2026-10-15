@@ -55,6 +55,7 @@ export function RolesMatrix() {
       label={t('label')}
       columns={columns}
       rowKey={(p) => p.key}
+      summary={false}
       rows={q.data?.permissions}
       error={q.data ? undefined : (q.error ?? undefined)}
       onRetry={() => void q.refetch()}

@@ -17,6 +17,7 @@ import {
   LoadingRows,
   PendingApprovalNotice,
   SelectField,
+  StatusChip,
   TextField,
   useCountdown,
   useErrorText,
@@ -27,10 +28,13 @@ import { cityLabel, useCityNames } from './cities';
 import { CityField } from './CityField';
 import { ACCOUNTS_KEY, accountKey, accountSessionsKey, useRoleLabel } from './queries';
 import { ROLES, roleChangePermission, type StaffAccount, staffActions } from './roles';
+import { useStaffStatus } from './status';
 import styles from './staff.module.css';
 
 type Reason = components['schemas']['StaffActionReason'];
 const REASONS: readonly Reason[] = ['left_team', 'security', 'role_change', 'other'];
+// Предел комментария к причине — StaffConfirmedAction.comment (maxLength: 500).
+const COMMENT_MAX = 500;
 
 // Все действия панели — под одним префиксом: пока любое идёт, панель не закрывается.
 const ACTION_KEY = ['staff', 'account-action'] as const;
@@ -69,6 +73,7 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
   const ta = useTranslations('account');
   const api = useApi();
   const roleLabel = useRoleLabel();
+  const statusOf = useStaffStatus();
   const dateTime = useDateTime();
   const card = useQuery({
     queryKey: accountKey(initial.id),
@@ -85,11 +90,15 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
   const [now] = useState(() => Date.now());
   // Действие исполнено — его блок исчезает (выключенной учётке нечего выключать), а с ним и кнопка,
   // на которую диалог вернул фокус. Фокус не должен падать на body при открытой панели: он уходит
-  // на саму панель.
+  // на саму панель. Только если панель — верхний оверлей: под открытым диалогом (подтверждение,
+  // разблокировка) фокус не трогаем — читалка объявила бы панель вместо диалога (ревью M2).
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const active = document.activeElement;
-    if (!active || active === document.body) panel.current?.focus();
+    if (active && active !== document.body) return;
+    const own = panel.current?.closest('[role="dialog"]');
+    const dialogs = document.querySelectorAll('[role="dialog"]');
+    if (own && dialogs[dialogs.length - 1] === own) panel.current?.focus();
   });
 
   if (card.isError && !card.isPlaceholderData)
@@ -102,6 +111,7 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
     );
 
   const actions = staffActions(me, a);
+  const status = statusOf(a);
   const cities = a.city_ids
     .map((id) => {
       const c = names.data?.items.find((x) => x.id === id);
@@ -117,6 +127,10 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
         <dt>{t('drawer.email')}</dt>
         {/* почта как хранится (A-форма xn--…) — её же вводят в подтверждении */}
         <dd>{a.email}</dd>
+        <dt>{t('drawer.status')}</dt>
+        <dd>
+          <StatusChip tone={status.tone}>{status.text}</StatusChip>
+        </dd>
         <dt>{t('drawer.role')}</dt>
         <dd>{roleLabel(a.role)}</dd>
         {a.city_ids.length > 0 && (
@@ -198,10 +212,17 @@ function useStaffAction<V, R>(
   opts: { onSuccess?: (r: R) => void; onError?: (e: ApiError) => void } = {},
 ) {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const errorText = useErrorText();
   return useAdminMutation(fn, {
     mutationKey: ACTION_KEY,
     onSuccess: opts.onSuccess,
-    onError: opts.onError,
+    onError: (e) => {
+      // Цель изменилась в другой вкладке или у другого сотрудника (уже выключена, удалена): после
+      // перечитывания блок действия с его ошибкой может исчезнуть — текст уходит тостом (ревью M3).
+      if (e.code === 'staff.wrong_stage' || e.code === 'staff.not_found') toast.error(errorText(e));
+      opts.onError?.(e);
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
   });
 }
@@ -564,7 +585,10 @@ function DestructiveDialog({
           label={tc('comment')}
           hint={tc('comment_hint')}
           autoComplete="off"
+          maxLength={COMMENT_MAX}
           rules={{
+            // как в контракте (StaffConfirmedAction.comment): длиннее — ошибка поля до запроса
+            maxLength: COMMENT_MAX,
             validate: {
               required: (v: string) => form.getValues('reason') !== 'other' || v.trim() !== '',
             },
