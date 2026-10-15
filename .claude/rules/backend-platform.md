@@ -87,3 +87,36 @@ paths:
   (`Permission.CityBound`): `scoped` бывает только у таких прав (тест `TestCityBound` перечисляет их явно). `scoped`
   без `{cityId}` в пути конвейер пропускает — список фильтрует по `auth.Staff.CityIDs`, изменение проверяет город
   цели через `Decide(ключ, cityID)`.
+
+## Подтверждение вдвоём (`platform/approvals`, спека сотрудников §4.8, D17, P13)
+
+- **Регистрация** — при сборке admin-api, до старта сервера: `reg.Register(approvals.Action{Name, Permission,
+  Permit, Exec, Target})` (имя `<модуль>.<действие>`, право из каталога `perm` и не черновое, дубль — паника),
+  `reg.SetInitiatorCheck` (один раз, регистрирует staff), затем `reg.Validate()`. Без проверки инициатора
+  `Approve` не исполняет ничего (ошибка, запрос остаётся `pending`). `Actions()` — имена по алфавиту (подписи D21).
+- **Право запроса** — `Permit(payload)` (nil → `Permission`) вычисляется в `Request` и хранится в
+  `approvals.permission`; подтверждающий сверяется с ним, а не с пересчётом по payload или текущей роли инициатора.
+  `Request` — в транзакции модуля (`tx` аргументом, ctx из её `db.InTx`): payload — JSON-объект с целым `v ≥ 1`,
+  инициатор `Decide(право, город цели) != Deny`, иначе `ErrForbidden`; аудит `platform.approval_requested` без
+  payload (в нём свободный текст).
+- **Кто решает:** сессия `active` без `Reauth`; не инициатор и не цель (`ErrSelf`, CHECK `approvals_two_hands`);
+  `Decide(сохранённое право, scope_city_id) != Deny` (`ErrForbidden`). Отмена — только инициатор; чужой запрос —
+  `ErrNotFound` (существование не раскрывается). Входящие (`List` `incoming`) — те же правила в SQL.
+- **Одна транзакция на решение (D8):** строка `FOR UPDATE`; срок вышел (`now >= expires_at`) — `expired` от
+  `system` коммитится, наружу `ErrClosed`; проверка инициатора отказала (`Fail`/`ErrStale`) — `failed` с
+  `error = initiator_changed` коммитится, наружу `ErrStale`. Под `Idempotency-Key` это та самая единственная
+  закоммиченная `db.InTx`: 409 сохраняется в ключ.
+- **Исполнитель — под savepoint:** пишет только свои таблицы, аудит и события — через ctx. Бизнес-отказ —
+  `return approvals.Fail(err)` (или `ErrStale`): savepoint откатывает все его изменения (и аудит), `failed` с
+  кодом ошибки (`ProblemError.Code` / `Code()`, не свободный текст) коммитится, наружу — исходная `err`
+  (`errors.Is(err, staff.ErrLastOwner)`). Ошибка без `Fail` или паника — откат всего, запрос `pending` (500).
+- **Каждое решение** — аудит `platform.approval_<status>` (`executed|rejected|cancelled|expired|failed`; актор —
+  решивший, у просрочки и гашения — `system`, комментарий — в `Reason`) и событие `platform.approval_decided`
+  (агрегат `approval`, версия 1) в той же транзакции.
+- **`CancelByInitiator(ctx, tx, staffID)`** — staff зовёт при выключении, сбросе доступа и смене роли
+  инициатора, в своей транзакции: его `pending` → `cancelled` от `system`, `initiator_changed`. Запросы о нём не
+  гасятся (их отсекает версия цели в исполнителе). `SKIP LOCKED`: строку под замком решения доводит само решение
+  (его проверка инициатора увидит изменение) — ожидание дало бы взаимную блокировку «замок учётки → гашение» ∥
+  «замок запроса → проверка инициатора». Порядок замков: строка `approvals` раньше строк модуля.
+- **Чистка** — тикер admin-api (10c): `ExpireDue` (порции `SKIP LOCKED`, своя транзакция на порцию) и
+  `PurgeDecided(ctx, approvals.DecidedRetention)` (решённые старше 180 суток; `pending` не трогает).
