@@ -4,8 +4,6 @@ import { useTranslations } from 'use-intl';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
-import type { components } from '../../api/gen/admin';
-import { useDateTime } from '../../i18n/format';
 import {
   Button,
   EmptyState,
@@ -15,11 +13,9 @@ import {
   useErrorText,
   useToast,
 } from '../../ui';
-import { deviceOf } from './device';
 import styles from './me.module.css';
 import { MY_SESSIONS_KEY, useMySessions } from './queries';
-
-type Session = components['schemas']['StaffSession'];
+import { useSessionLabel } from './sessionLabel';
 
 // «Активные сеансы» (макет 07, спека §4.7): браузер и ОС из User-Agent, сеть (подсеть /24 или /48 —
 // маскирует сервер), вход и последняя активность. Текущий — «Текущий сеанс» без кнопки; остальные —
@@ -33,7 +29,7 @@ export function MySessionsCard() {
   const toast = useToast();
   const errorText = useErrorText();
   const sessions = useMySessions();
-  const describe = useDescribe();
+  const describe = useSessionLabel();
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: MY_SESSIONS_KEY });
   const revoke = useAdminMutation(
@@ -125,22 +121,4 @@ export function MySessionsCard() {
       <p className={styles.note}>{t('note')}</p>
     </section>
   );
-}
-
-// Подписи сеанса: «Chrome · Windows», «Сеть … · вход … · активность …».
-function useDescribe() {
-  const t = useTranslations('me.sessions');
-  const dateTime = useDateTime();
-  return (s: Session) => {
-    const d = deviceOf(s.user_agent);
-    const device = d
-      ? t('device', { browser: t(`browsers.${d.browser}`), os: t(`systems.${d.os}`) })
-      : t('unknown_device');
-    const created = dateTime(s.created_at);
-    return {
-      device,
-      created,
-      details: t('details', { ip: s.ip, created, seen: dateTime(s.last_seen_at) }),
-    };
-  };
 }

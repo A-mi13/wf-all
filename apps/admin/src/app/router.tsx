@@ -14,6 +14,8 @@ import { ReauthModal } from '../features/auth/ReauthModal';
 import { SetupMfaPage } from '../features/auth/SetupMfaPage';
 import { LocaleSwitcher } from '../features/me/LocaleSwitcher';
 import { MyAccessPage } from '../features/me/MyAccessPage';
+import { parseStaffSearch } from '../features/staff/search';
+import { StaffPage } from '../features/staff/StaffPage';
 import { AppShell, ConnectionErrorState } from '../ui';
 import { useAccountCard } from './account';
 import { resolveRoute } from './guard';
@@ -27,8 +29,9 @@ import { LoadingStub, NotFoundStub, SectionStub } from './stubs';
 // Роутер админки (спека §9.1, §9.3–9.4): TanStack Router, маршруты кодом, пути — paths.ts.
 // Стадия сессии решает, куда пускать (guard.ts, beforeLoad корня); разделы — внутри AppShell: он
 // строит меню по правам и сам показывает ForbiddenState на прямой адрес без права (D23) и
-// DesktopOnlyState на телефоне (D22). Экраны входа — features/auth (Task 13), разделы пока —
-// заглушки (Task 14–15). Окно разблокировки (ReauthModal) стоит поверх любой страницы.
+// DesktopOnlyState на телефоне (D22). Экраны входа — features/auth (Task 13), «Мой доступ» и «Роли
+// и доступ» — features/me и features/staff (Task 14), подтверждения и журнал пока — заглушки
+// (Task 15). Окно разблокировки (ReauthModal) стоит поверх любой страницы.
 
 export interface RouterContext {
   session: Session;
@@ -116,7 +119,13 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   shellRoute.addChildren([
     section(paths.audit, 'nav.audit'),
-    section(paths.staff, 'nav.staff'),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.staff,
+      // фильтры «Кто имеет доступ» — search-параметры (перезагрузка, «Назад»)
+      validateSearch: parseStaffSearch,
+      component: StaffPage,
+    }),
     section(paths.approvals, 'nav.approvals'),
     createRoute({ getParentRoute: () => shellRoute, path: paths.me, component: MyAccessPage }),
   ]),

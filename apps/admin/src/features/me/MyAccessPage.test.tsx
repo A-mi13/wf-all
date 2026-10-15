@@ -526,3 +526,11 @@ describe('смена пароля', () => {
     ).toBeInTheDocument();
   });
 });
+
+test('StrictMode: статус и сеансы — по одному запросу на экран', async () => {
+  const { seen } = accessServer();
+  renderApp('/me', { me: meOwner, strict: true });
+  await screen.findByText('8 из 10 не использованы');
+  await screen.findByRole('list', { name: 'Сеансы' });
+  expect([seen.mfa, seen.sessions]).toEqual([1, 1]);
+});

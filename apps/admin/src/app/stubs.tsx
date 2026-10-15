@@ -2,8 +2,8 @@ import { useTranslations } from 'use-intl';
 import { PageHeader } from '../ui';
 
 // Временные страницы каркаса (Task 11): маршруты есть, экранов ещё нет. Заменяются экранами
-// Task 14–15 («Мой доступ», «Роли и доступ», подтверждения, журнал); экраны входа — Task 13
-// (features/auth). Нет доступа, нет связи и «только с компьютера» — состояния из src/ui (Task 12b).
+// Task 15 (подтверждения, журнал); «Мой доступ» и «Роли и доступ» — Task 14, экраны входа —
+// Task 13. Нет доступа, нет связи и «только с компьютера» — состояния из src/ui (Task 12b).
 
 export function NotFoundStub() {
   const t = useTranslations('states.not_found');
