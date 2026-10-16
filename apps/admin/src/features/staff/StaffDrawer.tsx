@@ -24,6 +24,7 @@ import {
   useToast,
 } from '../../ui';
 import { useSessionLabel } from '../me/sessionLabel';
+import { useInvalidateApprovals } from '../approvals/queries';
 import { cityLabel, useCityNames } from './cities';
 import { CityField } from './CityField';
 import { ACCOUNTS_KEY, accountKey, accountSessionsKey, useRoleLabel } from './queries';
@@ -86,6 +87,7 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
   const a = card.data ?? initial;
   const names = useCityNames(a.city_ids, can(me, 'geo.cities.read'));
   const [approval, setApproval] = useState(false);
+  const invalidateApprovals = useInvalidateApprovals();
   // «сейчас» — на момент открытия панели: закрыт ли вход (locked_until в прошлом — уже нет)
   const [now] = useState(() => Date.now());
   // Действие исполнено — его блок исчезает (выключенной учётке нечего выключать), а с ним и кнопка,
@@ -118,7 +120,10 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
       return c ? cityLabel(c) : null;
     })
     .filter((x) => x !== null);
-  const onApproval = () => setApproval(true);
+  const onApproval = () => {
+    setApproval(true);
+    void invalidateApprovals();
+  };
 
   return (
     <div ref={panel} tabIndex={-1} className={styles.panel}>
@@ -232,7 +237,8 @@ function useStaffAction<V, R>(
   });
 }
 
-// 200 — исполнено сразу, 202 — создан запрос на подтверждение (правило двух рук).
+// 200 — исполнено сразу, 202 — создан запрос на подтверждение (правило двух рук). Новый запрос —
+// счётчик и списки подтверждений перечитываются сразу (onApproval панели).
 type Outcome = 'done' | 'approval';
 const outcomeOf = (r: { response: Response }): Outcome =>
   r.response.status === 202 ? 'approval' : 'done';

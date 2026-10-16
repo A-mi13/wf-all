@@ -8,6 +8,9 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
+import { useIncomingApprovalsCount } from '../features/approvals/queries';
+import { parseApprovalsSearch } from '../features/approvals/search';
 import { AcceptInvitePage } from '../features/auth/AcceptInvitePage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { ReauthModal } from '../features/auth/ReauthModal';
@@ -86,10 +89,13 @@ function ActiveShell({ me }: { me: Me }) {
   const account = useAccountCard(me);
   // Выход — вход без return (logout.ts)
   const logout = useLogout();
+  // число у «Подтверждений» — фоновый опрос (features/approvals/queries.ts)
+  const incoming = useIncomingApprovalsCount();
   return (
     <AppShell
       groups={NAV}
       account={account}
+      counts={{ [paths.approvals]: incoming }}
       onLogout={() => logout.mutate()}
       loggingOut={logout.isPending}
       profileMenu={<LocaleSwitcher />}
@@ -126,7 +132,13 @@ const routeTree = rootRoute.addChildren([
       validateSearch: parseStaffSearch,
       component: StaffPage,
     }),
-    section(paths.approvals, 'nav.approvals'),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.approvals,
+      // вкладка «Входящие» / «Мои» — search-параметр box
+      validateSearch: parseApprovalsSearch,
+      component: ApprovalsPage,
+    }),
     createRoute({ getParentRoute: () => shellRoute, path: paths.me, component: MyAccessPage }),
   ]),
 ]);

@@ -17,6 +17,7 @@ import {
   TextField,
   useErrorText,
 } from '../../ui';
+import { useInvalidateApprovals } from '../approvals/queries';
 import { CityField } from './CityField';
 import { useRoleLabel } from './queries';
 import { grantableRoles, ROLES } from './roles';
@@ -75,6 +76,7 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
   const form = useForm<Values>({ defaultValues: initial });
   const role = useWatch({ control: form.control, name: 'role' });
   const [sent, setSent] = useState(false);
+  const invalidateApprovals = useInvalidateApprovals();
 
   // Только ввод сотрудника (type === 'change'): ни монтирование, ни reset, ни размонтирование.
   useEffect(
@@ -110,6 +112,8 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
       onSuccess: () => {
         clearDraft();
         setSent(true);
+        // 202 — новый запрос: счётчик и списки подтверждений перечитываются сразу
+        void invalidateApprovals();
       },
     },
   );

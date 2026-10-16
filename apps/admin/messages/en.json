@@ -267,6 +267,77 @@
         "access_reset": "Access reset",
         "revoke_owner": "Disabling an owner"
       }
+    },
+    "subtitle": "Two-person actions are carried out by a second staff member with the permission. A request lives for 24 hours.",
+    "tabs": {
+      "label": "Approval requests",
+      "incoming": "Incoming",
+      "mine": "Mine"
+    },
+    "table": {
+      "incoming": "Incoming requests",
+      "mine": "My requests",
+      "columns": {
+        "request": "Request",
+        "subject": "Whom and what",
+        "state": "Deadline and outcome",
+        "decision": "Decision"
+      }
+    },
+    "requested": "{name} · {time}",
+    "expires": "until {time}",
+    "decided": "{name} · {time}",
+    "system": "system",
+    "comment": "Comment: {text}",
+    "failure_reason": "Reason: {text}",
+    "statuses": {
+      "pending": "awaiting decision",
+      "executed": "executed",
+      "rejected": "rejected",
+      "cancelled": "cancelled",
+      "expired": "expired",
+      "failed": "not executed",
+      "unknown": "unknown"
+    },
+    "summary": {
+      "label": "What will be done",
+      "to": "Whom",
+      "role": "Role",
+      "role_change": "{from} → {to}",
+      "cities": "Cities",
+      "cities_count": "{count, plural, one {# city} other {# cities}}",
+      "no_cities": "no cities",
+      "reason": "Reason",
+      "comment": "Comment",
+      "target": "staff member {id}"
+    },
+    "failure": {
+      "initiator_changed": "The requester changed after the request: disabled, access reset or role changed",
+      "execution_failed": "The action did not go through — see the audit log for details",
+      "unknown": "The action was not carried out"
+    },
+    "approve": "Approve",
+    "reject": "Reject",
+    "cancel": "Cancel",
+    "desktop_only": "Granting access — desktop only",
+    "done": {
+      "executed": "Approved and carried out.",
+      "rejected": "Request rejected.",
+      "cancelled": "Request cancelled.",
+      "other": "The request is now “{status}”."
+    },
+    "failed_toast": "Approved but not carried out: {reason}",
+    "reject_dialog": {
+      "title": "Reject the request?",
+      "text": "The action will not be carried out. The requester will see the comment; it goes to the audit log.",
+      "comment": "Why you are rejecting",
+      "submit": "Reject"
+    },
+    "empty": {
+      "incoming_title": "No incoming requests",
+      "incoming_text": "Requests awaiting your decision will appear here.",
+      "mine_title": "You have not sent anything",
+      "mine_text": "Two-person actions you sent for approval will appear here."
     }
   },
   "errors": {

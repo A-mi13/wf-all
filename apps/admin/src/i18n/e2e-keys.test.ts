@@ -24,6 +24,9 @@ const E2E_KEYS = [
   'staff.invite.name',
   'staff.invite.role',
   'staff.invite.submit',
+  // «Подтверждения» → «Входящие» → «Подтвердить» (Task 15)
+  'approvals.tabs.incoming',
+  'approvals.approve',
 ];
 
 test('ключи подписей для e2e есть в ru и en (en — перевод, не пустой)', () => {
