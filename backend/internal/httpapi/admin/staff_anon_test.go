@@ -70,11 +70,13 @@ func TestStaffAcceptReissuedWhileWaitingWithKey(t *testing.T) {
 		done <- e.send(http.MethodPost, pathAccept, m.token, uuid.NewString(),
 			jsonOf(t, map[string]string{"email": "new@wf.example", "code": inviteCode, "password": staffPassword}))
 	}()
-	// запрос дошёл до замка учётки: в pg_locks есть невыданная блокировка
+	// запрос дошёл до замка учётки: соединение этой базы ждёт замок (pg_locks — весь кластер, а соседние
+	// пакеты гоняют тесты с замками на клонах того же кластера; у ожидания строки database в pg_locks пуст)
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		var waiting int
-		if err := e.owner.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted`).Scan(&waiting); err != nil {
+		if err := e.owner.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting > 0 {
