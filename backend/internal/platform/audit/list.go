@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,7 +22,10 @@ const listSet = "audit.log(created_at,id)"
 // фильтра нет. From — включительно, To — исключительно.
 type ListParams struct {
 	ActorStaffID uuid.UUID
-	ActionPrefix string // "staff." — все действия модуля; совпадение с начала строки, без шаблонов
+	// ActionPrefix — по сегментам, без шаблонов LIKE: на «.» или «_» — начало строки ("staff." — все
+	// действия модуля, "platform.approval_" — решения); иначе — само действие и его подвиды через точку
+	// ("staff.login" — staff.login и staff.login.*, но не staff.login_failed).
+	ActionPrefix string
 	ObjectType   string
 	ObjectID     uuid.UUID
 	From, To     time.Time
@@ -58,9 +62,11 @@ type Record struct {
 // страницы ("" — страниц больше нет). Чтение журнала не аудируется (спека §4.12).
 func List(ctx context.Context, q auditdb.DBTX, p ListParams) (items []Record, next string, err error) {
 	limit := page.Limit(&p.Limit)
+	prefix, exact := actionFilter(p.ActionPrefix)
 	arg := auditdb.ListAuditParams{
 		ActorStaffID: optUUID(p.ActorStaffID),
-		ActionPrefix: optString(p.ActionPrefix),
+		ActionPrefix: prefix,
+		ActionExact:  exact,
 		ObjectType:   optString(p.ObjectType),
 		ObjectID:     optUUID(p.ObjectID),
 		FromAt:       optTime(p.From),
@@ -92,6 +98,20 @@ func List(ctx context.Context, q auditdb.DBTX, p ListParams) (items []Record, ne
 		items = append(items, record(r))
 	}
 	return items, next, nil
+}
+
+// actionFilter — фильтр действия по сегментам (контракт listAudit.action_prefix): p оканчивается на «.» или
+// «_» — все действия с этим началом (staff., platform.approval_); иначе — само действие p и его подвиды
+// «p.…», но не «p_…» (staff.login не ловит staff.login_failed). Пусто — без фильтра.
+func actionFilter(p string) (prefix, exact *string) {
+	if p == "" {
+		return nil, nil
+	}
+	if strings.HasSuffix(p, ".") || strings.HasSuffix(p, "_") {
+		return &p, nil
+	}
+	sub := p + "."
+	return &sub, &p
 }
 
 // Get — одна запись журнала по id (письмо о действии, Task 8b/10c): поля и маска IP — как в List;

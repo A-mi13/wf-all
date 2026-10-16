@@ -16,7 +16,9 @@ type Querier interface {
 	// Аудит-лог (спека бэкенда §6.9, §10). Только вставка: изменение и удаление запрещены триггером.
 	InsertAudit(ctx context.Context, arg InsertAuditParams) error
 	// Журнал действий (спека §5.3): новые сверху, keyset по (created_at, id). Пустой фильтр (NULL) не
-	// сужает выборку. scoped — журнал модератора: записи его городов и его собственные.
+	// сужает выборку. Действие: action_prefix — начало строки (starts_with, без шаблонов LIKE), action_exact —
+	// точное действие (вместе с action_prefix «<действие>.» — действие и его подвиды; выбирает audit.List).
+	// scoped — журнал модератора: записи его городов и его собственные.
 	ListAudit(ctx context.Context, arg ListAuditParams) ([]ListAuditRow, error)
 }
 

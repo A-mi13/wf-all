@@ -229,6 +229,44 @@ func TestListCitiesFilters(t *testing.T) {
 	}
 }
 
+// IDs (P28, M10): nil — без фильтра; не nil — только эти города (несуществующие пропускаются), пустой не
+// nil — ни одного (модератор без городов не видит весь справочник); с q, статусом и курсором — сужает
+// внутри, курсор фильтр не снимает.
+func TestListCitiesIDs(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	live := f.addCity(testCity{Country: "RU", Slug: "livsk", Name: "Лайвск", Status: "live", Lat: 50, Lon: 40, Population: 1000, RuName: true})
+	f.addCity(testCity{Country: "RU", Slug: "zhdunovo", Name: "Ждуново", Status: "waitlist", Lat: 51, Lon: 40, Population: 10, RuName: true})
+	stav, mih := f.cityID("stavropol"), f.cityID("mihaylovsk")
+	cases := []struct {
+		name string
+		p    geo.ListParams
+		want []string
+	}{
+		{"nil — все", geo.ListParams{}, []string{"livsk", "stavropol", "mihaylovsk", "zhdunovo"}},
+		{"пустой — ни одного", geo.ListParams{IDs: []uuid.UUID{}}, []string{}},
+		{"свои", geo.ListParams{IDs: []uuid.UUID{mih, live}}, []string{"livsk", "mihaylovsk"}},
+		{"несуществующий пропущен", geo.ListParams{IDs: []uuid.UUID{uuid.New(), stav}}, []string{"stavropol"}},
+		{"с q", geo.ListParams{IDs: []uuid.UUID{stav, mih}, Q: "мих"}, []string{"mihaylovsk"}},
+		{"со статусом", geo.ListParams{IDs: []uuid.UUID{stav, live}, Status: []geo.Status{geo.StatusLive}}, []string{"livsk"}},
+	}
+	for _, c := range cases {
+		pg, err := f.svc.ListCities(ctx, c.p)
+		if err != nil || !slices.Equal(slugs(pg.Items), c.want) {
+			t.Errorf("%s: %q %v, ждали %q", c.name, slugs(pg.Items), err, c.want)
+		}
+	}
+	// курсор из списка без фильтра не снимает фильтр: вторая страница — только свои
+	first, err := f.svc.ListCities(ctx, geo.ListParams{Limit: ptr(1)})
+	if err != nil || first.Next == "" {
+		t.Fatalf("первая страница: %v %q", err, first.Next)
+	}
+	pg, err := f.svc.ListCities(ctx, geo.ListParams{IDs: []uuid.UUID{mih}, Cursor: first.Next})
+	if err != nil || !slices.Equal(slugs(pg.Items), []string{"mihaylovsk"}) {
+		t.Fatalf("курсор с фильтром: %q %v", slugs(pg.Items), err)
+	}
+}
+
 // q — префикс на любом языке после normalize_text: регистр, ё, латиница-двойники, пробелы.
 func TestListCitiesSearch(t *testing.T) {
 	f := newFixture(t)

@@ -113,20 +113,22 @@ SELECT id, actor_user_id, actor_staff_id, actor_label, actor_role, action, objec
        scope_city_id, before, after, reason, ip, user_agent, created_at
 FROM audit_log
 WHERE ($1::uuid IS NULL OR actor_staff_id = $1)
-  AND ($2::text IS NULL OR starts_with(action, $2))
-  AND ($3::text IS NULL OR object_type = $3)
-  AND ($4::uuid IS NULL OR object_id = $4)
-  AND ($5::timestamptz IS NULL OR created_at >= $5)
-  AND ($6::timestamptz IS NULL OR created_at < $6)
-  AND (NOT $7::bool OR scope_city_id = ANY($8::uuid[]) OR actor_staff_id = $9::uuid)
-  AND (NOT $10::bool OR (created_at, id) < ($11::timestamptz, $12::uuid))
+  AND ($2::text IS NULL OR starts_with(action, $2)
+       OR action = $3::text)
+  AND ($4::text IS NULL OR object_type = $4)
+  AND ($5::uuid IS NULL OR object_id = $5)
+  AND ($6::timestamptz IS NULL OR created_at >= $6)
+  AND ($7::timestamptz IS NULL OR created_at < $7)
+  AND (NOT $8::bool OR scope_city_id = ANY($9::uuid[]) OR actor_staff_id = $10::uuid)
+  AND (NOT $11::bool OR (created_at, id) < ($12::timestamptz, $13::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $13
+LIMIT $14
 `
 
 type ListAuditParams struct {
 	ActorStaffID *uuid.UUID
 	ActionPrefix *string
+	ActionExact  *string
 	ObjectType   *string
 	ObjectID     *uuid.UUID
 	FromAt       *time.Time
@@ -159,11 +161,14 @@ type ListAuditRow struct {
 }
 
 // Журнал действий (спека §5.3): новые сверху, keyset по (created_at, id). Пустой фильтр (NULL) не
-// сужает выборку. scoped — журнал модератора: записи его городов и его собственные.
+// сужает выборку. Действие: action_prefix — начало строки (starts_with, без шаблонов LIKE), action_exact —
+// точное действие (вместе с action_prefix «<действие>.» — действие и его подвиды; выбирает audit.List).
+// scoped — журнал модератора: записи его городов и его собственные.
 func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]ListAuditRow, error) {
 	rows, err := q.db.Query(ctx, listAudit,
 		arg.ActorStaffID,
 		arg.ActionPrefix,
+		arg.ActionExact,
 		arg.ObjectType,
 		arg.ObjectID,
 		arg.FromAt,

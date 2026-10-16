@@ -8,7 +8,8 @@ SELECT normalize_text(sqlc.arg(input)::text)::text AS normalized;
 -- канонические. Регион: region_id NULL — региона нет, region_name тогда ''.
 -- Порядок: ранг статуса (live 0, pilot 1, waitlist 2), population по убыванию, id; курсор —
 -- строго после (after_rank, after_population, after_id) в этом порядке.
--- statuses пуст — без фильтра; country '' — без фильтра; q_prefix '' — без поиска. q_prefix уже
+-- statuses пуст — без фильтра; country '' — без фильтра; filter_ids false — без фильтра по id, true —
+-- только ids (пустой массив — ни одного: модератор без городов, M10); q_prefix '' — без поиска. q_prefix уже
 -- нормализован (normalize_text оставляет только [a-zа-яё0-9], поэтому % и _ в нём невозможны).
 -- Перед «||» — sqlc.arg(x), не @x: префиксный «@» захватил бы всё выражение (см. ratelimit.sql).
 -- name: ListCities :many
@@ -34,6 +35,7 @@ WHERE co.is_enabled
   AND (coalesce(cardinality(sqlc.arg(statuses)::text[]), 0) = 0
        OR c.status::text = ANY (sqlc.arg(statuses)::text[]))
   AND (sqlc.arg(country)::text = '' OR co.code = sqlc.arg(country)::text)
+  AND (NOT sqlc.arg(filter_ids)::boolean OR c.id = ANY (sqlc.arg(ids)::uuid[]))
   AND (sqlc.arg(q_prefix)::text = ''
        OR c.name_normalized LIKE sqlc.arg(q_prefix)::text || '%'
        OR EXISTS (SELECT 1 FROM city_names qn

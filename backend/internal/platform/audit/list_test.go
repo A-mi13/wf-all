@@ -140,25 +140,37 @@ func TestListFilters(t *testing.T) {
 	pools := dbtest.NewPoolsAs(t, "admin")
 	anna, ivan, city, obj := id.New(), id.New(), id.New(), id.New()
 	r1, r2, r3, r4 := id.New(), id.New(), id.New(), id.New()
+	r5, r6, r7 := id.New(), id.New(), id.New()
 	seed(t, pools.Owner,
 		row{id: r1, staff: anna, action: "staff.role_granted", objectType: "staff_account", object: obj, at: t0},
 		row{id: r2, staff: ivan, action: "staff.login", objectType: "staff_account", at: t0.Add(time.Minute)},
 		row{id: r3, staff: anna, action: "geo.city_updated", object: city, city: city, at: t0.Add(2 * time.Minute)},
 		// «staffing.» не должно попасть под префикс «staff.»
 		row{id: r4, action: "staffing.x", objectType: "staff_account", at: t0.Add(3 * time.Minute)},
+		// staff.login_failed — другое действие, не подвид staff.login; staff.login.totp — подвид
+		row{id: r5, action: "staff.login_failed", objectType: "staff_account", at: t0.Add(4 * time.Minute)},
+		row{id: r6, action: "staff.login.totp", objectType: "staff_account", at: t0.Add(5 * time.Minute)},
+		row{id: r7, action: "platform.approval_executed", objectType: "approval", at: t0.Add(6 * time.Minute)},
 	)
 	cases := []struct {
 		name string
 		p    audit.ListParams
 		want []uuid.UUID
 	}{
-		{"без фильтров", audit.ListParams{}, []uuid.UUID{r4, r3, r2, r1}},
+		{"без фильтров", audit.ListParams{}, []uuid.UUID{r7, r6, r5, r4, r3, r2, r1}},
 		{"автор", audit.ListParams{ActorStaffID: anna}, []uuid.UUID{r3, r1}},
-		{"префикс действия", audit.ListParams{ActionPrefix: "staff."}, []uuid.UUID{r2, r1}},
+		{"префикс действия", audit.ListParams{ActionPrefix: "staff."}, []uuid.UUID{r6, r5, r2, r1}},
 		{"префикс с символами LIKE", audit.ListParams{ActionPrefix: "staff%"}, nil},
+		// по сегментам: без «.» и «_» на конце — само действие и его подвиды через точку
+		{"действие и подвиды", audit.ListParams{ActionPrefix: "staff.login"}, []uuid.UUID{r6, r2}},
+		{"действие без подвидов", audit.ListParams{ActionPrefix: "staff.role_granted"}, []uuid.UUID{r1}},
+		{"префикс на «_»", audit.ListParams{ActionPrefix: "platform.approval_"}, []uuid.UUID{r7}},
+		{"префикс на «_» внутри сегмента", audit.ListParams{ActionPrefix: "staff.login_"}, []uuid.UUID{r5}},
+		{"не начало сегмента", audit.ListParams{ActionPrefix: "staff.log"}, nil},
+		{"_ из LIKE буквально", audit.ListParams{ActionPrefix: "staff.login_faile_"}, nil},
 		{"тип объекта", audit.ListParams{ObjectType: "city"}, []uuid.UUID{r3}},
 		{"объект", audit.ListParams{ObjectID: obj}, []uuid.UUID{r1}},
-		{"с — включительно", audit.ListParams{From: t0.Add(time.Minute)}, []uuid.UUID{r4, r3, r2}},
+		{"с — включительно", audit.ListParams{From: t0.Add(time.Minute)}, []uuid.UUID{r7, r6, r5, r4, r3, r2}},
 		{"по — исключительно", audit.ListParams{To: t0.Add(2 * time.Minute)}, []uuid.UUID{r2, r1}},
 		{"вместе", audit.ListParams{ActorStaffID: anna, ActionPrefix: "geo.", From: t0, To: t0.Add(time.Hour)}, []uuid.UUID{r3}},
 	}
