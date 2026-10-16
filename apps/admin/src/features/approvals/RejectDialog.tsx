@@ -22,9 +22,11 @@ const REJECT_KEY = ['approvals', 'reject'] as const;
 export function RejectDialog({
   approval,
   onClose,
+  onDone,
 }: {
   approval: Approval | null;
   onClose: () => void;
+  onDone: () => void; // решение отправлено (отклонён или запрос уже не тот), списки перечитаны
 }) {
   const t = useTranslations('approvals.reject_dialog');
   const busy = useIsMutating({ mutationKey: REJECT_KEY }) > 0;
@@ -36,12 +38,20 @@ export function RejectDialog({
       description={t('text')}
       dismissible={!busy}
     >
-      {approval && <RejectForm approval={approval} onClose={onClose} />}
+      {approval && <RejectForm approval={approval} onClose={onClose} onDone={onDone} />}
     </Modal>
   );
 }
 
-function RejectForm({ approval, onClose }: { approval: Approval; onClose: () => void }) {
+function RejectForm({
+  approval,
+  onClose,
+  onDone,
+}: {
+  approval: Approval;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const t = useTranslations('approvals');
   const api = useApi();
   const toast = useToast();
@@ -62,7 +72,10 @@ function RejectForm({ approval, onClose }: { approval: Approval; onClose: () => 
         toast.success(t('done.rejected'));
         onClose();
       },
-      onSettled: () => invalidate(),
+      onSettled: async () => {
+        await invalidate();
+        onDone();
+      },
     },
   );
 

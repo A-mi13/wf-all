@@ -11,8 +11,9 @@ import {
   MINE_SYSTEM,
 } from '../../test/approvals';
 import { renderApp } from '../../test/app';
-import { meOwner } from '../../test/me';
+import { meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
+import { http, server } from '../../test/server';
 import { account, approval, staffServer } from '../../test/staff';
 
 // «Подтверждения» (*; спека §9.4 п. 6, §4.8, D17, D22): вкладки «Входящие» (incoming/pending) и
@@ -322,5 +323,66 @@ describe('телефон', () => {
     expect(within(row!).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
     expect(within(row!).queryByRole('button', { name: 'Отклонить' })).toBeNull();
     expect(row).toHaveTextContent('Выдача прав — только с компьютера');
+  });
+});
+
+// Общее устройство: сессия A истекла (401 → вход с return), за компьютер сел B. Кэш запросов живёт
+// в памяти вкладки — входящие A не должны мелькнуть у B, пока его список грузится.
+describe('общее устройство', () => {
+  test('сессия истекла → входит другой: данные прошлого сотрудника не видны до ответа', async () => {
+    directory();
+    approvalsServer();
+    const app = renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    expect(row).toHaveTextContent('Иван П.');
+
+    app.me.current = null;
+    await app.refetchMe();
+    await screen.findByRole('heading', { level: 1, name: 'Вход администратора' });
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/v1/approvals', async ({ request, response }) => {
+        if (!request.headers.has('X-WF-Background')) await gate;
+        return response(200).json({ items: [], next_cursor: null });
+      }),
+    );
+    app.me.current = meAdmin;
+    await app.refetchMe();
+    await page();
+    expect(screen.queryByText('Иван П.')).toBeNull();
+    release();
+    expect(await screen.findByText('Входящих нет')).toBeInTheDocument();
+  });
+});
+
+// Решённый запрос уходит из «Входящих» вместе с кнопкой, на которой стоял фокус (или куда окно
+// «Отклонить» вернуло бы его): фокус не должен падать на body.
+describe('фокус после решения', () => {
+  test('подтвердили — строки нет, фокус на списке, а не на body', async () => {
+    directory();
+    approvalsServer();
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    await userEvent.setup().click(within(row!).getByRole('button', { name: 'Подтвердить' }));
+    await screen.findByText('Входящих нет');
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
+  });
+
+  test('отклонили — окно закрыто, строки нет, фокус на списке', async () => {
+    directory();
+    approvalsServer();
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    const user = userEvent.setup();
+    await user.click(within(row!).getByRole('button', { name: 'Отклонить' }));
+    const dialog = screen.getByRole('dialog', { name: 'Отклонить запрос?' });
+    await user.type(within(dialog).getByLabelText('Почему отклоняете'), 'рано');
+    await user.click(within(dialog).getByRole('button', { name: 'Отклонить' }));
+    await screen.findByText('Входящих нет');
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
   });
 });

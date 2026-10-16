@@ -7,6 +7,11 @@
   gap: var(--wf-space-5);
 }
 
+/* Список: после решения фокус переносится сюда (строка с кнопкой исчезла) — программно, без рамки */
+.list:focus {
+  outline: none;
+}
+
 .stack {
   display: flex;
   flex-direction: column;

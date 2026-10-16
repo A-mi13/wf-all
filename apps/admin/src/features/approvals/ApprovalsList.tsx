@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { type ApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
@@ -61,7 +61,25 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (p) => p.next_cursor ?? undefined,
   });
-  const decisions = useDecisions();
+  // Решённый запрос уходит из «Входящих» вместе с кнопкой, на которой стоял фокус (или куда окно
+  // «Отклонить» вернуло бы его): после решения, когда список перечитан, фокус с body — на список.
+  const root = useRef<HTMLDivElement>(null);
+  const refocus = useRef(false);
+  const [decided, setDecided] = useState(0);
+  const onDone = () => {
+    refocus.current = true;
+    setDecided((n) => n + 1);
+  };
+  const { data, isFetching } = list;
+  useEffect(() => {
+    if (!refocus.current) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) {
+      root.current?.focus();
+      refocus.current = false;
+    } else if (!isFetching && !document.querySelector('[role="dialog"]')) refocus.current = false;
+  }, [decided, data, isFetching]);
+  const decisions = useDecisions(onDone);
   const [rejecting, setRejecting] = useState<Approval | null>(null);
 
   const decision = (a: Approval) => {
@@ -123,7 +141,7 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
   ];
 
   return (
-    <>
+    <div ref={root} tabIndex={-1} className={styles.list}>
       <DataTable
         label={t(`table.${box}`)}
         columns={columns}
@@ -137,15 +155,15 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
           />
         }
       />
-      <RejectDialog approval={rejecting} onClose={() => setRejecting(null)} />
-    </>
+      <RejectDialog approval={rejecting} onClose={() => setRejecting(null)} onDone={onDone} />
+    </div>
   );
 }
 
 // Подтвердить и отменить. Повторный клик, пока решение идёт, не уходит: нажатая кнопка — loading
 // (клик гасится), остальные — disabled; pendingId ставится в обработчике клика, и React перерисует
 // до следующего (дискретное событие). Второй запрос с новым ключом был бы вторым действием.
-function useDecisions() {
+function useDecisions(onDone: () => void) {
   const t = useTranslations('approvals');
   const api = useApi();
   const toast = useToast();
@@ -157,9 +175,10 @@ function useDecisions() {
   const [pendingId, setPendingId] = useState<string | null>(null);
 
   const onError = (e: ApiError) => toast.error(errorText(e));
-  const onSettled = () => {
+  const onSettled = async () => {
     setPendingId(null);
-    return invalidate();
+    await invalidate();
+    onDone();
   };
   const approveM = useAdminMutation(
     (a: Approval, key: string) =>

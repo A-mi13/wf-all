@@ -12,7 +12,7 @@ import { isApiError, unwrap } from '../api/client';
 import { useApi } from '../api/context';
 import { claimDrafts } from './draft';
 import { can, decide, type Decision, type Me } from './permissions';
-import { ME_KEY } from './query';
+import { isMeKey, ME_KEY } from './query';
 import { reauthBus } from './reauth';
 
 // Сессия на клиенте (спека сотрудников §9.3, R15, P20) — из GET /v1/staff/me; он же проверка
@@ -97,6 +97,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (staffId) claimDrafts(staffId);
   }, [staffId]);
+
+  // Без сессии (401: истекла, вышли): данные прошлого сотрудника — из кэша запросов. Экраны
+  // с ними уже сняты (роутер увёл на вход), а следующий за компьютером не увидит их, пока грузятся
+  // его собственные. me остаётся — по нему живёт сессия.
+  const anonymous = value.status === 'anonymous';
+  useEffect(() => {
+    if (!anonymous) return;
+    queryClient.removeQueries({ predicate: (query) => !isMeKey(query.queryKey) });
+  }, [anonymous, queryClient]);
 
   // После перезагрузки с reauth_required модалка открывается сразу; разблокировка прошла —
   // me перечитывается (P20).
