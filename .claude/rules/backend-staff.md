@@ -169,3 +169,20 @@ paths:
   Ключ убран раньше времени: письма приглашений за это окно отменяются (`mail.ErrSkip`, предупреждение в
   журнал сервера), не повторяются; восстановление — самоотправка сотрудника (код перевыпускается в той же
   строке) или повторная отправка админом/оператором.
+- **Хендлеры (`staff/admin`, Task 10a):** тонкие — запрос → сценарий `internal/app` → ответ контракта; логики
+  сценариев в них нет. `New(staff.Deps, Cookie{Name, Secure})` (имя и `Secure` — от сборки:
+  `httpapi/admin.CookieName`), `Sessions()` — загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware
+  (подключает `httpapi/admin`), только для операций тега staff (методы `*Handler`): нулевой `Handler` (main до
+  10c) — `501 http.not_implemented` без вызова метода; User-Agent и токен cookie — в ctx (`meta(ctx)`,
+  `requestFrom(ctx).token` → `oldToken` принятия); ошибки — **только** `staffadmin.Problem` (единственный перевод:
+  `ProblemError` как есть, `*MFAError` → `mfa_invalid`/`password_invalid` с `attempts_left` через
+  `httpx.(*Error).WithAttemptsLeft`, коды модуля — статусы `statusOf` (страж `TestProblemCoversStaffCodes`),
+  `auth.ErrSessionInvalid`/`ErrSessionReplaced` → 401). Cookie: `ErrSessionInvalid` (сессию погасили между
+  конвейером и замком) стирает её, как конвейер; `ErrSessionReplaced` — нет (в браузере уже новая). Новый токен
+  (вход, принятие, второй фактор, unlock, ack) и стирание у выхода — `cookieResponse` через `http.SetCookie`
+  (добавление): сгенерированный `Visit…` делает `Header().Set` и затёр бы стирание старой cookie от конвейера —
+  новая cookie идёт последней (`TestStaffLoginAfterInvalidCookie`). Ответы с секретом (setup, confirm,
+  перевыпуск кодов) заполняют `Headers.CacheControl = "no-store"`: пустое значение генератора стёрло бы
+  `no-store` конвейера. D9 у входа — сценарий `Login` (сотрудник конвейера в ctx), отдельный `Logout` не звать:
+  под `Idempotency-Key` — ровно одна транзакция. Отзыв текущей сессии cookie не стирает. Сквозные тесты — в
+  `internal/httpapi/admin` (`staff_*_test.go`: `staff/admin` не импортирует `httpapi/admin` даже в тестах).

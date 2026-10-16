@@ -40,6 +40,8 @@ paths:
   `start := time.Now()` … `time.Since(start)` (монотонные часы).
 - Ошибка, которую должен увидеть клиент (лимит, антибот, идемпотентность, флаг), — `httpx.ProblemError`
   (`httpx.NewError(статус, httpx.Code…)`); код строкой — падение стража `TestProblemCodesAreConstants`.
+  Остаток попыток (неверный код или пароль) — `.WithAttemptsLeft(n)`: новая ошибка, поле `attempts_left` (0 тоже
+  уходит); `Retry-After` — только заголовком (`Problem.RetryAfter`, в теле `retry_after` нет).
 - Почта — только задача `mail.SendArgs{V: 1, Mail: "<модуль>.<письмо>", Ref: id}` (на другую версию воркер
   вернёт ошибку, задача уйдёт в повтор и после `MaxAttempts` станет «мёртвой»); адрес находит
   `mail.Composer` модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en).

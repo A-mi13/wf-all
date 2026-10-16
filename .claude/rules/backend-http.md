@@ -70,6 +70,8 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Операция контракта, которую ещё не исполняет сервер, — заглушка `501 http.not_implemented`
-  (`httpx.CodeNotImplemented`; проверка — `apitest.NotImplemented`).
+  (`httpx.CodeNotImplemented`; проверка — `apitest.NotImplemented`). Strict-middleware — `o.Staff.Middleware()`
+  (операции тега staff: перевод ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер —
+  501; `.claude/rules/backend-staff.md`); заглушки сервера проверяются через него (`TestServerStubsNotImplemented`).
 - Тесты: cookie в запросе ставится руками (`net/http/cookiejar` не шлёт Secure-cookie по http, P24); проход конвейера
   — 501 заглушки; `{cityId}` — на подменённом контракте (`admin.Permissions` в `export_test.go`).
