@@ -155,7 +155,15 @@ paths:
     «оператор сервера», неизвестный код — без строки причины; `ErrSkip`: не `staff.disabled`, нет учётки,
     получатель не активный владелец.
   - Список — новые сверху, `page.Keyset{Set: "staff.accounts(created_at,id)"}`, `q` — начало почты или имени
-    (`likePrefix`: `\`, `%`, `_` буквально); чужие сессии владельца и админа — только при `grant_elevated` не Deny.
+    (`likePrefix`: `\`, `%`, `_` буквально); чужие сессии владельца и админа — только при `grant_elevated` не Deny
+    (админу — 403, страж через HTTP `TestAccountSessionsAdminScope`).
+  - **`PUT …/role` без `version`** (контракт плана A): правка из устаревшей панели снимает город, добавленный другим
+    сотрудником, — известное ограничение: последняя запись побеждает, след — аудит `staff.role_changed` (было/стало).
+  - **Хендлеры (`staff/admin/accounts.go`, Task 10b):** 202 `{approval}` — `oapi.ApprovalOf` (ручной файл в
+    `httpapi/admin/oapi`: общий для `staff/admin` и сборки); `ChangeRole`/`Disable` сразу (`nil, nil`) — 200 с
+    перечитанной карточкой `Account`. `RegisterApprovals(reg, svc)` — обёртка `app.RegisterApprovals` для сборки 10c;
+    `Label(ctx, s)` — подпись решившего для подтверждений (`App.Label`: учётка и сессия перечитываются без замка, как
+    `checkActor`; approve повторяет под замком в исполнителе, reject и cancel — нет).
 - **Оператор (§4.2, §4.11; `internal/app/operator.go`):** аудит — `actor_role = operator`, метка `operator`.
   `OperatorBootstrap` — учётка `owner` (`invited`), приглашение, `staff.bootstrapped`, событие `staff.invited`,
   письмо `staff.bootstrapped` каждому активному владельцу; доступен всегда. `OperatorInviteResend` — без паузы и
@@ -174,7 +182,7 @@ paths:
 - **Хендлеры (`staff/admin`, Task 10a):** тонкие — запрос → сценарий `internal/app` → ответ контракта; логики
   сценариев в них нет. `New(staff.Deps, Cookie{Name, Secure})` (имя и `Secure` — от сборки:
   `httpapi/admin.CookieName`; `CookieConfig()` — для сверки сборкой, рассогласование — отказ старта), `Sessions()` — загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware
-  (подключает `httpapi/admin`), только для операций тега staff (методы `*Handler`): нулевой `Handler` (main до
+  (подключает `httpapi/admin`), только для операций тега staff (методы `*Handler` вида `(ctx, oapi.…RequestObject)` — `IsOperation`): нулевой `Handler` (main до
   10c) — `501 http.not_implemented` без вызова метода; User-Agent и токен cookie — в ctx (`meta(ctx)`,
   `requestFrom(ctx).token` → `oldToken` принятия); ошибки — **только** `staffadmin.Problem` (единственный перевод:
   `ProblemError` как есть, `*MFAError` → `mfa_invalid`/`password_invalid` с `attempts_left` через

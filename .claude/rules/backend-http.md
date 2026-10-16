@@ -70,11 +70,25 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   `httpx.NotFoundWithoutRoute` (на ошибке биндинга): запрос без `Route` — `404 http.not_found`, хендлер не вызывается.
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
-  обязательны. Операция контракта, которую ещё не исполняет сервер, — заглушка `501 http.not_implemented`
-  (`httpx.CodeNotImplemented`). Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод ошибок
-  `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`);
-  заглушки сервера проверяются через него, а не прямым вызовом методов (`TestServerStubsNotImplemented`; у
-  `staff/admin` — `TestStubsNotImplemented`). Cookie собранного хендлера staff (`CookieConfig`) обязана совпасть с
-  `CookieName(CookieSecure)`/`CookieSecure` конвейера — иначе отказ старта (`TestNewHandlerCookieMismatch`).
+  обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
+  собранных staff, geo и подтверждениях отвечает не 501); нулевые хендлеры и нулевой `Server{}` (main до 10c) —
+  `501 http.not_implemented` без паники. Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод
+  ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`)
+  и `requestMeta` (`approvals.Meta{IP: peer, UserAgent: заголовок}` в ctx операций платформы: `meta` staff их не
+  видит); операция — метод вида `(ctx, oapi.<Операция>RequestObject) (ответ, error)` (`staffadmin.IsOperation`:
+  служебные методы той же формы, `Label`, — не операции). Cookie собранного хендлера staff (`CookieConfig`) обязана
+  совпасть с `CookieName(CookieSecure)`/`CookieSecure` конвейера — иначе отказ старта (`TestNewHandlerCookieMismatch`).
+- **Операции платформы** (`server.go`, Task 10b): `Options.Approvals` (`ApprovalService` — `*approvals.Service`)
+  задаётся ровно вместе с собранным `Options.Staff` (иначе отказ старта, `TestNewHandlerApprovalsWiring`); подпись
+  решившего — `Staff.Label` (перечитывает учётку и сессию: выключен — 401, роль сменилась — 403, до записей).
+  approve — `200` только `executed`; неудача исполнения — ошибка с кодом при закоммиченном `failed`: `ErrStale` (и
+  `ErrInitiatorChanged`) — 409 `platform.approval_stale`, бизнес-отказ — код из `approveStaffCodes` (= `staff.*`
+  `x-error-codes` approve, `TestApproveCodesMatchContract`), иной `staff.*` и отказ без кода — 500. Ошибки —
+  `staffadmin.Problem`. Журнал: скоуп модератора по `GrantScoped` (не-nil копия `CityIDs` + `OwnStaffID`), `from ≥ to`
+  — 400 `query.from` `range`; `action_prefix` — по сегментам (`backend-platform.md`).
 - Тесты: cookie в запросе ставится руками (`net/http/cookiejar` не шлёт Secure-cookie по http, P24); проход конвейера
-  — 501 заглушки; `{cityId}` — на подменённом контракте (`admin.Permissions` в `export_test.go`).
+  — 501 нулевых хендлеров (журнал — 200); `{cityId}` — на подменённом контракте (`admin.Permissions` в
+  `export_test.go`). Права по всем операциям × 9 субъектов — `TestPermissionsAllOperations` (ожидания ключей — из
+  `perm.Matrix`, `handler` — ручная таблица `handlerRoles`, сверка — `TestHandlerRolesMatchMatrix`; новая операция
+  контракта без строки `opsBase` — падение). Сквозные тесты на настоящих сценариях — `newStaffEnv` (подтверждения
+  собраны как в 10c; `e.v` — сверка с контрактом).

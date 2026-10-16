@@ -23,6 +23,8 @@ paths:
   `system|operator|anonymous`; `ActorLabel` — снимок отображаемого имени (журнал показывает его); `ScopeCityID` —
   город записи (по нему модератор видит журнал своих городов). Два автора — `ErrInvalidEntry`. Журнал читается
   только `audit.List` и `audit.Get` (фильтры, скоуп модератора `CityIDs`+`OwnStaffID`, курсор `audit.log(created_at,id)`).
+  `ActionPrefix` — по сегментам, без шаблонов LIKE: на «.» или «_» — начало строки (`staff.`, `platform.approval_`);
+  иначе — само действие и его подвиды через точку (`staff.login` не ловит `staff.login_failed`).
   `CityIDs == nil` — без ограничения городом (глобальная роль); модератору вызывающий ВСЕГДА передаёт не-nil срез
   (копия `append(make([]uuid.UUID, 0, len(s.CityIDs)), s.CityIDs...)`), скоуп выбирается по `GrantScoped`, а не по
   `len`: модератор без городов видит только свои записи, а не весь журнал. IP
