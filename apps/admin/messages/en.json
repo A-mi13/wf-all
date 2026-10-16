@@ -715,7 +715,8 @@
       "staff_account": "staff member",
       "approval": "approval request",
       "geonames_import": "GeoNames import",
-      "city": "city"
+      "city": "city",
+      "staff_keys": "staff keys"
     },
     "details": {
       "show": "Details",

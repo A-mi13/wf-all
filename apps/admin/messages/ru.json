@@ -715,7 +715,8 @@
       "staff_account": "сотрудник",
       "approval": "запрос на подтверждение",
       "geonames_import": "импорт GeoNames",
-      "city": "город"
+      "city": "город",
+      "staff_keys": "ключи сотрудников"
     },
     "details": {
       "show": "Подробнее",

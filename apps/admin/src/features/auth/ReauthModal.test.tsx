@@ -176,6 +176,8 @@ describe('разблокировка', () => {
     await enterCode(user, '492817');
     const group = within(d).getByRole('group', { name: CODE });
     await waitFor(() => expect(group).toHaveAttribute('aria-busy', 'true'));
+    // jsdom не снимает фокус с disabled-поля сам — включённость ячеек проверяется явно (ревью M4)
+    for (const cell of within(group).getAllByRole('textbox')) expect(cell).toBeEnabled();
     expect(document.activeElement).not.toBe(document.body);
     expect(group.contains(document.activeElement)).toBe(true);
     release();

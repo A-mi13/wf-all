@@ -47,6 +47,21 @@ describe('parseAuditSearch', () => {
     expect(parseAuditSearch({ tab: 'flags; drop' })).toEqual({});
   });
 
+  // Ревью M8: действие из другого раздела, чем вкладка, — отбрасывается (вкладка видна, а фильтр
+  // молча искал бы чужое).
+  test('действие не из раздела вкладки — отброшено', () => {
+    expect(parseAuditSearch({ tab: 'staff', action: 'platform.approval_executed' })).toEqual({
+      tab: 'staff',
+    });
+    expect(parseAuditSearch({ tab: 'staff', action: 'staff.login' })).toEqual({
+      tab: 'staff',
+      action: 'staff.login',
+    });
+    expect(parseAuditSearch({ action: 'platform.approval_executed' })).toEqual({
+      action: 'platform.approval_executed',
+    });
+  });
+
   test('«по» раньше «с» — «по» отброшен (сервер ответил бы 400)', () => {
     expect(parseAuditSearch({ from: '2026-10-13', to: '2026-10-01' })).toEqual({
       from: '2026-10-13',
@@ -76,6 +91,19 @@ describe('период → UTC', () => {
     // ещё +10, а 4 окт. 00:00 UTC — уже +11: первая оценка ошиблась бы на час.
     expect(dayStartUtc('2026-10-04', 'Australia/Sydney')).toBe('2026-10-03T14:00:00.000Z');
     expect(dayStartUtc('2026-10-05', 'Australia/Sydney')).toBe('2026-10-04T13:00:00.000Z');
+  });
+
+  // Ревью M3: перевод часов вперёд ровно в полночь — местной полуночи нет; «с» — первый
+  // существующий момент дня (01:00), а не час предыдущего дня.
+  test('полуночи нет (перевод вперёд в 00:00) — первый момент дня', () => {
+    // Сантьяго: 6 сентября 2026, 00:00 −04 → 01:00 −03 (04:00 UTC)
+    expect(dayStartUtc('2026-09-06', 'America/Santiago')).toBe('2026-09-06T04:00:00.000Z');
+    // «по» 5 сентября включительно — до первого момента 6-го
+    expect(dayStartUtc('2026-09-05', 'America/Santiago', 1)).toBe('2026-09-06T04:00:00.000Z');
+    // Гавана: 8 марта 2026, 00:00 −05 → 01:00 −04 (05:00 UTC)
+    expect(dayStartUtc('2026-03-08', 'America/Havana')).toBe('2026-03-08T05:00:00.000Z');
+    // соседние дни — обычная полночь
+    expect(dayStartUtc('2026-09-07', 'America/Santiago')).toBe('2026-09-07T03:00:00.000Z');
   });
 
   test('toAuditQuery: «по» включительно, вкладка → action_prefix, действие важнее вкладки', () => {

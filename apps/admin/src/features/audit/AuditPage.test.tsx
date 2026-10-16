@@ -50,6 +50,46 @@ describe('вкладки и строки', () => {
     expect(operator).toHaveTextContent('оператор сервера');
   });
 
+  // Ревью M2: импорт GeoNames оператором пишет только роль (actor_label пуст) — подпись по actor_role.
+  test('пустой actor_label — подпись по actor_role (operator, system); вид объекта staff_keys', async () => {
+    auditServer({
+      records: [
+        auditRecord({
+          id: '0192f1f0-8a9b-7c0d-9e1f-0000000000a1',
+          action: 'geo.import',
+          object_type: 'geonames_import',
+          actor_staff_id: null,
+          actor_role: 'operator',
+          actor_label: null,
+        }),
+        auditRecord({
+          id: '0192f1f0-8a9b-7c0d-9e1f-0000000000a2',
+          action: 'staff.rekeyed',
+          object_type: 'staff_keys',
+          object_id: null,
+          actor_staff_id: null,
+          actor_role: 'system',
+          actor_label: null,
+        }),
+        auditRecord({
+          id: '0192f1f0-8a9b-7c0d-9e1f-0000000000a3',
+          action: 'staff.login_failed',
+          object_id: null,
+          actor_staff_id: null,
+          actor_role: 'anonymous',
+          actor_label: null,
+        }),
+      ],
+    });
+    renderApp('/audit', { me: meOwner });
+    const [imported, rekeyed, anonymous] = rows(await table());
+    expect(anonymous).toHaveTextContent('аноним');
+    expect(anonymous).not.toHaveTextContent('anonymous');
+    expect(imported).toHaveTextContent('оператор сервера');
+    expect(rekeyed).toHaveTextContent('система');
+    expect(rekeyed).toHaveTextContent('ключи сотрудников');
+  });
+
   test.each([
     ['Сотрудники', 'staff', 'staff.'],
     ['Подтверждения', 'approvals', 'platform.approval_'],

@@ -98,13 +98,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (staffId) claimDrafts(staffId);
   }, [staffId]);
 
-  // Без сессии (401: истекла, вышли): данные прошлого сотрудника — из кэша запросов. Экраны
+  // Без сессии (401: истекла, вышли): данные прошлого сотрудника — из кэша запросов и мутаций (в
+  // переменных — почта и имя приглашённого, комментарий отклонения). Экраны
   // с ними уже сняты (роутер увёл на вход), а следующий за компьютером не увидит их, пока грузятся
   // его собственные. me остаётся — по нему живёт сессия.
   const anonymous = value.status === 'anonymous';
   useEffect(() => {
     if (!anonymous) return;
     queryClient.removeQueries({ predicate: (query) => !isMeKey(query.queryKey) });
+    queryClient.getMutationCache().clear();
   }, [anonymous, queryClient]);
 
   // После перезагрузки с reauth_required модалка открывается сразу; разблокировка прошла —

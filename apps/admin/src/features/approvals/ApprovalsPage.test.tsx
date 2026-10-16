@@ -11,7 +11,7 @@ import {
   MINE_SYSTEM,
 } from '../../test/approvals';
 import { renderApp } from '../../test/app';
-import { meAdmin, meOwner } from '../../test/me';
+import { CITY_OTHER, CITY_OWN, meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
 import { account, approval, staffServer } from '../../test/staff';
@@ -138,6 +138,63 @@ describe('карточка запроса', () => {
     expect(row).toHaveTextContent('модератор → поддержка');
   });
 
+  // Ревью I1: подтверждающий видит дельту городов — «было → стало», пустой список — «без городов».
+  test.each([
+    [
+      'добавлен город',
+      {
+        from_role: 'moderator',
+        from_city_ids: [CITY_OWN],
+        role: 'moderator',
+        city_ids: [CITY_OWN, CITY_OTHER],
+      },
+      'Ставрополь, Ставропольский край → Ставрополь, Ставропольский край; Пятигорск, Ставропольский край',
+    ],
+    [
+      'сняты все города (модератор → поддержка)',
+      {
+        from_role: 'moderator',
+        from_city_ids: [CITY_OWN, CITY_OTHER],
+        role: 'support',
+        city_ids: [],
+      },
+      'Ставрополь, Ставропольский край; Пятигорск, Ставропольский край → без городов',
+    ],
+    [
+      'города выданы (поддержка → модератор)',
+      { from_role: 'support', from_city_ids: [], role: 'moderator', city_ids: [CITY_OTHER] },
+      'без городов → Пятигорск, Ставропольский край',
+    ],
+  ])('смена роли: города «было → стало» — %s', async (_, change, text) => {
+    directory();
+    approvalsServer({
+      incoming: [
+        approval({
+          id: '0192f1e2-4c5d-7e6f-a081-0000000000d1',
+          action: 'staff.role_change',
+          target_id: MARIA.id,
+          payload: { v: 1, target_id: MARIA.id, version: 3, ...change },
+          requested_by: IGOR,
+        }),
+      ],
+    });
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    const cities = await within(row!).findByRole('definition', { name: 'Города' });
+    await waitFor(() => expect(cities).toHaveTextContent(text));
+  });
+
+  test('без staff.accounts.read — цель «сотрудник <id8>», карточка не запрашивается', async () => {
+    const dir = directory();
+    approvalsServer({ mine: [MINE_PENDING] });
+    const permissions = { ...meOwner.permissions };
+    delete permissions['staff.accounts.read'];
+    renderApp('/approvals?box=mine', { me: { ...meOwner, permissions } });
+    const [row] = rows(await table('Мои запросы'));
+    expect(row).toHaveTextContent('сотрудник 0192f1c4');
+    expect(dir.seen.cards).toEqual([]);
+  });
+
   test('решённые: статус, кто решил, комментарий, причина неудачи; системная отмена — «система»', async () => {
     directory();
     approvalsServer({ mine: [MINE_FAILED, MINE_SYSTEM] });
@@ -177,8 +234,12 @@ describe('подтвердить', () => {
     expect(seen.decisions).toHaveLength(1);
     expect(seen.decisions[0]).toMatchObject({ kind: 'approve', id: INCOMING.id });
     expect(seen.decisions[0]?.key).toBeTruthy();
+    // счётчик перечитан, а строка остаётся на месте с итогом — без кнопок (ревью I2)
     await waitFor(() => expect(seen.lists.length).toBeGreaterThan(lists));
-    expect(await screen.findByText('Входящих нет')).toBeInTheDocument();
+    const [after] = rows(await table('Входящие запросы'));
+    expect(after).toHaveTextContent('Иван П.');
+    expect(after).toHaveTextContent('исполнен');
+    expect(within(after!).queryByRole('button')).toBeNull();
   });
 
   test('executed — учётки перечитаны (карточка цели)', async () => {
@@ -221,10 +282,19 @@ describe('подтвердить', () => {
   test.each([
     [404, 'platform.approval_not_found', 'Запрос на подтверждение не найден'],
     [409, 'platform.approval_self', 'Нельзя решать свой запрос или запрос о себе'],
-    [409, 'platform.approval_stale', 'Данные изменились после запроса — создайте его заново'],
     [409, 'platform.approval_closed', 'Запрос уже решён, отменён или просрочен'],
-    [409, 'staff.last_owner', 'Нельзя оставить платформу без владельца'],
-    [409, 'staff.email_taken', 'Сотрудник с такой почтой уже есть'],
+    // ревью M5: запрос уже помечен failed — «подтверждено, но не выполнено» с причиной
+    [
+      409,
+      'platform.approval_stale',
+      'Подтверждено, но не выполнено: Данные изменились после запроса — создайте его заново',
+    ],
+    [
+      409,
+      'staff.last_owner',
+      'Подтверждено, но не выполнено: Нельзя оставить платформу без владельца',
+    ],
+    [409, 'staff.email_taken', 'Подтверждено, но не выполнено: Сотрудник с такой почтой уже есть'],
   ])('%s %s — тост с текстом и перечитывание списка', async (status, code, text) => {
     directory();
     const { seen } = approvalsServer({ answer: { approve: () => problem(status, code) } });
@@ -234,6 +304,78 @@ describe('подтвердить', () => {
     await userEvent.setup().click(within(row!).getByRole('button', { name: 'Подтвердить' }));
     expect(await screen.findByText(text)).toBeInTheDocument();
     await waitFor(() => expect(listCalls(seen).length).toBeGreaterThan(lists));
+  });
+
+  // Ревью I2: решённый R1 не уходит из списка сразу — строки не сдвигаются, и клик «туда же» не
+  // становится решением по R2.
+  test('успех: R1 остаётся на месте с итогом, клик по первой строке — не решение R2', async () => {
+    directory();
+    const second = approval({
+      id: '0192f1e2-4c5d-7e6f-a081-0000000000b2',
+      payload: {
+        v: 1,
+        email: 'petr@wf.example',
+        display_name: 'Пётр С.',
+        role: 'support',
+        city_ids: [],
+      },
+      requested_by: IGOR,
+    });
+    const { seen } = approvalsServer({ incoming: [INCOMING, second] });
+    renderApp('/approvals', { me: meOwner });
+    const t = await table('Входящие запросы');
+    const before = seen.background.length;
+    fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Подтвердить' }));
+    await screen.findByText('Подтверждено и выполнено.');
+    // счётчик перечитан — инвалидация после решения закончилась
+    await waitFor(() => expect(seen.background.length).toBeGreaterThan(before));
+    const first = rows(t)[0]!;
+    expect(first).toHaveTextContent('Иван П.');
+    expect(within(first).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
+    fireEvent.click(first);
+    expect(rows(t)[1]).toHaveTextContent('Пётр С.');
+    expect(seen.decisions).toHaveLength(1);
+  });
+
+  test('ошибка: пока список перечитывается, кнопки строк не оживают', async () => {
+    directory();
+    const second = approval({
+      id: '0192f1e2-4c5d-7e6f-a081-0000000000b2',
+      payload: {
+        v: 1,
+        email: 'petr@wf.example',
+        display_name: 'Пётр С.',
+        role: 'support',
+        city_ids: [],
+      },
+      requested_by: IGOR,
+    });
+    const { seen } = approvalsServer({
+      incoming: [INCOMING, second],
+      answer: { approve: () => problem(409, 'platform.approval_closed') },
+    });
+    renderApp('/approvals', { me: meOwner });
+    const t = await table('Входящие запросы');
+    // перечитывание списка после ошибки держим, пока не проверим кнопки
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/v1/approvals', async ({ request, response }) => {
+        if (!request.headers.has('X-WF-Background')) await gate;
+        return response(200).json({ items: [second], next_cursor: null });
+      }),
+    );
+    const [r1, r2] = rows(t);
+    const approve1 = within(r1!).getByRole('button', { name: 'Подтвердить' });
+    fireEvent.click(approve1);
+    await screen.findByText('Запрос уже решён, отменён или просрочен');
+    fireEvent.click(approve1);
+    fireEvent.click(within(r2!).getByRole('button', { name: 'Подтвердить' }));
+    expect(within(r2!).getByRole('button', { name: 'Подтвердить' })).toBeDisabled();
+    expect(seen.decisions).toHaveLength(1);
+    release();
+    await waitFor(() => expect(rows(t)).toHaveLength(1));
+    expect(seen.decisions).toHaveLength(1);
   });
 
   test('двойной клик — один запрос', async () => {
@@ -276,6 +418,23 @@ describe('отклонить', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
+  test.each([
+    [409, 'platform.approval_self', 'Нельзя решать свой запрос или запрос о себе'],
+    [404, 'platform.approval_not_found', 'Запрос на подтверждение не найден'],
+  ])('%s %s при отклонении — тост, окно закрыто', async (status, code, text) => {
+    directory();
+    approvalsServer({ answer: { reject: () => problem(status, code) } });
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    const user = userEvent.setup();
+    await user.click(within(row!).getByRole('button', { name: 'Отклонить' }));
+    const dialog = screen.getByRole('dialog', { name: 'Отклонить запрос?' });
+    await user.type(within(dialog).getByLabelText('Почему отклоняете'), 'нет');
+    await user.click(within(dialog).getByRole('button', { name: 'Отклонить' }));
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
   test('409 approval_closed — тост, окно закрыто, список перечитан', async () => {
     directory();
     const { seen } = approvalsServer({
@@ -308,6 +467,25 @@ describe('отменить', () => {
     expect(seen.decisions).toEqual([
       expect.objectContaining({ kind: 'cancel', id: MINE_PENDING.id }),
     ]);
+  });
+});
+
+describe('отменить — ошибки', () => {
+  test.each([
+    [404, 'platform.approval_not_found', 'Запрос на подтверждение не найден'],
+    [409, 'platform.approval_closed', 'Запрос уже решён, отменён или просрочен'],
+  ])('%s %s — тост и перечитывание списка', async (status, code, text) => {
+    directory();
+    const { seen } = approvalsServer({
+      mine: [MINE_PENDING],
+      answer: { cancel: () => problem(status, code) },
+    });
+    renderApp('/approvals?box=mine', { me: meOwner });
+    const [row] = rows(await table('Мои запросы'));
+    const lists = listCalls(seen).length;
+    await userEvent.setup().click(within(row!).getByRole('button', { name: 'Отменить' }));
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    await waitFor(() => expect(listCalls(seen).length).toBeGreaterThan(lists));
   });
 });
 
@@ -359,19 +537,47 @@ describe('общее устройство', () => {
 
 // Решённый запрос уходит из «Входящих» вместе с кнопкой, на которой стоял фокус (или куда окно
 // «Отклонить» вернуло бы его): фокус не должен падать на body.
+describe('общее устройство — кэш мутаций', () => {
+  test('сессия истекла — комментарий отклонения не остаётся в кэше мутаций', async () => {
+    directory();
+    approvalsServer();
+    const app = renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    const user = userEvent.setup();
+    await user.click(within(row!).getByRole('button', { name: 'Отклонить' }));
+    const dialog = screen.getByRole('dialog', { name: 'Отклонить запрос?' });
+    await user.type(within(dialog).getByLabelText('Почему отклоняете'), 'Рано выдавать город');
+    await user.click(within(dialog).getByRole('button', { name: 'Отклонить' }));
+    await screen.findByText('Запрос отклонён.');
+    const dump = () =>
+      JSON.stringify(
+        app.queryClient
+          .getMutationCache()
+          .getAll()
+          .map((m) => m.state.variables),
+      );
+    expect(dump()).toContain('Рано выдавать город');
+
+    app.me.current = null;
+    await app.refetchMe();
+    await screen.findByRole('heading', { level: 1, name: 'Вход администратора' });
+    await waitFor(() => expect(dump()).not.toContain('Рано выдавать город'));
+  });
+});
+
 describe('фокус после решения', () => {
-  test('подтвердили — строки нет, фокус на списке, а не на body', async () => {
+  test('подтвердили — кнопки строки нет, фокус на списке, а не на body', async () => {
     directory();
     approvalsServer();
     renderApp('/approvals', { me: meOwner });
     const [row] = rows(await table('Входящие запросы'));
     await userEvent.setup().click(within(row!).getByRole('button', { name: 'Подтвердить' }));
-    await screen.findByText('Входящих нет');
+    await within(row!).findByText('исполнен');
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
   });
 
-  test('отклонили — окно закрыто, строки нет, фокус на списке', async () => {
+  test('отклонили — окно закрыто, кнопки строки нет, фокус на списке', async () => {
     directory();
     approvalsServer();
     renderApp('/approvals', { me: meOwner });
@@ -381,7 +587,7 @@ describe('фокус после решения', () => {
     const dialog = screen.getByRole('dialog', { name: 'Отклонить запрос?' });
     await user.type(within(dialog).getByLabelText('Почему отклоняете'), 'рано');
     await user.click(within(dialog).getByRole('button', { name: 'Отклонить' }));
-    await screen.findByText('Входящих нет');
+    await within(row!).findByText('отклонён');
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
   });

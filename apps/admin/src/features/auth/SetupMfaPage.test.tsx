@@ -190,6 +190,27 @@ describe('настройка 2FA', () => {
     for (const c of CODES) expect(text).toContain(c);
   });
 
+  // Ревью M4: на время confirm ячейки busy (readOnly), а не disabled — фокус не падает на body.
+  test('пока confirm идёт, ячейки включены и заняты (aria-busy)', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    setupServer(app);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.post('/v1/staff/me/mfa/confirm', async ({ response }) => {
+        await gate;
+        return response(200).json({ recovery_codes: CODES });
+      }),
+    );
+    const user = userEvent.setup();
+    await enterCode(user, '492817');
+    const group = screen.getByRole('group', { name: CODE });
+    await waitFor(() => expect(group).toHaveAttribute('aria-busy', 'true'));
+    for (const cell of within(group).getAllByRole('textbox')) expect(cell).toBeEnabled();
+    release();
+    expect(await screen.findByRole('list', { name: 'Резервные коды' })).toBeInTheDocument();
+  });
+
   test('код не подошёл — текст и ячейки очищены, стёртый код не уходит', async () => {
     const app = renderApp('/setup-2fa', { me: meSetup });
     const ctl = setupServer(app);

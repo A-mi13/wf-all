@@ -123,10 +123,12 @@ export function AuditView({
 }
 
 // «Кто»: сотрудник — кнопка-фильтр по нему; оператор сервера и платформа — подписями; без автора-
-// человека (неудачный вход, анонимная повторная отправка) — «аноним».
+// человека (неудачный вход, анонимная повторная отправка) — «аноним». Пустой снимок имени — по роли
+// (импорт GeoNames оператором пишет только actor_role, ревью M2).
 function Actor({ record: r, onFilter }: { record: AuditRecord; onFilter: (id: string) => void }) {
   const t = useTranslations('audit.actor');
-  const label = r.actor_label;
+  const service = r.actor_role === 'operator' || r.actor_role === 'system';
+  const label = r.actor_label || (!r.actor_staff_id && service ? r.actor_role : null);
   if (label === 'operator' && !r.actor_staff_id) return <span>{t('operator')}</span>;
   if (label === 'system' && !r.actor_staff_id) return <span>{t('system')}</span>;
   if (r.actor_staff_id && label) {

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { type ApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
@@ -21,7 +21,7 @@ import {
 import { cityLabel, useCityNames } from '../staff/cities';
 import { ACCOUNTS_KEY, accountKey, useRoleLabel } from '../staff/queries';
 import { useApprovalAction, useApprovalFailureText, useApprovalStatus } from './labels';
-import { approvalsListKey, useInvalidateApprovals } from './queries';
+import { approvalsListKey, useSettleDecision } from './queries';
 import { RejectDialog } from './RejectDialog';
 import type { ApprovalBox } from './search';
 import { summarizePayload } from './summary';
@@ -38,8 +38,10 @@ const DECIDE_KEY = ['approvals', 'decide'] as const;
 // - «Подтвердить» — сразу, без окна (контракт e2e Task 16); итог — по status ответа: executed —
 //   успех (и перечитывание учёток), failed — ошибка по error, иное — справка по статусу.
 // - «Отклонить» — окно с обязательным комментарием; «Отменить» — свои ожидающие.
-// - Ошибки (platform.approval_*, staff.* исполнителя, прочие) — тост по коду; после любого решения
-//   перечитываются оба списка и счётчик меню.
+// - Ошибки (platform.approval_*, прочие) — тост по коду; staff.* исполнителя и approval_stale —
+//   «подтверждено, но не выполнено» (запрос уже failed). Решённый с ответом остаётся строкой с итогом
+//   (useSettleDecision), счётчик и другая вкладка перечитываются; ошибка — перечитывается всё, кнопки
+//   заняты до конца перечитывания.
 // - На телефоне решения по staff.* скрыты (D22, ограничение интерфейса — решает сервер).
 export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
   const t = useTranslations('approvals');
@@ -66,7 +68,9 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
   const root = useRef<HTMLDivElement>(null);
   const refocus = useRef(false);
   const [decided, setDecided] = useState(0);
-  const onDone = () => {
+  const settle = useSettleDecision(box);
+  const onDone = async (result?: Approval) => {
+    await settle(result);
     refocus.current = true;
     setDecided((n) => n + 1);
   };
@@ -162,8 +166,9 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
 
 // Подтвердить и отменить. Повторный клик, пока решение идёт, не уходит: нажатая кнопка — loading
 // (клик гасится), остальные — disabled; pendingId ставится в обработчике клика, и React перерисует
-// до следующего (дискретное событие). Второй запрос с новым ключом был бы вторым действием.
-function useDecisions(onDone: () => void) {
+// до следующего (дискретное событие), а снимается только после onDone — когда итог на месте или
+// список перечитан (ревью I2). Второй запрос с новым ключом был бы вторым действием.
+function useDecisions(onDone: (result?: Approval) => Promise<void>) {
   const t = useTranslations('approvals');
   const api = useApi();
   const toast = useToast();
@@ -171,15 +176,18 @@ function useDecisions(onDone: () => void) {
   const failureText = useApprovalFailureText();
   const statusOf = useApprovalStatus();
   const queryClient = useQueryClient();
-  const invalidate = useInvalidateApprovals();
   const [pendingId, setPendingId] = useState<string | null>(null);
 
   const onError = (e: ApiError) => toast.error(errorText(e));
-  const onSettled = async () => {
+  const onSettled = async (result: Approval | undefined) => {
+    await onDone(result);
     setPendingId(null);
-    await invalidate();
-    onDone();
   };
+  // Отказ исполнителя (staff.*) и устаревшая цель — запрос уже помечен failed (ревью M5).
+  const onApproveError = (e: ApiError) =>
+    e.code.startsWith('staff.') || e.code === 'platform.approval_stale'
+      ? toast.error(t('failed_toast', { reason: failureText(e.code) }))
+      : onError(e);
   const approveM = useAdminMutation(
     (a: Approval, key: string) =>
       unwrap(
@@ -200,7 +208,7 @@ function useDecisions(onDone: () => void) {
           toast.error(t('failed_toast', { reason: failureText(r.error ?? '') }));
         } else toast.info(t('done.other', { status: statusOf(r.status).text }));
       },
-      onError,
+      onError: onApproveError,
       onSettled,
     },
   );
@@ -316,14 +324,7 @@ function Subject({ approval: a, me }: { approval: Approval; me: Me }) {
           </dd>
         </>
       )}
-      {s.cityIds && s.cityIds.length > 0 && (
-        <>
-          <dt>{t('cities')}</dt>
-          <dd>
-            <CityNames ids={s.cityIds} me={me} />
-          </dd>
-        </>
-      )}
+      <Cities from={s.fromCityIds} to={s.cityIds} me={me} />
       {reason && (
         <>
           <dt>{t('reason')}</dt>
@@ -358,17 +359,33 @@ function TargetName({ id, me }: { id: string; me: Me }) {
   );
 }
 
-// Подписи городов — GET /v1/geo/cities?ids= (с правом geo.cities.read), иначе число.
-function CityNames({ ids, me }: { ids: string[]; me: Me }) {
+// Города запроса (ревью I1): у смены роли — «было → стало», если наборы разные (снятие всех городов
+// видно: «… → без городов»); иначе — сам набор. Пустой и без «было» — строки нет.
+function Cities({ from, to, me }: { from?: string[]; to?: string[]; me: Me }) {
   const t = useTranslations('approvals.summary');
-  const names = useCityNames(ids, can(me, 'geo.cities.read'));
-  const labels = ids
-    .map((id) => names.data?.items.find((c) => c.id === id))
-    .filter((c) => c !== undefined)
-    .map(cityLabel);
+  const id = useId();
+  const all = [...new Set([...(from ?? []), ...(to ?? [])])];
+  const names = useCityNames(all, can(me, 'geo.cities.read'));
+  if (all.length === 0) return null;
+  const list = (ids: string[]) => {
+    if (ids.length === 0) return t('no_cities');
+    const labels = ids
+      .map((c) => names.data?.items.find((x) => x.id === c))
+      .filter((c) => c !== undefined)
+      .map(cityLabel);
+    return labels.length === ids.length
+      ? labels.join('; ')
+      : t('cities_count', { count: ids.length });
+  };
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((c) => b.includes(c));
+  const text =
+    from && to && !same(from, to)
+      ? t('role_change', { from: list(from), to: list(to) })
+      : list(to ?? from ?? []);
   return (
     <>
-      {labels.length === ids.length ? labels.join('; ') : t('cities_count', { count: ids.length })}
+      <dt id={id}>{t('cities')}</dt>
+      <dd aria-labelledby={id}>{text}</dd>
     </>
   );
 }

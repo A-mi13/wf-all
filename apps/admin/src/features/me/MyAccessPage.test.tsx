@@ -335,6 +335,10 @@ describe('перевыпуск резервных кодов', () => {
     await waitFor(() =>
       expect(within(dialog).getByRole('button', { name: 'Закрыть' })).toBeDisabled(),
     );
+    // ячейки на время запроса — busy, не disabled (ревью M4)
+    const group = within(dialog).getByRole('group', { name: CODE });
+    expect(group).toHaveAttribute('aria-busy', 'true');
+    for (const cell of within(group).getAllByRole('textbox')) expect(cell).toBeEnabled();
     await user.keyboard('{Escape}');
     expect(screen.getByRole('dialog', { name: 'Новые резервные коды' })).toBeInTheDocument();
     release();
@@ -484,6 +488,30 @@ describe('смена пароля', () => {
     await user.type(within(root).getByLabelText('Новый пароль ещё раз'), repeat);
     await enterCode(user, root, '492817');
   }
+
+  // Ревью M4: на время смены пароля ячейки кода busy, а не disabled.
+  test('пока смена пароля идёт, ячейки кода включены и заняты (aria-busy)', async () => {
+    accessServer();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.post('/v1/staff/me/password', async ({ response }) => {
+        await gate;
+        return response(204).empty();
+      }),
+    );
+    renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    await page();
+    const form = card('Смена пароля');
+    await fill(user, form);
+    await user.click(within(form).getByRole('button', { name: 'Сменить пароль' }));
+    const group = within(form).getByRole('group', { name: CODE });
+    await waitFor(() => expect(group).toHaveAttribute('aria-busy', 'true'));
+    for (const cell of within(group).getAllByRole('textbox')) expect(cell).toBeEnabled();
+    release();
+    expect(await screen.findByText(/Пароль изменён|Пароль сменён/)).toBeInTheDocument();
+  });
 
   test('новый пароль и повтор не совпали — ошибка поля, запрос не уходит', async () => {
     const seen = passwordServer(() => null);

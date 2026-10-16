@@ -6,7 +6,6 @@ import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
 import { Button, Form, Modal, TextField, useErrorText, useToast } from '../../ui';
-import { useInvalidateApprovals } from './queries';
 import styles from './approvals.module.css';
 
 type Approval = components['schemas']['Approval'];
@@ -26,7 +25,8 @@ export function RejectDialog({
 }: {
   approval: Approval | null;
   onClose: () => void;
-  onDone: () => void; // решение отправлено (отклонён или запрос уже не тот), списки перечитаны
+  // решение отправлено: ответ (отклонён) — строка на месте с итогом; ошибка — всё перечитано
+  onDone: (result?: Approval) => Promise<void>;
 }) {
   const t = useTranslations('approvals.reject_dialog');
   const busy = useIsMutating({ mutationKey: REJECT_KEY }) > 0;
@@ -50,13 +50,12 @@ function RejectForm({
 }: {
   approval: Approval;
   onClose: () => void;
-  onDone: () => void;
+  onDone: (result?: Approval) => Promise<void>;
 }) {
   const t = useTranslations('approvals');
   const api = useApi();
   const toast = useToast();
   const errorText = useErrorText();
-  const invalidate = useInvalidateApprovals();
   const form = useForm<{ comment: string }>({ defaultValues: { comment: '' } });
   const reject = useAdminMutation(
     (v: { comment: string }, key: string) =>
@@ -72,10 +71,7 @@ function RejectForm({
         toast.success(t('done.rejected'));
         onClose();
       },
-      onSettled: async () => {
-        await invalidate();
-        onDone();
-      },
+      onSettled: (result) => onDone(result),
     },
   );
 
