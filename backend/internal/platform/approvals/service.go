@@ -120,7 +120,8 @@ func (s *Service) Request(ctx context.Context, tx pgx.Tx, by *auth.Staff, byLabe
 // ErrClosed; срок вышел — expired от системы коммитится и ErrClosed (D8); проверка инициатора
 // (InitiatorCheck с запросом целиком): отказ — failed (initiator_changed) коммитится и ErrStale;
 // исполнитель под savepoint: Fail(err) или ErrStale — изменения исполнителя откатываются, failed с
-// кодом ошибки коммитится, наружу — исходная ошибка; иная ошибка или паника — откат всего (запрос
+// кодом ошибки коммитится (ErrInitiatorChanged — initiator_changed, голый ErrStale —
+// platform.approval_stale), наружу — исходная ошибка; иная ошибка или паника — откат всего (запрос
 // остаётся pending). Успех — executed. При failed и expired возвращается и запрос в итоговом
 // состоянии, и ошибка. m — IP и User-Agent решившего для аудита.
 func (s *Service) Approve(ctx context.Context, st *auth.Staff, label string, m Meta, apID uuid.UUID, comment string) (Approval, error) {
