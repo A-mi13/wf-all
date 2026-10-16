@@ -12,6 +12,7 @@ import (
 
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/staff"
 )
@@ -214,7 +215,8 @@ func TestChangeRoleStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := e.approve(b, ap.ID)
-	if !errors.Is(err, approvals.ErrStale) || res.Status != approvals.StatusFailed {
+	// цель изменилась — причина platform.approval_stale, не initiator_changed (m1 уборки №6)
+	if !errors.Is(err, approvals.ErrStale) || res.Status != approvals.StatusFailed || res.Error != httpx.CodeApprovalStale {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if cs := e.citiesOf(m.ID); !slices.Equal(cs, []uuid.UUID{c1}) {

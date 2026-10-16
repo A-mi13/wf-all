@@ -45,7 +45,8 @@ func TestLastOwnerConcurrent(t *testing.T) {
 }
 
 // Гонка исполнения подтверждения и операторских выключений над тремя владельцами: что бы ни прошло,
-// активный владелец остаётся; без взаимных блокировок и 500.
+// активный владелец остаётся; без взаимных блокировок и 500. Хотя бы одно действие прошло (первый, взявший
+// замок владельцев, всегда успешен: активных трое) — иначе тест проходил бы и при всех упавших (m7).
 func TestLastOwnerConcurrentMixed(t *testing.T) {
 	e := newManageEnv(t)
 	a := e.addMember("owner.a@wf.example", memberOpts{Role: "owner"})
@@ -56,6 +57,7 @@ func TestLastOwnerConcurrentMixed(t *testing.T) {
 	if err != nil || ap == nil {
 		t.Fatalf("%+v %v", ap, err)
 	}
+	var passed atomic.Int32
 	barrier(3, func(i int) {
 		var err error
 		switch i {
@@ -66,11 +68,17 @@ func TestLastOwnerConcurrentMixed(t *testing.T) {
 		case 2:
 			err = e.app.OperatorDisable(context.Background(), c.Email)
 		}
+		if err == nil {
+			passed.Add(1)
+		}
 		if err != nil && !errors.Is(err, staff.ErrLastOwner) && !errors.Is(err, approvals.ErrStale) &&
 			!errors.Is(err, approvals.ErrClosed) && !errors.Is(err, auth.ErrSessionInvalid) {
 			t.Errorf("исход %d: %v", i, err)
 		}
 	})
+	if n := passed.Load(); n < 1 {
+		t.Fatalf("ни одно действие не прошло (%d)", n)
+	}
 	if n := e.activeOwners(); n < 1 {
 		t.Fatalf("активных владельцев %d", n)
 	}
@@ -199,8 +207,12 @@ func TestDisableInitiatorWhileApproving(t *testing.T) {
 	if err := <-disabled; err != nil {
 		t.Fatalf("выключение: %v", err)
 	}
-	if err := <-approved; !errors.Is(err, approvals.ErrStale) || res.Status != approvals.StatusFailed {
+	// причина — «инициатор изменился», а не «цель устарела» (m1 уборки №6)
+	if err := <-approved; !errors.Is(err, approvals.ErrStale) || res.Status != approvals.StatusFailed || res.Error != approvals.ErrorInitiatorChanged {
 		t.Fatalf("подтверждение: %+v %v", res, err)
+	}
+	if st, errText := e.apState(ap.ID); st != approvals.StatusFailed || errText != approvals.ErrorInitiatorChanged {
+		t.Fatalf("строка запроса: %s %s", st, errText)
 	}
 	if n := e.count(`SELECT count(*) FROM staff_accounts WHERE email = 'n@wf.example'`); n != 0 {
 		t.Fatal("учётка создана правами выключенного")

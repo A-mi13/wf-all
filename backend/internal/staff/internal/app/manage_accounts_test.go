@@ -164,6 +164,46 @@ func TestAccountSessions(t *testing.T) {
 	}
 }
 
+// Сессии своей учётки через карточку (m6 уборки №6): владелец видит свои — текущая отмечена, чужая нет;
+// админ — 403 (его роль elevated, сессии владельцев и админов ему закрыты, и своей тоже; свои — в «Мой
+// доступ»); чужая карточка не отмечает текущую сессию автора.
+func TestAccountSessionsOwn(t *testing.T) {
+	e := newManageEnv(t)
+	ctx := context.Background()
+	om := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
+	owner := e.as(om)
+	_, other := e.rawSession(om.ID, "active", netip4("198.51.100.7"), "Firefox", t0)
+	am := e.addMember("admin@wf.example", memberOpts{Role: "admin"})
+	admin := e.as(am)
+	sup := e.addMember("sup@wf.example", memberOpts{Role: "support"})
+	e.rawSession(sup.ID, "active", ipHome, "", t0)
+
+	got, err := e.app.AccountSessions(ctx, owner, om.ID)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("сессии владельца: %+v %v", got, err)
+	}
+	current := 0
+	for _, v := range got {
+		if v.Current {
+			current++
+			if v.ID != owner.SessionID {
+				t.Fatalf("отмечена не текущая сессия: %+v", v)
+			}
+		}
+		if v.ID == other && v.Current {
+			t.Fatal("чужая сессия отмечена текущей")
+		}
+	}
+	if current != 1 {
+		t.Fatalf("текущих сессий %d", current)
+	}
+	_, err = e.app.AccountSessions(ctx, admin, am.ID)
+	wantForbidden(t, err)
+	if got, err := e.app.AccountSessions(ctx, admin, sup.ID); err != nil || len(got) != 1 || got[0].Current {
+		t.Fatalf("карточка поддержки: %+v %v", got, err)
+	}
+}
+
 // Матрица ролей — та же, что perm (без черновых строк), значения — Grant.String().
 func TestRolesMatrix(t *testing.T) {
 	e := newManageEnv(t)

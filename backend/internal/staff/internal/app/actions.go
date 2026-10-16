@@ -190,7 +190,8 @@ func (a *App) checkInitiator(ctx context.Context, tx pgx.Tx, ap approvals.Approv
 // execLocks — вход исполнителя: замок стража владельцев (owners), затем учётки по возрастанию id (цель
 // — FOR UPDATE, инициатор и подтверждающий — FOR SHARE). Подтверждающий перепроверяется (m4: выключен,
 // сменил роль, сессия погашена — обычная ошибка: откат всего, запрос остаётся pending), инициатор —
-// под замком (изменился после запроса — ErrStale: failed). permission — право запроса (то же, что
+// под замком (изменился после запроса — ErrInitiatorChanged: failed с причиной initiator_changed, как у
+// checkInitiator; изменение цели — ErrStale, platform.approval_stale). permission — право запроса (то же, что
 // посчитал Permit).
 func (a *App) execLocks(ctx context.Context, q *staffdb.Queries, p payloadBase, permission string, approver *auth.Staff, target uuid.UUID, owners bool) (map[uuid.UUID]acct, actor, error) {
 	if owners {
@@ -209,7 +210,7 @@ func (a *App) execLocks(ctx context.Context, q *staffdb.Queries, p payloadBase, 
 	}
 	init, ok := locked[p.InitID]
 	if !ok || !initiatorValid(init.status, init.role, init.version, init.lockedUntil, p, permission, uuid.Nil, now) {
-		return nil, actor{}, approvals.ErrStale
+		return nil, actor{}, approvals.ErrInitiatorChanged
 	}
 	return locked, actorOf(approver, by), nil
 }

@@ -73,6 +73,12 @@ var (
 	ErrForbidden error = httpx.NewError(http.StatusForbidden, httpx.CodeForbidden)
 )
 
+// ErrInitiatorChanged — отказ исполнителя: инициатор изменился после запроса (перепроверка под замком
+// исполнителя, как InitiatorCheck без замка). Это ErrStale для клиента (409 platform.approval_stale), но
+// у failed-запроса error = ErrorInitiatorChanged, а не platform.approval_stale (та — цель устарела).
+// Возвращать как есть или обёрнутой (%w), без Fail.
+var ErrInitiatorChanged = fmt.Errorf("approvals: инициатор изменился после запроса: %w", ErrStale)
+
 // errNoInitiatorCheck — подтверждение без проверки инициатора не исполняется (fail-closed): сборка
 // admin-api (10c) обязана зарегистрировать проверку (staff) до старта сервера — Registry.Validate.
 var errNoInitiatorCheck = errors.New("approvals: проверка инициатора не зарегистрирована (Registry.SetInitiatorCheck)")

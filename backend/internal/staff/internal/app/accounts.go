@@ -155,7 +155,9 @@ func (a *App) accountViews(ctx context.Context, q *staffdb.Queries, rows []accou
 
 // AccountSessions — живые сессии сотрудника (listStaffAccountSessions): право staff.accounts.read; нет
 // учётки — staff.not_found; сессии владельца или админа — только тому, кто может выдавать эти роли
-// (grant_elevated не Deny; админу — 403). Своя учётка — текущая сессия отмечена.
+// (grant_elevated не Deny; админу — 403, и на свою учётку тоже: свои сессии админ видит в «Мой доступ»).
+// Читают только владелец и админ (accounts.read): у владельца на свою учётку текущая сессия отмечена, в
+// чужих карточках — никогда.
 func (a *App) AccountSessions(ctx context.Context, s *auth.Staff, staffID uuid.UUID) ([]staff.SessionView, error) {
 	if s.Decide(permAccountsRead, uuid.Nil) != auth.Allow {
 		return nil, errForbidden

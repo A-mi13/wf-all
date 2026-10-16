@@ -176,7 +176,11 @@ func (s *Service) Approve(ctx context.Context, st *auth.Staff, label string, m M
 				return err
 			}
 			bizErr = visible
-			out, err = s.decide(ctx, tx, row, StatusFailed, decider, cm, ptr(errorText(visible)))
+			reason := errorText(visible)
+			if errors.Is(execErr, ErrInitiatorChanged) {
+				reason = ErrorInitiatorChanged
+			}
+			out, err = s.decide(ctx, tx, row, StatusFailed, decider, cm, ptr(reason))
 			return err
 		}
 		if err := sp.Commit(ctx); err != nil {
