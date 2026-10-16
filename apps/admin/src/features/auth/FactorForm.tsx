@@ -140,7 +140,8 @@ export function FactorForm({
               onComplete={sendCode}
               onChange={setCode}
               invalid={Boolean(message)}
-              disabled={m.isPending || locked}
+              disabled={locked}
+              busy={m.isPending}
               autoFocus
               describedBy={message ? errorId : undefined}
             />

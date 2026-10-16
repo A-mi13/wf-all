@@ -281,6 +281,27 @@ describe('перевыпуск резервных кодов', () => {
     expect(seen.regen).toEqual([{ code: '492817' }, { code: '118274' }]);
   });
 
+  // Уборка №6, R3: разблокировку отклонили (выход из окна, блокировка) — экран уходит на вход, и
+  // «Вход подтверждён…» на нём не должен мелькнуть: вход как раз НЕ подтверждён.
+  test('разблокировка отклонена — без «Вход подтверждён», запрос не повторён', async () => {
+    const seen = regenServer(() => problem(401, 'auth.reauth_required'));
+    renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Перевыпустить коды' }));
+    const dialog = screen.getByRole('dialog', { name: 'Новые резервные коды' });
+    await enterCode(user, dialog, '492817');
+    await screen.findByRole('dialog', { name: 'Подтвердите вход' });
+    act(() => reauthBus.reject());
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Подтвердите вход' })).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(within(dialog).getByRole('group', { name: CODE })).not.toHaveAttribute('aria-busy'),
+    );
+    expect(screen.queryByText(/Вход подтверждён/)).toBeNull();
+    expect(seen.regen).toEqual([{ code: '492817' }]);
+  });
+
   test('коды на экране — Esc, фон и «×» окно не закрывают, только «Готово»', async () => {
     regenServer(() => null);
     renderApp('/me', { me: meOwner });
@@ -390,6 +411,31 @@ describe('активные сеансы', () => {
     expect(await screen.findByText('Сессия не найдена или уже завершена')).toBeInTheDocument();
     await waitFor(() => expect(seen.sessions).toBeGreaterThan(mid));
     expect(deleted).toEqual([OTHER, PHONE]);
+  });
+
+  // Уборка №6, R2: у нажатой «Завершить» loading вместе с disabled — побеждал disabled, и фокус с
+  // кнопки падал на body. Недоступны только кнопки других строк.
+  test('пока «Завершить» идёт, фокус остаётся на нажатой кнопке; другие строки недоступны', async () => {
+    accessServer();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.delete('/v1/staff/me/sessions/{sessionId}', async ({ response }) => {
+        await gate;
+        return response(204).empty();
+      }),
+    );
+    renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    const list = await screen.findByRole('list', { name: 'Сеансы' });
+    const pressed = within(list).getByRole('button', { name: /Safari · macOS/ });
+    await user.click(pressed);
+    await waitFor(() => expect(pressed).toHaveAttribute('aria-busy', 'true'));
+    expect(pressed).toBeEnabled();
+    expect(document.activeElement).toBe(pressed);
+    expect(within(list).getByRole('button', { name: /Устройство не определено/ })).toBeDisabled();
+    release();
+    expect(await screen.findByText(/Сеанс завершён/)).toBeInTheDocument();
   });
 
   test('«Завершить все другие сеансы» — число завершённых и перезапрос', async () => {
@@ -570,6 +616,28 @@ describe('смена пароля', () => {
     await waitFor(() => expect(digits(form)).toBe(''));
     expect(within(form).getByLabelText('Текущий пароль')).toHaveValue('Жёлтая карточка на 90-й');
     expect(within(form).getByLabelText('Новый пароль')).toHaveValue('Свисток на 46-й минуте');
+    expect(seen.password).toHaveLength(1);
+  });
+
+  // Уборка №6, R3: отклонённая разблокировка — не «Вход подтверждён» и не FormError с «Подтвердите
+  // вход…»: сессия уходит на вход, экран молчит.
+  test('разблокировка отклонена — без «Вход подтверждён» и без текста ошибки', async () => {
+    const seen = passwordServer(() => problem(401, 'auth.reauth_required'));
+    renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    await page();
+    const form = card('Смена пароля');
+    await fill(user, form);
+    await user.click(within(form).getByRole('button', { name: 'Сменить пароль' }));
+    await screen.findByRole('dialog', { name: 'Подтвердите вход' });
+    act(() => reauthBus.reject());
+    await waitFor(() =>
+      expect(within(form).getByRole('button', { name: 'Сменить пароль' })).not.toHaveAttribute(
+        'aria-busy',
+      ),
+    );
+    expect(screen.queryByText(/Вход подтверждён/)).toBeNull();
+    expect(within(form).queryByRole('alert')).toBeNull();
     expect(seen.password).toHaveLength(1);
   });
 

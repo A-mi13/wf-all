@@ -255,9 +255,27 @@ describe('reauth_required → разблокировка и повтор (P20)',
     bus.resolve();
     const err = await done;
     expect(err).toBeInstanceOf(ApiError);
-    expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required' });
+    expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required', replaySkipped: true });
     expect(state.hits).toBe(1);
     expect(seen).toEqual([null]);
+  });
+
+  // Уборка №6, R3: разблокировку отклонили (выход, блокировка) — запрос с noReplay() падает тем же
+  // 401, но без метки «повтор пропущен»: экран не пишет «Вход подтверждён…» на уходящей странице.
+  test('noReplay(): разблокировка отклонена — 401 без replaySkipped', async () => {
+    const { state, bus, api } = setup();
+    const done = caught(
+      api.POST('/v1/staff/me/password', {
+        params: { header: { 'Idempotency-Key': KEY } },
+        body,
+        ...noReplay(),
+      }),
+    );
+    await until(() => state.hits === 1 && bus.pending());
+    bus.reject();
+    const err = await done;
+    expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required' });
+    expect(err.replaySkipped).toBeUndefined();
   });
 
   test('без noReplay() тот же POST после разблокировки повторяется', async () => {

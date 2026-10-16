@@ -224,6 +224,49 @@ describe('черновик приглашения', () => {
   });
 });
 
+// ⚠️ из журнала Task 14: сессия истекла (401 auth.unauthenticated, вход с return), черновик остался в
+// sessionStorage вкладки — и доставался следующему сотруднику. Черновик привязан к me.id.
+describe('черновик приглашения — по сотруднику', () => {
+  async function expire(app: ReturnType<typeof renderApp>) {
+    app.me.current = null;
+    await app.refetchMe();
+    await screen.findByRole('heading', { level: 1, name: 'Вход администратора' });
+  }
+
+  test('A пишет черновик → 401 → входит B: черновика нет ни в форме, ни в storage', async () => {
+    staffServer({ accounts: TEAM });
+    const app = renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const dialog = await openInvite(user);
+    await fill(user, dialog, 'support');
+    expect(storageDump()).toContain('ivan.p@wf.example');
+    await expire(app);
+
+    app.me.current = meAdmin;
+    await app.refetchMe();
+    const next = await openInvite(user);
+    expect(within(next).getByLabelText('Рабочая почта')).toHaveValue('');
+    expect(within(next).getByLabelText('Имя')).toHaveValue('');
+    await waitFor(() => expect(storageDump()).not.toContain('ivan.p@wf.example'));
+  });
+
+  test('A пишет черновик → 401 → входит снова A: черновик на месте', async () => {
+    staffServer({ accounts: TEAM });
+    const app = renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const dialog = await openInvite(user);
+    await fill(user, dialog, 'support');
+    await expire(app);
+
+    app.me.current = meOwner;
+    await app.refetchMe();
+    const again = await openInvite(user);
+    expect(within(again).getByLabelText('Рабочая почта')).toHaveValue('ivan.p@wf.example');
+    expect(within(again).getByLabelText('Имя')).toHaveValue('Иван П.');
+    expect(within(again).getByLabelText('Роль')).toHaveValue('support');
+  });
+});
+
 test('StrictMode: черновик пишется, приглашение уходит один раз', async () => {
   staffServer({ accounts: TEAM });
   const sent = inviteServer();

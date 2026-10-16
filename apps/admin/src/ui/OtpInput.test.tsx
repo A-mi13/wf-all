@@ -164,6 +164,40 @@ describe('OtpInput', () => {
     expect(cells()[0]).toHaveFocus();
   });
 
+  // Уборка №6: на время запроса ячейки были disabled — фокус после автоотправки шестой цифры падал
+  // на body. busy: ячейки остаются в фокусе и в порядке Tab, ввод гасится, группа aria-busy.
+  test('busy: фокус остаётся в ячейке, ввод и вставка не меняют код, onComplete не зовётся', async () => {
+    const onComplete = vi.fn();
+    const onChange = vi.fn();
+    const ui = (busy: boolean) => (
+      <OtpInput label="Код из приложения" onComplete={onComplete} onChange={onChange} busy={busy} />
+    );
+    const { user, rerender } = renderWithIntl(ui(false));
+    await user.click(cells()[0]!);
+    await user.paste('123456');
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    const focused = document.activeElement;
+    rerender(ui(true));
+    expect(document.activeElement).toBe(focused);
+    expect(focused).not.toBe(document.body);
+    expect(screen.getByRole('group', { name: 'Код из приложения' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    for (const c of cells()) {
+      expect(c).toBeEnabled();
+      expect(c).toHaveAttribute('readonly');
+    }
+    onChange.mockClear();
+    await user.keyboard('{Backspace}7');
+    fireEvent.paste(cells()[0]!, { clipboardData: { getData: () => '999999' } });
+    expect(values()).toEqual(['1', '2', '3', '4', '5', '6']);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    rerender(ui(false));
+    expect(cells()[0]).not.toHaveAttribute('readonly');
+  });
+
   test('ошибка помечает группу, disabled выключает ячейки', () => {
     const { rerender } = setup({ invalid: true });
     for (const c of cells()) expect(c).toHaveAttribute('aria-invalid', 'true');

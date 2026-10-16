@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, test } from 'vitest';
-import { clearDrafts, useDraft } from './draft';
+import { claimDrafts, clearDrafts, useDraft } from './draft';
 
 afterEach(() => sessionStorage.clear());
 
@@ -40,5 +40,42 @@ test('clearDrafts() стирает все черновики админки и �
   expect(sessionStorage.getItem('wf-admin:draft:/staff')).toBeNull();
   expect(sessionStorage.getItem('wf-admin:draft:/login')).toBeNull();
   expect(sessionStorage.getItem('чужой-ключ')).toBe('x');
+  sessionStorage.removeItem('чужой-ключ');
+});
+
+// ⚠️ Task 14 → 15: черновик переживал истечение сессии и доставался следующему сотруднику во вкладке.
+// Черновик с владельцем (me.id) видит только он; вход другого сотрудника стирает чужие (claimDrafts).
+test('черновик с владельцем: другой сотрудник его не видит, тот же — видит', () => {
+  const a = renderHook(() => useDraft<Form>('/staff:invite', 'staff-a'));
+  act(() => a.result.current[1]({ email: 'ivan.p@wf.example', name: 'Иван П.' }));
+  a.unmount();
+  expect(
+    renderHook(() => useDraft<Form>('/staff:invite', 'staff-b')).result.current[0],
+  ).toBeUndefined();
+  expect(renderHook(() => useDraft<Form>('/staff:invite')).result.current[0]).toBeUndefined();
+  expect(renderHook(() => useDraft<Form>('/staff:invite', 'staff-a')).result.current[0]).toEqual({
+    email: 'ivan.p@wf.example',
+    name: 'Иван П.',
+  });
+});
+
+test('claimDrafts(владелец) стирает черновики других сотрудников, свои и без владельца — нет', () => {
+  const a = renderHook(() => useDraft<Form>('/staff:invite', 'staff-a'));
+  act(() => a.result.current[1]({ email: 'a@wf.example', name: 'A' }));
+  const b = renderHook(() => useDraft<Form>('/staff:invite', 'staff-b'));
+  act(() => b.result.current[1]({ email: 'b@wf.example', name: 'B' }));
+  const login = renderHook(() => useDraft<Form>('/login'));
+  act(() => login.result.current[1]({ email: 'l@wf.example', name: '' }));
+  sessionStorage.setItem('чужой-ключ', 'a@wf.example');
+
+  claimDrafts('staff-b');
+  const dump = Array.from({ length: sessionStorage.length }, (_, i) => {
+    const k = sessionStorage.key(i) ?? '';
+    return `${k}=${sessionStorage.getItem(k) ?? ''}`;
+  }).join('\n');
+  expect(dump).not.toMatch(/wf-admin.*a@wf\.example/);
+  expect(dump).toContain('b@wf.example');
+  expect(dump).toContain('l@wf.example');
+  expect(sessionStorage.getItem('чужой-ключ')).toBe('a@wf.example');
   sessionStorage.removeItem('чужой-ключ');
 });

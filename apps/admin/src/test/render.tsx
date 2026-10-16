@@ -6,6 +6,7 @@ import { createApi } from '../api/client';
 import type { Me } from '../app/permissions';
 import { AppProviders } from '../app/providers';
 import { createQueryClient, ME_KEY } from '../app/query';
+import { browserTimeZone } from '../i18n/format';
 import { type Locale, messagesFor } from '../i18n/messages';
 import { ToastProvider } from '../ui/toast';
 import { meOwner } from './me';
@@ -35,13 +36,16 @@ export function renderWithProviders(ui: ReactElement, opts: ProvidersOptions = {
   return { ...render(ui, { wrapper }), queryClient: wrapper.queryClient };
 }
 
-// Компонент src/ui без API и сессии: только язык (по умолчанию ru) и тосты. Возвращает и user
-// (user-event). С vi.useFakeTimers user-event зависает (RTL ждёт настоящий setTimeout) — там
-// события через fireEvent.
-export function renderWithIntl(ui: ReactElement, { locale = 'ru' }: { locale?: Locale } = {}) {
+// Компонент src/ui без API и сессии: только язык (по умолчанию ru), пояс (по умолчанию — браузера,
+// как у LocaleProvider; тест дат может задать свой) и тосты. Возвращает и user (user-event). С
+// vi.useFakeTimers user-event зависает (RTL ждёт настоящий setTimeout) — там события через fireEvent.
+export function renderWithIntl(
+  ui: ReactElement,
+  { locale = 'ru', timeZone = browserTimeZone() }: { locale?: Locale; timeZone?: string } = {},
+) {
   const user = userEvent.setup();
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <IntlProvider locale={locale} messages={messagesFor(locale)}>
+    <IntlProvider locale={locale} messages={messagesFor(locale)} timeZone={timeZone}>
       <ToastProvider>{children}</ToastProvider>
     </IntlProvider>
   );

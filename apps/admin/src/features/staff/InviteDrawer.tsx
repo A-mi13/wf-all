@@ -63,7 +63,8 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
   const api = useApi();
   const errorText = useErrorText();
   const roleLabel = useRoleLabel();
-  const [draft, saveDraft, clearDraft] = useDraft<Partial<Values>>(INVITE_DRAFT);
+  // черновик — этого сотрудника: после истечения сессии другой за компьютером его не увидит
+  const [draft, saveDraft, clearDraft] = useDraft<Partial<Values>>(INVITE_DRAFT, me.id ?? '');
   const roles = grantableRoles(me);
   // Роль из черновика, которую сотрудник больше выдать не может (права сменились), не подставляется.
   const [initial] = useState<Values>(() => ({

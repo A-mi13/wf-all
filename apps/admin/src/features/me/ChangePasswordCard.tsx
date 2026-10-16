@@ -105,6 +105,9 @@ export function ChangePasswordCard() {
       form.setFocus('current_password');
       return true;
     }
+    // разблокировку отклонили (выход, блокировка): страница уходит на вход — ни «Вход
+    // подтверждён», ни FormError (уборка №6, R3)
+    if (e.code === 'auth.reauth_required' && !e.replaySkipped) return true;
     // неверный код или разблокировка посреди запроса (код уже использован, запрос не повторён)
     if (e.code === 'staff.mfa_invalid' || e.code === 'auth.reauth_required') {
       setFailure(e);
@@ -188,7 +191,7 @@ export function ChangePasswordCard() {
                   // полный код не отправляет форму сам: нужны ещё пароли
                   onComplete={() => {}}
                   invalid={Boolean(fieldState.error) || failure?.code === 'staff.mfa_invalid'}
-                  disabled={change.isPending}
+                  busy={change.isPending}
                   describedBy={
                     [fieldState.error ? codeId : '', message ? errorId : '']
                       .filter(Boolean)

@@ -223,7 +223,7 @@ function ScanStep({
           onComplete={sendCode}
           onChange={setCode}
           invalid={Boolean(failure)}
-          disabled={confirm.isPending}
+          busy={confirm.isPending}
           describedBy={message ? errorId : undefined}
         />
         {message && (

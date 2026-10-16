@@ -26,6 +26,10 @@ export class ApiError extends Error {
   readonly fields?: FieldError[];
   readonly retryAfter?: number;
   readonly attemptsLeft?: number;
+  // 401 auth.reauth_required запроса с noReplay(): разблокировка ПРОШЛА, но запрос не повторён —
+  // экран просит новый код («Вход подтверждён…»). Без метки (разблокировку отклонили: выход,
+  // блокировка) экран молчит — страница уходит на вход.
+  readonly replaySkipped?: true;
 
   constructor(init: {
     status: number;
@@ -33,6 +37,7 @@ export class ApiError extends Error {
     fields?: FieldError[];
     retryAfter?: number;
     attemptsLeft?: number;
+    replaySkipped?: boolean;
   }) {
     super(`${init.status} ${init.code}`);
     this.name = 'ApiError';
@@ -41,6 +46,7 @@ export class ApiError extends Error {
     if (init.fields) this.fields = init.fields;
     if (init.retryAfter !== undefined) this.retryAfter = init.retryAfter;
     if (init.attemptsLeft !== undefined) this.attemptsLeft = init.attemptsLeft;
+    if (init.replaySkipped) this.replaySkipped = true;
   }
 }
 
@@ -83,7 +89,7 @@ async function readProblem(res: Response): Promise<Partial<Problem> | null> {
 
 // Problem (RFC 9457) → ApiError. Ответ без Problem (прокси, HTML) — код internal: у него есть
 // текст в локалях, а статус сохраняется.
-async function toApiError(res: Response): Promise<ApiError> {
+async function toApiError(res: Response, replaySkipped = false): Promise<ApiError> {
   const p = await readProblem(res);
   const header = Number.parseInt(res.headers.get('Retry-After') ?? '', 10);
   const errors = p?.errors;
@@ -96,6 +102,7 @@ async function toApiError(res: Response): Promise<ApiError> {
     fields,
     retryAfter: nonNegative(p?.retry_after) ?? nonNegative(header),
     attemptsLeft: nonNegative(p?.attempts_left),
+    replaySkipped,
   });
 }
 
@@ -119,6 +126,7 @@ function adminMiddleware(bus: ReauthBus): Middleware {
       originals.delete(id);
       const replay = !once.delete(id);
       let res = response;
+      let skipped = false;
       if (res.status === 401 && original) {
         const p = await readProblem(res);
         if (p?.code === 'auth.reauth_required') {
@@ -131,9 +139,10 @@ function adminMiddleware(bus: ReauthBus): Middleware {
           // Повтор — один раз: снова reauth_required уходит ошибкой, без второго круга. Запрос с
           // noReplay() не повторяется: экран получает исходный 401 и просит новый код.
           if (unlocked && replay) res = await options.fetch(original);
+          skipped = unlocked && !replay;
         }
       }
-      if (!res.ok) throw await toApiError(res);
+      if (!res.ok) throw await toApiError(res, skipped);
       return res;
     },
     onError({ id }) {

@@ -27,7 +27,11 @@ export type OtpInputProps = {
   onComplete: (code: string) => void; // все 6 цифр введены — автоотправка
   onChange?: (code: string) => void; // текущие цифры подряд (неполный код — короче 6)
   invalid?: boolean; // код не подошёл: рамки ошибки, aria-invalid
-  disabled?: boolean; // запрос идёт
+  // Ввод недоступен совсем (вход закрыт на час): ячейки disabled, фокус уходит со страницы.
+  disabled?: boolean;
+  // Запрос с кодом идёт: ячейки readOnly (не disabled — фокус не падает на body), ввод и вставка
+  // гасятся, группа aria-busy.
+  busy?: boolean;
   autoFocus?: boolean;
   describedBy?: string; // id текста ошибки или подсказки под ячейками
   ref?: Ref<OtpInputHandle>;
@@ -48,6 +52,7 @@ export function OtpInput({
   onChange,
   invalid,
   disabled,
+  busy,
   autoFocus,
   describedBy,
   ref,
@@ -122,6 +127,11 @@ export function OtpInput({
   const onKeyDown = (i: number, e: KeyboardEvent<HTMLInputElement>) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return; // Ctrl+V и прочие сочетания — браузеру
     const k = e.key;
+    // запрос идёт: правки гасятся, переход между ячейками (стрелки, Tab) — как обычно
+    if (busy && (k.length === 1 || k === 'Backspace' || k === 'Delete')) {
+      e.preventDefault();
+      return;
+    }
     if (isDigit(k)) {
       e.preventDefault();
       setAt(i, k);
@@ -155,6 +165,7 @@ export function OtpInput({
 
   // Ввод без keydown с цифрой: экранные клавиатуры (key «Unidentified»), автозаполнение.
   const onInput = (i: number, raw: string) => {
+    if (busy) return;
     const digits = digitsOf(raw);
     if (!raw) return setAt(i, '');
     if (!digits) return; // одни не-цифры: ячейка как была
@@ -175,6 +186,7 @@ export function OtpInput({
 
   const onPaste = (i: number, e: ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
+    if (busy) return;
     fill(i, e.clipboardData.getData('text'));
   };
 
@@ -183,6 +195,7 @@ export function OtpInput({
       role="group"
       aria-label={label}
       aria-describedby={describedBy}
+      aria-busy={busy || undefined}
       className={cx(styles.group, invalid && styles.invalid)}
     >
       {cells.map((c, i) => (
@@ -201,6 +214,7 @@ export function OtpInput({
           aria-label={t('digit', { index: i + 1, count: LENGTH })}
           aria-invalid={invalid || undefined}
           disabled={disabled}
+          readOnly={busy}
           value={c}
           onKeyDown={(e) => onKeyDown(i, e)}
           onChange={(e) => onInput(i, e.target.value)}

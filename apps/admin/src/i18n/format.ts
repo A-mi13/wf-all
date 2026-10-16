@@ -11,3 +11,9 @@ export function useDateTime(): (iso: string) => string {
     [format],
   );
 }
+
+// Пояс браузера сотрудника — для LocaleProvider и тестового renderWithIntl (один источник: в тестах
+// даты идут тем же путём, что в приложении).
+export function browserTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}

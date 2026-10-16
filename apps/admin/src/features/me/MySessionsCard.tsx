@@ -89,7 +89,8 @@ export function MySessionsCard() {
                     variant="danger-outline"
                     aria-label={t('revoke_label', { device: d.device, created: d.created })}
                     loading={revoke.isPending && revoke.variables === s.id}
-                    disabled={revoke.isPending}
+                    // у нажатой — только loading (aria-disabled): disabled уронил бы фокус на body
+                    disabled={revoke.isPending && revoke.variables !== s.id}
                     onClick={() => revoke.mutate(s.id)}
                   >
                     {t('revoke')}

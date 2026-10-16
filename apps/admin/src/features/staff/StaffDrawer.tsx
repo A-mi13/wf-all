@@ -205,6 +205,13 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+// Цель изменилась в другой вкладке или у другого сотрудника (уже выключена, удалена): после
+// перечитывания блок действия с его ошибкой может исчезнуть — текст уходит общим тостом
+// useStaffAction (ревью M3), а блок свой текст не дублирует: одна ошибка — одно сообщение (уборка №6,
+// R1). Диалог действия с такой ошибкой закрывается.
+const TOASTED = new Set(['staff.wrong_stage', 'staff.not_found']);
+const toasted = (e: ApiError): boolean => TOASTED.has(e.code);
+
 // Мутация действия над сотрудником: общий ключ (панель не закрывается) и перечитывание всего про
 // учётки после ответа — и после ошибки (409 wrong_stage, last_owner: данные могли устареть).
 function useStaffAction<V, R>(
@@ -218,9 +225,7 @@ function useStaffAction<V, R>(
     mutationKey: ACTION_KEY,
     onSuccess: opts.onSuccess,
     onError: (e) => {
-      // Цель изменилась в другой вкладке или у другого сотрудника (уже выключена, удалена): после
-      // перечитывания блок действия с его ошибкой может исчезнуть — текст уходит тостом (ревью M3).
-      if (e.code === 'staff.wrong_stage' || e.code === 'staff.not_found') toast.error(errorText(e));
+      if (toasted(e)) toast.error(errorText(e));
       opts.onError?.(e);
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
@@ -248,7 +253,7 @@ function ResendBlock({ target }: { target: StaffAccount }) {
       onError: (e) => {
         // пауза 60 с от выпуска приглашения — отсчёт в кнопке, не ошибка
         if (e.code === 'ratelimit.exceeded') wait.start(e.retryAfter ?? 60);
-        else toast.error(errorText(e));
+        else if (!toasted(e)) toast.error(errorText(e));
       },
     },
   );
@@ -326,6 +331,7 @@ function RoleBlock({
         form={form}
         onSubmit={(v) => (permission && decision !== 'deny' ? change.mutateAsync(v) : undefined)}
         onError={(e) => {
+          if (toasted(e)) return true; // текст — общим тостом
           if (e.code !== 'staff.city_not_found') return false;
           form.setError(
             'city_ids',
@@ -395,6 +401,9 @@ function SessionsBlock({ target }: { target: StaffAccount }) {
       onSuccess: (d) => {
         setConfirming(false);
         toast.success(t('done', { count: d.revoked }));
+      },
+      onError: (e) => {
+        if (toasted(e)) setConfirming(false);
       },
     },
   );
@@ -540,6 +549,9 @@ function DestructiveDialog({
         onClose();
         if (o === 'approval') onApproval();
         else toast.success(t('done'));
+      },
+      onError: (e) => {
+        if (toasted(e)) onClose();
       },
     },
   );

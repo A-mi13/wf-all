@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { isApiError, unwrap } from '../api/client';
 import { useApi } from '../api/context';
+import { claimDrafts } from './draft';
 import { can, decide, type Decision, type Me } from './permissions';
 import { ME_KEY } from './query';
 import { reauthBus } from './reauth';
@@ -89,6 +90,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       : { ...state, refresh, afterLogout };
   }, [q.data, q.error, signedOut, refresh, afterLogout]);
   const reauthRequired = value.status === 'active' && value.reauthRequired;
+
+  // Сессия сотрудника известна (setup, active): черновики других сотрудников этой вкладки стираются
+  // (⚠️ Task 14: после истечения сессии за компьютер мог сесть другой).
+  const staffId = value.status === 'active' || value.status === 'setup' ? value.me.id : undefined;
+  useEffect(() => {
+    if (staffId) claimDrafts(staffId);
+  }, [staffId]);
 
   // После перезагрузки с reauth_required модалка открывается сразу; разблокировка прошла —
   // me перечитывается (P20).

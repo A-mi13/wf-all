@@ -107,8 +107,12 @@ function CodeStep({ onIssued }: { onIssued: (codes: string[]) => void }) {
     m.mutate({ code: c });
   };
 
+  // auth.reauth_required: разблокировка прошла, а запрос не повторён — «введите новый код»;
+  // разблокировку отклонили (выход, блокировка) — молчим: страница уходит на вход (уборка №6, R3).
   const message =
-    !failure || (failure.code === 'ratelimit.exceeded' && !limited)
+    !failure ||
+    (failure.code === 'ratelimit.exceeded' && !limited) ||
+    (failure.code === 'auth.reauth_required' && !failure.replaySkipped)
       ? null
       : failure.code === 'auth.reauth_required'
         ? tme('reauth_retry')
@@ -127,7 +131,7 @@ function CodeStep({ onIssued }: { onIssued: (codes: string[]) => void }) {
         onComplete={send}
         onChange={setCode}
         invalid={Boolean(message)}
-        disabled={m.isPending}
+        busy={m.isPending}
         autoFocus
         describedBy={message ? errorId : undefined}
       />

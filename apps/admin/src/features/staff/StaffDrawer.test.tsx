@@ -278,6 +278,27 @@ describe('выключение и сброс доступа', () => {
     expect(within(panel).queryByRole('region', { name: 'Выключить учётку' })).toBeNull();
   });
 
+  // Уборка №6, R1: 404 not_found при выключении, а карточка ещё читается (гонка) — блок остаётся;
+  // ошибка — один тост, диалог закрыт (не тост и FormError в диалоге разом).
+  test('404 not_found при выключении — один тост, диалог закрыт', async () => {
+    destructiveServer({ disable: () => problem(404, 'staff.not_found') });
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const panel = await manage(user, 'Иван П.');
+    await user.click(
+      within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
+    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'security');
+    await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
+    await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
+    await screen.findByText('Сотрудник не найден');
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Выключить — Иван П.?' })).toBeNull(),
+    );
+    expect(screen.getAllByText('Сотрудник не найден')).toHaveLength(1);
+  });
+
   // Ревью M4: комментарий длиннее предела контракта (500) не уходит.
   test('комментарий длиннее 500 символов — до запроса не уходит длиннее предела', async () => {
     const sent = destructiveServer();
@@ -445,5 +466,96 @@ describe('приглашение и сеансы цели', () => {
     expect(within(panel).getByRole('region', { name: 'Приглашение' })).toBeInTheDocument();
     for (const name of ['Роль и города', 'Сеансы', 'Сброс доступа', 'Выключить учётку'])
       expect(within(panel).queryByRole('region', { name })).toBeNull();
+  });
+});
+
+// Уборка №6, R1: одна ошибка — одно сообщение. wrong_stage / not_found показывает общий тост
+// useStaffAction (блок с ошибкой может исчезнуть после перечитывания); блок свой текст не дублирует.
+describe('одна ошибка — одно сообщение', () => {
+  const INVITED = TEAM.find((a) => a.display_name === 'Настя Д.')!;
+  const STALE = 'Это действие сейчас недоступно. Обновите страницу';
+  const GONE = 'Сотрудник не найден';
+
+  test('переотправка → 409 wrong_stage — один тост', async () => {
+    staffServer({ accounts: [...TEAM.slice(0, 1), INVITED] });
+    server.use(
+      http.post('/v1/staff/accounts/{staffId}/invite/resend', ({ response }) =>
+        response.untyped(problem(409, 'staff.wrong_stage')),
+      ),
+      http.get('/v1/staff/accounts/{staffId}/sessions', ({ response }) =>
+        response(200).json({ items: [] }),
+      ),
+    );
+    renderApp('/staff', { me: meAdmin });
+    const user = userEvent.setup();
+    const panel = await manage(user, 'Настя Д.');
+    await user.click(
+      within(region(panel, 'Приглашение')).getByRole('button', {
+        name: 'Отправить приглашение повторно',
+      }),
+    );
+    await screen.findByText(STALE);
+    await waitFor(() =>
+      expect(
+        within(region(panel, 'Приглашение')).getByRole('button', {
+          name: 'Отправить приглашение повторно',
+        }),
+      ).not.toHaveAttribute('aria-busy'),
+    );
+    expect(screen.getAllByText(STALE)).toHaveLength(1);
+  });
+
+  test('роль → 404 not_found — один тост, без ошибки в форме', async () => {
+    staffServer({ accounts: [...TEAM.slice(0, 1), account({ city_ids: [CITY_OWN, CITY_OTHER] })] });
+    server.use(
+      http.put('/v1/staff/accounts/{staffId}/role', ({ response }) =>
+        response.untyped(problem(404, 'staff.not_found')),
+      ),
+      http.get('/v1/staff/accounts/{staffId}/sessions', ({ response }) =>
+        response(200).json({ items: [] }),
+      ),
+    );
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const panel = await manage(user, 'Мария К.');
+    const block = region(panel, 'Роль и города');
+    await user.click(
+      await within(block).findByRole('button', { name: 'Убрать «Пятигорск, Ставропольский край»' }),
+    );
+    await user.click(within(block).getByRole('button', { name: 'Сохранить' }));
+    await screen.findByText(GONE);
+    await waitFor(() =>
+      expect(within(block).getByRole('button', { name: 'Сохранить' })).not.toHaveAttribute(
+        'aria-busy',
+      ),
+    );
+    expect(screen.getAllByText(GONE)).toHaveLength(1);
+    expect(within(block).queryByRole('alert')).toBeNull();
+  });
+
+  test('«Завершить все» → 404 not_found — один тост, диалог закрыт', async () => {
+    staffServer({ accounts: [...TEAM.slice(0, 1), account()] });
+    server.use(
+      http.get('/v1/staff/accounts/{staffId}/sessions', ({ response }) =>
+        response(200).json({ items: [session({ current: false })] }),
+      ),
+      http.post('/v1/staff/accounts/{staffId}/sessions/revoke-all', ({ response }) =>
+        response.untyped(problem(404, 'staff.not_found')),
+      ),
+    );
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const panel = await manage(user, 'Мария К.');
+    const block = region(panel, 'Сеансы');
+    await within(block).findByRole('list', { name: 'Сеансы сотрудника' });
+    await user.click(within(block).getByRole('button', { name: 'Завершить все сеансы' }));
+    const dialog = screen.getByRole('dialog', { name: 'Завершить все сеансы — Мария К.?' });
+    await user.type(within(dialog).getByLabelText(/Введите/), 'maria.k@wf.example');
+    await user.click(within(dialog).getByRole('button', { name: 'Завершить все' }));
+    await screen.findByText(GONE);
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Завершить все сеансы — Мария К.?' })).toBeNull(),
+    );
+    expect(screen.getAllByText(GONE)).toHaveLength(1);
   });
 });

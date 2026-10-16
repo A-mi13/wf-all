@@ -4,6 +4,7 @@ import { IntlProvider } from 'use-intl';
 import type { Me } from '../app/permissions';
 import { ME_KEY } from '../app/query';
 import { useSession } from '../app/session';
+import { browserTimeZone } from './format';
 import { defaultLocale, type Locale, messagesFor } from './messages';
 
 const isLocale = (v: unknown): v is Locale => v === 'ru' || v === 'en';
@@ -29,7 +30,7 @@ export function useApplyLocale(): (locale: Locale) => void {
 // без него use-intl на каждом форматировании пишет ENVIRONMENT_FALLBACK в консоль.
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const locale = useLocale();
-  const [timeZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [timeZone] = useState(browserTimeZone);
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);

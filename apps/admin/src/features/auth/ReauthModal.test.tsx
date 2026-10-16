@@ -157,6 +157,31 @@ describe('разблокировка', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  // Уборка №6: ячейки кода на время запроса были disabled — после автоотправки шестой цифры фокус
+  // падал на body (читалка теряла окно).
+  test('пока unlock идёт, фокус остаётся в ячейке кода, а не на body', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    lockedServer();
+    server.use(
+      http.post('/v1/staff/auth/unlock', async ({ response }) => {
+        await gate;
+        return response.untyped(problem(400, 'staff.mfa_invalid', { attempts_left: 3 }));
+      }),
+    );
+    const user = userEvent.setup();
+    mount();
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    const d = await dialog();
+    await enterCode(user, '492817');
+    const group = within(d).getByRole('group', { name: CODE });
+    await waitFor(() => expect(group).toHaveAttribute('aria-busy', 'true'));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(group.contains(document.activeElement)).toBe(true);
+    release();
+    expect(await within(d).findByRole('alert')).toHaveTextContent('Осталось 3 попытки');
+  });
+
   test('закрыть без разблокировки нельзя: Esc не закрывает, «Закрыть» недоступна', async () => {
     lockedServer();
     const user = userEvent.setup();
