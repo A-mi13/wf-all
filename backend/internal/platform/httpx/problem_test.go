@@ -145,3 +145,23 @@ func TestNewFieldError(t *testing.T) {
 		t.Fatalf("ожидаемый ответ попал в лог: %s", logs.String())
 	}
 }
+
+// attempts_left (неверный код или пароль, спека сотрудников §7) — полем тела; 0 после последней
+// неудачи тоже уходит (иначе клиент не узнал бы о закрытии входа). WithAttemptsLeft не трогает
+// исходную ошибку: общие переменные Err… не должны получать чужой счётчик. Без него поля нет.
+func TestErrorWithAttemptsLeft(t *testing.T) {
+	base := httpx.NewError(http.StatusBadRequest, httpx.CodeValidationFailed)
+	for _, n := range []int{3, 0} {
+		rec := httptest.NewRecorder()
+		httpx.WriteError(slog.New(slog.DiscardHandler), rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil),
+			fmt.Errorf("обёртка: %w", base.WithAttemptsLeft(n)))
+		if got, ok := decode(t, rec)["attempts_left"]; !ok || got != float64(n) {
+			t.Fatalf("attempts_left = %v (%v), ждали %d", got, ok, n)
+		}
+	}
+	rec := httptest.NewRecorder()
+	httpx.WriteError(slog.New(slog.DiscardHandler), rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil), base)
+	if _, ok := decode(t, rec)["attempts_left"]; ok {
+		t.Fatal("attempts_left у ошибки без счётчика — WithAttemptsLeft изменил исходную")
+	}
+}
