@@ -87,7 +87,9 @@ paths:
   приглашения, учётка)`. Повторная отправка самим (`ResendInviteSelf`) — всегда nil; ТОТ ЖЕ код
   (`MarkInviteResent`: `sends + 1`, `last_sent_at`, строка не перешифровывается, срок прежний; составитель
   расшифрует код сам) только при живом приглашении с кодом, паузе 60 с и `sends < 5` («сутки» = жизнь строки:
-  самостоятельная отправка срок не продлевает); аудит `anonymous`; страж ротации — `TestResendInviteSelfSameCode`. Админом
+  самостоятельная отправка срок не продлевает); аудит `anonymous`; страж ротации — `TestResendInviteSelfSameCode`. Различимость
+  по времени у самоотправки (подходящая почта — транзакция с замками, задача и аудит) принята; выравнивать не будем —
+  объём ограничивают IP-лимит, пауза 60 с и не больше 5 отправок. Админом
   (`ResendInvite`) — `Decide(staff.invites.resend) == Allow`, не над собой, только `invited`, пауза —
   `*staff.ResendTooSoonError` (429 с остатком) — от выпуска последнего приглашения (`GetLastInvite.created_at`),
   не от `last_sent_at`: самоотправки паузу админа не двигают (`TestResendInvitePauseFromIssue`); новое
@@ -171,7 +173,7 @@ paths:
   строке) или повторная отправка админом/оператором.
 - **Хендлеры (`staff/admin`, Task 10a):** тонкие — запрос → сценарий `internal/app` → ответ контракта; логики
   сценариев в них нет. `New(staff.Deps, Cookie{Name, Secure})` (имя и `Secure` — от сборки:
-  `httpapi/admin.CookieName`), `Sessions()` — загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware
+  `httpapi/admin.CookieName`; `CookieConfig()` — для сверки сборкой, рассогласование — отказ старта), `Sessions()` — загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware
   (подключает `httpapi/admin`), только для операций тега staff (методы `*Handler`): нулевой `Handler` (main до
   10c) — `501 http.not_implemented` без вызова метода; User-Agent и токен cookie — в ctx (`meta(ctx)`,
   `requestFrom(ctx).token` → `oldToken` принятия); ошибки — **только** `staffadmin.Problem` (единственный перевод:
@@ -183,6 +185,7 @@ paths:
   (добавление): сгенерированный `Visit…` делает `Header().Set` и затёр бы стирание старой cookie от конвейера —
   новая cookie идёт последней (`TestStaffLoginAfterInvalidCookie`). Ответы с секретом (setup, confirm,
   перевыпуск кодов) заполняют `Headers.CacheControl = "no-store"`: пустое значение генератора стёрло бы
-  `no-store` конвейера. D9 у входа — сценарий `Login` (сотрудник конвейера в ctx), отдельный `Logout` не звать:
+  `no-store` конвейера. Код модуля наружу — только из `x-error-codes` операции: недостижимая ветка сценария —
+  внутренняя ошибка (500), не `staff.*` (`errPasswordNotActive`). D9 у входа — сценарий `Login` (сотрудник конвейера в ctx), отдельный `Logout` не звать:
   под `Idempotency-Key` — ровно одна транзакция. Отзыв текущей сессии cookie не стирает. Сквозные тесты — в
   `internal/httpapi/admin` (`staff_*_test.go`: `staff/admin` не импортирует `httpapi/admin` даже в тестах).

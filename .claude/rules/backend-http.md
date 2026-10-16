@@ -55,7 +55,8 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   (`admin.ValidateAllowlist`) — проверка на старте, до подключения к базе.
 - **Права** (`x-permission`): правила строятся из контракта на старте — операция без `x-permission`, ключ вне каталога
   или черновой, `handler` без `x-permission-any` — отказ старта; маршрут без правила в работе — 500 в лог (fail-closed).
-  `anonymous` — пропуск; `session` — любая стадия; `self`, ключ и `handler` — только `active`: `mfa_pending` → `401
+  `anonymous` — пропуск, но `Idempotency-Key` снимается: анонимная мутация не идёт под идемпотентностью даже с
+  живой cookie (сотрудник в ctx остаётся — D9 у входа; страж `TestStaffAnonymousNoIdempotency`); `session` — любая стадия; `self`, ключ и `handler` — только `active`: `mfa_pending` → `401
   auth.unauthenticated`, `setup` → `403 auth.setup_required`, `Reauth` → `401 auth.reauth_required`. Ключ: `{cityId}` в
   пути — `Staff.Decide(ключ, город) != Deny` (`Route.Param`); без города — `Grant != Deny` (scoped-список фильтрует
   ручка; `Decide(ключ, uuid.Nil)` дал бы Deny). `handler` — хоть одно право из `x-permission-any` не `Deny`, точно решает
@@ -70,8 +71,10 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Операция контракта, которую ещё не исполняет сервер, — заглушка `501 http.not_implemented`
-  (`httpx.CodeNotImplemented`; проверка — `apitest.NotImplemented`). Strict-middleware — `o.Staff.Middleware()`
-  (операции тега staff: перевод ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер —
-  501; `.claude/rules/backend-staff.md`); заглушки сервера проверяются через него (`TestServerStubsNotImplemented`).
+  (`httpx.CodeNotImplemented`). Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод ошибок
+  `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`);
+  заглушки сервера проверяются через него, а не прямым вызовом методов (`TestServerStubsNotImplemented`; у
+  `staff/admin` — `TestStubsNotImplemented`). Cookie собранного хендлера staff (`CookieConfig`) обязана совпасть с
+  `CookieName(CookieSecure)`/`CookieSecure` конвейера — иначе отказ старта (`TestNewHandlerCookieMismatch`).
 - Тесты: cookie в запросе ставится руками (`net/http/cookiejar` не шлёт Secure-cookie по http, P24); проход конвейера
   — 501 заглушки; `{cityId}` — на подменённом контракте (`admin.Permissions` в `export_test.go`).
