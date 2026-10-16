@@ -122,6 +122,8 @@ paths:
   кодом ошибки (`ProblemError.Code` / `Code()`; ошибка без кода — общий `execution_failed`, её текст в строку и
   аудит не пишется: в нём бывают ПД) коммитится, наружу — исходная `err`
   (`errors.Is(err, staff.ErrLastOwner)`). Ошибка без `Fail` или паника — откат всего, запрос `pending` (500).
+  `approvals.ErrInitiatorChanged` (обёртка `ErrStale`) — отказ исполнителя из-за изменившегося инициатора:
+  наружу `ErrStale`, у `failed` — `error = initiator_changed`; голый `ErrStale` — `platform.approval_stale`.
 - **Каждое решение** — аудит `platform.approval_<status>` (`executed|rejected|cancelled|expired|failed`; актор —
   решивший, у просрочки и гашения — `system`, комментарий — в `Reason`) и событие `platform.approval_decided`
   (агрегат `approval`, версия 1) в той же транзакции.

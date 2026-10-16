@@ -142,7 +142,8 @@ paths:
   - **Версия учётки** растёт при выключении, сбросе, смене роли/городов, повторном приглашении (и `LockOut`).
     payload каждого действия — `v`, `init_id`, `init_ver` (+ цель и её `version`). `checkInitiator`
     (`InitiatorCheck`) — без замка; исполнитель (`execLocks`) повторяет её под `FOR SHARE` и перепроверяет
-    подтверждающего; цель другой версии — `ErrStale`. Блокировка (`LockOut`) инициатора или цели валит запрос —
+    подтверждающего; инициатор изменился — `ErrInitiatorChanged` (`initiator_changed`), цель другой версии —
+    `ErrStale` (`platform.approval_stale`). Блокировка (`LockOut`) инициатора или цели валит запрос —
     осознанно (`TestLockOutTargetStale`). Бизнес-отказ исполнителя — только `approvals.Fail` (`business`:
     `last_owner`, `email_taken`, `city_not_found` — в т.ч. FK 23503 города) или `ErrStale`.
   - Выключение, сброс и смена роли гасят ожидающие запросы сотрудника (`cancelRequests` → `CancelByInitiator`).
