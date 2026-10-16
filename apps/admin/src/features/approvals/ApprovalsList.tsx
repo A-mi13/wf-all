@@ -303,7 +303,7 @@ function Subject({ approval: a, me }: { approval: Approval; me: Me }) {
         ) : a.target_id ? (
           <TargetName id={a.target_id} me={me} />
         ) : (
-          '—'
+          t('none')
         )}
       </dd>
       {s.role && (

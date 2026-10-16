@@ -309,7 +309,8 @@
       "no_cities": "no cities",
       "reason": "Reason",
       "comment": "Comment",
-      "target": "staff member {id}"
+      "target": "staff member {id}",
+      "none": "—"
     },
     "failure": {
       "initiator_changed": "The requester changed after the request: disabled, access reset or role changed",
