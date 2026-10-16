@@ -4,8 +4,10 @@ import { approval } from './staff';
 
 // Сервер «Подтверждений» для моков — по схемам контракта admin.d.ts (Approval, ApprovalPage): списки
 // box=incoming|mine (status, курсор по страницам), решения approve/reject/cancel. Ответ решения — из
-// answer (Response — ошибка или свой ответ), иначе запрос в итоговом состоянии. seen — что спрашивал
-// экран.
+// answer (Response — ошибка или свой ответ), иначе запрос в итоговом состоянии. Ошибка меняет
+// состояние, как на сервере (afterError): мок не отвечает списком, которого сервер не покажет. hold —
+// ворота списка: ответ считается в момент запроса, а уходит, когда промис разрешится (запрос «в
+// полёте»). seen — что спрашивал экран.
 
 type Approval = components['schemas']['Approval'];
 type Decision = 'approve' | 'reject' | 'cancel';
@@ -94,6 +96,7 @@ export function approvalsServer(
     mine?: Approval[];
     pageSize?: number;
     answer?: Partial<Record<Decision, (a: Approval, body: unknown) => Response | Approval | null>>;
+    hold?: (q: URLSearchParams, background: boolean) => Promise<void> | undefined;
   } = {},
 ) {
   const state = { incoming: opts.incoming ?? [INCOMING], mine: opts.mine ?? [] };
@@ -106,10 +109,11 @@ export function approvalsServer(
   const all = () => [...state.incoming, ...state.mine];
 
   server.use(
-    http.get('/v1/approvals', ({ request, response }) => {
+    http.get('/v1/approvals', async ({ request, response }) => {
       const q = new URL(request.url).searchParams;
+      const background = request.headers.get('X-WF-Background');
       seen.lists.push(q);
-      seen.background.push(request.headers.get('X-WF-Background'));
+      seen.background.push(background);
       const box = q.get('box') === 'mine' ? state.mine : state.incoming;
       const status = q.get('status');
       const rows = box.filter((a) => !status || a.status === status);
@@ -117,11 +121,44 @@ export function approvalsServer(
       const limit = Number(q.get('limit') ?? size);
       const items = rows.slice(from, from + Math.min(limit, size));
       const next = from + items.length < rows.length ? String(from + items.length) : null;
+      await opts.hold?.(q, background !== null);
       return response(200).json({ items, next_cursor: next });
     }),
   );
+  const DECIDED_AT = '2026-10-13T12:00:00Z';
+  // Записать итог: решённый уходит из входящих (как на сервере: входящие — pending).
+  const settle = (out: Approval) => {
+    if (out.status !== 'pending') state.incoming = state.incoming.filter((a) => a.id !== out.id);
+    state.mine = state.mine.map((a) => (a.id === out.id ? out : a));
+  };
+  // Ошибка решения на сервере (контракт approveApproval, reject, cancel): отказ исполнения (staff.*) и
+  // устаревший запрос у approve — запрос уже failed с кодом в error; решён, отменён или просрочен
+  // (closed) — больше не ожидает (свой, ожидавший, — просрочен); не найден — его нет в списках.
+  // Прочие (approval_self, auth.*) состояние не меняют.
+  const afterError = async (kind: Decision, target: Approval, r: Response) => {
+    const code = ((await r.clone().json()) as { code?: string }).code ?? '';
+    if (kind === 'approve' && (code === 'platform.approval_stale' || code.startsWith('staff.'))) {
+      settle({
+        ...target,
+        status: 'failed',
+        decided_by: OLGA,
+        decided_at: DECIDED_AT,
+        error: code,
+      });
+    } else if (code === 'platform.approval_closed') {
+      state.incoming = state.incoming.filter((a) => a.id !== target.id);
+      state.mine = state.mine.map((a) =>
+        a.id === target.id && a.status === 'pending'
+          ? { ...a, status: 'expired', decided_at: a.expires_at }
+          : a,
+      );
+    } else if (code === 'platform.approval_not_found') {
+      state.incoming = state.incoming.filter((a) => a.id !== target.id);
+      state.mine = state.mine.filter((a) => a.id !== target.id);
+    }
+  };
   // Итог решения: ответ из answer (ошибка или свой запрос) или запрос в состоянии status.
-  const decide = (
+  const decide = async (
     kind: Decision,
     status: Approval['status'],
     id: string,
@@ -131,22 +168,18 @@ export function approvalsServer(
     seen.decisions.push({ kind, id, body, key });
     const target = all().find((a) => a.id === id) ?? approval({ id });
     const r = opts.answer?.[kind]?.(target, body);
-    if (r instanceof Response) return r;
-    const out: Approval = r ?? {
-      ...target,
-      status,
-      decided_by: OLGA,
-      decided_at: '2026-10-13T12:00:00Z',
-    };
-    // решённый уходит из входящих (как на сервере: входящие — pending)
-    if (out.status !== 'pending') state.incoming = state.incoming.filter((a) => a.id !== out.id);
-    state.mine = state.mine.map((a) => (a.id === out.id ? out : a));
+    if (r instanceof Response) {
+      await afterError(kind, target, r);
+      return r;
+    }
+    const out: Approval = r ?? { ...target, status, decided_by: OLGA, decided_at: DECIDED_AT };
+    settle(out);
     return out;
   };
   const json = async (request: Request) => request.json().catch(() => null) as Promise<unknown>;
   server.use(
     http.post('/v1/approvals/{approvalId}/approve', async ({ params, request, response }) => {
-      const r = decide(
+      const r = await decide(
         'approve',
         'executed',
         params.approvalId,
@@ -156,7 +189,7 @@ export function approvalsServer(
       return r instanceof Response ? response.untyped(r) : response(200).json(r);
     }),
     http.post('/v1/approvals/{approvalId}/reject', async ({ params, request, response }) => {
-      const r = decide(
+      const r = await decide(
         'reject',
         'rejected',
         params.approvalId,
@@ -165,8 +198,8 @@ export function approvalsServer(
       );
       return r instanceof Response ? response.untyped(r) : response(200).json(r);
     }),
-    http.post('/v1/approvals/{approvalId}/cancel', ({ params, request, response }) => {
-      const r = decide(
+    http.post('/v1/approvals/{approvalId}/cancel', async ({ params, request, response }) => {
+      const r = await decide(
         'cancel',
         'cancelled',
         params.approvalId,

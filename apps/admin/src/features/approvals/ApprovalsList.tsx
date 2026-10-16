@@ -36,7 +36,8 @@ const DECIDE_KEY = ['approvals', 'decide'] as const;
 // «Мои» — box=mine, все состояния. Строка — запрос (действие, кто и когда), «кому и что» из payload,
 // срок или итог (кто решил, комментарий, причина неудачи), решение.
 // - «Подтвердить» — сразу, без окна (контракт e2e Task 16); итог — по status ответа: executed —
-//   успех (и перечитывание учёток), failed — ошибка по error, иное — справка по статусу.
+//   успех (и перечитывание учёток), failed — ошибка по error (так отвечал сервер до правки контракта
+//   d347777, теперь неудача — ошибка ниже; ветка — защита), иное — справка по статусу.
 // - «Отклонить» — окно с обязательным комментарием; «Отменить» — свои ожидающие.
 // - Ошибки (platform.approval_*, прочие) — тост по коду; staff.* исполнителя и approval_stale —
 //   «подтверждено, но не выполнено» (запрос уже failed). Решённый с ответом остаётся строкой с итогом
@@ -63,8 +64,10 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (p) => p.next_cursor ?? undefined,
   });
-  // Решённый запрос уходит из «Входящих» вместе с кнопкой, на которой стоял фокус (или куда окно
-  // «Отклонить» вернуло бы его): после решения, когда список перечитан, фокус с body — на список.
+  // У решённого запроса уходит кнопка, на которой стоял фокус (или куда окно «Отклонить» вернуло бы
+  // его): строка остаётся с итогом, а при ошибке перечитывание убирает и строку. После решения, когда
+  // итог на месте или список перечитан, фокус с body — на список. Так же — при закрытии окна
+  // «Отклонить» (ревью m5): открыватель могло убрать перечитывание, пока окно было открыто.
   const root = useRef<HTMLDivElement>(null);
   const refocus = useRef(false);
   const [decided, setDecided] = useState(0);
@@ -74,6 +77,11 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
     refocus.current = true;
     setDecided((n) => n + 1);
   };
+  const [rejecting, setRejecting] = useState<Approval | null>(null);
+  const closeReject = () => {
+    refocus.current = true;
+    setRejecting(null);
+  };
   const { data, isFetching } = list;
   useEffect(() => {
     if (!refocus.current) return;
@@ -82,9 +90,8 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
       root.current?.focus();
       refocus.current = false;
     } else if (!isFetching && !document.querySelector('[role="dialog"]')) refocus.current = false;
-  }, [decided, data, isFetching]);
+  }, [decided, data, isFetching, rejecting]);
   const decisions = useDecisions(onDone);
-  const [rejecting, setRejecting] = useState<Approval | null>(null);
 
   const decision = (a: Approval) => {
     if (a.status !== 'pending') return null;
@@ -159,7 +166,7 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
           />
         }
       />
-      <RejectDialog approval={rejecting} onClose={() => setRejecting(null)} onDone={onDone} />
+      <RejectDialog approval={rejecting} onClose={closeReject} onDone={onDone} />
     </div>
   );
 }

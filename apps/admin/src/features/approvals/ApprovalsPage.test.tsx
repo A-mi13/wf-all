@@ -261,7 +261,9 @@ describe('подтвердить', () => {
     await waitFor(() => expect(dir.seen.cards.length).toBeGreaterThan(cards));
   });
 
-  test('200, но failed — тост-ошибка по error, не «успех»', async () => {
+  // Контракт (d347777): 200 — только executed, неудача исполнения — ошибка с кодом (ниже). 200 failed
+  // отвечал сервер до правки контракта — ветка оставлена защитой (скользящий деплой), мок — старый сервер.
+  test('старый сервер: 200, но failed — тост-ошибка по error, не «успех»', async () => {
     directory();
     approvalsServer({
       answer: {
@@ -295,6 +297,7 @@ describe('подтвердить', () => {
       'Подтверждено, но не выполнено: Нельзя оставить платформу без владельца',
     ],
     [409, 'staff.email_taken', 'Подтверждено, но не выполнено: Сотрудник с такой почтой уже есть'],
+    [422, 'staff.city_not_found', 'Подтверждено, но не выполнено: Город не найден'],
   ])('%s %s — тост с текстом и перечитывание списка', async (status, code, text) => {
     directory();
     const { seen } = approvalsServer({ answer: { approve: () => problem(status, code) } });
@@ -306,9 +309,9 @@ describe('подтвердить', () => {
     await waitFor(() => expect(listCalls(seen).length).toBeGreaterThan(lists));
   });
 
-  // Ревью I2: решённый R1 не уходит из списка сразу — строки не сдвигаются, и клик «туда же» не
-  // становится решением по R2.
-  test('успех: R1 остаётся на месте с итогом, клик по первой строке — не решение R2', async () => {
+  // Ревью I2: решённый R1 не уходит из списка сразу — строки не сдвигаются, и под курсором в первой
+  // строке нет кнопки, которой второй клик решил бы R2.
+  test('успех: R1 остаётся на месте с итогом и без кнопки, R2 не сдвигается', async () => {
     directory();
     const second = approval({
       id: '0192f1e2-4c5d-7e6f-a081-0000000000b2',
@@ -332,8 +335,45 @@ describe('подтвердить', () => {
     const first = rows(t)[0]!;
     expect(first).toHaveTextContent('Иван П.');
     expect(within(first).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
-    fireEvent.click(first);
     expect(rows(t)[1]).toHaveTextContent('Пётр С.');
+    expect(seen.decisions).toHaveLength(1);
+  });
+
+  // Ревью m1: запрос списка, ушедший до решения («Показать ещё»), по завершении записал бы страницы,
+  // взятые до решения, поверх итога — R1 снова pending с кнопками (второй клик → 409). Полёт
+  // отменяется до записи итога.
+  test('список в полёте («Показать ещё») не возвращает решённую строку с кнопкой', async () => {
+    directory();
+    const second = approval({
+      id: '0192f1e2-4c5d-7e6f-a081-0000000000b2',
+      payload: {
+        v: 1,
+        email: 'petr@wf.example',
+        display_name: 'Пётр С.',
+        role: 'support',
+        city_ids: [],
+      },
+      requested_by: IGOR,
+    });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { seen } = approvalsServer({
+      incoming: [INCOMING, second],
+      pageSize: 1,
+      hold: (q) => (q.has('cursor') ? gate : undefined),
+    });
+    const app = renderApp('/approvals', { me: meOwner });
+    const t = await table('Входящие запросы');
+    expect(rows(t)).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }));
+    await waitFor(() => expect(listCalls(seen).some((q) => q.has('cursor'))).toBe(true));
+    fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Подтвердить' }));
+    await screen.findByText('Подтверждено и выполнено.');
+    release();
+    await waitFor(() => expect(app.queryClient.isFetching()).toBe(0));
+    const first = rows(t)[0]!;
+    expect(first).toHaveTextContent('исполнен');
+    expect(within(first).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
     expect(seen.decisions).toHaveLength(1);
   });
 
@@ -433,9 +473,14 @@ describe('отклонить', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Отклонить' }));
     expect(await screen.findByText(text)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // не найден — строки (и кнопки-открывателя) больше нет: фокус на списке, не на body (ревью m5)
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
   });
 
-  test('409 approval_closed — тост, окно закрыто, список перечитан', async () => {
+  // Ревью m5: запрос решён другим — перечитывание убрало строку вместе с «Отклонить», куда окно
+  // вернуло бы фокус; окно закрывается после перечитывания — фокус на списке, не на body.
+  test('409 approval_closed — тост, окно закрыто, список перечитан, фокус на списке', async () => {
     directory();
     const { seen } = approvalsServer({
       answer: { reject: () => problem(409, 'platform.approval_closed') },
@@ -451,6 +496,9 @@ describe('отклонить', () => {
     expect(await screen.findByText('Запрос уже решён, отменён или просрочен')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(listCalls(seen).length).toBeGreaterThan(lists));
+    expect(await screen.findByText('Входящих нет')).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
   });
 });
 
@@ -467,6 +515,27 @@ describe('отменить', () => {
     expect(seen.decisions).toEqual([
       expect.objectContaining({ kind: 'cancel', id: MINE_PENDING.id }),
     ]);
+  });
+
+  // Ревью m4: итог отмены — на месте (useSettleDecision('mine')): строка с чипом «отменён» и без
+  // кнопки сразу, не дожидаясь перечитывания «Моих» (его держим воротами).
+  test('отменили — строка на месте с чипом «отменён» и без кнопки, без перечитывания', async () => {
+    directory();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let held = false;
+    approvalsServer({
+      mine: [MINE_PENDING],
+      hold: (_, background) => (held && !background ? gate : undefined),
+    });
+    renderApp('/approvals?box=mine', { me: meOwner });
+    const t = await table('Мои запросы');
+    held = true;
+    await userEvent.setup().click(within(rows(t)[0]!).getByRole('button', { name: 'Отменить' }));
+    await screen.findByText('Запрос отменён.');
+    await waitFor(() => expect(rows(t)[0]).toHaveTextContent('отменён'));
+    expect(within(rows(t)[0]!).queryByRole('button')).toBeNull();
+    release();
   });
 });
 
@@ -535,8 +604,6 @@ describe('общее устройство', () => {
   });
 });
 
-// Решённый запрос уходит из «Входящих» вместе с кнопкой, на которой стоял фокус (или куда окно
-// «Отклонить» вернуло бы его): фокус не должен падать на body.
 describe('общее устройство — кэш мутаций', () => {
   test('сессия истекла — комментарий отклонения не остаётся в кэше мутаций', async () => {
     directory();
@@ -565,6 +632,9 @@ describe('общее устройство — кэш мутаций', () => {
   });
 });
 
+// У решённого запроса уходит кнопка, на которой стоял фокус (или куда окно «Отклонить» вернуло бы
+// его); строка остаётся с итогом (при ошибке перечитывание убирает и строку): фокус не должен падать
+// на body.
 describe('фокус после решения', () => {
   test('подтвердили — кнопки строки нет, фокус на списке, а не на body', async () => {
     directory();
@@ -588,6 +658,25 @@ describe('фокус после решения', () => {
     await user.type(within(dialog).getByLabelText('Почему отклоняете'), 'рано');
     await user.click(within(dialog).getByRole('button', { name: 'Отклонить' }));
     await within(row!).findByText('отклонён');
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
+  });
+
+  // Ревью m5: пока окно «Отклонить» открыто, перечитывание (решил другой, вернулись во вкладку) убрало
+  // строку вместе с открывателем; окно закрыли — вернуть фокус некуда, он на списке, а не на body.
+  test('окно «Отклонить» закрыли после того, как строку убрало перечитывание, — фокус на списке', async () => {
+    directory();
+    const { state } = approvalsServer();
+    const app = renderApp('/approvals', { me: meOwner });
+    const t = await table('Входящие запросы');
+    const user = userEvent.setup();
+    await user.click(within(rows(t)[0]!).getByRole('button', { name: 'Отклонить' }));
+    const dialog = screen.getByRole('dialog', { name: 'Отклонить запрос?' });
+    state.incoming = [];
+    await app.queryClient.invalidateQueries({ queryKey: ['approvals'] });
+    expect(await screen.findByText('Входящих нет')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Закрыть' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
   });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { dayStartUtc, parseAuditSearch, toAuditQuery } from './search';
+import ru from '../../../messages/ru.json';
+import { AUDIT_SECTIONS, dayStartUtc, parseAuditSearch, toAuditQuery } from './search';
 
 // Фильтры журнала — search-параметры /audit (спека §9.1, §5.3): незнакомое и негодное из адреса
 // отбрасывается (в запрос уходят только значения контракта); период — даты в местном времени
@@ -128,5 +129,19 @@ describe('период → UTC', () => {
     ['flags', 'flags.'],
   ] as const)('вкладка %s → %s', (tab, prefix) => {
     expect(toAuditQuery({ tab }, 'UTC')).toEqual({ action_prefix: prefix });
+  });
+
+  // Правило сервера для action_prefix (контракт, 305026c): оканчивается на «.» или «_» — начало
+  // строки; иначе — само действие и его подвиды через точку. Вкладка — раздел целиком (начало строки),
+  // фильтр «Действие» — точный код из подписей audit.actions (не начало: staff.login ≠ staff.login_failed).
+  test('вкладки — начало строки, коды фильтра «Действие» — точные действия', () => {
+    for (const prefix of Object.values(AUDIT_SECTIONS)) expect(prefix).toMatch(/[._]$/);
+    const codes = (tree: object, at = ''): string[] =>
+      Object.entries(tree).flatMap(([k, v]) =>
+        typeof v === 'string' ? [`${at}${k}`] : codes(v as object, `${at}${k}.`),
+      );
+    const actions = codes(ru.audit.actions);
+    expect(actions).toContain('staff.login');
+    for (const code of actions) expect(code).not.toMatch(/[._]$/);
   });
 });

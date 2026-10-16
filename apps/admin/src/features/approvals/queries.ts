@@ -7,8 +7,8 @@ import type { components } from '../../api/gen/admin';
 type Approval = components['schemas']['Approval'];
 type ApprovalPage = components['schemas']['ApprovalPage'];
 
-// Ключи «Подтверждений». Всё — под APPROVALS_KEY: решение на экране и любой 202 {approval} в других
-// разделах одной инвалидацией перечитывают счётчик меню и оба списка.
+// Ключи «Подтверждений». Всё — под APPROVALS_KEY: любой 202 {approval} в других разделах одной
+// инвалидацией перечитывает счётчик меню и оба списка; решение на экране — useSettleDecision.
 export const APPROVALS_KEY = ['approvals'] as const;
 export const COUNT_KEY = [...APPROVALS_KEY, 'count'] as const;
 export const approvalsListKey = (box: 'incoming' | 'mine') =>
@@ -45,14 +45,18 @@ export function useIncomingApprovalsCount(): number | undefined {
 // Итог решения на экране списка box (ревью Task 15, I2). Ответ есть (200: решён) — строка остаётся
 // на месте с итогом (запрос из ответа), список вкладки только помечается устаревшим (перечитается при
 // следующем переходе), счётчик и другая вкладка перечитываются сейчас: строки не сдвигаются под
-// курсором, и второй клик двойного не становится решением по соседнему запросу. Ответа нет (ошибка:
-// состояние запроса неизвестно) — перечитывается всё. Промис — после перечитывания.
+// курсором, и второй клик двойного не становится решением по соседнему запросу. Запрос списка в полёте
+// («Показать ещё», возврат во вкладку, online) сначала отменяется (ревью m1): завершившись, он записал
+// бы страницы, взятые до решения, поверх итога — строка снова pending с кнопками. Отменённый
+// возвращает список к состоянию до запроса (страница «ещё» не добавится — кнопка останется). Ответа
+// нет (ошибка: состояние запроса неизвестно) — перечитывается всё. Промис — после перечитывания.
 export function useSettleDecision(box: 'incoming' | 'mine'): (result?: Approval) => Promise<void> {
   const queryClient = useQueryClient();
   return useCallback(
     async (result) => {
       const key = approvalsListKey(box);
       if (!result) return queryClient.invalidateQueries({ queryKey: APPROVALS_KEY });
+      await queryClient.cancelQueries({ queryKey: key, exact: true });
       queryClient.setQueryData<InfiniteData<ApprovalPage, string | undefined>>(key, (old) =>
         old
           ? {
@@ -74,7 +78,8 @@ export function useSettleDecision(box: 'incoming' | 'mine'): (result?: Approval)
   );
 }
 
-// Перечитать подтверждения (счётчик и списки): после 202 {approval} в любом разделе и после решений.
+// Перечитать подтверждения (счётчик и списки): после 202 {approval} в любом разделе. Решения на экране
+// «Подтверждений» — useSettleDecision.
 export function useInvalidateApprovals(): () => Promise<void> {
   const queryClient = useQueryClient();
   return useCallback(
