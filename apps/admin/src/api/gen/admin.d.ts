@@ -2777,7 +2777,7 @@ export interface operations {
                  */
                 actor_staff_id?: string;
                 /**
-                 * @description Начало кода действия по сегментам (без шаблонов): с точкой в конце — все действия с этим началом (staff. — все действия сотрудников); без точки — само действие и его подвиды через точку (staff.login — staff.login и staff.login.*, но не staff.login_failed)
+                 * @description Начало кода действия по сегментам (без шаблонов): оканчивается на «.» или «_» — все действия с этим началом (staff. — все действия сотрудников, platform.approval_ — решения по подтверждениям); иначе — само действие и его подвиды через точку (staff.login — staff.login и staff.login.*, но не staff.login_failed)
                  * @example staff.
                  */
                 action_prefix?: string;
