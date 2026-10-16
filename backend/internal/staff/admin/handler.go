@@ -50,6 +50,13 @@ func (h *Handler) Sessions() auth.StaffSessions {
 	return h.app
 }
 
+// CookieConfig — cookie сессии, на которую собран хендлер; ok=false — нулевой Handler (не собран, cookie
+// не ставит). Сборка сверяет её с cookie конвейера (httpapi/admin.NewHandler): рассогласование — отказ
+// старта.
+func (h *Handler) CookieConfig() (c Cookie, ok bool) {
+	return h.cookie, h.app != nil
+}
+
 var errNotImplemented = httpx.NewError(http.StatusNotImplemented, httpx.CodeNotImplemented)
 
 // operations — имена операций тега staff: методы *Handler вида (ctx, запрос) (ответ, error). Имя

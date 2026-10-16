@@ -22,6 +22,7 @@ import (
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/testkit/apitest"
+	"wf/backend/internal/staff"
 	staffadmin "wf/backend/internal/staff/admin"
 )
 
@@ -309,6 +310,32 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 		mutate(&o)
 		if _, err := admin.NewHandler(slog.New(slog.DiscardHandler), o); err == nil {
 			t.Errorf("%s: собрано", name)
+		}
+	}
+}
+
+// Cookie хендлера staff (staffadmin.Cookie) и конвейера (CookieName(CookieSecure), CookieSecure) задаются
+// сборкой по отдельности (ревью 10a m2): рассогласование — отказ старта, иначе новая cookie входа не
+// читалась бы конвейером (вход по кругу), а стирание и D9 у принятия молча не работали бы. Нулевой
+// хендлер (main до 10c) сверку пропускает; согласованный собирается.
+func TestNewHandlerCookieMismatch(t *testing.T) {
+	for name, c := range map[string]staffadmin.Cookie{
+		"dev-имя при Secure": {Name: admin.CookieName(false), Secure: true},
+		"без Secure":         {Name: admin.CookieName(true), Secure: false},
+		"чужое имя":          {Name: "session", Secure: true},
+	} {
+		o := testOptions(t)
+		o.Staff = staffadmin.New(staff.Deps{}, c)
+		if _, err := admin.NewHandler(quiet(), o); err == nil || !strings.Contains(err.Error(), "cookie") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	for _, secure := range []bool{true, false} {
+		o := testOptions(t)
+		o.CookieSecure = secure
+		o.Staff = staffadmin.New(staff.Deps{}, staffadmin.Cookie{Name: admin.CookieName(secure), Secure: secure})
+		if _, err := admin.NewHandler(quiet(), o); err != nil {
+			t.Errorf("согласованная cookie (secure=%v): %v", secure, err)
 		}
 	}
 }

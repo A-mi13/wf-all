@@ -515,6 +515,26 @@ func TestChangePasswordRevokedSession(t *testing.T) {
 	}
 }
 
+// Смена пароля не из стадии active (конвейер такую не пропускает — x-permission self) — внутренняя
+// ошибка, а не код модуля: staff.wrong_stage нет в x-error-codes changeStaffPassword (ревью 10a m1).
+// Неудача не пишется, пароль не меняется.
+func TestChangePasswordNotActiveIsInternal(t *testing.T) {
+	e := newEnv(t)
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+	pending := e.load(e.login(context.Background(), m))
+	pending.Stage = auth.StageActive // как будто конвейер пропустил: под замком сессия всё ещё mfa_pending
+	err := e.app.ChangePassword(context.Background(), pending, testPassword, e.totp(m), "", newPassword, metaWeb)
+	if _, ok := staff.CodeOf(err); err == nil || ok {
+		t.Fatalf("ждали внутреннюю ошибку без кода модуля, получили %v", err)
+	}
+	if _, ok := errors.AsType[httpx.ProblemError](err); ok {
+		t.Fatalf("ответ клиенту вместо внутренней ошибки: %v", err)
+	}
+	if n := e.count(`SELECT mfa_failures FROM staff_accounts WHERE id = $1`, m.ID); n != 0 {
+		t.Fatalf("счётчик %d", n)
+	}
+}
+
 // Параллельные неверные текущие пароли не обходят порог «5 подряд»: пять неудач (attempts_left
 // 4…0), остальные — отказ погашенной блокировкой сессии; одна блокировка.
 func TestChangePasswordConcurrentFailures(t *testing.T) {

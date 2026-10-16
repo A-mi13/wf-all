@@ -12,6 +12,7 @@ import (
 
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/httpx"
+	"wf/backend/internal/platform/idempotency"
 	"wf/backend/internal/platform/perm"
 )
 
@@ -140,6 +141,14 @@ func permissions(rules permRules, log *slog.Logger) func(http.Handler) http.Hand
 				return
 			}
 			if rule.kind == permAnonymous {
+				// анонимная мутация не идёт под идемпотентностью (hard rule 5), даже если живая cookie
+				// дала сотрудника в ctx (он нужен D9 у входа) и клиент прислал ключ: сценарии входа и
+				// приглашений пишут неудачу отдельной транзакцией или не пишут ничего — под ключом это
+				// 500 и оракул существования почты (ревью 10a I1)
+				if r.Header.Get(idempotency.Header) != "" {
+					r = r.Clone(r.Context())
+					r.Header.Del(idempotency.Header)
+				}
 				next.ServeHTTP(w, r)
 				return
 			}

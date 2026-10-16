@@ -173,7 +173,9 @@ func (a *App) ChangePassword(ctx context.Context, s *auth.Staff, current, code, 
 			return nil, err
 		}
 		if sess.Stage != auth.StageActive {
-			return nil, staff.ErrWrongStage
+			// недостижимо: конвейер пускает к смене пароля только active (x-permission self), а стадия
+			// сессии на месте не меняется; staff.wrong_stage нет в x-error-codes операции — внутренняя ошибка
+			return nil, errPasswordNotActive
 		}
 		ok, err := a.verifyCurrent(ctx, current, acct.PasswordHash)
 		if err != nil {
@@ -206,6 +208,9 @@ func (a *App) ChangePassword(ctx context.Context, s *auth.Staff, current, code, 
 	// токен сессии только что заменён (unlock в другой вкладке): 401 без стирания новой cookie
 	return replacedAsSession(err)
 }
+
+// errPasswordNotActive — смена пароля по сессии не в стадии active (защита в глубину, 500).
+var errPasswordNotActive = errors.New("staff: смена пароля не из стадии active")
 
 // verifyCurrent — подходит ли текущий пароль к хэшу учётки. Нет хэша или пароль длиннее потолка
 // хэшера — просто «не подходит» (неудача), а не ошибка.
