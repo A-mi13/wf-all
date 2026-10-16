@@ -3,6 +3,7 @@ package admin_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ import (
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/testkit/apitest"
+	staffadmin "wf/backend/internal/staff/admin"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -51,14 +53,35 @@ func TestStubAnswersNotImplementedThroughPipeline(t *testing.T) {
 }
 
 // Все 33 операции плана A собраны в Server (операции platform — свои, staff и geo — встроенные
-// хендлеры модулей) и до задач 10a–10b отвечают 501 http.not_implemented.
+// хендлеры модулей). Как в cmd/admin-api до сборки 10c (нулевые хендлеры), каждая — через
+// strict-middleware модуля staff, который подключает NewHandler, — отвечает 501 http.not_implemented:
+// операции staff — из Middleware нулевого хендлера (Task 10a), остальные — заглушки 9a.
 func TestServerStubsNotImplemented(t *testing.T) {
-	n, bad := apitest.NotImplemented(admin.Server{})
+	mw := (&staffadmin.Handler{}).Middleware()
+	v := reflect.ValueOf(admin.Server{})
+	ctxType, errType := reflect.TypeFor[context.Context](), reflect.TypeFor[error]()
+	n := 0
+	for i := range v.NumMethod() {
+		m := v.Type().Method(i)
+		ft := m.Type // с получателем: (s, ctx, запрос)
+		if ft.NumIn() != 3 || ft.In(1) != ctxType || ft.NumOut() != 2 || ft.Out(1) != errType {
+			continue
+		}
+		n++
+		f := func(ctx context.Context, _ http.ResponseWriter, _ *http.Request, _ any) (any, error) {
+			out := v.Method(i).Call([]reflect.Value{reflect.ValueOf(ctx), reflect.Zero(ft.In(2))})
+			err, _ := out[1].Interface().(error)
+			return out[0].Interface(), err
+		}
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		resp, err := mw(f, m.Name)(r.Context(), httptest.NewRecorder(), r, nil)
+		pe, ok := errors.AsType[httpx.ProblemError](err)
+		if resp != nil || !ok || pe.Problem().Status != http.StatusNotImplemented || pe.Problem().Code != httpx.CodeNotImplemented {
+			t.Errorf("%s: ответ %v, ошибка %v — ждали 501 http.not_implemented", m.Name, resp, err)
+		}
+	}
 	if n != 33 {
 		t.Fatalf("операций сервера %d, ждали 33", n)
-	}
-	for _, m := range bad {
-		t.Errorf("%s: не 501 http.not_implemented", m)
 	}
 }
 

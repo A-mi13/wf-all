@@ -117,7 +117,9 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		limiter: o.Limiter, policy: authRule.IP, neg: newNegCache(o.Clock, negCacheTTL, negCacheMax), log: log,
 	}
 	requestErr := httpx.RequestErrorHandler(log)
-	strict := oapi.NewStrictHandlerWithOptions(Server{staffHandler: o.Staff, geoHandler: o.Geo}, nil, oapi.StrictHTTPServerOptions{
+	// strict-middleware модуля staff: User-Agent и токен cookie в ctx операций тега staff, перевод
+	// ошибок staff.Problem, стирание cookie при погашенной сессии, 501 у несобранного хендлера
+	strict := oapi.NewStrictHandlerWithOptions(Server{staffHandler: o.Staff, geoHandler: o.Geo}, []oapi.StrictMiddlewareFunc{o.Staff.Middleware()}, oapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  requestErr,
 		ResponseErrorHandlerFunc: httpx.ResponseErrorHandler(log),
 	})
