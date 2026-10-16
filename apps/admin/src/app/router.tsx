@@ -11,6 +11,8 @@ import { useEffect, useState } from 'react';
 import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
 import { useIncomingApprovalsCount } from '../features/approvals/queries';
 import { parseApprovalsSearch } from '../features/approvals/search';
+import { AuditPage } from '../features/audit/AuditPage';
+import { parseAuditSearch } from '../features/audit/search';
 import { AcceptInvitePage } from '../features/auth/AcceptInvitePage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { ReauthModal } from '../features/auth/ReauthModal';
@@ -27,14 +29,15 @@ import { NAV } from './nav';
 import type { Me } from './permissions';
 import { paths } from './paths';
 import { type Session, useSession } from './session';
-import { LoadingStub, NotFoundStub, SectionStub } from './stubs';
+import { LoadingStub, NotFoundStub } from './stubs';
 
 // Роутер админки (спека §9.1, §9.3–9.4): TanStack Router, маршруты кодом, пути — paths.ts.
 // Стадия сессии решает, куда пускать (guard.ts, beforeLoad корня); разделы — внутри AppShell: он
 // строит меню по правам и сам показывает ForbiddenState на прямой адрес без права (D23) и
 // DesktopOnlyState на телефоне (D22). Экраны входа — features/auth (Task 13), «Мой доступ» и «Роли
-// и доступ» — features/me и features/staff (Task 14), подтверждения и журнал пока — заглушки
-// (Task 15). Окно разблокировки (ReauthModal) стоит поверх любой страницы.
+// и доступ» — features/me и features/staff (Task 14), «Подтверждения» и «Журнал действий» —
+// features/approvals и features/audit (Task 15). Окно разблокировки (ReauthModal) стоит поверх
+// любой страницы.
 
 export interface RouterContext {
   session: Session;
@@ -111,20 +114,19 @@ const shellRoute = createRoute({
   component: Shell,
 });
 
-const section = (path: string, titleKey: string) =>
-  createRoute({
-    getParentRoute: () => shellRoute,
-    path,
-    component: () => <SectionStub titleKey={titleKey} />,
-  });
-
 const routeTree = rootRoute.addChildren([
   loginRoute,
   acceptRoute,
   setupRoute,
   indexRoute,
   shellRoute.addChildren([
-    section(paths.audit, 'nav.audit'),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.audit,
+      // вкладка, фильтры и период журнала — search-параметры (перезагрузка, «Назад»)
+      validateSearch: parseAuditSearch,
+      component: AuditPage,
+    }),
     createRoute({
       getParentRoute: () => shellRoute,
       path: paths.staff,

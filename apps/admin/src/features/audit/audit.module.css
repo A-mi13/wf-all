@@ -1,0 +1,127 @@
+/* «Журнал действий» по макету 07: вкладки разделов, таблица «время · кто · тег · действие · объект ·
+   id», раскрытие «было/стало». На телефоне строки — карточки (DataTable). Цвета — только токены. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-5);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  min-width: 0;
+}
+
+.time {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.code {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+.actionRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--wf-space-2);
+}
+
+.action {
+  color: var(--wf-color-text-secondary);
+  font-weight: 500;
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  margin-top: var(--wf-space-2);
+  padding: var(--wf-space-3);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--wf-space-1) var(--wf-space-3);
+  margin: 0;
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+.facts dt {
+  color: var(--wf-color-text-subtle);
+  font-weight: 700;
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--wf-color-text);
+  overflow-wrap: anywhere;
+}
+
+.diff {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--wf-space-3);
+}
+
+.state {
+  min-width: 0;
+}
+
+.stateTitle {
+  margin: 0 0 var(--wf-space-1);
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.json {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+}
+
+.filterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--wf-space-3);
+}
+
+.filterActions {
+  display: flex;
+  justify-content: flex-end;
+}

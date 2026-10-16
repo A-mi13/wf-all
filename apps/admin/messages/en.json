@@ -639,5 +639,106 @@
     "security": "Security (leak, lost device)",
     "role_change": "Change of duties",
     "other": "Other"
+  },
+  "audit": {
+    "subtitle": "All staff actions · records are never deleted or edited",
+    "tabs": {
+      "label": "Log sections",
+      "all": "All",
+      "staff": "Staff",
+      "approvals": "Approvals",
+      "directories": "Directories",
+      "flags": "Flags"
+    },
+    "table": {
+      "label": "Log records",
+      "columns": {
+        "time": "Time",
+        "who": "Who",
+        "tag": "Tag",
+        "action": "Action",
+        "object": "Object",
+        "id": "Id"
+      }
+    },
+    "actor": {
+      "operator": "server operator",
+      "system": "system",
+      "anonymous": "anonymous",
+      "unknown": "—",
+      "filter": "Show actions by {name}"
+    },
+    "tags": {
+      "staff": "staff",
+      "approvals": "approval",
+      "directories": "directory",
+      "flags": "flag",
+      "other": "system"
+    },
+    "actions": {
+      "staff": {
+        "login": "Signed in to the admin",
+        "login_failed": "Failed sign-in",
+        "factor_failed": "Second-factor code rejected",
+        "locked": "Sign-in locked for an hour",
+        "unlock": "Session unlocked",
+        "session_revoked": "Session ended",
+        "sessions_revoked": "Sessions ended",
+        "password_changed": "Password changed",
+        "locale_changed": "Interface language changed",
+        "invite_accepted": "Invitation accepted",
+        "invite_accept_failed": "Wrong invitation code",
+        "invite_resent": "Invitation resent",
+        "mfa_enabled": "Second factor enabled",
+        "recovery_regenerated": "Recovery codes reissued",
+        "bootstrapped": "First owner created",
+        "rekeyed": "Secrets re-encrypted",
+        "invited": "Staff member invited",
+        "role_changed": "Role and cities changed",
+        "disabled": "Account disabled",
+        "access_reset": "Access reset"
+      },
+      "platform": {
+        "approval_requested": "Approval request created",
+        "approval_executed": "Request approved and carried out",
+        "approval_rejected": "Request rejected",
+        "approval_cancelled": "Request cancelled",
+        "approval_expired": "Request expired",
+        "approval_failed": "Request approved but not carried out"
+      },
+      "geo": {
+        "import": "GeoNames import"
+      }
+    },
+    "objects": {
+      "staff_account": "staff member",
+      "approval": "approval request",
+      "geonames_import": "GeoNames import",
+      "city": "city"
+    },
+    "details": {
+      "show": "Details",
+      "label": "Details of record {id}",
+      "record": "Record",
+      "object": "Object",
+      "reason": "Reason",
+      "ip": "Network",
+      "user_agent": "Browser",
+      "before": "Before",
+      "after": "After",
+      "none": "—"
+    },
+    "filters": {
+      "action": "Action",
+      "action_all": "Any",
+      "object_type": "Object type",
+      "object_type_all": "Any",
+      "object_id": "Object id",
+      "actor": "Staff member id",
+      "from": "From",
+      "to": "To",
+      "period_hint": "Dates use your local time, both days inclusive.",
+      "apply": "Apply"
+    }
   }
 }

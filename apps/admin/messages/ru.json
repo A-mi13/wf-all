@@ -639,5 +639,106 @@
     "security": "Безопасность (утечка, потерянное устройство)",
     "role_change": "Смена обязанностей",
     "other": "Другое"
+  },
+  "audit": {
+    "subtitle": "Все действия сотрудников · записи не удаляются и не редактируются",
+    "tabs": {
+      "label": "Разделы журнала",
+      "all": "Все",
+      "staff": "Сотрудники",
+      "approvals": "Подтверждения",
+      "directories": "Справочники",
+      "flags": "Флаги"
+    },
+    "table": {
+      "label": "Записи журнала",
+      "columns": {
+        "time": "Время",
+        "who": "Кто",
+        "tag": "Тег",
+        "action": "Действие",
+        "object": "Объект",
+        "id": "Id"
+      }
+    },
+    "actor": {
+      "operator": "оператор сервера",
+      "system": "система",
+      "anonymous": "аноним",
+      "unknown": "—",
+      "filter": "Показать действия: {name}"
+    },
+    "tags": {
+      "staff": "сотрудники",
+      "approvals": "подтверждение",
+      "directories": "справочник",
+      "flags": "флаг",
+      "other": "система"
+    },
+    "actions": {
+      "staff": {
+        "login": "Вход в админку",
+        "login_failed": "Неудачный вход",
+        "factor_failed": "Код второго фактора не подошёл",
+        "locked": "Вход закрыт на час",
+        "unlock": "Сессия разблокирована",
+        "session_revoked": "Сеанс завершён",
+        "sessions_revoked": "Сеансы завершены",
+        "password_changed": "Пароль сменён",
+        "locale_changed": "Язык интерфейса сменён",
+        "invite_accepted": "Приглашение принято",
+        "invite_accept_failed": "Неверный код приглашения",
+        "invite_resent": "Приглашение отправлено повторно",
+        "mfa_enabled": "Второй фактор включён",
+        "recovery_regenerated": "Резервные коды перевыпущены",
+        "bootstrapped": "Первый владелец создан",
+        "rekeyed": "Секреты перешифрованы",
+        "invited": "Сотрудник приглашён",
+        "role_changed": "Роль и города изменены",
+        "disabled": "Учётка выключена",
+        "access_reset": "Доступ сброшен"
+      },
+      "platform": {
+        "approval_requested": "Запрос на подтверждение создан",
+        "approval_executed": "Запрос подтверждён и исполнен",
+        "approval_rejected": "Запрос отклонён",
+        "approval_cancelled": "Запрос отменён",
+        "approval_expired": "Запрос истёк",
+        "approval_failed": "Запрос подтверждён, но не исполнен"
+      },
+      "geo": {
+        "import": "Импорт GeoNames"
+      }
+    },
+    "objects": {
+      "staff_account": "сотрудник",
+      "approval": "запрос на подтверждение",
+      "geonames_import": "импорт GeoNames",
+      "city": "город"
+    },
+    "details": {
+      "show": "Подробнее",
+      "label": "Подробности записи {id}",
+      "record": "Запись",
+      "object": "Объект",
+      "reason": "Причина",
+      "ip": "Сеть",
+      "user_agent": "Браузер",
+      "before": "Было",
+      "after": "Стало",
+      "none": "—"
+    },
+    "filters": {
+      "action": "Действие",
+      "action_all": "Любое",
+      "object_type": "Вид объекта",
+      "object_type_all": "Любой",
+      "object_id": "Id объекта",
+      "actor": "Id сотрудника",
+      "from": "С",
+      "to": "По",
+      "period_hint": "Даты — по вашему местному времени, оба дня включительно.",
+      "apply": "Применить"
+    }
   }
 }
