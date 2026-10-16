@@ -251,7 +251,6 @@ test('коды ошибок операций (спека §7, reconcile §7)', (
     'staff.city_not_found',
     'staff.email_taken',
     'staff.last_owner',
-    'staff.not_found',
   ]);
   assert.deepEqual(codes('resendStaffInvite'), [
     'staff.not_found',

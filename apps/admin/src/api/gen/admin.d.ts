@@ -808,16 +808,19 @@ export interface paths {
          * Подтвердить запрос
          * @description Второй сотрудник подтверждает действие «вдвоём» — оно исполняется сразу, в той же
          *     транзакции. Нужно право запроса (любое из прав «вдвоём»; точное — право самого запроса) и
-         *     город в ваших; подтверждающий — не инициатор и не цель. Ответ — запрос в итоговом состоянии
-         *     (`executed` или `failed` с причиной в `error`).
+         *     город в ваших; подтверждающий — не инициатор и не цель. Ответ — запрос в состоянии
+         *     `executed`. Если исполнение не удалось, запрос помечается `failed` (причина — в его `error`)
+         *     и ответ — ошибка с кодом ниже.
          *
          *     Коды ошибок:
          *     - 404 `platform.approval_not_found` — запроса нет; 403 `auth.forbidden` — нет права запроса.
          *     - 409 `platform.approval_self` — свой запрос или запрос о вас.
          *     - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен (24 часа).
          *     - 409 `platform.approval_stale` — цель изменилась после запроса (запрос помечен `failed`).
-         *     - Отказ исполнения — код действия: 409 `staff.last_owner`, 409 `staff.email_taken`,
-         *       422 `staff.city_not_found`, 404 `staff.not_found`.
+         *     - 409 `platform.approval_stale` — также если инициатор изменился после запроса (`error` =
+         *       `initiator_changed`).
+         *     - Отказ исполнения — код действия (запрос помечен `failed`): 409 `staff.last_owner`,
+         *       409 `staff.email_taken`, 422 `staff.city_not_found`.
          */
         post: operations["approveApproval"];
         delete?: never;
@@ -2774,7 +2777,7 @@ export interface operations {
                  */
                 actor_staff_id?: string;
                 /**
-                 * @description Начало кода действия: staff. — все действия сотрудников, staff.login — входы. Совпадение с начала строки, без шаблонов
+                 * @description Начало кода действия по сегментам (без шаблонов): с точкой в конце — все действия с этим началом (staff. — все действия сотрудников); без точки — само действие и его подвиды через точку (staff.login — staff.login и staff.login.*, но не staff.login_failed)
                  * @example staff.
                  */
                 action_prefix?: string;
