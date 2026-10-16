@@ -311,31 +311,43 @@ func TestApproveExecutorFail(t *testing.T) {
 // ErrInitiatorChanged исполнителя (инициатор изменился под замком исполнителя) — как отказ проверки
 // инициатора: изменения модуля откатываются, failed с причиной initiator_changed, наружу ErrStale
 // (409 platform.approval_stale); обычный ErrStale (цель устарела) остаётся platform.approval_stale.
+// Подтест «через Fail» (ревью уборки №6, Minor 2): исполнитель, вопреки совету, вернул
+// Fail(ErrInitiatorChanged) — причина та же (initiator_changed, а не код ErrStale), наружу ErrStale.
 func TestApproveExecutorInitiatorChanged(t *testing.T) {
-	e := newEnv(t)
-	a, b := e.member(perm.Owner), e.member(perm.Owner)
-	ap := e.request(a, actGrant, payload{V: 1})
-	e.setExec(func(ctx context.Context, _ pgx.Tx, _ json.RawMessage, approver *auth.Staff) error {
-		if err := moduleWrite(ctx, approver); err != nil {
-			return err
-		}
-		return fmt.Errorf("инициатор под замком: %w", approvals.ErrInitiatorChanged)
-	})
-	res, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "")
-	if !isErr(err, approvals.ErrStale) {
-		t.Fatalf("ошибка наружу: %v", err)
-	}
-	if res.Status != approvals.StatusFailed || res.Error != approvals.ErrorInitiatorChanged {
-		t.Fatalf("ответ: %+v", res)
-	}
-	if r := e.row(ap.ID); r.Status != "failed" || r.Error != approvals.ErrorInitiatorChanged {
-		t.Fatalf("строка: %+v", r)
-	}
-	if n := e.moduleWrites(); n != 0 {
-		t.Fatalf("изменения модуля не откатились: %d", n)
-	}
-	if e.audits(ap.ID, "platform.approval_failed") != 1 || e.decided(ap.ID) != 1 {
-		t.Fatal("нет аудита или события failed")
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"обёрнута %w", fmt.Errorf("инициатор под замком: %w", approvals.ErrInitiatorChanged)},
+		{"через Fail", approvals.Fail(approvals.ErrInitiatorChanged)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			a, b := e.member(perm.Owner), e.member(perm.Owner)
+			ap := e.request(a, actGrant, payload{V: 1})
+			e.setExec(func(ctx context.Context, _ pgx.Tx, _ json.RawMessage, approver *auth.Staff) error {
+				if err := moduleWrite(ctx, approver); err != nil {
+					return err
+				}
+				return tc.err
+			})
+			res, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, "")
+			if !isErr(err, approvals.ErrStale) {
+				t.Fatalf("ошибка наружу: %v", err)
+			}
+			if res.Status != approvals.StatusFailed || res.Error != approvals.ErrorInitiatorChanged {
+				t.Fatalf("ответ: %+v", res)
+			}
+			if r := e.row(ap.ID); r.Status != "failed" || r.Error != approvals.ErrorInitiatorChanged {
+				t.Fatalf("строка: %+v", r)
+			}
+			if n := e.moduleWrites(); n != 0 {
+				t.Fatalf("изменения модуля не откатились: %d", n)
+			}
+			if e.audits(ap.ID, "platform.approval_failed") != 1 || e.decided(ap.ID) != 1 {
+				t.Fatal("нет аудита или события failed")
+			}
+		})
 	}
 }
 
