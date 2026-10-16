@@ -12,15 +12,13 @@ import (
 	staffadmin "wf/backend/internal/staff/admin"
 )
 
-var ctxType = reflect.TypeFor[context.Context]()
-
-// operations — методы-операции strict-интерфейса у *Handler: (ctx, запрос) (ответ, error).
+// operations — методы-операции strict-интерфейса у *Handler: (ctx, oapi.…RequestObject) (ответ, error);
+// служебные методы той же формы (Label) — не операции.
 func operations() []reflect.Method {
 	t := reflect.TypeFor[*staffadmin.Handler]()
 	var out []reflect.Method
 	for i := range t.NumMethod() {
-		m := t.Method(i)
-		if ft := m.Type; ft.NumIn() == 3 && ft.In(1) == ctxType && ft.NumOut() == 2 && ft.Out(1) == reflect.TypeFor[error]() {
+		if m := t.Method(i); staffadmin.IsOperation(m.Type) {
 			out = append(out, m)
 		}
 	}

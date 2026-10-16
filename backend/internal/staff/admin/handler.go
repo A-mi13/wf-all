@@ -11,9 +11,11 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 
 	"wf/backend/internal/httpapi/admin/oapi"
+	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/peer"
@@ -50,6 +52,26 @@ func (h *Handler) Sessions() auth.StaffSessions {
 	return h.app
 }
 
+// RegisterApprovals — действия staff.* и проверка инициатора в реестре подтверждений платформы (сборка
+// admin-api, 10c: approvals.New → RegisterApprovals → Registry.Validate); svc — сервис подтверждений для
+// запросов сценариев. Нулевой Handler ничего не регистрирует.
+func (h *Handler) RegisterApprovals(r *approvals.Registry, svc *approvals.Service) {
+	if h.app == nil {
+		return
+	}
+	h.app.RegisterApprovals(r, svc)
+}
+
+// Label — подпись сотрудника s для решений подтверждений (Options.Approvals в httpapi/admin): снимок имени
+// с перепроверкой учётки и сессии без замка — выключен или сессия погашена — auth.ErrSessionInvalid, роль
+// сменилась — 403. Ошибку переводит Problem.
+func (h *Handler) Label(ctx context.Context, s *auth.Staff) (string, error) {
+	if h.app == nil {
+		return "", errNotImplemented
+	}
+	return h.app.Label(ctx, s)
+}
+
 // CookieConfig — cookie сессии, на которую собран хендлер; ok=false — нулевой Handler (не собран, cookie
 // не ставит). Сборка сверяет её с cookie конвейера (httpapi/admin.NewHandler): рассогласование — отказ
 // старта.
@@ -59,20 +81,34 @@ func (h *Handler) CookieConfig() (c Cookie, ok bool) {
 
 var errNotImplemented = httpx.NewError(http.StatusNotImplemented, httpx.CodeNotImplemented)
 
-// operations — имена операций тега staff: методы *Handler вида (ctx, запрос) (ответ, error). Имя
-// метода strict-интерфейса совпадает с operationID, который strict-сервер передаёт middleware.
+// operations — имена операций тега staff: методы *Handler вида (ctx, <Операция>RequestObject контракта)
+// (ответ, error). Имя метода strict-интерфейса совпадает с operationID, который strict-сервер передаёт
+// middleware. Служебные методы той же формы (Label: ctx, *auth.Staff) операциями не считаются — запрос
+// обязан быть типом oapi.
 var operations = sync.OnceValue(func() map[string]bool {
-	ctxType, errType := reflect.TypeFor[context.Context](), reflect.TypeFor[error]()
 	t := reflect.TypeFor[*Handler]()
 	ops := make(map[string]bool, t.NumMethod())
 	for i := range t.NumMethod() {
-		ft := t.Method(i).Type // с получателем: (h, ctx, запрос)
-		if ft.NumIn() == 3 && ft.In(1) == ctxType && ft.NumOut() == 2 && ft.Out(1) == errType {
+		if IsOperation(t.Method(i).Type) {
 			ops[t.Method(i).Name] = true
 		}
 	}
 	return ops
 })
+
+// IsOperation — ft (тип метода с получателем) — операция strict-интерфейса: (h, ctx,
+// oapi.<Операция>RequestObject) (ответ, error). Общий признак для Middleware и тестов.
+func IsOperation(ft reflect.Type) bool {
+	ctxType, errType := reflect.TypeFor[context.Context](), reflect.TypeFor[error]()
+	if ft.NumIn() != 3 || ft.In(1) != ctxType || ft.NumOut() != 2 || ft.Out(1) != errType {
+		return false
+	}
+	req := ft.In(2)
+	return req.PkgPath() == oapiPkg && strings.HasSuffix(req.Name(), "RequestObject")
+}
+
+// oapiPkg — пакет типов контракта admin (запросы операций).
+var oapiPkg = reflect.TypeFor[oapi.GetStaffMeRequestObject]().PkgPath()
 
 // Middleware — strict-middleware операций тега staff (остальные теги проходят как есть):
 //   - нулевой Handler — 501 http.not_implemented без вызова операции;

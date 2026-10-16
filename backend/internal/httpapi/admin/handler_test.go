@@ -17,11 +17,13 @@ import (
 
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
+	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/platform/ratelimit"
 	"wf/backend/internal/platform/testkit/apitest"
+	"wf/backend/internal/platform/testkit/clocktest"
 	"wf/backend/internal/staff"
 	staffadmin "wf/backend/internal/staff/admin"
 )
@@ -60,12 +62,11 @@ func TestStubAnswersNotImplementedThroughPipeline(t *testing.T) {
 func TestServerStubsNotImplemented(t *testing.T) {
 	mw := (&staffadmin.Handler{}).Middleware()
 	v := reflect.ValueOf(admin.Server{})
-	ctxType, errType := reflect.TypeFor[context.Context](), reflect.TypeFor[error]()
 	n := 0
 	for i := range v.NumMethod() {
 		m := v.Type().Method(i)
-		ft := m.Type // с получателем: (s, ctx, запрос)
-		if ft.NumIn() != 3 || ft.In(1) != ctxType || ft.NumOut() != 2 || ft.Out(1) != errType {
+		ft := m.Type                     // с получателем: (s, ctx, запрос)
+		if !staffadmin.IsOperation(ft) { // служебные методы той же формы (Label) — не операции
 			continue
 		}
 		n++
@@ -334,8 +335,36 @@ func TestNewHandlerCookieMismatch(t *testing.T) {
 		o := testOptions(t)
 		o.CookieSecure = secure
 		o.Staff = staffadmin.New(staff.Deps{}, staffadmin.Cookie{Name: admin.CookieName(secure), Secure: secure})
+		o.Approvals = approvals.New(nil, o.Clock, approvals.NewRegistry())
 		if _, err := admin.NewHandler(quiet(), o); err != nil {
 			t.Errorf("согласованная cookie (secure=%v): %v", secure, err)
+		}
+	}
+}
+
+// Подтверждения вдвоём (Options.Approvals) — ровно вместе с собранным хендлером staff: собранный staff без
+// них молча отвечал бы 501 на решения в проде (забыли в сборке 10c), подтверждения без staff некому
+// подписать (Staff.Label). Оба нулевые (main до 10c) и оба заданные — собирается.
+func TestNewHandlerApprovalsWiring(t *testing.T) {
+	built := func() *staffadmin.Handler {
+		return staffadmin.New(staff.Deps{}, staffadmin.Cookie{Name: admin.CookieName(true), Secure: true})
+	}
+	svc := approvals.New(nil, clocktest.New(t0), approvals.NewRegistry())
+	for name, c := range map[string]struct {
+		staff *staffadmin.Handler
+		svc   admin.ApprovalService
+		ok    bool
+	}{
+		"оба нулевые":             {&staffadmin.Handler{}, nil, true},
+		"оба заданы":              {built(), svc, true},
+		"staff без подтверждений": {built(), nil, false},
+		"подтверждения без staff": {&staffadmin.Handler{}, svc, false},
+	} {
+		o := testOptions(t)
+		o.Staff, o.Approvals = c.staff, c.svc
+		_, err := admin.NewHandler(quiet(), o)
+		if (err == nil) != c.ok {
+			t.Errorf("%s: err = %v", name, err)
 		}
 	}
 }

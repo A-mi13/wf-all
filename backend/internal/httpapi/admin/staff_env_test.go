@@ -28,10 +28,12 @@ import (
 
 	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin"
+	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/keys"
 	"wf/backend/internal/platform/password"
 	"wf/backend/internal/platform/ratelimit"
+	"wf/backend/internal/platform/testkit/apitest"
 	"wf/backend/internal/platform/testkit/clocktest"
 	"wf/backend/internal/platform/testkit/dbtest"
 	"wf/backend/internal/platform/token"
@@ -62,6 +64,13 @@ type staffEnv struct {
 	clock *clocktest.Fake
 	ring  *keys.Ring
 	h     http.Handler
+	// reg и approvals — подтверждения вдвоём, как в сборке 10c: approvals.New → RegisterApprovals →
+	// Validate. Тесты регистрируют в reg и свои действия (ветки исполнителя без живого сценария).
+	reg       *approvals.Registry
+	approvals *approvals.Service
+	// v — сверка запросов и ответов send с контрактом (apitest); nil — без сверки (гонки в горутинах,
+	// запросы вне контракта).
+	v *apitest.Validator
 	// onLoad — вызывается после каждой загрузки сессии конвейером (между загрузкой и сценарием):
 	// гонки «сессию погасили или заменили посреди запроса», барьер двух вкладок. nil — ничего.
 	onLoad atomic.Pointer[func(*auth.Staff)]
@@ -93,11 +102,17 @@ func newStaffEnv(t *testing.T, opts ...func(*admin.Options)) *staffEnv {
 		Pool: pools.As, Clock: clk, Keys: ring, Hasher: hasher, Limiter: ratelimit.Unlimited, River: rc,
 		Rand: rand.Reader, Origin: testOrigin, Log: quiet(),
 	}, staffadmin.Cookie{Name: admin.CookieName(true), Secure: true})
-	e := &staffEnv{t: t, owner: pools.Owner, clock: clk, ring: ring}
+	reg := approvals.NewRegistry()
+	svc := approvals.New(pools.As, clk, reg)
+	sh.RegisterApprovals(reg, svc)
+	if err := reg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	e := &staffEnv{t: t, owner: pools.Owner, clock: clk, ring: ring, reg: reg, approvals: svc}
 	loader := sh.Sessions()
 	o := admin.Options{
 		DB: pools.As, Limiter: ratelimit.Unlimited, RateRules: ratelimit.DefaultRules(), Origin: testOrigin,
-		CookieSecure: true, Staff: sh, Geo: &geoadmin.Handler{}, Clock: clk,
+		CookieSecure: true, Staff: sh, Geo: &geoadmin.Handler{}, Clock: clk, Approvals: svc,
 		Sessions: auth.StaffSessionsFunc(func(ctx context.Context, tok string, ip netip.Addr, bg bool) (*auth.Staff, error) {
 			s, err := loader.LoadStaff(ctx, tok, ip, bg)
 			if f := e.onLoad.Load(); f != nil && err == nil {
@@ -171,6 +186,9 @@ func (e *staffEnv) send(method, path, token, key, body string, hdr ...string) *h
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		r.Header.Set(hdr[i], hdr[i+1])
+	}
+	if e.v != nil {
+		return e.v.Do(e.t, e.h, r)
 	}
 	return serve(e.h, r)
 }

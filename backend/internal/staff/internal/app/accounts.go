@@ -266,3 +266,27 @@ func utcPtr(t *time.Time) *time.Time {
 	u := t.UTC()
 	return &u
 }
+
+// Label — подпись сотрудника s для решений подтверждений вдвоём (снимок имени в approvals и журнале;
+// ручки approve, reject и cancel в httpapi/admin) с перепроверкой без замка, как checkActor: учётки нет, она
+// не active или закрыта, сессия погашена, истекла или не active — auth.ErrSessionInvalid (401); роль
+// сменилась после загрузки сессии — 403. Подтверждение исполнитель перепроверяет ещё раз под замком
+// (execLocks); отклонение и отмена исполнителя не зовут — для них это единственная проверка решившего
+// (окно — между этим чтением и замком строки запроса).
+func (a *App) Label(ctx context.Context, s *auth.Staff) (string, error) {
+	q := staffdb.New(a.pool)
+	r, err := q.ManageGetAccount(ctx, s.StaffID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", auth.ErrSessionInvalid
+	}
+	if err != nil {
+		return "", err
+	}
+	acc := acct{id: r.ID, status: r.Status, role: r.Role, name: r.DisplayName, email: r.Email,
+		version: r.Version, lockedUntil: r.LockedUntil}
+	by, err := checkActor(ctx, q, s, map[uuid.UUID]acct{s.StaffID: acc}, a.clock.Now())
+	if err != nil {
+		return "", err
+	}
+	return label(by.name), nil
+}

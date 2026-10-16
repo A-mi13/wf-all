@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,11 +10,13 @@ import (
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/apidocs"
+	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
@@ -46,7 +49,22 @@ type Options struct {
 	Staff     *staffadmin.Handler // операции тега staff
 	Geo       *geoadmin.Handler   // операции тега geo
 	Clock     clock.Clock         // негативный кэш сессий
+	// Approvals — подтверждения вдвоём (*approvals.Service после RegisterApprovals модулей, сборка 10c):
+	// операции тега platform listApprovals, approve, reject, cancel. Обязателен вместе с собранным Staff
+	// (подпись решившего — Staff.Label) и только с ним: nil при нулевом Staff — эти операции отвечают 501.
+	Approvals ApprovalService
 }
+
+// ApprovalService — решения и списки подтверждений вдвоём (реализует *approvals.Service; интерфейс —
+// чтобы тесты сервера могли подменить сервис без сценариев staff).
+type ApprovalService interface {
+	List(ctx context.Context, st *auth.Staff, box, status, cursor string, limit int) ([]approvals.Approval, string, error)
+	Approve(ctx context.Context, st *auth.Staff, label string, m approvals.Meta, id uuid.UUID, comment string) (approvals.Approval, error)
+	Reject(ctx context.Context, st *auth.Staff, label string, m approvals.Meta, id uuid.UUID, comment string) (approvals.Approval, error)
+	Cancel(ctx context.Context, st *auth.Staff, label string, m approvals.Meta, id uuid.UUID) (approvals.Approval, error)
+}
+
+var _ ApprovalService = (*approvals.Service)(nil)
 
 const defaultRequestTimeout = 15 * time.Second
 
@@ -82,6 +100,11 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	if c, ok := o.Staff.CookieConfig(); ok && (c.Name != CookieName(o.CookieSecure) || c.Secure != o.CookieSecure) {
 		return nil, fmt.Errorf("admin: cookie хендлера staff (%s, Secure=%v) не совпадает с cookie конвейера (%s, Secure=%v)",
 			c.Name, c.Secure, CookieName(o.CookieSecure), o.CookieSecure)
+	}
+	// подтверждения — ровно с собранным staff: без них операции platform молча отвечали бы 501, а без
+	// staff некому подписать решившего (Staff.Label)
+	if _, built := o.Staff.CookieConfig(); built != (o.Approvals != nil) {
+		return nil, fmt.Errorf("admin: подтверждения (Approvals) задаются ровно вместе с собранным хендлером staff (собран: %v, Approvals: %v)", built, o.Approvals != nil)
 	}
 	if err := o.Peer.Validate(); err != nil {
 		return nil, err
@@ -125,7 +148,11 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	requestErr := httpx.RequestErrorHandler(log)
 	// strict-middleware модуля staff: User-Agent и токен cookie в ctx операций тега staff, перевод
 	// ошибок staff.Problem, стирание cookie при погашенной сессии, 501 у несобранного хендлера
-	strict := oapi.NewStrictHandlerWithOptions(Server{staffHandler: o.Staff, geoHandler: o.Geo}, []oapi.StrictMiddlewareFunc{o.Staff.Middleware()}, oapi.StrictHTTPServerOptions{
+	srv := Server{staffHandler: o.Staff, geoHandler: o.Geo, approvals: o.Approvals, audit: o.DB}
+	if o.Approvals != nil {
+		srv.label = o.Staff.Label
+	}
+	strict := oapi.NewStrictHandlerWithOptions(srv, []oapi.StrictMiddlewareFunc{o.Staff.Middleware(), requestMeta}, oapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  requestErr,
 		ResponseErrorHandlerFunc: httpx.ResponseErrorHandler(log),
 	})

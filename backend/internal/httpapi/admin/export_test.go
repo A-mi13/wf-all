@@ -7,6 +7,9 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+// ApproveStaffCodes — коды staff.*, которыми отвечает approve (страж сверки с x-error-codes).
+var ApproveStaffCodes = approveStaffCodes
+
 // NewHandlerWithSpec — конвейер на подменённом контракте: отказ старта на испорченном бандле
 // (только тесты).
 var NewHandlerWithSpec = newHandler
