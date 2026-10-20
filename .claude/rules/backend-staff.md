@@ -206,8 +206,8 @@ paths:
 - **Хендлеры (`staff/admin`, Task 10a):** тонкие — запрос → сценарий `internal/app` → ответ контракта; логики
   сценариев в них нет. `New(staff.Deps, Cookie{Name, Secure})` (имя и `Secure` — от сборки:
   `httpapi/admin.CookieName`; `CookieConfig()` — для сверки сборкой, рассогласование — отказ старта), `Sessions()` — загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware
-  (подключает `httpapi/admin`), только для операций тега staff (методы `*Handler` вида `(ctx, oapi.…RequestObject)` — `IsOperation`): нулевой `Handler` (main до
-  10c) — `501 http.not_implemented` без вызова метода; User-Agent и токен cookie — в ctx (`meta(ctx)`,
+  (подключает `httpapi/admin`), только для операций тега staff (методы `*Handler` вида `(ctx, oapi.…RequestObject)` — `IsOperation`): нулевой `Handler` (тесты
+  конвейера; `cmd/admin-api` собирает `New`) — `501 http.not_implemented` без вызова метода; User-Agent и токен cookie — в ctx (`meta(ctx)`,
   `requestFrom(ctx).token` → `oldToken` принятия); ошибки — **только** `staffadmin.Problem` (единственный перевод:
   `ProblemError` как есть, `*MFAError` → `mfa_invalid`/`password_invalid` с `attempts_left` через
   `httpx.(*Error).WithAttemptsLeft`, коды модуля — статусы `statusOf` (страж `TestProblemCoversStaffCodes`),

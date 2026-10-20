@@ -66,7 +66,8 @@ paths:
   вернёт ошибку, задача уйдёт в повтор и после `MaxAttempts` станет «мёртвой»); адрес находит
   `mail.Composer` модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en). `mail.SMTP.Send` закрывает
   соединение по отмене ctx (остановка River, срок задачи): висящий SMTP не держит остановку до своего таймаута 20 с
-  (`TestSMTPSendHonorsCancel`).
+  (`TestSMTPSendHonorsCancel`). Письма сотрудников — не `mail.SendArgs`, а `staff.NewMailArgs` на очереди
+  `queue.Staff`: их исполняет River-клиент admin-api (SMTP `ADMIN_MAIL_*`), не воркер (`backend-staff.md`, «Фон»).
 - Пароли — `password.Check` + `password.Hasher` (argon2id под семафором; `password.DefaultParams()` — минимум OWASP);
   «нет почты» — `VerifyDummy`. Пароль приводится к NFKC; длиннее `password.MaxInputBytes` (1024 байта) —
   `ErrTooLong` до хэширования; хэш из базы с параметрами выше потолков (m 256 МиБ, t 10, p 16) или солью < 16 байт —
@@ -74,7 +75,8 @@ paths:
 - Секреты в базе — `keys.Ring` из `*_SECRET_KEYS`: `Seal(данные, aad = id строки)` → шифротекст и `key_id` (хранить
   рядом), `Open(ct, key_id, aad)`; пустой aad — `keys.ErrNoAAD`. Хэш-коды — `MAC(key_id, метка, сообщение)` (своя
   метка на назначение, сравнение — `hmac.Equal`). Новые строки — `CurrentID()`; старый ключ убирают из окружения,
-  когда счёт строк с этим `key_id` = 0; `Has` — есть ли ключ в кольце.
+  когда счёт строк с этим `key_id` = 0; `Has` — есть ли ключ в кольце. Перешифровка секретов сотрудников и
+  двухфазная ротация `ADMIN_STAFF_SECRET_KEYS` — `admin-api staff rekey` (`docs/deploy-dev.md`, раздел «admin-api»).
 - Когда требовать PoW — `risk.Assessor`; требование — `humancheck.Require` (403 с задачей).
 - Тесты механизмов с SQL — под ролью прода: `dbtest.NewPoolsAs(t, "api"|"worker"|"admin")`.
 - Пагинация — пакет `page`, свой курсор модули не пишут: v1 `Encode/Decode` — keyset по `(created_at, id)`;
