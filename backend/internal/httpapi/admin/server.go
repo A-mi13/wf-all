@@ -31,7 +31,7 @@ type Server struct {
 	*staffHandler // тег staff: вход, сессии, «Мой доступ», роли и доступ сотрудников
 	*geoHandler   // тег geo: города для выбора городов модератора
 
-	// операции платформы; нулевые (Server{}, cmd/admin-api до сборки 10c) — 501 http.not_implemented
+	// операции платформы; нулевые (Server{} в тестах конвейера) — 501 http.not_implemented
 	approvals ApprovalService                                    // подтверждения вдвоём
 	label     func(context.Context, *auth.Staff) (string, error) // подпись решившего (Staff.Label)
 	audit     *pgxpool.Pool                                      // журнал действий (роль admin)

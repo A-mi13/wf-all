@@ -13,7 +13,7 @@ import (
 	"wf/backend/internal/staff"
 )
 
-// Нулевой хендлер staff (cmd/admin-api до сборки 10c): операции тега staff за полным конвейером
+// Нулевой хендлер staff (тесты конвейера; cmd/admin-api собирает настоящий): операции тега staff за полным конвейером
 // отвечают 501 http.not_implemented — без паники (recover дал бы 500) и до сценариев.
 func TestStaffZeroHandler(t *testing.T) {
 	o := testOptions(t)

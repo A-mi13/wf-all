@@ -96,7 +96,7 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		return nil, fmt.Errorf("admin: нет правила rate limit класса %s (отказы сессии сотрудника)", classStaffAuth)
 	}
 	// cookie ставит хендлер staff, читает и стирает конвейер: имя и Secure — одни и те же (ревью 10a m2).
-	// Нулевой хендлер (cmd/admin-api до сборки 10c) cookie не ставит — сверять нечего.
+	// Нулевой хендлер (тесты конвейера; cmd/admin-api собирает настоящий) cookie не ставит — сверять нечего.
 	if c, ok := o.Staff.CookieConfig(); ok && (c.Name != CookieName(o.CookieSecure) || c.Secure != o.CookieSecure) {
 		return nil, fmt.Errorf("admin: cookie хендлера staff (%s, Secure=%v) не совпадает с cookie конвейера (%s, Secure=%v)",
 			c.Name, c.Secure, CookieName(o.CookieSecure), o.CookieSecure)

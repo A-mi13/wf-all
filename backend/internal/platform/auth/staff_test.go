@@ -156,7 +156,7 @@ func TestStaffSessionsFunc(t *testing.T) {
 	}
 }
 
-// NoStaffSessions — до модуля staff (Task 6a/10c): сессий сотрудников нет, любой токен —
+// NoStaffSessions — загрузчик без модуля staff (нулевой хендлер staff): сессий сотрудников нет, любой токен —
 // ErrSessionInvalid (конвейер admin-api стирает cookie и считает отказ в IP-лимите).
 func TestNoStaffSessions(t *testing.T) {
 	s, err := auth.NoStaffSessions.LoadStaff(context.Background(), "tok", netip.MustParseAddr("203.0.113.7"), false)

@@ -27,7 +27,7 @@ const (
 )
 
 // Handler — операции тега geo; встраивается в internal/httpapi/admin.Server указателем. Собирается New;
-// нулевой Handler (cmd/admin-api до сборки 10c) отвечает 501 http.not_implemented.
+// нулевой Handler (тесты конвейера; cmd/admin-api собирает настоящий) отвечает 501 http.not_implemented.
 type Handler struct{ svc geo.Service }
 
 // New — хендлер поверх чтения справочника (geo.New на пуле admin-api).

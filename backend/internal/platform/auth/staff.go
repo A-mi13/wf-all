@@ -137,8 +137,8 @@ func (f StaffSessionsFunc) LoadStaff(ctx context.Context, token string, ip netip
 	return f(ctx, token, ip, background)
 }
 
-// NoStaffSessions — до модуля staff (сборка cmd/admin-api, Task 10c): сессий сотрудников нет,
-// любой токен — ErrSessionInvalid.
+// NoStaffSessions — загрузчик без модуля staff (нулевой staff/admin.Handler в тестах конвейера; сборка
+// cmd/admin-api берёт настоящий — Handler.Sessions()): сессий сотрудников нет, любой токен — ErrSessionInvalid.
 var NoStaffSessions StaffSessions = StaffSessionsFunc(func(context.Context, string, netip.Addr, bool) (*Staff, error) {
 	return nil, ErrSessionInvalid
 })

@@ -7,7 +7,7 @@ import (
 	"wf/backend/internal/platform/testkit/apitest"
 )
 
-// Нулевой Handler (cmd/admin-api до сборки 10c передаёт &geoadmin.Handler{}): listGeoCities отвечает 501
+// Нулевой Handler (&geoadmin.Handler{} — тесты конвейера; cmd/admin-api собирает New): listGeoCities отвечает 501
 // http.not_implemented без паники. Собранный (New) — сквозные тесты httpapi/admin (geo_test.go).
 func TestZeroHandlerNotImplemented(t *testing.T) {
 	n, bad := apitest.NotImplemented(&geoadmin.Handler{})

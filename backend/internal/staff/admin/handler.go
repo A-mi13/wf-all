@@ -31,7 +31,7 @@ type Cookie struct {
 }
 
 // Handler — операции тега staff; встраивается в internal/httpapi/admin.Server указателем. Собирается
-// New; нулевой Handler (cmd/admin-api до сборки Task 10c) на каждую операцию тега отвечает 501
+// New; нулевой Handler (тесты конвейера; cmd/admin-api собирает New) на каждую операцию тега отвечает 501
 // http.not_implemented — проверка одна, в Middleware.
 type Handler struct {
 	app    *app.App

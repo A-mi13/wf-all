@@ -56,9 +56,10 @@ func TestStubAnswersNotImplementedThroughPipeline(t *testing.T) {
 }
 
 // Все 33 операции плана A собраны в Server (операции platform — свои, staff и geo — встроенные
-// хендлеры модулей). Как в cmd/admin-api до сборки 10c (нулевые хендлеры), каждая — через
-// strict-middleware модуля staff, который подключает NewHandler, — отвечает 501 http.not_implemented:
-// операции staff — из Middleware нулевого хендлера (Task 10a), остальные — заглушки 9a.
+// хендлеры модулей). У нулевого Server{} (нулевые хендлеры — тесты конвейера; cmd/admin-api собирает
+// настоящие) каждая — через strict-middleware модуля staff, который подключает NewHandler, — отвечает 501
+// http.not_implemented: операции staff — из Middleware нулевого хендлера (Task 10a), остальные — проверка
+// нулевого хендлера geo и операций платформы.
 func TestServerStubsNotImplemented(t *testing.T) {
 	mw := (&staffadmin.Handler{}).Middleware()
 	v := reflect.ValueOf(admin.Server{})
@@ -318,7 +319,7 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 // Cookie хендлера staff (staffadmin.Cookie) и конвейера (CookieName(CookieSecure), CookieSecure) задаются
 // сборкой по отдельности (ревью 10a m2): рассогласование — отказ старта, иначе новая cookie входа не
 // читалась бы конвейером (вход по кругу), а стирание и D9 у принятия молча не работали бы. Нулевой
-// хендлер (main до 10c) сверку пропускает; согласованный собирается.
+// хендлер (тесты конвейера) сверку пропускает; согласованный собирается.
 func TestNewHandlerCookieMismatch(t *testing.T) {
 	for name, c := range map[string]staffadmin.Cookie{
 		"dev-имя при Secure": {Name: admin.CookieName(false), Secure: true},
@@ -344,7 +345,7 @@ func TestNewHandlerCookieMismatch(t *testing.T) {
 
 // Подтверждения вдвоём (Options.Approvals) — ровно вместе с собранным хендлером staff: собранный staff без
 // них молча отвечал бы 501 на решения в проде (забыли в сборке 10c), подтверждения без staff некому
-// подписать (Staff.Label). Оба нулевые (main до 10c) и оба заданные — собирается.
+// подписать (Staff.Label). Оба нулевые (тесты конвейера) и оба заданные — собирается.
 func TestNewHandlerApprovalsWiring(t *testing.T) {
 	built := func() *staffadmin.Handler {
 		return staffadmin.New(staff.Deps{}, staffadmin.Cookie{Name: admin.CookieName(true), Secure: true})
