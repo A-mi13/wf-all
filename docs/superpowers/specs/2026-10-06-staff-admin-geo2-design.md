@@ -83,7 +83,8 @@ geo»), §5 и §11. Дизайн: `design/screens/07-Админка.dc.html`, `
   ключи флагов). Так права видят и конвейер, и любой модуль, а границы слоёв archtest не нарушаются:
   модуль `staff` — слой 0, geo его не импортирует.
 - Права сотрудника считаются при загрузке сессии и лежат в `auth.Staff` (платформа):
-  `auth.StaffFrom(ctx).Can(perm, cityID)` — для модулей без импорта `staff`.
+  `auth.StaffFrom(ctx).Decide(perm, cityID)` → `Deny | Allow | NeedsApproval` — для модулей без импорта
+  `staff` (`Can` — только «можно сразу»: для `dual` — false).
 - `./task gen` генерирует из матрицы таблицу в `docs/05-ролевая-модель.md` (между маркерами) и
   `contracts/openapi/admin/permissions.json`. `gen:check` ловит расхождение. Экран «Роли и доступ» берёт
   матрицу из `GET /v1/staff/roles`, подписи прав — из локалей админки (`permissions.<ключ>`).
@@ -469,9 +470,10 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
 ### 4.8. Подтверждение вдвоём (механизм платформы)
 
 - Механизм — `backend/internal/platform/approvals`, таблица `approvals` (§3.2). Модули регистрируют
-  исполнителей: `Registry.Register(action, permission string, ex Executor)`. Платформа открывает
-  транзакцию подтверждения и вызывает исполнителя; модуль пишет только свои таблицы, аудит и события —
-  атомарно.
+  действия при сборке admin-api: `Registry.Register(approvals.Action{Name, Permission, Permit, Exec,
+  Target})` и проверку инициатора `SetInitiatorCheck`, затем `Registry.Validate()`. Платформа открывает
+  транзакцию подтверждения и вызывает исполнителя под savepoint; модуль пишет только свои таблицы, аудит и
+  события — атомарно.
 - Операция с правом `dual` не исполняется, а создаёт запрос и отвечает `202 {approval}`.
 - Ручки (тег `platform`, реализует `httpapi/admin.Server`):
   - `GET /v1/approvals?box=incoming|mine&status=&cursor=` (`self`) — входящие: запросы, которые
@@ -483,7 +485,8 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
   - срок не истёк, запрос `pending` (`409 platform.approval_closed`);
   - инициатор всё ещё `active` и имеет право запроса;
   - версия цели (`version` в `payload`) — изменилась → статус `failed`, `409 platform.approval_stale`.
-- Срок 24 ч. Исполнение само проверяет срок; просроченные помечает задача `staff.cleanup`.
+- Срок 24 ч. Исполнение само проверяет срок; просроченные помечает `expired` `ExpireDue`
+  из тикера чистки admin-api (`staff/jobs.Cleaner.Tick`, раз в час, §4.10) — не задача River.
 - Каждый шаг пишется в аудит; событие `platform.approval_decided`. Письма о новых запросах — в этом срезе
   нет: счётчик в меню (§9.3).
 - Регистрируются в этом срезе (модуль `staff`): `staff.invite`, `staff.role_change`, `staff.access_reset`,
@@ -612,7 +615,8 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 - **IP-аллоулист**: `ADMIN_IP_ALLOWLIST` — список CIDR, пустой = выключен. По спеке бэкенда §8.4(в)
   включается только с закрытым origin — решение спеки деплоя, не dev-стенда. Отказ —
   `403 auth.ip_not_allowed`.
-- **Сессия**: `auth.StaffSessions.LoadStaff(ctx, token, ip) (*auth.Staff, error)`. Шов из спеки geo §5.1
+- **Сессия**: `auth.StaffSessions.LoadStaff(ctx, token, ip, background) (*auth.Staff, error)` (`background` —
+  запрос с `X-WF-Background: 1`, бездействие не продлевает). Шов из спеки geo §5.1
   меняется: загрузчик по токену cookie, Principal сотрудника — отдельный тип
   `auth.Staff{StaffID, SessionID, Role, CityIDs, Stage, Reauth, Grants}`. Положительного кэша нет —
   сессия сверяется с базой на каждый запрос. Отказ кэшируется на 5 с по хэшу токена и считается в
@@ -667,7 +671,9 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 - Нестроковый `x-rate-limit` — ошибка, а не тихий `default`. Страж ветки `UnknownClasses`.
 - Маскирование `client_ip` в аудите; словарь маскирования знает `code`, `secret`, `recovery`, `password`,
   `token`.
-- Конструктор аргументов письма сам ставит `V` (`mail.NewSendArgs`; для `staff.mail` — `NewMailArgs`).
+- Конструктор аргументов письма сам ставит `V`: для `staff.mail` — `staff.NewMailArgs` (сделано в плане A).
+  У `mail.SendArgs` конструктора в коде нет (`mail.NewSendArgs` не заведён, `backend/internal/platform/mail/job.go`):
+  `mail.send` пока никто не ставит — остаётся первому отправителю (спека `identity`).
 - У `staff_*` и `approvals` нет sequence-прав для `api`.
 
 ## 6. geo 2/2 — бэкенд админки
