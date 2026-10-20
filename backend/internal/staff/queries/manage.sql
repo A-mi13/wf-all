@@ -45,8 +45,9 @@ JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.id = sqlc.arg(id)::uuid;
 
 -- name: ManageSessionState :one
--- Сессия автора или подтверждающего: жива ли (учётка уже под замком — гашение сессий идёт под ним же).
-SELECT staff_id, stage::text AS stage, expires_at, revoked_at
+-- Сессия автора или подтверждающего: жива ли (учётка уже под замком — гашение сессий идёт под ним же); причина
+-- гашения отличает замену токена (replaced) от прочего.
+SELECT staff_id, stage::text AS stage, expires_at, revoked_at, revoked_reason
 FROM staff_sessions
 WHERE id = sqlc.arg(id)::uuid;
 

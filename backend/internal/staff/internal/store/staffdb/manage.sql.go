@@ -405,19 +405,21 @@ func (q *Queries) ManageResetAccess(ctx context.Context, arg ManageResetAccessPa
 }
 
 const manageSessionState = `-- name: ManageSessionState :one
-SELECT staff_id, stage::text AS stage, expires_at, revoked_at
+SELECT staff_id, stage::text AS stage, expires_at, revoked_at, revoked_reason
 FROM staff_sessions
 WHERE id = $1::uuid
 `
 
 type ManageSessionStateRow struct {
-	StaffID   uuid.UUID
-	Stage     string
-	ExpiresAt time.Time
-	RevokedAt *time.Time
+	StaffID       uuid.UUID
+	Stage         string
+	ExpiresAt     time.Time
+	RevokedAt     *time.Time
+	RevokedReason *string
 }
 
-// Сессия автора или подтверждающего: жива ли (учётка уже под замком — гашение сессий идёт под ним же).
+// Сессия автора или подтверждающего: жива ли (учётка уже под замком — гашение сессий идёт под ним же); причина
+// гашения отличает замену токена (replaced) от прочего.
 func (q *Queries) ManageSessionState(ctx context.Context, id uuid.UUID) (ManageSessionStateRow, error) {
 	row := q.db.QueryRow(ctx, manageSessionState, id)
 	var i ManageSessionStateRow
@@ -426,6 +428,7 @@ func (q *Queries) ManageSessionState(ctx context.Context, id uuid.UUID) (ManageS
 		&i.Stage,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.RevokedReason,
 	)
 	return i, err
 }

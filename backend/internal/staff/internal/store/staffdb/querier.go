@@ -170,7 +170,8 @@ type Querier interface {
 	// Сброс доступа: пароля нет, блокировка второго фактора снята, статус invited, версия растёт;
 	// display_name задан — новое имя (повторное приглашение выключенной учётки).
 	ManageResetAccess(ctx context.Context, arg ManageResetAccessParams) (int64, error)
-	// Сессия автора или подтверждающего: жива ли (учётка уже под замком — гашение сессий идёт под ним же).
+	// Сессия автора или подтверждающего: жива ли (учётка уже под замком — гашение сессий идёт под ним же); причина
+	// гашения отличает замену токена (replaced) от прочего.
 	ManageSessionState(ctx context.Context, id uuid.UUID) (ManageSessionStateRow, error)
 	// Новая роль (granted_by — кто выдал; NULL — оператор).
 	ManageSetRole(ctx context.Context, arg ManageSetRoleParams) error

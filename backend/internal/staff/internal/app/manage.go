@@ -120,7 +120,9 @@ func lockAccounts(ctx context.Context, q *staffdb.Queries, target uuid.UUID, sha
 
 // checkActor — сотрудник s (автор действия или подтверждающий) в момент действия, его учётка уже под
 // замком (M-4, m4): учётки нет, она не active или закрыта, сессия погашена, истекла или не active —
-// auth.ErrSessionInvalid; роль сменилась после загрузки сессии (права снимка устарели) — 403. Гашение
+// auth.ErrSessionInvalid; сессию заменили новой (вход, unlock, принятие в другой вкладке) —
+// auth.ErrSessionReplaced: 401 без стирания свежей cookie (уборка №8 m1; окно replacedGrace не проверяется —
+// см. replacedAsSession); роль сменилась после загрузки сессии (права снимка устарели) — 403. Гашение
 // сессий и смена роли идут под замком учётки, поэтому под FOR SHARE ответ не устареет до коммита.
 func checkActor(ctx context.Context, q *staffdb.Queries, s *auth.Staff, locked map[uuid.UUID]acct, now time.Time) (acct, error) {
 	a, ok := locked[s.StaffID]
@@ -136,7 +138,11 @@ func checkActor(ctx context.Context, q *staffdb.Queries, s *auth.Staff, locked m
 		return a, auth.ErrSessionInvalid
 	case err != nil:
 		return a, err
-	case sess.StaffID != s.StaffID || sess.RevokedAt != nil || !now.Before(sess.ExpiresAt) || sess.Stage != auth.StageActive:
+	case sess.StaffID != s.StaffID:
+		return a, auth.ErrSessionInvalid
+	case sess.RevokedAt != nil && sess.RevokedReason != nil && *sess.RevokedReason == reasonReplaced:
+		return a, auth.ErrSessionReplaced
+	case sess.RevokedAt != nil || !now.Before(sess.ExpiresAt) || sess.Stage != auth.StageActive:
 		return a, auth.ErrSessionInvalid
 	}
 	return a, nil

@@ -97,6 +97,40 @@ func TestManageActorSessionRevoked(t *testing.T) {
 	}
 }
 
+// Уборка №8 m1: сессию автора заменили (вход, unlock или принятие в другой вкладке) между конвейером и
+// подписью/замком — auth.ErrSessionReplaced (401 без стирания свежей cookie), как у конвейера и lockSelf;
+// погашенная иначе (выход, завершена, блокировка) — по-прежнему ErrSessionInvalid. Действие не исполняется.
+func TestManageActorSessionReplaced(t *testing.T) {
+	cases := []struct {
+		reason string
+		want   error
+	}{
+		{"replaced", auth.ErrSessionReplaced},
+		{"logout", auth.ErrSessionInvalid},
+		{"revoked", auth.ErrSessionInvalid},
+		{"locked", auth.ErrSessionInvalid},
+	}
+	for _, c := range cases {
+		t.Run(c.reason, func(t *testing.T) {
+			e := newManageEnv(t)
+			ctx := context.Background()
+			e.addMember("owner@wf.example", memberOpts{Role: "owner"})
+			admin := e.as(e.addMember("admin@wf.example", memberOpts{Role: "admin"}))
+			sup := e.addMember("sup@wf.example", memberOpts{Role: "support"})
+			e.exec(`UPDATE staff_sessions SET revoked_at = $1, revoked_reason = $2 WHERE id = $3`, e.clock.Now(), c.reason, admin.SessionID)
+			if _, err := e.app.Label(ctx, admin); !errors.Is(err, c.want) {
+				t.Fatalf("Label: %v, ждали %v", err, c.want)
+			}
+			if _, err := e.app.Disable(ctx, admin, sup.ID, "other", "", sup.Email, metaWeb); !errors.Is(err, c.want) {
+				t.Fatalf("Disable: %v, ждали %v", err, c.want)
+			}
+			if e.acct(sup.ID).Status != "active" {
+				t.Fatal("выключено по погашенной сессии")
+			}
+		})
+	}
+}
+
 // Встречные действия без замка стража владельцев (владелец I завершает сессии владельца T, T — сессии I)
 // стартуют вместе: учётки берутся по возрастанию id — без взаимной блокировки (40P01). Одно проходит,
 // второе видит погашенную сессию своего автора. -count=30.
