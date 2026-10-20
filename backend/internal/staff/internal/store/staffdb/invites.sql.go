@@ -449,6 +449,36 @@ func (q *Queries) ListMFAOnOldKeys(ctx context.Context, currentKey string) ([]uu
 	return items, nil
 }
 
+const listStoredKeyIDs = `-- name: ListStoredKeyIDs :many
+SELECT key_id FROM staff_mfa
+UNION
+SELECT key_id FROM staff_recovery_codes
+UNION
+SELECT code_key_id::text FROM staff_invites WHERE code_key_id IS NOT NULL
+`
+
+// Ключи кольца, на которых лежат секреты staff (секреты TOTP, резервные коды, живые коды приглашений): команда
+// оператора сверяет их со своим кольцом — чужие ключи значат «не те ADMIN_STAFF_SECRET_KEYS».
+func (q *Queries) ListStoredKeyIDs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listStoredKeyIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var key_id string
+		if err := rows.Scan(&key_id); err != nil {
+			return nil, err
+		}
+		items = append(items, key_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAccountByEmail = `-- name: LockAccountByEmail :one
 
 SELECT a.id, a.status::text AS status, a.display_name, a.version, r.role::text AS role

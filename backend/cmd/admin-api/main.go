@@ -69,9 +69,9 @@ const (
 	// staffMailWorkers — одновременных писем очереди staff: писем сотрудникам единицы в час.
 	staffMailWorkers = 5
 	// softStopTimeout — мягкая остановка River после дренажа HTTP (ADMIN_SHUTDOWN_TIMEOUT, по умолчанию 10 с):
-	// вместе с жёсткой (5 с в queue.Stop) — 30 с между SIGTERM и SIGKILL (Render). Не уложилось письмо — его
-	// ctx отменяется, задача вернётся в повтор.
-	softStopTimeout = 15 * time.Second
+	// 10 + 12 + 5 с жёсткой (queue.Stop) = 27 с — с запасом в 30 с между SIGTERM и SIGKILL (Render). Не уложилось
+	// письмо — его ctx отменяется (SMTP обрывает соединение сразу, mail.SMTP), задача вернётся в повтор.
+	softStopTimeout = 12 * time.Second
 )
 
 // run без аргументов — сервер; staff … — команда оператора. Ошибка использования (errUsage) — код выхода 2.
@@ -198,8 +198,7 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 // River работает на ctx без отмены и останавливается сам после тикера: мягко (письмо в полёте доигрывается),
 // не уложился — StopAndCancel, задача вернётся в повтор.
 func background(log *slog.Logger, pool *pgxpool.Pool, a assembly, sender mail.Sender) (func(context.Context) error, error) {
-	workers := river.NewWorkers()
-	jobs.AddWorkers(workers, a.deps, sender)
+	workers := allWorkers(a.deps, sender)
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:       map[string]river.QueueConfig{queue.Staff: {MaxWorkers: staffMailWorkers}},
 		Workers:      workers,
@@ -331,6 +330,11 @@ const queuedNote = "письмо поставлено в очередь staff �
 // попадают в логи хостинга), код приглашения — только с --print-code и только в out.
 func execCommand(ctx context.Context, c command, h *staffadmin.Handler, out io.Writer) error {
 	who := logx.Mask(c.email)
+	if c.name == "bootstrap" || c.name == "invite-resend" || c.name == "reset-access" {
+		if err := checkKeys(ctx, h); err != nil {
+			return err
+		}
+	}
 	switch c.name {
 	case "bootstrap":
 		code, err := h.OperatorBootstrap(ctx, c.email, c.fullName, c.printCode)
@@ -426,4 +430,36 @@ func hint(cmd string, err error) error {
 		return fmt.Errorf("staff %s: %w", cmd, err)
 	}
 	return fmt.Errorf("staff %s: %s: %w", cmd, msg, err)
+}
+
+// realWorkers — исполнители admin-api; их виды — ровно queue.AdminKinds (сверка — TestAdminKinds).
+func realWorkers(d staff.Deps, sender mail.Sender) *river.Workers {
+	workers := river.NewWorkers()
+	jobs.AddWorkers(workers, d, sender)
+	return workers
+}
+
+// allWorkers — реестр исполняющего клиента admin-api: свои исполнители и заглушки видов воркера (I1 ревью 10c): став
+// лидером River, рескьюер admin-api вернёт зависшую задачу воркера в retryable, а не выбросит неизвестный вид.
+func allWorkers(d staff.Deps, sender mail.Sender) *river.Workers {
+	workers := realWorkers(d, sender)
+	queue.AddForeign(workers, queue.WorkerKinds())
+	return workers
+}
+
+// checkKeys — команда, шифрующая код приглашения, отказывает до записи, если в базе есть секреты на ключах,
+// которых нет в её ADMIN_STAFF_SECRET_KEYS (отказ 1 ревью 10c): это признак «не то кольцо» (другая машина,
+// старый .env). Отказ, а не предупреждение: команда погасила бы живое приглашение и выпустила код на ключе,
+// которого может не быть у сервера — письмо отменится, принять код нельзя. Ключи и их id не печатаются.
+func checkKeys(ctx context.Context, h *staffadmin.Handler) error {
+	n, err := h.OperatorUnknownKeys(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("в базе есть секреты на ключах, которых нет в ADMIN_STAFF_SECRET_KEYS этой команды (ключей: %d) — "+
+			"похоже, кольцо не то: запустите команду с кольцом сервера (все его ключи, текущий первым); "+
+			"если ключ убран намеренно — сначала rekey с прежним кольцом", n)
+	}
+	return nil
 }

@@ -164,3 +164,12 @@ SELECT count(*) FROM staff_mfa WHERE key_id <> sqlc.arg(current_key)::text;
 -- name: CountInvitesOnOldKeys :one
 -- Итог перешифровки: коды приглашений не на текущем ключе.
 SELECT count(*) FROM staff_invites WHERE code_enc IS NOT NULL AND code_key_id <> sqlc.arg(current_key)::text;
+
+-- name: ListStoredKeyIDs :many
+-- Ключи кольца, на которых лежат секреты staff (секреты TOTP, резервные коды, живые коды приглашений): команда
+-- оператора сверяет их со своим кольцом — чужие ключи значат «не те ADMIN_STAFF_SECRET_KEYS».
+SELECT key_id FROM staff_mfa
+UNION
+SELECT key_id FROM staff_recovery_codes
+UNION
+SELECT code_key_id::text FROM staff_invites WHERE code_key_id IS NOT NULL;

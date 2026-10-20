@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,23 +24,24 @@ type CleanupReport struct{ Invites, Sessions int64 }
 // отправка берёт назначение). Порциями по cleanupBatch, каждая — один оператор с SKIP LOCKED: долгих
 // замков нет, два экземпляра admin-api не мешают друг другу. Граница — строго старше now − 30 суток.
 // Отмена ctx (остановка сервиса) обрывает текущую порцию — она откатывается, удалённое раньше остаётся
-// удалённым; ошибка — с тем, что успели удалить.
+// удалённым; ошибка — с тем, что успели удалить; шаги (сессии, приглашения) независимы.
 func (a *App) Cleanup(ctx context.Context) (CleanupReport, error) {
 	before := a.clock.Now().Add(-CleanupRetention)
 	q := staffdb.New(a.pool)
+	// шаги независимы (m3 ревью 10c): сбой одного не отменяет другой, ошибки — вместе
 	var rep CleanupReport
-	var err error
-	if rep.Sessions, err = drain(ctx, func(ctx context.Context) (int64, error) {
+	var errSessions, errInvites error
+	if rep.Sessions, errSessions = drain(ctx, func(ctx context.Context) (int64, error) {
 		return q.CleanupSessionsBatch(ctx, staffdb.CleanupSessionsBatchParams{Before: before, Lim: cleanupBatch})
-	}); err != nil {
-		return rep, fmt.Errorf("staff: чистка сессий: %w", err)
+	}); errSessions != nil {
+		errSessions = fmt.Errorf("staff: чистка сессий: %w", errSessions)
 	}
-	if rep.Invites, err = drain(ctx, func(ctx context.Context) (int64, error) {
+	if rep.Invites, errInvites = drain(ctx, func(ctx context.Context) (int64, error) {
 		return q.CleanupInvitesBatch(ctx, staffdb.CleanupInvitesBatchParams{Before: before, Lim: cleanupBatch})
-	}); err != nil {
-		return rep, fmt.Errorf("staff: чистка приглашений: %w", err)
+	}); errInvites != nil {
+		errInvites = fmt.Errorf("staff: чистка приглашений: %w", errInvites)
 	}
-	return rep, nil
+	return rep, errors.Join(errSessions, errInvites)
 }
 
 // drain — порции batch до первой неполной; итог — сколько удалено.

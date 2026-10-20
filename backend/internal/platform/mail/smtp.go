@@ -71,7 +71,24 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 	}
 	msg.SetMessageID()
 	msg.SetDate()
-	opts := []gomail.Option{gomail.WithPort(s.port), gomail.WithTLSPolicy(s.tls), gomail.WithTimeout(20 * time.Second)}
+	// соединение закрывается по отмене ctx (m2 ревью 10c): go-mail отмену видит только при установке соединения, а
+	// посреди обмена ждал бы своего таймаута (20 с) — остановка River и срок задачи не укладывались бы в бюджет
+	var stopWatch func() bool
+	dial := func(dctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(dctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		stopWatch = context.AfterFunc(ctx, func() { _ = conn.Close() })
+		return conn, nil
+	}
+	defer func() {
+		if stopWatch != nil {
+			stopWatch()
+		}
+	}()
+	opts := []gomail.Option{gomail.WithPort(s.port), gomail.WithTLSPolicy(s.tls), gomail.WithTimeout(20 * time.Second),
+		gomail.WithDialContextFunc(dial)}
 	if s.user != "" {
 		opts = append(opts, gomail.WithSMTPAuth(gomail.SMTPAuthPlain), gomail.WithUsername(s.user), gomail.WithPassword(s.pass))
 	}
@@ -80,6 +97,9 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 		return fmt.Errorf("mail: клиент SMTP: %w", err)
 	}
 	if err := c.DialAndSendWithContext(ctx, msg); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("mail: отправка прервана: %w", ctxErr)
+		}
 		return scrub(err)
 	}
 	return nil

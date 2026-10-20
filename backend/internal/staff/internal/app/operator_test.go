@@ -294,3 +294,24 @@ func TestRekeyUnreadable(t *testing.T) {
 		t.Fatalf("аудит %+v", rows)
 	}
 }
+
+// Ключи базы, которых нет в кольце (отказ 1 ревью 10c): сколько разных key_id из staff_mfa, staff_recovery_codes и
+// живых кодов приглашений отсутствует в кольце этого процесса. Своё кольцо — 0; чужие ключи считаются по разу.
+func TestUnknownKeys(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	m := e.addMember("a@wf.example", memberOpts{}) // секрет и коды — текущим ключом кольца
+	if n, err := e.app.UnknownKeys(ctx); err != nil || n != 0 {
+		t.Fatalf("своё кольцо: %d, %v", n, err)
+	}
+	e.exec(`UPDATE staff_mfa SET key_id = 'AAAAAAAAAAA' WHERE staff_id = $1`, m.ID)
+	e.exec(`UPDATE staff_recovery_codes SET key_id = 'AAAAAAAAAAA' WHERE staff_id = $1`, m.ID)
+	if n, err := e.app.UnknownKeys(ctx); err != nil || n != 1 {
+		t.Fatalf("один чужой ключ: %d, %v", n, err)
+	}
+	inv, _ := e.invitee("i@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	e.exec(`UPDATE staff_invites SET code_key_id = 'BBBBBBBBBBB' WHERE staff_id = $1`, inv.ID)
+	if n, err := e.app.UnknownKeys(ctx); err != nil || n != 2 {
+		t.Fatalf("два чужих ключа: %d, %v", n, err)
+	}
+}

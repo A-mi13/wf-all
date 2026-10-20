@@ -403,3 +403,39 @@ func TestServerApproveExecutes(t *testing.T) {
 		t.Fatalf("остановка: %v", err)
 	}
 }
+
+// Не те ключи у команды (отказ 1 ревью 10c): в базе шифротексты на ключах, которых нет в
+// ADMIN_STAFF_SECRET_KEYS команды, — команда, шифрующая код (bootstrap, invite-resend, reset-access), отказывает
+// до записи (код 1, подсказка без ключей): иначе код зашифрован ключом, которого нет у сервера, письмо
+// отменится, а прежнее живое приглашение уже погашено. Кольцо сервера с новым ключом первым — проходит.
+func TestOperatorRefusesForeignKeys(t *testing.T) {
+	e := newTestEnv(t)
+	if _, _, err := e.operator("bootstrap", "--email", "anna@wf.example", "--name", "Анна В."); err != nil {
+		t.Fatal(err)
+	}
+	code := e.liveCode("anna@wf.example")
+	other := newTestEnv(t).key
+	for _, args := range [][]string{
+		{"bootstrap", "--email", "boris@wf.example", "--name", "Борис"},
+		{"invite-resend", "--email", "anna@wf.example", "--print-code"},
+		{"reset-access", "--email", "anna@wf.example"},
+	} {
+		var out, logOut bytes.Buffer
+		err := run(context.Background(), append([]string{"staff"}, args...), e.environ("ADMIN_STAFF_SECRET_KEYS="+other), &out, &logOut)
+		if err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "ADMIN_STAFF_SECRET_KEYS") {
+			t.Fatalf("%v: err = %v", args, err)
+		}
+		if strings.Contains(err.Error()+out.String()+logOut.String(), other) || strings.Contains(err.Error(), e.key) {
+			t.Fatalf("%v: ключ в выводе", args)
+		}
+	}
+	if e.count(`SELECT count(*) FROM staff_accounts WHERE email = 'boris@wf.example'`) != 0 || e.liveCode("anna@wf.example") != code {
+		t.Fatal("команда с чужим кольцом что-то записала")
+	}
+	// кольцо сервера после ротации: новый ключ первым, старый вторым — все ключи базы известны
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"staff", "invite-resend", "--email", "anna@wf.example"},
+		e.environ("ADMIN_STAFF_SECRET_KEYS="+other+","+e.key), &out, io.Discard); err != nil {
+		t.Fatalf("кольцо с новым ключом первым: %v", err)
+	}
+}

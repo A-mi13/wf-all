@@ -260,3 +260,31 @@ func TestCleanupSkipsLockedRows(t *testing.T) {
 		t.Fatal("строка под замком удалена")
 	}
 }
+
+// Шаги чистки независимы (m3 ревью 10c): сбой чистки сессий не отменяет чистку приглашений — ошибка
+// возвращается, но приглашения удалены (и наоборот).
+func TestCleanupStepsIndependent(t *testing.T) {
+	for _, broken := range []string{"staff_sessions", "staff_invites"} {
+		t.Run(broken, func(t *testing.T) {
+			e := newEnv(t)
+			m := e.addMember("a@wf.example", memberOpts{})
+			e.clock.Advance(90 * 24 * time.Hour)
+			old := e.cutoff().Add(-time.Hour)
+			sid := e.session(m.ID, old, time.Time{})
+			iid := e.inviteAt(m.ID, "invite", "revoked", old, old.Add(-48*time.Hour))
+			e.inviteAt(m.ID, "invite", "consumed", old, old)
+			// у роли admin отнято удаление из одной таблицы — шаг этой таблицы падает
+			e.exec(`REVOKE DELETE ON ` + broken + ` FROM admin`)
+			rep, err := e.app.Cleanup(context.Background())
+			if err == nil {
+				t.Fatal("сбой шага не вернул ошибку")
+			}
+			if broken == "staff_sessions" && (rep.Invites != 1 || e.exists("staff_invites", iid)) {
+				t.Fatalf("сбой сессий отменил чистку приглашений: %+v", rep)
+			}
+			if broken == "staff_invites" && (rep.Sessions != 1 || e.exists("staff_sessions", sid)) {
+				t.Fatalf("сбой приглашений отменил чистку сессий: %+v", rep)
+			}
+		})
+	}
+}

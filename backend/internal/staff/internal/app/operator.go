@@ -344,3 +344,20 @@ func (a *App) OperatorDisable(ctx context.Context, email string) error {
 		return a.disable(ctx, tx, q, t, operatorActor, uuid.Nil, reasonByOper, staff.Meta{})
 	})
 }
+
+// UnknownKeys — сколько разных ключей, на которых лежат секреты staff (секреты TOTP, резервные коды, живые коды
+// приглашений), нет в кольце этого процесса (отказ 1 ревью 10c: команда оператора с «не тем» кольцом). Без замков —
+// проверка до сценария; id ключей наружу не отдаются.
+func (a *App) UnknownKeys(ctx context.Context) (int, error) {
+	ids, err := staffdb.New(a.pool).ListStoredKeyIDs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		if !a.keys.Has(id) {
+			n++
+		}
+	}
+	return n, nil
+}

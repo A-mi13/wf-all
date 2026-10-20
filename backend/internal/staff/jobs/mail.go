@@ -22,7 +22,8 @@ import (
 // медленный SMTP не держит исполнителя дольше — задача уйдёт в повтор.
 const mailTimeout = time.Minute
 
-// errUnknownKind — вид письма, которого этот admin-api не знает.
+// errUnknownKind — вид письма, которого этот admin-api не знает: обычная ошибка с повтором (m1 ревью 10c) — при
+// скользящем деплое письмо нового вида возьмёт экземпляр нового релиза.
 var errUnknownKind = errors.New("staff: неизвестный вид письма")
 
 // MailWorker — исполнитель задачи staff.mail (§4.10, §4.12): по виду письма зовёт составителя сценариев
@@ -47,9 +48,9 @@ func AddWorkers(w *river.Workers, d staff.Deps, s mail.Sender) {
 func (*MailWorker) Timeout(*river.Job[staff.MailArgs]) time.Duration { return mailTimeout }
 
 // Work — письмо одной задачи. Письмо больше не нужно (mail.ErrSkip составителя: сущности нет — в т.ч.
-// удалена чисткой, ref не того вида, получатель выключен или не той роли, код нечитаем) и неизвестный вид —
-// отмена задачи без повторов (river.JobCancel): повторы этого не исправят. Аргументы другой версии —
-// обычная ошибка: повтор возьмёт экземпляр релиза, который их понимает. Ошибка базы и SMTP — обычная
+// удалена чисткой, ref не того вида, получатель выключен или не той роли, код нечитаем) — отмена задачи без
+// повторов (river.JobCancel): повторы этого не исправят. Неизвестный вид и аргументы другой версии — обычная
+// ошибка: повтор возьмёт экземпляр релиза, который их понимает. Ошибка базы и SMTP — обычная
 // ошибка, River повторит (MaxAttempts 10). В журнал — только вид письма и id (адресов и кодов в нём нет).
 func (w *MailWorker) Work(ctx context.Context, job *river.Job[staff.MailArgs]) error {
 	a := job.Args
@@ -57,12 +58,8 @@ func (w *MailWorker) Work(ctx context.Context, job *river.Job[staff.MailArgs]) e
 		return fmt.Errorf("staff: версия аргументов письма %d не поддерживается этим admin-api", a.V)
 	}
 	m, err := w.compose(ctx, a)
-	if errors.Is(err, mail.ErrSkip) || errors.Is(err, errUnknownKind) {
-		level := slog.LevelInfo
-		if errors.Is(err, errUnknownKind) {
-			level = slog.LevelWarn
-		}
-		w.log.Log(ctx, level, "staff: письмо не отправлено, задача отменена", "kind", a.Mail, "job_id", job.ID,
+	if errors.Is(err, mail.ErrSkip) {
+		w.log.InfoContext(ctx, "staff: письмо не отправлено, задача отменена", "kind", a.Mail, "job_id", job.ID,
 			"ref", a.Ref.String(), "recipient", a.Recipient.String(), "reason", err.Error())
 		return river.JobCancel(err)
 	}

@@ -113,10 +113,10 @@ func TestMailWorkerSends(t *testing.T) {
 	}
 }
 
-// Письмо больше не нужно (§4.12, «Поправки» — MailWorker): неизвестный вид и mail.ErrSkip составителя —
-// отмена задачи River (JobCancel: без повторов), письма нет. Случаи — по одному на проверку составителя:
-// сущности нет (в т.ч. удалена чисткой между постановкой и исполнением), ref не того вида, получатель
-// выключен или не той роли. Аргументы другой версии — обычная ошибка (повтор возьмёт экземпляр нового
+// Письмо больше не нужно (§4.12, «Поправки» — MailWorker): mail.ErrSkip составителя — отмена задачи River
+// (JobCancel: без повторов), письма нет. Случаи — по одному на проверку составителя: сущности нет (в т.ч. удалена
+// чисткой между постановкой и исполнением), ref не того вида, получатель выключен или не той роли. Неизвестный вид
+// и аргументы другой версии — обычная ошибка (m1 ревью 10c: при скользящем деплое повтор возьмёт экземпляр нового
 // релиза), не отмена.
 func TestMailWorkerArgs(t *testing.T) {
 	e := newEnv(t)
@@ -127,8 +127,6 @@ func TestMailWorkerArgs(t *testing.T) {
 		name string
 		args staff.MailArgs
 	}{
-		{"неизвестный вид", staff.NewMailArgs("staff.future", f.newOwner, f.ownerRU)},
-		{"пустой вид", staff.NewMailArgs("", f.newOwner, f.ownerRU)},
 		{"приглашения нет (удалено чисткой)", staff.NewMailArgs(staff.MailInvite, uuid.New(), f.newOwner)},
 		{"приглашение письмом сброса", staff.NewMailArgs(staff.MailAccessReset, invite.Ref, f.newOwner)},
 		{"приглашение чужому получателю", staff.NewMailArgs(staff.MailInvite, invite.Ref, f.ownerRU)},
@@ -154,18 +152,24 @@ func TestMailWorkerArgs(t *testing.T) {
 			}
 		})
 	}
-	t.Run("версия аргументов 2", func(t *testing.T) {
-		sent := &mail.Memory{}
-		a := invite
-		a.V = 2
-		err := jobs.NewMailWorker(e.deps, sent).Work(context.Background(), job(a))
-		if err == nil || errors.Is(err, &river.JobCancelError{}) {
-			t.Fatalf("err = %v, ждали обычную ошибку (повтор)", err)
-		}
-		if n := len(sent.Messages()); n != 0 {
-			t.Fatalf("отправлено писем: %d", n)
-		}
-	})
+	v2 := invite
+	v2.V = 2
+	for name, a := range map[string]staff.MailArgs{
+		"версия аргументов 2": v2,
+		"неизвестный вид":     staff.NewMailArgs("staff.future", f.newOwner, f.ownerRU),
+		"пустой вид":          staff.NewMailArgs("", f.newOwner, f.ownerRU),
+	} {
+		t.Run(name, func(t *testing.T) {
+			sent := &mail.Memory{}
+			err := jobs.NewMailWorker(e.deps, sent).Work(context.Background(), job(a))
+			if err == nil || errors.Is(err, &river.JobCancelError{}) {
+				t.Fatalf("err = %v, ждали обычную ошибку (повтор)", err)
+			}
+			if n := len(sent.Messages()); n != 0 {
+				t.Fatalf("отправлено писем: %d", n)
+			}
+		})
+	}
 }
 
 // failingSender — SMTP недоступен.
@@ -205,7 +209,7 @@ func TestMailWorkerLogHasNoSecrets(t *testing.T) {
 		Work(ctx, job(e.mailOf(staff.MailBootstrapped, f.ownerRU)))
 	log := e.log.String()
 	// не вхолостую: отмены в журнале есть
-	if !strings.Contains(log, "staff.future") || !strings.Contains(log, staff.MailBootstrapped) {
+	if !strings.Contains(log, staff.MailBootstrapped) {
 		t.Fatalf("в журнале нет отмен:\n%s", log)
 	}
 	for _, secret := range []string{"@wf.example", f.inviteCode, f.resetCode, "Пётр Н."} {

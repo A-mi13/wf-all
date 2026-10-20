@@ -95,3 +95,11 @@ func onlyIf(show bool) func(code string, err error) (string, error) {
 		return code, nil
 	}
 }
+
+// OperatorUnknownKeys — сколько ключей базы нет в кольце команды.
+func (h *Handler) OperatorUnknownKeys(ctx context.Context) (int, error) {
+	if h.app == nil {
+		return 0, errNotBuilt
+	}
+	return h.app.UnknownKeys(ctx)
+}

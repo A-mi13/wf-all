@@ -3,7 +3,9 @@ package mail_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -181,4 +183,63 @@ func TestSMTPErrorsHaveNoAddress(t *testing.T) {
 			t.Fatalf("в ошибке адрес получателя: %v", err)
 		}
 	})
+}
+
+// Висящий SMTP (m2 ревью 10c): сервер принял соединение, ответил на EHLO и замолчал посреди обмена. Отмена ctx
+// отправки (остановка River, срок задачи) обрывает соединение сразу, а не ждёт таймаута go-mail (20 с): иначе
+// остановка admin-api и воркера не укладывается в бюджет до SIGKILL.
+func TestSMTPSendHonorsCancel(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	hung := make(chan struct{}) // сервер замолчал
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		r := bufio.NewReader(c)
+		fmt.Fprint(c, "220 hang ESMTP\r\n")
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if strings.HasPrefix(strings.ToUpper(line), "EHLO") {
+				fmt.Fprint(c, "250 hang\r\n")
+				continue
+			}
+			close(hung) // MAIL FROM и дальше — без ответа, до закрытия соединения клиентом
+			_, _ = io.Copy(io.Discard, r)
+			return
+		}
+	}()
+	s, err := mail.NewSMTP(mail.SMTPConfig{Addr: ln.Addr().String(), From: "WF <noreply@wf.local>", TLS: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Send(ctx, mail.Message{To: "a@wf.example", Subject: "s", Text: "t"}) }()
+	select {
+	case <-hung:
+	case <-time.After(10 * time.Second):
+		t.Fatal("сервер не дождался MAIL FROM")
+	}
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, ждали context.Canceled", err)
+		}
+		if took := time.Since(start); took > 2*time.Second {
+			t.Fatalf("отправка вернулась через %s после отмены", took)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("отмена ctx не прервала висящую отправку за 5 с")
+	}
 }
