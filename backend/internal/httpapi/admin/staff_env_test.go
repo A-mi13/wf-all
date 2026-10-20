@@ -143,8 +143,11 @@ func newStaffEnv(t *testing.T, opts ...func(*admin.Options)) *staffEnv {
 // commitTracer — трассировщик запросов пула сценариев: onCommit (nil — ничего) зовётся с ctx коммита
 // после успешного COMMIT транзакции, в которой идемпотентность вставила ключ (транзакция действия под
 // Idempotency-Key). pgx коммитит и откатывает запросами "commit"/"rollback" на соединении транзакции.
+// onQuery (nil — ничего) зовётся перед каждым запросом пула с его SQL: гонка «между подписью решившего и
+// замком исполнителя» (запросы sqlc начинаются с «-- name: <Запрос>»).
 type commitTracer struct {
 	onCommit atomic.Pointer[func(context.Context)]
+	onQuery  atomic.Pointer[func(sql string)]
 	mu       sync.Mutex
 	keyed    map[*pgx.Conn]bool // соединения открытых транзакций с ключом идемпотентности
 }
@@ -152,6 +155,9 @@ type commitTracer struct {
 type traceSQLKey struct{}
 
 func (c *commitTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	if f := c.onQuery.Load(); f != nil {
+		(*f)(d.SQL)
+	}
 	if strings.Contains(d.SQL, "INSERT INTO staff_idempotency_keys") {
 		c.mu.Lock()
 		c.keyed[conn] = true

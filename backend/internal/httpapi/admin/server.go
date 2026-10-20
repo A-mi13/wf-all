@@ -59,8 +59,9 @@ type metaKey struct{}
 //   - откуда запрос (IP — peer, User-Agent — httpx.UserAgent: ≤ 512 байт) в ctx: strict-сервер не передаёт операции
 //     *http.Request, а meta модуля staff заполняет только его Middleware и только для операций тега staff
 //     (ревью 10a, отказ 3);
-//   - auth.ErrSessionInvalid операции (подпись решившего: сессию погасили или учётку выключили после
-//     конвейера) — 401 и стирание cookie clearCookie, как у Middleware staff (ревью 10b m3). Ошибки операций
+//   - auth.ErrSessionInvalid операции (подпись решившего или перепроверка подтверждающего под замком
+//     исполнителя approve: сессию погасили или учётку выключили после конвейера) — 401 и стирание cookie
+//     clearCookie, как у Middleware staff (ревью 10b m3, уборка №8 m3). Ошибки операций
 //     staff сюда приходят уже переведёнными (Problem) — стирания второй раз нет.
 func requestMeta(clearCookie *http.Cookie) oapi.StrictMiddlewareFunc {
 	return func(f oapi.StrictHandlerFunc, _ string) oapi.StrictHandlerFunc {
@@ -191,10 +192,23 @@ func (s Server) ApproveApproval(ctx context.Context, req oapi.ApproveApprovalReq
 }
 
 // approveProblem — ошибка approve клиенту: код staff.* — только из approveStaffCodes, иной — 500 (без
-// обёртки %w: Problem не должен узнать в нём код модуля); остальное — Problem.
+// обёртки %w: Problem не должен узнать в нём код модуля); остальное — decisionProblem.
 func approveProblem(err error) error {
 	if code, ok := staff.CodeOf(err); ok && !slices.Contains(approveStaffCodes, code) {
 		return fmt.Errorf("admin: approve: исполнитель вернул код %s вне x-error-codes approveApproval", code)
+	}
+	return decisionProblem("approve", err)
+}
+
+// decisionProblem — ошибка решения (approve, reject, cancel) клиенту. auth.ErrSessionInvalid уходит как есть,
+// обёрнутой: её переводит requestMeta — 401 со стиранием cookie, как у подписи решившего (decider). Так у approve
+// отвечает перепроверка подтверждающего под замком исполнителя (сессию погасили или учётку выключили после
+// подписи, уборка №8 m3); reject и cancel её сейчас не порождают — перевод общий, чтобы новая перепроверка не
+// дала 401 без стирания. Заменённая сессия (auth.ErrSessionReplaced) — через Problem: 401 без стирания (в
+// браузере уже новая cookie). Остальное — Problem.
+func decisionProblem(op string, err error) error {
+	if errors.Is(err, auth.ErrSessionInvalid) {
+		return fmt.Errorf("admin: %s: %w", op, err)
 	}
 	return staffadmin.Problem(err)
 }
@@ -214,7 +228,7 @@ func (s Server) RejectApproval(ctx context.Context, req oapi.RejectApprovalReque
 	}
 	ap, err := s.approvals.Reject(ctx, st, label, metaFrom(ctx), req.ApprovalId, comment)
 	if err != nil {
-		return nil, staffadmin.Problem(err)
+		return nil, decisionProblem("reject", err)
 	}
 	out, err := oapi.ApprovalOf(ap)
 	if err != nil {
@@ -235,7 +249,7 @@ func (s Server) CancelApproval(ctx context.Context, req oapi.CancelApprovalReque
 	}
 	ap, err := s.approvals.Cancel(ctx, st, label, metaFrom(ctx), req.ApprovalId)
 	if err != nil {
-		return nil, staffadmin.Problem(err)
+		return nil, decisionProblem("cancel", err)
 	}
 	out, err := oapi.ApprovalOf(ap)
 	if err != nil {
