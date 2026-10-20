@@ -284,12 +284,12 @@ test('коды конвейера admin — в общих кодах; удалё
   }
 });
 
-test('Problem: attempts_left и retry_after — необязательные целые', () => {
+test('Problem: attempts_left — необязательное целое; retry_after в теле нет (только заголовок Retry-After)', () => {
   const p = schema('Problem');
-  for (const f of ['attempts_left', 'retry_after']) {
-    assert.equal(p.properties[f]?.type, 'integer', f);
-    assert.ok(!p.required.includes(f), f);
-  }
+  assert.equal(p.properties.attempts_left?.type, 'integer');
+  assert.ok(!p.required.includes('attempts_left'));
+  // сервер шлёт срок только заголовком (httpx.Problem.RetryAfter json:"-", решение 10a; ревью ветки, HTTP Minor 3)
+  assert.equal(p.properties.retry_after, undefined);
 });
 
 test('StaffMe (R15): права — объект PermissionGrant, сессия nullable', () => {
