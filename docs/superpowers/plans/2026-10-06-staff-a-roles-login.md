@@ -30,9 +30,10 @@ oapi-codegen strict), PostgreSQL 18, redocly/oasdiff, React 19 + Vite 8, TanStac
 openapi-fetch, react-hook-form, Vitest + MSW (openapi-msw), Playwright.
 
 **Spec:** `docs/superpowers/specs/2026-10-06-staff-admin-geo2-design.md` (редакция 2, дальше — «спека»).
-Журналы решений:
-- `.superpowers/sdd/2026-10-06-staff-a/decisions-r2.md` (D1–D24, ревью спеки);
-- `.superpowers/sdd/2026-10-06-staff-a/decisions-r3-plan.md` (P1–P26, ревью каркаса).
+Журналы решений — в конце этого плана (файлы `.superpowers/sdd/…` не в git, ссылки на `decisions-r2.md` и
+`decisions-r3-plan.md` в тексте ведут сюда):
+- «Приложение А» — decisions-r2 (D1–D24, ревью спеки);
+- «Приложение Б» — decisions-r3-plan (P1–P26, ревью каркаса).
 
 Родительские спеки:
 - `docs/superpowers/specs/2026-10-01-backend-architecture-design.md` («спека бэкенда»);

@@ -9,7 +9,7 @@
 
 | Папка | Для чего |
 | --- | --- |
-| `backend/` | Go-монолит: `cmd/{api,admin-api,worker,migrate}`, `internal/*`, `migrations/` |
+| `backend/` | Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc}` (`permdoc` — кодогенерация таблицы прав, в образ не входит), `internal/*`, `migrations/` |
 | `contracts/` | контракты OpenAPI и токены дизайна — источник истины для кода и фронтов |
 | `apps/` | `web` (Next.js) и `admin` (React + Vite) |
 | `packages/` | общий код фронтов: `@wf/config`, `@wf/tokens`, `@wf/i18n` |
@@ -160,10 +160,23 @@ CI поднимает свою базу на 15432 (`.github/workflows/backend.y
 заменяет их плейсхолдеры (`<base64-32-байта>`) случайными ключами — `scripts/env-keys.sh`
 (значения не выводит). Файл собирается во временном `backend/.env.tmp` и встаёт на место только
 целиком: при сбое (нет `openssl`) `backend/.env` не появится, и повторный `./task setup` сделает
-шаг заново. Уже существующий `backend/.env` setup не трогает: остались плейсхолдеры —
-`bash scripts/env-keys.sh backend/.env`. `API_BFF_*` пусты до спеки веба. В уже существующий
-`backend/.env` новая переменная с ключом дописывается скриптом, который генерирует значение и не
-выводит его (`.claude/rules/env.md`).
+шаг заново. `API_BFF_*` пусты до спеки веба.
+
+Уже существующий `backend/.env` setup не трогает и новых переменных в него не дописывает — готового
+скрипта для этого нет. После обновления ветки сверьте файл с шаблоном: имена, которых в нём нет,
+покажет
+
+```bash
+comm -23 <(sed -n "s/=.*//p" backend/.env.example | grep "^[A-Z]" | sort) \
+         <(sed -n "s/=.*//p" backend/.env | grep "^[A-Z]" | sort)
+```
+
+(значения не выводятся). Недостающие строки перенесите из `backend/.env.example` как есть, с
+плейсхолдерами, затем `bash scripts/env-keys.sh backend/.env` заменит плейсхолдеры ключей
+(`<base64-32-байта>`) случайными значениями — заполненные ключи не трогает, значений не выводит. Пример:
+ветка сотрудников добавила `ADMIN_ORIGIN`, `ADMIN_STAFF_SECRET_KEYS`, `ADMIN_MAIL_SMTP_ADDR` и
+`ADMIN_MAIL_FROM` (без них admin-api не стартует) и `ADMIN_MAIL_SMTP_TLS=none` (для локального
+Mailpit; по умолчанию — `mandatory`).
 
 ## Про исходный документ
 

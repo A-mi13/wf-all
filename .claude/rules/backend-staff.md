@@ -6,7 +6,7 @@ paths:
 # Модуль staff (сотрудники админки)
 
 Спека — `docs/superpowers/specs/2026-10-06-staff-admin-geo2-design.md` §4; решения плана A —
-`.superpowers/sdd/2026-10-06-staff-a/decisions-r2.md` (D7–D12) и приложение Б плана (P1–P11).
+приложения А (D7–D12) и Б (P1–P11) плана `docs/superpowers/plans/2026-10-06-staff-a-roles-login.md`.
 
 - **Пакеты без циклов (P1–P5).** Корень `staff` — только `Deps`, `Meta`, DTO, ошибки (`Err*`, `MFAError`,
   `RateLimitError`, `ResendTooSoonError`, `CodeOf`), коды (`codes.go`, сверка с контрактом —
@@ -146,8 +146,14 @@ paths:
     (`InitiatorCheck`) — без замка; исполнитель (`execLocks`) повторяет её под `FOR SHARE` и перепроверяет
     подтверждающего; инициатор изменился — `ErrInitiatorChanged` (`initiator_changed`), цель другой версии —
     `ErrStale` (`platform.approval_stale`). Блокировка (`LockOut`) инициатора или цели валит запрос —
-    осознанно (`TestLockOutTargetStale`). Бизнес-отказ исполнителя — только `approvals.Fail` (`business`:
-    `last_owner`, `email_taken`, `city_not_found` — в т.ч. FK 23503 города) или `ErrStale`.
+    осознанно (`TestLockOutTargetStale`). Враждебный сценарий (принят): знающий пароль цели или инициатора пятью
+    неверными кодами закрывает учётку на час и тем валит её ожидающие подтверждения; повторить может раз в час —
+    пока учётка закрыта, шаг пароля до второго фактора не пускает, а неудачи блокировку не продлевают
+    (`TestNoRelockWhileLocked`). Выход — переподать запрос и подтвердить его в течение часа, до следующей
+    блокировки, либо выключить учётку с утёкшим паролем (`disable`; владельца — вдвоём в том же окне или оператором
+    `admin-api staff disable`): неактивную шаг пароля тоже не пускает.
+    Бизнес-отказ исполнителя — только `approvals.Fail` (`business`: `last_owner`, `email_taken`, `city_not_found` —
+    в т.ч. FK 23503 города) или `ErrStale`.
   - Выключение, сброс и смена роли гасят ожидающие запросы сотрудника (`cancelRequests` → `CancelByInitiator`).
   - **Письмо U1** — `disable` админа: `staff.NewMailArgs(MailAdminDisabled, auditID, владелец)` каждому активному
     владельцу, кроме инициатора (оператор — всем); `auditID` — `Entry.ID` записи `staff.disabled`.
