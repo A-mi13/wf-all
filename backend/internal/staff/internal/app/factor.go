@@ -237,7 +237,9 @@ func (a *App) lockOut(ctx context.Context, q *staffdb.Queries, tx pgx.Tx, acct s
 }
 
 // passFactor — второй фактор для сессии s на шаге step: mfa (стадия mfa_pending → active) или unlock
-// (active, снимает Reauth) — через withFactor. Под замком учётки сначала сессия: погашена, истекла,
+// (active, снимает Reauth) — через withFactor. Unlock — только для сессии, которую конвейер загрузил в
+// Reauth: иначе staff.wrong_stage до транзакции (общее устройство: окно разблокировки сотрудника A, а в cookie
+// уже активная сессия B — код B не повторяет запрос A под его cookie). Под замком учётки сначала сессия: погашена, истекла,
 // учётка закрыта — auth.ErrSessionInvalid без записи неудачи; заменена (вторая вкладка успела
 // раньше тем же кодом) — staff.mfa_invalid без записи неудачи. Успех — новый токен: старая строка
 // гасится как replaced (её токен ещё минуту отвечает «заменён», не стирая новую cookie), новая —
@@ -247,7 +249,7 @@ func (a *App) passFactor(ctx context.Context, s *auth.Staff, code, recovery stri
 	if step == stepUnlock {
 		wantStage, action = auth.StageActive, actionUnlock
 	}
-	if s.Stage != wantStage {
+	if s.Stage != wantStage || step == stepUnlock && !s.Reauth {
 		return "", staff.ErrWrongStage
 	}
 	var (

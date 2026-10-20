@@ -24,6 +24,17 @@ func (e *env) pending(m member) *auth.Staff {
 	return e.load(e.login(context.Background(), m))
 }
 
+// reauth — активная сессия токена tok, загруженная из другой сети (вне /24): Reauth без сдвига часов и без
+// записи в сессию — unlock принимает только такую.
+func (e *env) reauth(tok string) *auth.Staff {
+	e.t.Helper()
+	s, err := e.app.LoadStaff(context.Background(), tok, netip4("198.51.100.77"), false)
+	if err != nil || !s.Reauth {
+		e.t.Fatalf("Reauth: %+v %v", s, err)
+	}
+	return s
+}
+
 // wantMFAInvalid — отказ второго фактора с attempts_left.
 func wantMFAInvalid(t *testing.T, err error, left int) {
 	t.Helper()
@@ -139,7 +150,7 @@ func TestLockoutAfterFiveFailures(t *testing.T) {
 	e.addMember("off@wf.example", memberOpts{Role: "owner", Status: "disabled"})
 	m := e.addMember("mod@wf.example", memberOpts{Role: "moderator", Name: "Модератор", Cities: []uuid.UUID{e.city("kazan")}})
 	ctx := context.Background()
-	other := e.load(e.signIn(m)) // вторая живая сессия того же сотрудника
+	other := e.reauth(e.signIn(m)) // вторая живая сессия того же сотрудника (в Reauth — её unlock ниже)
 	s := e.pending(m)
 	for want := 4; want >= 0; want-- {
 		_, err := e.app.VerifyMFA(ctx, s, "000000", "", metaWeb)
@@ -252,7 +263,7 @@ func TestFailureCommittedBeforeAnswer(t *testing.T) {
 func TestUnlockFailureAudit(t *testing.T) {
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{Role: "support", Name: "Поддержка"})
-	s := e.load(e.signIn(m))
+	s := e.reauth(e.signIn(m))
 	_, err := e.app.Unlock(context.Background(), s, "000000", "", metaWeb)
 	wantMFAInvalid(t, err, app.MaxFactorFailures-1)
 	rows := e.audits("staff.factor_failed")
@@ -348,6 +359,51 @@ func TestUnlockReplacesToken(t *testing.T) {
 	if _, err := e.app.Unlock(context.Background(), e.pending(m), e.totp(m), "", metaWeb); !errors.Is(err, staff.ErrWrongStage) {
 		t.Fatalf("Unlock в mfa_pending: %v", err)
 	}
+}
+
+// I1 финального ревью (фронт, сценарий 2): unlock — только для сессии в Reauth. Общее устройство: во вкладке
+// A открыто окно разблокировки, во вкладке B вошёл другой сотрудник — код уходит с его активной сессией без
+// Reauth. Ответ — staff.wrong_stage до транзакции: токен не повёрнут, неудача, аудит и резервный код не тронуты,
+// под Idempotency-Key нет ни одной транзакции.
+func TestUnlockRequiresReauth(t *testing.T) {
+	e := newEnv(t)
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+	tok := e.signIn(m)
+	s := e.load(tok)
+	if s.Reauth {
+		t.Fatal("свежая сессия в Reauth")
+	}
+	e.clock.Advance(30 * time.Second) // код входа уже принят — следующий шаг
+	sessions := e.count(`SELECT count(*) FROM staff_sessions WHERE staff_id = $1`, m.ID)
+	var outcomes []bool
+	ctx := db.WithTxHook(context.Background(), func(context.Context, pgxTx) (func(bool), error) {
+		return func(committed bool) { outcomes = append(outcomes, committed) }, nil
+	})
+	for _, c := range []struct{ code, recovery string }{{e.totp(m), ""}, {"000000", ""}, {"", m.Codes[0]}} {
+		tok, err := e.app.Unlock(ctx, s, c.code, c.recovery, metaWeb)
+		if !errors.Is(err, staff.ErrWrongStage) || tok != "" {
+			t.Fatalf("unlock без Reauth (%q, %q): %q, %v", c.code, c.recovery, tok, err)
+		}
+	}
+	if len(outcomes) != 0 {
+		t.Fatalf("транзакции под ключом: %v", outcomes)
+	}
+	if n := e.count(`SELECT count(*) FROM staff_sessions WHERE staff_id = $1`, m.ID); n != sessions {
+		t.Fatalf("сессий %d, было %d — токен повёрнут", n, sessions)
+	}
+	if n := e.count(`SELECT count(*) FROM staff_sessions WHERE id = $1 AND revoked_at IS NULL`, s.SessionID); n != 1 {
+		t.Fatal("сессия запроса погашена")
+	}
+	if n := e.count(`SELECT mfa_failures FROM staff_accounts WHERE id = $1`, m.ID); n != 0 {
+		t.Fatalf("записана неудача: %d", n)
+	}
+	if n := e.count(`SELECT count(*) FROM staff_recovery_codes WHERE staff_id = $1 AND used_at IS NULL`, m.ID); n != len(m.Codes) {
+		t.Fatalf("резервных кодов %d — код сгорел", n)
+	}
+	if len(e.audits("staff.unlock"))+len(e.audits("staff.factor_failed")) != 0 {
+		t.Fatal("аудит без разблокировки")
+	}
+	e.load(tok) // сессия жива
 }
 
 // I1 (ревью 6a): параллельные неверные коды не обходят порог «5 подряд». Неудача пишется под замком

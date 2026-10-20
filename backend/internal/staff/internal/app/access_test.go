@@ -318,10 +318,11 @@ func TestSelfMutationsRecheckSession(t *testing.T) {
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	_, laptop := e.rawSession(m.ID, auth.StageActive, ipHome, "x", t0.Add(-time.Hour))
-	s := e.load(e.signIn(m))
+	tok := e.signIn(m)
+	s := e.load(tok)
 	ctx := context.Background()
 	e.clock.Advance(30 * time.Second) // код входа уже принят — следующий шаг
-	fresh, err := e.app.Unlock(ctx, s, e.totp(m), "", metaWeb)
+	fresh, err := e.app.Unlock(ctx, e.reauth(tok), e.totp(m), "", metaWeb)
 	if err != nil {
 		t.Fatal(err)
 	}
