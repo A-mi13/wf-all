@@ -38,6 +38,9 @@ BEGIN
         -- вход сотрудников и ключи идемпотентности admin-api (staff_idempotency_keys: ответы с ПД) —
         -- только admin-api
         WHEN r.name LIKE 'staff\_%' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END
+        -- ключи идемпотентности игроков: API ведёт, воркер чистит; admin-api ходит только в
+        -- staff_idempotency_keys (ветка выше) — у admin ничего
+        WHEN r.name = 'idempotency_keys' THEN CASE who WHEN 'admin' THEN NULL ELSE 'SELECT, INSERT, UPDATE, DELETE' END
         -- подтверждения вдвоём (D2) — только admin-api; DELETE — чистка решённых старше 180 дней
         WHEN r.name = 'approvals' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END
         -- пароли: воркер только удаляет (удаление аккаунта), хеш прочитать не может; SELECT (user_id)

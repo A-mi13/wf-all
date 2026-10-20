@@ -26,7 +26,7 @@ func TestRolePrivileges(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS credentials (user_id uuid, password_hash text)",
 		"CREATE SEQUENCE IF NOT EXISTS staff_probe_seq",
 		"CREATE SEQUENCE IF NOT EXISTS approvals_probe_seq",
-		"GRANT ALL ON credentials, audit_log, event_inbox, outbox, goose_db_version, river_job, river_leader, " +
+		"GRANT ALL ON credentials, audit_log, event_inbox, outbox, goose_db_version, idempotency_keys, river_job, river_leader, " +
 			"river_queue, river_notification TO api, admin, worker",
 		"GRANT ALL ON countries, regions, cities, districts, country_names, region_names, city_names, city_slug_history, " +
 			"geonames_imports, geonames_places, geonames_place_names, geonames_admin1, geonames_admin1_names, app_versions " +
@@ -101,6 +101,12 @@ func TestRolePrivileges(t *testing.T) {
 		{"api", "DELETE FROM staff_idempotency_keys WHERE false", false},
 		{"worker", "SELECT 1 FROM staff_idempotency_keys", false},
 		{"worker", "DELETE FROM staff_idempotency_keys WHERE expires_at < now()", false},
+		// ключи игроков admin-api не нужны (ходит только в staff_idempotency_keys) — у admin ничего
+		// (least privilege; периодику idempotency.cleanup лидер admin-api только ставит в river_job)
+		{"admin", "SELECT 1 FROM idempotency_keys", false},
+		{"admin", "INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash) VALUES (gen_random_uuid(), 'probe', '/p', 'h')", false},
+		{"admin", "UPDATE idempotency_keys SET response_status = 200 WHERE false", false},
+		{"admin", "DELETE FROM idempotency_keys WHERE expires_at < now()", false},
 		// справочник geo (спека geo §3.8): API только читает справочник, источник без журнала и
 		// версии приложения
 		{"api", "SELECT 1 FROM countries", true},

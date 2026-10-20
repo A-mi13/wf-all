@@ -267,7 +267,9 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
 
 - `worker` — **ничего** на `staff_*` и `approvals`: всё о сотрудниках исполняет admin-api (§4.10).
 - `staff_idempotency_keys` (§3.2) — под той же веткой `staff_*`: DML только у `admin`; у `api` и `worker` —
-  ничего (страж `TestRolePrivileges`, сквозной — `TestStaffIdempotencyOwnTable`).
+  ничего (страж `TestRolePrivileges`, сквозной — `TestStaffIdempotencyOwnTable`). Обратно: у `admin` на
+  `idempotency_keys` игроков — ничего (admin-api в неё не ходит; периодику `idempotency.cleanup` лидер только
+  ставит в `river_job`, исполняет воркер).
 - `admin` — права на служебные таблицы River, как у воркера (исполнение задач очереди `staff`, §4.10).
 - `admin`: `DELETE` на `city_slug_history` (план B; спека geo §3.8).
 - `api`: к `staff_*` и `approvals` доступа нет, sequence-прав тоже (страж §11).
