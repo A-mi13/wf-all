@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -71,6 +72,8 @@ type staffEnv struct {
 	// v — сверка запросов и ответов send с контрактом (apitest); nil — без сверки (гонки в горутинах,
 	// запросы вне контракта).
 	v *apitest.Validator
+	// commits — трассировщик пула сценариев: обрыв запроса сразу после коммита (ревью 10b m2).
+	commits *commitTracer
 	// onLoad — вызывается после каждой загрузки сессии конвейером (между загрузкой и сценарием):
 	// гонки «сессию погасили или заменили посреди запроса», барьер двух вкладок. nil — ничего.
 	onLoad atomic.Pointer[func(*auth.Staff)]
@@ -81,6 +84,15 @@ type staffEnv struct {
 func newStaffEnv(t *testing.T, opts ...func(*admin.Options)) *staffEnv {
 	t.Helper()
 	pools := dbtest.NewPoolsAs(t, "admin")
+	// пул сценариев — тот же (роль admin), но с трассировщиком коммитов
+	commits := &commitTracer{keyed: map[*pgx.Conn]bool{}}
+	cfg := pools.As.Config()
+	cfg.ConnConfig.Tracer = commits
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
 	clk := clocktest.New(t0)
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
@@ -94,24 +106,24 @@ func newStaffEnv(t *testing.T, opts ...func(*admin.Options)) *staffEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rc, err := river.NewClient(riverpgxv5.New(pools.As), &river.Config{})
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sh := staffadmin.New(staff.Deps{
-		Pool: pools.As, Clock: clk, Keys: ring, Hasher: hasher, Limiter: ratelimit.Unlimited, River: rc,
+		Pool: pool, Clock: clk, Keys: ring, Hasher: hasher, Limiter: ratelimit.Unlimited, River: rc,
 		Rand: rand.Reader, Origin: testOrigin, Log: quiet(),
 	}, staffadmin.Cookie{Name: admin.CookieName(true), Secure: true})
 	reg := approvals.NewRegistry()
-	svc := approvals.New(pools.As, clk, reg)
+	svc := approvals.New(pool, clk, reg)
 	sh.RegisterApprovals(reg, svc)
 	if err := reg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	e := &staffEnv{t: t, owner: pools.Owner, clock: clk, ring: ring, reg: reg, approvals: svc}
+	e := &staffEnv{t: t, owner: pools.Owner, clock: clk, ring: ring, reg: reg, approvals: svc, commits: commits}
 	loader := sh.Sessions()
 	o := admin.Options{
-		DB: pools.As, Limiter: ratelimit.Unlimited, RateRules: ratelimit.DefaultRules(), Origin: testOrigin,
+		DB: pool, Limiter: ratelimit.Unlimited, RateRules: ratelimit.DefaultRules(), Origin: testOrigin,
 		CookieSecure: true, Staff: sh, Geo: &geoadmin.Handler{}, Clock: clk, Approvals: svc,
 		Sessions: auth.StaffSessionsFunc(func(ctx context.Context, tok string, ip netip.Addr, bg bool) (*auth.Staff, error) {
 			s, err := loader.LoadStaff(ctx, tok, ip, bg)
@@ -126,6 +138,40 @@ func newStaffEnv(t *testing.T, opts ...func(*admin.Options)) *staffEnv {
 	}
 	e.h = newHandler(t, o)
 	return e
+}
+
+// commitTracer — трассировщик запросов пула сценариев: onCommit (nil — ничего) зовётся с ctx коммита
+// после успешного COMMIT транзакции, в которой идемпотентность вставила ключ (транзакция действия под
+// Idempotency-Key). pgx коммитит и откатывает запросами "commit"/"rollback" на соединении транзакции.
+type commitTracer struct {
+	onCommit atomic.Pointer[func(context.Context)]
+	mu       sync.Mutex
+	keyed    map[*pgx.Conn]bool // соединения открытых транзакций с ключом идемпотентности
+}
+
+type traceSQLKey struct{}
+
+func (c *commitTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(d.SQL, "INSERT INTO idempotency_keys") {
+		c.mu.Lock()
+		c.keyed[conn] = true
+		c.mu.Unlock()
+	}
+	return context.WithValue(ctx, traceSQLKey{}, d.SQL)
+}
+
+func (c *commitTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, d pgx.TraceQueryEndData) {
+	sql, _ := ctx.Value(traceSQLKey{}).(string)
+	if sql != "commit" && sql != "rollback" {
+		return
+	}
+	c.mu.Lock()
+	keyed := c.keyed[conn]
+	delete(c.keyed, conn)
+	c.mu.Unlock()
+	if f := c.onCommit.Load(); f != nil && keyed && sql == "commit" && d.Err == nil {
+		(*f)(ctx)
+	}
 }
 
 func (e *staffEnv) exec(sql string, args ...any) {
@@ -166,11 +212,17 @@ func (e *staffEnv) invite(email, role string) uuid.UUID {
 // него), body — JSON ("" — без тела). Изменяющие методы — с Origin админки и X-WF-Admin: 1.
 func (e *staffEnv) send(method, path, token, key, body string, hdr ...string) *httptest.ResponseRecorder {
 	e.t.Helper()
+	return e.sendCtx(context.Background(), method, path, token, key, body, hdr...)
+}
+
+// sendCtx — send с ctx запроса (обрыв клиента — отмена ctx; хук транзакций db.WithTxHook).
+func (e *staffEnv) sendCtx(ctx context.Context, method, path, token, key, body string, hdr ...string) *httptest.ResponseRecorder {
+	e.t.Helper()
 	var rd io.Reader
 	if body != "" {
 		rd = strings.NewReader(body)
 	}
-	r := httptest.NewRequestWithContext(context.Background(), method, path, rd)
+	r := httptest.NewRequestWithContext(ctx, method, path, rd)
 	if body != "" {
 		r.Header.Set("Content-Type", "application/json")
 	}

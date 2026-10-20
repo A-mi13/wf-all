@@ -259,6 +259,50 @@ func TestManageChangeRoleDisableReset(t *testing.T) {
 	wantProblem(t, e.post(path(a.id, "access-reset"), a.token, confirmed("security", a.email)), http.StatusConflict, staff.CodeSelfAction)
 }
 
+// Немедленные смена городов и выключение перечитывают карточку после коммита (ревью 10b m2): клиент
+// оборвал запрос (ctx отменён) сразу после коммита транзакции действия — действие выполнено, ответ всё
+// равно 200 с карточкой, а не 500; ответ сохранён под ключом — повтор тем же ключом отдаёт его, а не
+// replay_unavailable. Шов — трассировщик пула сценариев (commitTracer): COMMIT транзакции с ключом
+// идемпотентности отменяет ctx запроса.
+func TestImmediateActionAnswersAfterCancel(t *testing.T) {
+	e := newStaffEnv(t)
+	a := e.owners(1)[0]
+	e.v = apitest.New(t, oapi.GetSpec)
+	c1, c2 := e.city("vremensk"), e.city("pokrovsk")
+	mod := e.moderator("mod@wf.example", c1, c2)
+	sup := e.invite("sup@wf.example", "support")
+	// cut — запрос, оборванный сразу после коммита; повтор тем же ключом — сохранённый ответ
+	cut := func(method, path, body string) oapi.StaffAccount {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		committed := false
+		f := func(context.Context) {
+			committed = true
+			cancel()
+		}
+		e.commits.onCommit.Store(&f)
+		key := uuid.NewString()
+		rec := e.sendCtx(ctx, method, path, a.token, key, body)
+		e.commits.onCommit.Store(nil)
+		got := account(t, rec)
+		if !committed || ctx.Err() == nil {
+			t.Fatalf("%s %s: коммит %v, ctx %v — шов не сработал", method, path, committed, ctx.Err())
+		}
+		again := e.send(method, path, a.token, key, body)
+		if !replayed(again) || again.Code != http.StatusOK || !sameJSON(t, again, rec) {
+			t.Fatalf("%s %s: повтор ключом %d %s", method, path, again.Code, again.Body.String())
+		}
+		return got
+	}
+	if got := cut(http.MethodPut, "/v1/staff/accounts/"+mod.String()+"/role", roleBody("moderator", c1)); !slices.Equal(got.CityIds, []uuid.UUID{c1}) {
+		t.Fatalf("снятие города после обрыва: %+v", got)
+	}
+	if got := cut(http.MethodPost, "/v1/staff/accounts/"+sup.String()+"/disable", confirmed("left_team", "sup@wf.example")); got.Status != "disabled" {
+		t.Fatalf("выключение после обрыва: %+v", got)
+	}
+}
+
 // Приглашение: модератор без городов — 400 body.city_ids; несуществующий город — 422; почта действующей
 // учётки — 409 email_taken; админ приглашает админа — 403 (право grant_elevated только у владельца).
 func TestManageInviteErrors(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/approvals"
+	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/staff"
 )
@@ -115,7 +116,7 @@ func (h *Handler) ChangeStaffRole(ctx context.Context, req oapi.ChangeStaffRoleR
 		}
 		return oapi.ChangeStaffRole202JSONResponse(body), nil
 	}
-	v, err := h.app.Account(ctx, s, req.StaffId)
+	v, err := h.committedAccount(ctx, s, req.StaffId)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +142,7 @@ func (h *Handler) DisableStaffAccount(ctx context.Context, req oapi.DisableStaff
 		}
 		return oapi.DisableStaffAccount202JSONResponse(body), nil
 	}
-	v, err := h.app.Account(ctx, s, req.StaffId)
+	v, err := h.committedAccount(ctx, s, req.StaffId)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +217,21 @@ func (h *Handler) GetStaffRoles(ctx context.Context, _ oapi.GetStaffRolesRequest
 		}})
 	}
 	return out, nil
+}
+
+// rereadTimeout — срок перечитывания карточки после коммита (committedAccount).
+const rereadTimeout = 5 * time.Second
+
+// committedAccount — карточка после уже закоммиченного немедленного действия (смена городов, выключение).
+// Перечитывание — на ctx без отмены (ревью 10b m2): обрыв клиента или срок запроса сразу после коммита
+// иначе дали бы 500 при выполненном действии, ответ не сохранился бы под Idempotency-Key, и повтор ключом
+// получил бы replay_unavailable. WithoutCancel снимает и срок запроса — взамен свой короткий. Карточка из
+// той же транзакции сценария была бы точнее, но сценарии (internal/app) возвращают только запрос
+// подтверждения; перечитывание того же субъекта s — те же права, что у GetStaffAccount.
+func (h *Handler) committedAccount(ctx context.Context, s *auth.Staff, id uuid.UUID) (staff.AccountView, error) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rereadTimeout)
+	defer cancel()
+	return h.app.Account(rctx, s, id)
 }
 
 // accepted — 202 {approval}: действие не исполнено, создан запрос подтверждения.
