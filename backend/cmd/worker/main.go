@@ -31,6 +31,7 @@ import (
 	"wf/backend/internal/platform/idempotency"
 	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/mail"
+	"wf/backend/internal/platform/periodic"
 	"wf/backend/internal/platform/queue"
 	"wf/backend/internal/platform/ratelimit"
 )
@@ -94,8 +95,8 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	river.AddWorker(workers, idempotency.NewCleanupWorker(pool))
 	river.AddWorker(workers, geojobs.NewImportWorker(pool, clock.System, geo, log))
 	mail.AddWorkers(workers, mails(), sender)
-	periodic := []*river.PeriodicJob{events.CleanupJob(), ratelimit.CleanupJob(), humancheck.CleanupJob(), idempotency.CleanupJob()}
-	client, err := queue.NewClient(pool, workers, cfg.Queues, periodic, log)
+	// периодика — общий список платформы: его же подключает admin-api, лидером River может стать любой (P27)
+	client, err := queue.NewClient(pool, workers, cfg.Queues, periodic.Jobs(), log)
 	if err != nil {
 		return err
 	}
