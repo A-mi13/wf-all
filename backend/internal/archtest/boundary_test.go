@@ -46,6 +46,52 @@ func TestPublicBinariesDoNotDependOnAdmin(t *testing.T) {
 	}
 }
 
+// Модуль staff (сотрудники: ключи, сессии, письма с кодами) исполняет только admin-api (D3): cmd/api и
+// cmd/worker не тянут ни корень staff, ни его пакеты — даже транзитивно (у ролей БД api и worker прав на
+// staff_* нет, ключей ADMIN_STAFF_SECRET_KEYS — тоже). required — как выше: граф не пуст.
+func TestPublicBinariesDoNotDependOnStaff(t *testing.T) {
+	binaries := []struct {
+		pkg      string
+		required []string
+	}{
+		{"./cmd/api", []string{"wf/backend/internal/platform/config", "wf/backend/internal/httpapi/public"}},
+		{"./cmd/worker", []string{"wf/backend/internal/platform/config", "wf/backend/internal/platform/periodic"}},
+	}
+	for _, bin := range binaries {
+		deps := listDeps(t, bin.pkg, "linux")
+		for _, req := range bin.required {
+			if !deps[req] {
+				t.Fatalf("go list -deps %s не содержит ожидаемый пакет %s — страж проверяет вхолостую", bin.pkg, req)
+			}
+		}
+		for pkg := range deps {
+			if isStaffPackage(pkg) {
+				t.Errorf("%s зависит от модуля staff: %s", bin.pkg, pkg)
+			}
+		}
+	}
+}
+
+func TestIsStaffPackage(t *testing.T) {
+	cases := map[string]bool{
+		"wf/backend/internal/staff":                    true,
+		"wf/backend/internal/staff/jobs":               true,
+		"wf/backend/internal/staff/internal/app":       true,
+		"wf/backend/internal/staffing":                 false,
+		"wf/backend/internal/platform/queue":           false,
+		"wf/backend/internal/httpapi/admin/oapi/staff": false,
+	}
+	for pkg, want := range cases {
+		if got := isStaffPackage(pkg); got != want {
+			t.Errorf("isStaffPackage(%q) = %v, want %v", pkg, got, want)
+		}
+	}
+}
+
+func isStaffPackage(pkg string) bool {
+	return pkg == "wf/backend/internal/staff" || strings.HasPrefix(pkg, "wf/backend/internal/staff/")
+}
+
 // Сам предикат проверяем отдельно: и что ловит, и что не ловит лишнего.
 func TestIsAdminPackage(t *testing.T) {
 	cases := map[string]bool{
