@@ -184,16 +184,21 @@ paths:
   `internal/app`): код приглашения отдаётся наружу **только** при `printCode` (`onlyIf`) — без флага его нет даже у
   вызывающего; `RekeyReport` — копия всех полей итога + `Clean()`. Вывод команды — stdout, почта маской
   (`logx.Mask`), код — только с `--print-code`, в журнал и stderr — никогда (страж `TestOperatorCommands`).
+  Команды, выпускающие код (`bootstrap`, `invite-resend`, `reset-access`), сначала сверяют ключи базы с кольцом
+  (`App.UnknownKeys`: `key_id` секретов TOTP, резервных кодов и живых кодов приглашений, которых нет в кольце; запрос
+  `ListStoredKeyIDs`) — есть чужие — отказ до записи, код 1, без ключей в выводе (`TestOperatorRefusesForeignKeys`).
 - **Фон (§4.10, Task 10c; `staff/jobs`):** `MailWorker` (`AddWorkers(w, d, sender)` — исполняющий River-клиент
   admin-api на очереди `staff`): вид → составитель (`invite`/`access_reset` → `ComposeInvite(…, kind)`, `locked`,
-  `bootstrapped`, `admin_disabled`); `mail.ErrSkip` и неизвестный вид — `river.JobCancel` (без повторов) и строка
-  журнала с видом и id, без почты; `V != 1` и ошибка SMTP — обычная ошибка (повтор); таймаут задачи — минута.
+  `bootstrapped`, `admin_disabled`); `mail.ErrSkip` — `river.JobCancel` (без повторов) и строка журнала с видом и id, без
+  почты; неизвестный вид, `V != 1` и ошибка SMTP — обычная ошибка (повтор: при скользящем деплое письмо нового вида
+  возьмёт экземпляр нового релиза); таймаут задачи — минута.
   `Deps.River` сценариев — отдельный клиент только для вставки (иначе цикл «исполнителю нужны Deps»). `Cleaner`:
   `Tick` = `App.Cleanup` (сессии, умершие — `LEAST(expires_at, revoked_at)` — больше `CleanupRetention` = 30 суток
   назад; приглашения, погашенные/отозванные/просроченные раньше границы, кроме последнего у сотрудника — по нему
   `GetLastInvite` берёт назначение; порции `FOR UPDATE SKIP LOCKED`, строку под замком сценария пропускают, страж
   `TestCleanupSkipsLockedRows`) + `ExpireDue` + `PurgeDecided(DecidedRetention)`; `Run` — проход сразу, затем раз
-  в час; ошибка прохода — `log.Error`, тикер живёт; отмена ctx — не сбой.
+  в час; шаги независимы (сбой одного не отменяет другие, ошибки вместе — `TestCleanupStepsIndependent`); ошибка
+  прохода — `log.Error`, тикер живёт; отмена ctx — не сбой.
 - **Хендлеры (`staff/admin`, Task 10a):** тонкие — запрос → сценарий `internal/app` → ответ контракта; логики
   сценариев в них нет. `New(staff.Deps, Cookie{Name, Secure})` (имя и `Secure` — от сборки:
   `httpapi/admin.CookieName`; `CookieConfig()` — для сверки сборкой, рассогласование — отказ старта), `Sessions()` — загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware

@@ -27,7 +27,13 @@ paths:
   Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
   фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены
   (ошибка или nil) — HTTP гасится, `RunService` возвращает ошибку (стражи `service_test.go`). `RunHTTP` — обёртка без фона
-  (`cmd/api`). У admin-api: HTTP-дренаж `ADMIN_SHUTDOWN_TIMEOUT` (10 с) + River мягко 15 с + жёстко 5 с = 30 с до SIGKILL.
+  (`cmd/api`). У admin-api: HTTP-дренаж `ADMIN_SHUTDOWN_TIMEOUT` (10 с) + River мягко 12 с + жёстко 5 с = 27 с (запас до SIGKILL 30 с).
+- Виды задач исполняющих бинарников — списки `queue.WorkerKinds()` и `queue.AdminKinds()` (имя и срок исполнителя).
+  Рескьюер лидера River (задача `running` дольше часа) ищет исполнителя вида в СВОЁМ клиенте и без него выбрасывает
+  задачу (`discarded`), поэтому каждый бинарник регистрирует виды другого заглушками `queue.AddForeign` (срок — как у
+  настоящего исполнителя; исполнять заглушка отказывается). Новый вид — строка в своём списке, иначе падают
+  `TestWorkerKinds` / `TestAdminKinds` (реестр сверяется со списком через `testkit/rivertest.Kinds`, сроки — с
+  исполнителями); стражи рескьюера — `TestRescuerKeepsAdminJobs`, `TestRescuerKeepsWorkerJobs`, `TestForeignTimeoutRespected`.
 - Аудит — `audit.Write(ctx, entry)` в транзакции действия; чтение чувствительного — `audit.WriteRead`. ПД в `Before`/`After` маскирует `audit.Mask` по словам ключа (camelCase/PascalCase делятся на слова: `contactEmail`, `contact_email`, `ContactEmail` — одно и то же); не маскируется ключ, оканчивающийся на `at`/`count`/`left`/`verified`/`enabled`/`required`. Маскирование по ключу, а не по содержимому: свободный текст с ПД (комментарии, описания) в `Before`/`After` класть нельзя. Новые чувствительные слова — в списки слов и пар в `audit/mask.go`.
   Автор — ровно один: `ActorUserID` (игрок) или `ActorStaffID` (сотрудник), без автора — `ActorRole`
   `system|operator|anonymous`; `ActorLabel` — снимок отображаемого имени (журнал показывает его); `ScopeCityID` —
@@ -56,7 +62,9 @@ paths:
   уходит); `Retry-After` — только заголовком (`Problem.RetryAfter`, в теле `retry_after` нет).
 - Почта — только задача `mail.SendArgs{V: 1, Mail: "<модуль>.<письмо>", Ref: id}` (на другую версию воркер
   вернёт ошибку, задача уйдёт в повтор и после `MaxAttempts` станет «мёртвой»); адрес находит
-  `mail.Composer` модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en).
+  `mail.Composer` модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en). `mail.SMTP.Send` закрывает
+  соединение по отмене ctx (остановка River, срок задачи): висящий SMTP не держит остановку до своего таймаута 20 с
+  (`TestSMTPSendHonorsCancel`).
 - Пароли — `password.Check` + `password.Hasher` (argon2id под семафором; `password.DefaultParams()` — минимум OWASP);
   «нет почты» — `VerifyDummy`. Пароль приводится к NFKC; длиннее `password.MaxInputBytes` (1024 байта) —
   `ErrTooLong` до хэширования; хэш из базы с параметрами выше потолков (m 256 МиБ, t 10, p 16) или солью < 16 байт —
