@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 
 	geojobs "wf/backend/internal/geo/jobs"
 	"wf/backend/internal/platform/config"
@@ -120,16 +121,9 @@ func waitRescued(t *testing.T, pool *pgxpool.Pool, id int64) {
 // обслуживает воркер (queue.Config), и не в очередь admin-api (queue.Staff) — иначе её взяла бы заглушка чужого
 // бинарника. Таблица теста — по виду на строку queue.WorkerKinds (новый вид без строки — падение).
 func TestWorkerKindsQueues(t *testing.T) {
-	queues := map[string]string{
-		"platform.ping":       queue.PingArgs{}.InsertOpts().Queue,
-		"events.deliver":      events.DeliverArgs{}.InsertOpts().Queue,
-		"events.cleanup":      events.CleanupArgs{}.InsertOpts().Queue,
-		"ratelimit.cleanup":   ratelimit.CleanupArgs{}.InsertOpts().Queue,
-		"humancheck.cleanup":  humancheck.CleanupArgs{}.InsertOpts().Queue,
-		"idempotency.cleanup": idempotency.CleanupArgs{}.InsertOpts().Queue,
-		"geo.import":          geojobs.ImportArgs{}.InsertOpts().Queue,
-		"mail.send":           mail.SendArgs{}.InsertOpts().Queue,
-	}
+	// вид — из самих аргументов (Kind), а не строкой таблицы: перепутанная пара вида и аргументов не пройдёт (m-r5)
+	queues := queuesOf(queue.PingArgs{}, events.DeliverArgs{}, events.CleanupArgs{}, ratelimit.CleanupArgs{},
+		humancheck.CleanupArgs{}, idempotency.CleanupArgs{}, geojobs.ImportArgs{}, mail.SendArgs{})
 	served := queue.Config(config.Queues{})
 	for _, k := range queue.WorkerKinds() {
 		q, ok := queues[k.Name]
@@ -141,4 +135,19 @@ func TestWorkerKindsQueues(t *testing.T) {
 			t.Errorf("%s ставится в очередь %q — её не обслуживает воркер", k.Name, q)
 		}
 	}
+}
+
+// argsWithQueue — аргументы задачи со своей очередью (InsertOpts).
+type argsWithQueue interface {
+	river.JobArgs
+	river.JobArgsWithInsertOpts
+}
+
+// queuesOf — очередь каждого вида по аргументам: вид — args.Kind().
+func queuesOf(args ...argsWithQueue) map[string]string {
+	out := make(map[string]string, len(args))
+	for _, a := range args {
+		out[a.Kind()] = a.InsertOpts().Queue
+	}
+	return out
 }

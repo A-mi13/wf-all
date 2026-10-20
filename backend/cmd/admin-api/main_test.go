@@ -100,6 +100,8 @@ func TestRunUnknownSubcommand(t *testing.T) {
 		{"staff", "reset-access", "--emial", "o@wf.example"},
 		{"staff", "disable", "--email", "o@wf.example", "--print-code"},
 		{"staff", "rekey", "--email", "o@wf.example"},
+		{"staff", "disable", "--email", "o@wf.example", "--keys-lost"},
+		{"staff", "rekey", "--keys-lost"},
 	} {
 		err := run(context.Background(), args, nil, io.Discard, io.Discard)
 		if !errors.Is(err, errUsage) || exitCode(err) != 2 {
@@ -470,5 +472,46 @@ func TestOperatorWarnsOnPartlyUnknownKeys(t *testing.T) {
 	}
 	if code := e.liveCode("anna@wf.example"); !strings.Contains(out, code) {
 		t.Fatalf("reset-access не выпустил код:\n%s", out)
+	}
+}
+
+// Потерян единственный ключ (I-r2 ревью раунда 2): все секреты базы — на ключе, которого нет нигде; по базе это
+// неотличимо от «не того кольца». Без флага — отказ (код 1) с подсказкой про --keys-lost, ничего не записано; с
+// --keys-lost — предупреждение в stderr (число ключей, без id), команда выполняется: новый код — текущим ключом.
+func TestOperatorLostWholeKey(t *testing.T) {
+	e := newTestEnv(t)
+	if _, _, err := e.operator("bootstrap", "--email", "anna@wf.example", "--name", "Анна В."); err != nil {
+		t.Fatal(err)
+	}
+	e.exec(`UPDATE staff_accounts SET status = 'active', password_hash = '$argon2id$stub' WHERE email = 'anna@wf.example'`)
+	e.exec(`INSERT INTO staff_mfa (staff_id, secret_enc, key_id, confirmed_at)
+		SELECT id, decode('00', 'hex'), 'AAAAAAAAAAA', now() FROM staff_accounts WHERE email = 'anna@wf.example'`)
+	e.exec(`UPDATE staff_invites SET revoked_at = now(), code_enc = NULL, code_key_id = NULL`)
+	state := func() string {
+		var s string
+		if err := e.owner.QueryRow(context.Background(), `SELECT a.status::text || '/' || a.version::text || '/' ||
+			(SELECT count(*) FROM staff_invites i WHERE i.staff_id = a.id AND i.revoked_at IS NULL AND i.consumed_at IS NULL)::text
+			FROM staff_accounts a WHERE a.email = 'anna@wf.example'`).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	before := state()
+	_, _, err := e.operator("reset-access", "--email", "anna@wf.example", "--print-code")
+	if err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "--keys-lost") {
+		t.Fatalf("без --keys-lost: %v", err)
+	}
+	if after := state(); after != before {
+		t.Fatalf("без --keys-lost что-то записано: %s → %s", before, after)
+	}
+	out, logOut, err := e.operator("reset-access", "--email", "anna@wf.example", "--print-code", "--keys-lost")
+	if err != nil {
+		t.Fatalf("с --keys-lost: %v", err)
+	}
+	if !strings.Contains(logOut, "(ключей: 1)") || strings.Contains(logOut, "AAAAAAAAAAA") || strings.Contains(logOut, e.key) {
+		t.Fatalf("предупреждение в stderr:\n%s", logOut)
+	}
+	if code := e.liveCode("anna@wf.example"); !strings.Contains(out, code) {
+		t.Fatalf("код в выводе не равен живому (расшифрованному текущим ключом):\n%s", out)
 	}
 }

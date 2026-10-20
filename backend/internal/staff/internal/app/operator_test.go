@@ -321,8 +321,8 @@ func TestKeyCheck(t *testing.T) {
 	check("два чужих ключа", 0, 2)
 }
 
-// Штатная ротация (I-r1, сценарий А): ключ K_old → K_new первым → rekey; сотрудник использовал резервный код на
-// K_old (использованные rekey не трогает и не считает); после удаления K_old итог rekey — нули, и сверка ключей
+// Штатная ротация (I-r1, сценарий А): ключ K_old → K_new первым → rekey; все резервные коды на
+// K_old использованы входом (used_at; использованные rekey не трогает и не считает); после удаления K_old итог rekey — нули, и сверка ключей
 // команды тоже чиста — команда оператора не должна отказывать с верным кольцом.
 func TestKeyCheckAfterRotation(t *testing.T) {
 	e := newEnv(t)
@@ -335,7 +335,7 @@ func TestKeyCheckAfterRotation(t *testing.T) {
 	if _, err := e.withRing(rotated).Rekey(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// сотрудник перевыпустил коды: старые на K_old — использованы (как после входа резервным кодом)
+	// коды на K_old использованы входом резервным кодом (used_at): rekey их не трогает и не считает, сверка — тоже
 	e.exec(`UPDATE staff_recovery_codes SET used_at = now() WHERE staff_id = $1`, m.ID)
 	onlyNew, err := keys.NewRing([]string{newKey})
 	if err != nil {

@@ -228,9 +228,12 @@ func runBackground(ctx context.Context, client *river.Client[pgx.Tx], cleaner *j
 
 // --- команды оператора ---
 
-const usage = "использование: admin-api — сервер; admin-api staff bootstrap --email <почта> --name <имя> [--print-code] | " +
-	"staff invite-resend --email <почта> [--print-code] | staff reset-access --email <почта> [--print-code] | " +
-	"staff disable --email <почта> | staff rekey"
+const usage = "использование: admin-api — сервер; " +
+	"admin-api staff bootstrap --email <почта> --name <имя> [--print-code] [--keys-lost] | " +
+	"staff invite-resend --email <почта> [--print-code] [--keys-lost] | " +
+	"staff reset-access --email <почта> [--print-code] [--keys-lost] | " +
+	"staff disable --email <почта> | staff rekey " +
+	"(--keys-lost: ключ, на котором лежат секреты базы, потерян безвозвратно — выполнить, несмотря на чужое кольцо)"
 
 // errUsage — неверная команда: код выхода 2 и usage в stderr.
 var errUsage = errors.New("неверная команда")
@@ -258,6 +261,8 @@ type command struct {
 	email     string
 	fullName  string
 	printCode bool
+	// keysLost — --keys-lost: ни один ключ базы не в кольце, потому что он потерян безвозвратно (не «не то кольцо»)
+	keysLost bool
 }
 
 // parseCommand — nil без аргументов (сервер). Флаги — только свои у каждой подкоманды; лишние аргументы,
@@ -272,12 +277,14 @@ func parseCommand(args []string) (*command, error) {
 	c := &command{name: args[1]}
 	fs := newFlagSet(c.name)
 	var email, name *string
-	var printCode *bool
+	var printCode, keysLost *bool
 	switch c.name {
 	case "bootstrap":
-		email, name, printCode = fs.String("email", "", ""), fs.String("name", "", ""), fs.Bool("print-code", false, "")
+		email, name = fs.String("email", "", ""), fs.String("name", "", "")
+		printCode, keysLost = fs.Bool("print-code", false, ""), fs.Bool("keys-lost", false, "")
 	case "invite-resend", "reset-access":
-		email, printCode = fs.String("email", "", ""), fs.Bool("print-code", false, "")
+		email = fs.String("email", "", "")
+		printCode, keysLost = fs.Bool("print-code", false, ""), fs.Bool("keys-lost", false, "")
 	case "disable":
 		email = fs.String("email", "", "")
 	case "rekey":
@@ -302,6 +309,9 @@ func parseCommand(args []string) (*command, error) {
 	}
 	if printCode != nil {
 		c.printCode = *printCode
+	}
+	if keysLost != nil {
+		c.keysLost = *keysLost
 	}
 	return c, nil
 }
@@ -331,7 +341,7 @@ const queuedNote = "письмо поставлено в очередь staff �
 func execCommand(ctx context.Context, c command, h *staffadmin.Handler, out, errOut io.Writer) error {
 	who := logx.Mask(c.email)
 	if c.name == "bootstrap" || c.name == "invite-resend" || c.name == "reset-access" {
-		if err := checkKeys(ctx, h, errOut); err != nil {
+		if err := checkKeys(ctx, h, c.keysLost, errOut); err != nil {
 			return err
 		}
 	}
@@ -451,21 +461,24 @@ func allWorkers(d staff.Deps, sender mail.Sender) *river.Workers {
 //   - в базе есть ключи и НИ ОДИН не в кольце — «не то кольцо» (другая машина, старый .env): отказ до записи, код 1 —
 //     иначе команда погасила бы живое приглашение и выпустила код на ключе, которого нет у сервера;
 //   - часть ключей не в кольце — предупреждение в stderr, команда выполняется: это документированный выход при
-//     потерянном ключе (reset-access, invite-resend выпускают новый код текущим ключом).
+//     потерянном ключе (reset-access, invite-resend выпускают новый код текущим ключом);
+//   - ни один не в кольце, но оператор подтвердил --keys-lost (единственный ключ потерян безвозвратно — по базе это
+//     неотличимо от «не того кольца», I-r2) — то же предупреждение, команда выполняется; кольцо и ключи не меняются.
 //
 // Чего сверка не видит: пустую базу и лишний (новый) ключ в кольце оператора — кольцо команды должно совпадать с
 // кольцом сервера, порядок тоже. Ключи и их id не печатаются — только число.
-func checkKeys(ctx context.Context, h *staffadmin.Handler, errOut io.Writer) error {
+func checkKeys(ctx context.Context, h *staffadmin.Handler, keysLost bool, errOut io.Writer) error {
 	known, unknown, err := h.OperatorKeyCheck(ctx)
 	if err != nil {
 		return err
 	}
 	switch {
-	case unknown > 0 && known == 0:
+	case unknown > 0 && known == 0 && !keysLost:
 		return fmt.Errorf("ни один ключ, на котором лежат секреты сотрудников в базе, не входит в ADMIN_STAFF_SECRET_KEYS "+
-			"этой команды (ключей базы: %d) — кольцо не то: запустите команду с кольцом сервера (все его ключи, тот же порядок)", unknown)
+			"этой команды (ключей базы: %d) — кольцо не то: запустите команду с кольцом сервера (все его ключи, тот же порядок); "+
+			"если ключ потерян безвозвратно — повторите с --keys-lost", unknown)
 	case unknown > 0:
-		fmt.Fprintf(errOut, "предупреждение: часть секретов сотрудников лежит на ключах, которых нет в ADMIN_STAFF_SECRET_KEYS "+
+		fmt.Fprintf(errOut, "предупреждение: секреты сотрудников (часть или все) лежат на ключах, которых нет в ADMIN_STAFF_SECRET_KEYS "+
 			"этой команды (ключей: %d) — если ключ потерян, это ожидаемо (reset-access и invite-resend выпускают новый код "+
 			"текущим ключом); если нет — проверьте, что кольцо команды совпадает с кольцом сервера\n", unknown)
 	}

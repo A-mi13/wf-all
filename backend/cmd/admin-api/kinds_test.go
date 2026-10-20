@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/queue"
@@ -88,7 +89,14 @@ func waitRescued(t *testing.T, pool *pgxpool.Pool, id int64) {
 // клиент admin-api (staffQueues), и которой нет у воркера (queue.Config); очереди двух бинарников не пересекаются —
 // иначе задачу одного взяла бы заглушка другого.
 func TestAdminKindsQueues(t *testing.T) {
-	queues := map[string]string{"staff.mail": staff.MailArgs{}.InsertOpts().Queue}
+	// вид — из самих аргументов (Kind), а не строкой таблицы (m-r5)
+	queues := map[string]string{}
+	for _, a := range []interface {
+		river.JobArgs
+		river.JobArgsWithInsertOpts
+	}{staff.MailArgs{}} {
+		queues[a.Kind()] = a.InsertOpts().Queue
+	}
 	own, worker := staffQueues(), queue.Config(config.Queues{})
 	for q := range own {
 		if _, clash := worker[q]; clash {
