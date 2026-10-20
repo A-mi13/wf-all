@@ -161,7 +161,8 @@ paths:
     сотрудником, — известное ограничение: последняя запись побеждает, след — аудит `staff.role_changed` (было/стало).
   - **Хендлеры (`staff/admin/accounts.go`, Task 10b):** 202 `{approval}` — `oapi.ApprovalOf` (ручной файл в
     `httpapi/admin/oapi`: общий для `staff/admin` и сборки); `ChangeRole`/`Disable` сразу (`nil, nil`) — 200 с
-    перечитанной карточкой `Account`. `RegisterApprovals(reg, svc)` — обёртка `app.RegisterApprovals` для сборки 10c;
+    перечитанной карточкой `Account` (`committedAccount`: ctx без отмены и свой срок 5 с — обрыв после коммита не даёт
+    500 при выполненном действии, страж `TestImmediateActionAnswersAfterCancel`). `RegisterApprovals(reg, svc)` — обёртка `app.RegisterApprovals` для сборки 10c;
     `Label(ctx, s)` — подпись решившего для подтверждений (`App.Label`: учётка и сессия перечитываются без замка, как
     `checkActor`; approve повторяет под замком в исполнителе, reject и cancel — нет).
 - **Оператор (§4.2, §4.11; `internal/app/operator.go`):** аудит — `actor_role = operator`, метка `operator`.
