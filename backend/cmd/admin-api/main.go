@@ -199,12 +199,7 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 // не уложился — StopAndCancel, задача вернётся в повтор.
 func background(log *slog.Logger, pool *pgxpool.Pool, a assembly, sender mail.Sender) (func(context.Context) error, error) {
 	workers := allWorkers(a.deps, sender)
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:       staffQueues(),
-		Workers:      workers,
-		PeriodicJobs: periodic.Jobs(),
-		Logger:       log,
-	})
+	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig(workers, log))
 	if err != nil {
 		return nil, err
 	}
@@ -483,6 +478,12 @@ func checkKeys(ctx context.Context, h *staffadmin.Handler, keysLost bool, errOut
 			"текущим ключом); если нет — проверьте, что кольцо команды совпадает с кольцом сервера\n", unknown)
 	}
 	return nil
+}
+
+// riverConfig — исполняющий клиент admin-api: обслуживание — общее с воркером (queue.ClientConfig от
+// queue.MaintenanceConfig, страж TestAdminRiverMaintenance), очередь — только staff, периодика — общий список платформы.
+func riverConfig(workers *river.Workers, log *slog.Logger) *river.Config {
+	return queue.ClientConfig(staffQueues(), workers, periodic.Jobs(), log)
 }
 
 // staffQueues — очереди исполняющего клиента admin-api: только staff (у воркера её нет — TestAdminKindsQueues).

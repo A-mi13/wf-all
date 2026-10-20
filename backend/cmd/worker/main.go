@@ -89,8 +89,7 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		return command(ctx, args, pool, reg, geo, out, log)
 	}
 	workers := allWorkers(pool, reg, geo, log, sender)
-	// периодика — общий список платформы: его же подключает admin-api, лидером River может стать любой (P27)
-	client, err := queue.NewClient(pool, workers, cfg.Queues, periodic.Jobs(), log)
+	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig(cfg.Queues, workers, log))
 	if err != nil {
 		return err
 	}
@@ -258,4 +257,11 @@ func allWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, lo
 	workers := realWorkers(pool, reg, geo, log, sender)
 	queue.AddForeign(workers, queue.AdminKinds())
 	return workers
+}
+
+// riverConfig — исполняющий клиент воркера: обслуживание — общее с admin-api (queue.ClientConfig от
+// queue.MaintenanceConfig, страж TestWorkerRiverMaintenance), периодика — общий список платформы: его же подключает
+// admin-api, лидером River может стать любой (P27).
+func riverConfig(q config.Queues, workers *river.Workers, log *slog.Logger) *river.Config {
+	return queue.ClientConfig(queue.Config(q), workers, periodic.Jobs(), log)
 }

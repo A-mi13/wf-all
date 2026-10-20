@@ -65,12 +65,7 @@ func Config(c config.Queues) map[string]river.QueueConfig {
 
 func NewClient(pool *pgxpool.Pool, workers *river.Workers, c config.Queues,
 	periodic []*river.PeriodicJob, log *slog.Logger) (*river.Client[pgx.Tx], error) {
-	return river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:       Config(c),
-		Workers:      workers,
-		PeriodicJobs: periodic,
-		Logger:       log,
-	})
+	return river.NewClient(riverpgxv5.New(pool), ClientConfig(Config(c), workers, periodic, log))
 }
 
 // hardStopTimeout — сколько ждать задачи после отмены их ctx, если мягкая остановка не уложилась.
