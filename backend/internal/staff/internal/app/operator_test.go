@@ -353,3 +353,44 @@ func TestKeyCheckAfterRotation(t *testing.T) {
 		t.Fatalf("сверка после ротации: известных %d, чужих %d (%v) — ждали 1 и 0", known, unknown, err)
 	}
 }
+
+// Пожелание ревью 10c: команда оператора с --keys-lost (ctx WithKeysLost) помечает свою запись аудита
+// keys_lost = true — разбор инцидента видит, какой код выпущен вопреки чужому кольцу; без флага пометки нет.
+func TestOperatorKeysLostAudited(t *testing.T) {
+	e := newManageEnv(t) // сброс доступа гасит запросы — нужны подтверждения
+	ctx := context.Background()
+	lost := app.WithKeysLost(ctx)
+	if _, err := e.app.OperatorBootstrap(ctx, "anna@wf.example", "Анна В."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.OperatorBootstrap(lost, "boris@wf.example", "Борис"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.OperatorInviteResend(lost, "anna@wf.example"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.OperatorInviteResend(ctx, "anna@wf.example"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.OperatorResetAccess(lost, "boris@wf.example"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.OperatorResetAccess(ctx, "boris@wf.example"); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"staff.bootstrapped", "staff.invite_resent", "staff.access_reset"} {
+		rows := e.audits(action)
+		if len(rows) != 2 {
+			t.Fatalf("%s: записей %d", action, len(rows))
+		}
+		marked := 0
+		for _, r := range rows {
+			if strings.Contains(r.After, `"keys_lost": true`) {
+				marked++
+			}
+		}
+		if marked != 1 {
+			t.Fatalf("%s: с keys_lost %d из 2: %+v", action, marked, rows)
+		}
+	}
+}

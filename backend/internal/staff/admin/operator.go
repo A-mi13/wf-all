@@ -5,6 +5,8 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+
+	"wf/backend/internal/staff/internal/app"
 )
 
 // Операции оператора (спека §4.2, §4.11) для подкоманд admin-api staff …: cmd/admin-api не может
@@ -103,3 +105,6 @@ func (h *Handler) OperatorKeyCheck(ctx context.Context) (known, unknown int, err
 	}
 	return h.app.KeyCheck(ctx)
 }
+
+// WithKeysLost — ctx подкоманды с --keys-lost: её запись аудита получает keys_lost = true (разбор инцидента).
+func WithKeysLost(ctx context.Context) context.Context { return app.WithKeysLost(ctx) }

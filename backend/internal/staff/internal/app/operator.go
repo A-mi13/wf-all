@@ -21,6 +21,24 @@ import (
 // доступа (без стража последнего владельца — выход из тупика) и выключение (под стражем). Подкоманды зовут их
 // через обёртки staff/admin/operator.go: код приглашения наружу — только с --print-code.
 
+// keysLostKey — пометка ctx команды оператора, запущенной с --keys-lost (ключ базы потерян безвозвратно).
+type keysLostKey struct{}
+
+// WithKeysLost — ctx команды с --keys-lost: сценарии, выпускающие код (bootstrap, invite-resend, reset-access),
+// кладут keys_lost = true в After своей записи аудита — разбор инцидента видит, какой код выпущен вопреки
+// чужому кольцу. На саму операцию пометка не влияет.
+func WithKeysLost(ctx context.Context) context.Context {
+	return context.WithValue(ctx, keysLostKey{}, true)
+}
+
+// markKeysLost — after с keys_lost = true, если ctx — команды с --keys-lost.
+func markKeysLost(ctx context.Context, after map[string]any) map[string]any {
+	if lost, _ := ctx.Value(keysLostKey{}).(bool); lost {
+		after["keys_lost"] = true
+	}
+	return after
+}
+
 // OperatorBootstrap — новый владелец (§4.2, U2) в одной транзакции: учётка owner в статусе invited
 // (почта и имя — по правилам приглашения, validateInvitee; почта занята в любом статусе —
 // staff.ErrEmailTaken), приглашение (IssueInvite, письмо staff.invite новой учётке), аудит
@@ -40,7 +58,7 @@ func (a *App) OperatorBootstrap(ctx context.Context, email, name string) (string
 			return err
 		}
 		if err := audit.Write(ctx, operatorActor.entry(actionBootstrapped, c.id, nil,
-			map[string]any{"role": roleOwner, "email": c.email}, staff.Meta{})); err != nil {
+			markKeysLost(ctx, map[string]any{"role": roleOwner, "email": c.email}), staff.Meta{})); err != nil {
 			return err
 		}
 		if err := publishInvited(ctx, c, roleOwner); err != nil {
@@ -88,7 +106,7 @@ func (a *App) OperatorInviteResend(ctx context.Context, email string) (string, e
 		if code, err = a.IssueInvite(ctx, tx, acct.ID, purpose); err != nil {
 			return err
 		}
-		return audit.Write(ctx, operatorActor.entry(actionInviteResent, acct.ID, nil, map[string]any{"purpose": purpose}, staff.Meta{}))
+		return audit.Write(ctx, operatorActor.entry(actionInviteResent, acct.ID, nil, markKeysLost(ctx, map[string]any{"purpose": purpose}), staff.Meta{}))
 	})
 	if err != nil {
 		return "", err
@@ -314,7 +332,7 @@ func (a *App) OperatorResetAccess(ctx context.Context, email string) (string, er
 		}
 		code, err = a.resetAccess(ctx, tx, q, t, resetSpec{
 			by: operatorActor, action: actionAccessReset, reason: reasonByOper,
-			after: map[string]any{"status": statusInvited}, purpose: purposeAccessReset,
+			after: markKeysLost(ctx, map[string]any{"status": statusInvited}), purpose: purposeAccessReset,
 			event: func(v int64) events.Event { return staff.AccessResetEvent(t.id, v) },
 		})
 		return err

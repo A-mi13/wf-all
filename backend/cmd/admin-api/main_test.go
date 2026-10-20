@@ -110,6 +110,36 @@ func TestRunUnknownSubcommand(t *testing.T) {
 	}
 }
 
+// 10c m-r8: --keys-lost и --print-code принимают ровно три команды, выпускающие код (bootstrap, invite-resend,
+// reset-access); у disable и rekey флага нет (TestRunUnknownSubcommand). Без флагов — оба false.
+func TestParseCommandFlags(t *testing.T) {
+	cases := []struct {
+		args []string
+		want command
+	}{
+		{[]string{"staff", "bootstrap", "--email", "o@wf.example", "--name", "Анна", "--keys-lost"},
+			command{name: "bootstrap", email: "o@wf.example", fullName: "Анна", keysLost: true}},
+		{[]string{"staff", "bootstrap", "--email", "o@wf.example", "--name", "Анна"},
+			command{name: "bootstrap", email: "o@wf.example", fullName: "Анна"}},
+		{[]string{"staff", "invite-resend", "--email", "o@wf.example", "--keys-lost", "--print-code"},
+			command{name: "invite-resend", email: "o@wf.example", printCode: true, keysLost: true}},
+		{[]string{"staff", "invite-resend", "--email", "o@wf.example"},
+			command{name: "invite-resend", email: "o@wf.example"}},
+		{[]string{"staff", "reset-access", "--keys-lost", "--email", "o@wf.example"},
+			command{name: "reset-access", email: "o@wf.example", keysLost: true}},
+		{[]string{"staff", "reset-access", "--email", "o@wf.example", "--print-code"},
+			command{name: "reset-access", email: "o@wf.example", printCode: true}},
+		{[]string{"staff", "disable", "--email", "o@wf.example"}, command{name: "disable", email: "o@wf.example"}},
+		{[]string{"staff", "rekey"}, command{name: "rekey"}},
+	}
+	for _, c := range cases {
+		got, err := parseCommand(c.args)
+		if err != nil || got == nil || *got != c.want {
+			t.Errorf("%v: %+v, %v; ждали %+v", c.args, got, err, c.want)
+		}
+	}
+}
+
 func TestExitCode(t *testing.T) {
 	if c := exitCode(errors.New("сбой")); c != 1 {
 		t.Fatalf("обычная ошибка: %d", c)
@@ -427,6 +457,10 @@ func TestOperatorRefusesForeignKeys(t *testing.T) {
 		if err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "ADMIN_STAFF_SECRET_KEYS") {
 			t.Fatalf("%v: err = %v", args, err)
 		}
+		// 10c m-r7: последствия --keys-lost при не том кольце названы в самом отказе
+		if !strings.Contains(err.Error(), "код, который сервер не прочтёт") || !strings.Contains(err.Error(), "переменной сервиса") {
+			t.Fatalf("%v: в отказе нет предупреждения о --keys-lost с не тем кольцом: %v", args, err)
+		}
 		if strings.Contains(err.Error()+out.String()+logOut.String(), other) || strings.Contains(err.Error(), e.key) {
 			t.Fatalf("%v: ключ в выводе", args)
 		}
@@ -445,7 +479,7 @@ func TestOperatorRefusesForeignKeys(t *testing.T) {
 // Потерянный ключ (I-r1, сценарий Б ревью раунда 1): секрет TOTP владельца — на ключе, которого уже нет нигде, а
 // остальные секреты базы — на ключе кольца. Документированный выход — reset-access — выполняется (код 0) с
 // предупреждением в stderr (число чужих ключей, без самих ключей); отказ — только когда ни один ключ базы не в
-// кольце (TestOperatorRefusesForeignKeys).
+// кольце и нет --keys-lost (TestOperatorRefusesForeignKeys, TestOperatorLostWholeKey).
 func TestOperatorWarnsOnPartlyUnknownKeys(t *testing.T) {
 	e := newTestEnv(t)
 	if _, _, err := e.operator("bootstrap", "--email", "anna@wf.example", "--name", "Анна В."); err != nil {
@@ -513,5 +547,12 @@ func TestOperatorLostWholeKey(t *testing.T) {
 	}
 	if code := e.liveCode("anna@wf.example"); !strings.Contains(out, code) {
 		t.Fatalf("код в выводе не равен живому (расшифрованному текущим ключом):\n%s", out)
+	}
+	// пожелание ревью 10c: команда с --keys-lost помечена в журнале действий (разбор инцидента), без флага — нет
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'staff.access_reset' AND after->'keys_lost' = 'true'`); n != 1 {
+		t.Fatalf("записей staff.access_reset с keys_lost: %d", n)
+	}
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE after ? 'keys_lost'`); n != 1 {
+		t.Fatalf("keys_lost у команд без флага: %d записей", n)
 	}
 }

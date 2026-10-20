@@ -340,6 +340,9 @@ func execCommand(ctx context.Context, c command, h *staffadmin.Handler, out, err
 			return err
 		}
 	}
+	if c.keysLost {
+		ctx = staffadmin.WithKeysLost(ctx) // пометка keys_lost в записи аудита команды
+	}
 	switch c.name {
 	case "bootstrap":
 		code, err := h.OperatorBootstrap(ctx, c.email, c.fullName, c.printCode)
@@ -471,7 +474,8 @@ func checkKeys(ctx context.Context, h *staffadmin.Handler, keysLost bool, errOut
 	case unknown > 0 && known == 0 && !keysLost:
 		return fmt.Errorf("ни один ключ, на котором лежат секреты сотрудников в базе, не входит в ADMIN_STAFF_SECRET_KEYS "+
 			"этой команды (ключей базы: %d) — кольцо не то: запустите команду с кольцом сервера (все его ключи, тот же порядок); "+
-			"если ключ потерян безвозвратно — повторите с --keys-lost", unknown)
+			"если ключ потерян безвозвратно — повторите с --keys-lost (с не тем кольцом флаг выпустит код, который сервер "+
+			"не прочтёт; сверьте кольцо с переменной сервиса)", unknown)
 	case unknown > 0:
 		fmt.Fprintf(errOut, "предупреждение: секреты сотрудников (часть или все) лежат на ключах, которых нет в ADMIN_STAFF_SECRET_KEYS "+
 			"этой команды (ключей: %d) — если ключ потерян, это ожидаемо (reset-access и invite-resend выпускают новый код "+
