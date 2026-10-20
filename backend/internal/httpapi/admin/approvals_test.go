@@ -121,6 +121,7 @@ func TestInviteApproveFlow(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
+	e.v = apitest.New(t, oapi.GetSpec)
 	jobs, events := e.count(`SELECT count(*) FROM river_job`), e.count(`SELECT count(*) FROM outbox`)
 
 	key := uuid.NewString()
@@ -182,6 +183,7 @@ func TestApprovalDecisionRules(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
+	e.v = apitest.New(t, oapi.GetSpec)
 	id := e.accepted(e.inviteReq(a.token, "", "ivan.p@wf.example", "support"))
 	wantProblem(t, e.decide("approve", id, a.token, "", ""), http.StatusConflict, httpx.CodeApprovalSelf)
 	wantProblem(t, e.decide("reject", id, a.token, "", `{"comment":"нет"}`), http.StatusConflict, httpx.CodeApprovalSelf)
@@ -199,10 +201,12 @@ func TestApprovalDecisionRules(t *testing.T) {
 }
 
 // Отклонение и отмена: 200 с итогом; повтор тем же ключом — сохранённый ответ (второго решения нет).
+// Аудит решения — с IP и User-Agent запроса (ревью 10b m1).
 func TestRejectCancelReplay(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
+	e.v = apitest.New(t, oapi.GetSpec)
 	r1 := e.accepted(e.inviteReq(a.token, "", "ivan.p@wf.example", "support"))
 	r2 := e.accepted(e.inviteReq(a.token, "", "petr.s@wf.example", "support"))
 	// «мои» по одной странице: новые сверху, курсор ведёт ко второй
@@ -218,22 +222,24 @@ func TestRejectCancelReplay(t *testing.T) {
 	}
 
 	key := uuid.NewString()
-	rec = e.decide("reject", r1, b.token, key, `{"comment":"Город после испытательного срока"}`)
+	rec = e.decide("reject", r1, b.token, key, `{"comment":"Город после испытательного срока"}`, "User-Agent", userAgent)
 	wantStatus(t, rec, http.StatusOK)
 	if got := bodyOf(t, rec); got["status"] != approvals.StatusRejected || got["comment"] != "Город после испытательного срока" {
 		t.Fatalf("reject: %s", rec.Body.String())
 	}
+	e.wantAuditMeta("platform.approval_rejected", r1)
 	again := e.decide("reject", r1, b.token, key, `{"comment":"Город после испытательного срока"}`)
 	if !replayed(again) || again.Code != http.StatusOK || !sameJSON(t, again, rec) {
 		t.Fatalf("повтор reject: %d %s", again.Code, again.Body.String())
 	}
 
 	key = uuid.NewString()
-	rec = e.decide("cancel", r2, a.token, key, "")
+	rec = e.decide("cancel", r2, a.token, key, "", "User-Agent", userAgent)
 	wantStatus(t, rec, http.StatusOK)
 	if got := bodyOf(t, rec); got["status"] != approvals.StatusCancelled {
 		t.Fatalf("cancel: %s", rec.Body.String())
 	}
+	e.wantAuditMeta("platform.approval_cancelled", r2)
 	again = e.decide("cancel", r2, a.token, key, "")
 	if !replayed(again) || again.Code != http.StatusOK || !sameJSON(t, again, rec) {
 		t.Fatalf("повтор cancel: %d %s", again.Code, again.Body.String())
@@ -250,6 +256,7 @@ func TestApproveAtExpiry(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
+	e.v = apitest.New(t, oapi.GetSpec)
 	id := e.accepted(e.inviteReq(a.token, "", "ivan.p@wf.example", "support"))
 	var expires time.Time
 	if err := e.owner.QueryRow(context.Background(), `SELECT expires_at FROM approvals WHERE id = $1`, id).Scan(&expires); err != nil {
@@ -321,6 +328,7 @@ func TestApproveConcurrent(t *testing.T) {
 func TestDecisionByChangedApprover(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(3)
+	e.v = apitest.New(t, oapi.GetSpec)
 	id := e.accepted(e.inviteReq(o[0].token, "", "ivan.p@wf.example", "support"))
 	for _, c := range []struct {
 		name   string
@@ -367,15 +375,17 @@ func TestApproveEmailTakenFailed(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
+	e.v = apitest.New(t, oapi.GetSpec)
 	first := e.accepted(e.inviteReq(a.token, "", "ivan.p@wf.example", "support"))
 	second := e.accepted(e.inviteReq(a.token, "", "ivan.p@wf.example", "support"))
 	wantStatus(t, e.decide("approve", first, b.token, "", ""), http.StatusOK)
 	key := uuid.NewString()
-	rec := e.decide("approve", second, b.token, key, "")
+	rec := e.decide("approve", second, b.token, key, "", "User-Agent", userAgent)
 	wantProblem(t, rec, http.StatusConflict, staff.CodeEmailTaken)
 	if st, errText := e.approvalRow(second); st != approvals.StatusFailed || errText != staff.CodeEmailTaken {
 		t.Fatalf("запрос %s %s", st, errText)
 	}
+	e.wantAuditMeta("platform.approval_failed", second)
 	again := e.decide("approve", second, b.token, key, "")
 	if !replayed(again) || again.Code != http.StatusConflict || !sameJSON(t, again, rec) {
 		t.Fatalf("повтор: %d %s", again.Code, again.Body.String())
@@ -386,6 +396,7 @@ func TestApproveEmailTakenFailed(t *testing.T) {
 func TestApproveCityNotFoundFailed(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(2)
+	e.v = apitest.New(t, oapi.GetSpec)
 	city := e.city("vremensk")
 	id := e.accepted(e.inviteReq(o[0].token, "", "ivan.p@wf.example", "moderator", city))
 	e.exec(`DELETE FROM cities WHERE id = $1`, city)
@@ -400,6 +411,7 @@ func TestApproveCityNotFoundFailed(t *testing.T) {
 func TestApproveInitiatorChanged(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(2)
+	e.v = apitest.New(t, oapi.GetSpec)
 	id := e.accepted(e.inviteReq(o[0].token, "", "ivan.p@wf.example", "support"))
 	e.exec(`UPDATE staff_accounts SET version = version + 1 WHERE id = $1`, o[0].id)
 	wantProblem(t, e.decide("approve", id, o[1].token, "", ""), http.StatusConflict, httpx.CodeApprovalStale)
@@ -416,6 +428,7 @@ func TestApproveStaffCodesAreCommittedFailed(t *testing.T) {
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
+	e.v = apitest.New(t, oapi.GetSpec)
 	errBoom := errors.New("сбой исполнителя: ivan.p@wf.example") // текст с ПД не должен попасть в ответ и строку
 	cases := []struct {
 		action  string
@@ -444,6 +457,19 @@ func TestApproveStaffCodesAreCommittedFailed(t *testing.T) {
 		if st, errText := e.approvalRow(id); st != c.row || errText != c.errText {
 			t.Errorf("%s: запрос %s %q, ждали %s %q", c.action, st, errText, c.row, c.errText)
 		}
+	}
+}
+
+// wantAuditMeta — запись журнала action об объекте id с IP (адрес запроса) и User-Agent запроса.
+func (e *staffEnv) wantAuditMeta(action string, id uuid.UUID) {
+	e.t.Helper()
+	var ip, ua *string
+	if err := e.owner.QueryRow(context.Background(), `SELECT host(ip), user_agent FROM audit_log
+		WHERE action = $1 AND object_id = $2`, action, id).Scan(&ip, &ua); err != nil {
+		e.t.Fatalf("журнал %s %s: %v", action, id, err)
+	}
+	if ip == nil || *ip != clientIP || ua == nil || *ua != userAgent {
+		e.t.Fatalf("журнал %s без IP/UA запроса: %v %v", action, ip, ua)
 	}
 }
 
