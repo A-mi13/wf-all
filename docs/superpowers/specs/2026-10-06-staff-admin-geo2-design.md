@@ -650,6 +650,8 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 
 - Cookie `__Host-wf_admin_session`: `HttpOnly; Secure; SameSite=Strict; Path=/`, без `Domain`, без
   `Max-Age` (сессионная; сроки — на сервере). Контракт меняет имя в `securitySchemes.session`.
+  `ADMIN_COOKIE_SECURE=false` при `https://` в `ADMIN_ORIGIN` — отказ старта (только dev по http);
+  `ADMIN_ORIGIN` с IDN-хостом — в форме A-label (`xn--…`), как его шлёт браузер, иначе отказ старта.
 - **Один origin без rewrite:** admin-api сам отдаёт собранную `apps/admin` из `ADMIN_STATIC_DIR`
   (пусто — не отдаёт). `/v1/*` — API, остальное — статика с fallback на `index.html`; заголовки CSP,
   `X-Content-Type-Options`, `Referrer-Policy`, `no-store` у `index.html`. В dev — прокси Vite

@@ -58,7 +58,7 @@ func TestStaffSessionLoadsByCookie(t *testing.T) {
 // Dev без Secure (R6 не прошла бы): имя wf_admin_session, __Host- не читается.
 func TestStaffSessionDevCookie(t *testing.T) {
 	o := testOptions(t)
-	o.CookieSecure = false
+	o.CookieSecure, o.Origin = false, "http://127.0.0.1:5173" // без Secure — только dev по http
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok": staffOf(perm.Owner, auth.StageActive, false)}}
 	h := newHandler(t, o)
 	r := call(http.MethodGet, "/v1/staff/me", "", "")
@@ -399,9 +399,23 @@ func TestNewHandlerRejectsBadOriginAndAllowlist(t *testing.T) {
 			t.Errorf("ValidateOrigin(%q): nil", origin)
 		}
 	}
-	for _, origin := range []string{"https://admin.wf.example", "http://127.0.0.1:5173", "https://[::1]:8443"} {
+	for _, origin := range []string{"https://admin.wf.example", "http://127.0.0.1:5173", "https://[::1]:8443",
+		"https://xn--80aqifr.xn--p1ai"} {
 		if err := admin.ValidateOrigin(origin); err != nil {
 			t.Errorf("ValidateOrigin(%q): %v", origin, err)
+		}
+	}
+	// IDN-хост в Unicode: браузер шлёт в Origin A-label (xn--…) — CSRF не совпал бы ни с одной мутацией
+	// (ревью ветки, HTTP Minor 2). Отказ — с подсказкой, как записать
+	for _, origin := range []string{"https://админ.рф", "https://admin.пример.рф:8443", "https://%d0%b0dmin.wf.example"} {
+		err := admin.ValidateOrigin(origin)
+		if err == nil || !strings.Contains(err.Error(), "xn--") {
+			t.Errorf("ValidateOrigin(%q): %v — ждали отказ с подсказкой A-label (xn--…)", origin, err)
+		}
+		o := base
+		o.Origin = origin
+		if _, err := admin.NewHandler(quiet(), o); err == nil {
+			t.Errorf("origin %q: собрано", origin)
 		}
 	}
 	for _, nets := range [][]netip.Prefix{
@@ -416,6 +430,28 @@ func TestNewHandlerRejectsBadOriginAndAllowlist(t *testing.T) {
 		}
 		if err := admin.ValidateAllowlist(nets); err == nil {
 			t.Errorf("ValidateAllowlist(%v): nil", nets)
+		}
+	}
+}
+
+// https в ADMIN_ORIGIN и ADMIN_COOKIE_SECURE=false — отказ старта (ревью ветки, HTTP Minor 1): cookie без
+// Secure ушла бы и по http, без префикса __Host- её можно подменить с поддомена; false — только dev по http
+// (R6). http + Secure (e2e на Chromium/Firefox) и https + Secure — собираются.
+func TestNewHandlerRejectsInsecureCookieOnHTTPS(t *testing.T) {
+	o := testOptions(t)
+	o.CookieSecure = false
+	o.Origin = "https://admin.wf.example"
+	if _, err := admin.NewHandler(quiet(), o); err == nil || !strings.Contains(err.Error(), "ADMIN_COOKIE_SECURE") {
+		t.Fatalf("https + CookieSecure=false: err = %v", err)
+	}
+	for _, c := range []struct {
+		origin string
+		secure bool
+	}{{"http://127.0.0.1:5173", false}, {"http://127.0.0.1:5173", true}, {"https://admin.wf.example", true}} {
+		o := testOptions(t)
+		o.Origin, o.CookieSecure = c.origin, c.secure
+		if _, err := admin.NewHandler(quiet(), o); err != nil {
+			t.Errorf("%s, Secure=%v: %v", c.origin, c.secure, err)
 		}
 	}
 }

@@ -45,9 +45,9 @@ func safeMethod(m string) bool {
 }
 
 // ValidateOrigin — ADMIN_ORIGIN в той форме, в какой браузер шлёт заголовок Origin (RFC 6454):
-// схема http или https, хост в нижнем регистре, порт — только нестандартный; без пути, слэша в
-// конце, запроса, фрагмента и userinfo. Иначе CSRF не совпал бы ни с одним запросом — отказ
-// старта, а не админка, где не работает ни одна кнопка.
+// схема http или https, хост в нижнем регистре и ASCII (IDN — A-label xn--…), порт — только
+// нестандартный; без пути, слэша в конце, запроса, фрагмента и userinfo. Иначе CSRF не совпал бы ни с
+// одним запросом — отказ старта, а не админка, где не работает ни одна кнопка.
 func ValidateOrigin(s string) error {
 	u, err := url.Parse(s)
 	if err != nil {
@@ -66,6 +66,12 @@ func ValidateOrigin(s string) error {
 	if s != strings.ToLower(s) {
 		errs = append(errs, errors.New("в нижнем регистре — так его шлёт браузер"))
 	}
+	// IDN-домен браузер пишет в Origin в форме A-label (Punycode): Unicode-хост (и %-кодированный — url.Parse
+	// раскодирует его в Unicode; %-код ASCII-байта url.Parse отвергает сам) не совпал бы ни с одним
+	// запросом — все мутации получили бы 403 auth.csrf_failed
+	if !ascii(u.Hostname()) {
+		errs = append(errs, errors.New("хост — в форме A-label (xn--…), как его шлёт браузер: например, https://xn--80aqifr.xn--p1ai, а не Unicode"))
+	}
 	if port := u.Port(); (u.Scheme == "http" && port == "80") || (u.Scheme == "https" && port == "443") {
 		errs = append(errs, errors.New("стандартный порт браузер в Origin не пишет — уберите его"))
 	}
@@ -73,4 +79,14 @@ func ValidateOrigin(s string) error {
 		return fmt.Errorf("admin: ADMIN_ORIGIN %q: %w", s, errors.Join(errs...))
 	}
 	return nil
+}
+
+// ascii — только печатные символы ASCII.
+func ascii(s string) bool {
+	for i := range len(s) {
+		if s[i] < 0x21 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }

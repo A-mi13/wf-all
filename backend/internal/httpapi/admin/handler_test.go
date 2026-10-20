@@ -335,6 +335,9 @@ func TestNewHandlerCookieMismatch(t *testing.T) {
 	for _, secure := range []bool{true, false} {
 		o := testOptions(t)
 		o.CookieSecure = secure
+		if !secure {
+			o.Origin = "http://127.0.0.1:5173" // без Secure — только dev по http
+		}
 		o.Staff = staffadmin.New(staff.Deps{}, staffadmin.Cookie{Name: admin.CookieName(secure), Secure: secure})
 		o.Approvals = approvals.New(nil, o.Clock, approvals.NewRegistry())
 		if _, err := admin.NewHandler(quiet(), o); err != nil {
