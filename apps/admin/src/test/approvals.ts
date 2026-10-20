@@ -3,11 +3,14 @@ import { http, server } from './server';
 import { approval } from './staff';
 
 // Сервер «Подтверждений» для моков — по схемам контракта admin.d.ts (Approval, ApprovalPage): списки
-// box=incoming|mine (status, курсор по страницам), решения approve/reject/cancel. Ответ решения — из
-// answer (Response — ошибка или свой ответ), иначе запрос в итоговом состоянии. Ошибка меняет
-// состояние, как на сервере (afterError): мок не отвечает списком, которого сервер не покажет. hold —
-// ворота списка: ответ считается в момент запроса, а уходит, когда промис разрешится (запрос «в
-// полёте»). seen — что спрашивал экран.
+// box=incoming|mine (status, курсор), решения approve/reject/cancel. Входящие — запросы, которые
+// смотрящий может решить, в любом состоянии (фильтр status=pending — у экрана). Курсор — как keyset
+// сервера (requested_at, id): позиция строки в заданном порядке (новые сверху), а не смещение — решение
+// не сдвигает следующую страницу. Ответ решения — из answer (Response — ошибка или свой ответ), иначе
+// запрос в итоговом состоянии. Ошибка меняет состояние, как на сервере (afterError): мок не отвечает
+// списком, которого сервер не покажет. record — записать итог в обход ответа (сервер решил, а ответ
+// потерян: 500, обрыв). hold — ворота списка: ответ считается в момент запроса, а уходит, когда промис
+// разрешится (запрос «в полёте»). seen — что спрашивал экран.
 
 type Approval = components['schemas']['Approval'];
 type Decision = 'approve' | 'reject' | 'cancel';
@@ -107,6 +110,13 @@ export function approvalsServer(
   };
   const size = opts.pageSize ?? 20;
   const all = () => [...state.incoming, ...state.mine];
+  // позиция строки в порядке списков — курсор (keyset сервера: после последней строки страницы)
+  const order = new Map<string, number>();
+  const pos = (a: Approval) => {
+    if (!order.has(a.id)) order.set(a.id, order.size);
+    return order.get(a.id) ?? 0;
+  };
+  all().forEach(pos);
 
   server.use(
     http.get('/v1/approvals', async ({ request, response }) => {
@@ -116,24 +126,25 @@ export function approvalsServer(
       seen.background.push(background);
       const box = q.get('box') === 'mine' ? state.mine : state.incoming;
       const status = q.get('status');
-      const rows = box.filter((a) => !status || a.status === status);
       const from = Number(q.get('cursor') ?? 0);
+      const rows = box.filter((a) => (!status || a.status === status) && pos(a) >= from);
       const limit = Number(q.get('limit') ?? size);
-      const items = rows.slice(from, from + Math.min(limit, size));
-      const next = from + items.length < rows.length ? String(from + items.length) : null;
+      const items = rows.slice(0, Math.min(limit, size));
+      const last = items.at(-1);
+      const next = last && items.length < rows.length ? String(pos(last) + 1) : null;
       await opts.hold?.(q, background !== null);
       return response(200).json({ items, next_cursor: next });
     }),
   );
   const DECIDED_AT = '2026-10-13T12:00:00Z';
-  // Записать итог: решённый уходит из входящих (как на сервере: входящие — pending).
+  // Записать итог в обоих ящиках (во входящих решённый остаётся — его отсекает status=pending).
   const settle = (out: Approval) => {
-    if (out.status !== 'pending') state.incoming = state.incoming.filter((a) => a.id !== out.id);
+    state.incoming = state.incoming.map((a) => (a.id === out.id ? out : a));
     state.mine = state.mine.map((a) => (a.id === out.id ? out : a));
   };
   // Ошибка решения на сервере (контракт approveApproval, reject, cancel): отказ исполнения (staff.*) и
   // устаревший запрос у approve — запрос уже failed с кодом в error; решён, отменён или просрочен
-  // (closed) — больше не ожидает (свой, ожидавший, — просрочен); не найден — его нет в списках.
+  // (closed) — больше не ожидает (ожидавший — просрочен); не найден — его нет в списках.
   // Прочие (approval_self, auth.*) состояние не меняют.
   // Тело не Problem (прокси, HTML) — кода нет, состояние не меняется (ревью уборки №7 m4).
   const afterError = async (kind: Decision, target: Approval, r: Response) => {
@@ -151,12 +162,12 @@ export function approvalsServer(
         error: code,
       });
     } else if (code === 'platform.approval_closed') {
-      state.incoming = state.incoming.filter((a) => a.id !== target.id);
-      state.mine = state.mine.map((a) =>
+      const closed = (a: Approval): Approval =>
         a.id === target.id && a.status === 'pending'
           ? { ...a, status: 'expired', decided_at: a.expires_at }
-          : a,
-      );
+          : a;
+      state.incoming = state.incoming.map(closed);
+      state.mine = state.mine.map(closed);
     } else if (code === 'platform.approval_not_found') {
       state.incoming = state.incoming.filter((a) => a.id !== target.id);
       state.mine = state.mine.filter((a) => a.id !== target.id);
@@ -214,5 +225,5 @@ export function approvalsServer(
       return r instanceof Response ? response.untyped(r) : response(200).json(r);
     }),
   );
-  return { state, seen };
+  return { state, seen, record: settle };
 }

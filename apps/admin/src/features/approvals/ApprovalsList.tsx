@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
-import { type ApiError, unwrap } from '../../api/client';
+import { type ApiError, isApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
@@ -21,7 +21,7 @@ import {
 import { cityLabel, useCityNames } from '../staff/cities';
 import { ACCOUNTS_KEY, accountKey, useRoleLabel } from '../staff/queries';
 import { useApprovalAction, useApprovalFailureText, useApprovalStatus } from './labels';
-import { approvalsListKey, useSettleDecision } from './queries';
+import { approvalsListKey, useFindIncomingApproval, useSettleDecision } from './queries';
 import { RejectDialog } from './RejectDialog';
 import type { ApprovalBox } from './search';
 import { summarizePayload } from './summary';
@@ -43,6 +43,8 @@ const DECIDE_KEY = ['approvals', 'decide'] as const;
 //   «подтверждено, но не выполнено» (запрос уже failed). Решённый с ответом остаётся строкой с итогом
 //   (useSettleDecision), счётчик и другая вкладка перечитываются; ошибка — перечитывается всё, кнопки
 //   заняты до конца перечитывания.
+// - Исход «Подтвердить» неизвестен (5xx, обрыв, 409 idempotency.replay_unavailable) — решение не
+//   повторяется: запрос перечитывается (useFindIncomingApproval), тост и строка — по его итогу.
 // - На телефоне решения по staff.* скрыты (D22, ограничение интерфейса — решает сервер).
 export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
   const t = useTranslations('approvals');
@@ -73,7 +75,8 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
   const [decided, setDecided] = useState(0);
   const settle = useSettleDecision(box);
   const onDone = async (result?: Approval) => {
-    await settle(result);
+    // догрузка «Показать ещё», отменённая ради итога, — повторить (useSettleDecision)
+    if (await settle(result)) void list.fetchNextPage();
     refocus.current = true;
     setDecided((n) => n + 1);
   };
@@ -195,6 +198,23 @@ function useDecisions(onDone: (result?: Approval) => Promise<void>) {
     e.code.startsWith('staff.') || e.code === 'platform.approval_stale'
       ? toast.error(t('failed_toast', { reason: failureText(e.code) }))
       : onError(e);
+  // Итог подтверждения по запросу в итоговом состоянии (ответ 200 или перечитанный): executed — успех,
+  // failed — ошибка по error, иное — справка.
+  const announce = (r: Approval) => {
+    if (r.status === 'executed') {
+      toast.success(t('done.executed'));
+      // учётки изменились: «Роли и доступ» (список, карточки) перечитаются
+      void queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY });
+    } else if (r.status === 'failed') {
+      toast.error(t('failed_toast', { reason: failureText(r.error ?? '') }));
+    } else toast.info(t('done.other', { status: statusOf(r.status).text }));
+  };
+  // Исход неизвестен (⚠️ ревью 10b п. 3): 5xx (сбой после коммита), обрыв сети (не ApiError), 409
+  // idempotency.replay_unavailable (ключ закоммичен, ответ не сохранён). Повтор тем же ключом снова дал бы
+  // replay_unavailable, новым — approval_closed: не повторять, а перечитать запрос.
+  const unknownOutcome = (e: unknown) =>
+    !isApiError(e) || e.status >= 500 || e.code === 'idempotency.replay_unavailable';
+  const findApproval = useFindIncomingApproval();
   const approveM = useAdminMutation(
     (a: Approval, key: string) =>
       unwrap(
@@ -206,17 +226,19 @@ function useDecisions(onDone: (result?: Approval) => Promise<void>) {
     {
       mutationKey: DECIDE_KEY,
       // 200 — запрос в итоговом состоянии: исполнение могло провалиться (failed) — итог по status
-      onSuccess: (r) => {
-        if (r.status === 'executed') {
-          toast.success(t('done.executed'));
-          // учётки изменились: «Роли и доступ» (список, карточки) перечитаются
-          void queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY });
-        } else if (r.status === 'failed') {
-          toast.error(t('failed_toast', { reason: failureText(r.error ?? '') }));
-        } else toast.info(t('done.other', { status: statusOf(r.status).text }));
+      onSuccess: announce,
+      onError: (e) => {
+        if (!unknownOutcome(e)) onApproveError(e);
       },
-      onError: onApproveError,
-      onSettled,
+      // исход неизвестен — итог по перечитанному запросу; всё ещё ждёт (сбой до коммита) или не нашли —
+      // ошибка (кнопки заняты, пока идёт перечитывание: pendingId снимается после onDone)
+      onSettled: async (r, e, a) => {
+        if (!e || !unknownOutcome(e)) return onSettled(r);
+        const found = await findApproval(a).catch(() => undefined);
+        if (found && found.status !== 'pending') announce(found);
+        else onError(e);
+        return onSettled(found);
+      },
     },
   );
   const cancelM = useAdminMutation(

@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { HttpResponse } from 'msw';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import type { components } from '../../api/gen/admin';
 import { reauthBus } from '../../app/reauth';
 import {
   approvalsServer,
@@ -9,12 +11,15 @@ import {
   MINE_FAILED,
   MINE_PENDING,
   MINE_SYSTEM,
+  OLGA,
 } from '../../test/approvals';
 import { renderApp } from '../../test/app';
 import { CITY_OTHER, CITY_OWN, meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
 import { account, approval, staffServer } from '../../test/staff';
+
+type Approval = components['schemas']['Approval'];
 
 // «Подтверждения» (*; спека §9.4 п. 6, §4.8, D17, D22): вкладки «Входящие» (incoming/pending) и
 // «Мои» (mine, все статусы), карточка из payload, «Подтвердить» — сразу, без окна (e2e Task 16),
@@ -309,6 +314,109 @@ describe('подтвердить', () => {
     await waitFor(() => expect(listCalls(seen).length).toBeGreaterThan(lists));
   });
 
+  // ⚠️ ревью 10b п. 3: исход approve неизвестен — 500 (сбой после коммита, обрыв) или 409
+  // idempotency.replay_unavailable (ключ закоммичен, ответа нет). Повтор мутации ошибочен (тем же ключом —
+  // снова replay_unavailable, новым — approval_closed): запрос перечитывается (входящие, все состояния),
+  // строка и тост — по его итогу.
+  test.each([
+    {
+      name: '500 internal → выполнен',
+      answer: () => problem(500, 'internal'),
+      outcome: { status: 'executed' as const, error: null },
+      toast: 'Подтверждено и выполнено.',
+      row: ['исполнен'],
+    },
+    {
+      name: '409 idempotency.replay_unavailable → не выполнен',
+      answer: () => problem(409, 'idempotency.replay_unavailable'),
+      outcome: { status: 'failed' as const, error: 'staff.email_taken' },
+      toast: 'Подтверждено, но не выполнено: Сотрудник с такой почтой уже есть',
+      row: ['не исполнен', 'Причина: Сотрудник с такой почтой уже есть'],
+    },
+    {
+      name: 'обрыв сети → выполнен',
+      answer: () => HttpResponse.error(),
+      outcome: { status: 'executed' as const, error: null },
+      toast: 'Подтверждено и выполнено.',
+      row: ['исполнен'],
+    },
+  ])('исход неизвестен: $name — без повторного POST, итог из перечитанного запроса', async (c) => {
+    directory();
+    let record: (a: Approval) => void = () => {};
+    const srv = approvalsServer({
+      answer: {
+        approve: (a) => {
+          record({ ...a, ...c.outcome, decided_by: OLGA, decided_at: '2026-10-13T12:00:00Z' });
+          return c.answer();
+        },
+      },
+    });
+    record = srv.record;
+    renderApp('/approvals', { me: meOwner });
+    const t = await table('Входящие запросы');
+    fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Подтвердить' }));
+    expect(await screen.findByText(c.toast)).toBeInTheDocument();
+    // перечитан сам запрос: входящие без фильтра состояния
+    expect(listCalls(srv.seen).some((q) => q.get('box') === 'incoming' && !q.has('status'))).toBe(
+      true,
+    );
+    const [row] = rows(t);
+    for (const text of c.row) expect(row).toHaveTextContent(text);
+    expect(within(row!).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
+    expect(srv.seen.decisions).toHaveLength(1);
+  });
+
+  test('исход неизвестен: запрос не на первой странице всех состояний — перечитываются следующие', async () => {
+    directory();
+    // новее и уже решён: во «Входящих» его не видно (status=pending), а при перечитывании он первый
+    const newer = approval({
+      id: '0192f1e2-4c5d-7e6f-a081-0000000000d1',
+      status: 'executed',
+      requested_at: '2026-10-13T11:00:00Z',
+      decided_by: OLGA,
+      decided_at: '2026-10-13T11:30:00Z',
+      requested_by: IGOR,
+    });
+    let record: (a: Approval) => void = () => {};
+    const srv = approvalsServer({
+      incoming: [newer, INCOMING],
+      pageSize: 1,
+      answer: {
+        approve: (a) => {
+          record({
+            ...a,
+            status: 'executed',
+            decided_by: OLGA,
+            decided_at: '2026-10-13T12:00:00Z',
+          });
+          return problem(500, 'internal');
+        },
+      },
+    });
+    record = srv.record;
+    renderApp('/approvals', { me: meOwner });
+    const t = await table('Входящие запросы');
+    expect(rows(t)).toHaveLength(1);
+    fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Подтвердить' }));
+    expect(await screen.findByText('Подтверждено и выполнено.')).toBeInTheDocument();
+    expect(rows(t)[0]).toHaveTextContent('исполнен');
+    expect(srv.seen.decisions).toHaveLength(1);
+  });
+
+  test('исход неизвестен, а запрос всё ещё ждёт (сбой до коммита) — тост ошибки, кнопка снова доступна', async () => {
+    directory();
+    const { seen } = approvalsServer({ answer: { approve: () => problem(500, 'internal') } });
+    renderApp('/approvals', { me: meOwner });
+    const t = await table('Входящие запросы');
+    fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Подтвердить' }));
+    expect(await screen.findByText('Что-то пошло не так. Попробуйте ещё раз')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(rows(t)[0]!).getByRole('button', { name: 'Подтвердить' })).toBeEnabled(),
+    );
+    expect(rows(t)[0]).toHaveTextContent('ждёт решения');
+    expect(seen.decisions).toHaveLength(1);
+  });
+
   // Ревью I2: решённый R1 не уходит из списка сразу — строки не сдвигаются, и под курсором в первой
   // строке нет кнопки, которой второй клик решил бы R2.
   test('успех: R1 остаётся на месте с итогом и без кнопки, R2 не сдвигается', async () => {
@@ -341,8 +449,9 @@ describe('подтвердить', () => {
 
   // Ревью m1: запрос списка, ушедший до решения («Показать ещё»), по завершении записал бы страницы,
   // взятые до решения, поверх итога — R1 снова pending с кнопками (второй клик → 409). Полёт
-  // отменяется до записи итога.
-  test('список в полёте («Показать ещё») не возвращает решённую строку с кнопкой', async () => {
+  // отменяется до записи итога, а догрузка после итога повторяется (уборка №8: курсор сервера — keyset,
+  // страница после последней строки от решения не сдвигается) — «Показать ещё» не теряется молча.
+  test('список в полёте («Показать ещё») не возвращает решённую строку с кнопкой, догрузка повторена', async () => {
     directory();
     const second = approval({
       id: '0192f1e2-4c5d-7e6f-a081-0000000000b2',
@@ -370,11 +479,53 @@ describe('подтвердить', () => {
     fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Подтвердить' }));
     await screen.findByText('Подтверждено и выполнено.');
     release();
+    await waitFor(() => expect(rows(t)).toHaveLength(2));
     await waitFor(() => expect(app.queryClient.isFetching()).toBe(0));
     const first = rows(t)[0]!;
     expect(first).toHaveTextContent('исполнен');
     expect(within(first).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
+    expect(rows(t)[1]).toHaveTextContent('Пётр С.');
+    // повтор — с тем же курсором (после R1), не с начала
+    expect(listCalls(seen).filter((q) => q.get('cursor') === '1')).toHaveLength(2);
     expect(seen.decisions).toHaveLength(1);
+  });
+
+  // Уборка №8: повторяется только догрузка; отменённое обновление всего списка (возврат во вкладку) — нет:
+  // оно сдвинуло бы строки под курсором (I2), а «Показать ещё» пользователь не нажимал.
+  test('обновление всего списка в полёте при решении — не повторяется и страниц не добавляет', async () => {
+    directory();
+    const second = approval({
+      id: '0192f1e2-4c5d-7e6f-a081-0000000000b2',
+      payload: {
+        v: 1,
+        email: 'petr@wf.example',
+        display_name: 'Пётр С.',
+        role: 'support',
+        city_ids: [],
+      },
+      requested_by: IGOR,
+    });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let held = false;
+    const { seen } = approvalsServer({
+      incoming: [INCOMING, second],
+      pageSize: 1,
+      hold: (_, background) => (held && !background ? gate : undefined),
+    });
+    const app = renderApp('/approvals', { me: meOwner });
+    const t = await table('Входящие запросы');
+    held = true;
+    const lists = listCalls(seen).length;
+    void app.queryClient.refetchQueries({ queryKey: ['approvals', 'list', 'incoming'] });
+    await waitFor(() => expect(listCalls(seen).length).toBeGreaterThan(lists));
+    fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Подтвердить' }));
+    await screen.findByText('Подтверждено и выполнено.');
+    release();
+    await waitFor(() => expect(app.queryClient.isFetching()).toBe(0));
+    expect(rows(t)).toHaveLength(1);
+    expect(rows(t)[0]).toHaveTextContent('исполнен');
+    expect(listCalls(seen).some((q) => q.has('cursor'))).toBe(false);
   });
 
   test('ошибка: пока список перечитывается, кнопки строк не оживают', async () => {
