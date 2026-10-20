@@ -71,7 +71,7 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
-  собранных staff, geo и подтверждениях отвечает не 501); нулевые хендлеры и нулевой `Server{}` (main до 10c) —
+  собранных staff, geo и подтверждениях отвечает не 501); нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
   `501 http.not_implemented` без паники. Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод
   ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`)
   и `requestMeta` (внешний: `approvals.Meta{IP: peer, UserAgent: заголовок}` в ctx операций платформы — `meta` staff

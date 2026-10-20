@@ -64,4 +64,9 @@ tasks:
 
   dev:api: { desc: Публичный API, cmds: ['go run ./cmd/api'] }
   dev:admin: { desc: API админки, cmds: ['go run ./cmd/admin-api'] }
+  admin:staff:
+    desc: 'Команды оператора admin-api на локальной базе: ./task backend:admin:staff -- bootstrap --email <почта> --name <имя> [--print-code] (см. docs/deploy-dev.md)'
+    # письма команда ставит в очередь staff — отправит запущенный admin-api (./task dev или backend:dev:admin) в Mailpit
+    cmds:
+      - go run ./cmd/admin-api staff {{.CLI_ARGS}}
   dev:worker: { desc: Worker, cmds: ['go run ./cmd/worker'] }

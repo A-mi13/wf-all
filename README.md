@@ -58,6 +58,11 @@
 | api / admin-api | http://127.0.0.1:8080/healthz и /readyz, http://127.0.0.1:8081/healthz и /readyz |
 | письма (Mailpit) | http://127.0.0.1:18025 |
 
+Первый владелец админки — команда оператора (письмо с кодом отправит запущенный admin-api в Mailpit):
+`./task backend:admin:staff -- bootstrap --email owner@wf.local --name "Владелец" --print-code`. Все команды
+оператора (`invite-resend`, `reset-access`, `disable`, `rekey`) и ротация ключей — `docs/deploy-dev.md`, раздел
+«admin-api».
+
 Дальше: вертикальный срез на вебе — регистрация, команда, матч, ссылка,
 запись, протокол.
 

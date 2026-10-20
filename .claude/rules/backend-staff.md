@@ -179,7 +179,21 @@ paths:
   `rekey` — убирать только при нулях во всех трёх счётчиках и пустых списках нечитаемых.
   Ключ убран раньше времени: письма приглашений за это окно отменяются (`mail.ErrSkip`, предупреждение в
   журнал сервера), не повторяются; восстановление — самоотправка сотрудника (код перевыпускается в той же
-  строке) или повторная отправка админом/оператором.
+  строке) или повторная отправка админом/оператором. Процедура для оператора — `docs/deploy-dev.md`.
+  Подкоманды `admin-api staff …` (Task 10c) идут через обёртки `staff/admin/operator.go` (cmd/admin-api не видит
+  `internal/app`): код приглашения отдаётся наружу **только** при `printCode` (`onlyIf`) — без флага его нет даже у
+  вызывающего; `RekeyReport` — копия всех полей итога + `Clean()`. Вывод команды — stdout, почта маской
+  (`logx.Mask`), код — только с `--print-code`, в журнал и stderr — никогда (страж `TestOperatorCommands`).
+- **Фон (§4.10, Task 10c; `staff/jobs`):** `MailWorker` (`AddWorkers(w, d, sender)` — исполняющий River-клиент
+  admin-api на очереди `staff`): вид → составитель (`invite`/`access_reset` → `ComposeInvite(…, kind)`, `locked`,
+  `bootstrapped`, `admin_disabled`); `mail.ErrSkip` и неизвестный вид — `river.JobCancel` (без повторов) и строка
+  журнала с видом и id, без почты; `V != 1` и ошибка SMTP — обычная ошибка (повтор); таймаут задачи — минута.
+  `Deps.River` сценариев — отдельный клиент только для вставки (иначе цикл «исполнителю нужны Deps»). `Cleaner`:
+  `Tick` = `App.Cleanup` (сессии, умершие — `LEAST(expires_at, revoked_at)` — больше `CleanupRetention` = 30 суток
+  назад; приглашения, погашенные/отозванные/просроченные раньше границы, кроме последнего у сотрудника — по нему
+  `GetLastInvite` берёт назначение; порции `FOR UPDATE SKIP LOCKED`, строку под замком сценария пропускают, страж
+  `TestCleanupSkipsLockedRows`) + `ExpireDue` + `PurgeDecided(DecidedRetention)`; `Run` — проход сразу, затем раз
+  в час; ошибка прохода — `log.Error`, тикер живёт; отмена ctx — не сбой.
 - **Хендлеры (`staff/admin`, Task 10a):** тонкие — запрос → сценарий `internal/app` → ответ контракта; логики
   сценариев в них нет. `New(staff.Deps, Cookie{Name, Secure})` (имя и `Secure` — от сборки:
   `httpapi/admin.CookieName`; `CookieConfig()` — для сверки сборкой, рассогласование — отказ старта), `Sessions()` — загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware

@@ -18,6 +18,16 @@ paths:
 - Подписчик события — `events.Subscription` с явным `Delivery` (`EveryEvent` | `LatestState`), регистрируется в `subscriptions()` в `cmd/worker/main.go`; обработчик идемпотентен по `event_inbox` сам собой, пишет только в своей транзакции `tx`. Доставка на подписку, которой нет в реестре этого воркера (воркер другого релиза при выкатке), — обычная ошибка с повтором, а затем «мёртвая» задача (видна, переигрывается), не отмена; отменяется только задача на событие, уже удалённое чисткой. Переигровка — `worker events replay --type T --subscriber S --since RFC3339`.
   Импорт городов оператором — `worker geo import --country RU`: синхронно в процессе, без задачи River, под ролью `worker`; задача `geo.import` ставится только через `jobs.NewImportArgs`.
 - Задача River объявляет очередь из `platform/queue` (`events`, `lifecycle`, `notify`, `mail`, `stats`, `media`, `maintenance`) в `InsertOpts`; очереди `default` нет. Аргументы — с полем версии `V`, без ПД, уникальность — `UniqueOpts`. River в воркере работает на неотменяемом ctx: по SIGTERM сначала останавливается relay, затем `queue.Stop` — мягкая остановка (25 с) и, не уложившись, `StopAndCancel` (5 с): сумма укладывается в 30 с между SIGTERM и SIGKILL. `WORKER_RELAY_BATCH` ≥ 1 и `WORKER_RELAY_POLL` > 0 проверяются на старте воркера.
+- Периодика платформы — только `platform/periodic.Jobs()` (новый срез и новые задачи на вызов): её подключают и воркер, и
+  admin-api — лидер River один на схему и ставит периодику по своему списку (P27), исполняет воркер (River не проверяет
+  исполнителя у периодической вставки; страж `TestLeaderWithoutWorkersEnqueuesPlatformJobs` под ролью `admin`). Новая
+  чистка платформы — в `Jobs()`, не в `cmd/worker`. Чистки, которым нужны права `admin` (`staff_*`, `approvals`), — не
+  River, а тикер в процессе admin-api (`staff/jobs.Cleaner`).
+- HTTP-бинарник с фоном — `server.RunService(ctx, name, cfg, logOut, build)`: `build(log, pool)` → `Service{Handler,
+  Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
+  фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены
+  (ошибка или nil) — HTTP гасится, `RunService` возвращает ошибку (стражи `service_test.go`). `RunHTTP` — обёртка без фона
+  (`cmd/api`). У admin-api: HTTP-дренаж `ADMIN_SHUTDOWN_TIMEOUT` (10 с) + River мягко 15 с + жёстко 5 с = 30 с до SIGKILL.
 - Аудит — `audit.Write(ctx, entry)` в транзакции действия; чтение чувствительного — `audit.WriteRead`. ПД в `Before`/`After` маскирует `audit.Mask` по словам ключа (camelCase/PascalCase делятся на слова: `contactEmail`, `contact_email`, `ContactEmail` — одно и то же); не маскируется ключ, оканчивающийся на `at`/`count`/`left`/`verified`/`enabled`/`required`. Маскирование по ключу, а не по содержимому: свободный текст с ПД (комментарии, описания) в `Before`/`After` класть нельзя. Новые чувствительные слова — в списки слов и пар в `audit/mask.go`.
   Автор — ровно один: `ActorUserID` (игрок) или `ActorStaffID` (сотрудник), без автора — `ActorRole`
   `system|operator|anonymous`; `ActorLabel` — снимок отображаемого имени (журнал показывает его); `ScopeCityID` —
@@ -138,6 +148,6 @@ paths:
   инициатора». Если то решение откатится (чужой approve → `ErrSelf`, чужой cancel → 404, 500), запрос останется
   `pending` — его отсечёт `InitiatorCheck` при следующем подтверждении по контракту выше (страж
   `TestSkippedCancelFailsAfterReactivation`). Порядок замков: строка `approvals` раньше строк модуля.
-- **Чистка** — тикер admin-api (10c): `ExpireDue` (порции `SKIP LOCKED`, своя транзакция на порцию; у истёкшего
+- **Чистка** — тикер admin-api (`staff/jobs.Cleaner.Tick`, раз в час): `ExpireDue` (порции `SKIP LOCKED`, своя транзакция на порцию; у истёкшего
   `decided_at = expires_at` — и у тика, и у клика approve/reject/cancel, как в списках) и
   `PurgeDecided(ctx, approvals.DecidedRetention)` (решённые старше 180 суток; `pending` не трогает).
