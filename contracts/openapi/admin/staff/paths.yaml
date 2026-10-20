@@ -534,6 +534,16 @@ invites:
       - 409 `staff.email_taken` — почта уже у действующей учётки.
       - 422 `staff.city_not_found` — города из `city_ids` нет.
       - 400 `validation.failed` по `body.city_ids` с кодом `min_items` — модератор без городов.
+      - 400 `validation.failed` по `body.email` с кодом `format` — не адрес почты по правилам админки:
+        ровно одна `@`, локальная часть — ASCII dot-atom (RFC 5322) не длиннее 64 байт, домен — в том
+        числе IDN (хранится в форме A-label `xn--…`) без невидимых и запрещённых IDNA символов, весь
+        адрес — не длиннее 254 байт. Регистр и крайние пробелы не важны.
+      - 400 `validation.failed` по `body.display_name`: `minLength` — имя пустое после обрезки крайних
+        пробелов; `maxLength` — длиннее 80 символов; `format` — в имени управляющие символы (перевод
+        строки, табуляция), форматирующие и bidi (U+202A–U+202E, U+2066–U+2069, U+200E/U+200F),
+        разделители строк или невидимые символы (U+200B и подобные): они подменяют или прячут текст в
+        письмах, подписях подтверждений и журнале. Соединитель эмодзи (U+200D) и селекторы
+        варианта (U+FE0E, U+FE0F) допустимы.
     parameters:
       - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
       - $ref: '../root.yaml#/components/parameters/AdminHeader'

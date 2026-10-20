@@ -390,13 +390,18 @@ StaffInviteRequest:
       maxLength: 320
       description: >-
         Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же
-        учётку через сброс доступа
+        учётку через сброс доступа. Регистр и крайние пробелы не важны; не адрес (локальная часть не
+        ASCII dot-atom, домен с невидимыми символами) — 400 validation.failed по body.email, код format
       example: ivan.p@wf.example
     display_name:
       type: string
       minLength: 1
       maxLength: 80
-      description: Отображаемое имя — его видят журнал и другие сотрудники
+      description: >-
+        Отображаемое имя — его видят журнал, письма и другие сотрудники. Крайние пробелы обрезаются;
+        управляющие, форматирующие и bidi-символы, разделители строк и невидимые символы (U+200B и
+        подобные) — 400 validation.failed по body.display_name, код format (соединитель эмодзи U+200D
+        допустим)
       example: Иван П.
     role:
       $ref: '../root.yaml#/components/schemas/StaffRole'
