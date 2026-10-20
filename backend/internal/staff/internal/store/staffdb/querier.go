@@ -17,6 +17,18 @@ type Querier interface {
 	// recovery-codes/ack: учётка активна, вход — сейчас.
 	ActivateAccount(ctx context.Context, arg ActivateAccountParams) error
 	AddFactorFailure(ctx context.Context, id uuid.UUID) (int32, error)
+	// Порция приглашений: погашенных (consumed_at) и отозванных (revoked_at) — по моменту закрытия, живых — по сроку
+	// (expires_at), граница — before. Последнее приглашение сотрудника (как в GetLastInvite: created_at, id) не
+	// удаляется никогда, даже давно просроченное: по нему повторная отправка админом и оператором берёт назначение
+	// (invite или access_reset), а карточка показывает истёкшее приглашение.
+	CleanupInvitesBatch(ctx context.Context, arg CleanupInvitesBatchParams) (int64, error)
+	// Чистка своих таблиц модуля (спека сотрудников §4.10, P27): тикер admin-api раз в час, порциями. Порция —
+	// один оператор (своя короткая транзакция), строки — FOR UPDATE SKIP LOCKED, как approvals.ExpireDueBatch:
+	// два экземпляра admin-api чистят параллельно, не ожидая друг друга и не удаляя строку дважды; строку под
+	// замком сценария порция пропускает (её возьмёт следующий проход).
+	// Порция сессий, умерших раньше границы: истёкших (expires_at) или погашенных (revoked_at) — что раньше.
+	// Давно истёкшую сессию гасят как expired только при загрузке, поэтому момент смерти — LEAST, а не revoked_at.
+	CleanupSessionsBatch(ctx context.Context, arg CleanupSessionsBatchParams) (int64, error)
 	// Подтверждение секрета кодом: принятый шаг — в last_used_step.
 	ConfirmMFA(ctx context.Context, arg ConfirmMFAParams) error
 	// recovery-codes/ack: приглашение погашено, код стирается.

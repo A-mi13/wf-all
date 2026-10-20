@@ -67,3 +67,10 @@ func InitiatorValid(status, role string, version int64, lockedUntil *time.Time, 
 
 // OwnersLockKey — ключ замка стража последнего владельца (тест держит его, чтобы выстроить очередь).
 const OwnersLockKey = ownersLockKey
+
+// SetCleanupBatch — размер порции чистки на время теста; возвращает восстановление.
+func SetCleanupBatch(n int32) func() {
+	old := cleanupBatch
+	cleanupBatch = n
+	return func() { cleanupBatch = old }
+}
