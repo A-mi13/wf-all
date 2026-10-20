@@ -56,7 +56,7 @@ var (
 type metaKey struct{}
 
 // requestMeta — strict-middleware операций платформы (сборка ставит его внешним, после Middleware staff):
-//   - откуда запрос (IP — peer, User-Agent — заголовок) в ctx: strict-сервер не передаёт операции
+//   - откуда запрос (IP — peer, User-Agent — httpx.UserAgent: ≤ 512 байт) в ctx: strict-сервер не передаёт операции
 //     *http.Request, а meta модуля staff заполняет только его Middleware и только для операций тега staff
 //     (ревью 10a, отказ 3);
 //   - auth.ErrSessionInvalid операции (подпись решившего: сессию погасили или учётку выключили после
@@ -65,7 +65,7 @@ type metaKey struct{}
 func requestMeta(clearCookie *http.Cookie) oapi.StrictMiddlewareFunc {
 	return func(f oapi.StrictHandlerFunc, _ string) oapi.StrictHandlerFunc {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
-			ctx = context.WithValue(ctx, metaKey{}, approvals.Meta{IP: peer.From(ctx).IP, UserAgent: r.UserAgent()})
+			ctx = context.WithValue(ctx, metaKey{}, approvals.Meta{IP: peer.From(ctx).IP, UserAgent: httpx.UserAgent(r)})
 			resp, err := f(ctx, w, r, req)
 			if err != nil && errors.Is(err, auth.ErrSessionInvalid) {
 				http.SetCookie(w, clearCookie)
