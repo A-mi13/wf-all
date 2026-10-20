@@ -19,6 +19,8 @@ export default defineConfig(({ mode }) => ({
     proxy: { '/v1': adminApiOrigin(loadEnv(mode, import.meta.dirname, 'WF_')) },
   },
   test: {
+    // e2e/*.spec.ts — сценарии Playwright (живой e2e): Vitest берёт только *.test.*
+    include: ['src/**/*.test.{ts,tsx}', 'e2e/**/*.test.ts', '*.test.ts'],
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
   },

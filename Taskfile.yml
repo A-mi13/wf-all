@@ -116,4 +116,6 @@ tasks:
       - task: design:test
       - task: backend:ci
       - task: admin:ci
+      # живой e2e админки: нужен Postgres (как backend:ci), порты 5174/5175, 18181/18182, 18026/11026
+      - task: admin:e2e
       - task: web:ci

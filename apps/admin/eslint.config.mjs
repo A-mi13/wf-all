@@ -8,7 +8,7 @@ import tseslint from 'typescript-eslint';
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 export default defineConfig([
-  globalIgnores(['dist/**', 'src/api/gen/**']),
+  globalIgnores(['dist/**', 'src/api/gen/**', 'playwright-report/**', 'test-results/**']),
   tseslint.configs.recommended,
   reactHooks.configs.flat.recommended,
   reactRefresh.configs.vite(),
