@@ -34,6 +34,8 @@ paths:
   настоящего исполнителя; исполнять заглушка отказывается). Новый вид — строка в своём списке, иначе падают
   `TestWorkerKinds` / `TestAdminKinds` (реестр сверяется со списком через `testkit/rivertest.Kinds`, сроки — с
   исполнителями); стражи рескьюера — `TestRescuerKeepsAdminJobs`, `TestRescuerKeepsWorkerJobs`, `TestForeignTimeoutRespected`.
+  Очередь каждого вида — среди очередей своего бинарника и не у чужого (`TestWorkerKindsQueues`, `TestAdminKindsQueues`):
+  иначе задачу взяла бы заглушка, а её ошибка сожгла бы попытку. Выкатывать worker и admin-api вместе.
 - Аудит — `audit.Write(ctx, entry)` в транзакции действия; чтение чувствительного — `audit.WriteRead`. ПД в `Before`/`After` маскирует `audit.Mask` по словам ключа (camelCase/PascalCase делятся на слова: `contactEmail`, `contact_email`, `ContactEmail` — одно и то же); не маскируется ключ, оканчивающийся на `at`/`count`/`left`/`verified`/`enabled`/`required`. Маскирование по ключу, а не по содержимому: свободный текст с ПД (комментарии, описания) в `Before`/`After` класть нельзя. Новые чувствительные слова — в списки слов и пар в `audit/mask.go`.
   Автор — ровно один: `ActorUserID` (игрок) или `ActorStaffID` (сотрудник), без автора — `ActorRole`
   `system|operator|anonymous`; `ActorLabel` — снимок отображаемого имени (журнал показывает его); `ScopeCityID` —

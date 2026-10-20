@@ -185,8 +185,10 @@ paths:
   вызывающего; `RekeyReport` — копия всех полей итога + `Clean()`. Вывод команды — stdout, почта маской
   (`logx.Mask`), код — только с `--print-code`, в журнал и stderr — никогда (страж `TestOperatorCommands`).
   Команды, выпускающие код (`bootstrap`, `invite-resend`, `reset-access`), сначала сверяют ключи базы с кольцом
-  (`App.UnknownKeys`: `key_id` секретов TOTP, резервных кодов и живых кодов приглашений, которых нет в кольце; запрос
-  `ListStoredKeyIDs`) — есть чужие — отказ до записи, код 1, без ключей в выводе (`TestOperatorRefusesForeignKeys`).
+  (`App.KeyCheck` → известных/чужих `key_id`; источники `ListStoredKeyIDs` — те же, что считает `rekey`: секреты TOTP,
+  НЕИСПОЛЬЗОВАННЫЕ резервные коды, живые коды приглашений): ни одного известного — отказ до записи, код 1
+  (`TestOperatorRefusesForeignKeys`); часть чужих — предупреждение в stderr с числом, команда выполняется (выход при
+  потерянном ключе, `TestOperatorWarnsOnPartlyUnknownKeys`); после штатной ротации — чисто (`TestKeyCheckAfterRotation`).
 - **Фон (§4.10, Task 10c; `staff/jobs`):** `MailWorker` (`AddWorkers(w, d, sender)` — исполняющий River-клиент
   admin-api на очереди `staff`): вид → составитель (`invite`/`access_reset` → `ComposeInvite(…, kind)`, `locked`,
   `bootstrapped`, `admin_disabled`); `mail.ErrSkip` — `river.JobCancel` (без повторов) и строка журнала с видом и id, без
