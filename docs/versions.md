@@ -12,7 +12,7 @@
 | PostgreSQL / PostGIS | 18.6 / 3.6.2 | `scripts/pg.sh` (локально, zip), `postgis/postgis:18-3.6` в CI |
 | Next.js / React | 16.3.6 / 19.3.0 | `apps/web/package.json`, catalog (`pnpm-workspace.yaml`) |
 | Vite / Vitest | 8.3.1 / 5.0.1 | catalog (`pnpm-workspace.yaml`) |
-| Playwright | 1.63.0 | `apps/web/package.json` |
+| Playwright | 1.63.0 | `apps/web/package.json`, `apps/admin/package.json` (одна версия на репо: CI-кеш браузеров — по ней) |
 | TypeScript | 6.0.3 (приложения, пакеты) / 5.9.3 (генератор) | catalog и `catalogs.contracts` (`pnpm-workspace.yaml`); почему не 7 — в исключениях |
 | ESLint / typescript-eslint / eslint-plugin-boundaries | 9.39.5 / 8.70.1 / 7.2.0 | catalog; boundaries — `packages/config/package.json` |
 | Prettier | 3.9.9 | catalog (`pnpm-workspace.yaml`) |

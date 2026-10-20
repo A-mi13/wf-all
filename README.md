@@ -63,6 +63,26 @@
 оператора (`invite-resend`, `reset-access`, `disable`, `rekey`) и ротация ключей — `docs/deploy-dev.md`, раздел
 «admin-api».
 
+### Живой e2e админки
+
+`./task admin:e2e` (аргументы Playwright — после `--`: `./task admin:e2e -- --headed`) — сценарий спеки
+сотрудников §11 в браузере поверх настоящих admin-api, Postgres и Mailpit: bootstrap двух владельцев, принятие
+приглашения и 2FA, выход и вход, приглашение админа вдвоём, журнал; вход с протухшей cookie — в Chromium и WebKit.
+Нужен запущенный Postgres (`./task infra:up`); `./task dev` можно не останавливать — у e2e свои порты и база:
+
+| Что | Порт / база |
+| --- | --- |
+| Vite (Chromium / WebKit) | 5174 / 5175 (= `ADMIN_ORIGIN` своей пары) |
+| admin-api (Chromium / WebKit) | 18181 / 18182 (у WebKit `ADMIN_COOKIE_SECURE=false`: `__Host-` на http он не принимает) |
+| Mailpit UI / SMTP | 18026 / 11026 (без `--database` — пустой ящик на прогон) |
+| база | `wf_e2e` на том же кластере (пересоздаётся в начале прогона) |
+
+Скрипт `scripts/e2e-admin.sh` проверяет, что порты свободны, пересоздаёт базу, накатывает миграции и права,
+собирает admin-api в `.tools/e2e/` и задаёт одноразовый `ADMIN_STAFF_SECRET_KEYS`; dev-значения `ADMIN_*` из
+`backend/.env` в прогон не попадают. Браузеры — `pnpm --filter @wf/admin exec playwright install chromium webkit`;
+только Chromium — `WF_E2E_PROJECTS=chromium ./task admin:e2e` (так в CI). Порты e2e — константы
+`apps/admin/e2e/env.ts` и список в `scripts/e2e-admin.sh`.
+
 Дальше: вертикальный срез на вебе — регистрация, команда, матч, ссылка,
 запись, протокол.
 
@@ -120,6 +140,7 @@ CI поднимает свою базу на 15432 (`.github/workflows/backend.y
 | веб (Next.js) | 3000 | скрипты `dev` и `start` в `apps/web/package.json`; сервер e2e — `WF_WEB_PORT` в окружении процесса (`WF_WEB_PORT=3100 pnpm e2e`; по умолчанию 3000; `baseURL`, `webServer.url` и команда в `apps/web/playwright.config.ts` берут его оттуда) |
 | админка (Vite) | 5173 | `server.port` в `apps/admin/vite.config.ts` |
 | Mailpit UI / SMTP | 18025 / 11025 | литералы в задаче `mail` корневого `Taskfile.yml` |
+| e2e админки | 5174/5175, 18181/18182, 18026/11026 | `PAIRS` и `MAILPIT` в `apps/admin/e2e/env.ts` **и** список `ports` в `scripts/e2e-admin.sh` |
 
 Порты в описаниях задач (`./task --list`) и в таблице адресов выше — справочные, их при
 смене порта править не обязательно.

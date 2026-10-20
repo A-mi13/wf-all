@@ -50,7 +50,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - Комментарии в коде — по-русски, идентификаторы — по-английски. Переводы строк LF.
 
 ## Проверки
-- Тесты гонять самому после правок: `./task backend:test` (нужен Postgres), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`.
+- Тесты гонять самому после правок: `./task backend:test` (нужен Postgres), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`; живой e2e админки — `./task admin:e2e` (Playwright + admin-api + Mailpit, нужен Postgres; свои порты и база `wf_e2e` — README).
 - `./task ci` включает lint/typecheck/build — как и они, только по просьбе (глобальный CLAUDE.md). Постоянная просьба
   пользователя (05.10.2026): после финального ревью ветки и волны исправлений, до пуша и PR — полный `./task ci`
   самому; красное — чинить до PR (на PR #11 CI дважды падал на lint, которого не было локально).
