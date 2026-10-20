@@ -755,6 +755,48 @@ describe('общее устройство', () => {
   });
 });
 
+// Ревью ветки, I1: вкладка A была скрыта, в другой вкладке A вышел и вошёл B — cookie общая, и при
+// возврате во вкладку me сразу B, без 401 между. Входящие A и комментарий его отклонения не должны
+// мелькнуть у B, пока грузится его список.
+describe('общее устройство — сотрудник сменился без выхода', () => {
+  test('me A → me B: список A пропал до ответа B, кэш мутаций A стёрт', async () => {
+    directory();
+    approvalsServer();
+    const app = renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    expect(row).toHaveTextContent('Иван П.');
+    const user = userEvent.setup();
+    await user.click(within(row!).getByRole('button', { name: 'Отклонить' }));
+    const dialog = screen.getByRole('dialog', { name: 'Отклонить запрос?' });
+    await user.type(within(dialog).getByLabelText('Почему отклоняете'), 'Рано выдавать город');
+    await user.click(within(dialog).getByRole('button', { name: 'Отклонить' }));
+    await screen.findByText('Запрос отклонён.');
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/v1/approvals', async ({ request, response }) => {
+        if (!request.headers.has('X-WF-Background')) await gate;
+        return response(200).json({ items: [], next_cursor: null });
+      }),
+    );
+    app.me.current = meAdmin;
+    await app.refetchMe();
+    await page();
+    expect(screen.queryByText('Иван П.')).toBeNull();
+    expect(
+      JSON.stringify(
+        app.queryClient
+          .getMutationCache()
+          .getAll()
+          .map((m) => m.state.variables),
+      ),
+    ).not.toContain('Рано выдавать город');
+    release();
+    expect(await screen.findByText('Входящих нет')).toBeInTheDocument();
+  });
+});
+
 describe('общее устройство — кэш мутаций', () => {
   test('сессия истекла — комментарий отклонения не остаётся в кэше мутаций', async () => {
     directory();

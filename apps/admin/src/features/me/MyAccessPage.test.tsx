@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { components } from '../../api/gen/admin';
 import { reauthBus } from '../../app/reauth';
 import { renderApp, storageDump } from '../../test/app';
-import { meOwner } from '../../test/me';
+import { meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
 import { session } from '../../test/staff';
@@ -169,6 +169,24 @@ describe('перевыпуск резервных кодов', () => {
     );
     return seen;
   }
+
+  // Ревью ветки, I1: коды A на экране, в другой вкладке вошёл B — вкладка узнаёт об этом по me.
+  // Окно с кодами живёт в состоянии экрана, а не в кэше: экраны A размонтируются (каркас по me.id).
+  test('сотрудник сменился, пока коды на экране — окна и кодов A у B нет', async () => {
+    regenServer(() => null);
+    const app = renderApp('/me', { me: meOwner });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Перевыпустить коды' }));
+    const dialog = screen.getByRole('dialog', { name: 'Новые резервные коды' });
+    await enterCode(user, dialog, '492817');
+    await within(dialog).findByRole('list', { name: 'Резервные коды' });
+
+    app.me.current = meAdmin;
+    await app.refetchMe();
+    await page();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    for (const c of NEW_CODES) expect(screen.queryByText(c)).not.toBeInTheDocument();
+  });
 
   test('только TOTP: 10 новых кодов; после «Готово» их нет ни в DOM, ни в storage, ни в кэше', async () => {
     const seen = regenServer(() => null);

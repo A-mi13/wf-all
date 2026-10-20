@@ -81,11 +81,13 @@ const indexRoute = createRoute({
   component: () => null,
 });
 
-// Каркас активной стадии: AppShell с меню из NAV, карточкой сотрудника, языком и выходом.
+// Каркас активной стадии: AppShell с меню из NAV, карточкой сотрудника, языком и выходом. key по
+// me.id: сменился сотрудник без выхода (другая вкладка, ревью ветки I1) — экраны прежнего
+// размонтируются вместе с состоянием (открытые окна, коды, введённое), кэш стирает SessionProvider.
 function Shell() {
   const s = useSession();
   if (s.status !== 'active') return null;
-  return <ActiveShell me={s.me} />;
+  return <ActiveShell key={s.me.id} me={s.me} />;
 }
 
 function ActiveShell({ me }: { me: Me }) {

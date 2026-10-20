@@ -9,7 +9,7 @@ import { useAdminMutation } from '../../api/mutation';
 import { reauthBus } from '../../app/reauth';
 import { useSession } from '../../app/session';
 import { renderApp } from '../../test/app';
-import { meOwner } from '../../test/me';
+import { meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { renderWithProviders } from '../../test/render';
 import { http, server } from '../../test/server';
@@ -227,6 +227,30 @@ describe('разблокировка', () => {
     await user.click(within(d).getByRole('button', { name: 'Ко входу' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(await screen.findByText('сессия: anonymous')).toBeInTheDocument();
+    expect(screen.queryByText('Сохранено')).not.toBeInTheDocument();
+  });
+});
+
+// Ревью ветки, I1 (сценарий 2): запрос A ждёт разблокировку, окно открыто; в другой вкладке вошёл B
+// (cookie общая). Вкладка узнаёт об этом по me — окно закрывается, запрос A падает исходной ошибкой и
+// не повторяется под cookie B, даже если B потом разблокирует свою сессию.
+describe('сменился сотрудник', () => {
+  test('me стал другим, пока окно открыто — окно закрыто, запрос A не повторён', async () => {
+    const ctl = lockedServer();
+    const user = userEvent.setup();
+    const { queryClient } = mount();
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await dialog();
+    expect(ctl.patches).toHaveLength(1);
+
+    server.use(http.get('/v1/staff/me', ({ response }) => response(200).json(meAdmin)));
+    await act(() => queryClient.refetchQueries({ queryKey: ['staff', 'me'], exact: true }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // B разблокировал бы свою сессию — запрос A уже не ждёт
+    ctl.unlocked = true;
+    await act(async () => {});
+    expect(ctl.patches).toHaveLength(1);
+    expect(ctl.unlocks).toBe(0);
     expect(screen.queryByText('Сохранено')).not.toBeInTheDocument();
   });
 });

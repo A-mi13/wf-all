@@ -6,11 +6,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { isApiError, unwrap } from '../api/client';
 import { useApi } from '../api/context';
-import { claimDrafts } from './draft';
+import { claimDrafts, clearDrafts } from './draft';
 import { can, decide, type Decision, type Me } from './permissions';
 import { isMeKey, ME_KEY } from './query';
 import { reauthBus } from './reauth';
@@ -56,6 +57,12 @@ function stateOf(data: Me | undefined, error: Error | null): SessionState {
     return { status: 'anonymous' };
   }
   return error ? { status: 'error', error } : { status: 'loading' };
+}
+
+// Чьи данные лежат в памяти вкладки по ответу me: id сотрудника (setup, active); null — ничьи
+// (mfa_pending, незнакомая стадия: учётки ещё нет).
+function ownerOf(me: Me): string | null {
+  return me.stage === 'active' || me.stage === 'setup' ? (me.id ?? null) : null;
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -108,6 +115,39 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     queryClient.removeQueries({ predicate: (query) => !isMeKey(query.queryKey) });
     queryClient.getMutationCache().clear();
   }, [anonymous, queryClient]);
+
+  // Сотрудник сменился без 401 между (ревью ветки, I1): в другой вкладке A вышел и вошёл B или B ввёл
+  // пароль — cookie общая, и эта вкладка получает me B (или mfa_pending) прямо после me A. Данные A
+  // стираются в момент, когда кэш получил новый me, — до первого рендера с ним (эффект по стадии
+  // успел бы показать B список A на кадр): кэш запросов, кроме me (активные сбрасываются и
+  // перечитываются уже под B), кэш мутаций (ПД в переменных), черновики вкладки (почта A на шаге 2
+  // входа), ждущая разблокировка (клон запроса A не уйдёт под cookie B). Каркас размонтирует экраны
+  // A сам (key по me.id в router.tsx). Тот же сотрудник (язык, права) ничего не стирает; после 401
+  // данные уже стёрты выше — вход в этой же вкладке (mfa_pending, active) ничего не стирает.
+  const owner = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const cached = queryClient.getQueryData<Me>(ME_KEY);
+    owner.current = cached ? ownerOf(cached) : undefined;
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || !isMeKey(event.query.queryKey)) return;
+      const { action } = event;
+      if (action.type === 'error') {
+        if (isApiError(action.error, 'auth.unauthenticated')) owner.current = null;
+        return;
+      }
+      if (action.type !== 'success') return;
+      const data = event.query.state.data as Me | undefined;
+      if (!data) return;
+      const prev = owner.current;
+      const next = ownerOf(data);
+      owner.current = next;
+      if (typeof prev !== 'string' || next === prev) return;
+      void queryClient.resetQueries({ predicate: (query) => !isMeKey(query.queryKey) });
+      queryClient.getMutationCache().clear();
+      clearDrafts();
+      reauthBus.reject();
+    });
+  }, [queryClient]);
 
   // После перезагрузки с reauth_required модалка открывается сразу; разблокировка прошла —
   // me перечитывается (P20).

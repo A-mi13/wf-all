@@ -17,10 +17,15 @@ function retryQuery(failures: number, error: unknown): boolean {
 // - мутации — networkMode 'always': без сети не копятся в очереди, а сразу падают (баннер «нет
 //   сети», P20);
 // - 401 auth.unauthenticated от любого запроса перечитывает me — сессия становится anonymous, и
-//   роутер уводит на вход с возвратом (§9.3).
+//   роутер уводит на вход с возвратом (§9.3);
+// - 403 auth.forbidden — права сняли, пока вкладка открыта (ревью ветки, M5): me перечитывается,
+//   меню и разделы следуют новым правам.
 export function createQueryClient(opts: { retry?: boolean } = {}): QueryClient {
   const onError = (error: unknown, isMe: boolean) => {
-    if (!isMe && isApiError(error, 'auth.unauthenticated')) {
+    if (
+      !isMe &&
+      (isApiError(error, 'auth.unauthenticated') || isApiError(error, 'auth.forbidden'))
+    ) {
       void client.invalidateQueries({ queryKey: ME_KEY });
     }
   };
