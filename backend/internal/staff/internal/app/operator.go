@@ -17,8 +17,9 @@ import (
 )
 
 // Операции оператора (спека §4.2): подкоманды admin-api staff … — доступ к серверу корень доверия,
-// матрицей прав они не ограничены, аудит — actor_role = operator. Обёртки с --print-code — 10c;
-// OperatorResetAccess и OperatorDisable — ниже (Task 8b).
+// матрицей прав они не ограничены, аудит — actor_role = operator: bootstrap, invite-resend, rekey, сброс
+// доступа (без стража последнего владельца — выход из тупика) и выключение (под стражем). Подкоманды зовут их
+// через обёртки staff/admin/operator.go: код приглашения наружу — только с --print-code.
 
 // OperatorBootstrap — новый владелец (§4.2, U2) в одной транзакции: учётка owner в статусе invited
 // (почта и имя — по правилам приглашения, validateInvitee; почта занята в любом статусе —
