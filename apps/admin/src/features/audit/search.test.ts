@@ -77,6 +77,16 @@ describe('parseAuditSearch', () => {
     });
   });
 
+  // Уборка №8 m2: односегментный код («staff») сервер понял бы как всё действие и его подвиды через
+  // точку — то есть весь модуль, а фильтр «Действие» показал бы его как точный код. Код — минимум два
+  // сегмента.
+  test('односегментное действие — отброшено', () => {
+    expect(parseAuditSearch({ action: 'staff' })).toEqual({});
+    expect(parseAuditSearch({ action: 'geo' })).toEqual({});
+    expect(parseAuditSearch({ tab: 'staff', action: 'staff' })).toEqual({ tab: 'staff' });
+    expect(parseAuditSearch({ action: 'geo.city.rename' })).toEqual({ action: 'geo.city.rename' });
+  });
+
   test('«по» раньше «с» — «по» отброшен (сервер ответил бы 400)', () => {
     expect(parseAuditSearch({ from: '2026-10-13', to: '2026-10-01' })).toEqual({
       from: '2026-10-13',

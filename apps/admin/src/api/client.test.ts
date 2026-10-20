@@ -4,7 +4,15 @@ import { createReauthBus } from '../app/reauth';
 import { meOwner } from '../test/me';
 import { problem } from '../test/problem';
 import { http, server, TEST_API } from '../test/server';
-import { ApiError, background, createApi, NO_REPLAY_HEADER, noReplay, unwrap } from './client';
+import {
+  ApiError,
+  background,
+  createApi,
+  isUnknownOutcome,
+  NO_REPLAY_HEADER,
+  noReplay,
+  unwrap,
+} from './client';
 
 // ключ идемпотентности действия — его даёт useAdminMutation, клиент только передаёт
 const KEY = crypto.randomUUID();
@@ -96,12 +104,12 @@ describe('Problem → ApiError', () => {
     expect(err.attemptsLeft).toBeUndefined();
   });
 
-  test('429 — retryAfter из тела', async () => {
+  // Сервер шлёт срок только заголовком Retry-After (решение 10a; поле retry_after из Problem убрано из
+  // контрактов, волна после ревью ветки).
+  test('429 — retryAfter из заголовка Retry-After', async () => {
     server.use(
       http.post('/v1/staff/auth/login', ({ response }) =>
-        response.untyped(
-          problem(429, 'ratelimit.exceeded', { retry_after: 42 }, { 'Retry-After': '42' }),
-        ),
+        response.untyped(problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '42' })),
       ),
     );
     const err = await caught(
@@ -112,10 +120,19 @@ describe('Problem → ApiError', () => {
     expect(err).toMatchObject({ status: 429, code: 'ratelimit.exceeded', retryAfter: 42 });
   });
 
-  test('429 — retryAfter из заголовка, если в теле нет', async () => {
+  test('429 без заголовка — срока нет, поле тела не читается', async () => {
     server.use(
-      http.post('/v1/staff/auth/login', ({ response }) =>
-        response.untyped(problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '30' })),
+      http.post('/v1/staff/auth/login', () =>
+        HttpResponse.json(
+          {
+            type: 'about:blank',
+            title: 'Error',
+            status: 429,
+            code: 'ratelimit.exceeded',
+            retry_after: 30,
+          },
+          { status: 429, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
       ),
     );
     const err = await caught(
@@ -123,7 +140,7 @@ describe('Problem → ApiError', () => {
         body: { email: 'olga.v@wf.example', password: 'x' },
       }),
     );
-    expect(err.retryAfter).toBe(30);
+    expect(err.retryAfter).toBeUndefined();
   });
 
   test('staff.mfa_invalid — attemptsLeft, и 0 тоже', async () => {
@@ -434,5 +451,28 @@ describe('unwrap — данные ответа без ! и as', () => {
     const e = await caught(unwrap(createApi(TEST_API).GET('/v1/staff/me')));
     expect(e).toBeInstanceOf(ApiError);
     expect(e).toMatchObject({ status: 204, code: 'internal' });
+  });
+});
+
+// Исход действия неизвестен (ревью ветки: уборка №8 m6, M2–M4): сервер мог исполнить, а ответа нет —
+// повторять новым ключом нельзя, итог — перечитыванием или повтором тем же ключом.
+describe('isUnknownOutcome', () => {
+  const api = (status: number, code = 'internal') => new ApiError({ status, code });
+  test.each([
+    ['обрыв сети (не ApiError)', new TypeError('Failed to fetch'), true],
+    ['500', api(500), true],
+    ['503 прокси', api(503), true],
+    ['408 прокси', api(408), true],
+    ['499 прокси', api(499), true],
+    ['2xx без тела (unwrap)', api(200), true],
+    ['204 без тела', api(204), true],
+    ['409 idempotency.replay_unavailable', api(409, 'idempotency.replay_unavailable'), true],
+    ['400 validation.failed', api(400, 'validation.failed'), false],
+    ['401 auth.reauth_required', api(401, 'auth.reauth_required'), false],
+    ['403 auth.forbidden', api(403, 'auth.forbidden'), false],
+    ['409 platform.approval_closed', api(409, 'platform.approval_closed'), false],
+    ['429', api(429, 'ratelimit.exceeded'), false],
+  ])('%s → %s', (_, e, want) => {
+    expect(isUnknownOutcome(e)).toBe(want);
   });
 });

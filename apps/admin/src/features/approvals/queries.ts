@@ -97,12 +97,15 @@ export function useSettleDecision(
 const REREAD_LIMIT = 100;
 const REREAD_PAGES = 5;
 
-// Найти запрос a во «Входящих» во всех состояниях (⚠️ ревью 10b п. 3): ответ на approve потерян (5xx,
-// обрыв, 409 idempotency.replay_unavailable — ключ закоммичен, ответ не сохранён), а повтор решения
-// ошибочен. Отдельного запроса «один запрос подтверждения» в контракте нет — страницы списка
-// box=incoming без status (новые сверху, keyset (requested_at, id)), пока не найден и пока страница не
-// ушла старше его requested_at. Не нашли — undefined.
-export function useFindIncomingApproval(): (a: Approval) => Promise<Approval | undefined> {
+// Найти запрос a в ящике box во всех состояниях (⚠️ ревью 10b п. 3, уборка №8 m4): ответ на решение
+// потерян (isUnknownOutcome: 5xx, обрыв, 408/499, 2xx без тела, 409 idempotency.replay_unavailable),
+// а повтор решения ошибочен. Подтвердить и отклонить — «Входящие», отменить — «Мои». Отдельного запроса
+// «один запрос подтверждения» в контракте нет — страницы списка без status (новые сверху, keyset
+// (requested_at, id)), пока не найден и пока страница не ушла старше его requested_at. Не нашли —
+// undefined.
+export function useFindApproval(
+  box: 'incoming' | 'mine',
+): (a: Approval) => Promise<Approval | undefined> {
   const api = useApi();
   return useCallback(
     async (a) => {
@@ -111,7 +114,7 @@ export function useFindIncomingApproval(): (a: Approval) => Promise<Approval | u
       for (let i = 0; i < REREAD_PAGES; i++) {
         const page = await unwrap(
           api.GET('/v1/approvals', {
-            params: { query: { box: 'incoming', limit: REREAD_LIMIT, cursor } },
+            params: { query: { box, limit: REREAD_LIMIT, cursor } },
           }),
         );
         const found = page.items.find((x) => x.id === a.id);
@@ -122,7 +125,7 @@ export function useFindIncomingApproval(): (a: Approval) => Promise<Approval | u
       }
       return undefined;
     },
-    [api],
+    [api, box],
   );
 }
 

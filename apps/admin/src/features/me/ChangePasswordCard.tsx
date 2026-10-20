@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
-import { type ApiError, noReplay } from '../../api/client';
+import { type ApiError, isUnknownOutcome, noReplay } from '../../api/client';
 import type { components } from '../../api/gen/admin';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
@@ -43,7 +43,10 @@ const EMPTY: Values = {
 // приложения или резервный код, ровно одно. Успех — 204, остальные свои сеансы погашены (список
 // перечитывается). Неверный текущий пароль (staff.password_invalid) и неверный код
 // (staff.mfa_invalid) считаются в блокировку вместе: «осталось N попыток», 0 — useLockout.
-// Пароли и коды — только в памяти формы: без черновика, мутация — gcTime 0.
+// Пароли и коды — только в памяти формы: без черновика, мутация — gcTime 0. Исход неизвестен
+// (isUnknownOutcome: 5xx, обрыв; ревью ветки M4) — пароль мог смениться: повтор со старым дал бы
+// password_invalid в блокировку. Экран говорит «результат неизвестен — входите новым паролем», форма
+// стёрта, сеансы перечитаны (другие могли кончиться).
 export function ChangePasswordCard() {
   const t = useTranslations('me.password');
   const tme = useTranslations('me');
@@ -60,7 +63,8 @@ export function ChangePasswordCard() {
   // Ячейки OtpInput держат цифры сами: новый ключ — пустые ячейки без фокуса (после успеха).
   const [round, setRound] = useState(0);
   const [mode, setMode] = useState<'app' | 'recovery'>('app');
-  const [failure, setFailure] = useState<ApiError | null>(null);
+  // 'unknown' — исход неизвестен: пароль мог смениться
+  const [failure, setFailure] = useState<ApiError | 'unknown' | null>(null);
 
   const change = useAdminMutation(
     (body: PasswordChange, key: string) =>
@@ -94,6 +98,13 @@ export function ChangePasswordCard() {
   };
 
   const onError = (e: ApiError) => {
+    if (isUnknownOutcome(e)) {
+      setFailure('unknown');
+      form.reset(EMPTY);
+      setRound((r) => r + 1);
+      void queryClient.invalidateQueries({ queryKey: MY_SESSIONS_KEY });
+      return true;
+    }
     if (isLock(e.code, e.attemptsLeft)) {
       lockout();
       return true;
@@ -119,13 +130,15 @@ export function ChangePasswordCard() {
 
   const message = !failure
     ? null
-    : failure.code === 'auth.reauth_required'
-      ? tme('reauth_retry')
-      : failure.attemptsLeft === undefined
-        ? errorText(failure) // без остатка попыток — общий текст по коду, не немая ошибка
-        : failure.code === 'staff.password_invalid'
-          ? t('password_invalid', { count: failure.attemptsLeft })
-          : t('mfa_invalid', { count: failure.attemptsLeft });
+    : failure === 'unknown'
+      ? t('unknown')
+      : failure.code === 'auth.reauth_required'
+        ? tme('reauth_retry')
+        : failure.attemptsLeft === undefined
+          ? errorText(failure) // без остатка попыток — общий текст по коду, не немая ошибка
+          : failure.code === 'staff.password_invalid'
+            ? t('password_invalid', { count: failure.attemptsLeft })
+            : t('mfa_invalid', { count: failure.attemptsLeft });
 
   return (
     <section aria-labelledby={titleId} className={styles.card}>
@@ -190,7 +203,10 @@ export function ChangePasswordCard() {
                   onChange={field.onChange}
                   // полный код не отправляет форму сам: нужны ещё пароли
                   onComplete={() => {}}
-                  invalid={Boolean(fieldState.error) || failure?.code === 'staff.mfa_invalid'}
+                  invalid={
+                    Boolean(fieldState.error) ||
+                    (failure !== 'unknown' && failure?.code === 'staff.mfa_invalid')
+                  }
                   busy={change.isPending}
                   describedBy={
                     [fieldState.error ? codeId : '', message ? errorId : '']

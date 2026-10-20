@@ -1,7 +1,7 @@
 import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
-import { type ApiError, noReplay, unwrap } from '../../api/client';
+import { type ApiError, isUnknownOutcome, noReplay, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import { Button, Modal, OtpInput, type OtpInputHandle, useCountdown, useErrorText } from '../../ui';
@@ -19,7 +19,9 @@ import { MY_MFA_KEY } from './queries';
 // потеряло бы их. Пока коды на экране, окно закрывает только «Готово» (Esc, фон и «×» — нет): старые
 // коды уже сгорели, и случайное закрытие оставило бы сотрудника без кодов при «10 из 10».
 // После разблокировки сессии запрос не повторяется (noReplay, ревью I1): код из приложения
-// одноразовый — экран стирает его и просит новый.
+// одноразовый — экран стирает его и просит новый. Исход неизвестен (isUnknownOutcome: 5xx, обрыв,
+// replay_unavailable — ответ с кодами не хранится, ревью ветки M2): старые коды могли сгореть —
+// окно говорит «коды могли быть перевыпущены», счётчик «N из 10» перечитан.
 const REGENERATE_KEY = ['staff', 'my', 'recovery-codes'] as const;
 
 export function RegenerateCodesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -65,7 +67,8 @@ function CodeStep({ onIssued }: { onIssued: (codes: string[]) => void }) {
   const errorId = useId();
   const otp = useRef<OtpInputHandle>(null);
   const [code, setCode] = useState('');
-  const [failure, setFailure] = useState<ApiError | null>(null);
+  // 'unknown' — исход неизвестен: коды могли быть перевыпущены
+  const [failure, setFailure] = useState<ApiError | 'unknown' | null>(null);
   const wait = useCountdown();
   const limited = wait.left > 0;
 
@@ -86,6 +89,12 @@ function CodeStep({ onIssued }: { onIssued: (codes: string[]) => void }) {
         void queryClient.invalidateQueries({ queryKey: MY_MFA_KEY });
       },
       onError: (e) => {
+        if (isUnknownOutcome(e)) {
+          setFailure('unknown');
+          void queryClient.invalidateQueries({ queryKey: MY_MFA_KEY });
+          otp.current?.reset();
+          return;
+        }
         if (isLock(e.code, e.attemptsLeft)) return lockout();
         if (e.code === 'ratelimit.exceeded') wait.start(e.retryAfter ?? 60);
         setFailure(e);
@@ -110,15 +119,17 @@ function CodeStep({ onIssued }: { onIssued: (codes: string[]) => void }) {
   // auth.reauth_required: разблокировка прошла, а запрос не повторён — «введите новый код»;
   // разблокировку отклонили (выход, блокировка) — молчим: страница уходит на вход (уборка №6, R3).
   const message =
-    !failure ||
-    (failure.code === 'ratelimit.exceeded' && !limited) ||
-    (failure.code === 'auth.reauth_required' && !failure.replaySkipped)
-      ? null
-      : failure.code === 'auth.reauth_required'
-        ? tme('reauth_retry')
-        : failure.code === 'staff.mfa_invalid' && failure.attemptsLeft !== undefined
-          ? tm('invalid', { count: failure.attemptsLeft })
-          : errorText(failure);
+    failure === 'unknown'
+      ? t('unknown')
+      : !failure ||
+          (failure.code === 'ratelimit.exceeded' && !limited) ||
+          (failure.code === 'auth.reauth_required' && !failure.replaySkipped)
+        ? null
+        : failure.code === 'auth.reauth_required'
+          ? tme('reauth_retry')
+          : failure.code === 'staff.mfa_invalid' && failure.attemptsLeft !== undefined
+            ? tm('invalid', { count: failure.attemptsLeft })
+            : errorText(failure);
 
   return (
     <div className={styles.factor}>

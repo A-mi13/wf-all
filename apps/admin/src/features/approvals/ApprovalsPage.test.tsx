@@ -340,6 +340,28 @@ describe('подтвердить', () => {
       toast: 'Подтверждено и выполнено.',
       row: ['исполнен'],
     },
+    // уборка №8 m6: 408/499 прокси и 2xx без тела — тоже неизвестный исход
+    {
+      name: '408 прокси → выполнен',
+      answer: () => new HttpResponse('Request Timeout', { status: 408 }),
+      outcome: { status: 'executed' as const, error: null },
+      toast: 'Подтверждено и выполнено.',
+      row: ['исполнен'],
+    },
+    {
+      name: '499 прокси → выполнен',
+      answer: () => new HttpResponse(null, { status: 499 }),
+      outcome: { status: 'executed' as const, error: null },
+      toast: 'Подтверждено и выполнено.',
+      row: ['исполнен'],
+    },
+    {
+      name: '200 без тела → выполнен',
+      answer: () => new HttpResponse(null, { status: 200 }),
+      outcome: { status: 'executed' as const, error: null },
+      toast: 'Подтверждено и выполнено.',
+      row: ['исполнен'],
+    },
   ])('исход неизвестен: $name — без повторного POST, итог из перечитанного запроса', async (c) => {
     directory();
     let record: (a: Approval) => void = () => {};
@@ -653,6 +675,58 @@ describe('отклонить', () => {
   });
 });
 
+// Уборка №8 m4: исход отклонения неизвестен — решение не повторяется, запрос перечитывается; итог
+// «отклонён» — успех (тост, окно закрыто); всё ещё ждёт — ошибка в окне, комментарий цел.
+describe('отклонить — исход неизвестен', () => {
+  async function rejectWith(comment: string) {
+    const t = await table('Входящие запросы');
+    const user = userEvent.setup();
+    await user.click(within(rows(t)[0]!).getByRole('button', { name: 'Отклонить' }));
+    const dialog = screen.getByRole('dialog', { name: 'Отклонить запрос?' });
+    await user.type(within(dialog).getByLabelText('Почему отклоняете'), comment);
+    await user.click(within(dialog).getByRole('button', { name: 'Отклонить' }));
+    return { t, dialog };
+  }
+
+  test('500, а запрос отклонён — тост «отклонён», окно закрыто, без повторного POST', async () => {
+    directory();
+    let record: (a: Approval) => void = () => {};
+    const srv = approvalsServer({
+      answer: {
+        reject: (a) => {
+          record({
+            ...a,
+            status: 'rejected',
+            decided_by: OLGA,
+            decided_at: '2026-10-13T12:00:00Z',
+          });
+          return problem(500, 'internal');
+        },
+      },
+    });
+    record = srv.record;
+    renderApp('/approvals', { me: meOwner });
+    const { t } = await rejectWith('Рано');
+    expect(await screen.findByText('Запрос отклонён.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByText('Что-то пошло не так. Попробуйте ещё раз')).toBeNull();
+    await waitFor(() => expect(rows(t)[0]).toHaveTextContent('отклонён'));
+    expect(srv.seen.decisions).toHaveLength(1);
+  });
+
+  test('обрыв, а запрос всё ещё ждёт — ошибка в окне, комментарий цел', async () => {
+    directory();
+    const { seen } = approvalsServer({ answer: { reject: () => HttpResponse.error() } });
+    renderApp('/approvals', { me: meOwner });
+    const { dialog } = await rejectWith('Рано');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Что-то пошло не так. Попробуйте ещё раз',
+    );
+    expect(within(dialog).getByLabelText('Почему отклоняете')).toHaveValue('Рано');
+    expect(seen.decisions).toHaveLength(1);
+  });
+});
+
 describe('отменить', () => {
   test('у своих ожидающих — «Отменить» → cancel, тост; у решённых кнопки нет', async () => {
     directory();
@@ -687,6 +761,54 @@ describe('отменить', () => {
     await waitFor(() => expect(rows(t)[0]).toHaveTextContent('отменён'));
     expect(within(rows(t)[0]!).queryByRole('button')).toBeNull();
     release();
+  });
+});
+
+// Уборка №8 m4: исход отмены неизвестен (сбой после коммита, обрыв) — как у «Подтвердить»: решение не
+// повторяется, запрос перечитывается («Мои», все состояния), тост — по его итогу.
+describe('отменить — исход неизвестен', () => {
+  test('500, а запрос отменён — «Запрос отменён.», без повторного POST', async () => {
+    directory();
+    let record: (a: Approval) => void = () => {};
+    const srv = approvalsServer({
+      mine: [MINE_PENDING],
+      answer: {
+        cancel: (a) => {
+          record({
+            ...a,
+            status: 'cancelled',
+            decided_by: OLGA,
+            decided_at: '2026-10-13T12:00:00Z',
+          });
+          return problem(500, 'internal');
+        },
+      },
+    });
+    record = srv.record;
+    renderApp('/approvals?box=mine', { me: meOwner });
+    const t = await table('Мои запросы');
+    fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Отменить' }));
+    expect(await screen.findByText('Запрос отменён.')).toBeInTheDocument();
+    expect(screen.queryByText('Что-то пошло не так. Попробуйте ещё раз')).toBeNull();
+    expect(listCalls(srv.seen).some((q) => q.get('box') === 'mine' && !q.has('status'))).toBe(true);
+    await waitFor(() => expect(rows(t)[0]).toHaveTextContent('отменён'));
+    expect(srv.seen.decisions).toHaveLength(1);
+  });
+
+  test('обрыв, а запрос всё ещё ждёт — тост ошибки, кнопка снова доступна', async () => {
+    directory();
+    const { seen } = approvalsServer({
+      mine: [MINE_PENDING],
+      answer: { cancel: () => HttpResponse.error() },
+    });
+    renderApp('/approvals?box=mine', { me: meOwner });
+    const t = await table('Мои запросы');
+    fireEvent.click(within(rows(t)[0]!).getByRole('button', { name: 'Отменить' }));
+    expect(await screen.findByText('Что-то пошло не так. Попробуйте ещё раз')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(rows(t)[0]!).getByRole('button', { name: 'Отменить' })).toBeEnabled(),
+    );
+    expect(seen.decisions).toHaveLength(1);
   });
 });
 

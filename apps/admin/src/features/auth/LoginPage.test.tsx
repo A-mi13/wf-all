@@ -173,9 +173,7 @@ describe('ошибки шага 1', () => {
     server.use(
       http.post('/v1/staff/auth/login', ({ response }) => {
         asked++;
-        return response.untyped(
-          problem(429, 'ratelimit.exceeded', { retry_after: 30 }, { 'Retry-After': '30' }),
-        );
+        return response.untyped(problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '30' }));
       }),
     );
     await page('Вход администратора');
@@ -233,7 +231,7 @@ describe('шаг 2', () => {
           app.me.current = meOwner;
           return response(204).empty();
         }
-        return response.untyped(problem(429, 'ratelimit.exceeded', { retry_after: 30 }));
+        return response.untyped(problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '30' }));
       }),
     );
     const group = await screen.findByRole('group', { name: CODE });
@@ -262,7 +260,7 @@ describe('шаг 2', () => {
     server.use(
       http.post('/v1/staff/auth/mfa', ({ response }) => {
         asked++;
-        return response.untyped(problem(429, 'ratelimit.exceeded', { retry_after: 30 }));
+        return response.untyped(problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '30' }));
       }),
     );
     const group = await screen.findByRole('group', { name: CODE });

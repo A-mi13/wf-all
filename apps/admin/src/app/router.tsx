@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
   createRoute,
@@ -21,13 +22,15 @@ import { LocaleSwitcher } from '../features/me/LocaleSwitcher';
 import { MyAccessPage } from '../features/me/MyAccessPage';
 import { parseStaffSearch } from '../features/staff/search';
 import { StaffPage } from '../features/staff/StaffPage';
-import { AppShell, ConnectionErrorState } from '../ui';
+import { isApiError } from '../api/client';
+import { AppShell, ConnectionErrorState, RateLimitedState } from '../ui';
 import { useAccountCard } from './account';
 import { resolveRoute } from './guard';
 import { useLogout } from './logout';
 import { NAV } from './nav';
 import type { Me } from './permissions';
 import { paths } from './paths';
+import { ME_KEY } from './query';
 import { type Session, useSession } from './session';
 import { LoadingStub, NotFoundStub } from './stubs';
 
@@ -159,21 +162,35 @@ function createAppRouter(history?: RouterHistory) {
 }
 
 // Роутер поверх сессии: пока me не ответил — загрузка; admin-api недоступен — «нет связи» с
-// повтором. Смена сессии (вход, выход, настройка 2FA) перезапускает beforeLoad.
+// повтором, отказал (ревью ветки M1) — 429 с отсчётом (лимит staff_auth по общему NAT) или текст по
+// коду (403 auth.ip_not_allowed). Смена сессии (вход, выход, настройка 2FA) перезапускает beforeLoad.
 export function AppRouter({ history }: { history?: RouterHistory }) {
   const session = useSession();
+  const queryClient = useQueryClient();
   const [router] = useState(() => createAppRouter(history));
   useEffect(() => {
     void router.invalidate();
   }, [router, session]);
 
   if (session.status === 'loading') return <LoadingStub />;
-  if (session.status === 'error')
+  if (session.status === 'error') {
+    const retry = () => void session.refresh();
     return (
       <main>
-        <ConnectionErrorState onRetry={() => void session.refresh()} />
+        {isApiError(session.error) && session.error.status === 429 ? (
+          // повторный 429 с тем же сроком — отсчёт заново (новый ответ — новый key)
+          <RateLimitedState
+            key={queryClient.getQueryState(ME_KEY)?.errorUpdatedAt}
+            page
+            retryAfter={session.error.retryAfter}
+            onRetry={retry}
+          />
+        ) : (
+          <ConnectionErrorState error={session.error} onRetry={retry} />
+        )}
       </main>
     );
+  }
   return (
     <>
       <RouterProvider router={router} context={{ session }} />

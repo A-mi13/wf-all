@@ -206,6 +206,59 @@ test('стадия error (нет связи с admin-api) — экран с по
   );
 });
 
+// Ревью ветки, M1: me при загрузке ответил отказом сервера, а не молчанием — «Нет связи» вводит в
+// заблуждение. 429 (лимит staff_auth по общему NAT) — отсчёт по Retry-After и «Повторить» по его концу;
+// прочие 4xx (403 auth.ip_not_allowed) — текст по коду и код для поддержки. Сеть и 5xx — «нет связи».
+describe('ошибка me при загрузке', () => {
+  function mountFailing(answer: () => Response) {
+    let up = false;
+    server.use(
+      http.get('/v1/staff/me', ({ response }) =>
+        up ? response(200).json(meOwner) : response.untyped(answer()),
+      ),
+    );
+    render(
+      <AppProviders api={createApi(TEST_API)} queryClient={createQueryClient({ retry: false })}>
+        <AppRouter history={createMemoryHistory({ initialEntries: ['/audit'] })} />
+      </AppProviders>,
+    );
+    return { up: () => (up = true) };
+  }
+
+  test('429 — «Слишком много запросов» с отсчётом, не «нет связи»; по концу отсчёта — «Повторить»', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const srv = mountFailing(() =>
+        problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '3' }),
+      );
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Слишком много запросов' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Нет связи с сервером')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Подождать 3 с' })).toBeDisabled();
+      act(() => vi.advanceTimersByTime(3000));
+      const retry = await screen.findByRole('button', { name: 'Повторить' });
+      srv.up();
+      act(() => retry.click());
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Журнал действий'),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('403 auth.ip_not_allowed — текст по коду и код для поддержки, не «нет связи»', async () => {
+    mountFailing(() => problem(403, 'auth.ip_not_allowed'));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Вход в админку с этого адреса закрыт');
+    expect(alert).toHaveTextContent('Код ошибки: 403 · auth.ip_not_allowed');
+    expect(alert).not.toHaveTextContent('Нет связи с сервером');
+    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Повторить' })).toBeInTheDocument();
+  });
+});
+
 describe('каркас AppShell', () => {
   // Модератор без права на «Роли и доступ»: в каталоге оно у всех ролей, здесь проверяется
   // механизм меню по правам.

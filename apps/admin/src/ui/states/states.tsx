@@ -112,9 +112,27 @@ export function DesktopOnlyState() {
   return <StateBlock page tone="warning" title={t('title')} text={t('text')} />;
 }
 
-// Стадия error сессии: admin-api не ответил на GET /v1/staff/me (сеть, 5xx).
-export function ConnectionErrorState({ onRetry }: { onRetry: () => void }) {
+// Стадия error сессии: admin-api не ответил на GET /v1/staff/me (сеть, 5xx) — «нет связи». Ответил
+// отказом (4xx, кроме 401 и 429 — у них свои экраны; ревью ветки M1: 403 auth.ip_not_allowed) — текст
+// по коду и код для поддержки: связь есть, «проверьте подключение» ввело бы в заблуждение.
+export function ConnectionErrorState({ error, onRetry }: { error?: unknown; onRetry: () => void }) {
   const t = useTranslations('states.connection');
+  const te = useTranslations('states.error');
+  const errorText = useErrorText();
+  if (isApiError(error) && error.status >= 400 && error.status < 500)
+    return (
+      <StateBlock
+        page
+        role="alert"
+        tone="warning"
+        title={t('refused_title')}
+        text={errorText(error)}
+        extra={
+          <p className={styles.code}>{te('code', { status: error.status, code: error.code })}</p>
+        }
+        action={<Button onClick={onRetry}>{t('retry')}</Button>}
+      />
+    );
   return (
     <StateBlock
       page

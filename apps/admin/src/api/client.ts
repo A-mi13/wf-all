@@ -54,6 +54,22 @@ export function isApiError(e: unknown, code?: string): e is ApiError {
   return e instanceof ApiError && (code === undefined || e.code === code);
 }
 
+// Исход изменяющего запроса неизвестен — сервер мог исполнить, а ответа нет: обрыв сети (не
+// ApiError), 5xx (сбой после коммита), 408/499 прокси, 2xx без тела (unwrap: прокси или расхождение с
+// контрактом), 409 idempotency.replay_unavailable (ключ закоммичен, ответ не сохранён). Повтор НОВЫМ
+// ключом был бы вторым действием: итог — перечитыванием (решения подтверждений) или повтором тем же
+// ключом (useAdminMutation: те же значения формы). Остальные 4xx — отказ сервера, исход известен.
+export function isUnknownOutcome(e: unknown): boolean {
+  if (!isApiError(e)) return true;
+  return (
+    e.status >= 500 ||
+    e.status < 300 ||
+    e.status === 408 ||
+    e.status === 499 ||
+    e.code === 'idempotency.replay_unavailable'
+  );
+}
+
 // Помечает фоновый опрос (счётчик подтверждений, статус импорта): сервер не продлевает по нему
 // бездействие сессии (§4.7, Review Focus 2). Возвращает только заголовки — спред не переносит в
 // GET поля RequestInit вроде body. Использование: api.GET(path, { params, ...background() }).
@@ -88,7 +104,8 @@ async function readProblem(res: Response): Promise<Partial<Problem> | null> {
 }
 
 // Problem (RFC 9457) → ApiError. Ответ без Problem (прокси, HTML) — код internal: у него есть
-// текст в локалях, а статус сохраняется.
+// текст в локалях, а статус сохраняется. Срок 429 — только заголовок Retry-After (решение 10a: поля
+// retry_after в Problem нет).
 async function toApiError(res: Response, replaySkipped = false): Promise<ApiError> {
   const p = await readProblem(res);
   const header = Number.parseInt(res.headers.get('Retry-After') ?? '', 10);
@@ -100,7 +117,7 @@ async function toApiError(res: Response, replaySkipped = false): Promise<ApiErro
     status: res.status,
     code: typeof p?.code === 'string' && p.code ? p.code : 'internal',
     fields,
-    retryAfter: nonNegative(p?.retry_after) ?? nonNegative(header),
+    retryAfter: nonNegative(header),
     attemptsLeft: nonNegative(p?.attempts_left),
     replaySkipped,
   });

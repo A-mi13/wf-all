@@ -387,7 +387,7 @@ describe('приглашение и сеансы цели', () => {
         expect(request.headers.get('Idempotency-Key')).toBeTruthy();
         return calls === 1
           ? response(204).empty()
-          : response.untyped(problem(429, 'ratelimit.exceeded', { retry_after: 42 }));
+          : response.untyped(problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '42' }));
       }),
     );
     renderApp('/staff', { me: meAdmin });

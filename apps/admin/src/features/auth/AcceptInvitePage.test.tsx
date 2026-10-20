@@ -182,7 +182,7 @@ test('повторная отправка — 429: текст и отсчёт; �
   renderApp('/accept');
   server.use(
     http.post('/v1/staff/auth/invite/resend', ({ response }) =>
-      response.untyped(problem(429, 'ratelimit.exceeded', { retry_after: 5 })),
+      response.untyped(problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '5' })),
     ),
   );
   await page('Принятие приглашения');

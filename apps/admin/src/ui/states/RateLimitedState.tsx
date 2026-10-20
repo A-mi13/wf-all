@@ -5,20 +5,24 @@ import { StateBlock } from './StateBlock';
 
 // Ответ 429 (макет 07, «Слишком часто»): отсчёт по Retry-After (ApiError.retryAfter, секунды),
 // пока он идёт — кнопка «Подождать N с» недоступна, потом — «Повторить». Новый retryAfter
-// перезапускает отсчёт; повторный 429 с тем же значением — экран ставит key={error}.
+// перезапускает отсчёт; повторный 429 с тем же значением — экран ставит key={error}. page —
+// состояние вместо страницы целиком (me ответил 429 при загрузке): заголовок h1.
 export function RateLimitedState({
   retryAfter,
   onRetry,
+  page,
 }: {
   retryAfter?: number;
   onRetry: () => void;
+  page?: boolean;
 }) {
   const t = useTranslations('states.rate_limited');
   const left = useCountdown(retryAfter ?? 0);
   return (
     <StateBlock
       tone="warning"
-      titleAs="h2"
+      page={page}
+      titleAs={page ? 'h1' : 'h2'}
       title={t('title')}
       text={left > 0 ? t('text', { seconds: left }) : t('ready')}
       action={

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { createQueryClient } from '../app/query';
 import { ApiError } from './client';
 import { useAdminMutation } from './mutation';
@@ -77,4 +77,72 @@ test('колбэки получают исходные переменные, а 
 
 test('мутации не ждут сети: networkMode always (P20)', () => {
   expect(createQueryClient().getDefaultOptions().mutations?.networkMode).toBe('always');
+});
+
+// Ревью ветки, M3: форма отправлена, исход неизвестен (5xx, обрыв, 408/499, 2xx без тела) — сервер мог
+// исполнить. Повтор с теми же значениями — то же действие, тот же ключ: сервер вернёт сохранённый ответ
+// или replay_unavailable, но не исполнит второй раз (второе приглашение, второй pending-запрос). Значения
+// изменились или прежний отказ известен (4xx) — новое действие, новый ключ.
+describe('повтор после неизвестного исхода', () => {
+  function failing(errors: unknown[]) {
+    const calls: { vars: unknown; key: string }[] = [];
+    const fn = async (vars: unknown, key: string) => {
+      calls.push({ vars, key });
+      const e = errors.shift();
+      if (e) throw e;
+      return 'ok';
+    };
+    return { calls, fn };
+  }
+  const run = async (
+    m: { current: { mutateAsync: (v: unknown) => Promise<unknown> } },
+    v: unknown,
+  ) => {
+    await act(() => m.current.mutateAsync(v).catch(() => undefined));
+  };
+
+  test('те же значения (новый объект формы) после 5xx и обрыва — тот же ключ', async () => {
+    const { calls, fn } = failing([
+      new ApiError({ status: 502, code: 'internal' }),
+      new TypeError('Failed to fetch'),
+    ]);
+    const { result } = renderHook(() => useAdminMutation(fn), { wrapper: wrapper() });
+    await run(result, { email: 'ivan@wf.example', role: 'support' });
+    await run(result, { email: 'ivan@wf.example', role: 'support' });
+    await run(result, { email: 'ivan@wf.example', role: 'support' });
+    expect(calls).toHaveLength(3);
+    expect(calls[1]?.key).toBe(calls[0]?.key);
+    expect(calls[2]?.key).toBe(calls[0]?.key);
+    // успех закрыл действие: те же значения дальше — новое действие
+    await run(result, { email: 'ivan@wf.example', role: 'support' });
+    expect(calls[3]?.key).not.toBe(calls[0]?.key);
+  });
+
+  test('2xx без тела и 408 — тоже неизвестный исход', async () => {
+    const { calls, fn } = failing([
+      new ApiError({ status: 200, code: 'internal' }),
+      new ApiError({ status: 408, code: 'internal' }),
+    ]);
+    const { result } = renderHook(() => useAdminMutation(fn), { wrapper: wrapper() });
+    await run(result, 'a');
+    await run(result, 'a');
+    await run(result, 'a');
+    expect(new Set(calls.map((c) => c.key)).size).toBe(1);
+  });
+
+  test('значения изменились — новый ключ', async () => {
+    const { calls, fn } = failing([new ApiError({ status: 500, code: 'internal' })]);
+    const { result } = renderHook(() => useAdminMutation(fn), { wrapper: wrapper() });
+    await run(result, { email: 'ivan@wf.example' });
+    await run(result, { email: 'petr@wf.example' });
+    expect(calls[1]?.key).not.toBe(calls[0]?.key);
+  });
+
+  test('известный отказ (4xx) — новый ключ и при тех же значениях', async () => {
+    const { calls, fn } = failing([new ApiError({ status: 409, code: 'staff.email_taken' })]);
+    const { result } = renderHook(() => useAdminMutation(fn), { wrapper: wrapper() });
+    await run(result, { email: 'ivan@wf.example' });
+    await run(result, { email: 'ivan@wf.example' });
+    expect(calls[1]?.key).not.toBe(calls[0]?.key);
+  });
 });

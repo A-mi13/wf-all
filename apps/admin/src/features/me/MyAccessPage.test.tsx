@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
+import { HttpResponse } from 'msw';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { components } from '../../api/gen/admin';
 import { reauthBus } from '../../app/reauth';
@@ -320,6 +321,38 @@ describe('перевыпуск резервных кодов', () => {
     expect(seen.regen).toEqual([{ code: '492817' }]);
   });
 
+  // Ревью ветки, M2: исход перевыпуска неизвестен (500 после коммита, обрыв, replay_unavailable — ответ с
+  // кодами не хранится) — старые коды могли сгореть. Окно говорит об этом прямо, счётчик перечитан.
+  test.each([
+    ['500 после коммита', () => problem(500, 'internal')],
+    ['обрыв сети', () => HttpResponse.error()],
+    ['409 idempotency.replay_unavailable', () => problem(409, 'idempotency.replay_unavailable')],
+  ])(
+    'исход неизвестен (%s) — «коды могли быть перевыпущены», счётчик перечитан',
+    async (_, answer) => {
+      const { state, seen } = accessServer();
+      server.use(
+        http.post('/v1/staff/me/mfa/recovery-codes', ({ response }) => {
+          seen.regen.push(1);
+          state.mfa = { ...state.mfa, recovery_codes_left: 10 };
+          return response.untyped(answer());
+        }),
+      );
+      renderApp('/me', { me: meOwner });
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Перевыпустить коды' }));
+      const dialog = screen.getByRole('dialog', { name: 'Новые резервные коды' });
+      const before = seen.mfa;
+      await enterCode(user, dialog, '492817');
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+        'коды могли быть перевыпущены',
+      );
+      await waitFor(() => expect(seen.mfa).toBeGreaterThan(before));
+      expect(await screen.findByText('10 из 10 не использованы')).toBeInTheDocument();
+      expect(seen.regen).toHaveLength(1);
+    },
+  );
+
   test('коды на экране — Esc, фон и «×» окно не закрывают, только «Готово»', async () => {
     regenServer(() => null);
     renderApp('/me', { me: meOwner });
@@ -364,7 +397,7 @@ describe('перевыпуск резервных кодов', () => {
   });
 
   test('429 — отсчёт; набранный за время отсчёта код по его концу стёрт', async () => {
-    const seen = regenServer(() => problem(429, 'ratelimit.exceeded', { retry_after: 20 }));
+    const seen = regenServer(() => problem(429, 'ratelimit.exceeded', {}, { 'Retry-After': '20' }));
     renderApp('/me', { me: meOwner });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Перевыпустить коды' }));
@@ -530,6 +563,34 @@ describe('смена пароля', () => {
     release();
     expect(await screen.findByText(/Пароль изменён|Пароль сменён/)).toBeInTheDocument();
   });
+
+  // Ревью ветки, M4: исход смены пароля неизвестен (500 после коммита, обрыв) — пароль мог смениться.
+  // Повтор со старым паролем дал бы staff.password_invalid в блокировку: экран говорит «результат
+  // неизвестен — входите новым паролем», форма стёрта, список сеансов перечитан (другие могли кончиться).
+  test.each([
+    ['500 после коммита', () => problem(500, 'internal')],
+    ['обрыв сети', () => HttpResponse.error()],
+  ])(
+    'исход неизвестен (%s) — «входите новым паролем», форма стёрта, повтора нет',
+    async (_, answer) => {
+      const seen = passwordServer(() => answer() as Response);
+      renderApp('/me', { me: meOwner });
+      const user = userEvent.setup();
+      await page();
+      const form = card('Смена пароля');
+      const before = seen.sessions;
+      await fill(user, form);
+      await user.click(within(form).getByRole('button', { name: 'Сменить пароль' }));
+      expect(await within(form).findByRole('alert')).toHaveTextContent('Результат неизвестен');
+      expect(within(form).getByRole('alert')).toHaveTextContent('входите новым паролем');
+      expect(within(form).getByLabelText('Текущий пароль')).toHaveValue('');
+      expect(within(form).getByLabelText('Новый пароль')).toHaveValue('');
+      expect(within(form).getByLabelText('Новый пароль ещё раз')).toHaveValue('');
+      expect(digits(form)).toBe('');
+      await waitFor(() => expect(seen.sessions).toBeGreaterThan(before));
+      expect(seen.password).toHaveLength(1);
+    },
+  );
 
   test('новый пароль и повтор не совпали — ошибка поля, запрос не уходит', async () => {
     const seen = passwordServer(() => null);

@@ -5,15 +5,30 @@ import {
   type UseMutationResult,
 } from '@tanstack/react-query';
 import { useCallback, useRef } from 'react';
-import type { ApiError } from './client';
+import { type ApiError, isUnknownOutcome } from './client';
 
 // Мутация админки (спека сотрудников §9.1, M6): ключ идемпотентности создаётся здесь — один на
 // действие пользователя. mutate()/mutateAsync() — новое действие, новый ключ; retry() — повтор
 // того же действия (кнопка «Повторить» после сбоя сети) с теми же данными и тем же ключом: сервер
 // не исполнит его дважды. Повтор после разблокировки сессии клиент API делает сам, тоже с тем же
 // ключом (клон запроса).
+// Исход прошлого действия неизвестен (isUnknownOutcome: 5xx, обрыв, 408/499, 2xx без тела,
+// replay_unavailable), а mutate()/mutateAsync() пришли с теми же значениями (повторная отправка формы)
+// — это то же действие: ключ прежний (ревью ветки, M3), иначе сервер исполнил бы его второй раз
+// (второе приглашение, второй pending-запрос). Значения другие, прошлое кончилось успехом или
+// известным отказом (4xx) — новое действие, новый ключ.
 
-type Keyed<V> = { vars: V; key: string };
+type Keyed<V> = { vars: V; key: string; unknown?: boolean };
+
+// Те же значения действия: формы дают новый объект на каждую отправку — сравнение по содержимому.
+function sameVars(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
 
 export type AdminMutationOptions<TData, TVars, TCtx> = Omit<
   UseMutationOptions<TData, ApiError, TVars, TCtx>,
@@ -53,7 +68,16 @@ export function useAdminMutation<TVars, TData, TCtx = unknown>(
   const m = useMutation<TData, ApiError, Keyed<TVars>, TCtx>({
     ...rest,
     networkMode: 'always',
-    mutationFn: ({ vars, key }) => fn(vars, key),
+    // исход отмечается на самом действии: повтор формы решает, тот же ли это ключ
+    mutationFn: async (k) => {
+      k.unknown = false;
+      try {
+        return await fn(k.vars, k.key);
+      } catch (e) {
+        k.unknown = isUnknownOutcome(e);
+        throw e;
+      }
+    },
     // колбэки хука возвращают свой результат: промис (инвалидация) мутация дожидается
     onMutate: onMutate && ((k, c) => onMutate(k.vars, c)),
     onSuccess: onSuccess && ((d, k, r, c) => onSuccess(d, k.vars, r, c)),
@@ -63,19 +87,23 @@ export function useAdminMutation<TVars, TData, TCtx = unknown>(
   const last = useRef<Keyed<TVars> | null>(null);
   const { mutate: run, mutateAsync: runAsync } = m;
 
+  // Новое действие или повтор прежнего с неизвестным исходом (те же значения — тот же ключ).
+  const action = useCallback((vars: TVars): Keyed<TVars> => {
+    const prev = last.current;
+    const key = prev?.unknown && sameVars(prev.vars, vars) ? prev.key : newKey();
+    last.current = { vars, key };
+    return last.current;
+  }, []);
   const mutate = useCallback(
     (vars: TVars, o?: MutateOptions<TData, ApiError, TVars, TCtx>) => {
-      last.current = { vars, key: newKey() };
-      run(last.current, unwrap(o));
+      run(action(vars), unwrap(o));
     },
-    [run],
+    [run, action],
   );
   const mutateAsync = useCallback(
-    (vars: TVars, o?: MutateOptions<TData, ApiError, TVars, TCtx>) => {
-      last.current = { vars, key: newKey() };
-      return runAsync(last.current, unwrap(o));
-    },
-    [runAsync],
+    (vars: TVars, o?: MutateOptions<TData, ApiError, TVars, TCtx>) =>
+      runAsync(action(vars), unwrap(o)),
+    [runAsync, action],
   );
   const retry = useCallback(() => {
     if (last.current) run(last.current);

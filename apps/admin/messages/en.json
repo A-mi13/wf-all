@@ -108,6 +108,7 @@
     "loading": "Loading…",
     "connection": {
       "title": "No connection to the server",
+      "refused_title": "The server refused access to the admin panel",
       "retry": "Retry",
       "text": "The admin panel got no response from the server. Check your connection and retry."
     },
@@ -445,7 +446,8 @@
       "submit": "Issue codes",
       "wait": "Wait {seconds} s",
       "done": "Done",
-      "issued": "Recovery codes reissued. The old ones no longer work."
+      "issued": "Recovery codes reissued. The old ones no longer work.",
+      "unknown": "No response arrived — the codes may have been reissued. If the counter below shows “10 of 10”, the old codes no longer work: issue new ones again and save them."
     },
     "sessions": {
       "title": "Active sessions",
@@ -494,7 +496,8 @@
       "submit": "Change password",
       "done": "Password changed. Other sessions ended.",
       "password_invalid": "The current password is wrong. {count, plural, one {# attempt left} other {# attempts left}}, then access closes for an hour and we notify the administrators.",
-      "mfa_invalid": "The code did not match. {count, plural, one {# attempt left} other {# attempts left}}, then access closes for an hour and we notify the administrators."
+      "mfa_invalid": "The code did not match. {count, plural, one {# attempt left} other {# attempts left}}, then access closes for an hour and we notify the administrators.",
+      "unknown": "Result unknown: no response arrived, and the password may have changed. Do not repeat the change with the old password — a wrong password counts towards the lockout; sign in with the new password."
     }
   },
   "staff": {

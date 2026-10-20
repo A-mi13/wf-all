@@ -167,6 +167,35 @@ describe('форма приглашения', () => {
   });
 });
 
+// Ревью ветки, M3: приглашение отправлено, ответ потерян (500 после коммита) — повторная отправка той же
+// формы — то же действие, тот же ключ: сервер вернёт сохранённый ответ, а не создаст второй запрос на
+// подтверждение. Изменили форму — новое действие, новый ключ.
+describe('повтор после неизвестного исхода', () => {
+  test('500 → «Отправить» снова с теми же данными — тот же Idempotency-Key; изменили имя — новый', async () => {
+    staffServer({ accounts: TEAM });
+    let n = 0;
+    const sent = inviteServer(() => (++n <= 2 ? problem(500, 'internal') : null));
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const dialog = await openInvite(user);
+    await fill(user, dialog, 'support');
+    const submit = () =>
+      user.click(within(dialog).getByRole('button', { name: 'Отправить на подтверждение' }));
+    await submit();
+    await waitFor(() => expect(sent).toHaveLength(1));
+    await within(dialog).findByText('Что-то пошло не так. Попробуйте ещё раз');
+    await submit();
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]?.key).toBe(sent[0]?.key);
+
+    await user.type(within(dialog).getByLabelText('Имя'), 'в');
+    await submit();
+    await within(dialog).findByText('Отправлено на подтверждение');
+    expect(sent).toHaveLength(3);
+    expect(sent[2]?.key).not.toBe(sent[0]?.key);
+  });
+});
+
 describe('черновик приглашения', () => {
   test('пережил перезагрузку: почта, имя, роль и города вернулись', async () => {
     staffServer({ accounts: TEAM });
