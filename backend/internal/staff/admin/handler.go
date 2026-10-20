@@ -112,7 +112,7 @@ var oapiPkg = reflect.TypeFor[oapi.GetStaffMeRequestObject]().PkgPath()
 
 // Middleware — strict-middleware операций тега staff (остальные теги проходят как есть):
 //   - нулевой Handler — 501 http.not_implemented без вызова операции;
-//   - в ctx — User-Agent и токен cookie запроса (strict-сервер их в объект запроса не кладёт): Meta
+//   - в ctx — User-Agent (httpx.UserAgent) и токен cookie запроса (strict-сервер их в объект запроса не кладёт): Meta
 //     сценариев и oldToken принятия приглашения;
 //   - ошибка операции — Problem; auth.ErrSessionInvalid (сессию погасили между конвейером и замком
 //     сценария) стирает cookie, как конвейер (session.go), а auth.ErrSessionReplaced — нет: в браузере
@@ -126,7 +126,7 @@ func (h *Handler) Middleware() oapi.StrictMiddlewareFunc {
 			if h.app == nil {
 				return nil, errNotImplemented
 			}
-			ctx = context.WithValue(ctx, requestKey{}, requestInfo{userAgent: r.UserAgent(), token: h.token(r)})
+			ctx = context.WithValue(ctx, requestKey{}, requestInfo{userAgent: httpx.UserAgent(r), token: h.token(r)})
 			resp, err := f(ctx, w, r, req)
 			if err == nil {
 				return resp, nil
@@ -161,7 +161,8 @@ func requestFrom(ctx context.Context) requestInfo {
 	return ri
 }
 
-// meta — откуда запрос: IP клиента (peer) и User-Agent как есть — в сессию и аудит сценариев.
+// meta — откуда запрос: IP клиента (peer) и User-Agent (httpx.UserAgent: не длиннее 512 байт, валидный UTF-8) —
+// в сессию и аудит сценариев.
 func meta(ctx context.Context) staff.Meta {
 	return staff.Meta{IP: peer.From(ctx).IP, UserAgent: requestFrom(ctx).userAgent}
 }
