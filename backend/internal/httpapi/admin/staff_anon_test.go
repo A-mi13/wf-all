@@ -15,10 +15,15 @@ import (
 // anonPaths — анонимные мутации админки (x-anonymous-mutations).
 var anonPaths = []string{pathLogin, pathAccept, pathResend}
 
+// anonKeyRows — строки ключей идемпотентности анонимных операций в обеих таблицах: ключи admin-api — в
+// staff_idempotency_keys (I-1), idempotency_keys — на случай, если конвейер собран не с той таблицей.
+const anonKeyRows = `SELECT (SELECT count(*) FROM staff_idempotency_keys WHERE endpoint = ANY($1))
+	+ (SELECT count(*) FROM idempotency_keys WHERE endpoint = ANY($1))`
+
 // Анонимные операции (x-permission anonymous, security: []) не идут под идемпотентностью даже с живой
 // cookie и присланным Idempotency-Key (hard rule 5, ревью 10a I1): самоотправка — 202 и на почту без
 // приглашения, и на подходящую (иначе 500 «успех без транзакции» выдавал бы, есть ли приглашение);
-// вход и принятие с ключом и cookie не оставляют строк в idempotency_keys. Сотрудник старой cookie в
+// вход и принятие с ключом и cookie не оставляют строк ключей (ни в staff_idempotency_keys, ни в idempotency_keys). Сотрудник старой cookie в
 // ctx остаётся — D9 у входа работает.
 func TestStaffAnonymousNoIdempotency(t *testing.T) {
 	e := newStaffEnv(t)
@@ -43,7 +48,7 @@ func TestStaffAnonymousNoIdempotency(t *testing.T) {
 	if r := e.sessionReason(other); r != "replaced" {
 		t.Fatalf("D9 у входа с ключом: %q", r)
 	}
-	if n := e.count(`SELECT count(*) FROM idempotency_keys WHERE endpoint = ANY($1)`, anonPaths); n != 0 {
+	if n := e.count(anonKeyRows, anonPaths); n != 0 {
 		t.Fatalf("строк идемпотентности у анонимных операций: %d", n)
 	}
 }
@@ -110,7 +115,7 @@ func TestStaffAcceptReissuedWhileWaitingWithKey(t *testing.T) {
 	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'staff.invite_accept_failed'`); n != 1 {
 		t.Fatalf("записей неудачи %d", n)
 	}
-	if n := e.count(`SELECT count(*) FROM idempotency_keys WHERE endpoint = ANY($1)`, anonPaths); n != 0 {
+	if n := e.count(anonKeyRows, anonPaths); n != 0 {
 		t.Fatalf("строк идемпотентности %d", n)
 	}
 }

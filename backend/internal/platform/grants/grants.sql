@@ -35,7 +35,8 @@ BEGIN
         WHEN r.name = 'goose_db_version' THEN NULL
         -- аудит только дописывается; читает — только админка
         WHEN r.name = 'audit_log' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT' ELSE 'INSERT' END
-        -- вход сотрудников — только admin-api
+        -- вход сотрудников и ключи идемпотентности admin-api (staff_idempotency_keys: ответы с ПД) —
+        -- только admin-api
         WHEN r.name LIKE 'staff\_%' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END
         -- подтверждения вдвоём (D2) — только admin-api; DELETE — чистка решённых старше 180 дней
         WHEN r.name = 'approvals' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END

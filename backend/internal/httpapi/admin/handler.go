@@ -31,7 +31,7 @@ type Options struct {
 	Docs           bool          // Swagger UI и контракт на /docs (config.HTTP.DocsEnabled)
 	RequestTimeout time.Duration // крайний срок запроса; 0 — 15 с
 	Peer           peer.Config
-	DB             *pgxpool.Pool // ключи идемпотентности
+	DB             *pgxpool.Pool // ключи идемпотентности (staff_idempotency_keys) и журнал; роль admin
 	Limiter        ratelimit.Limiter
 	RateRules      ratelimit.Rules
 	// Origin — ADMIN_ORIGIN: единственный origin админки (схема://хост[:порт]); с ним CSRF
@@ -180,7 +180,8 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		httpx.ValidateRequests(httpx.ValidateOptions{Authenticated: auth.AuthenticatedStaff}),
 		permissions(perms, log),
 		ratelimit.Middleware(o.Limiter, o.RateRules, log),
-		idempotency.Middleware(o.DB, idempotency.Config{}, log),
+		// ключи и ответы мутаций админки (ПД сотрудников) — своя таблица, права только роли admin (I-1)
+		idempotency.Middleware(o.DB, idempotency.Config{Table: idempotency.Staff}, log),
 	)
 	if o.Docs {
 		// /docs не в контракте: валидатор такие маршруты пропускает дальше, к роутеру

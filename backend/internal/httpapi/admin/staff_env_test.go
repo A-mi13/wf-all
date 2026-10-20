@@ -152,7 +152,7 @@ type commitTracer struct {
 type traceSQLKey struct{}
 
 func (c *commitTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
-	if strings.Contains(d.SQL, "INSERT INTO idempotency_keys") {
+	if strings.Contains(d.SQL, "INSERT INTO staff_idempotency_keys") {
 		c.mu.Lock()
 		c.keyed[conn] = true
 		c.mu.Unlock()

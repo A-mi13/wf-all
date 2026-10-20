@@ -35,7 +35,7 @@ PostGIS обязателен двум миграциям: `0005_pitches.sql` (п
 0017_platform_events.sql события: outbox с конвертом (UUIDv7, версии), inbox, курсоры, NOTIFY
 0018_platform_edge.sql   край платформы: rate limit (GCRA), решения антибота, заголовки ответа идемпотентности
 0019_geo.sql             geo: источник GeoNames, названия по локалям, история slug, точки и geoname_id городов, архив районов, geo_read_city_settings; app_versions (платформа)
-0020_staff.sql           сотрудники (staff_*): учётки, роль и города модератора, TOTP, резервные коды, приглашения, сессии; approvals (платформа); audit_log: автор-сотрудник, снимок имени, город; role_assignments — только допуск капитана
+0020_staff.sql           сотрудники (staff_*): учётки, роль и города модератора, TOTP, резервные коды, приглашения, сессии; approvals и staff_idempotency_keys — ключи идемпотентности admin-api, права только admin (платформа); audit_log: автор-сотрудник, снимок имени, город; role_assignments — только допуск капитана
 ```
 
 Правка миграции: пока она не слита в `main` и не накатана на стенд (стенд накатывает `migrate up` из `main`,

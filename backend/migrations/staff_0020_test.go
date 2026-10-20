@@ -419,10 +419,11 @@ func TestStaff0020RefusesStaffRoleAssignments(t *testing.T) {
 }
 
 // staffSnapshotSQL — всё, что задевает 0020: колонки и индексы audit_log, idempotency_keys,
-// role_assignments, все ограничения и триггеры, значения enum-типов, функции и отношения public
-// (без объектов расширений), комментарий idempotency_keys.user_id.
+// staff_idempotency_keys, role_assignments, все ограничения и триггеры, значения enum-типов, функции и
+// отношения public (без объектов расширений), комментарий idempotency_keys.user_id (0020 его не ставит:
+// ключи сотрудников — в своей таблице).
 const staffSnapshotSQL = `
-WITH t(rel) AS (VALUES ('audit_log'), ('idempotency_keys'), ('role_assignments'))
+WITH t(rel) AS (VALUES ('audit_log'), ('idempotency_keys'), ('staff_idempotency_keys'), ('role_assignments'))
 SELECT 'col ' || c.relname || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
        || CASE WHEN a.attnotnull THEN ' not null' ELSE '' END
        || coalesce(' default ' || pg_get_expr(d.adbin, d.adrelid), '')
@@ -481,8 +482,8 @@ func snapshotOf(t *testing.T, db *sql.DB, query string) []string {
 }
 
 // down 0020 возвращает схему 0019 в точности: типы role_name/role_scope со всеми значениями, CHECK
-// role_scope_id_present с 'global', audit_log без новых колонок, без комментария user_id, без
-// таблиц staff_* и approvals. Затем повторный up проходит.
+// role_scope_id_present с 'global', audit_log без новых колонок, без таблиц staff_* (и
+// staff_idempotency_keys) и approvals. Затем повторный up проходит.
 func TestStaff0020DownRestoresSchema(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
@@ -505,7 +506,11 @@ func TestStaff0020DownRestoresSchema(t *testing.T) {
 	for _, want := range []string{
 		"rel r approvals", "rel r staff_accounts", "rel r staff_sessions", "fn staff_role_cities_check",
 		"type role_name captain", "type role_scope city", "type staff_role owner,admin,moderator,support",
-		"cmt idempotency_keys.user_id id субъекта: игрок (users) или сотрудник (staff_accounts); UUIDv7 не пересекаются",
+		// ключи идемпотентности admin-api — своя таблица (I-1); у idempotency_keys комментария нет
+		"rel r staff_idempotency_keys", "cmt idempotency_keys.user_id -",
+		"col staff_idempotency_keys.response_body jsonb",
+		"idx CREATE INDEX staff_idempotency_keys_expiry_idx ON public.staff_idempotency_keys USING btree (expires_at)",
+		"con staff_idempotency_keys staff_idempotency_keys_pkey PRIMARY KEY (user_id, key)",
 		// keyset журнала по (created_at, id) — у частичных индексов автора и города тоже
 		"idx CREATE INDEX audit_log_staff_actor_idx ON public.audit_log USING btree (actor_staff_id, created_at DESC, id DESC) WHERE (actor_staff_id IS NOT NULL)",
 		"idx CREATE INDEX audit_log_scope_city_idx ON public.audit_log USING btree (scope_city_id, created_at DESC, id DESC) WHERE (scope_city_id IS NOT NULL)",

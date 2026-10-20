@@ -27,6 +27,12 @@ type Querier interface {
 	SaveResponse(ctx context.Context, arg SaveResponseParams) (int64, error)
 	// Только до конца текущей транзакции (is_local = true).
 	SetLockTimeout(ctx context.Context, value string) error
+	StaffClaim(ctx context.Context, arg StaffClaimParams) (time.Time, error)
+	StaffDeleteExpired(ctx context.Context, batch int32) (int64, error)
+	// Ключи admin-api — staff_idempotency_keys (права только роли admin, финальное ревью I-1): те же запросы
+	// над своей таблицей. Меняешь запрос выше — поменяй и его пару ниже.
+	StaffGet(ctx context.Context, arg StaffGetParams) (StaffGetRow, error)
+	StaffSaveResponse(ctx context.Context, arg StaffSaveResponseParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

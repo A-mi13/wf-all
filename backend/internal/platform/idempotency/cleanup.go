@@ -12,7 +12,9 @@ import (
 
 const cleanupBatch = 1000
 
-// CleanupArgs — чистка ключей старше 24 часов (спека §6.4, §9.3).
+// CleanupArgs — чистка просроченных ключей игроков (idempotency_keys; спека §6.4, §9.3). Ключи admin-api
+// (staff_idempotency_keys) чистит не воркер, а тикер admin-api — DeleteExpired(ctx, pool, Staff): у воркера
+// на них прав нет.
 type CleanupArgs struct {
 	V int `json:"v"`
 }
@@ -25,25 +27,18 @@ func (CleanupArgs) InsertOpts() river.InsertOpts {
 
 type CleanupWorker struct {
 	river.WorkerDefaults[CleanupArgs]
-	q *idempotencydb.Queries
+	db idempotencydb.DBTX
 }
 
 func NewCleanupWorker(db idempotencydb.DBTX) *CleanupWorker {
-	return &CleanupWorker{q: idempotencydb.New(db)}
+	return &CleanupWorker{db: db}
 }
 
 func (*CleanupWorker) Timeout(*river.Job[CleanupArgs]) time.Duration { return 10 * time.Minute }
 
 func (w *CleanupWorker) Work(ctx context.Context, _ *river.Job[CleanupArgs]) error {
-	for {
-		n, err := w.q.DeleteExpired(ctx, cleanupBatch)
-		if err != nil {
-			return err
-		}
-		if n < cleanupBatch {
-			return nil
-		}
-	}
+	_, err := DeleteExpired(ctx, w.db, Players)
+	return err
 }
 
 // CleanupJob — раз в час и сразу при старте воркера.

@@ -3,7 +3,7 @@
 -- решениями ревью от 06.10.2026; ролевая модель — docs/05-ролевая-модель.md):
 --   * модуль staff — учётки, роль и города модератора, TOTP, резервные коды, приглашения, сессии;
 --   * платформа — подтверждения вдвоём (approvals), автор-сотрудник, снимок имени и город в audit_log,
---     комментарий idempotency_keys.user_id (ключ субъекта — игрока или сотрудника);
+--     ключи идемпотентности admin-api (staff_idempotency_keys, права только admin);
 --   * identity — role_assignments: только допуск капитана в городе.
 -- id новых таблиц — UUIDv7 из Go (platform/id), время — из clock.Clock приложения: умолчаний нет
 -- намеренно. Секреты — только шифротекст (keys.Ring, AES-256-GCM) или HMAC; key_id — имя ключа
@@ -324,8 +324,26 @@ CREATE INDEX audit_log_scope_city_idx ON audit_log (scope_city_id, created_at DE
 -- журнал целиком: created_at DESC, id (keyset)
 CREATE INDEX audit_log_created_idx ON audit_log (created_at DESC, id DESC);
 
--- Идемпотентность (D19): колонка не переименовывается; ключ — (id субъекта, ключ).
-COMMENT ON COLUMN idempotency_keys.user_id IS 'id субъекта: игрок (users) или сотрудник (staff_accounts); UUIDv7 не пересекаются';
+-- Ключи идемпотентности admin-api (D19, финальное ревью ветки I-1) — своя таблица платформы с правами
+-- только роли admin (grants.sql, ветка staff_*): в ответах сотрудников ПД (почты, имена, комментарии
+-- подтверждений), а у api на idempotency_keys DML — читал бы их, подменял сохранённый ответ и снимал ключ.
+-- Схема и срок — как у idempotency_keys (0001, 0018); user_id — id сотрудника. Время — время базы (now()),
+-- как у idempotency_keys: запросы platform/idempotency сравнивают срок с now().
+CREATE TABLE staff_idempotency_keys (
+    user_id          uuid        NOT NULL,
+    key              text        NOT NULL,
+    endpoint         text        NOT NULL,
+    request_hash     text        NOT NULL,
+    response_status  int,
+    response_headers jsonb,
+    response_body    jsonb,
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    expires_at       timestamptz NOT NULL DEFAULT now() + interval '24 hours',
+    PRIMARY KEY (user_id, key)
+);
+
+-- чистка просроченных (тикер admin-api)
+CREATE INDEX staff_idempotency_keys_expiry_idx ON staff_idempotency_keys (expires_at);
 
 -- ---------------------------------------------------------------------------
 -- Роли игроков (§3.2, M1): только допуск капитана в городе. Старый CHECK ссылается на 'global' —
@@ -364,7 +382,7 @@ ALTER TABLE role_assignments
         CHECK ((scope_type = 'global' AND scope_id IS NULL)
             OR (scope_type <> 'global' AND scope_id IS NOT NULL));
 
-COMMENT ON COLUMN idempotency_keys.user_id IS NULL;
+DROP TABLE staff_idempotency_keys;
 
 DROP INDEX audit_log_created_idx;
 DROP INDEX audit_log_scope_city_idx;

@@ -44,3 +44,35 @@ SELECT set_config('lock_timeout', @value::text, true);
 DELETE FROM idempotency_keys
 WHERE expires_at <= now()
   AND (user_id, key) IN (SELECT user_id, key FROM idempotency_keys WHERE expires_at <= now() LIMIT @batch);
+
+-- Ключи admin-api — staff_idempotency_keys (права только роли admin, финальное ревью I-1): те же запросы
+-- над своей таблицей. Меняешь запрос выше — поменяй и его пару ниже.
+
+-- name: StaffGet :one
+SELECT request_hash, response_status, response_headers, response_body
+FROM staff_idempotency_keys
+WHERE user_id = @user_id AND key = @key AND expires_at > now();
+
+-- name: StaffClaim :one
+INSERT INTO staff_idempotency_keys AS k (user_id, key, endpoint, request_hash)
+VALUES (@user_id, @key, @endpoint, @request_hash)
+ON CONFLICT (user_id, key) DO UPDATE
+SET endpoint = excluded.endpoint,
+    request_hash = excluded.request_hash,
+    response_status = NULL,
+    response_headers = NULL,
+    response_body = NULL,
+    created_at = now(),
+    expires_at = now() + interval '24 hours'
+WHERE k.expires_at <= now()
+RETURNING created_at;
+
+-- name: StaffSaveResponse :execrows
+UPDATE staff_idempotency_keys
+SET response_status = @status, response_headers = @headers, response_body = @body
+WHERE user_id = @user_id AND key = @key AND request_hash = @request_hash AND response_status IS NULL;
+
+-- name: StaffDeleteExpired :execrows
+DELETE FROM staff_idempotency_keys
+WHERE expires_at <= now()
+  AND (user_id, key) IN (SELECT user_id, key FROM staff_idempotency_keys WHERE expires_at <= now() LIMIT @batch);

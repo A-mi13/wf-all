@@ -155,7 +155,7 @@ func TestStaffLocale(t *testing.T) {
 }
 
 // Review Focus 1, D14: ответы с секретами (секрет TOTP, коды при подтверждении и перевыпуске) не
-// сохраняются в idempotency_keys — ни тело, ни заголовки; повтор с тем же ключом — 409
+// сохраняются в staff_idempotency_keys — ни тело, ни заголовки; повтор с тем же ключом — 409
 // idempotency.replay_unavailable с no-store. Строка ключа есть (статус), но ни секрета, ни кодов в
 // таблице нет.
 func TestStaffSecretsNotReplayed(t *testing.T) {
@@ -172,7 +172,7 @@ func TestStaffSecretsNotReplayed(t *testing.T) {
 		again := e.send(http.MethodPost, path, tok, key, body)
 		wantProblem(t, again, http.StatusConflict, httpx.CodeIdempotencyReplayUnavailable)
 		wantNoStore(t, again)
-		if n := e.count(`SELECT count(*) FROM idempotency_keys WHERE key = $1 AND response_status = 200
+		if n := e.count(`SELECT count(*) FROM staff_idempotency_keys WHERE key = $1 AND response_status = 200
 			AND response_body IS NULL AND response_headers IS NULL`, key); n != 1 {
 			t.Fatalf("%s: строка ключа сохранила ответ", path)
 		}
@@ -195,7 +195,8 @@ func TestStaffSecretsNotReplayed(t *testing.T) {
 		secrets = append(secrets, c.(string))
 	}
 	secrets = append(secrets, secret, uri, setup, active)
-	rows, err := e.owner.Query(context.Background(), `SELECT coalesce(response_body::text, '') || coalesce(response_headers::text, '') FROM idempotency_keys`)
+	rows, err := e.owner.Query(context.Background(), `SELECT coalesce(response_body::text, '') || coalesce(response_headers::text, '') FROM staff_idempotency_keys
+		UNION ALL SELECT coalesce(response_body::text, '') || coalesce(response_headers::text, '') FROM idempotency_keys`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +207,7 @@ func TestStaffSecretsNotReplayed(t *testing.T) {
 			t.Fatal(err)
 		}
 		if containsAny([]byte(s), secrets...) {
-			t.Fatalf("секрет в idempotency_keys: %s", s)
+			t.Fatalf("секрет в ключах идемпотентности: %s", s)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -214,7 +215,7 @@ func TestStaffSecretsNotReplayed(t *testing.T) {
 	}
 }
 
-// Повтор второго фактора с тем же ключом после обрыва: Set-Cookie (новый токен) в idempotency_keys не
+// Повтор второго фактора с тем же ключом после обрыва: Set-Cookie (новый токен) в staff_idempotency_keys не
 // сохраняется; прежний токен уже заменён — 401 без стирания cookie (новую повтор не вернёт: вход заново).
 func TestStaffReplayAfterNewToken(t *testing.T) {
 	e := newStaffEnv(t)
@@ -228,12 +229,12 @@ func TestStaffReplayAfterNewToken(t *testing.T) {
 	wantProblem(t, again, http.StatusUnauthorized, httpx.CodeUnauthenticated)
 	noCookie(t, again)
 	var headers string
-	if err := e.owner.QueryRow(context.Background(), `SELECT coalesce(response_headers::text, '') FROM idempotency_keys
+	if err := e.owner.QueryRow(context.Background(), `SELECT coalesce(response_headers::text, '') FROM staff_idempotency_keys
 		WHERE key = $1 AND response_status = 204`, key).Scan(&headers); err != nil {
 		t.Fatal(err)
 	}
 	if containsAny([]byte(headers), active, "Set-Cookie", hostCookie) {
-		t.Fatalf("токен в idempotency_keys: %s", headers)
+		t.Fatalf("токен в staff_idempotency_keys: %s", headers)
 	}
 }
 

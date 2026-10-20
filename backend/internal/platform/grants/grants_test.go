@@ -32,7 +32,7 @@ func TestRolePrivileges(t *testing.T) {
 			"geonames_imports, geonames_places, geonames_place_names, geonames_admin1, geonames_admin1_names, app_versions " +
 			"TO api, admin, worker",
 		"GRANT ALL ON staff_accounts, staff_roles, staff_role_cities, staff_mfa, staff_recovery_codes, staff_invites, " +
-			"staff_sessions, approvals TO api, admin, worker",
+			"staff_sessions, staff_idempotency_keys, approvals TO api, admin, worker",
 		"GRANT ALL ON SEQUENCE staff_probe_seq, approvals_probe_seq TO api, admin, worker",
 	} {
 		if _, err := db.ExecContext(ctx, ddl); err != nil {
@@ -86,9 +86,21 @@ func TestRolePrivileges(t *testing.T) {
 		{"worker", "DELETE FROM rate_limits WHERE tat < now()", true},
 		{"worker", "DELETE FROM humancheck_spent WHERE expires_at < now()", true},
 		{"worker", "DELETE FROM idempotency_keys WHERE expires_at < now()", true},
-		// admin-api — тоже край: лимиты входа сотрудников и идемпотентность мутаций админки
+		// admin-api — тоже край: лимиты входа сотрудников
 		{"admin", "INSERT INTO rate_limits (key, tat) VALUES ('probe', now()) ON CONFLICT (key) DO UPDATE SET tat = excluded.tat", true},
-		{"admin", "INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash) VALUES (gen_random_uuid(), 'probe', '/p', 'h')", true},
+		// ключи идемпотентности admin-api — своя таблица (финальное ревью I-1): ответы сотрудников с ПД
+		// читает, пишет и чистит только admin; api и worker — ничего (api иначе читал бы почты и имена,
+		// подменял сохранённый ответ и снимал ключ)
+		{"admin", "INSERT INTO staff_idempotency_keys (user_id, key, endpoint, request_hash) VALUES (gen_random_uuid(), 'probe', '/p', 'h')", true},
+		{"admin", "SELECT response_body FROM staff_idempotency_keys", true},
+		{"admin", "UPDATE staff_idempotency_keys SET response_status = 200 WHERE false", true},
+		{"admin", "DELETE FROM staff_idempotency_keys WHERE expires_at < now()", true},
+		{"api", "SELECT response_body FROM staff_idempotency_keys", false},
+		{"api", "INSERT INTO staff_idempotency_keys (user_id, key, endpoint, request_hash) VALUES (gen_random_uuid(), 'probe', '/p', 'h')", false},
+		{"api", "UPDATE staff_idempotency_keys SET response_body = '{}' WHERE false", false},
+		{"api", "DELETE FROM staff_idempotency_keys WHERE false", false},
+		{"worker", "SELECT 1 FROM staff_idempotency_keys", false},
+		{"worker", "DELETE FROM staff_idempotency_keys WHERE expires_at < now()", false},
 		// справочник geo (спека geo §3.8): API только читает справочник, источник без журнала и
 		// версии приложения
 		{"api", "SELECT 1 FROM countries", true},

@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wf/backend/internal/platform/idempotency"
 	"wf/backend/internal/platform/idempotency/idempotencydb"
 	"wf/backend/internal/platform/testkit/dbtest"
 )
@@ -15,55 +17,65 @@ import (
 // Чистка не удаляет ключ, который параллельно переиспользовала транзакция запроса (спека §6.4).
 // Подзапрос DELETE видит снимок до коммита Claim: без условия срока на внешнем DELETE строка,
 // уже продлённая на 24 ч, удалилась бы после снятия блокировки — и повтор исполнил бы действие
-// второй раз.
+// второй раз. Обе таблицы ключей: игроков и admin-api.
 func TestDeleteExpiredKeepsKeyReclaimedConcurrently(t *testing.T) {
-	ctx := context.Background()
-	pool := dbtest.NewPool(t)
-	user := uuid.New()
-	if _, err := pool.Exec(ctx, `INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash, created_at, expires_at)
-		VALUES ($1, 'k', '/old', 'old', now() - interval '25 hours', now() - interval '1 hour')`, user); err != nil {
-		t.Fatal(err)
+	claims := map[idempotency.Table]func(ctx context.Context, tx pgx.Tx, user uuid.UUID) error{
+		idempotency.Players: func(ctx context.Context, tx pgx.Tx, user uuid.UUID) error {
+			_, err := idempotencydb.New(tx).Claim(ctx, idempotencydb.ClaimParams{UserID: user, Key: "k", Endpoint: "/new", RequestHash: "new"})
+			return err
+		},
+		idempotency.Staff: func(ctx context.Context, tx pgx.Tx, user uuid.UUID) error {
+			_, err := idempotencydb.New(tx).StaffClaim(ctx, idempotencydb.StaffClaimParams{UserID: user, Key: "k", Endpoint: "/new", RequestHash: "new"})
+			return err
+		},
 	}
-
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := idempotencydb.New(tx).Claim(ctx, idempotencydb.ClaimParams{
-		UserID: user, Key: "k", Endpoint: "/new", RequestHash: "new",
-	}); err != nil {
-		t.Fatalf("Claim просроченного ключа: %v", err)
-	}
-
-	// чистка на другом соединении упирается в блокировку строки, взятую Claim
-	done := make(chan error, 1)
-	go func() {
-		_, err := idempotencydb.New(pool).DeleteExpired(ctx, 100)
-		done <- err
-	}()
-	waitForLockWaiter(ctx, t, pool)
-
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("DeleteExpired: %v", err)
+	eachTable(t, func(t *testing.T, tbl tableCase) {
+		ctx := context.Background()
+		pool := dbtest.NewPool(t)
+		user := uuid.New()
+		if _, err := pool.Exec(ctx, `INSERT INTO `+tbl.name+` (user_id, key, endpoint, request_hash, created_at, expires_at)
+			VALUES ($1, 'k', '/old', 'old', now() - interval '25 hours', now() - interval '1 hour')`, user); err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("DeleteExpired не завершился после коммита Claim")
-	}
 
-	var hash string
-	if err := pool.QueryRow(ctx, `SELECT request_hash FROM idempotency_keys
-		WHERE user_id = $1 AND key = 'k' AND expires_at > now()`, user).Scan(&hash); err != nil {
-		t.Fatalf("переиспользованный ключ удалён чисткой: %v", err)
-	}
-	if hash != "new" {
-		t.Fatalf("request_hash = %q, нужен new", hash)
-	}
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if err := claims[tbl.table](ctx, tx, user); err != nil {
+			t.Fatalf("Claim просроченного ключа: %v", err)
+		}
+
+		// чистка на другом соединении упирается в блокировку строки, взятую Claim
+		done := make(chan error, 1)
+		go func() {
+			_, err := idempotency.DeleteExpired(ctx, pool, tbl.table)
+			done <- err
+		}()
+		waitForLockWaiter(ctx, t, pool)
+
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("DeleteExpired: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("DeleteExpired не завершился после коммита Claim")
+		}
+
+		var hash string
+		if err := pool.QueryRow(ctx, `SELECT request_hash FROM `+tbl.name+`
+			WHERE user_id = $1 AND key = 'k' AND expires_at > now()`, user).Scan(&hash); err != nil {
+			t.Fatalf("переиспользованный ключ удалён чисткой: %v", err)
+		}
+		if hash != "new" {
+			t.Fatalf("request_hash = %q, нужен new", hash)
+		}
+	})
 }
 
 // waitForLockWaiter ждёт, пока в базе теста появится соединение, ожидающее блокировку.

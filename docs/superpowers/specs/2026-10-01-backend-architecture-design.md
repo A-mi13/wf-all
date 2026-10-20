@@ -102,7 +102,7 @@ backend/internal/<модуль>/
 | `moderation` | abuse_reports, sanctions, anomaly_flags | жалобы, решения о санкциях, очереди аномалий |
 | `notify` | notifications, notification_preferences, notification_settings, push_tokens | входящие, пуши, письма-уведомления, категории, тихие часы |
 | `ads` | ad_placements, ad_dismissals | рекламные блоки |
-| `platform` | audit_log, outbox, event_inbox, event_cursors, idempotency_keys, feature_flags, rate_limits, humancheck_spent, app_versions, approvals, river_* | общие механизмы (§6), минимальная версия приложения (`platform/appversion`, спека `geo` §3.5), каталог прав сотрудников (`platform/perm`) и подтверждение вдвоём (`platform/approvals`, §4.4) |
+| `platform` | audit_log, outbox, event_inbox, event_cursors, idempotency_keys, staff_idempotency_keys, feature_flags, rate_limits, humancheck_spent, app_versions, approvals, river_* | общие механизмы (§6), минимальная версия приложения (`platform/appversion`, спека `geo` §3.5), каталог прав сотрудников (`platform/perm`) и подтверждение вдвоём (`platform/approvals`, §4.4) |
 
 `audit_log` пишут все модули, но только через `platform/audit` — это API платформы, а не
 доступ к чужой таблице.
@@ -338,6 +338,11 @@ strict-хендлер. Ошибки механизмов — `httpx.ProblemError
 - Ключ — `(user_id, key)`, где `user_id` — id субъекта (`auth.SubjectFrom`: игрок или сотрудник; UUIDv7
   не совпадают); `request_hash` — SHA-256 от метода, **фактического** пути с параметрами, query и тела.
   Колонка `endpoint` хранит фактический путь.
+- Таблица — `idempotency.Config.Table`: публичный API — `idempotency_keys` (по умолчанию), admin-api —
+  `staff_idempotency_keys` с правами только роли `admin` (в ответах админки ПД сотрудников, а у `api` на
+  `idempotency_keys` DML; спека сотрудников §3.2–3.3). Запросы двух таблиц одинаковы; просроченные ключи
+  `idempotency_keys` чистит воркер (`idempotency.cleanup`), `staff_idempotency_keys` — тикер admin-api
+  (`idempotency.DeleteExpired`).
 - Строка ключа вставляется **внутри бизнес-транзакции**: дубль не закоммитится дважды даже
   при обрыве связи. Ключ вставляет хук `db.WithTxHook` первой операцией транзакции ручки
   (транзакцию хук получает аргументом); хук узнаёт исход транзакции (`after(committed)`), и

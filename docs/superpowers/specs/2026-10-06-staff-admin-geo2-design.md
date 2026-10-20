@@ -254,14 +254,20 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
     `system|operator|anonymous` (анонимные события — неудачный вход, анонимная повторная отправка);
   - индексы `(actor_staff_id, created_at DESC, id DESC) WHERE actor_staff_id IS NOT NULL`,
     `(scope_city_id, created_at DESC, id DESC) WHERE scope_city_id IS NOT NULL` (keyset `(created_at, id)`).
-- **`idempotency_keys`** не меняется: ключ — `(user_id = id субъекта, key)`. UUIDv7 игрока и сотрудника
-  не совпадают; комментарий колонки — «id субъекта: игрок или сотрудник».
+- **`staff_idempotency_keys`** (платформа, `platform/idempotency`, D19) — ключи идемпотентности admin-api;
+  схема и срок (24 ч) — как у `idempotency_keys`, `user_id` — id сотрудника. Своя таблица, а не общая
+  (финальное ревью ветки, I-1): в сохранённых ответах админки ПД сотрудников и подтверждений (почты, имена,
+  комментарии), а у роли `api` на `idempotency_keys` DML — она читала бы их, подменяла сохранённый ответ и
+  снимала ключ. admin-api собирает `idempotency.Middleware` с `Config{Table: idempotency.Staff}`; публичный
+  API — по умолчанию `idempotency_keys` (не меняется). Права — §3.3; чистка — §4.10.
 - **`feature_flags`** (план B): `version bigint`. Ключи флагов заводятся миграциями модулей, админ только
   переключает.
 
 ### 3.3. Права ролей БД (`grants.sql`)
 
 - `worker` — **ничего** на `staff_*` и `approvals`: всё о сотрудниках исполняет admin-api (§4.10).
+- `staff_idempotency_keys` (§3.2) — под той же веткой `staff_*`: DML только у `admin`; у `api` и `worker` —
+  ничего (страж `TestRolePrivileges`, сквозной — `TestStaffIdempotencyOwnTable`).
 - `admin` — права на служебные таблицы River, как у воркера (исполнение задач очереди `staff`, §4.10).
 - `admin`: `DELETE` на `city_slug_history` (план B; спека geo §3.8).
 - `api`: к `staff_*` и `approvals` доступа нет, sequence-прав тоже (страж §11).
@@ -554,7 +560,10 @@ admin-api запускает свой River-клиент с исполнител
     (раньше из сроков и гашения);
   - порции — `FOR UPDATE SKIP LOCKED`: строку под замком сценария чистка пропускает, а не ждёт;
   - помечает просроченные подтверждения `expired` (`ExpireDue`) и удаляет решённые старше 180 дней
-    (`PurgeDecided`).
+    (`PurgeDecided`);
+  - удаляет просроченные ключи идемпотентности admin-api (`idempotency.DeleteExpired(ctx, pool,
+    idempotency.Staff)`: порции по 1000, как у чистки `idempotency_keys` воркером; у воркера прав на
+    `staff_idempotency_keys` нет).
 
 ### 4.11. Ротация ключей
 
