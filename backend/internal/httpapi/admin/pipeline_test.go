@@ -444,6 +444,10 @@ func TestNewHandlerRejectsInsecureCookieOnHTTPS(t *testing.T) {
 	if _, err := admin.NewHandler(quiet(), o); err == nil || !strings.Contains(err.Error(), "ADMIN_COOKIE_SECURE") {
 		t.Fatalf("https + CookieSecure=false: err = %v", err)
 	}
+	// то же — до базы (cmd/admin-api зовёт рядом с ValidateOrigin)
+	if err := admin.ValidateCookieSecure("https://admin.wf.example", false); err == nil {
+		t.Fatal("ValidateCookieSecure(https, false): nil")
+	}
 	for _, c := range []struct {
 		origin string
 		secure bool
@@ -452,6 +456,9 @@ func TestNewHandlerRejectsInsecureCookieOnHTTPS(t *testing.T) {
 		o.Origin, o.CookieSecure = c.origin, c.secure
 		if _, err := admin.NewHandler(quiet(), o); err != nil {
 			t.Errorf("%s, Secure=%v: %v", c.origin, c.secure, err)
+		}
+		if err := admin.ValidateCookieSecure(c.origin, c.secure); err != nil {
+			t.Errorf("ValidateCookieSecure(%s, %v): %v", c.origin, c.secure, err)
 		}
 	}
 }

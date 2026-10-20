@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"strings"
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -113,10 +112,8 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	if err := ValidateOrigin(o.Origin); err != nil {
 		return nil, err
 	}
-	// cookie без Secure на https ушла бы и по http, а без префикса __Host- её подменили бы с поддомена:
-	// false — только dev по http (R6)
-	if strings.HasPrefix(o.Origin, "https://") && !o.CookieSecure {
-		return nil, fmt.Errorf("admin: ADMIN_ORIGIN %q — https, а ADMIN_COOKIE_SECURE=false: cookie сессии без Secure — только для dev по http", o.Origin)
+	if err := ValidateCookieSecure(o.Origin, o.CookieSecure); err != nil {
+		return nil, err
 	}
 	if err := ValidateAllowlist(o.IPAllowlist); err != nil {
 		return nil, err

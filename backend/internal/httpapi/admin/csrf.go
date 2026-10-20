@@ -81,6 +81,16 @@ func ValidateOrigin(s string) error {
 	return nil
 }
 
+// ValidateCookieSecure — ADMIN_COOKIE_SECURE=false только с http-origin (dev, R6): на https cookie сессии без
+// Secure ушла бы и по http, а без префикса __Host- её подменили бы с поддомена. Проверка на старте, до базы
+// (как ValidateOrigin); NewHandler проверяет её же.
+func ValidateCookieSecure(origin string, secure bool) error {
+	if strings.HasPrefix(origin, "https://") && !secure {
+		return fmt.Errorf("admin: ADMIN_ORIGIN %q — https, а ADMIN_COOKIE_SECURE=false: cookie сессии без Secure — только для dev по http", origin)
+	}
+	return nil
+}
+
 // ascii — только печатные символы ASCII.
 func ascii(s string) bool {
 	for i := range len(s) {
