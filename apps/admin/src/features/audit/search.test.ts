@@ -63,6 +63,20 @@ describe('parseAuditSearch', () => {
     });
   });
 
+  // Ревью уборки №7 m3: action на «.» или «_» сервер понимает как начало строки (префикс), а фильтр
+  // «Действие» — только точный код; пустой сегмент — не код. Такое действие из адреса отбрасывается.
+  test('действие-префикс (на «.» или «_») и пустой сегмент — отброшены', () => {
+    expect(parseAuditSearch({ action: 'staff.login_' })).toEqual({});
+    expect(parseAuditSearch({ action: 'staff.' })).toEqual({});
+    expect(parseAuditSearch({ action: 'platform.approval_' })).toEqual({});
+    expect(parseAuditSearch({ action: 'staff..login' })).toEqual({});
+    expect(parseAuditSearch({ action: 'staff..' })).toEqual({});
+    expect(parseAuditSearch({ tab: 'staff', action: 'staff.login_' })).toEqual({ tab: 'staff' });
+    expect(parseAuditSearch({ action: 'staff.login_failed' })).toEqual({
+      action: 'staff.login_failed',
+    });
+  });
+
   test('«по» раньше «с» — «по» отброшен (сервер ответил бы 400)', () => {
     expect(parseAuditSearch({ from: '2026-10-13', to: '2026-10-01' })).toEqual({
       from: '2026-10-13',

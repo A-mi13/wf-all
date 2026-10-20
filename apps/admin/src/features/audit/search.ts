@@ -19,7 +19,7 @@ export const SECTIONS: readonly AuditSection[] = ['staff', 'approvals', 'directo
 
 export type AuditSearch = {
   tab?: AuditSection; // без вкладки — «Все»
-  action?: string; // код действия (или его начало) — важнее вкладки
+  action?: string; // точный код действия — важнее вкладки
   actor?: string; // id сотрудника-автора
   object_type?: string;
   object_id?: string;
@@ -30,7 +30,11 @@ export type AuditSearch = {
 export type AuditQuery = NonNullable<operations['listAudit']['parameters']['query']>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ACTION = /^[a-z][a-z0-9_]*(\.[a-z0-9_]*)*$/;
+// Точный код действия: сегменты через точку, без пустых, не на «.» и «_» — такое значение сервер понял
+// бы как начало строки (action_prefix, контракт 305026c), а фильтр «Действие» — только точный код (ревью
+// уборки №7 m3).
+const ACTION = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/;
+const isAction = (v: string) => v.length <= 100 && ACTION.test(v) && !/[._]$/.test(v);
 const OBJECT_TYPE = /^[a-z][a-z0-9_]{0,63}$/;
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -53,7 +57,7 @@ const str = (v: unknown, ok: (s: string) => boolean): string | undefined =>
 export function parseAuditSearch(s: Record<string, unknown>): AuditSearch {
   const out: AuditSearch = {};
   if (isSection(s.tab)) out.tab = s.tab;
-  const action = str(s.action, (v) => v.length <= 100 && ACTION.test(v));
+  const action = str(s.action, isAction);
   // действие из другого раздела, чем вкладка, — не берём: вкладка видна, а искал бы чужое
   if (action && (!out.tab || action.startsWith(AUDIT_SECTIONS[out.tab]))) out.action = action;
   const actor = str(s.actor, isUuid);
