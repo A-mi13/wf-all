@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/queue"
 	"wf/backend/internal/platform/testkit/rivertest"
 	"wf/backend/internal/staff"
@@ -55,15 +56,17 @@ func TestRescuerKeepsWorkerJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel, done := e.startServer()
-	waitJobState(t, e.owner, jobID, "retryable")
+	waitRescued(t, e.owner, jobID)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("остановка: %v", err)
 	}
 }
 
-// waitJobState — состояние задачи за 90 с (рескьюер: выборы лидера, задержка старта, первый проход сразу).
-func waitJobState(t *testing.T, pool *pgxpool.Pool, id int64, want string) {
+// waitRescued — задача возвращена в очередь за 90 с (рескьюер: выборы лидера, задержка старта, первый проход сразу):
+// retryable или уже available (планировщик лидера переводит retryable по сроку повтора — её исполнитель в этом тесте не
+// запущен); discarded — провал сразу.
+func waitRescued(t *testing.T, pool *pgxpool.Pool, id int64) {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	for {
@@ -71,12 +74,35 @@ func waitJobState(t *testing.T, pool *pgxpool.Pool, id int64, want string) {
 		if err := pool.QueryRow(context.Background(), `SELECT state FROM river_job WHERE id = $1`, id).Scan(&state); err != nil {
 			t.Fatal(err)
 		}
-		if state == want {
+		if state == "retryable" || state == "available" {
 			return
 		}
 		if state == "discarded" || time.Now().After(deadline) {
-			t.Fatalf("задача %d: %s, ждали %s", id, state, want)
+			t.Fatalf("задача %d: %s, ждали retryable или available", id, state)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// Очереди видов admin-api (m-r2 ревью раунда 1): staff.mail ставится в очередь, которую обслуживает исполняющий
+// клиент admin-api (staffQueues), и которой нет у воркера (queue.Config); очереди двух бинарников не пересекаются —
+// иначе задачу одного взяла бы заглушка другого.
+func TestAdminKindsQueues(t *testing.T) {
+	queues := map[string]string{"staff.mail": staff.MailArgs{}.InsertOpts().Queue}
+	own, worker := staffQueues(), queue.Config(config.Queues{})
+	for q := range own {
+		if _, clash := worker[q]; clash {
+			t.Errorf("очередь %q обслуживают и admin-api, и воркер", q)
+		}
+	}
+	for _, k := range queue.AdminKinds() {
+		q, ok := queues[k.Name]
+		if !ok {
+			t.Errorf("%s: нет строки в таблице очередей теста", k.Name)
+			continue
+		}
+		if _, ok := own[q]; !ok {
+			t.Errorf("%s ставится в очередь %q — её не обслуживает admin-api", k.Name, q)
+		}
 	}
 }

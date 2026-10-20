@@ -295,23 +295,61 @@ func TestRekeyUnreadable(t *testing.T) {
 	}
 }
 
-// Ключи базы, которых нет в кольце (отказ 1 ревью 10c): сколько разных key_id из staff_mfa, staff_recovery_codes и
-// живых кодов приглашений отсутствует в кольце этого процесса. Своё кольцо — 0; чужие ключи считаются по разу.
-func TestUnknownKeys(t *testing.T) {
+// Сверка ключей базы с кольцом (отказ 1 ревью 10c, I-r1): сколько разных key_id секретов staff (секреты TOTP,
+// НЕИСПОЛЬЗОВАННЫЕ резервные коды — как у rekey, живые коды приглашений) в кольце есть и сколько нет.
+func TestKeyCheck(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
+	check := func(name string, wantKnown, wantUnknown int) {
+		t.Helper()
+		known, unknown, err := e.app.KeyCheck(ctx)
+		if err != nil || known != wantKnown || unknown != wantUnknown {
+			t.Fatalf("%s: известных %d, чужих %d (%v), ждали %d и %d", name, known, unknown, err, wantKnown, wantUnknown)
+		}
+	}
+	check("пустая база", 0, 0)
 	m := e.addMember("a@wf.example", memberOpts{}) // секрет и коды — текущим ключом кольца
-	if n, err := e.app.UnknownKeys(ctx); err != nil || n != 0 {
-		t.Fatalf("своё кольцо: %d, %v", n, err)
-	}
+	check("своё кольцо", 1, 0)
+	e.exec(`UPDATE staff_recovery_codes SET key_id = 'AAAAAAAAAAA', used_at = now() WHERE staff_id = $1`, m.ID)
+	check("использованные коды на чужом ключе не в счёт", 1, 0)
 	e.exec(`UPDATE staff_mfa SET key_id = 'AAAAAAAAAAA' WHERE staff_id = $1`, m.ID)
-	e.exec(`UPDATE staff_recovery_codes SET key_id = 'AAAAAAAAAAA' WHERE staff_id = $1`, m.ID)
-	if n, err := e.app.UnknownKeys(ctx); err != nil || n != 1 {
-		t.Fatalf("один чужой ключ: %d, %v", n, err)
-	}
+	e.exec(`UPDATE staff_recovery_codes SET used_at = NULL WHERE staff_id = $1`, m.ID)
+	check("секрет и коды на чужом ключе", 0, 1)
 	inv, _ := e.invitee("i@wf.example", memberOpts{Role: "support"}, purposeInvite)
+	check("живое приглашение своим ключом", 1, 1)
 	e.exec(`UPDATE staff_invites SET code_key_id = 'BBBBBBBBBBB' WHERE staff_id = $1`, inv.ID)
-	if n, err := e.app.UnknownKeys(ctx); err != nil || n != 2 {
-		t.Fatalf("два чужих ключа: %d, %v", n, err)
+	check("два чужих ключа", 0, 2)
+}
+
+// Штатная ротация (I-r1, сценарий А): ключ K_old → K_new первым → rekey; сотрудник использовал резервный код на
+// K_old (использованные rekey не трогает и не считает); после удаления K_old итог rekey — нули, и сверка ключей
+// команды тоже чиста — команда оператора не должна отказывать с верным кольцом.
+func TestKeyCheckAfterRotation(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	oldRing, oldKey := newRing(t)
+	e.deps.Keys, e.ring = oldRing, oldRing
+	e.app = app.New(e.deps)
+	m := e.addMember("a@wf.example", memberOpts{}) // секрет и коды — ключом K_old
+	rotated, newKey := newRing(t, oldKey)
+	if _, err := e.withRing(rotated).Rekey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// сотрудник перевыпустил коды: старые на K_old — использованы (как после входа резервным кодом)
+	e.exec(`UPDATE staff_recovery_codes SET used_at = now() WHERE staff_id = $1`, m.ID)
+	onlyNew, err := keys.NewRing([]string{newKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	na := e.withRing(onlyNew)
+	rep, err := na.Rekey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.MFAOnOldKeys+rep.InvitesOnOldKeys+rep.RecoveryOnOldKeys+len(rep.UnreadableMFA)+len(rep.UnreadableInvites) != 0 {
+		t.Fatalf("rekey без K_old не чистый: %+v", rep)
+	}
+	if known, unknown, err := na.KeyCheck(ctx); err != nil || unknown != 0 || known != 1 {
+		t.Fatalf("сверка после ротации: известных %d, чужих %d (%v) — ждали 1 и 0", known, unknown, err)
 	}
 }

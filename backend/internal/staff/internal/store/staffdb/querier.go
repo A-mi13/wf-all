@@ -101,8 +101,9 @@ type Querier interface {
 	ListLockRecipients(ctx context.Context) ([]uuid.UUID, error)
 	// Перешифровка (§4.11): учётки с секретом TOTP не на текущем ключе.
 	ListMFAOnOldKeys(ctx context.Context, currentKey string) ([]uuid.UUID, error)
-	// Ключи кольца, на которых лежат секреты staff (секреты TOTP, резервные коды, живые коды приглашений): команда
-	// оператора сверяет их со своим кольцом — чужие ключи значат «не те ADMIN_STAFF_SECRET_KEYS».
+	// Ключи кольца, на которых лежат секреты staff, — те же источники, что считает rekey: секреты TOTP, НЕИСПОЛЬЗОВАННЫЕ
+	// резервные коды (как CountRecoveryOnOldKeys), живые коды приглашений (код есть только у живого). Команда оператора
+	// сверяет их со своим кольцом (App.KeyCheck).
 	ListStoredKeyIDs(ctx context.Context) ([]string, error)
 	// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка, роль и города модератора.
 	LoadSession(ctx context.Context, tokenHash []byte) (LoadSessionRow, error)

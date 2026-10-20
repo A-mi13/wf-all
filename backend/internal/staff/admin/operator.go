@@ -96,10 +96,10 @@ func onlyIf(show bool) func(code string, err error) (string, error) {
 	}
 }
 
-// OperatorUnknownKeys — сколько ключей базы нет в кольце команды.
-func (h *Handler) OperatorUnknownKeys(ctx context.Context) (int, error) {
+// OperatorKeyCheck — сколько ключей секретов staff в базе есть в кольце команды и сколько нет (App.KeyCheck).
+func (h *Handler) OperatorKeyCheck(ctx context.Context) (known, unknown int, err error) {
 	if h.app == nil {
-		return 0, errNotBuilt
+		return 0, 0, errNotBuilt
 	}
-	return h.app.UnknownKeys(ctx)
+	return h.app.KeyCheck(ctx)
 }

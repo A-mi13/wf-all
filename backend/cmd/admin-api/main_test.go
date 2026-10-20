@@ -439,3 +439,36 @@ func TestOperatorRefusesForeignKeys(t *testing.T) {
 		t.Fatalf("кольцо с новым ключом первым: %v", err)
 	}
 }
+
+// Потерянный ключ (I-r1, сценарий Б ревью раунда 1): секрет TOTP владельца — на ключе, которого уже нет нигде, а
+// остальные секреты базы — на ключе кольца. Документированный выход — reset-access — выполняется (код 0) с
+// предупреждением в stderr (число чужих ключей, без самих ключей); отказ — только когда ни один ключ базы не в
+// кольце (TestOperatorRefusesForeignKeys).
+func TestOperatorWarnsOnPartlyUnknownKeys(t *testing.T) {
+	e := newTestEnv(t)
+	if _, _, err := e.operator("bootstrap", "--email", "anna@wf.example", "--name", "Анна В."); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.operator("bootstrap", "--email", "boris@wf.example", "--name", "Борис"); err != nil {
+		t.Fatal(err)
+	}
+	// Анна — активный владелец с секретом TOTP на потерянном ключе
+	e.exec(`UPDATE staff_accounts SET status = 'active', password_hash = '$argon2id$stub' WHERE email = 'anna@wf.example'`)
+	e.exec(`INSERT INTO staff_mfa (staff_id, secret_enc, key_id, confirmed_at)
+		SELECT id, decode('00', 'hex'), 'AAAAAAAAAAA', now() FROM staff_accounts WHERE email = 'anna@wf.example'`)
+	e.exec(`UPDATE staff_invites SET revoked_at = now(), code_enc = NULL, code_key_id = NULL
+		WHERE staff_id = (SELECT id FROM staff_accounts WHERE email = 'anna@wf.example')`)
+	out, logOut, err := e.operator("reset-access", "--email", "anna@wf.example", "--print-code")
+	if err != nil {
+		t.Fatalf("reset-access при частично чужих ключах: %v", err)
+	}
+	if !strings.Contains(logOut, "ADMIN_STAFF_SECRET_KEYS") || !strings.Contains(logOut, "(ключей: 1)") {
+		t.Fatalf("нет предупреждения в stderr:\n%s", logOut)
+	}
+	if strings.Contains(logOut, "AAAAAAAAAAA") || strings.Contains(logOut, e.key) {
+		t.Fatalf("ключ в предупреждении:\n%s", logOut)
+	}
+	if code := e.liveCode("anna@wf.example"); !strings.Contains(out, code) {
+		t.Fatalf("reset-access не выпустил код:\n%s", out)
+	}
+}

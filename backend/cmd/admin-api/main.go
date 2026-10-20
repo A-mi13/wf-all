@@ -200,7 +200,7 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 func background(log *slog.Logger, pool *pgxpool.Pool, a assembly, sender mail.Sender) (func(context.Context) error, error) {
 	workers := allWorkers(a.deps, sender)
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:       map[string]river.QueueConfig{queue.Staff: {MaxWorkers: staffMailWorkers}},
+		Queues:       staffQueues(),
 		Workers:      workers,
 		PeriodicJobs: periodic.Jobs(),
 		Logger:       log,
@@ -320,7 +320,7 @@ func runCommand(ctx context.Context, c command, cfg config.Admin, ring *keys.Rin
 	if err != nil {
 		return err
 	}
-	return execCommand(ctx, c, a.staff, out)
+	return execCommand(ctx, c, a.staff, out, logOut)
 }
 
 // queuedNote — что делать с письмом: команда его не отправляет.
@@ -328,10 +328,10 @@ const queuedNote = "письмо поставлено в очередь staff �
 
 // execCommand — подкоманда на собранном хендлере. Почта в выводе и ошибках — маской (stderr и stdout команды
 // попадают в логи хостинга), код приглашения — только с --print-code и только в out.
-func execCommand(ctx context.Context, c command, h *staffadmin.Handler, out io.Writer) error {
+func execCommand(ctx context.Context, c command, h *staffadmin.Handler, out, errOut io.Writer) error {
 	who := logx.Mask(c.email)
 	if c.name == "bootstrap" || c.name == "invite-resend" || c.name == "reset-access" {
-		if err := checkKeys(ctx, h); err != nil {
+		if err := checkKeys(ctx, h, errOut); err != nil {
 			return err
 		}
 	}
@@ -447,19 +447,32 @@ func allWorkers(d staff.Deps, sender mail.Sender) *river.Workers {
 	return workers
 }
 
-// checkKeys — команда, шифрующая код приглашения, отказывает до записи, если в базе есть секреты на ключах,
-// которых нет в её ADMIN_STAFF_SECRET_KEYS (отказ 1 ревью 10c): это признак «не то кольцо» (другая машина,
-// старый .env). Отказ, а не предупреждение: команда погасила бы живое приглашение и выпустила код на ключе,
-// которого может не быть у сервера — письмо отменится, принять код нельзя. Ключи и их id не печатаются.
-func checkKeys(ctx context.Context, h *staffadmin.Handler) error {
-	n, err := h.OperatorUnknownKeys(ctx)
+// checkKeys — сверка ключей базы с кольцом команды, шифрующей код приглашения (отказ 1 ревью 10c, I-r1):
+//   - в базе есть ключи и НИ ОДИН не в кольце — «не то кольцо» (другая машина, старый .env): отказ до записи, код 1 —
+//     иначе команда погасила бы живое приглашение и выпустила код на ключе, которого нет у сервера;
+//   - часть ключей не в кольце — предупреждение в stderr, команда выполняется: это документированный выход при
+//     потерянном ключе (reset-access, invite-resend выпускают новый код текущим ключом).
+//
+// Чего сверка не видит: пустую базу и лишний (новый) ключ в кольце оператора — кольцо команды должно совпадать с
+// кольцом сервера, порядок тоже. Ключи и их id не печатаются — только число.
+func checkKeys(ctx context.Context, h *staffadmin.Handler, errOut io.Writer) error {
+	known, unknown, err := h.OperatorKeyCheck(ctx)
 	if err != nil {
 		return err
 	}
-	if n > 0 {
-		return fmt.Errorf("в базе есть секреты на ключах, которых нет в ADMIN_STAFF_SECRET_KEYS этой команды (ключей: %d) — "+
-			"похоже, кольцо не то: запустите команду с кольцом сервера (все его ключи, текущий первым); "+
-			"если ключ убран намеренно — сначала rekey с прежним кольцом", n)
+	switch {
+	case unknown > 0 && known == 0:
+		return fmt.Errorf("ни один ключ, на котором лежат секреты сотрудников в базе, не входит в ADMIN_STAFF_SECRET_KEYS "+
+			"этой команды (ключей базы: %d) — кольцо не то: запустите команду с кольцом сервера (все его ключи, тот же порядок)", unknown)
+	case unknown > 0:
+		fmt.Fprintf(errOut, "предупреждение: часть секретов сотрудников лежит на ключах, которых нет в ADMIN_STAFF_SECRET_KEYS "+
+			"этой команды (ключей: %d) — если ключ потерян, это ожидаемо (reset-access и invite-resend выпускают новый код "+
+			"текущим ключом); если нет — проверьте, что кольцо команды совпадает с кольцом сервера\n", unknown)
 	}
 	return nil
+}
+
+// staffQueues — очереди исполняющего клиента admin-api: только staff (у воркера её нет — TestAdminKindsQueues).
+func staffQueues() map[string]river.QueueConfig {
+	return map[string]river.QueueConfig{queue.Staff: {MaxWorkers: staffMailWorkers}}
 }

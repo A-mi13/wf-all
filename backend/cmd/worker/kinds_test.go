@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	geojobs "wf/backend/internal/geo/jobs"
+	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/humancheck"
 	"wf/backend/internal/platform/idempotency"
@@ -87,15 +88,17 @@ func TestRescuerKeepsAdminJobs(t *testing.T) {
 	t.Cleanup(cancel)
 	done := make(chan error, 1)
 	go func() { done <- run(ctx, nil, append(mailEnv, "WORKER_DATABASE_URL="+url), io.Discard, io.Discard) }()
-	waitJobState(t, pool, jobID, "retryable")
+	waitRescued(t, pool, jobID)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("остановка: %v", err)
 	}
 }
 
-// waitJobState — состояние задачи за 90 с (рескьюер: выборы лидера, задержка старта, первый проход сразу).
-func waitJobState(t *testing.T, pool *pgxpool.Pool, id int64, want string) {
+// waitRescued — задача возвращена в очередь за 90 с (рескьюер: выборы лидера, задержка старта, первый проход сразу):
+// retryable или уже available (планировщик лидера переводит retryable по сроку повтора — её исполнитель в этом тесте не
+// запущен); discarded — провал сразу.
+func waitRescued(t *testing.T, pool *pgxpool.Pool, id int64) {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	for {
@@ -103,12 +106,39 @@ func waitJobState(t *testing.T, pool *pgxpool.Pool, id int64, want string) {
 		if err := pool.QueryRow(context.Background(), `SELECT state FROM river_job WHERE id = $1`, id).Scan(&state); err != nil {
 			t.Fatal(err)
 		}
-		if state == want {
+		if state == "retryable" || state == "available" {
 			return
 		}
 		if state == "discarded" || time.Now().After(deadline) {
-			t.Fatalf("задача %d: %s, ждали %s", id, state, want)
+			t.Fatalf("задача %d: %s, ждали retryable или available", id, state)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// Очереди видов воркера (m-r2 ревью раунда 1): каждая задача из queue.WorkerKinds ставится в очередь, которую
+// обслуживает воркер (queue.Config), и не в очередь admin-api (queue.Staff) — иначе её взяла бы заглушка чужого
+// бинарника. Таблица теста — по виду на строку queue.WorkerKinds (новый вид без строки — падение).
+func TestWorkerKindsQueues(t *testing.T) {
+	queues := map[string]string{
+		"platform.ping":       queue.PingArgs{}.InsertOpts().Queue,
+		"events.deliver":      events.DeliverArgs{}.InsertOpts().Queue,
+		"events.cleanup":      events.CleanupArgs{}.InsertOpts().Queue,
+		"ratelimit.cleanup":   ratelimit.CleanupArgs{}.InsertOpts().Queue,
+		"humancheck.cleanup":  humancheck.CleanupArgs{}.InsertOpts().Queue,
+		"idempotency.cleanup": idempotency.CleanupArgs{}.InsertOpts().Queue,
+		"geo.import":          geojobs.ImportArgs{}.InsertOpts().Queue,
+		"mail.send":           mail.SendArgs{}.InsertOpts().Queue,
+	}
+	served := queue.Config(config.Queues{})
+	for _, k := range queue.WorkerKinds() {
+		q, ok := queues[k.Name]
+		if !ok {
+			t.Errorf("%s: нет строки в таблице очередей теста", k.Name)
+			continue
+		}
+		if _, ok := served[q]; !ok || q == queue.Staff {
+			t.Errorf("%s ставится в очередь %q — её не обслуживает воркер", k.Name, q)
+		}
 	}
 }

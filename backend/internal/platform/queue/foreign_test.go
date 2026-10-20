@@ -90,7 +90,8 @@ func TestForeignTimeoutRespected(t *testing.T) {
 		return s
 	}
 	deadline := time.Now().Add(90 * time.Second)
-	for state(control) != "retryable" {
+	// retryable или уже available: планировщик лидера переводит retryable по сроку повтора
+	for s := state(control); s != "retryable" && s != "available"; s = state(control) {
 		if time.Now().After(deadline) {
 			t.Fatalf("контрольная задача: %s, рескьюер не прошёл за 90 с", state(control))
 		}

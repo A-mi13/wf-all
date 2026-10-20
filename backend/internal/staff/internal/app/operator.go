@@ -345,19 +345,21 @@ func (a *App) OperatorDisable(ctx context.Context, email string) error {
 	})
 }
 
-// UnknownKeys — сколько разных ключей, на которых лежат секреты staff (секреты TOTP, резервные коды, живые коды
-// приглашений), нет в кольце этого процесса (отказ 1 ревью 10c: команда оператора с «не тем» кольцом). Без замков —
-// проверка до сценария; id ключей наружу не отдаются.
-func (a *App) UnknownKeys(ctx context.Context) (int, error) {
+// KeyCheck — сверка ключей, на которых лежат секреты staff, с кольцом этого процесса (отказ 1 ревью 10c): сколько
+// разных key_id есть в кольце (known) и сколько нет (unknown). Источники — те же, что считает rekey: секреты TOTP,
+// НЕИСПОЛЬЗОВАННЫЕ резервные коды, живые коды приглашений (использованные коды rekey не трогает — иначе после штатной
+// ротации сверка видела бы удалённый ключ). Без замков — проверка до сценария; id ключей наружу не отдаются.
+func (a *App) KeyCheck(ctx context.Context) (known, unknown int, err error) {
 	ids, err := staffdb.New(a.pool).ListStoredKeyIDs(ctx)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	n := 0
 	for _, id := range ids {
-		if !a.keys.Has(id) {
-			n++
+		if a.keys.Has(id) {
+			known++
+		} else {
+			unknown++
 		}
 	}
-	return n, nil
+	return known, unknown, nil
 }

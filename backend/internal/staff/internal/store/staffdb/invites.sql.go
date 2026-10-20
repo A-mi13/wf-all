@@ -452,13 +452,14 @@ func (q *Queries) ListMFAOnOldKeys(ctx context.Context, currentKey string) ([]uu
 const listStoredKeyIDs = `-- name: ListStoredKeyIDs :many
 SELECT key_id FROM staff_mfa
 UNION
-SELECT key_id FROM staff_recovery_codes
+SELECT key_id FROM staff_recovery_codes WHERE used_at IS NULL
 UNION
 SELECT code_key_id::text FROM staff_invites WHERE code_key_id IS NOT NULL
 `
 
-// Ключи кольца, на которых лежат секреты staff (секреты TOTP, резервные коды, живые коды приглашений): команда
-// оператора сверяет их со своим кольцом — чужие ключи значат «не те ADMIN_STAFF_SECRET_KEYS».
+// Ключи кольца, на которых лежат секреты staff, — те же источники, что считает rekey: секреты TOTP, НЕИСПОЛЬЗОВАННЫЕ
+// резервные коды (как CountRecoveryOnOldKeys), живые коды приглашений (код есть только у живого). Команда оператора
+// сверяет их со своим кольцом (App.KeyCheck).
 func (q *Queries) ListStoredKeyIDs(ctx context.Context) ([]string, error) {
 	rows, err := q.db.Query(ctx, listStoredKeyIDs)
 	if err != nil {
