@@ -8,6 +8,7 @@ import {
   MAILPIT,
   MAILPIT_BIN,
   MAILPIT_URL,
+  mailpitEnv,
   origin,
   PAIRS,
   type ProjectName,
@@ -36,6 +37,7 @@ const servers: NonNullable<PlaywrightTestConfig['webServer']> = [
     // без --database: база в памяти, исчезает с процессом — каждый прогон с пустым ящиком
     command: `"${MAILPIT_BIN}" --listen 127.0.0.1:${MAILPIT.ui} --smtp 127.0.0.1:${MAILPIT.smtp}`,
     url: `${MAILPIT_URL}/readyz`,
+    env: mailpitEnv() as Record<string, string>,
     reuseExistingServer: false,
     timeout: 30_000,
     stdout: 'ignore',

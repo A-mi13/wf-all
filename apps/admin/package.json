@@ -10,7 +10,7 @@
     "gen": "pnpm --filter @wf/contracts gen:admin",
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.e2e.json",
     "lint": "eslint .",
     "test": "vitest run",
     "e2e": "playwright test"

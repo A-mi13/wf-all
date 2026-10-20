@@ -3,6 +3,9 @@
 # Mailpit. Запуск — ./task admin:e2e (аргументы после -- уходят в playwright test).
 #
 # Готовит то, что нужно ДО webServer Playwright (он стартует раньше globalSetup):
+#   0. замок прогона .tools/e2e/run.lock (ревью Task 16, M4): второй прогон, стартовавший одновременно,
+#      прошёл бы проверку портов и пересоздал бы базу и exe под первым; замок держится до конца прогона,
+#      брошенный (процесс с его PID умер) — забирается;
 #   1. порты e2e свободны (свои, чтобы не задеть ./task dev: Vite 5174/5175, admin-api 18181/18182,
 #      Mailpit 18026/11026);
 #   2. база wf_e2e на том же кластере пересоздана (DROP … WITH (FORCE)): чистка и истечение подтверждений
@@ -16,16 +19,26 @@
 # Кластер: локально — scripts/pg.sh (127.0.0.1:WF_PG_PORT, суперпользователь postgres без пароля); в CI —
 # сервис postgis/postgis:18-3.6 с ролями и расширениями из deploy/dev/initdb/20_wf.sql
 # (WF_E2E_PG_SUPERUSER_URL=postgres://postgres:postgres@localhost:15432/postgres).
+# Адреса ролей migrator и admin — с того же хоста и порта, что WF_E2E_PG_SUPERUSER_URL (ревью Task 16, M6).
 # Проекты браузеров — WF_E2E_PROJECTS (по умолчанию chromium,webkit; CI — chromium).
+# Две пары admin-api (Chromium и WebKit) работают на одной базе и обе исполняют очередь staff (River):
+# письмо приглашения может уйти из пары другого браузера, и ссылка в нём — на чужой origin. Сценарии
+# берут из письма только код, не ссылку (ревью Task 16, M5); сценарий по ссылке — только с одной парой
+# (WF_E2E_PROJECTS=chromium) или своей базой на пару.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 die() { echo "e2e-admin: $*" >&2; exit 1; }
 
-PG_PORT="${WF_PG_PORT:-15432}"
-case "$PG_PORT" in '' | *[!0-9]*) die "WF_PG_PORT — не число" ;; esac
-PG_HOST=127.0.0.1
-SUPER_URL="${WF_E2E_PG_SUPERUSER_URL:-postgres://postgres@${PG_HOST}:${PG_PORT}/postgres}"
+LOCAL_PORT="${WF_PG_PORT:-15432}"
+case "$LOCAL_PORT" in '' | *[!0-9]*) die "WF_PG_PORT — не число" ;; esac
+SUPER_URL="${WF_E2E_PG_SUPERUSER_URL:-postgres://postgres@127.0.0.1:${LOCAL_PORT}/postgres}"
+# хост и порт ролей migrator и admin — из того же адреса, что у суперпользователя
+read -r PG_HOST PG_PORT < <(node -e '
+  const u = new URL(process.argv[1]);
+  process.stdout.write(`${u.hostname || "127.0.0.1"} ${u.port || "5432"}
+`);
+' "$SUPER_URL") || die "WF_E2E_PG_SUPERUSER_URL — не адрес postgres://"
 DB=wf_e2e
 PROJECTS="${WF_E2E_PROJECTS:-chromium,webkit}"
 
@@ -37,6 +50,26 @@ PSQL=psql
 [ -f ".tools/pg/pgsql/bin/psql$exe" ] && PSQL=".tools/pg/pgsql/bin/psql$exe"
 command -v "$PSQL" >/dev/null || die "нет psql (локально — bash scripts/pg.sh install)"
 [ -f ".tools/bin/mailpit$exe" ] || die "нет .tools/bin/mailpit — сначала bash scripts/bootstrap.sh"
+
+# 0. Замок прогона: mkdir атомарен; в замке — PID держателя. Держатель жив — отказ; умер (брошенный
+# замок после kill) — замок забирается. Снимается при любом выходе (trap), поэтому без exec ниже.
+LOCK=.tools/e2e/run.lock
+mkdir -p .tools/e2e
+if ! mkdir "$LOCK" 2>/dev/null; then
+  holder=$(cat "$LOCK/pid" 2>/dev/null || true)
+  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+    die "уже идёт прогон e2e (PID $holder, замок $LOCK) — дождитесь его конца"
+  fi
+  echo "e2e-admin: замок $LOCK брошен (PID ${holder:-?} не жив) — забираю" >&2
+  rm -f "$LOCK/pid"
+  rmdir "$LOCK" 2>/dev/null || true
+  mkdir "$LOCK" || die "замок $LOCK занят другим прогоном"
+fi
+echo $$ >"$LOCK/pid"
+unlock() { rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null || true; }
+trap unlock EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # 1. Порты: занятый — понятная ошибка до сборки (чужие процессы не трогаем)
 ports="18026 11026"
@@ -71,7 +104,6 @@ if ! out=$(cd backend && MIGRATOR_DATABASE_URL="postgres://migrator:migrator@${P
 fi
 
 # 4. admin-api
-mkdir -p .tools/e2e
 (cd backend && go build -o "../.tools/e2e/admin-api$exe" ./cmd/admin-api)
 
 # 5. Окружение прогона: без dev-настроек админки, с базой и одноразовым ключом e2e
@@ -84,4 +116,5 @@ export WF_E2E_ADMIN_DATABASE_URL="postgres://admin:admin@${PG_HOST}:${PG_PORT}/$
 export WF_E2E_PROJECTS="$PROJECTS"
 
 cd apps/admin
-exec pnpm exec playwright test "$@"
+# не exec: замок снимает trap EXIT этого процесса после конца прогона
+pnpm exec playwright test "$@"

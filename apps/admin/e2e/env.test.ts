@@ -1,6 +1,15 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { adminApiEnv, cleanEnv, cookieName, enabledProjects, PAIRS, pairOf, viteEnv } from './env';
+import {
+  adminApiEnv,
+  cleanEnv,
+  cookieName,
+  enabledProjects,
+  mailpitEnv,
+  PAIRS,
+  pairOf,
+  viteEnv,
+} from './env';
 
 describe('окружение e2e', () => {
   afterEach(() => {
@@ -55,6 +64,23 @@ describe('окружение e2e', () => {
     expect(viteEnv(PAIRS.webkit).WF_E2E_VITE_CACHE_DIR).not.toBe(
       viteEnv(PAIRS.chromium).WF_E2E_VITE_CACHE_DIR,
     );
+  });
+
+  // Ревью Task 16, M7: ключ сотрудников и строка подключения прогона нужны только admin-api (уже как
+  // ADMIN_*). Playwright складывает окружение сервера поверх process.env, поэтому сырые WF_E2E_* у Vite,
+  // Mailpit и самого admin-api затираются пустыми значениями, а не просто не передаются.
+  it('Vite, Mailpit и admin-api не наследуют ключ и базу прогона (WF_E2E_*)', () => {
+    vi.stubEnv('WF_E2E_ADMIN_DATABASE_URL', 'postgres://admin:admin@127.0.0.1:15432/wf_e2e');
+    vi.stubEnv('WF_E2E_STAFF_SECRET_KEYS', 'секрет-прогона');
+    const scrubbed = { WF_E2E_STAFF_SECRET_KEYS: '', WF_E2E_ADMIN_DATABASE_URL: '' };
+    for (const env of [viteEnv(PAIRS.chromium), mailpitEnv(), adminApiEnv(PAIRS.webkit)]) {
+      expect(env).toMatchObject(scrubbed);
+      expect(JSON.stringify(env)).not.toContain('wf_e2e?');
+    }
+    expect(JSON.stringify(viteEnv(PAIRS.webkit))).not.toContain('секрет-прогона');
+    expect(JSON.stringify(mailpitEnv())).not.toContain('секрет-прогона');
+    // admin-api — только под своим именем
+    expect(adminApiEnv(PAIRS.webkit).ADMIN_STAFF_SECRET_KEYS).toBe('секрет-прогона');
   });
 
   it('проекты: по умолчанию оба, список из WF_E2E_PROJECTS, незнакомый — ошибка', () => {

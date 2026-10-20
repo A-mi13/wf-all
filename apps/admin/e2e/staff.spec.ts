@@ -60,7 +60,11 @@ test.beforeAll(async ({ browser }) => {
     c.setDefaultTimeout(20_000);
     c.setDefaultNavigationTimeout(30_000);
   }
-  [pageA, pageB, pageAdmin] = await Promise.all([ctxA, ctxB, ctxAdmin].map((c) => c.newPage()));
+  [pageA, pageB, pageAdmin] = await Promise.all([
+    ctxA.newPage(),
+    ctxB.newPage(),
+    ctxAdmin.newPage(),
+  ]);
 });
 
 test.afterAll(async () => {
@@ -130,7 +134,8 @@ test('4. A приглашает админа (202) → B подтверждае�
   const approval = ((await res.json()) as { approval: Approval }).approval;
   expect(approval).toMatchObject({ status: 'pending', action: 'staff.invite' });
   approvalId = approval.id;
-  // правило двух рук: до подтверждения письма приглашённому нет
+  // до подтверждения писем приглашённому нет; сразу после 202 это ещё ничего не доказывает (фон River мог
+  // не успеть) — доказывает «письмо одно» после принятия ниже (ревью Task 16, M1)
   expect((await mailIds(admin.email)).size).toBe(0);
 
   await pageB.goto('/approvals');
@@ -153,6 +158,9 @@ test('4. A приглашает админа (202) → B подтверждае�
   await expect(pageB.getByText(t('approvals.done.executed'), { exact: true })).toBeVisible();
 
   await receiveInvite(admin);
+  // правило двух рук: письмо с кодом — одно, от подтверждения; приглашение на 202 его не слало (оно
+  // ушло бы в ту же очередь раньше и к этому моменту уже лежало бы в Mailpit)
+  expect((await mailIds(admin.email)).size).toBe(1);
 });
 
 test('5. админ принимает приглашение, настраивает 2FA и видит свой раздел', async () => {

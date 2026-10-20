@@ -74,7 +74,7 @@ describe('TotpDevice — код каждого шага один раз', () => 
         now += ms;
       },
     });
-    return { d, slept, at: () => now };
+    return { d, slept, at: () => now, set: (ms: number) => (now = ms) };
   }
 
   it('первый код — текущего шага, без ожидания', async () => {
@@ -93,11 +93,13 @@ describe('TotpDevice — код каждого шага один раз', () => 
     expect(totpStep(at() / 1000)).toBe(2);
   });
 
+  // Ревью Task 16, M2: то же устройство — второй next() после смены шага (часы ушли за границу между
+  // вызовами) отдаёт код нового шага сразу, без сна.
   it('шаг уже сменился — следующий код без ожидания', async () => {
-    const { d, slept } = device(10_000);
-    await d.next();
-    const later = new TotpDevice(RFC_SECRET, { now: () => 45_000, sleep: async () => {} });
-    expect(await later.next()).toBe(totp(RFC_SECRET, 45));
+    const { d, slept, set } = device(10_000);
+    expect(await d.next()).toBe(totp(RFC_SECRET, 10));
+    set(45_000);
+    expect(await d.next()).toBe(totp(RFC_SECRET, 45));
     expect(slept).toEqual([]);
   });
 

@@ -53,6 +53,12 @@ export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
   );
 }
 
+// Ключ сотрудников и строка подключения прогона (их ставит scripts/e2e-admin.sh) нужны только admin-api —
+// и уже под именами ADMIN_* (adminApiEnv). Playwright запускает webServer с окружением поверх process.env
+// (DEFAULT_ENVIRONMENT_VARIABLES, process.env, env сервера), поэтому «не передать» нельзя — значения
+// затираются пустыми (ревью Task 16, M7): ни Vite, ни Mailpit, ни дочерние процессы их не видят.
+const RUN_SECRETS = { WF_E2E_STAFF_SECRET_KEYS: '', WF_E2E_ADMIN_DATABASE_URL: '' } as const;
+
 function required(name: string): string {
   const v = process.env[name];
   if (!v) {
@@ -67,6 +73,7 @@ function required(name: string): string {
 export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
   return {
     ...cleanEnv(),
+    ...RUN_SECRETS,
     ADMIN_HTTP_ADDR: `127.0.0.1:${p.api}`,
     ADMIN_DATABASE_URL: required('WF_E2E_ADMIN_DATABASE_URL'),
     ADMIN_LOG_FORMAT: 'text',
@@ -92,7 +99,13 @@ export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
 export function viteEnv(p: Pair): NodeJS.ProcessEnv {
   return {
     ...cleanEnv(),
+    ...RUN_SECRETS,
     WF_ADMIN_API_ORIGIN: apiOrigin(p),
     WF_E2E_VITE_CACHE_DIR: `node_modules/.vite-e2e-${p.vite}`,
   };
+}
+
+// Окружение Mailpit: поверх process.env раннера (см. RUN_SECRETS) — без ключа и базы прогона.
+export function mailpitEnv(): NodeJS.ProcessEnv {
+  return { ...RUN_SECRETS };
 }
