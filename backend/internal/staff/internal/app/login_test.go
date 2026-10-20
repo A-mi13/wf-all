@@ -237,3 +237,72 @@ func TestLoginTimingEqualized(t *testing.T) {
 		}
 	}
 }
+
+// hookHasher — шов хэшера: после настоящего Verify один раз зовёт after — ровно в окне между проверкой
+// пароля (без замка) и транзакцией входа.
+type hookHasher struct {
+	app.PasswordHasher
+	after atomic.Pointer[func()]
+}
+
+func (h *hookHasher) Verify(ctx context.Context, pw, encoded string) (bool, bool, error) {
+	ok, rehash, err := h.PasswordHasher.Verify(ctx, pw, encoded)
+	if f := h.after.Swap(nil); f != nil {
+		(*f)()
+	}
+	return ok, rehash, err
+}
+
+// M-2 финального ревью (TOCTOU): пароль сверяется со старым хэшем без замка; если между этим и транзакцией
+// входа пароль сменили, учётку выключили, закрыли или сбросили, вход под замком учётки перепроверяет хэш и
+// состояние — ErrInvalidCredentials и аудит неудачи пароля, новой сессии нет.
+func TestLoginAccountChangedMidway(t *testing.T) {
+	base, err := sharedHasher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name   string
+		change func(e *env, m member, s *auth.Staff)
+	}{
+		{"смена пароля", func(e *env, m member, s *auth.Staff) {
+			if err := e.app.ChangePassword(context.Background(), s, testPassword, "", m.Codes[0], testPassword+" 2", metaWeb); err != nil {
+				e.t.Fatalf("смена пароля: %v", err)
+			}
+		}},
+		{"выключена", func(e *env, m member, _ *auth.Staff) {
+			e.exec(`UPDATE staff_accounts SET status = 'disabled' WHERE id = $1`, m.ID)
+		}},
+		{"закрыта", func(e *env, m member, _ *auth.Staff) {
+			e.exec(`UPDATE staff_accounts SET locked_until = $2 WHERE id = $1`, m.ID, t0.Add(time.Hour))
+		}},
+		{"сброс доступа", func(e *env, m member, _ *auth.Staff) {
+			e.exec(`UPDATE staff_accounts SET status = 'invited', password_hash = NULL WHERE id = $1`, m.ID)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			m := e.addMember("olga.v@wf.example", memberOpts{})
+			s := e.load(e.signIn(m))
+			h := &hookHasher{PasswordHasher: base}
+			e.app.SetHasher(h)
+			f := func() { c.change(e, m, s) }
+			h.after.Store(&f)
+			sessions := e.count(`SELECT count(*) FROM staff_sessions WHERE staff_id = $1`, m.ID)
+			res, err := e.app.Login(context.Background(), m.Email, testPassword, metaWeb)
+			if !errors.Is(err, staff.ErrInvalidCredentials) || res.Token != "" {
+				t.Fatalf("вход по старому состоянию: %+v, %v", res, err)
+			}
+			if h.after.Load() != nil {
+				t.Fatal("шов не сработал")
+			}
+			if n := e.count(`SELECT count(*) FROM staff_sessions WHERE staff_id = $1`, m.ID); n != sessions {
+				t.Fatalf("сессий %d, было %d", n, sessions)
+			}
+			if rows := e.audits("staff.login_failed"); len(rows) != 1 || !strings.Contains(rows[0].After, `"step": "password"`) {
+				t.Fatalf("аудит неудачи пароля %+v", rows)
+			}
+		})
+	}
+}

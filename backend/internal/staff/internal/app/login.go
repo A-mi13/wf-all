@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,7 +29,9 @@ type LoginResult struct {
 // VerifyDummy; эти отказы, неверный и слишком длинный пароль — один ErrInvalidCredentials и аудит
 // без автора (anonymous, почта маскируется). Неудачи пароля учётку не трогают. Успех — новая
 // сессия mfa_pending на 5 минут; сессия старой cookie (сотрудник в ctx от конвейера) гасится как
-// заменённая.
+// заменённая. Пароль сверяется без замка (argon2 под замком не держим), поэтому транзакция входа берёт
+// замок учётки и перепроверяет её (stillUsable): пароль сменили, учётку выключили, закрыли или сбросили
+// за это время — тот же ErrInvalidCredentials с аудитом, сессии нет (M-2 финального ревью).
 func (a *App) Login(ctx context.Context, email, pw string, m staff.Meta) (LoginResult, error) {
 	norm, valid := domain.NormalizeEmail(email)
 	keyMaterial := norm
@@ -85,16 +88,41 @@ func (a *App) Login(ctx context.Context, email, pw string, m staff.Meta) (LoginR
 	}
 	var raw string
 	err = db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		raw, err = a.replaceSession(ctx, staffdb.New(tx), old, newSession{
+		q := staffdb.New(tx)
+		locked, err := q.LockAccount(ctx, acct.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errLoginStale
+		}
+		if err != nil {
+			return err
+		}
+		now := a.clock.Now() // после замка: смена пароля или блокировка могли его держать
+		if !stillUsable(locked, *acct.PasswordHash, now) {
+			return errLoginStale
+		}
+		raw, err = a.replaceSession(ctx, q, old, newSession{
 			staffID: acct.ID, stage: auth.StageMFAPending, created: now, expires: now.Add(mfaPendingTTL),
 		}, now, m)
 		return err
 	})
+	if errors.Is(err, errLoginStale) {
+		return LoginResult{}, a.passwordFailed(ctx, acct, keyMaterial, m)
+	}
 	if err != nil {
 		return LoginResult{}, err
 	}
 	return LoginResult{Token: raw, Stage: auth.StageMFAPending}, nil
+}
+
+// errLoginStale — учётка изменилась между проверкой пароля (без замка) и транзакцией входа (M-2 финального
+// ревью): пароль сменили, учётку выключили, закрыли или сбросили. Ответ — как на неверный пароль.
+var errLoginStale = errors.New("staff: учётка изменилась во время входа")
+
+// stillUsable — учётка под замком всё ещё та, чей пароль проверен: active, не закрыта и хэш тот же, что
+// сверил Verify до транзакции (argon2 под замком не считается — только сравнение строк хэша).
+func stillUsable(a staffdb.LockAccountRow, verified string, now time.Time) bool {
+	return a.Status == staffdb.StaffStatusActive && (a.LockedUntil == nil || !now.Before(*a.LockedUntil)) &&
+		a.PasswordHash != nil && *a.PasswordHash == verified
 }
 
 // passwordFailed — аудит неудачи пароля без автора (anonymous): почта в After маскируется
