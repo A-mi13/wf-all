@@ -135,8 +135,13 @@ export function approvalsServer(
   // устаревший запрос у approve — запрос уже failed с кодом в error; решён, отменён или просрочен
   // (closed) — больше не ожидает (свой, ожидавший, — просрочен); не найден — его нет в списках.
   // Прочие (approval_self, auth.*) состояние не меняют.
+  // Тело не Problem (прокси, HTML) — кода нет, состояние не меняется (ревью уборки №7 m4).
   const afterError = async (kind: Decision, target: Approval, r: Response) => {
-    const code = ((await r.clone().json()) as { code?: string }).code ?? '';
+    const body = (await r
+      .clone()
+      .json()
+      .catch(() => null)) as { code?: unknown } | null;
+    const code = typeof body?.code === 'string' ? body.code : '';
     if (kind === 'approve' && (code === 'platform.approval_stale' || code.startsWith('staff.'))) {
       settle({
         ...target,
