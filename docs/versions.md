@@ -12,14 +12,14 @@
 | PostgreSQL / PostGIS | 18.6 / 3.6.2 | `scripts/pg.sh` (локально, zip), `postgis/postgis:18-3.6` в CI |
 | Next.js / React | 16.3.6 / 19.3.0 | `apps/web/package.json`, catalog (`pnpm-workspace.yaml`) |
 | Vite / Vitest | 8.3.1 / 5.0.1 | catalog (`pnpm-workspace.yaml`) |
-| Playwright | 1.63.0 | `apps/web/package.json`, `apps/admin/package.json` (одна версия на репо: CI-кеш браузеров — по ней) |
+| Playwright | 1.64.1 (Chromium 156.0.8078.4, WebKit 27.2) | `apps/web/package.json`, `apps/admin/package.json` (одна версия на репо: CI-кеш браузеров — по ней) |
 | TypeScript | 6.0.3 (приложения, пакеты) / 5.9.3 (генератор) | catalog и `catalogs.contracts` (`pnpm-workspace.yaml`); почему не 7 — в исключениях |
 | ESLint / typescript-eslint / eslint-plugin-boundaries | 9.39.5 / 8.70.1 / 7.2.0 | catalog; boundaries — `packages/config/package.json` |
 | Prettier | 3.9.9 | catalog (`pnpm-workspace.yaml`) |
 | openapi-typescript / openapi-fetch | 7.13.0 / 0.17.0 | `contracts/package.json` / `apps/{web,admin}/package.json` |
 | next-intl / use-intl | 4.14.7 / 4.14.7 | `apps/web/package.json` / `apps/admin/package.json` |
 | MSW | 2.15.0 | `apps/{web,admin}/package.json` |
-| TanStack Query / TanStack Router | 5.104.2 / 1.170.42 | `apps/admin/package.json`, Query ещё и `apps/web/package.json`; Router — маршруты кодом, почему не 1.170.44 — в исключениях |
+| TanStack Query / TanStack Router | 5.104.4 / 1.170.45 | `apps/admin/package.json`, Query ещё и `apps/web/package.json` (одна версия); Router — маршруты кодом; почему Query не 5.104.5 — в исключениях |
 | react-hook-form | 7.90.0 | `apps/admin/package.json` |
 | uqr | 0.1.3 | `apps/admin/package.json` (QR секрета 2FA — SVG на клиенте, без сети и зависимостей; R11) |
 | @fontsource/oswald / @fontsource/manrope | 5.3.0 / 5.3.0 | `apps/admin/package.json` (шрифты админки без внешних запросов, `src/app/fonts.ts`) |
@@ -51,7 +51,7 @@
 | --- | --- | --- | --- | --- |
 | TypeScript (приложения) | 6.0.3 | 7.0.2 | typescript-eslint 8.70 поддерживает TS < 6.1; у 7.x нет классического JS API | когда typescript-eslint и eslint-config-next объявят поддержку TS 7 |
 | TypeScript (генератор) | 5.9.3 | 7.0.2 | openapi-typescript 7.13 требует `typescript ^5.x` | когда openapi-typescript поднимет peer |
-| TanStack Router | 1.170.42 | 1.170.44 | 1.170.43 и 1.170.44 (с `router-core` 1.171.36–37) опубликованы 12.10.2026 23:20–23:58 UTC, моложе `minimumReleaseAge` (сутки) на момент Task 11 (13.10.2026); исключение в `minimumReleaseAgeExclude` ради патча не вводили | после 14.10.2026 00:00 UTC — поднять до последней патч-версии 1.170.x |
+| TanStack Query | 5.104.4 | 5.104.5 | 5.104.5 опубликована 19.10.2026 16:57 UTC — моложе `minimumReleaseAge` (сутки) на момент волны исправлений ветки (20.10.2026 10:40 UTC); исключение в `minimumReleaseAgeExclude` ради патча не вводили | после 20.10.2026 17:00 UTC — поднять до последней патч-версии 5.104.x в `apps/admin` и `apps/web` |
 | ESLint | 9.39.5 | 10.11.0 | eslint-config-next 16.3.6 тянет eslint-plugin-react 7.37.5 (ESLint ≤ 9) | когда eslint-config-next перейдёт на ESLint 10 |
 
 ## Ловушки
