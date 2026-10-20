@@ -147,12 +147,14 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	}
 	requestErr := httpx.RequestErrorHandler(log)
 	// strict-middleware модуля staff: User-Agent и токен cookie в ctx операций тега staff, перевод
-	// ошибок staff.Problem, стирание cookie при погашенной сессии, 501 у несобранного хендлера
+	// ошибок staff.Problem, стирание cookie при погашенной сессии, 501 у несобранного хендлера;
+	// requestMeta — последним, то есть внешним (strict-сервер оборачивает по порядку): IP и UA для
+	// операций платформы и стирание cookie при погашенной сессии в подписи решившего
 	srv := Server{staffHandler: o.Staff, geoHandler: o.Geo, approvals: o.Approvals, audit: o.DB}
 	if o.Approvals != nil {
 		srv.label = o.Staff.Label
 	}
-	strict := oapi.NewStrictHandlerWithOptions(srv, []oapi.StrictMiddlewareFunc{o.Staff.Middleware(), requestMeta}, oapi.StrictHTTPServerOptions{
+	strict := oapi.NewStrictHandlerWithOptions(srv, []oapi.StrictMiddlewareFunc{o.Staff.Middleware(), requestMeta(clearSessionCookie(o.CookieSecure))}, oapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  requestErr,
 		ResponseErrorHandlerFunc: httpx.ResponseErrorHandler(log),
 	})

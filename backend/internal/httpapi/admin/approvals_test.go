@@ -352,6 +352,12 @@ func TestDecisionByChangedApprover(t *testing.T) {
 			rec := e.decide(verb, id, c.who.token, "", `{"comment":"ок"}`)
 			e.onLoad.Store(nil)
 			wantProblem(t, rec, c.status, c.code)
+			// выключен — сессия больше не годится: cookie стирается (ревью 10b m3); роль сменилась — нет
+			if c.status == http.StatusUnauthorized {
+				clearedCookie(t, rec)
+			} else {
+				noCookie(t, rec)
+			}
 			if st, _ := e.approvalRow(id); st != approvals.StatusPending {
 				t.Fatalf("%s, %s: статус %s", c.name, verb, st)
 			}
@@ -365,6 +371,34 @@ func TestDecisionByChangedApprover(t *testing.T) {
 	}
 	if n := e.count(`SELECT count(*) FROM audit_log WHERE action LIKE 'platform.approval\_%' AND action <> 'platform.approval_requested'`); n != 0 {
 		t.Fatalf("решений в журнале: %d", n)
+	}
+}
+
+// Сессию погасили между конвейером и решением: подпись решившего (Label) перечитывает сессию — 401 и
+// стирание cookie, как у операций staff (ревью 10b m3); запрос остаётся pending. approve, reject и cancel.
+func TestDecisionRevokedSessionClearsCookie(t *testing.T) {
+	e := newStaffEnv(t)
+	o := e.owners(2)
+	a, b := o[0], o[1]
+	e.v = apitest.New(t, oapi.GetSpec)
+	id := e.accepted(e.inviteReq(a.token, "", "ivan.p@wf.example", "support"))
+	for _, c := range []struct {
+		verb string
+		who  member
+		body string
+	}{
+		{"approve", b, ""},
+		{"reject", b, `{"comment":"Рано"}`},
+		{"cancel", a, ""},
+	} {
+		tok := e.signIn(c.who) // погашенная сессия прошлого шага больше не годится
+		e.revokeOnLoad("logout")
+		rec := e.decide(c.verb, id, tok, "", c.body)
+		wantProblem(t, rec, http.StatusUnauthorized, httpx.CodeUnauthenticated)
+		clearedCookie(t, rec)
+		if st, _ := e.approvalRow(id); st != approvals.StatusPending {
+			t.Fatalf("%s: статус %s", c.verb, st)
+		}
 	}
 }
 

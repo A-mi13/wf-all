@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -54,13 +55,24 @@ var (
 // metaKey — approvals.Meta запроса в ctx операций (requestMeta).
 type metaKey struct{}
 
-// requestMeta — strict-middleware: откуда запрос (IP — peer, User-Agent — заголовок) в ctx операций
-// платформы. strict-сервер не передаёт операции *http.Request, а meta модуля staff заполняет только его
-// Middleware и только для операций тега staff (ревью 10a, отказ 3).
-func requestMeta(f oapi.StrictHandlerFunc, _ string) oapi.StrictHandlerFunc {
-	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
-		ctx = context.WithValue(ctx, metaKey{}, approvals.Meta{IP: peer.From(ctx).IP, UserAgent: r.UserAgent()})
-		return f(ctx, w, r, req)
+// requestMeta — strict-middleware операций платформы (сборка ставит его внешним, после Middleware staff):
+//   - откуда запрос (IP — peer, User-Agent — заголовок) в ctx: strict-сервер не передаёт операции
+//     *http.Request, а meta модуля staff заполняет только его Middleware и только для операций тега staff
+//     (ревью 10a, отказ 3);
+//   - auth.ErrSessionInvalid операции (подпись решившего: сессию погасили или учётку выключили после
+//     конвейера) — 401 и стирание cookie clearCookie, как у Middleware staff (ревью 10b m3). Ошибки операций
+//     staff сюда приходят уже переведёнными (Problem) — стирания второй раз нет.
+func requestMeta(clearCookie *http.Cookie) oapi.StrictMiddlewareFunc {
+	return func(f oapi.StrictHandlerFunc, _ string) oapi.StrictHandlerFunc {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
+			ctx = context.WithValue(ctx, metaKey{}, approvals.Meta{IP: peer.From(ctx).IP, UserAgent: r.UserAgent()})
+			resp, err := f(ctx, w, r, req)
+			if err != nil && errors.Is(err, auth.ErrSessionInvalid) {
+				http.SetCookie(w, clearCookie)
+				return nil, staffadmin.Problem(err)
+			}
+			return resp, err
+		}
 	}
 }
 
@@ -93,14 +105,17 @@ func staffFrom(ctx context.Context) (*auth.Staff, error) {
 }
 
 // decider — решающий и его подпись (снимок имени для approvals и журнала). Подпись перечитывает учётку и
-// сессию (Staff.Label): выключен или сессия погашена после загрузки конвейером — 401, роль сменилась — 403,
-// до любых записей.
+// сессию (Staff.Label): выключен или сессия погашена после загрузки конвейером — 401 со стиранием cookie
+// (auth.ErrSessionInvalid уходит как есть — переводит requestMeta), роль сменилась — 403, до любых записей.
 func (s Server) decider(ctx context.Context) (*auth.Staff, string, error) {
 	st, err := staffFrom(ctx)
 	if err != nil {
 		return nil, "", err
 	}
 	label, err := s.label(ctx, st)
+	if errors.Is(err, auth.ErrSessionInvalid) {
+		return nil, "", fmt.Errorf("admin: подпись решившего: %w", err)
+	}
 	if err != nil {
 		return nil, "", staffadmin.Problem(err)
 	}

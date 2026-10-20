@@ -33,6 +33,15 @@ func CookieName(secure bool) string {
 	return cookieDev
 }
 
+// clearSessionCookie — стирание cookie сессии (Max-Age=0). Secure — из ADMIN_COOKIE_SECURE: false только
+// в dev по http (R6); имя и атрибуты совпадают с установкой (staffadmin.Handler.sessionCookie).
+func clearSessionCookie(secure bool) *http.Cookie {
+	return &http.Cookie{ //nolint:gosec // G124: Secure по конфигу, см. выше
+		Name: CookieName(secure), Path: "/", MaxAge: -1, // Max-Age=0: браузер удаляет сразу
+		HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode,
+	}
+}
+
 // classStaffAuth — класс лимита входа в админку: в его IP-лимите считаются и отказы cookie (R9).
 const classStaffAuth = "staff_auth"
 
@@ -125,12 +134,7 @@ func (s *sessionLayer) middleware(next http.Handler) http.Handler {
 					s.log.ErrorContext(ctx, "admin: отказ сессии не учтён в лимите", "err", err)
 				}
 			}
-			// Secure — из ADMIN_COOKIE_SECURE: false только в dev по http (R6), стирание должно
-			// совпасть по атрибутам с установкой
-			http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure по конфигу, см. выше
-				Name: s.cookie, Path: "/", MaxAge: -1, // Max-Age=0: браузер удаляет сразу
-				HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode,
-			})
+			http.SetCookie(w, clearSessionCookie(s.secure))
 			next.ServeHTTP(w, r)
 			return
 		}
