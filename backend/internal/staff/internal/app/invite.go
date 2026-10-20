@@ -543,7 +543,9 @@ type created struct {
 
 // validateInvitee — почта и имя приглашаемого по правилам контракта (StaffInviteRequest): почта —
 // domain.NormalizeEmail (иначе 400 по body.email, format), имя без крайних пробелов — 1–80 символов
-// (body.display_name, minLength | maxLength). Возвращает нормализованные почту и имя.
+// (body.display_name, minLength | maxLength) без управляющих, форматирующих (bidi), разделителей строк и
+// невидимых символов — domain.DisplayNameOK (иначе body.display_name, format; M-3 финального ревью).
+// Возвращает нормализованные почту и имя.
 func validateInvitee(email, name string) (string, string, error) {
 	norm, ok := domain.NormalizeEmail(email)
 	if !ok {
@@ -555,6 +557,8 @@ func validateInvitee(email, name string) (string, string, error) {
 		return "", "", httpx.NewFieldError(fieldDisplayName, ruleMinLength)
 	case utf8.RuneCountInString(name) > maxDisplayName:
 		return "", "", httpx.NewFieldError(fieldDisplayName, ruleMaxLength)
+	case !domain.DisplayNameOK(name):
+		return "", "", httpx.NewFieldError(fieldDisplayName, ruleFormat)
 	}
 	return norm, name, nil
 }

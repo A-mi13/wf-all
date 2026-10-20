@@ -103,6 +103,10 @@ func TestInviteValidation(t *testing.T) {
 		{"почта", staff.InviteInput{Email: "не почта", DisplayName: "Х", Role: "support"}, "body.email", "format"},
 		{"имя пустое", staff.InviteInput{Email: "x@wf.example", DisplayName: "  ", Role: "support"}, "body.display_name", "minLength"},
 		{"имя длинное", staff.InviteInput{Email: "x@wf.example", DisplayName: strings.Repeat("я", 81), Role: "support"}, "body.display_name", "maxLength"},
+		// M-3 финального ревью: имя уходит в письма, подписи подтверждений и журнал
+		{"имя с bidi", staff.InviteInput{Email: "x@wf.example", DisplayName: "Ivan\u202Etxt.exe", Role: "support"}, "body.display_name", "format"},
+		{"имя с невидимым", staff.InviteInput{Email: "x@wf.example", DisplayName: "Иван\u200BП.", Role: "support"}, "body.display_name", "format"},
+		{"имя с управляющим", staff.InviteInput{Email: "x@wf.example", DisplayName: "Иван\nП.", Role: "support"}, "body.display_name", "format"},
 		{"роль", staff.InviteInput{Email: "x@wf.example", DisplayName: "Х", Role: "boss"}, "body.role", "enum"},
 		{"модератор без городов", staff.InviteInput{Email: "x@wf.example", DisplayName: "Х", Role: "moderator"}, "body.city_ids", "min_items"},
 		{"поддержка с городом", staff.InviteInput{Email: "x@wf.example", DisplayName: "Х", Role: "support", CityIDs: []uuid.UUID{c}}, "body.city_ids", "max_items"},
