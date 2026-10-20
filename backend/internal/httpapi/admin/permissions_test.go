@@ -76,6 +76,45 @@ var (
 	}
 )
 
+// cityRow — ответ конвейера модератору своего города (город пути — cityInPath) и чужого.
+type cityRow struct{ own, foreign outcome }
+
+// cityRows — ручная таблица операций с {cityId} в пути (ревью 10b m6): ожидания модератора своего и чужого
+// города задаются здесь явно, а не выводятся из expected. На контракте плана A таких операций нет —
+// субъекты moderator-own и moderator-foreign пока отвечают одинаково на всё; различимы станут с первой
+// операцией с {cityId} (план B): без строки здесь она уронит TestPermissionsAllOperations
+// (cityRowViolations), а путь её строки opsBase обязан вести в cityInPath.
+var cityRows = map[string]cityRow{}
+
+// cityRowViolations — операции контракта с {cityId} без строки rows (или со строкой opsBase не в город
+// cityInPath) и строки rows без такой операции.
+func cityRowViolations(spec *openapi3.T, rows map[string]cityRow) []string {
+	var bad []string
+	seen := map[string]bool{}
+	for path, item := range spec.Paths.Map() {
+		if !strings.Contains(path, "{cityId}") {
+			continue
+		}
+		for method, op := range item.Operations() {
+			id := opID(op)
+			seen[id] = true
+			if _, ok := rows[id]; !ok {
+				bad = append(bad, method+" "+path+" ("+id+"): операция с {cityId} без строки cityRows — модератор своего и чужого города неразличимы")
+			}
+			if req, ok := opsBase[id]; ok && !strings.Contains(req.path, cityInPath.String()) {
+				bad = append(bad, id+": путь строки opsBase не ведёт в cityInPath")
+			}
+		}
+	}
+	for id := range rows {
+		if !seen[id] {
+			bad = append(bad, id+": строка cityRows без операции с {cityId} в контракте")
+		}
+	}
+	slices.Sort(bad)
+	return bad
+}
+
 // subject — кто делает запрос: роль и стадия сессии (token "" — без сессии).
 type subject struct {
 	name  string
@@ -181,6 +220,9 @@ func TestPermissionsAllOperations(t *testing.T) {
 	o.Sessions = &fakeSessions{staff: sessions}
 	h := newHandler(t, o)
 
+	for _, v := range cityRowViolations(spec, cityRows) {
+		t.Error(v)
+	}
 	seen := map[string]bool{}
 	checked := 0
 	for path, item := range spec.Paths.Map() {
@@ -198,8 +240,15 @@ func TestPermissionsAllOperations(t *testing.T) {
 			if opID(op) == "listAudit" {
 				passStatus = http.StatusOK
 			}
+			row, cityOp := cityRows[opID(op)]
 			for _, s := range subjects {
 				want := expected(t, op, path, s)
+				// операция с {cityId}: модератор своего и чужого города — по ручной строке cityRows
+				if cityOp && s.name == "moderator-own" {
+					want = row.own
+				} else if cityOp && s.name == "moderator-foreign" {
+					want = row.foreign
+				}
 				rec := serve(h, call(req.method, req.path, s.token, req.body))
 				checked++
 				if want.pass {
@@ -221,6 +270,32 @@ func TestPermissionsAllOperations(t *testing.T) {
 	}
 	if checked < len(opsBase)*len(subjects) || len(opsBase) == 0 {
 		t.Fatalf("проверено %d — страж вхолостую", checked)
+	}
+}
+
+// Страж cityRows не вакуумен: контракт с операцией {cityId} без строки — нарушение; та же операция со
+// строкой — нет; строка без операции — нарушение. На текущем контракте нарушений нет.
+func TestCityRowsGuard(t *testing.T) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad := cityRowViolations(spec, cityRows); len(bad) != 0 {
+		t.Fatalf("текущий контракт: %v", bad)
+	}
+	spec.Paths.Set("/v1/geo/cities/{cityId}", &openapi3.PathItem{Get: &openapi3.Operation{
+		OperationID: "getGeoCity", Extensions: map[string]any{"x-permission": "geo.cities.read"},
+	}})
+	if bad := cityRowViolations(spec, cityRows); len(bad) != 1 || !strings.Contains(bad[0], "getGeoCity") {
+		t.Fatalf("операция с {cityId} без строки: %v", bad)
+	}
+	rows := map[string]cityRow{"getGeoCity": {own: pass, foreign: forbidden}}
+	if bad := cityRowViolations(spec, rows); len(bad) != 0 {
+		t.Fatalf("со строкой: %v", bad)
+	}
+	rows["listGeoCities"] = cityRow{own: pass, foreign: pass}
+	if bad := cityRowViolations(spec, rows); len(bad) != 1 || !strings.Contains(bad[0], "listGeoCities") {
+		t.Fatalf("строка без операции: %v", bad)
 	}
 }
 
