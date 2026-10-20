@@ -15,6 +15,7 @@ import (
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/id"
+	"wf/backend/internal/platform/keys"
 	"wf/backend/internal/platform/token"
 	"wf/backend/internal/staff"
 	"wf/backend/internal/staff/internal/domain"
@@ -62,23 +63,32 @@ func (a *App) checkFactor(ctx context.Context, q *staffdb.Queries, staffID uuid.
 }
 
 // useRecoveryCode — сверка нормализованного резервного кода со всеми неиспользованными кодами
-// сотрудника (HMAC ключом key_id каждой строки, сравнение за постоянное время); совпал — сгорает.
+// сотрудника (HMAC ключом key_id каждой строки, сравнение за постоянное время); совпал — сгорает. Строка на
+// ключе вне кольца (ключ потерян — --keys-lost, убран раньше перевыпуска кодов) не проверяема: пропуск с
+// предупреждением в журнал сервера (key_id, без кода), а не 500 — код может совпасть со строкой на известном
+// ключе (M-1 финального ревью).
 func (a *App) useRecoveryCode(ctx context.Context, q *staffdb.Queries, staffID uuid.UUID, norm string, now time.Time) (bool, error) {
 	rows, err := q.LockUnusedRecoveryCodes(ctx, staffID)
 	if err != nil {
 		return false, err
 	}
-	macs := map[string][]byte{} // key_id → HMAC введённого кода этим ключом
+	macs := map[string][]byte{} // key_id → HMAC введённого кода этим ключом; nil — ключа нет в кольце
 	var match []byte
 	for _, r := range rows {
-		m, ok := macs[r.KeyID]
-		if !ok {
-			if m, err = a.recoveryMAC(r.KeyID, staffID, norm); err != nil {
+		m, seen := macs[r.KeyID]
+		if !seen {
+			m, err = a.recoveryMAC(r.KeyID, staffID, norm)
+			switch {
+			case errors.Is(err, keys.ErrUnknownKey):
+				a.log.WarnContext(ctx, "staff: резервный код на ключе вне кольца пропущен",
+					"staff_id", staffID.String(), "key_id", r.KeyID)
+				m = nil
+			case err != nil:
 				return false, fmt.Errorf("staff: HMAC резервного кода: %w", err)
 			}
 			macs[r.KeyID] = m
 		}
-		if macEqual(m, r.CodeMac) && match == nil {
+		if m != nil && macEqual(m, r.CodeMac) && match == nil {
 			match = r.CodeMac
 		}
 	}

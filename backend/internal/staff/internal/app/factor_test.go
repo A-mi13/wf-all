@@ -1,8 +1,10 @@
 package app_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -404,6 +406,37 @@ func TestUnlockRequiresReauth(t *testing.T) {
 		t.Fatal("аудит без разблокировки")
 	}
 	e.load(tok) // сессия жива
+}
+
+// M-1 финального ревью: резервный код на ключе вне кольца (ключ потерян — --keys-lost, ранняя ротация) не
+// роняет сверку в 500: строка пропускается с предупреждением в журнал сервера (key_id, без кода), подходящая
+// строка на известном ключе принимается и сгорает. Все строки на чужом ключе — код не проверить:
+// staff.mfa_invalid (неудача считается, выход — reset-access).
+func TestRecoveryCodeSkipsUnknownKey(t *testing.T) {
+	e := newEnv(t)
+	var logs bytes.Buffer
+	d := e.deps
+	d.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	a := app.New(d)
+	ctx := context.Background()
+	m := e.addMember("olga.v@wf.example", memberOpts{})
+	const lost = "LOSTLOSTKEY" // формат key_id (11 символов), ключа нет в кольце
+	e.exec(`INSERT INTO staff_recovery_codes (staff_id, code_mac, key_id) VALUES ($1, decode(repeat('00', 32), 'hex'), $2)`, m.ID, lost)
+	tok, err := a.VerifyMFA(ctx, e.pending(m), "", m.Codes[0], metaWeb)
+	if err != nil || tok == "" {
+		t.Fatalf("код на известном ключе рядом со строкой на чужом: %q, %v", tok, err)
+	}
+	if n := e.count(`SELECT count(*) FROM staff_recovery_codes WHERE staff_id = $1 AND used_at IS NOT NULL`, m.ID); n != 1 {
+		t.Fatalf("сгорело кодов %d", n)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, lost) || strings.Contains(out, m.Codes[0]) {
+		t.Fatalf("журнал сервера:\n%s", out)
+	}
+
+	e.exec(`UPDATE staff_recovery_codes SET key_id = $2 WHERE staff_id = $1`, m.ID, lost)
+	_, err = a.VerifyMFA(ctx, e.pending(m), "", m.Codes[1], metaWeb)
+	wantMFAInvalid(t, err, app.MaxFactorFailures-1)
 }
 
 // I1 (ревью 6a): параллельные неверные коды не обходят порог «5 подряд». Неудача пишется под замком
