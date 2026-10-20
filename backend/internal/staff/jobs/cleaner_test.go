@@ -77,6 +77,36 @@ func TestCleanerTick(t *testing.T) {
 	}
 }
 
+// I-1 финального ревью: ключи идемпотентности admin-api (staff_idempotency_keys) чистит этот тикер — у воркера
+// прав на таблицу нет. Просроченный ключ удаляется, живой остаётся; ключи игроков (idempotency_keys) — не наши,
+// их чистит воркер. Итог — в строке журнала.
+func TestCleanerTickStaffIdempotencyKeys(t *testing.T) {
+	e := newEnv(t)
+	staffKey := func(key, expires string) {
+		e.exec(`INSERT INTO staff_idempotency_keys (user_id, key, endpoint, request_hash, expires_at)
+			VALUES ($1, $2, 'PUT /v1/staff/accounts/{staffId}/role', 'h', now() + $3::interval)`, id.New(), key, expires)
+	}
+	staffKey("old", "-1 minute")
+	staffKey("live", "1 hour")
+	e.exec(`INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash, expires_at)
+		VALUES ($1, 'player', 'POST /v1/teams', 'h', now() - interval '1 minute')`, id.New())
+	if err := jobs.NewCleaner(e.deps, e.svc).Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.count(`SELECT count(*) FROM staff_idempotency_keys WHERE key = 'old'`); n != 0 {
+		t.Error("просроченный ключ admin-api не удалён")
+	}
+	if n := e.count(`SELECT count(*) FROM staff_idempotency_keys WHERE key = 'live'`); n != 1 {
+		t.Error("живой ключ admin-api удалён")
+	}
+	if n := e.count(`SELECT count(*) FROM idempotency_keys WHERE key = 'player'`); n != 1 {
+		t.Error("ключ игрока удалён тикером admin-api")
+	}
+	if out := e.log.String(); !strings.Contains(out, "idempotency_keys=1") {
+		t.Errorf("в журнале нет числа удалённых ключей:\n%s", out)
+	}
+}
+
 // Run: проход сразу при старте, затем на каждый тик; ошибка прохода — в журнал сервера, тикер живёт
 // дальше (сервис не падает); отмена ctx — Run возвращается.
 func TestCleanerRunLogsAndContinues(t *testing.T) {
