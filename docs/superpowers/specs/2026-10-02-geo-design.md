@@ -308,15 +308,18 @@ v2 с версией и отпечатком набора полей (хэш `Se
 
 ### 5.1. Доступ
 
-Каждая операция требует сессию сотрудника и роль из таблицы §5.2 (проверка через
-`auth.Principal.HasRole`). Сессии admin-api — спека `identity`; здесь — шов: интерфейс платформы
-`auth.StaffSessions` (`Load(ctx, token string) (*Principal, error)`: непрозрачный токен из cookie
-→ сотрудник; `ErrSessionInvalid` — 401), `admin.Options.StaffSessions` и
-`ValidateOptions.Authenticated`. CSRF admin-api (`Origin` + обязательный заголовок, спека бэкенда
-§10) — спека `identity`/платформы; этап 2 оживает только вместе с ним. До `identity`
-загрузчик — «сессий нет», каждая операция отвечает 401 `auth.unauthenticated`. В тестах —
-загрузчик, отдающий заданный `Principal`. Мутирующие операции — с `Idempotency-Key`; аудит
-(`platform/audit`) и событие (§6) — в транзакции с данными.
+Каждая операция требует сессию сотрудника и право из матрицы (спека сотрудников
+`docs/superpowers/specs/2026-10-06-staff-admin-geo2-design.md` §2.5, каталог — `platform/perm`). Шов
+сессий реализован модулем `staff` (план A спеки сотрудников): `auth.StaffSessions.LoadStaff(ctx, token,
+ip, background) (*auth.Staff, error)` загружает сотрудника по токену cookie `__Host-wf_admin_session`.
+Конвейер admin-api (аллоулист IP, сессия, CSRF — `Origin` и `X-WF-Admin`, валидация, `x-permission`,
+лимит, идемпотентность; спека сотрудников §5.1) проверяет право операции по `x-permission`, а `scoped` —
+по `cityId` в пути; список без `cityId` (`GET /v1/geo/cities`) модератору фильтрует ручка по его городам
+(`auth.Staff.CityIDs`). Право, зависящее от тела (поля `PATCH …/cities/{cityId}`), проверяет сценарий
+через `auth.StaffFrom(ctx).Decide(право, cityID)` — без импорта `staff`. Отказ — `403 auth.forbidden`;
+без сессии — `401 auth.unauthenticated`. В тестах — загрузчик, отдающий заданный `auth.Staff`. Мутирующие
+операции — с `Idempotency-Key`; аудит (`platform/audit`: `actor_staff_id`, `actor_label`, `scope_city_id`
+— город операции) и событие (§6) — в транзакции с данными.
 
 ### 5.2. Операции и матрица прав
 
@@ -511,8 +514,9 @@ backend/internal/platform/appversion/   таблица, semver, правила; 
 - Активация: переопределение страны и региона, тёзки → разные `slug`, гонка двух активаций → 409.
 - Контракт (`apitest`): коды, кэш-заголовки, анонимность, `x-rate-limit`, маршрутизация
   `nearest`/`by-slug` против `{cityId}`, `NaN`.
-- Админка: матрица прав на каждую операцию, 401 до `identity`, идемпотентность, аудит и событие
-  в одной транзакции, `version` растёт.
+- Админка: права на каждую операцию по субъектам спеки сотрудников §11 (роли, модератор своего и чужого
+  города, без сессии — 401, стадии `mfa_pending`/`setup`, `Reauth`), идемпотентность, аудит и событие в
+  одной транзакции, `version` растёт.
 - `appversion`: semver, `min ≤ recommended`, хосты стора, пустая платформа → 200 с `null`.
 - `page` v2, `contracts-breaking.sh` (файл исключений public пуст после тега — страж), фронты
   (`listCities` вместо health), `archtest`, `grants_test`, локали фронтов.
@@ -526,10 +530,11 @@ backend/internal/platform/appversion/   таблица, semver, правила; 
    со своей машины против Neon под ролью `worker` — роли на Neon пока нет: `deploy-dev.md` получает
    шаги создания роли `worker` и повторного `migrate up` (применит `grants.sql`). Админская ручка
    импорта на стенде без воркера не исполнится — это ожидаемо.
-2. **Этап 2 — админка:** шов сессий admin-api, админские ручки `geo` и версий, удаление
-   `/v1/health` из admin, фронт admin. Оживают со входом сотрудников (`identity`).
+2. **Этап 2 — админка:** админские ручки `geo` и версий, фронт admin — план B спеки сотрудников. Шов
+   сессий admin-api, вход сотрудников, удаление `/v1/health` из admin и чтение городов
+   `GET /v1/geo/cities` (выбор городов модератора) сделаны её планом A (модуль `staff`).
 
-Сразу после `geo` — спека `identity` (вход сотрудников с TOTP включительно).
+Вход сотрудников с TOTP сделан модулем `staff` (спека сотрудников); `identity` — вход и роли игроков.
 
 ## 12. Обновление документов (в коммитах плана)
 
