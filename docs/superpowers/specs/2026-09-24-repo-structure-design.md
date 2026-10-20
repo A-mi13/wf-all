@@ -164,8 +164,16 @@ Oswald (цифры, заголовки) + Manrope (текст); `bg #0B0F0D`, `e
 | `task db:migrate` / `task db:reset` | `cmd/migrate` (goose как библиотека) против dev-базы |
 
   Каждое приложение запускается и без Taskfile (`go run ./cmd/api`, `pnpm dev`).
-- **Dev-хосты:** админка на `admin.localhost`, куки админки и приложения с разными именами —
-  куки на localhost не разделяются по портам. Детали — спека админки.
+- **Dev-хост и cookie админки:** админка — `http://127.0.0.1:5173` (Vite), `/v1` проксируется в
+  admin-api на `127.0.0.1:8081` (`WF_ADMIN_API_ORIGIN` в `apps/admin/.env.local`, `ADMIN_HTTP_ADDR`) — один
+  origin, `ADMIN_ORIGIN=http://127.0.0.1:5173`; другого origin у API админки нет (`VITE_ADMIN_API_URL`
+  удалён). В проде admin-api сам отдаёт собранную админку (`ADMIN_STATIC_DIR`). Cookie сессии сотрудника —
+  `__Host-wf_admin_session` (`HttpOnly; Secure; SameSite=Strict; Path=/`, без `Domain`): куки на localhost не
+  разделяются по портам, поэтому у админки своё имя, с cookie веба оно не пересекается. Chromium и Firefox
+  принимают её с `Secure` на `http://127.0.0.1`; WebKit — нет, для него в dev `ADMIN_COOKIE_SECURE=false`
+  (имя `wf_admin_session` без `Secure`), в проде — только `true`. Живой e2e админки — свои порты: Vite
+  5174/5175, admin-api 18181/18182, Mailpit 18026/11026, база `wf_e2e` (README). Детали — спека сотрудников
+  (`docs/superpowers/specs/2026-10-06-staff-admin-geo2-design.md` §5.2, §14).
 
 ## 9. Конфиг и секреты
 
