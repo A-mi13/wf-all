@@ -187,6 +187,15 @@ test('5. админ принимает приглашение, настраив�
   expect(options).not.toContain(t('roles.owner'));
   await pageAdmin.keyboard.press('Escape');
   await expect(pageAdmin.getByRole('dialog')).toHaveCount(0);
+
+  // и сервер отказывает сам, мимо интерфейса (ревью ветки, M6): админ админа не приглашает
+  const refused = await api<{ code: string }>(pageAdmin, 'POST', '/v1/staff/invites', {
+    email: `refused-${admin.email}`,
+    display_name: 'Отказ',
+    role: 'admin',
+  });
+  expect(refused.status).toBe(403);
+  expect(refused.body).toMatchObject({ code: 'auth.forbidden' });
 });
 
 test('6. «Отклонить» — окно; строка исчезла при перечитывании — фокус не на body', async () => {
