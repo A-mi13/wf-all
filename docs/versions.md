@@ -25,24 +25,24 @@
 | @fontsource/oswald / @fontsource/manrope | 5.3.0 / 5.3.0 | `apps/admin/package.json` (шрифты админки без внешних запросов, `src/app/fonts.ts`) |
 | GitHub Actions: checkout / setup-go / pnpm action-setup | 7.0.1 / 7.0.0 / 6.1.0 | полный SHA в `.github/workflows/*.yml`; плавающий тег `pnpm/action-setup@v6` указывал на 6.0.10 без поддержки pnpm 12 |
 | Flutter / Dart | фиксируется в wf-native | в репо wf-native проекта Flutter пока нет — версии появятся с мобильной спекой |
-| chi / pgx | 5.3.2 / 5.11.0 | `backend/go.mod` |
-| oapi-codegen / sqlc | 2.8.0 / 1.31.1 | `backend/tools/go.mod` |
-| oapi-codegen runtime | 1.7.0 | `backend/go.mod` (биндинг параметров запроса в сгенерированном коде `internal/httpapi/*/oapi`) |
-| River | 0.47.0 | `backend/go.mod` (рантайм-библиотека воркера), CLI — `backend/tools/go.mod` |
-| goose / pgtestdb / kin-openapi | 3.28.0 / 0.1.1 / 0.149.0 | `backend/go.mod` |
+| chi / pgx | 5.5.0 / 5.11.0 | `backend/go.mod` |
+| oapi-codegen / sqlc | 2.8.1 / 1.31.1 | `backend/tools/go.mod` |
+| oapi-codegen runtime | 1.8.0 | `backend/go.mod` (биндинг параметров запроса в сгенерированном коде `internal/httpapi/*/oapi`) |
+| River | 0.49.0 | `backend/go.mod` (рантайм-библиотека воркера и admin-api), CLI — `backend/tools/go.mod`; почему не 0.50.0 — в исключениях |
+| goose / pgtestdb / kin-openapi | 3.29.0 / 0.1.1 / 0.152.0 | `backend/go.mod` |
 | google/uuid | 1.6.0 | `backend/go.mod` (UUIDv7 — `internal/platform/id`) |
 | golang-jwt/jwt | 5.3.1 | `backend/go.mod` (access-токены, EdDSA — `internal/platform/token`) |
-| golang.org/x/crypto / x/net / x/sync / x/text | 0.57.0 / 0.59.0 / 0.23.0 / 0.42.0 | `backend/go.mod` (argon2id и NFKC пароля — `internal/platform/password`; singleflight — `internal/platform/auth`, `internal/platform/health`; IDNA домена почты сотрудника (UTS #46) и NFKC кодов — `internal/staff/internal/domain`) |
+| golang.org/x/crypto / x/net / x/sync / x/text | 0.58.0 / 0.61.0 / 0.24.0 / 0.43.0 | `backend/go.mod` (argon2id и NFKC пароля — `internal/platform/password`; singleflight — `internal/platform/auth`, `internal/platform/health`; IDNA домена почты сотрудника (UTS #46) и NFKC кодов — `internal/staff/internal/domain`) |
 | messageformat-go/mf1 | 0.8.6 | `backend/go.mod` (ICU MessageFormat v1 серверных локалей — `internal/platform/i18n`) |
 | go-mail | 0.8.1 | `backend/go.mod` (SMTP — `internal/platform/mail`) |
 | altcha-lib-go | 1.0.0 | `backend/go.mod` (только тесты совместимости ALTCHA — `internal/platform/humancheck`) |
-| go-task / gitleaks / actionlint / Mailpit | 3.53.1 / 8.30.1 / 1.7.12 / 1.31.2 | `tools/go.mod` |
-| golangci-lint | 2.14.0 | `tools/lint/go.mod` |
+| go-task / gitleaks / actionlint / Mailpit | 3.54.0 / 8.30.1 / 1.7.12 / 1.32.0 | `tools/go.mod` |
+| golangci-lint | 2.15.0 | `tools/lint/go.mod` |
 | lefthook | 2.2.2 | корневой `package.json` |
 | Образы Docker: golang / alpine | 1.27.1-alpine3.24 / 3.24.2 | `backend/Dockerfile` |
 | Swagger UI (swagger-ui-dist, jsDelivr + SRI) | 5.33.1 | `SwaggerUIVersion` и хэши в `backend/internal/platform/apidocs/apidocs.go` |
 | Redocly CLI | 2.71.0 | `contracts/package.json` (сборка бандлов контракта) |
-| oasdiff | 1.32.1 | `tools/oasdiff/go.mod` (отдельный модуль, см. ловушки) |
+| oasdiff | 1.34.1 | `tools/oasdiff/go.mod` (отдельный модуль, см. ловушки) |
 | go-pgquery (pg_query в wasm) | v0.0.0-20250409022910-10ac41983c07 | `backend/go.mod` — та же версия, что у sqlc в `backend/tools/go.mod` |
 
 ## Исключения
@@ -51,6 +51,7 @@
 | --- | --- | --- | --- | --- |
 | TypeScript (приложения) | 6.0.3 | 7.0.2 | typescript-eslint 8.72 поддерживает TS < 6.1 (проверено 27.10.2026); у 7.x нет классического JS API | когда typescript-eslint и eslint-config-next объявят поддержку TS 7 |
 | TypeScript (генератор) | 5.9.3 | 7.0.2 | openapi-typescript 7.13 требует `typescript ^5.x` | когда openapi-typescript поднимет peer |
+| River | 0.49.0 | 0.50.0 | 0.50.0 опубликована 27.10.2026 00:53 UTC — моложе суток на момент подъёма Go-зависимостей ветки (27.10.2026; та же защита, что `minimumReleaseAge` у pnpm); 0.x — минорный подъём River может ломать API, а заглушки чужих видов (`queue.AddForeign`) опираются на его внутренности | после 28.10.2026 01:00 UTC — поднять River, riverpgxv5, rivertype и CLI до последней 0.x, прогнать `go test ./cmd/... ./internal/platform/queue/...` и тесты рескьюера |
 | ESLint | 9.39.5 | 10.13.0 | eslint-config-next 16.4.3 тянет eslint-plugin-react 7.37.5 (peer ESLint ≤ 9.7; проверено 27.10.2026) | когда eslint-config-next перейдёт на ESLint 10 |
 
 ## Ловушки

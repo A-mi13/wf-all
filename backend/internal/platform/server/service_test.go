@@ -85,8 +85,8 @@ func TestRunServiceStopOrder(t *testing.T) {
 	<-inFlight
 	cancel() // SIGTERM при запросе в полёте
 	select {
-	case <-bgStopped:
-		t.Fatal("фон остановлен до дренажа HTTP")
+	case err := <-bgStopped:
+		t.Fatalf("фон остановлен до дренажа HTTP (пинг пула: %v)", err)
 	case <-time.After(200 * time.Millisecond):
 	}
 	close(release)

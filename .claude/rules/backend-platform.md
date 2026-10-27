@@ -31,7 +31,7 @@ paths:
   Исполняющий клиент River — только `queue.ClientConfig(очереди, исполнители, периодика, журнал)` у обоих бинарников
   (`riverConfig` в `cmd/worker` и `cmd/admin-api`; свой `&river.Config{…}` не собирать): общая часть —
   `queue.MaintenanceConfig` (сроки чистки выполненных, отменённых и «мёртвых» задач, порог рескьюера — умолчания River
-  v0.47, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
+  v0.47–v0.49, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
   `TestMaintenanceConfig`, `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance`
   (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
   сверить умолчания с константами `queue/maintenance.go`.
