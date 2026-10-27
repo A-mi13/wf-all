@@ -1,7 +1,7 @@
 import { createMemoryHistory } from '@tanstack/react-router';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createApi } from '../api/client';
 import { CITY_OWN, meModerator, meMfaPending, meOwner, meSetup } from '../test/me';
 import { problem } from '../test/problem';
@@ -11,6 +11,10 @@ import { AppProviders } from './providers';
 import { createQueryClient } from './query';
 import { reauthBus } from './reauth';
 import { AppRouter } from './router';
+import { sectionsServer } from '../test/sections';
+
+// стартовая и возврат приводят в разделы каркаса — их первые запросы описаны (src/test/sections.ts)
+beforeEach(() => sectionsServer());
 
 afterEach(() => {
   reauthBus.reject();

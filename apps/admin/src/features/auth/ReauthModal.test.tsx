@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { useState } from 'react';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { background, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
@@ -14,10 +14,14 @@ import { problem } from '../../test/problem';
 import { renderWithProviders } from '../../test/render';
 import { http, server } from '../../test/server';
 import { ReauthModal } from './ReauthModal';
+import { sectionsServer } from '../../test/sections';
 
 // Окно разблокировки (спека §9.3): 401 auth.reauth_required у любого запроса — модалка поверх
 // страницы, форма под ней цела; unlock → исходный запрос повторяется (тем же ключом). Закрыть без
 // разблокировки нельзя; блокировка — экран входа; «Выйти» — выход каркаса.
+
+// стартовая и возврат приводят в разделы каркаса — их первые запросы описаны (src/test/sections.ts)
+beforeEach(() => sectionsServer());
 
 afterEach(() => {
   reauthBus.reject();

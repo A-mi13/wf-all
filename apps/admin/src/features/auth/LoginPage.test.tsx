@@ -1,15 +1,19 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { reauthBus } from '../../app/reauth';
 import { renderApp, storageDump } from '../../test/app';
 import { meMfaPending, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
+import { sectionsServer } from '../../test/sections';
 
 // Экран входа (спека §9.4 п. 1, §4.6): шаг 1 — почта и пароль, шаг 2 — второй фактор. Стадию
 // ведёт сессия: 200 staffLogin → me = mfa_pending → шаг 2; 204 staffVerifyMfa → me = active →
 // ?return= или стартовая.
+
+// стартовая и возврат приводят в разделы каркаса — их первые запросы описаны (src/test/sections.ts)
+beforeEach(() => sectionsServer());
 
 afterEach(() => {
   reauthBus.reject();

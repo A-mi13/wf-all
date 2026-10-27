@@ -1,15 +1,19 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { reauthBus } from '../../app/reauth';
 import { renderApp, storageDump } from '../../test/app';
 import { meOwner, meSetup } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
+import { sectionsServer } from '../../test/sections';
 
 // Настройка 2FA (спека §9.4 п. 3, §4.5): секрет выпускается один раз (и в StrictMode), QR рисуется
 // на клиенте, код → 10 резервных кодов → «Я сохранил коды» → «Готово» (ack) → стартовая. Секрет и
 // коды не попадают ни в storage, ни в кэш запросов после ухода с экрана.
+
+// стартовая и возврат приводят в разделы каркаса — их первые запросы описаны (src/test/sections.ts)
+beforeEach(() => sectionsServer());
 
 afterEach(() => {
   reauthBus.reject();

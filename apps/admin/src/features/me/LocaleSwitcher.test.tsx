@@ -64,7 +64,7 @@ test('код ошибки без текста в локалях — общий �
 
 test('текущий язык повторно не сохраняется', async () => {
   renderWithProviders(<LocaleSwitcher />, { me: { ...meOwner, locale: 'en' } });
-  // неописанный запрос уронил бы тест (onUnhandledFrame: error)
+  // PATCH не уходит: неописанный запрос роняет тест (request:unhandled → afterEach, src/test/setup.ts)
   await userEvent.click(screen.getByRole('button', { name: 'English' }));
   expect(screen.getByRole('button', { name: 'English' })).toHaveAttribute('aria-pressed', 'true');
 });

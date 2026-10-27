@@ -167,7 +167,8 @@ export function approval(over: Partial<Approval> = {}): Approval {
 }
 
 // Сервер «Ролей и доступа»: матрица, список (фильтры q/status/role, курсор по страницам), карточка,
-// города (q — начало названия, ids — подписи). seen — что спрашивал экран.
+// города (q — начало названия, ids — подписи), сеансы цели (по умолчанию — нет; свои — server.use в тесте).
+// seen — что спрашивал экран.
 export function staffServer(
   opts: { accounts?: StaffAccount[]; pageSize?: number; roles?: StaffRoles } = {},
 ) {
@@ -177,6 +178,7 @@ export function staffServer(
     cities: [] as URLSearchParams[],
     roles: 0,
     cards: [] as string[],
+    sessions: [] as string[],
   };
   const size = opts.pageSize ?? 50;
   server.use(
@@ -205,6 +207,10 @@ export function staffServer(
       seen.cards.push(params.staffId);
       const a = state.accounts.find((x) => x.id === params.staffId);
       return a ? response(200).json(a) : response.untyped(problem(404, 'staff.not_found'));
+    }),
+    http.get('/v1/staff/accounts/{staffId}/sessions', ({ params, response }) => {
+      seen.sessions.push(params.staffId);
+      return response(200).json({ items: [] });
     }),
     http.get('/v1/geo/cities', ({ request, response }) => {
       const q = new URL(request.url).searchParams;

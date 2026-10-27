@@ -3,6 +3,7 @@ import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 import { reauthBus } from '../../app/reauth';
 import { renderApp, storageDump } from '../../test/app';
+import { auditServer } from '../../test/audit';
 import { CITY_OTHER, meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
@@ -243,7 +244,8 @@ describe('черновик приглашения', () => {
     await waitFor(() => expect(storageDump()).not.toContain('ivan.p@wf.example'));
     expect(storageDump()).not.toContain('Иван П.');
 
-    // следующий сотрудник за этим компьютером
+    // следующий сотрудник за этим компьютером (его стартовая — журнал)
+    auditServer({ records: [] });
     app.me.current = meAdmin;
     await app.refetchMe();
     await user.click(await screen.findByRole('link', { name: 'Роли и доступ' }));

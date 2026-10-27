@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test } from 'vitest';
 import { App } from './App';
 import { createApi } from './api/client';
 import { createQueryClient } from './app/query';
@@ -8,6 +8,10 @@ import { reauthBus } from './app/reauth';
 import { meOwner } from './test/me';
 import { problem } from './test/problem';
 import { http, server, TEST_API } from './test/server';
+import { sectionsServer } from './test/sections';
+
+// стартовая и возврат приводят в разделы каркаса — их первые запросы описаны (src/test/sections.ts)
+beforeEach(() => sectionsServer());
 
 afterEach(() => {
   reauthBus.reject();
