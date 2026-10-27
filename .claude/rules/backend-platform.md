@@ -12,7 +12,11 @@ paths:
 - Транзакция платформы — `db.InTx(ctx, pool, fn)`: всегда новая, кладёт tx в ctx; оттуда её читают только `events.Publish`, `audit.Write`. Вне `InTx` они возвращают `db.ErrNoTx`. Идемпотентность tx из ctx не читает — получает аргументом хука (ниже).
 - Идемпотентность (`idempotency.Middleware`, спека §6.4) вставляет ключ хуком `db.WithTxHook` первой операцией транзакции ручки; `after` хука узнаёт исход (коммит/откат), ответ сохраняется только при коммите. Ручка с `Idempotency-Key` — ровно одна закоммиченная `db.InTx` (повтор после отката можно, вторая после коммита или вложенная — 500); успех вернуть только после коммита, иначе 500 «без транзакции». Чтения до неё — без транзакции.
   Ключ — `(user_id, key)`, где `user_id` — id субъекта `auth.SubjectFrom` (игрок или сотрудник; колонки вида нет —
-  UUIDv7 не совпадают). Операция с `x-idempotency: no-store` (ответ с секретами) хранит только хэш и статус: повтор —
+  UUIDv7 не совпадают). Таблица — параметр `Config.Table` (`idempotency.Table`): `Players` (нулевое значение) —
+  `idempotency_keys` у public API, `Staff` — `staff_idempotency_keys` у admin-api (ответы сотрудников с ПД; права на неё
+  только у роли `admin`); неизвестная — паника при сборке. Чистка — `idempotency.DeleteExpired(ctx, db, таблица)` пулом
+  роли с правами на таблицу: `Players` — воркер (`CleanupWorker`, River, раз в час), `Staff` — тикер admin-api (шаг
+  `staff/jobs.Cleaner.Tick`). Операция с `x-idempotency: no-store` (ответ с секретами) хранит только хэш и статус: повтор —
   `409 idempotency.replay_unavailable`; `Cache-Control: no-store` ставит хендлер.
 - События — только id и непрофильные значения, без персональных данных; у агрегата `version`, подписчик в режиме `LatestState` отбрасывает устаревшие версии (§6.5).
 - Подписчик события — `events.Subscription` с явным `Delivery` (`EveryEvent` | `LatestState`), регистрируется в `subscriptions()` в `cmd/worker/main.go`; обработчик идемпотентен по `event_inbox` сам собой, пишет только в своей транзакции `tx`. Доставка на подписку, которой нет в реестре этого воркера (воркер другого релиза при выкатке), — обычная ошибка с повтором, а затем «мёртвая» задача (видна, переигрывается), не отмена; отменяется только задача на событие, уже удалённое чисткой. Переигровка — `worker events replay --type T --subscriber S --since RFC3339`.
@@ -21,8 +25,16 @@ paths:
 - Периодика платформы — только `platform/periodic.Jobs()` (новый срез и новые задачи на вызов): её подключают и воркер, и
   admin-api — лидер River один на схему и ставит периодику по своему списку (P27), исполняет воркер (River не проверяет
   исполнителя у периодической вставки; страж `TestLeaderWithoutWorkersEnqueuesPlatformJobs` под ролью `admin`). Новая
-  чистка платформы — в `Jobs()`, не в `cmd/worker`. Чистки, которым нужны права `admin` (`staff_*`, `approvals`), — не
-  River, а тикер в процессе admin-api (`staff/jobs.Cleaner`).
+  чистка платформы — в `Jobs()`, не в `cmd/worker`. Чистки, которым нужны права `admin` (`staff_*`, `approvals`,
+  `staff_idempotency_keys`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +
+  `ExpireDue` + `PurgeDecided` + `idempotency.DeleteExpired(…, Staff)`).
+  Исполняющий клиент River — только `queue.ClientConfig(очереди, исполнители, периодика, журнал)` у обоих бинарников
+  (`riverConfig` в `cmd/worker` и `cmd/admin-api`; свой `&river.Config{…}` не собирать): общая часть —
+  `queue.MaintenanceConfig` (сроки чистки выполненных, отменённых и «мёртвых» задач, порог рескьюера — умолчания River
+  v0.47, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
+  `TestMaintenanceConfig`, `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance`
+  (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
+  сверить умолчания с константами `queue/maintenance.go`.
 - HTTP-бинарник с фоном — `server.RunService(ctx, name, cfg, logOut, build)`: `build(log, pool)` → `Service{Handler,
   Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
   фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены

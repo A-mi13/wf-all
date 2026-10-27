@@ -51,8 +51,11 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   лимита и идемпотентности.
 - **CSRF**: любой метод, кроме GET/HEAD/OPTIONS/TRACE, — ровно один `Origin`, равный `ADMIN_ORIGIN`, и `X-WF-Admin: 1`,
   иначе `403 auth.csrf_failed` до разбора тела; анонимные мутации тоже. `ADMIN_ORIGIN` — в форме заголовка `Origin`
-  (`admin.ValidateOrigin`: схема http/https, нижний регистр, без пути и стандартного порта), аллоулист без `/0`
-  (`admin.ValidateAllowlist`) — проверка на старте, до подключения к базе.
+  (`admin.ValidateOrigin`: схема http/https, хост в нижнем регистре и только ASCII — IDN в A-label `xn--…`, без пути и
+  стандартного порта), аллоулист без `/0` (`admin.ValidateAllowlist`) — проверка на старте, до подключения к базе.
+  `admin.ValidateCookieSecure(origin, secure)`: https-origin и `ADMIN_COOKIE_SECURE=false` — отказ старта (cookie без
+  `Secure` и без `__Host-` — только dev по http); зовётся в `cmd/admin-api/main.go` рядом с `ValidateOrigin`, до
+  подключения к базе, и ещё раз в `NewHandler`.
 - **Права** (`x-permission`): правила строятся из контракта на старте — операция без `x-permission`, ключ вне каталога
   или черновой, `handler` без `x-permission-any` — отказ старта; маршрут без правила в работе — 500 в лог (fail-closed).
   `anonymous` — пропуск, но `Idempotency-Key` снимается: анонимная мутация не идёт под идемпотентностью даже с
