@@ -10,6 +10,7 @@ import (
 // новая строка здесь, иначе TestInternalDirsAreKnown упадёт.
 var Layers = map[string]int{
 	"geo":          0,
+	"staff":        0, // сотрудники админки: учётки, роли, сессии (спека «Сотрудники и админка geo»)
 	"identity":     1,
 	"media":        2,
 	"economy":      3,

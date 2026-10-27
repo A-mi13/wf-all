@@ -1,11 +1,286 @@
-Health:
+# Схемы платформы админки: подтверждения вдвоём (спека сотрудников §4.8) и журнал действий (§5.3).
+# Каждая регистрируется в ../root.yaml components.schemas.
+ApprovalAction:
+  type: string
+  description: >-
+    Действие запроса на подтверждение — подпись берётся из локалей админки
+    (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или
+    городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца
+  enum: [staff.invite, staff.role_change, staff.access_reset, staff.revoke_owner]
+  x-extensible-enum: true
+ApprovalStatus:
+  type: string
+  description: >-
+    Состояние запроса. pending — ждёт решения (24 часа); executed — подтверждён и исполнен;
+    rejected — отклонён; cancelled — отозван инициатором или погашен системой; expired — истёк
+    срок; failed — подтверждён, но не исполнился (причина в error)
+  enum: [pending, executed, rejected, cancelled, expired, failed]
+  x-extensible-enum: true
+ApprovalActor:
   type: object
-  description: Состояние сервиса
-  required: [status]
+  description: Сотрудник в запросе — id и снимок имени на момент действия
+  required: [id, label]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id учётки сотрудника
+      example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+    label:
+      type: string
+      description: Имя сотрудника на момент действия
+      example: Ольга В.
+Approval:
+  type: object
+  description: Запрос на подтверждение действия «вдвоём»
+  required:
+    - id
+    - action
+    - permission
+    - status
+    - payload
+    - target_id
+    - scope_city_id
+    - requested_by
+    - requested_at
+    - expires_at
+    - decided_by
+    - decided_at
+    - comment
+    - error
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id запроса
+      example: 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+    action:
+      $ref: '../root.yaml#/components/schemas/ApprovalAction'
+    permission:
+      type: string
+      description: Право, которое нужно подтверждающему (ключ матрицы)
+      example: staff.roles.grant
+    status:
+      $ref: '../root.yaml#/components/schemas/ApprovalStatus'
+    payload:
+      type: object
+      additionalProperties: true
+      description: >-
+        Что именно будет сделано — поля зависят от действия (почта, имя, роль, города, причина);
+        v — версия формата
+      example:
+        v: 1
+        email: ivan.p@wf.example
+        display_name: Иван П.
+        role: moderator
+        city_ids: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47]
+    target_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: Сотрудник-цель; null — цели ещё нет (приглашение новой учётки)
+      example: null
+    scope_city_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: Город запроса — подтверждают сотрудники с этим городом; null — без города
+      example: null
+    requested_by:
+      $ref: '../root.yaml#/components/schemas/ApprovalActor'
+    requested_at:
+      type: string
+      format: date-time
+      description: Когда запрос создан
+      example: '2026-10-13T09:15:00Z'
+    expires_at:
+      type: string
+      format: date-time
+      description: До какого времени запрос можно решить (24 часа)
+      example: '2026-10-14T09:15:00Z'
+    decided_by:
+      type: object
+      nullable: true
+      description: Кто решил (подтвердил, отклонил или отменил); null — ещё не решён или решила система
+      allOf:
+        - $ref: '../root.yaml#/components/schemas/ApprovalActor'
+    decided_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Когда решён; null — ещё ждёт решения
+      example: null
+    comment:
+      type: string
+      nullable: true
+      description: Комментарий к решению; null — без комментария
+      example: null
+    error:
+      type: string
+      nullable: true
+      description: Почему не исполнился (status failed) или почему погашен системой; null — без ошибки
+      example: null
+ApprovalAccepted:
+  type: object
+  description: Действие не исполнено сразу — создан запрос на подтверждение вторым сотрудником
+  required: [approval]
+  properties:
+    approval:
+      $ref: '../root.yaml#/components/schemas/Approval'
+ApprovalPage:
+  type: object
+  description: Страница запросов на подтверждение
+  required: [items, next_cursor]
+  properties:
+    items:
+      type: array
+      description: Запросы страницы
+      items:
+        $ref: '../root.yaml#/components/schemas/Approval'
+    next_cursor:
+      type: string
+      nullable: true
+      description: Курсор следующей страницы; null — страниц больше нет
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMTNUMDk6MTU6MDBaIiwiMDE5MmYxZTIiXX0
+ApprovalApprove:
+  type: object
+  description: Решение «подтвердить»
   additionalProperties: false
   properties:
-    status:
+    comment:
       type: string
-      description: Всегда ok — иначе сервис не ответил бы
-      enum: [ok]
-      x-extensible-enum: true
+      maxLength: 500
+      description: Комментарий к подтверждению — попадает в журнал
+      example: Проверила с Иваном лично
+ApprovalReject:
+  type: object
+  description: Решение «отклонить»
+  required: [comment]
+  additionalProperties: false
+  properties:
+    comment:
+      type: string
+      minLength: 1
+      maxLength: 500
+      description: Почему отклонено — увидит инициатор, попадает в журнал
+      example: Город модератору выдаём после испытательного срока
+AuditRecord:
+  type: object
+  description: Запись журнала действий
+  required:
+    - id
+    - created_at
+    - action
+    - object_type
+    - object_id
+    - actor_user_id
+    - actor_staff_id
+    - actor_role
+    - actor_label
+    - scope_city_id
+    - reason
+    - ip
+    - user_agent
+    - before
+    - after
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id записи
+      example: 0192f1f0-8a9b-7c0d-9e1f-2a3b4c5d6e7f
+    created_at:
+      type: string
+      format: date-time
+      description: Когда сделано
+      example: '2026-10-13T09:20:00Z'
+    action:
+      type: string
+      description: Код действия <модуль>.<действие> — подпись в локалях админки
+      example: staff.role_granted
+    object_type:
+      type: string
+      description: Вид объекта действия
+      example: staff_account
+    object_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: Id объекта; null — действие без объекта (например, неудачный вход)
+      example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+    actor_user_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: Игрок-автор действия; null — автор не игрок
+      example: null
+    actor_staff_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: Сотрудник-автор действия; null — автор не сотрудник
+      example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+    actor_role:
+      type: string
+      nullable: true
+      description: >-
+        Роль автора на момент действия (роль сотрудника или игрока) либо system, operator,
+        anonymous — без автора-человека
+      example: owner
+    actor_label:
+      type: string
+      nullable: true
+      description: «Кто» — имя на момент действия; operator — оператор сервера, system — платформа
+      example: Ольга В.
+    scope_city_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: Город записи — по нему модератор видит журнал своих городов; null — без города
+      example: null
+    reason:
+      type: string
+      nullable: true
+      description: Причина действия (код причины и комментарий); null — без причины
+      example: 'left_team: перешёл в другой проект'
+    ip:
+      type: string
+      nullable: true
+      description: Сеть автора — подсеть /24 (IPv4) или /48 (IPv6); null — неизвестна
+      example: 203.0.113.0/24
+    user_agent:
+      type: string
+      nullable: true
+      description: Браузер автора (User-Agent); null — неизвестен
+      example: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'
+    before:
+      type: object
+      nullable: true
+      additionalProperties: true
+      description: Было — значимые поля до действия, персональные данные замаскированы; null — объекта не было
+      example:
+        role: support
+        city_ids: []
+    after:
+      type: object
+      nullable: true
+      additionalProperties: true
+      description: Стало — значимые поля после действия, персональные данные замаскированы; null — объект удалён
+      example:
+        role: moderator
+        city_ids: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47]
+AuditPage:
+  type: object
+  description: Страница журнала действий
+  required: [items, next_cursor]
+  properties:
+    items:
+      type: array
+      description: Записи страницы, новые сверху
+      items:
+        $ref: '../root.yaml#/components/schemas/AuditRecord'
+    next_cursor:
+      type: string
+      nullable: true
+      description: Курсор следующей страницы; null — страниц больше нет
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMTNUMDk6MjA6MDBaIiwiMDE5MmYxZjAiXX0

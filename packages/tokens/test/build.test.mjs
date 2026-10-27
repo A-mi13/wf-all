@@ -20,8 +20,32 @@ test('цвета, шрифты, шкалы и движение — CSS-пере�
   assert.match(css, /color-scheme: dark;/);
 });
 
+// P21/R10: цвета макетов админки 07/08 и ширина переключения раскладки.
+test('токены админки: фоны чипов и статусов, приглушённые тексты, breakpoint', () => {
+  assert.match(css, /--wf-color-surface-sunken: #0E130F;/);
+  assert.match(css, /--wf-color-chip-bg: #1F2A23;/);
+  assert.match(css, /--wf-color-chip-accent-bg: #2C4434;/);
+  assert.match(css, /--wf-color-success-bg: #1E2A17;/);
+  assert.match(css, /--wf-color-warning-bg: #2A2113;/);
+  assert.match(css, /--wf-color-danger-bg: #2A1614;/);
+  assert.match(css, /--wf-color-danger-border: #5A3733;/);
+  assert.match(css, /--wf-color-text-faint: #6E7B73;/);
+  assert.match(css, /--wf-color-text-ghost: #4F5C55;/);
+  assert.match(css, /--wf-breakpoint-mobile: 768px;/);
+});
+
+// P21: новые имена не перекрывают существующие — значения прежних токенов не меняются.
+test('прежние токены текста не тронуты', () => {
+  assert.match(css, /--wf-color-text-subtle: #7E8C83;/);
+  assert.match(css, /--wf-color-text-disabled: #5E7266;/);
+});
+
 test('закоммиченные файлы совпадают с tokens.json', async () => {
   const onDisk = (f) => readFile(new URL(`../${f}`, import.meta.url), 'utf8');
   assert.equal(await onDisk('tokens.css'), css, 'запусти pnpm --filter @wf/tokens build');
-  assert.equal(await onDisk('tokens.ts'), buildTs(tokens), 'запусти pnpm --filter @wf/tokens build');
+  assert.equal(
+    await onDisk('tokens.ts'),
+    buildTs(tokens),
+    'запусти pnpm --filter @wf/tokens build',
+  );
 });

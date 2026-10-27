@@ -9,6 +9,9 @@ tasks:
       - test -z "$(git status --porcelain -- src/api/gen)" || { git status --short -- src/api/gen; echo 'src/api/gen расходится с контрактом — закоммитить результат pnpm gen'; exit 1; }
   dev: { desc: Dev-сервер админки (:5173), cmds: ['pnpm dev'] }
   test: { desc: Тесты админки, cmds: ['pnpm test'] }
+  e2e:
+    desc: Живой e2e (Playwright + admin-api + Postgres wf_e2e + Mailpit; порты 5174/5175, 18181/18182, 18026/11026)
+    cmds: ['bash ../../scripts/e2e-admin.sh {{.CLI_ARGS}}']
   lint: { cmds: ['pnpm lint'] }
   typecheck: { cmds: ['pnpm typecheck'] }
   build: { cmds: ['pnpm build'] }

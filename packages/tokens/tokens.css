@@ -19,6 +19,15 @@
   --wf-color-danger: #F97066;
   --wf-color-slot-empty: #1B241F;
   --wf-color-slot-filled: #2A3B2E;
+  --wf-color-surface-sunken: #0E130F;
+  --wf-color-chip-bg: #1F2A23;
+  --wf-color-chip-accent-bg: #2C4434;
+  --wf-color-success-bg: #1E2A17;
+  --wf-color-warning-bg: #2A2113;
+  --wf-color-danger-bg: #2A1614;
+  --wf-color-danger-border: #5A3733;
+  --wf-color-text-faint: #6E7B73;
+  --wf-color-text-ghost: #4F5C55;
   --wf-font-display: 'Oswald', sans-serif;
   --wf-font-body: 'Manrope', system-ui, sans-serif;
   --wf-text-3xl: 32px;
@@ -58,6 +67,7 @@
   --wf-size-avatar-lg: 96px;
   --wf-size-slot: 56px;
   --wf-size-bar: 8px;
+  --wf-breakpoint-mobile: 768px;
   --wf-duration-fast: 120ms;
   --wf-duration-base: 200ms;
   --wf-duration-slow: 400ms;

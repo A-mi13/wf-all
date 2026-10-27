@@ -1,25 +1,750 @@
 {
-  "app": { "title": "" },
-  "health": { "checking": "", "ok": "", "down": "" },
+  "app": {
+    "title": "Administration",
+    "brand": "WHEREFOOTBALL"
+  },
+  "nav": {
+    "groups": {
+      "security": "Security"
+    },
+    "audit": "Audit log",
+    "staff": "Roles and access",
+    "approvals": "Approvals",
+    "me": "My access",
+    "label": "Sections",
+    "more": "More",
+    "more_title": "Sections and access",
+    "logout": "Sign out",
+    "counts": {
+      "approvals": "{count, plural, one {# request awaits a decision} other {# requests await a decision}}"
+    }
+  },
+  "pages": {
+    "login": {
+      "title": "Admin sign-in"
+    },
+    "accept": {
+      "title": "Accept invitation"
+    },
+    "setup2fa": {
+      "title": "Two-factor setup"
+    }
+  },
+  "auth": {
+    "common": {
+      "footnote": "Sign-in only with a work email and a second factor. Every sign-in is written to the audit log — together with everything you do afterwards."
+    },
+    "login": {
+      "lead": "A separate sign-in system: a player account doesn't work here — not even your own.",
+      "email": "Work email",
+      "password": "Password",
+      "submit": "Sign in",
+      "wait": "Wait {seconds} s",
+      "expired": "Time for the authenticator code ran out — you get five minutes. Enter your email and password again."
+    },
+    "mfa": {
+      "lead": "Password accepted. Enter the six digits from your authenticator app — you have five minutes.",
+      "as": "Signing in as {email}",
+      "code": "Authenticator app code",
+      "recovery": "Recovery code",
+      "recovery_hint": "Looks like xxxxx-xxxxx. Each code works once and is used up after sign-in.",
+      "use_recovery": "Use a recovery code",
+      "use_app": "Enter the app code",
+      "submit": "Sign in",
+      "wait": "Wait {seconds} s",
+      "invalid": "The code didn't work. {count, plural, one {# attempt} other {# attempts}} left, then access is closed for an hour and we notify the admins.",
+      "locked": "The code didn't work — access is closed for an hour, and we've notified the admins. If it wasn't you, contact an owner or admin.",
+      "to_login": "Back to sign-in",
+      "restart": "Different email or password"
+    },
+    "reauth": {
+      "title": "Confirm sign-in",
+      "text": "20 minutes passed without activity, or your network changed. Enter the app code — you'll continue where you left off, nothing you typed is lost.",
+      "submit": "Continue working",
+      "logout": "Sign out"
+    },
+    "accept": {
+      "lead": "First sign-in by invitation: the email from the letter, a new password and the code from the letter. Then — second-factor setup.",
+      "email": "Work email",
+      "password": "New password",
+      "password_hint": "From 10 to 128 characters; common passwords are rejected. A phrase of several words is easier to remember than random characters.",
+      "passwordRepeat": "Repeat password",
+      "code": "Code from the email",
+      "code_hint": "The code from the invitation email, like xxxxx-xxxxx: 10 Latin letters and digits; case, dashes and spaces don't matter. The invitation lives for 24 hours.",
+      "submit": "Accept invitation",
+      "wait": "Wait {seconds} s",
+      "resend": "Email the code again",
+      "resend_wait": "Email it again in {seconds} s",
+      "resent": "If the invitation for this email is still active, an email with the same code is on its way — the code from earlier emails works too. No email? Check spam."
+    },
+    "setup": {
+      "lead": "Scan the QR code in Google Authenticator, 1Password or any other authenticator app and enter the six digits. Until the second factor is set up, the admin opens only this screen.",
+      "qr": "QR code for the authenticator app",
+      "secret": "Can't scan? Enter the secret manually",
+      "copy": "Copy",
+      "copy_secret": "Copy the secret",
+      "copied": "Copied",
+      "copy_failed": "Couldn't copy — select the text and copy it manually",
+      "code": "Authenticator app code",
+      "confirm": "Confirm",
+      "invalid": "The code didn't work. Make sure the time on your phone is set automatically and enter a new code.",
+      "codes_title": "Recovery codes",
+      "codes_text": "Each code works once instead of the app code. We show them exactly once — later you can only regenerate them in My access, and the old ones stop working at once.",
+      "copy_codes": "Copy codes",
+      "download": "Download .txt",
+      "file_name": "admin-recovery-codes.txt",
+      "file_header": "Admin recovery codes. Each code works once.",
+      "saved": "I saved the codes",
+      "finish": "Done",
+      "confirmed_title": "The second factor is already confirmed",
+      "confirmed_text": "The authenticator app is connected; only the last step is left. Recovery codes are shown once and won't appear here again — you can issue new ones in My access.",
+      "continue": "Continue",
+      "elsewhere": "Two-factor setup is being continued in another tab. Finish it there, or start over here: the QR code in that tab will stop working.",
+      "replay": "A response with a secret isn't stored, so it can't be repeated. Start the setup again — the app will get a new QR code.",
+      "restart": "Start again",
+      "logout": "Sign out"
+    }
+  },
+  "states": {
+    "loading": "Loading…",
+    "connection": {
+      "title": "No connection to the server",
+      "refused_title": "The server refused access to the admin panel",
+      "retry": "Retry",
+      "text": "The admin panel got no response from the server. Check your connection and retry."
+    },
+    "forbidden": {
+      "title": "No access to this section",
+      "text": "This section needs a permission your role doesn't have. An owner or admin can grant access."
+    },
+    "not_found": {
+      "title": "Page not found"
+    },
+    "empty": {
+      "title": "Nothing found",
+      "text": "No records match this search and filter. This is not an error — it is just empty."
+    },
+    "error": {
+      "title": "Could not load",
+      "code": "Error code: {status} · {code}",
+      "retry": "Retry"
+    },
+    "offline": {
+      "text": "No network. Decisions will not be sent; showing the last loaded data."
+    },
+    "desktop_only": {
+      "title": "Desktop only",
+      "text": "This section opens only on a computer: it changes access and settings that cannot be undone from a phone on the go."
+    },
+    "rate_limited": {
+      "title": "Too many requests",
+      "text": "The server slowed requests down to protect data. You can retry in {seconds} s.",
+      "ready": "You can retry now.",
+      "wait": "Wait {seconds} s",
+      "retry": "Retry"
+    },
+    "pending_approval": {
+      "title": "Sent for approval",
+      "text": "The action runs once a second staff member with the right approves it. The request lives 24 hours; track it in Approvals."
+    }
+  },
+  "locale": {
+    "label": "Interface language",
+    "ru": "Русский",
+    "en": "English"
+  },
+  "ui": {
+    "close": "Close",
+    "password": {
+      "show": "Show password",
+      "hide": "Hide password"
+    },
+    "otp": {
+      "digit": "Digit {index} of {count}"
+    },
+    "multiselect": {
+      "search": "{label}: search",
+      "remove": "Remove “{label}”",
+      "empty": "Nothing found"
+    },
+    "confirm": {
+      "prompt": "Type “{word}” to confirm",
+      "cancel": "Cancel"
+    },
+    "toast": {
+      "region": "Notifications",
+      "close": "Dismiss notification"
+    },
+    "field_errors": {
+      "invalid": "Check this value",
+      "required": "This field is required",
+      "minLength": "Too short",
+      "maxLength": "Too long",
+      "min": "Value is too small",
+      "max": "Value is too large",
+      "minimum": "Value is too small",
+      "maximum": "Value is too large",
+      "pattern": "Invalid format",
+      "format": "Invalid format",
+      "type": "Invalid format",
+      "enum": "Choose a value from the list",
+      "minItems": "Select at least one option",
+      "maxItems": "Too many selected",
+      "min_items": "Select at least one option",
+      "max_items": "More selected than allowed",
+      "too_short": "Password is too short",
+      "too_long": "Password is too long",
+      "common": "This password is too common — choose another one",
+      "mismatch": "Does not match",
+      "range": "Invalid period"
+    }
+  },
+  "permissions": {
+    "staff": {
+      "roles": {
+        "read": "Role and permission matrix",
+        "grant_elevated": "Grant the owner or admin role",
+        "grant": "Grant the moderator or support role, add a city to a moderator",
+        "revoke_owner": "Remove an owner (disable the account)",
+        "revoke_admin": "Remove an admin (disable the account)",
+        "revoke": "Remove a moderator or support member, remove a city from a moderator"
+      },
+      "accounts": {
+        "read": "Staff list and profiles"
+      },
+      "access": {
+        "reset_elevated": "Reset access for an owner or admin",
+        "reset": "Reset access for a moderator or support member"
+      },
+      "invites": {
+        "resend": "Resend an invitation"
+      },
+      "sessions": {
+        "revoke": "End other staff members' sessions (admins: moderators and support only)"
+      }
+    },
+    "audit": {
+      "log": {
+        "read": "Read the audit log (moderators: own cities and own entries)"
+      }
+    },
+    "geo": {
+      "places": {
+        "search": "Search GeoNames places"
+      },
+      "cities": {
+        "read": "Cities and districts",
+        "activate": "Open a city",
+        "manage": "City status, slug and geoname_id link",
+        "rename": "City names by language"
+      },
+      "districts": {
+        "manage": "City districts"
+      },
+      "countries": {
+        "read": "Countries and their rules",
+        "manage": "Country rules and enabling a country"
+      },
+      "imports": {
+        "read": "GeoNames import log",
+        "run": "Run a GeoNames import"
+      }
+    },
+    "platform": {
+      "versions": {
+        "read": "App versions",
+        "manage": "Minimum and recommended version, store link"
+      },
+      "flags": {
+        "read": "Feature flags",
+        "manage": "Toggle feature flags by city"
+      }
+    }
+  },
+  "approvals": {
+    "actions": {
+      "staff": {
+        "invite": "Staff invitation",
+        "role_change": "Role or cities change",
+        "access_reset": "Access reset",
+        "revoke_owner": "Disabling an owner"
+      }
+    },
+    "subtitle": "Two-person actions are carried out by a second staff member with the permission. A request lives for 24 hours.",
+    "tabs": {
+      "label": "Approval requests",
+      "incoming": "Incoming",
+      "mine": "Mine"
+    },
+    "table": {
+      "incoming": "Incoming requests",
+      "mine": "My requests",
+      "columns": {
+        "request": "Request",
+        "subject": "Whom and what",
+        "state": "Deadline and outcome",
+        "decision": "Decision"
+      }
+    },
+    "requested": "{name} · {time}",
+    "expires": "until {time}",
+    "decided": "{name} · {time}",
+    "system": "system",
+    "comment": "Comment: {text}",
+    "failure_reason": "Reason: {text}",
+    "statuses": {
+      "pending": "awaiting decision",
+      "executed": "executed",
+      "rejected": "rejected",
+      "cancelled": "cancelled",
+      "expired": "expired",
+      "failed": "not executed",
+      "unknown": "unknown"
+    },
+    "summary": {
+      "label": "What will be done",
+      "to": "Whom",
+      "role": "Role",
+      "role_change": "{from} → {to}",
+      "cities": "Cities",
+      "cities_count": "{count, plural, one {# city} other {# cities}}",
+      "no_cities": "no cities",
+      "reason": "Reason",
+      "comment": "Comment",
+      "target": "staff member {id}",
+      "none": "—"
+    },
+    "failure": {
+      "initiator_changed": "The requester changed after the request: disabled, access reset or role changed",
+      "execution_failed": "The action did not go through — see the audit log for details",
+      "unknown": "The action was not carried out"
+    },
+    "approve": "Approve",
+    "reject": "Reject",
+    "cancel": "Cancel",
+    "desktop_only": "Granting access — desktop only",
+    "done": {
+      "executed": "Approved and carried out.",
+      "rejected": "Request rejected.",
+      "cancelled": "Request cancelled.",
+      "other": "The request is now “{status}”."
+    },
+    "failed_toast": "Approved but not carried out: {reason}",
+    "reject_dialog": {
+      "title": "Reject the request?",
+      "text": "The action will not be carried out. The requester will see the comment; it goes to the audit log.",
+      "comment": "Why you are rejecting",
+      "submit": "Reject"
+    },
+    "empty": {
+      "incoming_title": "No incoming requests",
+      "incoming_text": "Requests awaiting your decision will appear here.",
+      "mine_title": "You have not sent anything",
+      "mine_text": "Two-person actions you sent for approval will appear here."
+    }
+  },
   "errors": {
-    "internal": "",
+    "internal": "Something went wrong. Please try again",
     "request": {
-      "invalid": "",
-      "too_large": ""
+      "invalid": "The request could not be processed",
+      "too_large": "The request is too large"
     },
-    "validation": { "failed": "" },
+    "validation": {
+      "failed": "Check the form fields"
+    },
     "http": {
-      "not_found": "",
-      "method_not_allowed": ""
+      "not_found": "Not found",
+      "method_not_allowed": "This action is not available",
+      "not_implemented": "This feature is still in development"
     },
-    "auth": { "unauthenticated": "" },
-    "ratelimit": { "exceeded": "" },
-    "humancheck": { "required": "" },
+    "auth": {
+      "unauthenticated": "Please sign in again",
+      "forbidden": "You don't have permission for this action",
+      "csrf_failed": "The request was rejected for security reasons. Reload the page",
+      "ip_not_allowed": "Admin sign-in from this address is blocked",
+      "reauth_required": "Confirm your sign-in with a code from your app",
+      "setup_required": "Finish setting up two-factor authentication first"
+    },
+    "ratelimit": {
+      "exceeded": "Too many requests. Please wait a moment"
+    },
+    "humancheck": {
+      "required": "Please confirm you are not a robot"
+    },
     "idempotency": {
-      "key_reused": "",
-      "in_progress": "",
-      "replay_unavailable": ""
+      "key_reused": "This action was already performed with different data. Reload the page",
+      "in_progress": "The action is still in progress. Please wait",
+      "replay_unavailable": "The action is done. Reload the page"
     },
-    "feature": { "disabled": "" }
+    "feature": {
+      "disabled": "This feature is not available yet"
+    },
+    "platform": {
+      "approval_not_found": "Approval request not found",
+      "approval_self": "You can't decide your own request or a request about you",
+      "approval_stale": "The data changed after the request — create it again",
+      "approval_closed": "The request is already decided, cancelled or expired"
+    },
+    "staff": {
+      "invalid_credentials": "Wrong email or password",
+      "mfa_invalid": "The code didn't work",
+      "password_invalid": "The current password is wrong",
+      "wrong_stage": "This action is not available right now. Reload the page",
+      "invite_invalid": "The invitation code didn't work or has expired",
+      "email_taken": "A staff member with this email already exists",
+      "not_found": "Staff member not found",
+      "session_not_found": "Session not found or already ended",
+      "city_not_found": "City not found",
+      "last_owner": "The platform can't be left without an owner",
+      "self_action": "You can't do this to yourself — use My access"
+    }
+  },
+  "roles": {
+    "owner": "owner",
+    "admin": "admin",
+    "moderator": "moderator",
+    "support": "support",
+    "unknown": "staff member"
+  },
+  "account": {
+    "cities": "{count, plural, one {# city} other {# cities}}"
+  },
+  "table": {
+    "search": "Search",
+    "clear_search": "Clear search",
+    "more_filters": "More filters",
+    "shown": "Showing {count}",
+    "reset": "Reset filters",
+    "load_more": "Show more",
+    "load_more_failed": "Could not load more. Try again",
+    "more_filters_active": "More filters, set: {count}"
+  },
+  "me": {
+    "subtitle": "Second factor, recovery codes and active sessions",
+    "mfa_on": "2FA on",
+    "locked": "Access is closed for an hour: five wrong codes or passwords in a row. We have notified the administrators. If it was not you, contact an owner or an admin.",
+    "reauth_retry": "Sign-in confirmed. A second-factor code works only once — enter a new code: the action has not been done yet.",
+    "mfa": {
+      "title": "Second factor",
+      "on": "Second factor is on",
+      "since": "Authenticator app connected {date}. The code is asked at sign-in and after 20 minutes of inactivity. A new device can only be set up through a second staff member.",
+      "off": "Second factor is not set up",
+      "regenerate": "Reissue codes",
+      "lost": "Lost access",
+      "lost_title": "Recovery takes two people",
+      "lost_text": "Access is restored by an owner or an admin: one requests an access reset, a second one confirms it. Your password, second factor, recovery codes and sessions are revoked, and a new invitation is sent to your work email. There is no self-service “forgot password” — nobody can take over sign-in through email."
+    },
+    "codes": {
+      "title": "Recovery codes",
+      "left": "{count} of 10 unused",
+      "low": "Almost no codes left — reissue them while you still have your authenticator app.",
+      "text": "Each code works once. The codes are shown only when issued — after that only a reissue, and the old ones stop working at once."
+    },
+    "regenerate": {
+      "title": "New recovery codes",
+      "text": "The old codes stop working immediately. Confirm with a code from your authenticator app — a recovery code is not accepted here.",
+      "code": "Authenticator app code",
+      "submit": "Issue codes",
+      "wait": "Wait {seconds} s",
+      "done": "Done",
+      "issued": "Recovery codes reissued. The old ones no longer work.",
+      "unknown": "No response arrived — the codes may have been reissued. If the counter below shows “10 of 10”, the old codes no longer work: issue new ones again and save them."
+    },
+    "sessions": {
+      "title": "Active sessions",
+      "label": "Sessions",
+      "current": "Current session",
+      "revoke": "End",
+      "revoke_label": "End session: {device}, signed in {created}",
+      "revoke_others": "End all other sessions",
+      "device": "{browser} · {os}",
+      "unknown_device": "Unknown device",
+      "details": "Network {ip} · signed in {created} · active {seen}",
+      "revoked": "Session ended. That device will need to sign in again.",
+      "revoked_others": "{count, plural, =0 {There were no other sessions} one {# session ended} other {# sessions ended}}",
+      "empty": "No active sessions",
+      "note": "A session lives 8 hours and ends when the network changes. After 20 minutes of inactivity the admin asks for the second factor again — inconvenient by design.",
+      "browsers": {
+        "chrome": "Chrome",
+        "edge": "Edge",
+        "firefox": "Firefox",
+        "safari": "Safari",
+        "opera": "Opera",
+        "yandex": "Yandex Browser",
+        "other": "Browser"
+      },
+      "systems": {
+        "windows": "Windows",
+        "macos": "macOS",
+        "ios": "iOS",
+        "android": "Android",
+        "linux": "Linux",
+        "other": "Unknown OS"
+      }
+    },
+    "password": {
+      "title": "Change password",
+      "text": "Current password, the new one twice and the second factor. Your other sessions will end — this one stays.",
+      "current": "Current password",
+      "new": "New password",
+      "new_hint": "10 to 128 characters; common passwords are not accepted. A phrase of several words is easier to remember than a jumble of characters.",
+      "repeat": "New password again",
+      "code": "Authenticator app code",
+      "recovery": "Recovery code",
+      "recovery_hint": "Looks like xxxxx-xxxxx. The code is used up even if the password is not changed.",
+      "use_recovery": "Use a recovery code",
+      "use_app": "Enter an app code",
+      "submit": "Change password",
+      "done": "Password changed. Other sessions ended.",
+      "password_invalid": "The current password is wrong. {count, plural, one {# attempt left} other {# attempts left}}, then access closes for an hour and we notify the administrators.",
+      "mfa_invalid": "The code did not match. {count, plural, one {# attempt left} other {# attempts left}}, then access closes for an hour and we notify the administrators.",
+      "unknown": "Result unknown: no response arrived, and the password may have changed. Do not repeat the change with the old password — a wrong password counts towards the lockout; sign in with the new password."
+    }
+  },
+  "staff": {
+    "subtitle": "Who can do what",
+    "matrix": {
+      "label": "Permission matrix",
+      "permission": "Permission",
+      "grants": {
+        "allow": "yes",
+        "scoped": "own cities",
+        "dual": "two people",
+        "deny": "no",
+        "unknown": "—"
+      }
+    },
+    "two_hands": {
+      "title": "Two-person rule",
+      "text": "One staff member can only request these actions — they run after a second staff member with the same permission confirms. Nobody does them alone, not even an owner.",
+      "item": "{permission} — {roles}",
+      "none": "The matrix has no two-person actions right now."
+    },
+    "list": {
+      "title": "Who has access",
+      "label": "Staff",
+      "search": "Name or email",
+      "columns": {
+        "person": "Staff member",
+        "role": "Role",
+        "status": "Status",
+        "last_login": "Last sign-in",
+        "actions": "Actions"
+      },
+      "status_filter": "Status",
+      "status_all": "All",
+      "statuses": {
+        "active": "Active",
+        "invited": "Invited",
+        "disabled": "Disabled"
+      },
+      "role_filter": "Role",
+      "role_all": "All roles",
+      "never": "never signed in",
+      "you": "you",
+      "manage": "Manage",
+      "manage_label": "Manage: {name}"
+    },
+    "status": {
+      "active": "active",
+      "invited": "invitation not accepted",
+      "expired": "invitation expired",
+      "disabled": "disabled",
+      "locked": "sign-in closed",
+      "unknown": "unknown status"
+    },
+    "invite": {
+      "open": "Invite staff member",
+      "title": "Invite a staff member",
+      "text": "A second staff member with the permission confirms the invitation. After that a code goes to the work email; it lives 24 hours, and the second factor is set up at first sign-in.",
+      "email": "Work email",
+      "name": "Name",
+      "name_hint": "Shown in the audit log and to other staff.",
+      "role": "Role",
+      "role_placeholder": "Choose a role",
+      "cities": "Moderator cities",
+      "cities_search": "Find a city",
+      "cities_hint": "A moderator needs at least one city.",
+      "submit": "Send for confirmation",
+      "again": "Invite another",
+      "close": "Close"
+    },
+    "drawer": {
+      "title": "Staff member",
+      "email": "Email",
+      "role": "Role",
+      "status": "Status",
+      "cities": "Cities",
+      "last_login": "Last sign-in",
+      "created": "Account created",
+      "locked_until": "Sign-in closed until {time}",
+      "invite_until": "Invitation valid until {time}",
+      "reason": "Reason",
+      "reason_placeholder": "Choose a reason",
+      "comment": "Comment",
+      "comment_hint": "Goes to the audit log. Required for “Other”.",
+      "journal": "The action goes to the audit log.",
+      "resend": {
+        "title": "Invitation",
+        "text": "A new invitation code: the previous one stops working, and the 24-hour period starts again.",
+        "button": "Resend invitation",
+        "wait": "Retry in {seconds} s",
+        "done": "A new invitation code was sent; the previous one no longer works."
+      },
+      "role_change": {
+        "title": "Role and cities",
+        "role": "Role",
+        "cities": "Moderator cities",
+        "save": "Save",
+        "request": "Send for confirmation",
+        "saved": "Role and cities saved.",
+        "denied": "You cannot make this change."
+      },
+      "sessions": {
+        "title": "Sessions",
+        "label": "Staff member sessions",
+        "empty": "No active sessions.",
+        "revoke_all": "End all sessions",
+        "confirm_title": "End all sessions — {name}?",
+        "confirm_text": "The staff member is signed out on every device and signs in again. The account stays active.",
+        "confirm": "End all",
+        "done": "{count, plural, =0 {There were no active sessions} one {# session ended} other {# sessions ended}}"
+      },
+      "reset": {
+        "title": "Access reset",
+        "text": "When a staff member lost their password or phone. Takes two people.",
+        "button": "Request access reset",
+        "confirm_title": "Reset access — {name}?",
+        "consequences": {
+          "secrets": "Password, second factor and recovery codes stop working",
+          "sessions": "All the staff member’s sessions end",
+          "invite": "A new invitation is sent to the work email"
+        },
+        "confirm": "Send for confirmation"
+      },
+      "disable": {
+        "title": "Disable account",
+        "text": "Removes the role: sign-in closes, sessions and pending requests are cancelled. History and the audit log stay.",
+        "button": "Disable",
+        "request": "Request disabling",
+        "confirm_title": "Disable — {name}?",
+        "consequences": {
+          "role": "The role is removed, sign-in is closed",
+          "sessions": "All sessions and pending requests of the staff member are cancelled",
+          "history": "History and the audit log are kept"
+        },
+        "confirm_now": "Disable",
+        "confirm_request": "Send for confirmation",
+        "done": "Account disabled."
+      }
+    }
+  },
+  "reasons": {
+    "left_team": "Left the team",
+    "security": "Security (leak, lost device)",
+    "role_change": "Change of duties",
+    "other": "Other"
+  },
+  "audit": {
+    "subtitle": "All staff actions · records are never deleted or edited",
+    "tabs": {
+      "label": "Log sections",
+      "all": "All",
+      "staff": "Staff",
+      "approvals": "Approvals",
+      "directories": "Directories",
+      "flags": "Flags"
+    },
+    "table": {
+      "label": "Log records",
+      "columns": {
+        "time": "Time",
+        "who": "Who",
+        "tag": "Tag",
+        "action": "Action",
+        "object": "Object",
+        "id": "Id"
+      }
+    },
+    "actor": {
+      "operator": "server operator",
+      "system": "system",
+      "anonymous": "anonymous",
+      "unknown": "—",
+      "filter": "Show actions by {name}"
+    },
+    "tags": {
+      "staff": "staff",
+      "approvals": "approval",
+      "directories": "directory",
+      "flags": "flag",
+      "other": "system"
+    },
+    "actions": {
+      "staff": {
+        "login": "Signed in to the admin",
+        "login_failed": "Failed sign-in",
+        "factor_failed": "Second-factor code rejected",
+        "locked": "Sign-in locked for an hour",
+        "unlock": "Session unlocked",
+        "session_revoked": "Session ended",
+        "sessions_revoked": "Sessions ended",
+        "password_changed": "Password changed",
+        "locale_changed": "Interface language changed",
+        "invite_accepted": "Invitation accepted",
+        "invite_accept_failed": "Wrong invitation code",
+        "invite_resent": "Invitation resent",
+        "mfa_enabled": "Second factor enabled",
+        "recovery_regenerated": "Recovery codes reissued",
+        "bootstrapped": "First owner created",
+        "rekeyed": "Secrets re-encrypted",
+        "invited": "Staff member invited",
+        "role_changed": "Role and cities changed",
+        "disabled": "Account disabled",
+        "access_reset": "Access reset"
+      },
+      "platform": {
+        "approval_requested": "Approval request created",
+        "approval_executed": "Request approved and carried out",
+        "approval_rejected": "Request rejected",
+        "approval_cancelled": "Request cancelled",
+        "approval_expired": "Request expired",
+        "approval_failed": "Request approved but not carried out"
+      },
+      "geo": {
+        "import": "GeoNames import"
+      }
+    },
+    "objects": {
+      "staff_account": "staff member",
+      "approval": "approval request",
+      "geonames_import": "GeoNames import",
+      "city": "city",
+      "staff_keys": "staff keys"
+    },
+    "details": {
+      "show": "Details",
+      "label": "Details of record {id}",
+      "record": "Record",
+      "object": "Object",
+      "reason": "Reason",
+      "ip": "Network",
+      "user_agent": "Browser",
+      "before": "Before",
+      "after": "After",
+      "none": "—"
+    },
+    "filters": {
+      "action": "Action",
+      "action_all": "Any",
+      "object_type": "Object type",
+      "object_type_all": "Any",
+      "object_id": "Object id",
+      "actor": "Staff member id",
+      "from": "From",
+      "to": "To",
+      "period_hint": "Dates use your local time, both days inclusive.",
+      "apply": "Apply"
+    }
   }
 }

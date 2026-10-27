@@ -35,6 +35,10 @@ func (r *reader) ListCities(ctx context.Context, p ListParams) (CityPage, error)
 	for _, s := range p.Status {
 		arg.Statuses = append(arg.Statuses, string(s))
 	}
+	// nil — без фильтра; не nil, даже пустой, — только эти города (пустой — ни одного)
+	if p.IDs != nil {
+		arg.FilterIds, arg.Ids = true, p.IDs
+	}
 	if p.Q != "" {
 		q, err := r.st.NormalizeQuery(ctx, p.Q)
 		if err != nil {

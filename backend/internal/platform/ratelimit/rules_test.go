@@ -12,7 +12,7 @@ import (
 
 func TestDefaultRulesValid(t *testing.T) {
 	r := ratelimit.DefaultRules()
-	for _, class := range []string{"default", "auth", "geo_nearest"} {
+	for _, class := range []string{"default", "auth", "geo_nearest", "staff_auth"} {
 		cp, ok := r[class]
 		if !ok {
 			t.Fatalf("нет класса %s", class)
@@ -39,6 +39,27 @@ func TestDefaultRulesGeoNearest(t *testing.T) {
 	want := ratelimit.ClassPolicy{IP: ratelimit.Policy{Limit: 30, Period: time.Minute, Burst: 10}}
 	if cp != want {
 		t.Fatalf("geo_nearest = %+v, want %+v", cp, want)
+	}
+}
+
+// Спека сотрудников §4.6, §5.1: вход в админку и шаги второго фактора (/v1/staff/auth/*) — класс
+// staff_auth: по IP 30 в минуту со всплеском 15, по сотруднику 20 в минуту со всплеском 10. Тот же
+// IP-ключ считает отказы сессии (перебор cookie). Правило — раньше класса в контракте admin: иначе
+// admin-api не стартует (ratelimit.UnknownClasses).
+func TestDefaultRulesStaffAuth(t *testing.T) {
+	cp, ok := ratelimit.DefaultRules()["staff_auth"]
+	if !ok {
+		t.Fatal("нет класса staff_auth")
+	}
+	want := ratelimit.ClassPolicy{
+		IP:   ratelimit.Policy{Limit: 30, Period: time.Minute, Burst: 15},
+		User: ratelimit.Policy{Limit: 20, Period: time.Minute, Burst: 10},
+	}
+	if cp != want {
+		t.Fatalf("staff_auth = %+v, want %+v", cp, want)
+	}
+	if err := ratelimit.DefaultRules().Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -127,6 +148,39 @@ paths:
 	got := ratelimit.UnknownClasses(spec, ratelimit.DefaultRules())
 	if len(got) != 1 || got[0] != "GET /b: x-rate-limit nope" {
 		t.Fatalf("got %v", got)
+	}
+}
+
+// Нестроковый или пустой x-rate-limit (P22, остаток фундамента 3/3) — нарушение: раньше такая
+// операция молча уходила в класс default (Route.Extension даёт ""), и опечатка в контракте
+// (x-rate-limit: 5, x-rate-limit: "") снимала с ручки её лимит без единого сигнала.
+func TestUnknownClassesNonString(t *testing.T) {
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(`
+openapi: 3.0.3
+info: {title: t, version: "1"}
+paths:
+  /num:
+    get: {operationId: num, x-rate-limit: 5, responses: {"200": {description: ok}}}
+  /empty:
+    get: {operationId: empty, x-rate-limit: "", responses: {"200": {description: ok}}}
+  /list:
+    post: {operationId: list, x-rate-limit: [auth], responses: {"200": {description: ok}}}
+  /ok:
+    get: {operationId: ok, x-rate-limit: auth, responses: {"200": {description: ok}}}
+  /none:
+    get: {operationId: none, responses: {"200": {description: ok}}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ratelimit.UnknownClasses(spec, ratelimit.DefaultRules())
+	want := []string{
+		"GET /empty: x-rate-limit — не непустая строка",
+		"GET /num: x-rate-limit — не непустая строка",
+		"POST /list: x-rate-limit — не непустая строка",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %q\nwant %q", got, want)
 	}
 }
 

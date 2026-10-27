@@ -72,6 +72,10 @@ init() {
   "$BIN/initdb" -D "$DATA" -U postgres -A trust -E UTF8 \
     --locale-provider=builtin --builtin-locale=C.UTF-8 --locale=C >/dev/null
   printf "\nlisten_addresses = '127.0.0.1'\nport = %s\n" "$PORT" >> "$DATA/postgresql.conf"
+  # Кластер одноразовый (dev и тесты) — без fsync. На Windows каждый DROP DATABASE (очистка клона базы
+  # теста) делает принудительный checkpoint; с fsync он идёт ~8 с, тесты встают в очередь до таймаута.
+  # Цена: после сбоя ОС кластер может испортиться — тогда stop, удалить .tools/pg/data, init.
+  printf "fsync = off\nfull_page_writes = off\nsynchronous_commit = off\n" >> "$DATA/postgresql.conf"
   start
   "$BIN/psql" -h 127.0.0.1 -p "$PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 -q \
     -f deploy/dev/initdb/20_wf.sql

@@ -1,0 +1,219 @@
+/* «Роли и доступ» по макету 07: матрица прав и «Правило двух рук», ниже — «Кто имеет доступ»;
+   панели справа — приглашение и строка сотрудника (*). Раздел только с компьютера (desktopOnly). */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-6);
+}
+
+.top {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--wf-space-4);
+  align-items: start;
+}
+
+.matrix {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  min-width: 0;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* «Правило двух рук» — жёлтая плашка макета */
+.twoHands {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  padding: var(--wf-space-4);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-warning-bg);
+  font-family: var(--wf-font-body);
+}
+
+.twoHandsTitle {
+  margin: 0;
+  color: var(--wf-color-warning);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 800;
+}
+
+.twoHandsText {
+  margin: 0;
+  color: var(--wf-color-text-secondary);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+}
+
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  margin: 0;
+  padding-left: var(--wf-space-4);
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+}
+
+/* Клетки матрицы: «вдвоём» — жёлтым, «нет» — приглушённо */
+.grant {
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+}
+
+.allow {
+  color: var(--wf-color-success);
+}
+
+.scoped {
+  color: var(--wf-color-text-muted);
+}
+
+.dual {
+  color: var(--wf-color-warning);
+}
+
+.deny {
+  color: var(--wf-color-text-subtle);
+}
+
+/* Строка сотрудника в списке */
+.person {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-3);
+  min-width: 0;
+}
+
+.personText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.name {
+  font-weight: 700;
+}
+
+.email {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  overflow-wrap: anywhere;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wf-space-1);
+}
+
+.muted {
+  color: var(--wf-color-text-subtle);
+}
+
+/* Панели справа */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-5);
+  font-family: var(--wf-font-body);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--wf-space-1) var(--wf-space-3);
+  margin: 0;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.facts dt {
+  color: var(--wf-color-text-subtle);
+  font-weight: 600;
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  padding-top: var(--wf-space-4);
+  border-top: 1px solid var(--wf-color-border);
+}
+
+.blockTitle {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.text {
+  margin: 0;
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 500;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+}
+
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+.session {
+  display: flex;
+  flex-direction: column;
+  padding: var(--wf-space-2) var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  overflow-wrap: anywhere;
+}
+
+.sessionDevice {
+  font-weight: 700;
+}

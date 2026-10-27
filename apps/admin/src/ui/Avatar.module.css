@@ -1,0 +1,21 @@
+.avatar {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-avatar-sm);
+  height: var(--wf-size-avatar-sm);
+  border-radius: var(--wf-radius-full);
+  background: var(--wf-color-slot-empty);
+  color: var(--wf-color-text-secondary);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  font-weight: 800;
+  user-select: none;
+}
+
+.md {
+  width: var(--wf-size-avatar-md);
+  height: var(--wf-size-avatar-md);
+  font-size: var(--wf-text-sm);
+}

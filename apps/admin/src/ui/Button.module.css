@@ -1,0 +1,123 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--wf-space-2);
+  min-height: var(--wf-size-touch-min);
+  padding: 0 var(--wf-space-4);
+  border: 1px solid transparent;
+  border-radius: var(--wf-radius-md);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color var(--wf-duration-fast) var(--wf-ease),
+    border-color var(--wf-duration-fast) var(--wf-ease),
+    color var(--wf-duration-fast) var(--wf-ease);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--wf-color-accent);
+  outline-offset: 2px;
+}
+
+.primary {
+  background: var(--wf-color-accent);
+  color: var(--wf-color-text-inverse);
+}
+
+.primary:hover:enabled:not([aria-disabled='true']) {
+  background: var(--wf-color-accent-hover);
+}
+
+.secondary {
+  background: transparent;
+  border-color: var(--wf-color-border);
+  color: var(--wf-color-text-secondary);
+}
+
+.secondary:hover:enabled:not([aria-disabled='true']) {
+  border-color: var(--wf-color-border-strong);
+  color: var(--wf-color-text);
+}
+
+.danger {
+  background: var(--wf-color-danger);
+  color: var(--wf-color-text-inverse);
+}
+
+.dangerOutline {
+  background: transparent;
+  border-color: var(--wf-color-danger-border);
+  color: var(--wf-color-danger);
+}
+
+.dangerOutline:hover:enabled:not([aria-disabled='true']) {
+  background: var(--wf-color-danger-bg);
+}
+
+.link {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wf-color-accent);
+}
+
+.link:hover:enabled:not([aria-disabled='true']) {
+  color: var(--wf-color-accent-hover);
+}
+
+/* Недоступная — как в макете подтверждения: фон slot-empty, текст ghost (только disabled; loading —
+   aria-disabled, фокус остаётся на кнопке) */
+.button:disabled,
+.button[aria-disabled='true'] {
+  background: var(--wf-color-slot-empty);
+  border-color: transparent;
+  color: var(--wf-color-text-ghost);
+  cursor: not-allowed;
+}
+
+.link:disabled,
+.link[aria-disabled='true'] {
+  background: none;
+}
+
+.lg {
+  min-height: var(--wf-size-control);
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-base);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.block {
+  display: flex;
+  width: 100%;
+}
+
+.spinner {
+  flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentcolor;
+  border-right-color: transparent;
+  border-radius: var(--wf-radius-full);
+  animation: spin var(--wf-duration-slow) linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: calc(var(--wf-duration-slow) * 4);
+  }
+}

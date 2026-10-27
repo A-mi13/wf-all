@@ -223,3 +223,67 @@ func TestMiddlewareFailOpen(t *testing.T) {
 		t.Fatalf("ошибки нет в логе: %s", logs.String())
 	}
 }
+
+// doAs — запрос с произвольным субъектом в ctx (put — auth.With или auth.WithStaff).
+func doAs(h http.Handler, method, path, ip, device string, put func(context.Context) context.Context) *httptest.ResponseRecorder {
+	r := httptest.NewRequestWithContext(context.Background(), method, path, nil)
+	ctx := put(peer.With(r.Context(), peer.Info{IP: netip.MustParseAddr(ip), Device: device}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r.WithContext(ctx))
+	return rec
+}
+
+func asStaff(id uuid.UUID) func(context.Context) context.Context {
+	return func(ctx context.Context) context.Context {
+		return auth.WithStaff(ctx, &auth.Staff{StaffID: id, SessionID: uuid.New(), Role: "admin", Stage: auth.StageActive})
+	}
+}
+
+func asUser(id uuid.UUID) func(context.Context) context.Context {
+	return func(ctx context.Context) context.Context { return auth.With(ctx, &auth.Principal{UserID: id}) }
+}
+
+// Сотрудник admin-api считается ключом staff:<класс>:<id> по политике User; устройства сессии у
+// него нет — метка BFF (если есть) считается как у анонима.
+func TestMiddlewareStaffKeys(t *testing.T) {
+	var logs bytes.Buffer
+	id := uuid.New()
+	for _, tc := range []struct {
+		name, device string
+		want         []string
+	}{
+		{"сотрудник", "", []string{"ip:default:203.0.113.1", "staff:default:" + id.String()}},
+		{"сотрудник с меткой BFF", "dev-a", []string{"ip:default:203.0.113.1", "staff:default:" + id.String(), "device:default:b:dev-a"}},
+	} {
+		rec := &recording{}
+		h := pipeline(t, rec, ratelimit.DefaultRules(), &logs)
+		doAs(h, http.MethodGet, "/feed", "203.0.113.1", tc.device, asStaff(id))
+		if strings.Join(rec.keys, " ") != strings.Join(tc.want, " ") {
+			t.Fatalf("%s: ключи %v, нужно %v", tc.name, rec.keys, tc.want)
+		}
+	}
+}
+
+// Игрок и сотрудник не делят счётчик, даже с одинаковым id: исчерпанный лимит игрока не режет
+// сотрудника, и наоборот.
+func TestMiddlewareUserAndStaffCountSeparately(t *testing.T) {
+	l, _, _ := limiter(t)
+	rules := ratelimit.Rules{
+		"default": {IP: ratelimit.Policy{Limit: 100, Period: time.Minute}, User: ratelimit.Policy{Limit: 1, Period: time.Minute}},
+	}
+	var logs bytes.Buffer
+	h := pipeline(t, l, rules, &logs)
+	id := uuid.New()
+	if rec := doAs(h, http.MethodGet, "/feed", "198.51.100.1", "", asUser(id)); rec.Code != 204 {
+		t.Fatalf("игрок, первый: %d", rec.Code)
+	}
+	if rec := doAs(h, http.MethodGet, "/feed", "198.51.100.1", "", asUser(id)); rec.Code != 429 {
+		t.Fatalf("игрок, второй: %d — лимит User не сработал", rec.Code)
+	}
+	if rec := doAs(h, http.MethodGet, "/feed", "198.51.100.1", "", asStaff(id)); rec.Code != 204 {
+		t.Fatalf("сотрудник с тем же id: %d — делит счётчик с игроком", rec.Code)
+	}
+	if rec := doAs(h, http.MethodGet, "/feed", "198.51.100.1", "", asStaff(id)); rec.Code != 429 {
+		t.Fatalf("сотрудник, второй: %d — лимит User для сотрудника не сработал", rec.Code)
+	}
+}

@@ -16,6 +16,9 @@ export function buildCss(t) {
     ...px(t.space, 'space'),
     ...px(t.radius, 'radius'),
     ...px(t.size, 'size'),
+    // Ширина переключения раскладки (P21): в @media переменные не работают — значение для JS
+    // (matchMedia через tokens.ts) и для calc()/container-запросов
+    ...px(t.breakpoint, 'breakpoint'),
     ...Object.entries(t.duration).map(([k, v]) => `--wf-duration-${k}: ${v}ms;`),
     `--wf-ease: ${t.ease};`,
   ];

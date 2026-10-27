@@ -9,25 +9,28 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 1. Деньги за аренду платформа не принимает никогда: `rent_total_minor` — справочный расчёт, `payment_notes` — заметки капитана. Эквайринг, эскроу, кошельки, «оплата матча» не добавлять; выручка — подписки и валюта через штатные IAP (`docs/01-домен-и-правила.md`).
 2. Суммы — `int64` в минорных единицах + ISO 4217, без float; валюта — из страны города, не выбирается руками (`backend/migrations/README.md`).
 3. Время — `timestamptz` в UTC; матч «в 20:00» — время поля, таймзона у города/поля (`docs/02-архитектура.md`).
-4. Роли — `role_assignments` со скоупом, не колонка в `users` (`backend/migrations/0003_identity.sql`).
-5. Ручка создана или изменена → в том же коммите контракт с полным описанием и примерами всего (`.claude/rules/contracts.md`, страж `contracts/src/docs.mjs`; Swagger — `/docs`). Мутирующие запросы принимают `Idempotency-Key` (кроме анонимных: регистрация, вход, коды); события пишутся в `outbox` в той же транзакции, что и данные (спека бэкенда §6.4–6.5).
+4. Роли игроков — `role_assignments` со скоупом (после `0020` — только допуск капитана в городе), не колонка в `users`; сотрудники — отдельные учётки `staff_*` с одной ролью (`staff_roles`), права — матрица `platform/perm`, ручки проверяют право, а не роль (`docs/05-ролевая-модель.md`, `backend/migrations/0020_staff.sql`).
+5. Ручка создана или изменена → в том же коммите контракт с полным описанием и примерами всего (`.claude/rules/contracts.md`, страж `contracts/src/docs.mjs`; Swagger — `/docs`). Операция admin объявляет `x-permission` (право из `platform/perm` или служебное значение). Мутирующие запросы принимают `Idempotency-Key` (кроме анонимных: регистрация, вход, коды; в админке — ровно операции с `security: []` из `x-anonymous-mutations`: вход, принятие приглашения, повторная отправка кода); события пишутся в `outbox` в той же транзакции, что и данные (спека бэкенда §6.4–6.5).
 6. Строки UI, включая админку, — только в `apps/*/messages/{ru,en}.json`; тексты писем и пушей — в `backend/locales/{ru,en}.json`; `en` с теми же ключами (`@wf/i18n`, тесты локалей).
 7. TDD: сначала падающий тест, потом код — бэк и фронт; страж проверяется подсадкой бага (`docs/04-принципы-архитектуры.md`).
 8. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
 
 ## File structure
-- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate}`, `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
+- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc}` (`permdoc` — кодогенерация таблицы прав, в образ не входит), `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
 - `contracts/` — OpenAPI: исходники `openapi/{public,admin}/` по модулям, бандлы `openapi/{public,admin}.yaml` (сгенерированы) — источник истины; `tokens/tokens.json`
 - `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`
 - `deploy/dev/` — роли и расширения БД; dev-стенд (Neon + Render): `backend/Dockerfile`, `render.yaml`, `docs/deploy-dev.md`; `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
 - `design/` — бриф, `screens/*.dc.html`, `tools/extract-export.mjs`; `product/` — «почему так»
-- Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`
+- Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`,
+  `docs/05-ролевая-модель.md` (роли игроков и сотрудников, матрица прав — генерируется `./task gen`)
 - Архитектура бэкенда (модули, владение таблицами, платформа, стражи, порядок): `docs/superpowers/specs/2026-10-01-backend-architecture-design.md`
-- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`)
+- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`, модуль сотрудников — `backend-staff`)
 
 ## Skills и агенты
 Проектных скиллов нет: справочники восстанавливаются из `backend/migrations/README.md` и `design/README.md`.
 Субагенты плана — `wf-implementer` (задача по брифу; model при вызове: лёгкое — sonnet, иначе opus) и `wf-reviewer` (любое ревью, только opus); haiku не использовать.
+Оба работают по уровню риска A/B/C: исполнитель до первого теста составляет таблицу режимов отказа, ревьюер
+обязательно проходит 10 категорий нестандартных условий (A) и опровергает каждую находку до отчёта (`.claude/agents/`).
 
 ## What NOT to do
 - Не урезать объём и не обходить доменные правила временно (автоодобрение и т. п.): строим весь продукт, включая турниры, рейтинги, подписки, кредиты, косметику, прогнозы, чат, второй язык; выключенное — за фича-флагами по городам (пользователь, 01.10.2026).
@@ -47,8 +50,10 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - Комментарии в коде — по-русски, идентификаторы — по-английски. Переводы строк LF.
 
 ## Проверки
-- Тесты гонять самому после правок: `./task backend:test` (нужен Postgres), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`.
-- `./task ci` включает lint/typecheck/build — как и они, только по просьбе (глобальный CLAUDE.md).
+- Тесты гонять самому после правок: `./task backend:test` (нужен Postgres), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`; живой e2e админки — `./task admin:e2e` (Playwright + admin-api + Mailpit, нужен Postgres; свои порты и база `wf_e2e` — README).
+- `./task ci` включает lint/typecheck/build — как и они, только по просьбе (глобальный CLAUDE.md). Постоянная просьба
+  пользователя (05.10.2026): после финального ревью ветки и волны исправлений, до пуша и PR — полный `./task ci`
+  самому; красное — чинить до PR (на PR #11 CI дважды падал на lint, которого не было локально).
 - Кодогенерация — `./task gen`; сгенерированное коммитится (`gen:check` в CI сверяет).
 - Локальный Postgres 18 + PostGIS без Docker: `bash scripts/pg.sh install|init|start|stop|status|psql|port` → 127.0.0.1:`WF_PG_PORT` из `deploy/dev/.env` (по умолчанию 15432, `.tools/pg`).
 - `node --test` — только с глобом в кавычках: `node --test "dir/*.test.mjs"` (каталог на этой Node не сканируется).

@@ -1,0 +1,46 @@
+/* Ячейки кода по макету 07 (вход, шаг 2; «Мой доступ» — настройка 2FA) */
+.group {
+  display: flex;
+  gap: var(--wf-space-2);
+}
+
+.cell {
+  box-sizing: border-box;
+  flex: 1 1 0;
+  min-width: 0;
+  height: calc(var(--wf-size-control) + var(--wf-space-1));
+  padding: 0;
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+  color: var(--wf-color-text);
+  caret-color: var(--wf-color-accent);
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-2xl);
+  font-weight: 600;
+  text-align: center;
+  transition: border-color var(--wf-duration-fast) var(--wf-ease);
+}
+
+.filled {
+  border-color: var(--wf-color-border-strong);
+}
+
+.cell:focus {
+  outline: none;
+  border-color: var(--wf-color-accent);
+}
+
+.cell:disabled {
+  color: var(--wf-color-text-ghost);
+  cursor: not-allowed;
+}
+
+.invalid .cell {
+  border-color: var(--wf-color-danger-border);
+  background: var(--wf-color-danger-bg);
+}
+
+.invalid .cell:focus {
+  border-color: var(--wf-color-danger);
+}

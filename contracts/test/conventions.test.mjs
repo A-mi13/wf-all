@@ -18,9 +18,12 @@ test('Problem описывает ошибки полей', async () => {
   assert.deepEqual(errors.items.required, ['field', 'code']);
 });
 
-// Спека §6.4: в админке Idempotency-Key обязателен у всех мутирующих операций.
-test('в админке нет анонимных мутирующих операций', async () => {
-  assert.deepEqual((await load('admin'))['x-anonymous-mutations'], []);
+// Спека сотрудников §8: в админке без Idempotency-Key — только вход, принятие приглашения и
+// повторная отправка (security: []); состав списка сверяет test/admin.test.mjs.
+test('анонимные мутации админки — только из x-anonymous-mutations', async () => {
+  const admin = await load('admin');
+  assert.ok(admin['x-anonymous-mutations'].length > 0);
+  assert.deepEqual(conventionViolations(admin), []);
 });
 
 const base = () => ({

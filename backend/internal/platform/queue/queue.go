@@ -28,6 +28,10 @@ const (
 	Maintenance = "maintenance" // чистка, сроки, сверки, отложенные действия админки
 )
 
+// Staff — очередь писем сотрудникам (staff.mail, D3): её обслуживает только admin-api (у роли БД
+// worker прав на staff_* нет), поэтому в Config воркера её нет — конфигурация очереди у admin-api.
+const Staff = "staff"
+
 // PingArgs — проверка живости очереди: мониторинг ставит задачу и ждёт её выполнения.
 type PingArgs struct{}
 
@@ -61,12 +65,7 @@ func Config(c config.Queues) map[string]river.QueueConfig {
 
 func NewClient(pool *pgxpool.Pool, workers *river.Workers, c config.Queues,
 	periodic []*river.PeriodicJob, log *slog.Logger) (*river.Client[pgx.Tx], error) {
-	return river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:       Config(c),
-		Workers:      workers,
-		PeriodicJobs: periodic,
-		Logger:       log,
-	})
+	return river.NewClient(riverpgxv5.New(pool), ClientConfig(Config(c), workers, periodic, log))
 }
 
 // hardStopTimeout — сколько ждать задачи после отмены их ctx, если мягкая остановка не уложилась.

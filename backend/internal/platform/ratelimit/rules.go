@@ -25,7 +25,8 @@ const DefaultClass = "default"
 
 // DefaultRules — стартовые политики. IP щедрее пользователя: за одним адресом мобильного
 // оператора (CGNAT) — многие. auth — вход, регистрация, коды: перебор паролей и рассылки.
-// geo_nearest — автоопределение города (спека geo §4.2).
+// geo_nearest — автоопределение города (спека geo §4.2). staff_auth — вход в админку (спека
+// сотрудников §4.6).
 func DefaultRules() Rules {
 	return Rules{
 		DefaultClass: {
@@ -41,6 +42,13 @@ func DefaultRules() Rules {
 		// приложение спрашивает на старте и по кнопке «определить», не на каждый ввод
 		"geo_nearest": {
 			IP: Policy{Limit: 30, Period: time.Minute, Burst: 10},
+		},
+		// вход в админку и шаги второго фактора (спека сотрудников §4.6, §5.1): /v1/staff/auth/*.
+		// По IP — перебор паролей и кодов (тот же ключ считает отказы сессии — перебор cookie), по
+		// сотруднику (staff:<id>) — шаги второго фактора одной сессии
+		"staff_auth": {
+			IP:   Policy{Limit: 30, Period: time.Minute, Burst: 15},
+			User: Policy{Limit: 20, Period: time.Minute, Burst: 10},
 		},
 	}
 }
@@ -155,12 +163,19 @@ func StrayClasses(spec *openapi3.T, r Rules) []string {
 }
 
 // UnknownClasses — операции, чей x-rate-limit не описан в правилах: «<МЕТОД> <путь>: x-rate-limit <класс>».
+// Расширение есть, но не непустая строка (5, "", список), — тоже нарушение (P22): Middleware
+// отправил бы такую операцию в default, и опечатка контракта молча снимала бы с неё лимит.
 func UnknownClasses(spec *openapi3.T, r Rules) []string {
 	var out []string
 	for path, item := range spec.Paths.Map() {
 		for method, op := range item.Operations() {
-			class, _ := op.Extensions["x-rate-limit"].(string)
+			raw, declared := op.Extensions["x-rate-limit"]
+			if !declared {
+				continue
+			}
+			class, _ := raw.(string)
 			if class == "" {
+				out = append(out, fmt.Sprintf("%s %s: x-rate-limit — не непустая строка", method, path))
 				continue
 			}
 			if _, ok := r[class]; !ok {

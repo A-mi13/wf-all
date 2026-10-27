@@ -13,6 +13,12 @@ on:
       - 'pnpm-lock.yaml'
       - 'package.json'
       - 'Taskfile.yml'
+      # живой e2e (job e2e): admin-api, миграции, роли базы, Mailpit и скрипт прогона
+      - 'backend/**'
+      - 'contracts/openapi/**'
+      - 'deploy/dev/initdb/**'
+      - 'scripts/**'
+      - 'tools/**'
       - '.github/workflows/admin.yml'
   pull_request:
     paths: *paths
@@ -41,3 +47,47 @@ jobs:
           key: tools-${{ runner.os }}-${{ hashFiles('tools/**/go.mod', 'tools/**/go.sum', 'scripts/bootstrap.sh') }}
       - run: bash scripts/bootstrap.sh
       - run: ./task admin:ci
+  # Живой e2e (Task 16): Playwright поверх настоящих admin-api, Postgres и Mailpit — ./task admin:e2e
+  # (scripts/e2e-admin.sh: база wf_e2e, миграции и права, сборка admin-api, одноразовый ключ). Mailpit —
+  # из .tools/bin (scripts/bootstrap.sh, без Docker-образа). Только Chromium: WebKit на раннере требует
+  # системных библиотек через apt (минуты) — проверка cookie в WebKit идёт в локальном прогоне.
+  # Трейс упавшего теста не выгружается: actions/upload-artifact в репо ещё не закреплён по SHA.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      db:
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: '**/go.sum'
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools/bin
+          key: tools-${{ runner.os }}-${{ hashFiles('tools/**/go.mod', 'tools/**/go.sum', 'scripts/bootstrap.sh') }}
+      - run: bash scripts/bootstrap.sh
+      # сервис postgis/postgis не видит deploy/dev/initdb — роли и расширения вручную (как в backend.yml)
+      - run: psql "postgresql://postgres:postgres@localhost:15432/postgres" -v ON_ERROR_STOP=1 -f deploy/dev/initdb/20_wf.sql
+      - id: playwright
+        run: echo "version=$(node -p "require('./apps/admin/package.json').devDependencies['@playwright/test']")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # только headless shell и без --with-deps — как в web.yml
+      - run: pnpm --filter @wf/admin exec playwright install --only-shell chromium
+      - run: ./task admin:e2e
+        env:
+          CI: 'true'
+          WF_E2E_PROJECTS: chromium
+          WF_E2E_PG_SUPERUSER_URL: postgres://postgres:postgres@localhost:15432/postgres

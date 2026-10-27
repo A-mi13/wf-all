@@ -37,6 +37,10 @@ type Problem struct {
 	// RetryAfter — через сколько секунд повторить (ratelimit.exceeded); уходит заголовком
 	// Retry-After, не в теле.
 	RetryAfter int `json:"-"`
+	// AttemptsLeft — сколько неудач подряд осталось до блокировки: неверный код второго фактора
+	// или текущий пароль (admin-api, спека сотрудников §7). Указатель: 0 — вход закрыт, поле
+	// уходит; nil — поля нет.
+	AttemptsLeft *int `json:"attempts_left,omitempty"`
 }
 
 func WriteProblem(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
@@ -76,6 +80,14 @@ func NewError(status int, code string) *Error {
 func NewFieldError(field, code string) *Error {
 	return &Error{p: Problem{Status: http.StatusBadRequest, Code: CodeValidationFailed,
 		Errors: []FieldError{{Field: field, Code: code}}}}
+}
+
+// WithAttemptsLeft — та же ошибка с attempts_left = n (неверный код или пароль): новая *Error,
+// исходная не меняется — общие переменные ошибок не получают чужой счётчик.
+func (e *Error) WithAttemptsLeft(n int) *Error {
+	p := e.p
+	p.AttemptsLeft = &n
+	return &Error{p: p}
 }
 
 func (e *Error) Error() string { return "httpx: " + e.p.Code }

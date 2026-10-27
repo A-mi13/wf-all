@@ -27,13 +27,22 @@ BEGIN
     LOOP
       EXECUTE format('REVOKE ALL ON %I FROM %I', r.name, who);
       privs := CASE
+        -- последовательности сотрудников и подтверждений — только admin-api (M12)
+        WHEN r.kind = 'S' AND (r.name LIKE 'staff\_%' OR r.name LIKE 'approvals\_%') THEN
+          CASE who WHEN 'admin' THEN 'USAGE, SELECT' END
         WHEN r.kind = 'S' THEN 'USAGE, SELECT'
         -- служебное мигратора
         WHEN r.name = 'goose_db_version' THEN NULL
         -- аудит только дописывается; читает — только админка
         WHEN r.name = 'audit_log' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT' ELSE 'INSERT' END
-        -- вход сотрудников — только admin-api
+        -- вход сотрудников и ключи идемпотентности admin-api (staff_idempotency_keys: ответы с ПД) —
+        -- только admin-api
         WHEN r.name LIKE 'staff\_%' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END
+        -- ключи идемпотентности игроков: API ведёт, воркер чистит; admin-api ходит только в
+        -- staff_idempotency_keys (ветка выше) — у admin ничего
+        WHEN r.name = 'idempotency_keys' THEN CASE who WHEN 'admin' THEN NULL ELSE 'SELECT, INSERT, UPDATE, DELETE' END
+        -- подтверждения вдвоём (D2) — только admin-api; DELETE — чистка решённых старше 180 дней
+        WHEN r.name = 'approvals' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END
         -- пароли: воркер только удаляет (удаление аккаунта), хеш прочитать не может; SELECT (user_id)
         -- для WHERE удаления выдаётся колоночно ниже
         WHEN r.name = 'credentials' THEN CASE who WHEN 'worker' THEN 'DELETE' ELSE 'SELECT, INSERT, UPDATE, DELETE' END
@@ -41,12 +50,13 @@ BEGIN
         WHEN r.name = 'outbox' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE'
                                              WHEN 'admin' THEN 'SELECT, INSERT' ELSE 'INSERT' END
         WHEN r.name IN ('event_inbox', 'event_cursors') THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE' END
-        -- очередь: API ставит задачи (письма с кодами), админка смотрит и перезапускает, воркер
-        -- исполняет; UPDATE у api — уникальная вставка River идёт через ON CONFLICT DO UPDATE.
-        -- MAINTAIN (PG17+) у воркера — лидер River ежедневно переиндексирует river_job
-        WHEN r.name = 'river_job' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE, MAINTAIN'
-                                                ELSE 'SELECT, INSERT, UPDATE' END
-        WHEN r.name LIKE 'river\_%' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE' END
+        -- очередь: API ставит задачи (письма с кодами); воркер и admin-api исполняют (admin-api —
+        -- очередь staff, D3) и могут стать лидером River: чистка, переиндексация river_job (MAINTAIN,
+        -- PG17+), служебные таблицы; UPDATE у api — уникальная вставка River идёт через ON CONFLICT DO UPDATE
+        WHEN r.name = 'river_job' THEN CASE who WHEN 'api' THEN 'SELECT, INSERT, UPDATE'
+                                                ELSE 'SELECT, INSERT, UPDATE, DELETE, MAINTAIN' END
+        WHEN r.name LIKE 'river\_%' THEN CASE who WHEN 'api' THEN NULL
+                                                  ELSE 'SELECT, INSERT, UPDATE, DELETE' END
         -- справочник geo (спека geo §3.8): API только читает; админка правит, но не удаляет —
         -- районы архивируются, города и страны остаются; воркер (сверка импорта, §5.4) обновляет
         -- города и регионы, страны только читает

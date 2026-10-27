@@ -13,7 +13,11 @@ const samples = {
     ['/v1/cities', 'geo'],
     ['/v1/app/min-version', 'platform'],
   ],
-  admin: [['/v1/health', 'platform']],
+  admin: [
+    ['/v1/staff/me', 'staff'],
+    ['/v1/geo/cities', 'geo'],
+    ['/v1/audit', 'platform'],
+  ],
 };
 
 for (const name of ['public', 'admin']) {

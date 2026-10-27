@@ -14,7 +14,7 @@ test('схема Problem одинакова в public и admin', async () => {
 });
 
 // Путь-образец каждого контракта есть в сгенерированных типах.
-const samplePath = { public: '/v1/cities/nearest', admin: '/v1/health' };
+const samplePath = { public: '/v1/cities/nearest', admin: '/v1/staff/me' };
 
 for (const name of ['public', 'admin']) {
   test(`${name}.yaml генерирует TS-типы`, async () => {

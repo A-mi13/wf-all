@@ -188,6 +188,13 @@ components:
                 type: string
                 description: 'Нарушенное правило схемы: required, minLength, maximum, enum, format…'
                 example: minLength
+        attempts_left:
+          type: integer
+          minimum: 0
+          description: >-
+            Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после
+            которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
+          example: 3
         challenge:
           type: object
           description: >-

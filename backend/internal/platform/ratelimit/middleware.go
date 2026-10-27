@@ -13,7 +13,8 @@ import (
 )
 
 // Middleware — лимит после валидации (спека §6.1). Класс — x-rate-limit операции (без него —
-// default); ключи — IP из peer, пользователь из Principal, устройство (сессии или метка BFF).
+// default); ключи (keys.go) — IP из peer, субъект (игрок из Principal или сотрудник из auth.Staff,
+// политика User класса), устройство (сессии или метка BFF).
 // Маршрут не из контракта не считается. Хранилище недоступно — запрос проходит, ошибка — в
 // лог: без базы не работает и остальное, а 500 на каждый запрос ничего не защищает.
 func Middleware(l Limiter, r Rules, log *slog.Logger) func(http.Handler) http.Handler {
@@ -42,22 +43,22 @@ func Middleware(l Limiter, r Rules, log *slog.Logger) func(http.Handler) http.Ha
 			}
 			var checks []check
 			if info.IP.IsValid() {
-				checks = append(checks, check{"ip:" + class + ":" + info.IP.String(), cp.IP})
+				checks = append(checks, check{IPKey(class, info.IP), cp.IP})
 			}
 			// устройство сессии (s:) и метка BFF (b:) — разные пространства ключей: метка из
 			// cookie, совпавшая строкой с чужим DeviceID, не расходует его лимит
-			device := ""
+			deviceKey := ""
 			if info.Device != "" {
-				device = "b:" + info.Device
+				deviceKey = BFFDeviceKey(class, info.Device)
 			}
-			if p, ok := auth.From(ctx); ok {
-				checks = append(checks, check{"user:" + class + ":" + p.UserID.String(), cp.User})
-				if p.DeviceID != uuid.Nil {
-					device = "s:" + p.DeviceID.String()
+			if s, ok := auth.SubjectFrom(ctx); ok {
+				checks = append(checks, check{SubjectKey(class, s), cp.User})
+				if s.DeviceID != uuid.Nil {
+					deviceKey = SessionDeviceKey(class, s.DeviceID)
 				}
 			}
-			if device != "" {
-				checks = append(checks, check{"device:" + class + ":" + device, cp.Device})
+			if deviceKey != "" {
+				checks = append(checks, check{deviceKey, cp.Device})
 			}
 			for _, c := range checks {
 				res, err := l.Allow(ctx, c.key, c.p)

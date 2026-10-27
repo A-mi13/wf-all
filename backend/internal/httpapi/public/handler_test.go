@@ -119,6 +119,35 @@ func TestPlatformCodesDocumented(t *testing.T) {
 	}
 }
 
+// Спека сотрудников §5.1 (D18): коды конвейера admin-api и подтверждений (httpx.AdminPlatformCodes)
+// в публичный контракт не попадают — ни в общие коды, ни в коды операций.
+func TestAdminCodesNotInPublic(t *testing.T) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byOp, err := apitest.OperationCodes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(spec.Extensions["x-error-codes-common"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var common []string
+	if err := json.Unmarshal(b, &common); err != nil {
+		t.Fatal(err)
+	}
+	byOp["x-error-codes-common"] = common
+	for where, codes := range byOp {
+		for _, c := range codes {
+			if slices.Contains(httpx.AdminPlatformCodes, c) {
+				t.Errorf("%s: код админки %s в публичном контракте", where, c)
+			}
+		}
+	}
+}
+
 // Страж «коды модуля задокументированы» (.claude/rules/backend-http.md): geo.Codes и x-error-codes
 // операций с тегом geo совпадают в обе стороны. Админские операции geo (этап 2) добавят свой
 // контракт в сверку.
@@ -351,5 +380,29 @@ func TestRateLimitClassesKnown(t *testing.T) {
 	}
 	for _, v := range ratelimit.UnknownClasses(spec, ratelimit.DefaultRules()) {
 		t.Error(v)
+	}
+}
+
+// Защита в глубину: chi сопоставляет {param} с пустым сегментом, а маршрутизатор контракта — нет,
+// поэтому без httpx.Route конвейер (валидатор, лимит, идемпотентность) пропущен. Такой запрос не
+// доходит до хендлера: у обязательного параметра пути (slug) пустое значение — ошибка биндинга, её
+// отвечает httpx.NotFoundWithoutRoute (404 http.not_found). Тест идёт через это звено; звено
+// httpx.RequireRoute интеграционно на текущем контракте не воспроизвести — его стережёт юнит-тест
+// httpx.TestRequireRoute.
+func TestEmptyPathParamNeverReachesHandler(t *testing.T) {
+	o := testOptions(t)
+	geoFake := &fakeGeo{}
+	o.Geo = geoFake
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/cities/by-slug/", nil))
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"http.not_found"`) {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(geoFake.calls) != 0 {
+		t.Fatalf("хендлер вызван: %v", geoFake.calls)
 	}
 }

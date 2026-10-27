@@ -1,0 +1,209 @@
+/* Экраны входа по макетам 07 («Вход», «Мой доступ» — второй фактор) и 08 (вход на телефоне).
+   Раскладка резиновая: колонка до 420px (настройка 2FA — шире), на телефоне — во всю ширину с
+   полями; блоки QR и секрета переносятся друг под друга сами (flex-wrap), без @media. */
+
+.page {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 100vh;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  padding: var(--wf-space-12) var(--wf-space-6);
+  background: var(--wf-color-bg);
+  color: var(--wf-color-text);
+  font-family: var(--wf-font-body);
+}
+
+.column {
+  width: 100%;
+  max-width: 420px;
+}
+
+.wide {
+  max-width: 600px;
+}
+
+.brand {
+  margin: 0;
+  color: var(--wf-color-accent);
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  letter-spacing: 3px;
+}
+
+.title {
+  margin: var(--wf-space-2) 0 0;
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-3xl);
+  line-height: var(--wf-text-3xl-line);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.lead {
+  margin: var(--wf-space-2) 0 0;
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 500;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+  margin-top: var(--wf-space-6);
+  padding: var(--wf-space-5);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-bg-elevated);
+}
+
+.footnote {
+  margin: var(--wf-space-4) 0 0;
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+}
+
+/* Текст под формой: подсказка шага, «вход как», ответ на повторную отправку */
+.note {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+}
+
+/* Сообщение о неудаче кода (попытки, блокировка): как FormError, свой текст */
+.error {
+  margin: 0;
+  padding: var(--wf-space-3);
+  border: 1px solid var(--wf-color-danger-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-danger-bg);
+  color: var(--wf-color-danger);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+}
+
+.fieldLabel {
+  margin: 0;
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+}
+
+.factor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+}
+
+/* Настройка 2FA: QR и секрет рядом, на узком — друг под другом */
+.scan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--wf-space-5);
+}
+
+.qr {
+  flex: 0 1 180px;
+  min-width: 140px;
+  padding: var(--wf-space-2);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-text);
+}
+
+.secretBlock {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  min-width: 0;
+}
+
+.secret {
+  margin: 0;
+  padding: var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+  font-family: var(--wf-font-body);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+  letter-spacing: 1px;
+  overflow-wrap: anywhere;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--wf-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.codes li {
+  padding: var(--wf-space-2) 0;
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-sm);
+  background: var(--wf-color-surface-sunken);
+  font-family: var(--wf-font-body);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+  text-align: center;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wf-space-2);
+}
+
+.stepTitle {
+  margin: 0;
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-xl);
+  line-height: var(--wf-text-xl-line);
+  font-weight: 600;
+}
+
+.below {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--wf-space-4);
+}

@@ -1,10 +1,25 @@
 openapi: 3.0.3
 info:
   title: WF admin API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    API админки (admin-api); потребитель — только apps/admin. Аутентификация — cookie сессии
-    `wf_admin_session`, которую ставит вход в админку.
+    API админки (admin-api); потребитель — только apps/admin, с того же origin, что и сам API.
+
+    **Вход и сессия.** Сотрудник входит почтой и паролем (`staffLogin`), затем вторым фактором —
+    кодом из приложения-аутентификатора или резервным кодом (`staffVerifyMfa`). Сессия — cookie
+    `__Host-wf_admin_session` (`HttpOnly; Secure; SameSite=Strict; Path=/`, без `Domain` и срока):
+    её ставят и меняют ответы с заголовком `Set-Cookie`, браузер шлёт её сам. Сроки — на сервере:
+    8 часов от входа; бездействие дольше 20 минут или смена сети — 401 `auth.reauth_required`
+    (сессия жива, нужен второй фактор — `staffUnlock`). Стадии сессии: `mfa_pending` (пароль
+    принят, ждём второй фактор, 5 минут), `setup` (первый вход по приглашению — только настройка
+    2FA), `active`. Клиент узнаёт стадию, роль и права из `GET /v1/staff/me`.
+
+    **Права.** У каждой операции — расширение `x-permission`: ключ права из матрицы ролей
+    (`GET /v1/staff/roles`) или служебное значение — `anonymous` (без сессии), `session` (сессия в
+    любой стадии), `self` (активная сессия, только своё), `handler` (право зависит от тела или
+    цели запроса; возможные права — в `x-permission-any`). Нет права — 403 `auth.forbidden`.
+    Действие с правом «вдвоём» не исполняется сразу, а создаёт запрос на подтверждение: ответ
+    `202` с `approval`, второй сотрудник решает его в «Подтверждениях» (`/v1/approvals`).
 
     Общие правила для всех операций:
 
@@ -20,39 +35,1307 @@ info:
       использован с другим запросом), `idempotency.in_progress` (409 — запрос с этим ключом ещё
       выполняется), `idempotency.replay_unavailable` (409 — действие выполнено, перечитайте
       состояние), `feature.disabled` (403 — функция выключена флагом).
-    - **Idempotency-Key** — обязательный заголовок мутирующих операций: новый ключ (UUID) на
-      каждое действие пользователя, тот же ключ при повторе после обрыва сети — действие не
-      выполнится дважды: повтор отдаёт сохранённый ответ с заголовком `Idempotency-Replayed: true`.
+      Конвейер админки: `auth.forbidden` (403 — нет права на операцию или город вне ваших),
+      `auth.csrf_failed` (403 — запрос не со страницы админки: нет `Origin` админки или заголовка
+      `X-WF-Admin`), `auth.ip_not_allowed` (403 — вход в админку с этого адреса закрыт),
+      `auth.reauth_required` (401 — подтвердите вход вторым фактором, `staffUnlock`),
+      `auth.setup_required` (403 — сначала завершите настройку 2FA), `http.not_implemented`
+      (501 — операция описана в контракте, но сервер её ещё не исполняет).
+    - **X-WF-Admin: 1** — обязательный заголовок каждого изменяющего запроса (POST, PUT, PATCH,
+      DELETE) вместе с `Origin` админки — защита от подделки запроса с чужого сайта.
+    - **X-WF-Background: 1** — необязательный заголовок фоновых запросов клиента (опрос счётчика
+      подтверждений, статуса импорта): такой запрос не продлевает сессию — не обновляет время
+      последней активности, — поэтому открытая, но брошенная вкладка через 20 минут всё равно
+      получит 401 `auth.reauth_required`. Действия пользователя этот заголовок не ставят.
+    - **Idempotency-Key** — обязательный заголовок изменяющих операций, кроме анонимных (вход,
+      принятие приглашения, повторная отправка кода): новый ключ (UUID) на каждое действие
+      пользователя, тот же ключ при повторе после обрыва сети — действие не выполнится дважды:
+      повтор отдаёт сохранённый ответ с заголовком `Idempotency-Replayed: true`. Ответы с
+      секретами (`x-idempotency: no-store`) не сохраняются: их повтор — 409
+      `idempotency.replay_unavailable`.
     - **Время** — ISO 8601 в UTC (`2026-10-01T17:00:00Z`); местное время матча считается по
       таймзоне города или поля.
     - **Деньги** — целое число в минорных единицах (копейки) плюс код валюты ISO 4217.
+    - **Списки** — страницы по курсору: `next_cursor` ответа передайте в `cursor` следующего
+      запроса, `null` — страниц больше нет; курсор непрозрачный, испорченный — 400
+      `validation.failed` по полю `query.cursor`.
     - **Тело запроса** — не больше 1 МиБ.
     - Поле `request_id` в ошибке — назовите его, сообщая о проблеме: по нему находится запрос в логах.
 security:
   - session: []
 tags:
+  - name: staff
+    description: Сотрудники админки — вход, второй фактор, сессии, «Мой доступ», приглашения, роли и доступ других сотрудников
+  - name: geo
+    description: Справочник городов в админке — выбор городов модератора
   - name: platform
-    description: Служебные операции платформы — живость сервиса и подобное, не сценарии админки
+    description: Механизмы платформы админки — журнал действий и подтверждения вдвоём
 paths:
-  /v1/health:
-    get:
-      operationId: getHealth
+  /v1/staff/auth/login:
+    post:
+      operationId: staffLogin
       tags:
-        - platform
+        - staff
       security: []
-      x-error-codes: []
-      summary: Проверка живости сервиса
+      x-permission: anonymous
+      x-rate-limit: staff_auth
+      x-error-codes:
+        - staff.invalid_credentials
+      summary: Вход — почта и пароль
       description: |
-        Отвечает 200, пока процесс жив и принимает запросы; база данных не проверяется.
-        Без аутентификации. Используется хостингом для health check; клиентам — чтобы
-        разбудить dev-стенд после простоя (первый запрос может идти до минуты).
+        Первый шаг входа в админку. Без сессии. Успех — новая сессия в стадии `mfa_pending` на
+        5 минут (cookie в `Set-Cookie`) и ответ `{stage: "mfa_pending"}`: дальше — второй фактор
+        (`staffVerifyMfa`). Прежняя сессия из cookie, если была, гасится.
+
+        Коды ошибок:
+        - 400 `staff.invalid_credentials` — один ответ на всё: почты нет, пароль неверный, учётка не
+          активна, без настроенного второго фактора или вход закрыт после неверных кодов. Время
+          ответа одинаковое — по нему нельзя узнать, есть ли такая почта.
+        - 429 `ratelimit.exceeded` — слишком много попыток с этого адреса или для этой почты
+          (повторите через `Retry-After` секунд). Неверный пароль никого не блокирует.
+      parameters:
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Почта и пароль сотрудника
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffLoginRequest'
       responses:
         '200':
-          description: Сервис жив
+          description: Пароль принят — нужен второй фактор
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Health'
+                $ref: '#/components/schemas/StaffStageResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/auth/mfa:
+    post:
+      operationId: staffVerifyMfa
+      tags:
+        - staff
+      x-permission: session
+      x-rate-limit: staff_auth
+      x-error-codes:
+        - staff.mfa_invalid
+        - staff.wrong_stage
+      summary: Вход — второй фактор
+      description: |
+        Второй шаг входа: код из приложения-аутентификатора или резервный код (ровно одно поле).
+        Только для сессии в стадии `mfa_pending`. Успех — **новый токен** в стадии `active`
+        (`Set-Cookie`, прежний токен больше не действует), ответ 204; резервный код сгорает.
+
+        Коды ошибок:
+        - 400 `staff.mfa_invalid` — код не подошёл; в `attempts_left` — сколько попыток осталось.
+          Пятая неудача подряд закрывает вход на час и завершает все сессии сотрудника
+          (`attempts_left: 0`).
+        - 409 `staff.wrong_stage` — сессия не в стадии `mfa_pending`.
+        - 401 `auth.unauthenticated` — сессии нет или 5 минут на второй фактор истекли: войдите
+          заново.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Код из приложения или резервный код
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffFactorRequest'
+      responses:
+        '204':
+          description: Вход выполнен — сессия активна
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/auth/unlock:
+    post:
+      operationId: staffUnlock
+      tags:
+        - staff
+      x-permission: session
+      x-rate-limit: staff_auth
+      x-error-codes:
+        - staff.mfa_invalid
+        - staff.wrong_stage
+      summary: Разблокировка сессии вторым фактором
+      description: |
+        Подтверждение входа после 401 `auth.reauth_required` (бездействие дольше 20 минут или смена
+        сети): код из приложения или резервный код. Успех — **новый токен** (`Set-Cookie`), сессия
+        принимает текущую сеть, ответ 204; исходный запрос можно повторить. Резервный код сгорает.
+
+        Коды ошибок:
+        - 400 `staff.mfa_invalid` — код не подошёл, в `attempts_left` — остаток попыток; пятая
+          неудача подряд закрывает вход на час и завершает все сессии сотрудника.
+        - 409 `staff.wrong_stage` — сессия не ждёт разблокировки.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Код из приложения или резервный код
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffFactorRequest'
+      responses:
+        '204':
+          description: Сессия разблокирована
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/auth/logout:
+    post:
+      operationId: staffLogout
+      tags:
+        - staff
+      x-permission: session
+      x-rate-limit: staff_auth
+      x-error-codes: []
+      summary: Выход
+      description: |
+        Завершает текущую сессию в любой стадии и стирает cookie (`Set-Cookie` с `Max-Age=0`).
+        Ответ 204.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '204':
+          description: Сессия завершена, cookie стёрта
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/ClearSessionCookie'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/auth/invite/accept:
+    post:
+      operationId: staffAcceptInvite
+      tags:
+        - staff
+      security: []
+      x-permission: anonymous
+      x-rate-limit: staff_auth
+      x-error-codes:
+        - staff.invite_invalid
+      summary: Принятие приглашения — первый вход
+      description: |
+        Первый вход по письму-приглашению (и после сброса доступа): почта, код из письма и новый
+        пароль. Без сессии. Успех — пароль сохранён, создаётся сессия в стадии `setup`
+        (`Set-Cookie`, прежняя сессия из cookie гасится), ответ `{stage: "setup"}`: дальше —
+        настройка 2FA (`staffMfaSetup`). Приглашение остаётся живым до завершения настройки —
+        потерянную сессию настройки можно возобновить повторным принятием тем же или новым кодом.
+
+        Коды ошибок:
+        - 400 `validation.failed` по полю `body.password` с кодом `too_short`, `too_long` или
+          `common` — пароль не подходит (проверяется первым, до кода приглашения).
+        - 400 `staff.invite_invalid` — один ответ на всё: код неверный, почта не та, срок истёк или
+          приглашения нет. Неверный код ничего не стирает и попыток не тратит: код длинный
+          (`xxxxx-xxxxx`, 50 бит), перебор упирается в лимит адреса. Любая неудача (в том числе
+          несуществующая почта) пишется в журнал действий одинаково — без автора, почта в записи
+          маскирована; не больше 20 записей в час на почту, сверх — без записи, ответ тот же.
+        - 429 `ratelimit.exceeded` — слишком много попыток с этого адреса.
+      parameters:
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Почта, код из письма и новый пароль
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffAcceptInviteRequest'
+      responses:
+        '200':
+          description: Приглашение принято — нужна настройка 2FA
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffStageResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/auth/invite/resend:
+    post:
+      operationId: staffResendInviteSelf
+      tags:
+        - staff
+      security: []
+      x-permission: anonymous
+      x-rate-limit: staff_auth
+      x-error-codes: []
+      summary: Прислать код приглашения ещё раз
+      description: |
+        Сотрудник просит прислать код приглашения ещё раз. Без сессии, ответ всегда 202 — по нему
+        нельзя узнать, есть ли такая почта. Письмо приходит с ТЕМ ЖЕ кодом: новый код не выпускается,
+        код из прежних писем остаётся годным (чужое нажатие лишь присылает приглашённому копию его
+        кода). Письмо уходит, только если приглашение живо, с прошлой отправки прошло 60 секунд и
+        отправок за жизнь приглашения (сутки) меньше пяти; срок приглашения (24 часа) не продлевается.
+        Новый код выпускает только админ (`resendStaffInvite`) или оператор сервера. Клиент показывает
+        отсчёт 60 секунд до следующей попытки.
+
+        Коды ошибок: 429 `ratelimit.exceeded` — слишком много запросов с этого адреса.
+      parameters:
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Почта из приглашения
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffEmailRequest'
+      responses:
+        '202':
+          description: Запрос принят; письмо уходит, если код можно выслать
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me:
+    get:
+      operationId: getStaffMe
+      tags:
+        - staff
+      x-permission: session
+      x-error-codes: []
+      summary: Кто вошёл
+      description: |
+        Учётка, роль, города, права и стадия текущей сессии — первый запрос админки при загрузке и
+        проверка связи. Работает в любой стадии сессии и под `reauth_required` (поле
+        `reauth_required: true`). Меню и кнопки строятся по `permissions`: раздела без права в меню
+        нет.
+
+        В стадии `mfa_pending` — только `stage`, `session`, `reauth_required` и пустые `city_ids` и
+        `permissions`; в стадии `setup` — учётка без прав. Нет сессии — 401 `auth.unauthenticated`
+        (экран входа).
+      responses:
+        '200':
+          description: Текущий сотрудник и сессия
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMe'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/locale:
+    patch:
+      operationId: updateStaffMeLocale
+      tags:
+        - staff
+      x-permission: self
+      x-error-codes: []
+      summary: Сменить язык админки
+      description: |
+        Сохраняет язык админки и писем сотруднику — переключатель языка в меню профиля. Ответ 204;
+        новый язык приходит в `GET /v1/staff/me`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Новый язык
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffLocaleUpdate'
+      responses:
+        '204':
+          description: Язык сохранён
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/mfa:
+    get:
+      operationId: getStaffMfa
+      tags:
+        - staff
+      x-permission: self
+      x-error-codes: []
+      summary: Состояние второго фактора
+      description: |
+        «Мой доступ»: когда настроено приложение-аутентификатор и сколько резервных кодов осталось.
+        Секрет и сами коды не возвращаются никогда.
+      responses:
+        '200':
+          description: Состояние второго фактора
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMfaStatus'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/mfa/setup:
+    post:
+      operationId: staffMfaSetup
+      tags:
+        - staff
+      x-permission: session
+      x-idempotency: no-store
+      x-error-codes:
+        - staff.wrong_stage
+      summary: Настройка 2FA — новый секрет
+      description: |
+        Первый шаг настройки второго фактора — только в стадии `setup` (после принятия
+        приглашения). Возвращает секрет и ссылку для QR; повторный вызов до подтверждения выпускает
+        новый секрет. Ответ не сохраняется для повтора по `Idempotency-Key` (повтор —
+        409 `idempotency.replay_unavailable`, вызовите заново с новым ключом) и не кэшируется.
+
+        Коды ошибок: 409 `staff.wrong_stage` — сессия не в стадии `setup` (2FA уже настроена).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '200':
+          description: Секрет приложения-аутентификатора
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMfaSecret'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/mfa/confirm:
+    post:
+      operationId: staffMfaConfirm
+      tags:
+        - staff
+      x-permission: session
+      x-idempotency: no-store
+      x-error-codes:
+        - staff.mfa_invalid
+        - staff.wrong_stage
+      summary: Настройка 2FA — подтверждение кодом
+      description: |
+        Второй шаг настройки: код из приложения сверяется с выданным секретом. Успех — 10 резервных
+        кодов, показываются один раз. Только в стадии `setup`. Ответ не сохраняется для повтора по
+        `Idempotency-Key` (повтор — 409 `idempotency.replay_unavailable`) и не кэшируется. Дальше —
+        `staffRecoveryAck`.
+
+        Коды ошибок:
+        - 400 `staff.mfa_invalid` — код не подошёл (проверьте время на телефоне).
+        - 409 `staff.wrong_stage` — сессия не в стадии `setup` или секрет ещё не выпущен.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Код из приложения-аутентификатора
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffCodeRequest'
+      responses:
+        '200':
+          description: Резервные коды
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRecoveryCodes'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/mfa/recovery-codes:
+    post:
+      operationId: regenerateStaffRecoveryCodes
+      tags:
+        - staff
+      x-permission: self
+      x-idempotency: no-store
+      x-error-codes:
+        - staff.mfa_invalid
+        - staff.wrong_stage
+      summary: Новые резервные коды
+      description: |
+        «Мой доступ»: выпускает 10 новых резервных кодов взамен всех прежних (прежние перестают
+        действовать). Подтверждается только кодом из приложения — резервный код здесь не
+        принимается. Ответ не сохраняется для повтора по `Idempotency-Key` (повтор — 409
+        `idempotency.replay_unavailable`) и не кэшируется.
+
+        Коды ошибок:
+        - 400 `staff.mfa_invalid` — код не подошёл, в `attempts_left` — остаток попыток; пятая
+          неудача подряд закрывает вход на час и завершает все сессии.
+        - 409 `staff.wrong_stage` — второй фактор не настроен.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Код из приложения-аутентификатора
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffCodeRequest'
+      responses:
+        '200':
+          description: Новые резервные коды
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRecoveryCodes'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/mfa/recovery-codes/ack:
+    post:
+      operationId: staffRecoveryAck
+      tags:
+        - staff
+      x-permission: session
+      x-error-codes:
+        - staff.wrong_stage
+      summary: Настройка 2FA — коды сохранены
+      description: |
+        Последний шаг настройки: сотрудник подтвердил, что сохранил резервные коды. Приглашение
+        гасится, учётка становится активной, сессия получает **новый токен** в стадии `active`
+        (`Set-Cookie`, прежний токен больше не действует). Ответ 204. Без этого шага сессия остаётся
+        в `setup` и остальные операции отвечают 403 `auth.setup_required`.
+
+        Коды ошибок: 409 `staff.wrong_stage` — сессия не в стадии `setup` или 2FA ещё не
+        подтверждена (`staffMfaConfirm`).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '204':
+          description: Настройка завершена — сессия активна
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSessionCookie'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/password:
+    post:
+      operationId: changeStaffPassword
+      tags:
+        - staff
+      x-permission: self
+      x-error-codes:
+        - staff.password_invalid
+        - staff.mfa_invalid
+      summary: Сменить свой пароль
+      description: |
+        «Мой доступ»: текущий пароль, второй фактор (код из приложения или резервный код — ровно
+        одно) и новый пароль. Успех — 204, все остальные сессии сотрудника завершаются (текущая
+        остаётся).
+
+        Коды ошибок:
+        - 400 `staff.password_invalid` — текущий пароль неверный; 400 `staff.mfa_invalid` — второй
+          фактор не подошёл. Обе неудачи считаются вместе с неудачами второго фактора, в
+          `attempts_left` — остаток; пятая подряд закрывает вход на час.
+        - 400 `validation.failed` по полю `body.new_password` с кодом `too_short`, `too_long` или
+          `common` — новый пароль не подходит; по `body.code` — не передан ни код, ни резервный код
+          или переданы оба.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Текущий пароль, второй фактор и новый пароль
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffPasswordChange'
+      responses:
+        '204':
+          description: Пароль изменён, другие сессии завершены
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/sessions:
+    get:
+      operationId: listStaffMySessions
+      tags:
+        - staff
+      x-permission: self
+      x-error-codes: []
+      summary: Мои сессии
+      description: |
+        «Мой доступ»: живые сессии сотрудника — устройство и браузер (из `user_agent`), сеть
+        (подсеть /24 или /48), время входа и последней активности. Город по адресу не определяется.
+      responses:
+        '200':
+          description: Живые сессии
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffSessionList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/sessions/revoke-others:
+    post:
+      operationId: revokeStaffOtherSessions
+      tags:
+        - staff
+      x-permission: self
+      x-error-codes: []
+      summary: Завершить остальные мои сессии
+      description: |
+        «Мой доступ»: завершает все свои сессии, кроме текущей. Ответ — сколько завершено.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '200':
+          description: Остальные сессии завершены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRevoked'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/me/sessions/{sessionId}:
+    delete:
+      operationId: revokeStaffMySession
+      tags:
+        - staff
+      x-permission: self
+      x-error-codes:
+        - staff.session_not_found
+      summary: Завершить мою сессию
+      description: |
+        «Мой доступ»: завершает одну свою сессию (например, на забытом компьютере); текущую тоже
+        можно — тогда следующий запрос ответит 401. Ответ 204.
+
+        Коды ошибок: 404 `staff.session_not_found` — сессии нет, она уже завершена или чужая.
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '204':
+          description: Сессия завершена
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/invites:
+    post:
+      operationId: createStaffInvite
+      tags:
+        - staff
+      x-permission: handler
+      x-permission-any:
+        - staff.roles.grant
+        - staff.roles.grant_elevated
+      x-error-codes:
+        - staff.email_taken
+        - staff.city_not_found
+      summary: Пригласить сотрудника
+      description: |
+        «Роли и доступ»: приглашение нового сотрудника. Право зависит от роли: владельца и админа
+        приглашает только владелец (`staff.roles.grant_elevated`), модератора и поддержку — владелец
+        или админ (`staff.roles.grant`). Приглашение всегда подтверждает второй сотрудник: ответ
+        202 с запросом на подтверждение. После подтверждения создаётся учётка в статусе `invited` и
+        уходит письмо с кодом; почта выключенной учётки возвращает ту же учётку через сброс доступа.
+
+        Коды ошибок:
+        - 403 `auth.forbidden` — нет права выдать эту роль.
+        - 409 `staff.email_taken` — почта уже у действующей учётки.
+        - 422 `staff.city_not_found` — города из `city_ids` нет.
+        - 400 `validation.failed` по `body.city_ids` с кодом `min_items` — модератор без городов.
+        - 400 `validation.failed` по `body.city_ids`: `max_items` — города у роли не `moderator`
+          (города бывают только у модератора); `maxItems` — больше 100 городов.
+        - 400 `validation.failed` по `body.email`: `minLength` — короче 3 символов, `maxLength` — длиннее
+          320 символов (до проверки формата).
+        - 400 `validation.failed` по `body.email` с кодом `format` — не адрес почты по правилам админки:
+          ровно одна `@`, локальная часть — ASCII dot-atom (RFC 5322) не длиннее 64 байт, домен — в том
+          числе IDN (хранится в форме A-label `xn--…`) без невидимых и запрещённых IDNA символов, весь
+          адрес — не длиннее 254 байт. Регистр и крайние пробелы не важны.
+        - 400 `validation.failed` по `body.display_name`: `minLength` — имя пустое после обрезки крайних
+          пробелов; `maxLength` — длиннее 80 символов; `format` — в имени управляющие символы (перевод
+          строки, табуляция), форматирующие и bidi (U+202A–U+202E, U+2066–U+2069, U+200E/U+200F),
+          разделители строк или невидимые символы (U+200B и подобные): они подменяют или прячут текст в
+          письмах, подписях подтверждений и журнале. Только внутри эмодзи допустимы соединитель
+          U+200D (между двумя эмодзи) и селекторы U+FE0E, U+FE0F (сразу после эмодзи или цифры
+          кейкапа); имя без единого видимого символа — тоже `format`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Почта, имя, роль и города нового сотрудника
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffInviteRequest'
+      responses:
+        '202':
+          description: Создан запрос на подтверждение приглашения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/accounts:
+    get:
+      operationId: listStaffAccounts
+      tags:
+        - staff
+      x-permission: staff.accounts.read
+      x-error-codes: []
+      summary: Список сотрудников
+      description: |
+        «Роли и доступ»: сотрудники с ролью, городами, статусом, последним входом и состоянием
+        приглашения («не принято / просрочено»). Порядок — новые сверху. Фильтры складываются:
+        `status`, `role`, `q` — начало имени или почты без учёта регистра.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Только учётки в этом состоянии; без параметра — все
+          schema:
+            $ref: '#/components/schemas/StaffStatus'
+          example: active
+        - name: role
+          in: query
+          required: false
+          description: Только сотрудники с этой ролью; без параметра — все роли
+          schema:
+            $ref: '#/components/schemas/StaffRole'
+          example: moderator
+        - name: q
+          in: query
+          required: false
+          description: Начало имени или почты, без учёта регистра
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+          example: ива
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница сотрудников
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffAccountPage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/accounts/{staffId}:
+    get:
+      operationId: getStaffAccount
+      tags:
+        - staff
+      x-permission: staff.accounts.read
+      x-error-codes:
+        - staff.not_found
+      summary: Карточка сотрудника
+      description: |
+        «Роли и доступ»: учётка сотрудника — роль, города, статус, приглашение, блокировка входа.
+
+        Коды ошибок: 404 `staff.not_found` — учётки нет.
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+      responses:
+        '200':
+          description: Учётка сотрудника
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffAccount'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/accounts/{staffId}/role:
+    put:
+      operationId: changeStaffRole
+      tags:
+        - staff
+      x-permission: handler
+      x-permission-any:
+        - staff.roles.grant
+        - staff.roles.grant_elevated
+        - staff.roles.revoke
+      x-error-codes:
+        - staff.not_found
+        - staff.self_action
+        - staff.city_not_found
+        - staff.last_owner
+      summary: Сменить роль и города сотрудника
+      description: |
+        «Роли и доступ»: новая роль и города целиком. Право — по изменению:
+        - старая или новая роль `owner` или `admin` — `staff.roles.grant_elevated`, вдвоём;
+        - роль меняется или добавлен хотя бы один город — `staff.roles.grant`, вдвоём;
+        - только снятие городов (остаётся хотя бы один) — `staff.roles.revoke`, сразу.
+
+        Сразу — 200 с обновлённой учёткой; вдвоём — 202 с запросом на подтверждение. Смена роли
+        гасит ожидающие запросы сотрудника на подтверждение.
+
+        Коды ошибок:
+        - 403 `auth.forbidden` — нет права на такое изменение.
+        - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свою роль менять нельзя.
+        - 422 `staff.city_not_found` — города из `city_ids` нет; 400 `validation.failed` по
+          `body.city_ids` с кодом `min_items` — модератор без городов, `max_items` — города у роли не
+          `moderator` (города бывают только у модератора), `maxItems` — больше 100 городов.
+        - 409 `staff.last_owner` — понижение последнего активного владельца.
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Новая роль и города
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffRoleUpdate'
+      responses:
+        '200':
+          description: Роль изменена сразу
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffAccount'
+        '202':
+          description: Создан запрос на подтверждение смены роли
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/accounts/{staffId}/disable:
+    post:
+      operationId: disableStaffAccount
+      tags:
+        - staff
+      x-permission: handler
+      x-permission-any:
+        - staff.roles.revoke
+        - staff.roles.revoke_admin
+        - staff.roles.revoke_owner
+      x-error-codes:
+        - staff.not_found
+        - staff.self_action
+        - staff.wrong_stage
+        - staff.last_owner
+      summary: Выключить учётку (снять роль)
+      description: |
+        «Роли и доступ»: снимает роль — учётка выключается, все её сессии и ожидающие запросы на
+        подтверждение гасятся, история и журнал сохраняются. Право — по роли цели: модератор и
+        поддержка — `staff.roles.revoke`, админ — `staff.roles.revoke_admin` (сразу; остальным
+        владельцам уходит письмо), владелец — `staff.roles.revoke_owner` (вдвоём). Сразу — 200 с
+        учёткой; вдвоём — 202 с запросом на подтверждение. В `confirm` — почта цели, введённая
+        руками.
+
+        Коды ошибок:
+        - 403 `auth.forbidden` — нет права снять эту роль.
+        - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — себя выключить нельзя;
+          409 `staff.wrong_stage` — учётка уже выключена.
+        - 409 `staff.last_owner` — последнего активного владельца выключить нельзя.
+        - 400 `validation.failed` по `body.confirm` с кодом `mismatch` — почта не совпала.
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Причина, комментарий и почта цели
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffConfirmedAction'
+      responses:
+        '200':
+          description: Учётка выключена сразу
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffAccount'
+        '202':
+          description: Создан запрос на подтверждение выключения владельца
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/accounts/{staffId}/access-reset:
+    post:
+      operationId: resetStaffAccess
+      tags:
+        - staff
+      x-permission: handler
+      x-permission-any:
+        - staff.access.reset
+        - staff.access.reset_elevated
+      x-error-codes:
+        - staff.not_found
+        - staff.self_action
+        - staff.last_owner
+      summary: Сбросить доступ сотрудника
+      description: |
+        «Роли и доступ»: когда сотрудник потерял пароль или телефон. Всегда вдвоём — ответ 202 с
+        запросом на подтверждение. После подтверждения пароль, второй фактор, резервные коды и
+        сессии гасятся, учётка возвращается в `invited`, сотруднику уходит новое приглашение.
+        Самостоятельного «забыл пароль» у сотрудников нет. Право — по роли цели: модератор и
+        поддержка — `staff.access.reset`, владелец и админ — `staff.access.reset_elevated`. В
+        `confirm` — почта цели, введённая руками.
+
+        Коды ошибок:
+        - 403 `auth.forbidden` — нет права сбросить доступ этой роли.
+        - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свой доступ — через «Мой
+          доступ».
+        - 409 `staff.last_owner` — сброс доступа единственному активному владельцу.
+        - 400 `validation.failed` по `body.confirm` с кодом `mismatch` — почта не совпала.
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Причина, комментарий и почта цели
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffConfirmedAction'
+      responses:
+        '202':
+          description: Создан запрос на подтверждение сброса доступа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/accounts/{staffId}/invite/resend:
+    post:
+      operationId: resendStaffInvite
+      tags:
+        - staff
+      x-permission: staff.invites.resend
+      x-error-codes:
+        - staff.not_found
+        - staff.self_action
+        - staff.wrong_stage
+      summary: Отправить приглашение повторно
+      description: |
+        «Роли и доступ»: новый код приглашения сотруднику, который ещё не настроил вход; прежний код
+        больше не действует, срок 24 часа начинается заново. Ответ 204.
+
+        Коды ошибок:
+        - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — себе нельзя.
+        - 409 `staff.wrong_stage` — учётка не в статусе `invited` (вход уже настроен или выключена).
+        - 429 `ratelimit.exceeded` — с выпуска текущего приглашения (админом или оператором) не прошло
+          60 секунд; повторные отправки самим сотрудником паузу не двигают (повторите через
+          `Retry-After` секунд).
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '204':
+          description: Новый код отправлен
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/accounts/{staffId}/sessions:
+    get:
+      operationId: listStaffAccountSessions
+      tags:
+        - staff
+      x-permission: staff.accounts.read
+      x-error-codes:
+        - staff.not_found
+      summary: Сессии сотрудника
+      description: |
+        «Роли и доступ»: живые сессии другого сотрудника — перед их завершением
+        (`revokeStaffAccountSessions`). Чтение — правом чтения `staff.accounts.read`. Админ видит
+        сессии только модераторов и поддержки: роль цели проверяет сценарий, как и у завершения.
+
+        Коды ошибок: 404 `staff.not_found` — учётки нет; 403 `auth.forbidden` — сессии владельца или
+        админа, а вы админ.
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+      responses:
+        '200':
+          description: Живые сессии сотрудника
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffSessionList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/accounts/{staffId}/sessions/revoke-all:
+    post:
+      operationId: revokeStaffAccountSessions
+      tags:
+        - staff
+      x-permission: staff.sessions.revoke
+      x-error-codes:
+        - staff.not_found
+        - staff.self_action
+      summary: Завершить все сессии сотрудника
+      description: |
+        «Роли и доступ»: завершает все сессии другого сотрудника сразу (подозрение на захват).
+        Учётка остаётся активной — сотрудник войдёт заново. Ответ — сколько сессий завершено.
+
+        Коды ошибок: 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свои сессии — через
+        «Мой доступ»; 403 `auth.forbidden` — сессии владельца или админа, а вы админ.
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '200':
+          description: Сессии завершены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRevoked'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/staff/roles:
+    get:
+      operationId: getStaffRoles
+      tags:
+        - staff
+      x-permission: staff.roles.read
+      x-error-codes: []
+      summary: Роли и матрица прав
+      description: |
+        «Роли и доступ»: роли и права с доступом каждой роли — та же матрица, что в документе
+        ролевой модели; черновые права будущих модулей не входят. Подписи прав — в локалях админки
+        (`permissions.<ключ>`).
+      responses:
+        '200':
+          description: Роли и матрица прав
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRoles'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/geo/cities:
+    get:
+      operationId: listGeoCities
+      tags:
+        - geo
+      x-permission: geo.cities.read
+      x-error-codes: []
+      summary: Города платформы
+      description: |
+        Города платформы всех статусов (`waitlist`, `pilot`, `live`) — выбор городов модератора в
+        «Ролях и доступе» и подписи уже назначенных городов. Владелец, админ и поддержка видят все
+        города; модератору — только его города (право `scoped`): фильтры сужают внутри них.
+
+        Порядок: статус (`live`, затем `pilot`, затем `waitlist`), население по убыванию, id.
+        Фильтры складываются: `q` — начало названия на любом поддерживаемом языке (ru, en) без учёта
+        регистра и ё/е; `ids` — только эти города (подписи назначенных модератору городов, до 100 id;
+        несуществующие id пропускаются).
+
+        `q`, пустой после нормализации (одни знаки препинания или пробелы), — 400
+        `validation.failed` по полю `query.q` с правилом `minLength`. Больше 100 `ids` — 400
+        `validation.failed` по `query.ids`. Названия — на языке из `Accept-Language`.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Начало названия города на любом поддерживаемом языке (ru, en), без учёта регистра и ё/е
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+          example: став
+        - name: ids
+          in: query
+          required: false
+          description: Только города с этими id; несколько значений — повторите параметр (ids=…&ids=…), до 100. Без параметра — без фильтра
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items:
+              type: string
+              format: uuid
+          example:
+            - 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+            - 7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/AcceptLanguage'
+      responses:
+        '200':
+          description: Страница городов
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+            Vary:
+              $ref: '#/components/headers/Vary'
+            Content-Language:
+              $ref: '#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeoCityPage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/audit:
+    get:
+      operationId: listAudit
+      tags:
+        - platform
+      x-permission: audit.log.read
+      x-error-codes: []
+      summary: Журнал действий
+      description: |
+        Записи журнала: кто, что и над чем сделал, было/стало, причина, сеть и браузер. Новые
+        сверху (время записи, затем id). Модератор видит записи своих городов и свои собственные —
+        фильтры сужают внутри них; остальные роли с правом видят весь журнал.
+
+        «Кто» — снимок имени на момент действия (`actor_label`): `operator` — оператор сервера,
+        `system` — сама платформа. Персональные данные в `before`/`after` замаскированы при записи,
+        адрес — до подсети /24 или /48. Чтение журнала само в журнал не пишется.
+
+        Фильтры складываются. `from` не раньше `to` — 400 `validation.failed` по `query.from` с
+        правилом `range`.
+      parameters:
+        - name: actor_staff_id
+          in: query
+          required: false
+          description: Только действия этого сотрудника
+          schema:
+            type: string
+            format: uuid
+          example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+        - name: action_prefix
+          in: query
+          required: false
+          description: 'Начало кода действия по сегментам (без шаблонов): оканчивается на «.» или «_» — все действия с этим началом (staff. — все действия сотрудников, platform.approval_ — решения по подтверждениям); иначе — само действие и его подвиды через точку (staff.login — staff.login и staff.login.*, но не staff.login_failed)'
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+          example: staff.
+        - name: object_type
+          in: query
+          required: false
+          description: Только записи об объектах этого вида (staff_account, approval, city…)
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+          example: staff_account
+        - name: object_id
+          in: query
+          required: false
+          description: Только записи об этом объекте
+          schema:
+            type: string
+            format: uuid
+          example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+        - name: from
+          in: query
+          required: false
+          description: Записи с этого момента включительно
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-01T00:00:00Z'
+        - name: to
+          in: query
+          required: false
+          description: Записи до этого момента, не включая его
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-14T00:00:00Z'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница журнала
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditPage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/approvals:
+    get:
+      operationId: listApprovals
+      tags:
+        - platform
+      x-permission: self
+      x-error-codes: []
+      summary: Запросы на подтверждение
+      description: |
+        «Подтверждения»: `box=incoming` — запросы, которые вы можете подтвердить (у вас есть право
+        запроса, город в ваших, вы не инициатор и не цель); `box=mine` — запросы, которые создали вы.
+        Новые сверху. Счётчик в меню — `box=incoming&status=pending` раз в минуту с заголовком
+        `X-WF-Background: 1` (фоновый опрос не продлевает сессию).
+      parameters:
+        - name: box
+          in: query
+          required: true
+          description: incoming — ждут вашего решения; mine — созданные вами
+          schema:
+            type: string
+            enum:
+              - incoming
+              - mine
+            x-extensible-enum: true
+        - name: status
+          in: query
+          required: false
+          description: Только запросы в этом состоянии; без параметра — все
+          schema:
+            $ref: '#/components/schemas/ApprovalStatus'
+          example: pending
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница запросов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalPage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/approvals/{approvalId}/approve:
+    post:
+      operationId: approveApproval
+      tags:
+        - platform
+      x-permission: handler
+      x-permission-any:
+        - staff.roles.grant_elevated
+        - staff.roles.grant
+        - staff.roles.revoke_owner
+        - staff.access.reset_elevated
+        - staff.access.reset
+      x-error-codes:
+        - platform.approval_not_found
+        - platform.approval_self
+        - platform.approval_stale
+        - platform.approval_closed
+        - staff.last_owner
+        - staff.email_taken
+        - staff.city_not_found
+      summary: Подтвердить запрос
+      description: |
+        Второй сотрудник подтверждает действие «вдвоём» — оно исполняется сразу, в той же
+        транзакции. Нужно право запроса (любое из прав «вдвоём»; точное — право самого запроса) и
+        город в ваших; подтверждающий — не инициатор и не цель. Ответ — запрос в состоянии
+        `executed`. Если исполнение не удалось, запрос помечается `failed` (причина — в его `error`)
+        и ответ — ошибка с кодом ниже.
+
+        Коды ошибок:
+        - 404 `platform.approval_not_found` — запроса нет; 403 `auth.forbidden` — нет права запроса.
+        - 409 `platform.approval_self` — свой запрос или запрос о вас.
+        - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен (24 часа).
+        - 409 `platform.approval_stale` — цель изменилась после запроса (запрос помечен `failed`).
+        - 409 `platform.approval_stale` — также если инициатор изменился после запроса (`error` =
+          `initiator_changed`).
+        - 409 `platform.approval_stale` — также если почта или имя приглашения (`staff.invite`) больше не
+          проходят правила приглашения (правила стали строже, пока запрос ждал): запрос помечен `failed`,
+          приглашение нужно подать заново.
+        - Отказ исполнения — код действия (запрос помечен `failed`): 409 `staff.last_owner`,
+          409 `staff.email_taken`, 422 `staff.city_not_found`.
+      parameters:
+        - $ref: '#/components/parameters/ApprovalId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Комментарий к решению — необязателен
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalApprove'
+      responses:
+        '200':
+          description: Запрос подтверждён и исполнен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/approvals/{approvalId}/reject:
+    post:
+      operationId: rejectApproval
+      tags:
+        - platform
+      x-permission: handler
+      x-permission-any:
+        - staff.roles.grant_elevated
+        - staff.roles.grant
+        - staff.roles.revoke_owner
+        - staff.access.reset_elevated
+        - staff.access.reset
+      x-error-codes:
+        - platform.approval_not_found
+        - platform.approval_self
+        - platform.approval_closed
+      summary: Отклонить запрос
+      description: |
+        Второй сотрудник отклоняет действие «вдвоём» с обязательным комментарием — действие не
+        исполняется. Права — как у подтверждения. Ответ — запрос в состоянии `rejected`.
+
+        Коды ошибок:
+        - 404 `platform.approval_not_found` — запроса нет; 403 `auth.forbidden` — нет права запроса.
+        - 409 `platform.approval_self` — свой запрос или запрос о вас.
+        - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен.
+      parameters:
+        - $ref: '#/components/parameters/ApprovalId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Причина отказа
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalReject'
+      responses:
+        '200':
+          description: Запрос отклонён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/approvals/{approvalId}/cancel:
+    post:
+      operationId: cancelApproval
+      tags:
+        - platform
+      x-permission: self
+      x-error-codes:
+        - platform.approval_not_found
+        - platform.approval_closed
+      summary: Отменить свой запрос
+      description: |
+        Инициатор отзывает свой запрос, пока его не решили. Ответ — запрос в состоянии `cancelled`.
+
+        Коды ошибок:
+        - 404 `platform.approval_not_found` — запроса нет или он не ваш.
+        - 409 `platform.approval_closed` — запрос уже решён, отменён или просрочен.
+      parameters:
+        - $ref: '#/components/parameters/ApprovalId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '200':
+          description: Запрос отменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
         default:
           $ref: '#/components/responses/Problem'
 components:
@@ -60,8 +1343,8 @@ components:
     session:
       type: apiKey
       in: cookie
-      name: wf_admin_session
-      description: Cookie сессии админки; ставится при входе
+      name: __Host-wf_admin_session
+      description: Cookie сессии сотрудника (HttpOnly; Secure; SameSite=Strict; Path=/). Ставят и меняют ответы входа, второго фактора, разблокировки, принятия приглашения и завершения настройки 2FA; стирает выход. Скрипту страницы недоступна — браузер шлёт её сам
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -73,6 +1356,107 @@ components:
         minLength: 16
         maxLength: 128
       example: 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+    AdminHeader:
+      name: X-WF-Admin
+      in: header
+      required: true
+      description: Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+      schema:
+        type: string
+        pattern: ^1$
+      example: '1'
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      required: false
+      description: Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+      schema:
+        type: string
+      example: ru-RU,ru;q=0.9,en;q=0.8
+    StaffId:
+      name: staffId
+      in: path
+      required: true
+      description: Id учётки сотрудника
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: Id сессии сотрудника — из списка «Мой доступ»
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+    ApprovalId:
+      name: approvalId
+      in: path
+      required: true
+      description: Id запроса на подтверждение
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+      schema:
+        type: string
+        maxLength: 1024
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Размер страницы, от 1 до 100; без параметра — 20
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      example: 20
+  headers:
+    SetSessionCookie:
+      description: 'Новый токен сессии: прежний больше не действует. Имя — __Host-wf_admin_session, cookie сессионная (без Max-Age и Expires) — сроки держит сервер'
+      required: true
+      schema:
+        type: string
+      example: __Host-wf_admin_session=k3Jd9Qx2Lm7Vb4Np8Rt1Zw6Yc0Hs5Ae; Path=/; HttpOnly; Secure; SameSite=Strict
+    ClearSessionCookie:
+      description: Стирание cookie сессии — браузер удаляет её сразу (Max-Age=0)
+      required: true
+      schema:
+        type: string
+      example: __Host-wf_admin_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict
+    CacheNoStore:
+      description: Ответ с секретом — не кэшируется нигде, в том числе браузером
+      required: true
+      schema:
+        type: string
+      example: no-store
+    CachePrivate:
+      description: Ответ зависит от сотрудника и его прав — общим кэшам и браузеру его не хранить
+      required: true
+      schema:
+        type: string
+      example: private, no-store
+    Vary:
+      description: Всегда Accept-Language — ответ зависит от языка
+      required: true
+      schema:
+        type: string
+      example: Accept-Language
+    ContentLanguage:
+      description: Язык названий в ответе (ru или en). Заголовка нет — поддерживаемый язык не выбран, названия на языке страны каждой записи
+      required: false
+      schema:
+        type: string
+      example: ru
   responses:
     Problem:
       description: Ошибка в формате RFC 9457
@@ -139,6 +1523,11 @@ components:
                 type: string
                 description: 'Нарушенное правило схемы: required, minLength, maximum, enum, format…'
                 example: minLength
+        attempts_left:
+          type: integer
+          minimum: 0
+          description: Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
+          example: 3
         challenge:
           type: object
           description: 'Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature)'
@@ -171,19 +1560,996 @@ components:
               type: string
               description: HMAC-SHA-256 задачи на ключе сервера, hex
               example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
-    Health:
+    StaffRole:
+      type: string
+      description: Роль сотрудника — одна на человека. owner — владелец, admin — админ, moderator — модератор своих городов, support — поддержка. Список открытый — незнакомое значение клиент обязан пережить
+      enum:
+        - owner
+        - admin
+        - moderator
+        - support
+      x-extensible-enum: true
+    StaffStatus:
+      type: string
+      description: Состояние учётки. invited — приглашение выслано, вход ещё не настроен (и после сброса доступа); active — работает; disabled — выключена (роль снята), войти нельзя
+      enum:
+        - invited
+        - active
+        - disabled
+      x-extensible-enum: true
+    StaffStage:
+      type: string
+      description: Стадия сессии. mfa_pending — пароль принят, ждём второй фактор (5 минут); setup — первый вход по приглашению, доступна только настройка 2FA; active — сессия работает
+      enum:
+        - mfa_pending
+        - setup
+        - active
+      x-extensible-enum: true
+    StaffLocale:
+      type: string
+      description: Язык админки и писем сотруднику
+      enum:
+        - ru
+        - en
+      x-extensible-enum: true
+    PermissionGrant:
+      type: string
+      description: 'Доступ сотрудника к праву. allow — можно сразу; scoped — только в своих городах (модератор); dual — только вдвоём: действие создаёт запрос на подтверждение'
+      enum:
+        - allow
+        - scoped
+        - dual
+      x-extensible-enum: true
+    RoleGrant:
+      type: string
+      description: 'Значение клетки матрицы ролей: allow — можно сразу; scoped — только в своих городах; dual — вдвоём, через подтверждение; deny — нельзя'
+      enum:
+        - allow
+        - scoped
+        - dual
+        - deny
+      x-extensible-enum: true
+    StaffActionReason:
+      type: string
+      description: 'Причина выключения или сброса доступа — из списка: left_team — ушёл из команды, security — безопасность (утечка, потерянное устройство), role_change — смена обязанностей, other — другое (поясните в комментарии)'
+      enum:
+        - left_team
+        - security
+        - role_change
+        - other
+      x-extensible-enum: true
+    StaffLoginRequest:
       type: object
-      description: Состояние сервиса
+      description: Вход сотрудника — первый шаг, почта и пароль
       required:
-        - status
+        - email
+        - password
       additionalProperties: false
       properties:
-        status:
+        email:
           type: string
-          description: Всегда ok — иначе сервис не ответил бы
+          minLength: 3
+          maxLength: 320
+          description: Рабочая почта сотрудника; регистр и пробелы по краям не важны, домен на кириллице принимается
+          example: olga.v@wf.example
+        password:
+          type: string
+          description: Пароль сотрудника как введён, без обрезки пробелов
+          example: Жёлтая карточка на 90-й
+    StaffFactorRequest:
+      type: object
+      description: 'Второй фактор — ровно одно из полей: код из приложения-аутентификатора или резервный код. Резервный код сгорает при использовании'
+      minProperties: 1
+      maxProperties: 1
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Код из приложения-аутентификатора — 6 цифр; пробелы между цифрами допустимы (вставка из буфера)
+          example: '492817'
+        recovery_code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны
+          example: k7m2q-x9p4t
+    StaffCodeRequest:
+      type: object
+      description: Код из приложения-аутентификатора (резервные коды здесь не принимаются)
+      required:
+        - code
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 6 цифр из приложения-аутентификатора; пробелы между цифрами допустимы
+          example: '492817'
+    StaffAcceptInviteRequest:
+      type: object
+      description: Принятие приглашения — почта из письма, код из письма и новый пароль
+      required:
+        - email
+        - code
+        - password
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: Почта, на которую пришло приглашение; регистр и пробелы по краям не важны
+          example: olga.v@wf.example
+        code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 'Код из письма-приглашения: 10 символов base32 (буквы a–z и цифры 2–7) в виде xxxxx-xxxxx. Регистр, дефис, пробелы и перевод строки при вставке не важны — сервер нормализует ввод'
+          example: k7m2p-x4q6d
+        password:
+          type: string
+          description: 'Новый пароль: не короче 10 символов, не длиннее 128, не из списка распространённых. Нарушение — 400 validation.failed по полю body.password с кодом too_short, too_long или common'
+          example: Жёлтая карточка на 90-й
+    StaffEmailRequest:
+      type: object
+      description: Почта сотрудника — для повторной отправки кода приглашения
+      required:
+        - email
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: Почта из приглашения; регистр и пробелы по краям не важны
+          example: olga.v@wf.example
+    StaffStageResult:
+      type: object
+      description: Стадия новой сессии — что показать дальше (второй фактор или настройку 2FA)
+      required:
+        - stage
+      properties:
+        stage:
+          $ref: '#/components/schemas/StaffStage'
+    StaffMe:
+      type: object
+      description: 'Кто вошёл: учётка, роль, города, права и стадия сессии — по нему админка строит меню и кнопки. В стадии mfa_pending приходят только stage, session, reauth_required и пустые city_ids и permissions (поля учётки отсутствуют); в стадии setup — учётка без прав'
+      required:
+        - stage
+        - reauth_required
+        - city_ids
+        - permissions
+        - session
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id учётки сотрудника; нет в стадии mfa_pending
+          example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+        email:
+          type: string
+          description: Рабочая почта в каноническом виде (домен — в ASCII-форме xn--…); нет в стадии mfa_pending
+          example: olga.v@wf.example
+        display_name:
+          type: string
+          description: Отображаемое имя — его видят журнал и другие сотрудники; нет в стадии mfa_pending
+          example: Ольга В.
+        locale:
+          $ref: '#/components/schemas/StaffLocale'
+        role:
+          $ref: '#/components/schemas/StaffRole'
+        city_ids:
+          type: array
+          description: Города модератора; у остальных ролей и в стадии mfa_pending — пустой список
+          items:
+            type: string
+            format: uuid
+          example:
+            - 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        stage:
+          $ref: '#/components/schemas/StaffStage'
+        reauth_required:
+          type: boolean
+          description: 'Сессия ждёт второй фактор (бездействие или смена сети): до staffUnlock остальные операции отвечают 401 auth.reauth_required'
+          example: false
+        permissions:
+          type: object
+          description: Права сотрудника — ключ права и доступ; права без доступа не перечисляются. Пусто в стадиях mfa_pending и setup
+          additionalProperties:
+            $ref: '#/components/schemas/PermissionGrant'
+          example:
+            staff.roles.read: allow
+            staff.accounts.read: allow
+            staff.roles.grant: dual
+            audit.log.read: allow
+            geo.cities.read: allow
+        session:
+          type: object
+          nullable: true
+          description: Текущая сессия; null — сессия не определена
+          allOf:
+            - $ref: '#/components/schemas/StaffMeSession'
+    StaffMeSession:
+      type: object
+      description: Текущая сессия — её id (отметка «это устройство» в «Моём доступе») и абсолютный срок
+      required:
+        - id
+        - expires_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id текущей сессии
+          example: 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+        expires_at:
+          type: string
+          format: date-time
+          description: Когда сессия закончится в любом случае (8 часов от входа; у mfa_pending — 5 минут)
+          example: '2026-10-13T17:00:00Z'
+    StaffLocaleUpdate:
+      type: object
+      description: Новый язык админки и писем
+      required:
+        - locale
+      additionalProperties: false
+      properties:
+        locale:
+          $ref: '#/components/schemas/StaffLocale'
+    StaffMfaStatus:
+      type: object
+      description: Состояние второго фактора — для «Моего доступа»
+      required:
+        - confirmed_at
+        - recovery_codes_left
+      properties:
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Когда настроено приложение-аутентификатор; null — ещё не настроено
+          example: '2026-10-01T09:12:00Z'
+        recovery_codes_left:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: Сколько резервных кодов из 10 ещё не использовано
+          example: 8
+    StaffMfaSecret:
+      type: object
+      description: Новый секрет приложения-аутентификатора. Показывается один раз; повторный вызов до подтверждения выпускает новый секрет, старый перестаёт действовать
+      required:
+        - secret
+        - otpauth_uri
+      properties:
+        secret:
+          type: string
+          description: Секрет base32 (RFC 4648, без =) — для ручного ввода в приложение
+          example: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+        otpauth_uri:
+          type: string
+          description: Ссылка otpauth://totp/… для QR-кода; QR рисует сама страница, ссылку никуда не отправлять
+          example: otpauth://totp/WF%20admin:olga.v%40wf.example?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=WF%20admin
+    StaffRecoveryCodes:
+      type: object
+      description: Резервные коды — показываются один раз, сервер хранит только их отпечатки. Каждый код работает вместо кода из приложения один раз
+      required:
+        - recovery_codes
+      properties:
+        recovery_codes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          description: 10 кодов вида xxxxx-xxxxx
+          items:
+            type: string
+          example:
+            - k7m2q-x9p4t
+            - a3b5c-d7e2f
+            - m4n6p-q2r8s
+            - t5v7w-x3y9z
+            - b2c4d-f6g8h
+            - j3k5m-n7p2q
+            - r4s6t-v8w3x
+            - y5z7a-b2c9d
+            - e3f5g-h7j4k
+            - p6q8r-s2t5v
+    StaffPasswordChange:
+      type: object
+      description: 'Смена своего пароля: текущий пароль, второй фактор (ровно одно из code и recovery_code) и новый пароль. Остальные свои сессии гасятся'
+      required:
+        - current_password
+        - new_password
+      additionalProperties: false
+      properties:
+        current_password:
+          type: string
+          description: Текущий пароль как введён
+          example: Жёлтая карточка на 90-й
+        code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 6 цифр из приложения-аутентификатора; не вместе с recovery_code
+          example: '492817'
+        recovery_code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Резервный код вида xxxxx-xxxxx вместо кода из приложения; сгорает
+          example: k7m2q-x9p4t
+        new_password:
+          type: string
+          description: 'Новый пароль: не короче 10 символов, не длиннее 128, не из списка распространённых. Нарушение — 400 validation.failed по полю body.new_password с кодом too_short, too_long или common'
+          example: Свисток на 46-й минуте
+    StaffSession:
+      type: object
+      description: Сессия сотрудника — устройство, сеть и время работы
+      required:
+        - id
+        - stage
+        - current
+        - created_at
+        - last_seen_at
+        - expires_at
+        - ip
+        - user_agent
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id сессии — для завершения
+          example: 0192f1d0-1b2c-7d3e-8f4a-5b6c7d8e9f01
+        stage:
+          $ref: '#/components/schemas/StaffStage'
+        current:
+          type: boolean
+          description: Это сессия, с которой сделан запрос («это устройство»)
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          description: Когда сессия создана (вход)
+          example: '2026-10-13T09:00:00Z'
+        last_seen_at:
+          type: string
+          format: date-time
+          description: Последняя активность — с точностью до минуты, фоновые опросы её не двигают
+          example: '2026-10-13T10:41:00Z'
+        expires_at:
+          type: string
+          format: date-time
+          description: Когда сессия закончится в любом случае
+          example: '2026-10-13T17:00:00Z'
+        ip:
+          type: string
+          description: Сеть, из которой вошли, — подсеть /24 (IPv4) или /48 (IPv6); полный адрес не показывается
+          example: 203.0.113.0/24
+        user_agent:
+          type: string
+          nullable: true
+          description: Строка User-Agent браузера — устройство и браузер разбирает админка; null — браузер её не прислал
+          example: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36
+    StaffSessionList:
+      type: object
+      description: Живые сессии сотрудника, новые сверху
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: Сессии; текущая отмечена current
+          items:
+            $ref: '#/components/schemas/StaffSession'
+    StaffRevoked:
+      type: object
+      description: Сколько сессий завершено
+      required:
+        - revoked
+      properties:
+        revoked:
+          type: integer
+          minimum: 0
+          description: Число завершённых сессий; 0 — других сессий не было
+          example: 2
+    StaffInviteRequest:
+      type: object
+      description: Приглашение нового сотрудника — почта, имя, роль и города (у модератора)
+      required:
+        - email
+        - display_name
+        - role
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же учётку через сброс доступа. Регистр и крайние пробелы не важны; не адрес (локальная часть не ASCII dot-atom, домен с невидимыми символами) — 400 validation.failed по body.email, код format; короче 3 или длиннее 320 символов — код minLength или maxLength
+          example: ivan.p@wf.example
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Отображаемое имя — его видят журнал, письма и другие сотрудники. Крайние пробелы обрезаются; управляющие, форматирующие и bidi-символы, разделители строк и невидимые символы (U+200B и подобные), имя без видимых символов — 400 validation.failed по body.display_name, код format. Только внутри эмодзи допустимы соединитель U+200D (между двумя эмодзи) и селекторы U+FE0E, U+FE0F (сразу после эмодзи или цифры кейкапа)
+          example: Иван П.
+        role:
+          $ref: '#/components/schemas/StaffRole'
+        city_ids:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          description: Города модератора — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пусто или нет поля (иначе код max_items); больше 100 — код maxItems
+          items:
+            type: string
+            format: uuid
+          example:
+            - 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    StaffRoleUpdate:
+      type: object
+      description: Новая роль и города сотрудника целиком (не разница)
+      required:
+        - role
+        - city_ids
+      additionalProperties: false
+      properties:
+        role:
+          $ref: '#/components/schemas/StaffRole'
+        city_ids:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          description: Города модератора целиком — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пустой список (иначе код max_items); больше 100 — код maxItems
+          items:
+            type: string
+            format: uuid
+          example:
+            - 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+            - 7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65
+    StaffConfirmedAction:
+      type: object
+      description: Разрушающее действие над сотрудником — причина из списка, комментарий и почта цели, введённая руками
+      required:
+        - reason
+        - confirm
+      additionalProperties: false
+      properties:
+        reason:
+          $ref: '#/components/schemas/StaffActionReason'
+        comment:
+          type: string
+          maxLength: 500
+          description: Пояснение к причине — попадает в журнал действий
+          example: Перешёл в другой проект
+        confirm:
+          type: string
+          minLength: 1
+          maxLength: 320
+          description: Почта сотрудника-цели, введённая руками; регистр и пробелы по краям не важны. Не совпала — 400 validation.failed по body.confirm с кодом mismatch
+          example: ivan.p@wf.example
+    StaffInviteState:
+      type: object
+      description: Живое приглашение учётки — пока сотрудник не настроил вход
+      required:
+        - purpose
+        - expires_at
+        - expired
+      properties:
+        purpose:
+          type: string
+          description: invite — первое приглашение; access_reset — после сброса доступа
           enum:
-            - ok
+            - invite
+            - access_reset
           x-extensible-enum: true
+        expires_at:
+          type: string
+          format: date-time
+          description: Срок кода приглашения (24 часа от выпуска)
+          example: '2026-10-14T09:00:00Z'
+        expired:
+          type: boolean
+          description: Срок истёк — нужна повторная отправка
+          example: false
+    StaffAccount:
+      type: object
+      description: Учётка сотрудника — строка списка «Роли и доступ» и карточка
+      required:
+        - id
+        - email
+        - display_name
+        - locale
+        - status
+        - role
+        - city_ids
+        - created_at
+        - last_login_at
+        - locked_until
+        - version
+        - invite
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id учётки
+          example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+        email:
+          type: string
+          description: Рабочая почта в каноническом виде (домен — в ASCII-форме xn--…)
+          example: ivan.p@wf.example
+        display_name:
+          type: string
+          description: Отображаемое имя
+          example: Иван П.
+        locale:
+          $ref: '#/components/schemas/StaffLocale'
+        status:
+          $ref: '#/components/schemas/StaffStatus'
+        role:
+          $ref: '#/components/schemas/StaffRole'
+        city_ids:
+          type: array
+          description: Города модератора; у остальных ролей — пустой список
+          items:
+            type: string
+            format: uuid
+          example:
+            - 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        created_at:
+          type: string
+          format: date-time
+          description: Когда учётка создана
+          example: '2026-10-01T09:00:00Z'
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Последний вход; null — ещё не входил
+          example: '2026-10-13T09:00:00Z'
+        locked_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: До какого времени вход закрыт после пяти неверных кодов подряд; null — не закрыт
+          example: null
+        version:
+          type: integer
+          format: int64
+          description: Версия учётки — растёт при каждом изменении, в том числе роли и городов
+          example: 4
+        invite:
+          type: object
+          nullable: true
+          description: Живое приглашение («приглашение не принято / просрочено»); null — приглашения нет
+          allOf:
+            - $ref: '#/components/schemas/StaffInviteState'
+    StaffAccountPage:
+      type: object
+      description: Страница списка сотрудников
+      required:
+        - items
+        - next_cursor
+      properties:
+        items:
+          type: array
+          description: Сотрудники страницы
+          items:
+            $ref: '#/components/schemas/StaffAccount'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы; null — страниц больше нет
+          example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+    RoleGrants:
+      type: object
+      description: Доступ к праву у каждой роли — строка матрицы
+      required:
+        - owner
+        - admin
+        - moderator
+        - support
+      properties:
+        owner:
+          $ref: '#/components/schemas/RoleGrant'
+        admin:
+          $ref: '#/components/schemas/RoleGrant'
+        moderator:
+          $ref: '#/components/schemas/RoleGrant'
+        support:
+          $ref: '#/components/schemas/RoleGrant'
+    RolePermission:
+      type: object
+      description: Право матрицы — ключ, признак изменения и доступ ролей. Подпись права — в локалях админки (permissions.<ключ>)
+      required:
+        - key
+        - mutating
+        - grants
+      properties:
+        key:
+          type: string
+          description: Ключ права <модуль>.<ресурс>.<действие>
+          example: staff.roles.grant
+        mutating:
+          type: boolean
+          description: Право меняет данные (иначе — только чтение)
+          example: true
+        grants:
+          $ref: '#/components/schemas/RoleGrants'
+    StaffRoles:
+      type: object
+      description: Роли и матрица прав — экран «Роли и доступ»; черновые права будущих модулей не входят
+      required:
+        - roles
+        - permissions
+      properties:
+        roles:
+          type: array
+          description: Роли по старшинству
+          items:
+            $ref: '#/components/schemas/StaffRole'
+        permissions:
+          type: array
+          description: Права в порядке каталога
+          items:
+            $ref: '#/components/schemas/RolePermission'
+    CityStatus:
+      type: string
+      description: Статус города. waitlist — игр пока нет; pilot — первые команды и модератор; live — город работает. Список открытый — незнакомое значение клиент обязан пережить
+      enum:
+        - waitlist
+        - pilot
+        - live
+      x-extensible-enum: true
+    GeoCity:
+      type: object
+      description: Город платформы в списке админки — для выбора и подписи городов модератора
+      required:
+        - id
+        - slug
+        - name
+        - status
+        - country_code
+        - region_name
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id города
+          example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        slug:
+          type: string
+          pattern: ^[a-z0-9-]+$
+          description: Текущий адрес города в вебе
+          example: stavropol
+        name:
+          type: string
+          description: Название на языке ответа; перевода нет — каноническое, на языке страны
+          example: Ставрополь
+        status:
+          $ref: '#/components/schemas/CityStatus'
+        country_code:
+          type: string
+          pattern: ^[A-Z]{2}$
+          description: Код страны ISO 3166-1 alpha-2
+          example: RU
+        region_name:
+          type: string
+          nullable: true
+          description: Регион на языке ответа — различает одноимённые города; null — регион не задан
+          example: Ставропольский край
+    GeoCityPage:
+      type: object
+      description: Страница городов
+      required:
+        - items
+        - next_cursor
+      properties:
+        items:
+          type: array
+          description: Города страницы
+          items:
+            $ref: '#/components/schemas/GeoCity'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы; null — страниц больше нет
+          example: eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiXX0
+    ApprovalAction:
+      type: string
+      description: Действие запроса на подтверждение — подпись берётся из локалей админки (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца
+      enum:
+        - staff.invite
+        - staff.role_change
+        - staff.access_reset
+        - staff.revoke_owner
+      x-extensible-enum: true
+    ApprovalStatus:
+      type: string
+      description: Состояние запроса. pending — ждёт решения (24 часа); executed — подтверждён и исполнен; rejected — отклонён; cancelled — отозван инициатором или погашен системой; expired — истёк срок; failed — подтверждён, но не исполнился (причина в error)
+      enum:
+        - pending
+        - executed
+        - rejected
+        - cancelled
+        - expired
+        - failed
+      x-extensible-enum: true
+    ApprovalActor:
+      type: object
+      description: Сотрудник в запросе — id и снимок имени на момент действия
+      required:
+        - id
+        - label
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id учётки сотрудника
+          example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+        label:
+          type: string
+          description: Имя сотрудника на момент действия
+          example: Ольга В.
+    Approval:
+      type: object
+      description: Запрос на подтверждение действия «вдвоём»
+      required:
+        - id
+        - action
+        - permission
+        - status
+        - payload
+        - target_id
+        - scope_city_id
+        - requested_by
+        - requested_at
+        - expires_at
+        - decided_by
+        - decided_at
+        - comment
+        - error
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id запроса
+          example: 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+        action:
+          $ref: '#/components/schemas/ApprovalAction'
+        permission:
+          type: string
+          description: Право, которое нужно подтверждающему (ключ матрицы)
+          example: staff.roles.grant
+        status:
+          $ref: '#/components/schemas/ApprovalStatus'
+        payload:
+          type: object
+          additionalProperties: true
+          description: Что именно будет сделано — поля зависят от действия (почта, имя, роль, города, причина); v — версия формата
+          example:
+            v: 1
+            email: ivan.p@wf.example
+            display_name: Иван П.
+            role: moderator
+            city_ids:
+              - 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        target_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Сотрудник-цель; null — цели ещё нет (приглашение новой учётки)
+          example: null
+        scope_city_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Город запроса — подтверждают сотрудники с этим городом; null — без города
+          example: null
+        requested_by:
+          $ref: '#/components/schemas/ApprovalActor'
+        requested_at:
+          type: string
+          format: date-time
+          description: Когда запрос создан
+          example: '2026-10-13T09:15:00Z'
+        expires_at:
+          type: string
+          format: date-time
+          description: До какого времени запрос можно решить (24 часа)
+          example: '2026-10-14T09:15:00Z'
+        decided_by:
+          type: object
+          nullable: true
+          description: Кто решил (подтвердил, отклонил или отменил); null — ещё не решён или решила система
+          allOf:
+            - $ref: '#/components/schemas/ApprovalActor'
+        decided_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Когда решён; null — ещё ждёт решения
+          example: null
+        comment:
+          type: string
+          nullable: true
+          description: Комментарий к решению; null — без комментария
+          example: null
+        error:
+          type: string
+          nullable: true
+          description: Почему не исполнился (status failed) или почему погашен системой; null — без ошибки
+          example: null
+    ApprovalAccepted:
+      type: object
+      description: Действие не исполнено сразу — создан запрос на подтверждение вторым сотрудником
+      required:
+        - approval
+      properties:
+        approval:
+          $ref: '#/components/schemas/Approval'
+    ApprovalPage:
+      type: object
+      description: Страница запросов на подтверждение
+      required:
+        - items
+        - next_cursor
+      properties:
+        items:
+          type: array
+          description: Запросы страницы
+          items:
+            $ref: '#/components/schemas/Approval'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы; null — страниц больше нет
+          example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMTNUMDk6MTU6MDBaIiwiMDE5MmYxZTIiXX0
+    ApprovalApprove:
+      type: object
+      description: Решение «подтвердить»
+      additionalProperties: false
+      properties:
+        comment:
+          type: string
+          maxLength: 500
+          description: Комментарий к подтверждению — попадает в журнал
+          example: Проверила с Иваном лично
+    ApprovalReject:
+      type: object
+      description: Решение «отклонить»
+      required:
+        - comment
+      additionalProperties: false
+      properties:
+        comment:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Почему отклонено — увидит инициатор, попадает в журнал
+          example: Город модератору выдаём после испытательного срока
+    AuditRecord:
+      type: object
+      description: Запись журнала действий
+      required:
+        - id
+        - created_at
+        - action
+        - object_type
+        - object_id
+        - actor_user_id
+        - actor_staff_id
+        - actor_role
+        - actor_label
+        - scope_city_id
+        - reason
+        - ip
+        - user_agent
+        - before
+        - after
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id записи
+          example: 0192f1f0-8a9b-7c0d-9e1f-2a3b4c5d6e7f
+        created_at:
+          type: string
+          format: date-time
+          description: Когда сделано
+          example: '2026-10-13T09:20:00Z'
+        action:
+          type: string
+          description: Код действия <модуль>.<действие> — подпись в локалях админки
+          example: staff.role_granted
+        object_type:
+          type: string
+          description: Вид объекта действия
+          example: staff_account
+        object_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Id объекта; null — действие без объекта (например, неудачный вход)
+          example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+        actor_user_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Игрок-автор действия; null — автор не игрок
+          example: null
+        actor_staff_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Сотрудник-автор действия; null — автор не сотрудник
+          example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+        actor_role:
+          type: string
+          nullable: true
+          description: Роль автора на момент действия (роль сотрудника или игрока) либо system, operator, anonymous — без автора-человека
+          example: owner
+        actor_label:
+          type: string
+          nullable: true
+          description: «Кто» — имя на момент действия; operator — оператор сервера, system — платформа
+          example: Ольга В.
+        scope_city_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Город записи — по нему модератор видит журнал своих городов; null — без города
+          example: null
+        reason:
+          type: string
+          nullable: true
+          description: Причина действия (код причины и комментарий); null — без причины
+          example: 'left_team: перешёл в другой проект'
+        ip:
+          type: string
+          nullable: true
+          description: Сеть автора — подсеть /24 (IPv4) или /48 (IPv6); null — неизвестна
+          example: 203.0.113.0/24
+        user_agent:
+          type: string
+          nullable: true
+          description: Браузер автора (User-Agent); null — неизвестен
+          example: Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15
+        before:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Было — значимые поля до действия, персональные данные замаскированы; null — объекта не было
+          example:
+            role: support
+            city_ids: []
+        after:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Стало — значимые поля после действия, персональные данные замаскированы; null — объект удалён
+          example:
+            role: moderator
+            city_ids:
+              - 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    AuditPage:
+      type: object
+      description: Страница журнала действий
+      required:
+        - items
+        - next_cursor
+      properties:
+        items:
+          type: array
+          description: Записи страницы, новые сверху
+          items:
+            $ref: '#/components/schemas/AuditRecord'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы; null — страниц больше нет
+          example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMTNUMDk6MjA6MDBaIiwiMDE5MmYxZjAiXX0
 x-error-codes-common:
   - internal
   - request.invalid
@@ -198,4 +2564,13 @@ x-error-codes-common:
   - idempotency.in_progress
   - idempotency.replay_unavailable
   - feature.disabled
-x-anonymous-mutations: []
+  - auth.forbidden
+  - auth.csrf_failed
+  - auth.ip_not_allowed
+  - auth.reauth_required
+  - auth.setup_required
+  - http.not_implemented
+x-anonymous-mutations:
+  - staffLogin
+  - staffAcceptInvite
+  - staffResendInviteSelf

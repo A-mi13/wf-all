@@ -1,0 +1,80 @@
+/* «Подтверждения» (*): вкладки «Входящие» и «Мои», список запросов (DataTable; на телефоне строки —
+   карточки), окно «Отклонить». Цвета — только токены. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-5);
+}
+
+/* Список: после решения фокус переносится сюда (строка с кнопкой исчезла) — программно, без рамки */
+.list:focus {
+  outline: none;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  min-width: 0;
+}
+
+.action,
+.name {
+  color: var(--wf-color-text);
+  font-weight: 700;
+}
+
+.muted {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  overflow-wrap: anywhere;
+}
+
+.failure {
+  color: var(--wf-color-danger);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+}
+
+/* «Кому и что»: подпись — значение */
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--wf-space-1) var(--wf-space-3);
+  margin: 0;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.facts dt {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--wf-color-text);
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--wf-space-2);
+}
+
+/* На телефоне вместо решений по выдаче прав */
+.note {
+  margin: 0;
+  color: var(--wf-color-warning);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+}

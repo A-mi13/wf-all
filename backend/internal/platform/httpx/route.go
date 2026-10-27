@@ -12,8 +12,9 @@ import (
 )
 
 // Route — операция контракта, на которую пришёл запрос. Кладёт Routes; читают аутентификация
-// (security), валидатор и rate limit (x-rate-limit) — маршрут ищется один раз на запрос. Идемпотентность маршрут не
-// читает: ей нужен фактический путь (r.URL.Path).
+// (security), валидатор, rate limit (x-rate-limit) и идемпотентность (x-idempotency: no-store) —
+// маршрут ищется один раз на запрос. Ключ идемпотентности привязан к фактическому пути (r.URL.Path),
+// а не к шаблону маршрута.
 type Route struct {
 	route  *routers.Route
 	params map[string]string
@@ -25,6 +26,13 @@ func (r *Route) Operation() *openapi3.Operation { return r.route.Operation }
 func (r *Route) Extension(name string) string {
 	s, _ := r.route.Operation.Extensions[name].(string)
 	return s
+}
+
+// Param — значение параметра пути операции (P10), как в пути запроса; у маршрута нет такого
+// параметра — ("", false). Город из пути ({cityId}) — для проверки права scoped в admin-api.
+func (r *Route) Param(name string) (string, bool) {
+	v, ok := r.params[name]
+	return v, ok
 }
 
 // AcceptsBearer — есть ли в security операции (без своего — в общем security документа) схема
@@ -73,4 +81,34 @@ func Routes(spec *openapi3.T) (func(http.Handler) http.Handler, error) {
 			next.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+// RequireRoute — звено на самом хендлере операции (ChiServerOptions.Middlewares генератора: после
+// биндинга параметров, перед вызовом хендлера): без Route в ctx отвечает 404 http.not_found и
+// хендлер не вызывает. chi сопоставляет {param} с пустым сегментом (PUT /v1/staff/accounts//role),
+// а маршрутизатор контракта (Routes) — нет: Route не ставится, и звенья сессии, валидации, прав,
+// лимита и идемпотентности пропущены. Защита в глубину: хендлер без этих звеньев недостижим.
+// Ошибка биндинга параметра на таком запросе (пустой uuid) приходит раньше — её закрывает
+// NotFoundWithoutRoute.
+func RequireRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := RouteFrom(r.Context()); !ok {
+			WriteProblem(w, r, http.StatusNotFound, CodeNotFound, "")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// NotFoundWithoutRoute — ErrorHandlerFunc генератора (ошибки биндинга параметров): запрос без
+// Route контракта получает 404 http.not_found, а не 400 про параметр, прочие — handle. Пара к
+// RequireRoute: тот ловит запрос, чей биндинг прошёл, этот — чей биндинг не прошёл.
+func NotFoundWithoutRoute(handle func(w http.ResponseWriter, r *http.Request, err error)) func(w http.ResponseWriter, r *http.Request, err error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		if _, ok := RouteFrom(r.Context()); !ok {
+			WriteProblem(w, r, http.StatusNotFound, CodeNotFound, "")
+			return
+		}
+		handle(w, r, err)
+	}
 }

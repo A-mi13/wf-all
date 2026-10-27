@@ -204,3 +204,49 @@ func TestMaskTypedNilIsNull(t *testing.T) {
 		}
 	}
 }
+
+// Остатки фундамента: адрес клиента в любом написании (client_ip — заголовок BFF X-WF-Client-IP)
+// и секреты входа сотрудников — коды, резервные коды, пароли, токены (решение M12).
+func TestMaskClientIPAndStaffSecrets(t *testing.T) {
+	cases := []struct {
+		key  string
+		in   any
+		want any
+	}{
+		{"client_ip", "203.0.113.7", "***"},
+		{"clientIp", "203.0.113.7", "***"},
+		{"clientIP", "203.0.113.7", "***"},
+		{"X-WF-Client-IP", "203.0.113.7", "***"},
+		{"ipv4", "203.0.113.7", "***"},
+		{"ipv6", "2001:db8::1", "***"},
+		{"client_ipv6", "2001:db8::1", "***"},
+		{"ips", []any{"203.0.113.7"}, "***"},
+		{"remote_address", "203.0.113.7", "***"},
+		{"client_address", "203.0.113.7", "***"},
+		{"peer_addr", "203.0.113.7:5100", "***"},
+		{"code", "123456", "***"},
+		{"invite_code", "123456", "***"},
+		{"inviteCode", "123456", "***"},
+		{"code_enc", "AQID", "***"},
+		{"codes", []any{"abcde-fghij"}, "***"},
+		{"recovery", "abcde-fghij", "***"},
+		{"recovery_key", "x", "***"},
+		{"secret_enc", "AQID", "***"},
+		{"new_password", "correct horse", "***"},
+		{"access_token", "x", "***"},
+		// публичные коды и счётчики не маскируются: журнал импорта geo пишет country_code
+		{"country_code", "RU", "RU"},
+		{"countryCode", "RU", "RU"},
+		{"currency_code", "RUB", "RUB"},
+		{"error_code", "staff.mfa_invalid", "staff.mfa_invalid"},
+		{"status_code", 409, 409},
+		{"recovery_codes_left", 7, 7},
+		{"code_sent_at", "2026-10-06T10:00:00Z", "2026-10-06T10:00:00Z"},
+	}
+	for _, c := range cases {
+		got := maskMap(t, map[string]any{c.key: c.in})[c.key]
+		if !equalJSON(got, c.want) {
+			t.Errorf("%s: %v -> %v, ждали %v", c.key, c.in, got, c.want)
+		}
+	}
+}

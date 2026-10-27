@@ -1,6 +1,10 @@
 // Package idempotency — повтор мутирующего запроса не исполняет действие дважды (спека бэкенда
 // §6.4). Ключ (user_id, key) вставляется хуком в бизнес-транзакцию ручки: дубль не закоммитится
-// и при обрыве связи. Ответ сохраняется после коммита; повтор с тем же запросом получает его.
+// и при обрыве связи. user_id — id субъекта запроса (auth.SubjectFrom): игрока public API или
+// сотрудника admin-api (решение D19). Таблица — Config.Table: у публичного API idempotency_keys, у
+// admin-api своя staff_idempotency_keys с правами только роли admin (ответы сотрудников — с ПД).
+// Ответ сохраняется после коммита; повтор с тем же запросом получает его. Операция с
+// x-idempotency: no-store (ответ с секретами) хранит только хэш запроса и статус.
 // Одна закоммиченная транзакция на идемпотентный запрос: db.InTx после коммита или внутри
 // открытой — ошибка; после отката (повтор при 40001) ключ вставляется заново.
 package idempotency
@@ -30,7 +34,12 @@ import (
 )
 
 const (
-	Header             = "Idempotency-Key"
+	Header = "Idempotency-Key"
+	// Extension — расширение операции контракта: NoStore — ответ с секретами (секрет TOTP,
+	// резервные коды) не сохраняется: в строке ключа только хэш запроса и статус, повтор того же
+	// запроса — 409 idempotency.replay_unavailable (решение D14).
+	Extension          = "x-idempotency"
+	NoStore            = "no-store"
 	headerReplayed     = "Idempotency-Replayed"
 	defaultLockTimeout = 3 * time.Second
 	codeLockTimeout    = "55P03" // lock_not_available
@@ -45,6 +54,9 @@ type Config struct {
 	// LockTimeout — сколько дубль ждёт первый запрос на уникальном индексе, прежде чем
 	// получить 409 idempotency.in_progress.
 	LockTimeout time.Duration
+	// Table — таблица ключей: нулевое значение Players (idempotency_keys) — публичный API; admin-api —
+	// Staff (staff_idempotency_keys, права только роли admin). Неизвестная — паника при сборке.
+	Table Table
 }
 
 // RequestHash — SHA-256 от метода, фактического пути с query и тела.
@@ -55,19 +67,20 @@ func RequestHash(method, requestURI string, body []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Middleware — идемпотентность мутирующего запроса с Idempotency-Key от вошедшего пользователя.
-// Без ключа, без пользователя и для GET/HEAD/OPTIONS запрос проходит как есть.
+// Middleware — идемпотентность мутирующего запроса с Idempotency-Key от вошедшего субъекта
+// (игрок — auth.With, сотрудник — auth.WithStaff). Без ключа, без субъекта и для GET/HEAD/OPTIONS
+// запрос проходит как есть.
 func Middleware(dbtx idempotencydb.DBTX, cfg Config, log *slog.Logger) func(http.Handler) http.Handler {
 	if cfg.LockTimeout <= 0 {
 		cfg.LockTimeout = defaultLockTimeout
 	}
 	// lock_timeout в миллисекундах, а "0ms" значит «ждать без конца»: меньше 1 мс — это 1 мс
 	cfg.LockTimeout = max(cfg.LockTimeout, time.Millisecond)
-	q := idempotencydb.New(dbtx)
+	q := storeOf(cfg.Table, dbtx)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := r.Header.Get(Header)
-			p, ok := auth.From(r.Context())
+			s, ok := auth.SubjectFrom(r.Context())
 			if key == "" || !ok || !mutating(r.Method) {
 				next.ServeHTTP(w, r)
 				return
@@ -78,13 +91,14 @@ func Middleware(dbtx idempotencydb.DBTX, cfg Config, log *slog.Logger) func(http
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
-			c := &claim{userID: p.UserID, key: key, endpoint: r.URL.Path,
-				hash: RequestHash(r.Method, r.URL.RequestURI(), body), lockTimeout: cfg.LockTimeout}
+			c := &claim{subjectID: s.ID, key: key, endpoint: r.URL.Path,
+				hash: RequestHash(r.Method, r.URL.RequestURI(), body), lockTimeout: cfg.LockTimeout,
+				noStore: noStore(r), table: cfg.Table}
 
-			row, err := q.Get(r.Context(), idempotencydb.GetParams{UserID: c.userID, Key: key})
+			row, err := q.get(r.Context(), idempotencydb.GetParams{UserID: c.subjectID, Key: key})
 			switch {
 			case err == nil:
-				replay(w, r, row, c.hash)
+				replay(w, r, row, c.hash, c.noStore)
 				return
 			case !errors.Is(err, pgx.ErrNoRows):
 				httpx.WriteError(log, w, r, err)
@@ -116,6 +130,13 @@ func Middleware(dbtx idempotencydb.DBTX, cfg Config, log *slog.Logger) func(http
 	}
 }
 
+// noStore — операция маршрута помечена x-idempotency: no-store. Маршрута нет (запрос не из
+// контракта, тесты без Routes) — ответ сохраняется как обычно.
+func noStore(r *http.Request) bool {
+	rt, ok := httpx.RouteFrom(r.Context())
+	return ok && rt.Extension(Extension) == NoStore
+}
+
 func mutating(method string) bool {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
@@ -124,11 +145,11 @@ func mutating(method string) bool {
 	return false
 }
 
-func replay(w http.ResponseWriter, r *http.Request, row idempotencydb.GetRow, hash string) {
+func replay(w http.ResponseWriter, r *http.Request, row idempotencydb.GetRow, hash string, noStore bool) {
 	switch {
 	case row.RequestHash != hash:
 		httpx.WriteProblem(w, r, http.StatusUnprocessableEntity, httpx.CodeIdempotencyKeyReused, "")
-	case row.ResponseStatus == nil:
+	case row.ResponseStatus == nil || noStore:
 		httpx.WriteProblem(w, r, http.StatusConflict, httpx.CodeIdempotencyReplayUnavailable, "")
 	default:
 		var h map[string]string
@@ -146,11 +167,13 @@ func replay(w http.ResponseWriter, r *http.Request, row idempotencydb.GetRow, ha
 // транзакции (after хука): откат снимает ключ — следующая db.InTx того же запроса (повтор после
 // 40001) вставляет его заново; коммит закрепляет — ответ сохраняется только тогда.
 type claim struct {
-	userID      uuid.UUID
+	subjectID   uuid.UUID // user_id строки: игрок или сотрудник
 	key         string
 	endpoint    string
 	hash        string
 	lockTimeout time.Duration
+	noStore     bool  // ответ не сохраняется: только статус (x-idempotency: no-store)
+	table       Table // таблица ключей (Config.Table)
 
 	mu        sync.Mutex
 	pending   bool // ключ вставлен в открытую транзакцию, исход ещё неизвестен
@@ -174,15 +197,15 @@ func (c *claim) hook(ctx context.Context, tx pgx.Tx) (func(committed bool), erro
 	if c.pending || c.committed || c.conflict != nil {
 		return nil, errSecondTx
 	}
-	q := idempotencydb.New(tx)
-	prev, err := q.CurrentLockTimeout(ctx)
+	q := storeOf(c.table, tx)
+	prev, err := q.currentLockTimeout(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := q.SetLockTimeout(ctx, fmt.Sprintf("%dms", c.lockTimeout.Milliseconds())); err != nil {
+	if err := q.setLockTimeout(ctx, fmt.Sprintf("%dms", c.lockTimeout.Milliseconds())); err != nil {
 		return nil, err
 	}
-	_, err = q.Claim(ctx, idempotencydb.ClaimParams{UserID: c.userID, Key: c.key, Endpoint: c.endpoint, RequestHash: c.hash})
+	err = q.claim(ctx, idempotencydb.ClaimParams{UserID: c.subjectID, Key: c.key, Endpoint: c.endpoint, RequestHash: c.hash})
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == codeLockTimeout {
 		c.conflict = httpx.NewError(http.StatusConflict, httpx.CodeIdempotencyInProgress)
 		return nil, c.conflict
@@ -190,7 +213,7 @@ func (c *claim) hook(ctx context.Context, tx pgx.Tx) (func(committed bool), erro
 	if errors.Is(err, pgx.ErrNoRows) {
 		// ключ занял запрос, закоммиченный между проверкой и вставкой
 		c.conflict = httpx.NewError(http.StatusConflict, httpx.CodeIdempotencyInProgress)
-		if row, err := q.Get(ctx, idempotencydb.GetParams{UserID: c.userID, Key: c.key}); err == nil && row.RequestHash != c.hash {
+		if row, err := q.get(ctx, idempotencydb.GetParams{UserID: c.subjectID, Key: c.key}); err == nil && row.RequestHash != c.hash {
 			c.conflict = httpx.NewError(http.StatusUnprocessableEntity, httpx.CodeIdempotencyKeyReused)
 		}
 		return nil, c.conflict
@@ -201,7 +224,7 @@ func (c *claim) hook(ctx context.Context, tx pgx.Tx) (func(committed bool), erro
 	c.pending = true
 	// lock_timeout — только для вставки ключа, не для бизнес-запросов транзакции; after
 	// возвращается и при ошибке: InTx откатит транзакцию и снимет pending
-	return c.settle, q.SetLockTimeout(ctx, prev)
+	return c.settle, q.setLockTimeout(ctx, prev)
 }
 
 // settle — исход транзакции, в которую вставлен ключ.
@@ -212,25 +235,28 @@ func (c *claim) settle(committed bool) {
 	c.committed = committed
 }
 
-func (c *claim) save(ctx context.Context, r *http.Request, q *idempotencydb.Queries, buf *buffer, log *slog.Logger) {
-	body := buf.body.Bytes()
-	if len(body) == 0 {
-		body = nil
-	} else if !json.Valid(body) {
-		log.WarnContext(ctx, "idempotency: ответ не JSON — повтор получит replay_unavailable",
-			"method", r.Method, "path", r.URL.Path)
-		return
-	}
-	h := map[string]string{}
-	for _, k := range savedHeaders {
-		if v := buf.header.Get(k); v != "" {
-			h[k] = v
+func (c *claim) save(ctx context.Context, r *http.Request, q store, buf *buffer, log *slog.Logger) {
+	var body, headers []byte
+	if !c.noStore {
+		body = buf.body.Bytes()
+		if len(body) == 0 {
+			body = nil
+		} else if !json.Valid(body) {
+			log.WarnContext(ctx, "idempotency: ответ не JSON — повтор получит replay_unavailable",
+				"method", r.Method, "path", r.URL.Path)
+			return
 		}
+		h := map[string]string{}
+		for _, k := range savedHeaders {
+			if v := buf.header.Get(k); v != "" {
+				h[k] = v
+			}
+		}
+		headers, _ = json.Marshal(h)
 	}
-	headers, _ := json.Marshal(h)
 	status := int32(buf.code()) //nolint:gosec // HTTP-статус
-	if _, err := q.SaveResponse(ctx, idempotencydb.SaveResponseParams{Status: &status, Headers: headers, Body: body,
-		UserID: c.userID, Key: c.key, RequestHash: c.hash}); err != nil {
+	if _, err := q.saveResponse(ctx, idempotencydb.SaveResponseParams{Status: &status, Headers: headers, Body: body,
+		UserID: c.subjectID, Key: c.key, RequestHash: c.hash}); err != nil {
 		log.ErrorContext(ctx, "idempotency: ответ не сохранён — повтор получит replay_unavailable",
 			"method", r.Method, "path", r.URL.Path, "err", err)
 	}

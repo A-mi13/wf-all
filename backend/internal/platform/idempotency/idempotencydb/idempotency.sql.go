@@ -151,3 +151,114 @@ func (q *Queries) SetLockTimeout(ctx context.Context, value string) error {
 	_, err := q.db.Exec(ctx, setLockTimeout, value)
 	return err
 }
+
+const staffClaim = `-- name: StaffClaim :one
+INSERT INTO staff_idempotency_keys AS k (user_id, key, endpoint, request_hash)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, key) DO UPDATE
+SET endpoint = excluded.endpoint,
+    request_hash = excluded.request_hash,
+    response_status = NULL,
+    response_headers = NULL,
+    response_body = NULL,
+    created_at = now(),
+    expires_at = now() + interval '24 hours'
+WHERE k.expires_at <= now()
+RETURNING created_at
+`
+
+type StaffClaimParams struct {
+	UserID      uuid.UUID
+	Key         string
+	Endpoint    string
+	RequestHash string
+}
+
+func (q *Queries) StaffClaim(ctx context.Context, arg StaffClaimParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, staffClaim,
+		arg.UserID,
+		arg.Key,
+		arg.Endpoint,
+		arg.RequestHash,
+	)
+	var created_at time.Time
+	err := row.Scan(&created_at)
+	return created_at, err
+}
+
+const staffDeleteExpired = `-- name: StaffDeleteExpired :execrows
+DELETE FROM staff_idempotency_keys
+WHERE expires_at <= now()
+  AND (user_id, key) IN (SELECT user_id, key FROM staff_idempotency_keys WHERE expires_at <= now() LIMIT $1)
+`
+
+func (q *Queries) StaffDeleteExpired(ctx context.Context, batch int32) (int64, error) {
+	result, err := q.db.Exec(ctx, staffDeleteExpired, batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const staffGet = `-- name: StaffGet :one
+
+SELECT request_hash, response_status, response_headers, response_body
+FROM staff_idempotency_keys
+WHERE user_id = $1 AND key = $2 AND expires_at > now()
+`
+
+type StaffGetParams struct {
+	UserID uuid.UUID
+	Key    string
+}
+
+type StaffGetRow struct {
+	RequestHash     string
+	ResponseStatus  *int32
+	ResponseHeaders []byte
+	ResponseBody    []byte
+}
+
+// Ключи admin-api — staff_idempotency_keys (права только роли admin, финальное ревью I-1): те же запросы
+// над своей таблицей. Меняешь запрос выше — поменяй и его пару ниже.
+func (q *Queries) StaffGet(ctx context.Context, arg StaffGetParams) (StaffGetRow, error) {
+	row := q.db.QueryRow(ctx, staffGet, arg.UserID, arg.Key)
+	var i StaffGetRow
+	err := row.Scan(
+		&i.RequestHash,
+		&i.ResponseStatus,
+		&i.ResponseHeaders,
+		&i.ResponseBody,
+	)
+	return i, err
+}
+
+const staffSaveResponse = `-- name: StaffSaveResponse :execrows
+UPDATE staff_idempotency_keys
+SET response_status = $1, response_headers = $2, response_body = $3
+WHERE user_id = $4 AND key = $5 AND request_hash = $6 AND response_status IS NULL
+`
+
+type StaffSaveResponseParams struct {
+	Status      *int32
+	Headers     []byte
+	Body        []byte
+	UserID      uuid.UUID
+	Key         string
+	RequestHash string
+}
+
+func (q *Queries) StaffSaveResponse(ctx context.Context, arg StaffSaveResponseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, staffSaveResponse,
+		arg.Status,
+		arg.Headers,
+		arg.Body,
+		arg.UserID,
+		arg.Key,
+		arg.RequestHash,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

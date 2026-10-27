@@ -1,0 +1,11 @@
+/* Языки — сегменты в меню профиля */
+.segments {
+  display: flex;
+  gap: var(--wf-space-1);
+}
+
+.segment {
+  flex: 1 1 0;
+  padding: 0 var(--wf-space-2);
+  font-size: var(--wf-text-xs);
+}

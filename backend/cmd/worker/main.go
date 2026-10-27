@@ -31,6 +31,7 @@ import (
 	"wf/backend/internal/platform/idempotency"
 	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/mail"
+	"wf/backend/internal/platform/periodic"
 	"wf/backend/internal/platform/queue"
 	"wf/backend/internal/platform/ratelimit"
 )
@@ -87,15 +88,8 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	if len(args) > 0 {
 		return command(ctx, args, pool, reg, geo, out, log)
 	}
-	workers := queue.NewWorkers()
-	events.AddWorkers(workers, pool, reg)
-	river.AddWorker(workers, ratelimit.NewCleanupWorker(pool, clock.System))
-	river.AddWorker(workers, humancheck.NewCleanupWorker(pool, clock.System))
-	river.AddWorker(workers, idempotency.NewCleanupWorker(pool))
-	river.AddWorker(workers, geojobs.NewImportWorker(pool, clock.System, geo, log))
-	mail.AddWorkers(workers, mails(), sender)
-	periodic := []*river.PeriodicJob{events.CleanupJob(), ratelimit.CleanupJob(), humancheck.CleanupJob(), idempotency.CleanupJob()}
-	client, err := queue.NewClient(pool, workers, cfg.Queues, periodic, log)
+	workers := allWorkers(pool, reg, geo, log, sender)
+	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig(cfg.Queues, workers, log))
 	if err != nil {
 		return err
 	}
@@ -150,7 +144,7 @@ func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.
 		return fmt.Errorf("--since: нужен RFC 3339, например 2026-10-01T00:00:00Z")
 	}
 	// клиент только для вставки: очереди обслуживает работающий воркер
-	ins, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Logger: log})
+	ins, err := river.NewClient(riverpgxv5.New(pool), queue.InsertConfig(log))
 	if err != nil {
 		return err
 	}
@@ -243,4 +237,31 @@ func subscriptions() (*events.Registry, error) {
 // (mail.Composer по id кода).
 func mails() *mail.Registry {
 	return mail.NewRegistry()
+}
+
+// realWorkers — исполнители воркера; их виды — ровно queue.WorkerKinds (сверка — TestWorkerKinds).
+func realWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, log *slog.Logger, sender mail.Sender) *river.Workers {
+	workers := queue.NewWorkers()
+	events.AddWorkers(workers, pool, reg)
+	river.AddWorker(workers, ratelimit.NewCleanupWorker(pool, clock.System))
+	river.AddWorker(workers, humancheck.NewCleanupWorker(pool, clock.System))
+	river.AddWorker(workers, idempotency.NewCleanupWorker(pool))
+	river.AddWorker(workers, geojobs.NewImportWorker(pool, clock.System, geo, log))
+	mail.AddWorkers(workers, mails(), sender)
+	return workers
+}
+
+// allWorkers — реестр исполняющего клиента воркера: свои исполнители и заглушки видов admin-api (I1 ревью 10c): став
+// лидером River, рескьюер воркера вернёт зависшее письмо staff.mail в retryable, а не выбросит неизвестный вид.
+func allWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, log *slog.Logger, sender mail.Sender) *river.Workers {
+	workers := realWorkers(pool, reg, geo, log, sender)
+	queue.AddForeign(workers, queue.AdminKinds())
+	return workers
+}
+
+// riverConfig — исполняющий клиент воркера: обслуживание — общее с admin-api (queue.ClientConfig от
+// queue.MaintenanceConfig, страж TestWorkerRiverMaintenance), периодика — общий список платформы: его же подключает
+// admin-api, лидером River может стать любой (P27).
+func riverConfig(q config.Queues, workers *river.Workers, log *slog.Logger) *river.Config {
+	return queue.ClientConfig(queue.Config(q), workers, periodic.Jobs(), log)
 }

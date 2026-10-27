@@ -182,23 +182,26 @@ WHERE co.is_enabled
   AND (coalesce(cardinality($2::text[]), 0) = 0
        OR c.status::text = ANY ($2::text[]))
   AND ($3::text = '' OR co.code = $3::text)
-  AND ($4::text = ''
-       OR c.name_normalized LIKE $4::text || '%'
+  AND (NOT $4::boolean OR c.id = ANY ($5::uuid[]))
+  AND ($6::text = ''
+       OR c.name_normalized LIKE $6::text || '%'
        OR EXISTS (SELECT 1 FROM city_names qn
-                  WHERE qn.city_id = c.id AND qn.name_normalized LIKE $4::text || '%'))
-  AND (NOT $5::boolean
-       OR (CASE c.status WHEN 'live' THEN 0 WHEN 'pilot' THEN 1 ELSE 2 END) > $6::bigint
-       OR ((CASE c.status WHEN 'live' THEN 0 WHEN 'pilot' THEN 1 ELSE 2 END) = $6::bigint
-           AND (c.population < $7::bigint
-                OR (c.population = $7::bigint AND c.id > $8::uuid))))
+                  WHERE qn.city_id = c.id AND qn.name_normalized LIKE $6::text || '%'))
+  AND (NOT $7::boolean
+       OR (CASE c.status WHEN 'live' THEN 0 WHEN 'pilot' THEN 1 ELSE 2 END) > $8::bigint
+       OR ((CASE c.status WHEN 'live' THEN 0 WHEN 'pilot' THEN 1 ELSE 2 END) = $8::bigint
+           AND (c.population < $9::bigint
+                OR (c.population = $9::bigint AND c.id > $10::uuid))))
 ORDER BY status_rank, c.population DESC, c.id
-LIMIT $9::bigint
+LIMIT $11::bigint
 `
 
 type ListCitiesParams struct {
 	Locale          string
 	Statuses        []string
 	Country         string
+	FilterIds       bool
+	Ids             []uuid.UUID
 	QPrefix         string
 	HasCursor       bool
 	AfterRank       int64
@@ -229,7 +232,8 @@ type ListCitiesRow struct {
 // канонические. Регион: region_id NULL — региона нет, region_name тогда ”.
 // Порядок: ранг статуса (live 0, pilot 1, waitlist 2), population по убыванию, id; курсор —
 // строго после (after_rank, after_population, after_id) в этом порядке.
-// statuses пуст — без фильтра; country ” — без фильтра; q_prefix ” — без поиска. q_prefix уже
+// statuses пуст — без фильтра; country ” — без фильтра; filter_ids false — без фильтра по id, true —
+// только ids (пустой массив — ни одного: модератор без городов, M10); q_prefix ” — без поиска. q_prefix уже
 // нормализован (normalize_text оставляет только [a-zа-яё0-9], поэтому % и _ в нём невозможны).
 // Перед «||» — sqlc.arg(x), не @x: префиксный «@» захватил бы всё выражение (см. ratelimit.sql).
 func (q *Queries) ListCities(ctx context.Context, arg ListCitiesParams) ([]ListCitiesRow, error) {
@@ -237,6 +241,8 @@ func (q *Queries) ListCities(ctx context.Context, arg ListCitiesParams) ([]ListC
 		arg.Locale,
 		arg.Statuses,
 		arg.Country,
+		arg.FilterIds,
+		arg.Ids,
 		arg.QPrefix,
 		arg.HasCursor,
 		arg.AfterRank,

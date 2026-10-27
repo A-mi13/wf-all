@@ -42,11 +42,14 @@ var Schema = map[string]Object{
 	"event_inbox":      table("platform"),
 	"event_cursors":    table("platform"),
 	"idempotency_keys": table("platform"),
-	"rate_limits":      table("platform"),
-	"humancheck_spent": table("platform"),
-	"feature_flags":    table("platform"),
-	"app_versions":     table("platform"),
-	"goose_db_version": table("platform"),
+	// ключи идемпотентности admin-api: права только admin (I-1)
+	"staff_idempotency_keys": table("platform"),
+	"rate_limits":            table("platform"),
+	"humancheck_spent":       table("platform"),
+	"feature_flags":          table("platform"),
+	"app_versions":           table("platform"),
+	"approvals":              table("platform"), // подтверждение вдвоём (D2)
+	"goose_db_version":       table("platform"),
 
 	"normalize_text":           {Function, "platform", true},
 	"immutable_unaccent":       {Function, "platform", true},
@@ -70,6 +73,16 @@ var Schema = map[string]Object{
 	"geonames_admin1":        table("geo"),
 	"geonames_admin1_names":  table("geo"),
 	"geo_read_city_settings": {View, "geo", true},
+
+	// staff (спека «Сотрудники и админка geo» §3.1)
+	"staff_accounts":          table("staff"),
+	"staff_roles":             table("staff"),
+	"staff_role_cities":       table("staff"),
+	"staff_mfa":               table("staff"),
+	"staff_recovery_codes":    table("staff"),
+	"staff_invites":           table("staff"),
+	"staff_sessions":          table("staff"),
+	"staff_role_cities_check": {Function, "staff", false},
 
 	// identity
 	"users":                 table("identity"),

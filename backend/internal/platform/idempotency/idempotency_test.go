@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -115,6 +116,30 @@ type env struct {
 	h     http.Handler
 	logs  *bytes.Buffer
 	user  uuid.UUID
+	table string // имя таблицы ключей этого конвейера (SQL проверок)
+	other string // имя второй таблицы: в неё ключи этого конвейера не попадают
+}
+
+// tableCase — таблица ключей и роль БД процесса, который её ведёт: публичный API — idempotency_keys под
+// api (по умолчанию), admin-api — staff_idempotency_keys под admin (финальное ревью ветки, I-1: ответы
+// сотрудников с ПД не видны роли api).
+type tableCase struct {
+	table       idempotency.Table
+	role        string
+	name, other string
+}
+
+var tables = []tableCase{
+	{idempotency.Players, "api", "idempotency_keys", "staff_idempotency_keys"},
+	{idempotency.Staff, "admin", "staff_idempotency_keys", "idempotency_keys"},
+}
+
+// eachTable — сценарий на обеих таблицах ключей.
+func eachTable(t *testing.T, f func(t *testing.T, tc tableCase)) {
+	t.Helper()
+	for _, tc := range tables {
+		t.Run(tc.name, func(t *testing.T) { f(t, tc) })
+	}
 }
 
 func setup(t *testing.T) *env {
@@ -124,15 +149,36 @@ func setup(t *testing.T) *env {
 
 func setupWith(t *testing.T, lockTimeout time.Duration) *env {
 	t.Helper()
-	pools := dbtest.NewPoolsAs(t, "api")
+	return setupOn(t, lockTimeout, tables[0])
+}
+
+// setupOn — конвейер с таблицей tc.table под ролью tc.role. Players задаётся нулевым Config.Table —
+// так его собирает публичный API.
+func setupOn(t *testing.T, lockTimeout time.Duration, tc tableCase) *env {
+	t.Helper()
+	pools := dbtest.NewPoolsAs(t, tc.role)
 	logs := &bytes.Buffer{}
 	log := slog.New(slog.NewTextHandler(logs, nil))
 	p := &probe{pool: pools.As, log: log}
 	if err := pools.As.QueryRow(context.Background(), "SELECT current_setting('lock_timeout')").Scan(&p.lockTimeout); err != nil {
 		t.Fatal(err)
 	}
-	return &env{pools: pools, probe: p, logs: logs, user: uuid.New(),
-		h: idempotency.Middleware(pools.As, idempotency.Config{LockTimeout: lockTimeout}, log)(p)}
+	cfg := idempotency.Config{LockTimeout: lockTimeout}
+	if tc.table != idempotency.Players {
+		cfg.Table = tc.table
+	}
+	return &env{pools: pools, probe: p, logs: logs, user: uuid.New(), table: tc.name, other: tc.other,
+		h: idempotency.Middleware(pools.As, cfg, log)(p)}
+}
+
+// keys — строк в таблице name (под владельцем базы).
+func (e *env) keys(t *testing.T, name string) int {
+	t.Helper()
+	var n int
+	if err := e.pools.Owner.QueryRow(context.Background(), "SELECT count(*) FROM "+name).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // header — заголовок запроса для сценариев с несколькими запросами.
@@ -140,18 +186,34 @@ func header(k, v string) func(*http.Request) {
 	return func(r *http.Request) { r.Header.Set(k, v) }
 }
 
+// do — запрос игрока e.user.
 func (e *env) do(method, path, key, body string, opts ...func(*http.Request)) *httptest.ResponseRecorder {
-	r := httptest.NewRequestWithContext(context.Background(), method, path, strings.NewReader(body))
+	return e.doAs(asUser(e.user), method, path, key, body, opts...)
+}
+
+// doAs — запрос от субъекта, которого put кладёт в ctx (auth.With или auth.WithStaff).
+func (e *env) doAs(put func(context.Context) context.Context, method, path, key, body string,
+	opts ...func(*http.Request)) *httptest.ResponseRecorder {
+	r := httptest.NewRequestWithContext(put(context.Background()), method, path, strings.NewReader(body))
 	if key != "" {
 		r.Header.Set(idempotency.Header, key)
 	}
 	for _, o := range opts {
 		o(r)
 	}
-	r = r.WithContext(auth.With(r.Context(), &auth.Principal{UserID: e.user}))
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, r)
 	return rec
+}
+
+func asUser(id uuid.UUID) func(context.Context) context.Context {
+	return func(ctx context.Context) context.Context { return auth.With(ctx, &auth.Principal{UserID: id}) }
+}
+
+func asStaff(id uuid.UUID) func(context.Context) context.Context {
+	return func(ctx context.Context) context.Context {
+		return auth.WithStaff(ctx, &auth.Staff{StaffID: id, SessionID: uuid.New(), Role: "admin", Stage: auth.StageActive})
+	}
 }
 
 func (e *env) rows(t *testing.T) int {
@@ -195,43 +257,52 @@ func waitLockWaiter(t *testing.T, owner *pgxpool.Pool) {
 // без энтропии — gitleaks не примет за секрет
 var key = strings.Repeat("k", 20)
 
+// Повтор отдаёт сохранённый ответ; ключ и ответ — только в таблице своего конвейера: ключи admin-api не
+// попадают в idempotency_keys, ключи публичного API — в staff_idempotency_keys.
 func TestReplaySameRequest(t *testing.T) {
-	e := setup(t)
-	first := e.do(http.MethodPost, "/v1/things?x=1", key, `{"name":"x"}`)
-	if first.Code != http.StatusCreated {
-		t.Fatalf("первый: %d %s", first.Code, first.Body.String())
-	}
-	again := e.do(http.MethodPost, "/v1/things?x=1", key, `{"name":"x"}`)
-	if again.Code != http.StatusCreated || again.Header().Get("Location") != "/v1/things/1" ||
-		again.Header().Get("Content-Type") != "application/json" || again.Header().Get("Idempotency-Replayed") != "true" {
-		t.Fatalf("повтор: %d %v", again.Code, again.Header())
-	}
-	var a, b map[string]any
-	_ = json.Unmarshal(first.Body.Bytes(), &a)
-	_ = json.Unmarshal(again.Body.Bytes(), &b)
-	if a["id"] != b["id"] || a["name"] != b["name"] {
-		t.Fatalf("тело повтора: %s", again.Body.String())
-	}
-	if e.probe.calls.Load() != 1 || e.rows(t) != 1 {
-		t.Fatalf("исполнено %d раз, строк %d", e.probe.calls.Load(), e.rows(t))
-	}
+	eachTable(t, func(t *testing.T, tc tableCase) {
+		e := setupOn(t, 200*time.Millisecond, tc)
+		first := e.do(http.MethodPost, "/v1/things?x=1", key, `{"name":"x"}`)
+		if first.Code != http.StatusCreated {
+			t.Fatalf("первый: %d %s", first.Code, first.Body.String())
+		}
+		again := e.do(http.MethodPost, "/v1/things?x=1", key, `{"name":"x"}`)
+		if again.Code != http.StatusCreated || again.Header().Get("Location") != "/v1/things/1" ||
+			again.Header().Get("Content-Type") != "application/json" || again.Header().Get("Idempotency-Replayed") != "true" {
+			t.Fatalf("повтор: %d %v", again.Code, again.Header())
+		}
+		var a, b map[string]any
+		_ = json.Unmarshal(first.Body.Bytes(), &a)
+		_ = json.Unmarshal(again.Body.Bytes(), &b)
+		if a["id"] != b["id"] || a["name"] != b["name"] {
+			t.Fatalf("тело повтора: %s", again.Body.String())
+		}
+		if e.probe.calls.Load() != 1 || e.rows(t) != 1 {
+			t.Fatalf("исполнено %d раз, строк %d", e.probe.calls.Load(), e.rows(t))
+		}
+		if own, other := e.keys(t, e.table), e.keys(t, e.other); own != 1 || other != 0 {
+			t.Fatalf("ключей в %s: %d, в %s: %d", e.table, own, e.other, other)
+		}
+	})
 }
 
 func TestKeyReusedWithOtherRequest(t *testing.T) {
-	e := setup(t)
-	e.do(http.MethodPost, "/v1/things", key, `{"name":"x"}`)
-	for name, rec := range map[string]*httptest.ResponseRecorder{
-		"другое тело":  e.do(http.MethodPost, "/v1/things", key, `{"name":"y"}`),
-		"другой путь":  e.do(http.MethodPost, "/v1/teams", key, `{"name":"x"}`),
-		"другой query": e.do(http.MethodPost, "/v1/things?a=1", key, `{"name":"x"}`),
-	} {
-		if rec.Code != http.StatusUnprocessableEntity || code(t, rec) != httpx.CodeIdempotencyKeyReused {
-			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+	eachTable(t, func(t *testing.T, tc tableCase) {
+		e := setupOn(t, 200*time.Millisecond, tc)
+		e.do(http.MethodPost, "/v1/things", key, `{"name":"x"}`)
+		for name, rec := range map[string]*httptest.ResponseRecorder{
+			"другое тело":  e.do(http.MethodPost, "/v1/things", key, `{"name":"y"}`),
+			"другой путь":  e.do(http.MethodPost, "/v1/teams", key, `{"name":"x"}`),
+			"другой query": e.do(http.MethodPost, "/v1/things?a=1", key, `{"name":"x"}`),
+		} {
+			if rec.Code != http.StatusUnprocessableEntity || code(t, rec) != httpx.CodeIdempotencyKeyReused {
+				t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+			}
 		}
-	}
-	if e.probe.calls.Load() != 1 {
-		t.Fatalf("исполнено %d раз", e.probe.calls.Load())
-	}
+		if e.probe.calls.Load() != 1 {
+			t.Fatalf("исполнено %d раз", e.probe.calls.Load())
+		}
+	})
 }
 
 // Бизнес-ошибка откатывает ключ вместе с транзакцией — повтор исполняется заново (§6.4).
@@ -253,9 +324,13 @@ func TestBusinessErrorRollsBackKey(t *testing.T) {
 // Review Focus 2: дубль, пока первый в транзакции, — 409 in_progress; после коммита — повтор.
 // LockTimeout меньше 1 мс не превращается в "0ms" (ждать без конца).
 func TestParallelDuplicate(t *testing.T) {
+	eachTable(t, func(t *testing.T, tbl tableCase) { parallelDuplicate(t, tbl) })
+}
+
+func parallelDuplicate(t *testing.T, tbl tableCase) {
 	for _, lt := range []time.Duration{200 * time.Millisecond, time.Microsecond} {
 		t.Run(lt.String(), func(t *testing.T) {
-			e := setupWith(t, lt)
+			e := setupOn(t, lt, tbl)
 			e.probe.entered, e.probe.gate = make(chan struct{}, 2), make(chan struct{})
 			var first *httptest.ResponseRecorder
 			var wg sync.WaitGroup
@@ -298,7 +373,11 @@ func TestParallelDuplicate(t *testing.T) {
 // коммитится раньше, чем A дошёл до сохранения ответа. Ответ A (откаченный ключ) не должен
 // попасть в ключ B — иначе все повторы B получат чужой 422.
 func TestRolledBackRequestDoesNotSaveIntoWinnerKey(t *testing.T) {
-	e := setupWith(t, 5*time.Second)
+	eachTable(t, rolledBackDoesNotSaveIntoWinnerKey)
+}
+
+func rolledBackDoesNotSaveIntoWinnerKey(t *testing.T, tbl tableCase) {
+	e := setupOn(t, 5*time.Second, tbl)
 	aEntered, aGo := make(chan struct{}), make(chan struct{})
 	aRolledBack, aFinish := make(chan struct{}), make(chan struct{})
 	bCommitted, bGo := make(chan struct{}), make(chan struct{})
@@ -351,6 +430,10 @@ func TestRolledBackRequestDoesNotSaveIntoWinnerKey(t *testing.T) {
 // ждал на индексе): тот же запрос — 409 in_progress, другой — 422 key_reused; действие не
 // исполнено.
 func TestClaimAfterConcurrentCommit(t *testing.T) {
+	eachTable(t, claimAfterConcurrentCommit)
+}
+
+func claimAfterConcurrentCommit(t *testing.T, tbl tableCase) {
 	same := idempotency.RequestHash(http.MethodPost, "/v1/things", []byte(`{}`))
 	for _, tc := range []struct {
 		name, hash, code string
@@ -360,14 +443,14 @@ func TestClaimAfterConcurrentCommit(t *testing.T) {
 		{"другой запрос", "other", httpx.CodeIdempotencyKeyReused, http.StatusUnprocessableEntity},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e := setupWith(t, 2*time.Second)
+			e := setupOn(t, 2*time.Second, tbl)
 			ctx := context.Background()
 			tx, err := e.pools.Owner.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback(ctx) }()
-			if _, err := tx.Exec(ctx, `INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash)
+			if _, err := tx.Exec(ctx, `INSERT INTO `+e.table+` (user_id, key, endpoint, request_hash)
 				VALUES ($1, $2, '/v1/things', $3)`, e.user, key, tc.hash); err != nil {
 				t.Fatal(err)
 			}
@@ -406,36 +489,40 @@ func TestRetryAfterRollbackReclaimsKey(t *testing.T) {
 
 // Закоммичено, а ответ не сохранился (обрыв между коммитом и записью ответа).
 func TestReplayUnavailable(t *testing.T) {
-	e := setup(t)
-	hash := idempotency.RequestHash(http.MethodPost, "/v1/things", []byte(`{}`))
-	if _, err := e.pools.Owner.Exec(context.Background(),
-		`INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash) VALUES ($1, $2, '/v1/things', $3)`,
-		e.user, key, hash); err != nil {
-		t.Fatal(err)
-	}
-	rec := e.do(http.MethodPost, "/v1/things", key, `{}`)
-	if rec.Code != http.StatusConflict || code(t, rec) != httpx.CodeIdempotencyReplayUnavailable {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if e.probe.calls.Load() != 0 {
-		t.Fatal("действие исполнено повторно")
-	}
+	eachTable(t, func(t *testing.T, tbl tableCase) {
+		e := setupOn(t, 200*time.Millisecond, tbl)
+		hash := idempotency.RequestHash(http.MethodPost, "/v1/things", []byte(`{}`))
+		if _, err := e.pools.Owner.Exec(context.Background(),
+			`INSERT INTO `+e.table+` (user_id, key, endpoint, request_hash) VALUES ($1, $2, '/v1/things', $3)`,
+			e.user, key, hash); err != nil {
+			t.Fatal(err)
+		}
+		rec := e.do(http.MethodPost, "/v1/things", key, `{}`)
+		if rec.Code != http.StatusConflict || code(t, rec) != httpx.CodeIdempotencyReplayUnavailable {
+			t.Fatalf("%d %s", rec.Code, rec.Body.String())
+		}
+		if e.probe.calls.Load() != 0 {
+			t.Fatal("действие исполнено повторно")
+		}
+	})
 }
 
 // Просроченный ключ (24 ч) переиспользуется.
 func TestExpiredKeyReclaimed(t *testing.T) {
-	e := setup(t)
-	if _, err := e.pools.Owner.Exec(context.Background(),
-		`INSERT INTO idempotency_keys (user_id, key, endpoint, request_hash, response_status, expires_at)
-		 VALUES ($1, $2, '/old', 'other', 200, now() - interval '1 second')`, e.user, key); err != nil {
-		t.Fatal(err)
-	}
-	if rec := e.do(http.MethodPost, "/v1/things", key, `{}`); rec.Code != http.StatusCreated || rec.Header().Get("Idempotency-Replayed") != "" {
-		t.Fatalf("%d %v", rec.Code, rec.Header())
-	}
-	if rec := e.do(http.MethodPost, "/v1/things", key, `{}`); rec.Header().Get("Idempotency-Replayed") != "true" {
-		t.Fatal("новый ответ не сохранён")
-	}
+	eachTable(t, func(t *testing.T, tbl tableCase) {
+		e := setupOn(t, 200*time.Millisecond, tbl)
+		if _, err := e.pools.Owner.Exec(context.Background(),
+			`INSERT INTO `+e.table+` (user_id, key, endpoint, request_hash, response_status, expires_at)
+			 VALUES ($1, $2, '/old', 'other', 200, now() - interval '1 second')`, e.user, key); err != nil {
+			t.Fatal(err)
+		}
+		if rec := e.do(http.MethodPost, "/v1/things", key, `{}`); rec.Code != http.StatusCreated || rec.Header().Get("Idempotency-Replayed") != "" {
+			t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body.String())
+		}
+		if rec := e.do(http.MethodPost, "/v1/things", key, `{}`); rec.Header().Get("Idempotency-Replayed") != "true" {
+			t.Fatal("новый ответ не сохранён")
+		}
+	})
 }
 
 // Ручка, требующая идемпотентности, обязана выполняться в одной транзакции (§6.4).
@@ -484,4 +571,121 @@ func TestPassthrough(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("ключей %d", n)
 	}
+}
+
+// Сотрудник admin-api — субъект идемпотентности (остаток фундамента 3/3: без Principal механизм
+// в админке был молча выключен). Ключ строки — id сотрудника в user_id (D19).
+func TestStaffSubjectReplays(t *testing.T) {
+	e := setup(t)
+	staff := uuid.New()
+	if rec := e.doAs(asStaff(staff), http.MethodPost, "/v1/things", key, `{}`); rec.Code != http.StatusCreated {
+		t.Fatalf("первый: %d %s", rec.Code, rec.Body.String())
+	}
+	again := e.doAs(asStaff(staff), http.MethodPost, "/v1/things", key, `{}`)
+	if again.Code != http.StatusCreated || again.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("повтор сотрудника: %d %v", again.Code, again.Header())
+	}
+	if e.probe.calls.Load() != 1 || e.rows(t) != 1 {
+		t.Fatalf("исполнено %d раз, строк %d", e.probe.calls.Load(), e.rows(t))
+	}
+	var subject uuid.UUID
+	if err := e.pools.Owner.QueryRow(context.Background(), "SELECT user_id FROM idempotency_keys WHERE key = $1", key).Scan(&subject); err != nil {
+		t.Fatal(err)
+	}
+	if subject != staff {
+		t.Fatalf("ключ записан на %s, нужен сотрудник %s", subject, staff)
+	}
+}
+
+// Одна строка Idempotency-Key у игрока и сотрудника — два разных ключа: второй запрос исполняется
+// (не 422 key_reused и не чужой повтор).
+func TestUserAndStaffKeysIndependent(t *testing.T) {
+	e := setup(t)
+	if rec := e.do(http.MethodPost, "/v1/things", key, `{"name":"x"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("игрок: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := e.doAs(asStaff(uuid.New()), http.MethodPost, "/v1/teams", key, `{"name":"y"}`)
+	if rec.Code != http.StatusCreated || rec.Header().Get("Idempotency-Replayed") != "" {
+		t.Fatalf("сотрудник с тем же ключом: %d %v %s", rec.Code, rec.Header(), rec.Body.String())
+	}
+	if e.probe.calls.Load() != 2 || e.rows(t) != 2 {
+		t.Fatalf("исполнено %d, строк %d", e.probe.calls.Load(), e.rows(t))
+	}
+}
+
+const noStoreSpec = `
+openapi: 3.0.3
+info: {title: t, version: "1"}
+paths:
+  /v1/things:
+    post: {operationId: createThing, responses: {"201": {description: ok}}}
+  /v1/secrets:
+    post: {operationId: createSecret, x-idempotency: no-store, responses: {"201": {description: ok}}}
+`
+
+// withRoutes — маршрут контракта в ctx до идемпотентности, как в конвейерах public и admin.
+func withRoutes(t *testing.T, h http.Handler) http.Handler {
+	t.Helper()
+	spec, err := openapi3.NewLoader().LoadFromData([]byte(noStoreSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := httpx.Routes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return routes(h)
+}
+
+// Ответ с секретами (секрет TOTP, резервные коды) не ложится в idempotency_keys: повтор того же
+// запроса — 409 replay_unavailable, а не секрет из базы (решение D14). Обычная операция за тем же
+// конвейером повторяется как прежде.
+func TestNoStoreKeepsOnlyStatus(t *testing.T) {
+	eachTable(t, noStoreKeepsOnlyStatus)
+}
+
+func noStoreKeepsOnlyStatus(t *testing.T, tbl tableCase) {
+	e := setupOn(t, 200*time.Millisecond, tbl)
+	e.h = withRoutes(t, e.h)
+	if rec := e.do(http.MethodPost, "/v1/secrets", key, `{}`); rec.Code != http.StatusCreated {
+		t.Fatalf("первый: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := e.do(http.MethodPost, "/v1/secrets", key, `{}`)
+	if rec.Code != http.StatusConflict || code(t, rec) != httpx.CodeIdempotencyReplayUnavailable {
+		t.Fatalf("повтор: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do(http.MethodPost, "/v1/secrets", key, `{"other":1}`); rec.Code != http.StatusUnprocessableEntity ||
+		code(t, rec) != httpx.CodeIdempotencyKeyReused {
+		t.Fatalf("тот же ключ, другой запрос: %d %s", rec.Code, rec.Body.String())
+	}
+	if e.probe.calls.Load() != 1 || e.rows(t) != 1 {
+		t.Fatalf("исполнено %d, строк %d", e.probe.calls.Load(), e.rows(t))
+	}
+	var status *int32
+	var stored bool
+	if err := e.pools.Owner.QueryRow(context.Background(), `SELECT response_status,
+		response_body IS NOT NULL OR response_headers IS NOT NULL FROM `+e.table+` WHERE key = $1`, key).Scan(&status, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if status == nil || *status != http.StatusCreated || stored {
+		t.Fatalf("строка ключа: статус %v, тело или заголовки сохранены: %v", status, stored)
+	}
+
+	other := strings.Repeat("o", 20)
+	if rec := e.do(http.MethodPost, "/v1/things", other, `{}`); rec.Code != http.StatusCreated {
+		t.Fatalf("обычная операция: %d", rec.Code)
+	}
+	if rec := e.do(http.MethodPost, "/v1/things", other, `{}`); rec.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("обычная операция за Routes не повторилась: %d %v", rec.Code, rec.Header())
+	}
+}
+
+// Неизвестная таблица ключей — отказ сборки (паника при старте), а не запись «куда-то».
+func TestUnknownTablePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Middleware с неизвестной таблицей собран")
+		}
+	}()
+	idempotency.Middleware(dbtest.NewPool(t), idempotency.Config{Table: idempotency.Table(99)}, slog.New(slog.DiscardHandler))
 }

@@ -92,6 +92,21 @@ func TestRunPublishesPendingEventsAndStops(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	// периодика — общий список платформы (periodic.Jobs, P27): лидер-воркер ставит все четыре чистки
+	for {
+		var kinds int
+		if err := pool.QueryRow(context.Background(), `SELECT count(DISTINCT kind) FROM river_job
+			WHERE kind IN ('events.cleanup', 'ratelimit.cleanup', 'humancheck.cleanup', 'idempotency.cleanup')`).Scan(&kinds); err != nil {
+			t.Fatal(err)
+		}
+		if kinds == 4 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("воркер поставил %d из 4 периодических чисток", kinds)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("остановка: %v", err)

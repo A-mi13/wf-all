@@ -1,0 +1,292 @@
+/* Формы по макетам 07 (вход) и 13 («Поля ввода», «Выпадающий список», «Переключатели и выбор») */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  min-width: 0;
+}
+
+.fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.label {
+  padding: 0;
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+  color: var(--wf-color-text-muted);
+}
+
+.field:focus-within > .label {
+  color: var(--wf-color-accent);
+}
+
+.control {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--wf-size-control);
+  padding: 0 var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+  color: var(--wf-color-text);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-sm);
+  font-weight: 600;
+  transition: border-color var(--wf-duration-fast) var(--wf-ease);
+}
+
+.control::placeholder {
+  color: var(--wf-color-text-faint);
+  opacity: 1;
+}
+
+.control:focus {
+  outline: none;
+  border-color: var(--wf-color-accent);
+}
+
+.control:disabled {
+  color: var(--wf-color-text-ghost);
+  cursor: not-allowed;
+}
+
+.invalid .control {
+  border-color: var(--wf-color-danger-border);
+  background: var(--wf-color-danger-bg);
+}
+
+.invalid > .label,
+.invalid:focus-within > .label {
+  color: var(--wf-color-danger);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+  color: var(--wf-color-text-subtle);
+}
+
+.error {
+  margin: 0;
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  color: var(--wf-color-danger);
+}
+
+.formError {
+  margin: 0;
+  padding: var(--wf-space-3);
+  border: 1px solid var(--wf-color-danger-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-danger-bg);
+  color: var(--wf-color-danger);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+}
+
+/* Поле с кнопкой внутри (пароль) и со стрелкой (select) */
+.withAction,
+.withChevron {
+  position: relative;
+}
+
+.withAction > .control {
+  padding-right: calc(var(--wf-size-touch-min) + var(--wf-space-2));
+}
+
+.action {
+  position: absolute;
+  top: 50%;
+  right: var(--wf-space-1);
+  translate: 0 -50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-touch-min);
+  height: var(--wf-size-touch-min);
+  padding: 0;
+  border: 0;
+  border-radius: var(--wf-radius-md);
+  background: none;
+  color: var(--wf-color-text-muted);
+  cursor: pointer;
+}
+
+.action:hover:enabled {
+  color: var(--wf-color-text);
+}
+
+.action:focus-visible,
+.chipRemove:focus-visible {
+  outline: 2px solid var(--wf-color-accent);
+  outline-offset: 2px;
+}
+
+.icon {
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.withChevron > .control {
+  appearance: none;
+  padding-right: calc(var(--wf-space-4) * 2 + var(--wf-space-2));
+  cursor: pointer;
+}
+
+.chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--wf-space-4);
+  translate: 0 -50%;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--wf-color-text-muted);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Флажок: квадрат 24, отмечен — заливка accent с галочкой */
+.checkRow,
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-3);
+  min-height: var(--wf-size-touch-min);
+  cursor: pointer;
+}
+
+.box {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  width: var(--wf-space-6);
+  height: var(--wf-space-6);
+}
+
+.checkInput {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 2px solid var(--wf-color-border-strong);
+  border-radius: var(--wf-radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.checkInput:checked {
+  border-color: var(--wf-color-accent);
+  background: var(--wf-color-accent);
+}
+
+.checkInput:focus-visible {
+  outline: 2px solid var(--wf-color-accent);
+  outline-offset: 2px;
+}
+
+.checkInput:disabled {
+  border-color: var(--wf-color-border);
+  cursor: not-allowed;
+}
+
+.invalid .checkInput:not(:checked) {
+  border-color: var(--wf-color-danger-border);
+}
+
+.checkMark {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  visibility: hidden;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--wf-color-text-inverse);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.checkInput:checked + .checkMark {
+  visibility: visible;
+}
+
+.checkLabel {
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+  color: var(--wf-color-text);
+}
+
+/* Несколько значений: чипы выбранного и список вариантов */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wf-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wf-space-1);
+  padding: var(--wf-space-1) var(--wf-space-1) var(--wf-space-1) var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-sm);
+  background: var(--wf-color-slot-empty);
+  color: var(--wf-color-text-secondary);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+}
+
+.chipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-space-6);
+  height: var(--wf-space-6);
+  padding: 0;
+  border: 0;
+  border-radius: var(--wf-radius-full);
+  background: var(--wf-color-border);
+  color: var(--wf-color-text-muted);
+  cursor: pointer;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(var(--wf-size-touch-min) * 6);
+  overflow-y: auto;
+  padding: 0 var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+}
+
+.options > .hint {
+  padding: var(--wf-space-3) 0;
+}
