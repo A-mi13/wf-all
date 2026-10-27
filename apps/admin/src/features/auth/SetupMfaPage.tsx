@@ -7,7 +7,7 @@ import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import { useLogout } from '../../app/logout';
 import type { Me } from '../../app/permissions';
-import { ME_KEY } from '../../app/query';
+import { ME_KEY, ONE_SHOT } from '../../app/query';
 import { useSession } from '../../app/session';
 import {
   Button,
@@ -41,6 +41,22 @@ export function SetupMfaPage() {
   const t = useTranslations('auth.setup');
   const tp = useTranslations('pages');
   const [view, setView] = useState<View>({ kind: 'scan' });
+  // Чья настройка на экране (повторное ревью 27.10, m2): в другой вкладке прежний вышел, а следующий
+  // принял приглашение и сканирует свой секрет там (cookie общая). Здесь секрет и коды прежнего
+  // снимаются, а свой секрет не выпускается сам — новый выпуск сжёг бы QR в той вкладке; «Начать
+  // заново» — явное решение. Выпуск прежнего SessionProvider удалил из кэша (meta ONE_SHOT).
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const staffId =
+    session.status === 'setup' || session.status === 'active' ? session.me.id : undefined;
+  const [owner, setOwner] = useState(staffId);
+  const other = staffId !== undefined && owner !== undefined && staffId !== owner;
+  const startHere = () => {
+    queryClient.removeQueries({ queryKey: SETUP_KEY, exact: true });
+    setOwner(staffId);
+    setRescanned(false);
+    setView({ kind: 'scan' });
+  };
   // ack ответил wrong_stage, а стадия всё ещё setup: второй фактор не подтверждён (секрет сброшен
   // повторным принятием приглашения в другой вкладке) — снова сканирование с новым секретом.
   // Один раз: если и новый выпуск, и ack снова отвечают wrong_stage, — ошибка, а не петля.
@@ -56,7 +72,7 @@ export function SetupMfaPage() {
   return (
     <AuthLayout
       title={tp('setup2fa.title')}
-      lead={view.kind === 'scan' ? t('lead') : undefined}
+      lead={view.kind === 'scan' && !other ? t('lead') : undefined}
       wide
       below={
         <Button variant="link" loading={logout.isPending} onClick={() => logout.mutate()}>
@@ -64,14 +80,22 @@ export function SetupMfaPage() {
         </Button>
       }
     >
-      {view.kind === 'scan' && (
+      {other && (
+        <>
+          <p className={styles.note}>{t('elsewhere')}</p>
+          <Button size="lg" block onClick={startHere}>
+            {t('restart')}
+          </Button>
+        </>
+      )}
+      {!other && view.kind === 'scan' && (
         <ScanStep
           onConfirmed={(codes) => setView({ kind: 'codes', codes })}
           onAlreadyConfirmed={() => setView({ kind: 'confirmed' })}
         />
       )}
-      {view.kind === 'codes' && <CodesStep codes={view.codes} onRescan={rescan} />}
-      {view.kind === 'confirmed' && <ConfirmedStep onRescan={rescan} />}
+      {!other && view.kind === 'codes' && <CodesStep codes={view.codes} onRescan={rescan} />}
+      {!other && view.kind === 'confirmed' && <ConfirmedStep onRescan={rescan} />}
     </AuthLayout>
   );
 }
@@ -133,6 +157,8 @@ function ScanStep({
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    // смена сотрудника (другая вкладка) удаляет, а не перезапускает выпуск (session.tsx)
+    meta: ONE_SHOT,
   });
   const confirm = useAdminMutation(
     (v: { code: string }, key: string) =>

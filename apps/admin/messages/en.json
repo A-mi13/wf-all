@@ -99,6 +99,7 @@
       "confirmed_title": "The second factor is already confirmed",
       "confirmed_text": "The authenticator app is connected; only the last step is left. Recovery codes are shown once and won't appear here again — you can issue new ones in My access.",
       "continue": "Continue",
+      "elsewhere": "Two-factor setup is being continued in another tab. Finish it there, or start over here: the QR code in that tab will stop working.",
       "replay": "A response with a secret isn't stored, so it can't be repeated. Start the setup again — the app will get a new QR code.",
       "restart": "Start again",
       "logout": "Sign out"

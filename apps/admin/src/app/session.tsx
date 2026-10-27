@@ -13,7 +13,7 @@ import { isApiError, unwrap } from '../api/client';
 import { useApi } from '../api/context';
 import { claimDrafts, clearDrafts } from './draft';
 import { can, decide, type Decision, type Me } from './permissions';
-import { isMeKey, ME_KEY } from './query';
+import { isMeKey, isOneShot, ME_KEY } from './query';
 import { reauthBus } from './reauth';
 
 // Сессия на клиенте (спека сотрудников §9.3, R15, P20) — из GET /v1/staff/me; он же проверка
@@ -145,6 +145,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const next = ownerOf(data);
       owner.current = next;
       if (typeof prev !== 'string' || next === prev) return;
+      // одноразовые выпуски (секрет 2FA: каждый запрос — новый секрет) удаляются, а не перезапускаются:
+      // повтор под cookie нового сотрудника сжёг бы секрет, который он сканирует в другой вкладке
+      // (повторное ревью 27.10, m2); остальное сбрасывается и перечитывается уже под ним
+      queryClient.removeQueries({ predicate: (query) => isOneShot(query.meta) });
       void queryClient.resetQueries({ predicate: (query) => !isMeKey(query.queryKey) });
       queryClient.getMutationCache().clear();
       clearDrafts();

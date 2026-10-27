@@ -364,3 +364,66 @@ describe('перезагрузки и повторы', () => {
     expect(screen.getByRole('group', { name: CODE })).toBeInTheDocument();
   });
 });
+
+// Повторное ревью 27.10, Minor 2: общее устройство — в другой вкладке A вышел, B принял приглашение и
+// сканирует свой секрет. Эта вкладка (настройка A) при возврате получает me B: сброс кэша прежнего
+// сотрудника не должен перезапускать одноразовый выпуск секрета под cookie B — иначе секрет B во вкладке 2
+// сгорает. Секрет A со страницы уходит (он не B), новый выпуск — только явным действием.
+describe('общее устройство: сменился сотрудник', () => {
+  const meSetupB = {
+    ...meSetup,
+    id: '0192f1c4-2222-7b21-9c5d-0000000000b2',
+    email: 'boris.k@wf.example',
+    display_name: 'Борис К.',
+  };
+
+  test('me другого сотрудника на /setup-2fa — секрет не выпускается заново (POST setup — один)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const sentSetup = () =>
+      fetchSpy.mock.calls.filter(([r]) => r instanceof Request && r.url.includes('/mfa/setup'))
+        .length;
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    const ctl = setupServer(app);
+    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+    expect(sentSetup()).toBe(1);
+
+    app.me.current = meSetupB;
+    await app.refetchMe();
+    // секрет A снят, свой B не выпущен: экран говорит, где настройка, и даёт начать здесь
+    await screen.findByText(/продолжают в другой вкладке/);
+    expect(screen.queryByText(/JBSW Y3DP/)).not.toBeInTheDocument();
+    expect(sentSetup()).toBe(1);
+    expect(ctl.setup).toHaveLength(1);
+    expect(app.queryClient.getQueryData(['staff', 'mfa', 'setup'])).toBeUndefined();
+
+    // «Начать заново» — явное решение: новый выпуск, новым ключом
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Начать заново' }));
+    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+    expect(ctl.setup).toHaveLength(2);
+    expect(ctl.setup[1]).not.toBe(ctl.setup[0]);
+  });
+
+  test('коды A на экране — при me B сняты, выпуска нет', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    const ctl = setupServer(app);
+    await enterCode(userEvent.setup(), '492817');
+    await screen.findByText(CODES[0]!);
+
+    app.me.current = meSetupB;
+    await app.refetchMe();
+    await screen.findByText(/продолжают в другой вкладке/);
+    for (const c of CODES) expect(screen.queryByText(c)).not.toBeInTheDocument();
+    expect(ctl.setup).toHaveLength(1);
+  });
+
+  test('тот же сотрудник (me перечитан) — секрет на месте, выпуск не повторён', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    const ctl = setupServer(app);
+    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+    app.me.current = { ...meSetup, locale: 'ru' };
+    await app.refetchMe();
+    expect(screen.getByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')).toBeInTheDocument();
+    expect(screen.queryByText(/продолжают в другой вкладке/)).not.toBeInTheDocument();
+    expect(ctl.setup).toHaveLength(1);
+  });
+});

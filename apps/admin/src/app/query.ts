@@ -7,6 +7,13 @@ export const ME_KEY = ['staff', 'me'] as const;
 export const isMeKey = (key: readonly unknown[]): boolean =>
   key.length === ME_KEY.length && key[0] === ME_KEY[0] && key[1] === ME_KEY[1];
 
+// Одноразовый запрос (meta: ONE_SHOT): каждый вызов выпускает новое (секрет 2FA). Смена сотрудника его
+// удаляет из кэша, а не перезапускает (session.tsx).
+export const ONE_SHOT = { oneShot: true } as const;
+
+export const isOneShot = (meta: Record<string, unknown> | undefined): boolean =>
+  meta?.oneShot === true;
+
 // Ответы 4xx — решение сервера, повтор их не изменит; сеть и 5xx — до двух повторов.
 function retryQuery(failures: number, error: unknown): boolean {
   if (isApiError(error) && error.status < 500) return false;
