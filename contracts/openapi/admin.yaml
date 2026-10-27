@@ -1234,6 +1234,9 @@ paths:
         - 409 `platform.approval_stale` — цель изменилась после запроса (запрос помечен `failed`).
         - 409 `platform.approval_stale` — также если инициатор изменился после запроса (`error` =
           `initiator_changed`).
+        - 409 `platform.approval_stale` — также если почта или имя приглашения (`staff.invite`) больше не
+          проходят правила приглашения (правила стали строже, пока запрос ждал): запрос помечен `failed`,
+          приглашение нужно подать заново.
         - Отказ исполнения — код действия (запрос помечен `failed`): 409 `staff.last_owner`,
           409 `staff.email_taken`, 422 `staff.city_not_found`.
       parameters:

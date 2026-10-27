@@ -255,6 +255,13 @@ func (a *App) execInvite(ctx context.Context, tx pgx.Tx, raw json.RawMessage, ap
 	if err != nil {
 		return err
 	}
+	// Почта и имя — по ТЕКУЩИМ правилам (validateInvitee): запрос мог ждать подтверждения, пока правила
+	// ужесточили (волна 2, m1). Отказ — бизнес-отказ ErrStale (failed, 409 platform.approval_stale: переподать
+	// приглашение), а не FieldError: та откатила бы всё и оставила запрос pending с 400 по полю, которого в approve
+	// нет. Оба пути — и новая учётка, и повторное приглашение выключенной (имя пишет сброс доступа).
+	if p.Email, p.DisplayName, err = validateInvitee(p.Email, p.DisplayName); err != nil {
+		return fmt.Errorf("staff: приглашение не проходит текущие правила почты или имени: %w", approvals.ErrStale)
+	}
 	cities := p.CityIDs
 	if cities == nil {
 		cities = []uuid.UUID{}
