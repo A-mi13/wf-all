@@ -115,6 +115,8 @@ tasks:
       - task: packages:ci
       - task: design:test
       - task: backend:ci
+      # ломающие правки контрактов против origin/main — как шаг job backend в CI (PR #12: выпадал локально)
+      - task: contracts:breaking
       - task: admin:ci
       # живой e2e админки: нужен Postgres (как backend:ci), порты 5174/5175, 18181/18182, 18026/11026;
       # проекты по умолчанию chromium,webkit — нужен браузер WebKit (pnpm --filter @wf/admin exec
