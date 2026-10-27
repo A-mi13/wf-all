@@ -464,6 +464,16 @@ export interface paths {
          *     - 409 `staff.email_taken` — почта уже у действующей учётки.
          *     - 422 `staff.city_not_found` — города из `city_ids` нет.
          *     - 400 `validation.failed` по `body.city_ids` с кодом `min_items` — модератор без городов.
+         *     - 400 `validation.failed` по `body.email` с кодом `format` — не адрес почты по правилам админки:
+         *       ровно одна `@`, локальная часть — ASCII dot-atom (RFC 5322) не длиннее 64 байт, домен — в том
+         *       числе IDN (хранится в форме A-label `xn--…`) без невидимых и запрещённых IDNA символов, весь
+         *       адрес — не длиннее 254 байт. Регистр и крайние пробелы не важны.
+         *     - 400 `validation.failed` по `body.display_name`: `minLength` — имя пустое после обрезки крайних
+         *       пробелов; `maxLength` — длиннее 80 символов; `format` — в имени управляющие символы (перевод
+         *       строки, табуляция), форматирующие и bidi (U+202A–U+202E, U+2066–U+2069, U+200E/U+200F),
+         *       разделители строк или невидимые символы (U+200B и подобные): они подменяют или прячут текст в
+         *       письмах, подписях подтверждений и журнале. Соединитель эмодзи (U+200D) и селекторы
+         *       варианта (U+FE0E, U+FE0F) допустимы.
          */
         post: operations["createStaffInvite"];
         delete?: never;
@@ -933,11 +943,6 @@ export interface components {
              * @example 3
              */
             attempts_left?: number;
-            /**
-             * @description Через сколько секунд повторить — у ошибок с ожиданием; то же значение, что в заголовке Retry-After, для клиента, которому заголовок недоступен
-             * @example 60
-             */
-            retry_after?: number;
             /** @description Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature) */
             challenge?: {
                 /**
@@ -1263,12 +1268,12 @@ export interface components {
         /** @description Приглашение нового сотрудника — почта, имя, роль и города (у модератора) */
         StaffInviteRequest: {
             /**
-             * @description Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же учётку через сброс доступа
+             * @description Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же учётку через сброс доступа. Регистр и крайние пробелы не важны; не адрес (локальная часть не ASCII dot-atom, домен с невидимыми символами) — 400 validation.failed по body.email, код format
              * @example ivan.p@wf.example
              */
             email: string;
             /**
-             * @description Отображаемое имя — его видят журнал и другие сотрудники
+             * @description Отображаемое имя — его видят журнал, письма и другие сотрудники. Крайние пробелы обрезаются; управляющие, форматирующие и bidi-символы, разделители строк и невидимые символы (U+200B и подобные) — 400 validation.failed по body.display_name, код format (соединитель эмодзи U+200D допустим)
              * @example Иван П.
              */
             display_name: string;
