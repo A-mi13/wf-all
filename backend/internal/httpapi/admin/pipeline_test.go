@@ -463,6 +463,44 @@ func TestNewHandlerRejectsInsecureCookieOnHTTPS(t *testing.T) {
 	}
 }
 
+// Волна 2, HTTP непредусмотренный 1: http-origin не loopback и ADMIN_COOKIE_SECURE=true — браузер не примет
+// Secure-cookie по http (исключение — только loopback, «потенциально надёжный» источник): вход без сессии и петля
+// логина. Отказ старта с подсказкой; loopback (127.0.0.1, [::1], localhost — e2e Chromium и dev) собирается.
+func TestCookieSecureOnHTTPNeedsLoopback(t *testing.T) {
+	for _, c := range []struct {
+		origin string
+		ok     bool
+	}{
+		{"http://admin.lan:8080", false},
+		{"http://10.0.0.5", false},
+		{"http://127.0.0.2:5173", false},
+		{"http://localhost.wf.example", false},
+		{"http://127.0.0.1:5173", true},
+		{"http://127.0.0.1", true},
+		{"http://[::1]:5173", true},
+		{"http://localhost:5173", true},
+		{"https://admin.wf.example", true},
+	} {
+		err := admin.ValidateCookieSecure(c.origin, true)
+		if c.ok != (err == nil) {
+			t.Errorf("ValidateCookieSecure(%s, true) = %v, ждали ok=%v", c.origin, err, c.ok)
+			continue
+		}
+		if err != nil && !strings.Contains(err.Error(), "ADMIN_COOKIE_SECURE=false") {
+			t.Errorf("%s: в отказе нет подсказки: %v", c.origin, err)
+		}
+		o := testOptions(t)
+		o.Origin, o.CookieSecure = c.origin, true
+		if _, err := admin.NewHandler(quiet(), o); c.ok != (err == nil) {
+			t.Errorf("NewHandler(%s, Secure): %v, ждали ok=%v", c.origin, err, c.ok)
+		}
+	}
+	// dev по http без Secure — как раньше, на любом хосте
+	if err := admin.ValidateCookieSecure("http://admin.lan:8080", false); err != nil {
+		t.Errorf("http + false: %v", err)
+	}
+}
+
 // Защита в глубину: chi сопоставляет {staffId} с пустым сегментом, а маршрутизатор контракта —
 // нет, поэтому httpx.Route не ставится и звенья конвейера пропущены. Запрос не доходит до
 // хендлера: 404 http.not_found, а не 400 биндинга параметра (и не 501 заглушки) — и с сессией

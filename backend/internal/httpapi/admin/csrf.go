@@ -82,13 +82,33 @@ func ValidateOrigin(s string) error {
 }
 
 // ValidateCookieSecure — ADMIN_COOKIE_SECURE=false только с http-origin (dev, R6): на https cookie сессии без
-// Secure ушла бы и по http, а без префикса __Host- её подменили бы с поддомена. Проверка на старте, до базы
-// (как ValidateOrigin); NewHandler проверяет её же.
+// Secure ушла бы и по http, а без префикса __Host- её подменили бы с поддомена. И наоборот: http-origin с
+// Secure=true — только loopback (127.0.0.1, [::1], localhost): Secure-cookie по http браузер принимает лишь от
+// «потенциально надёжного» источника, на другом хосте вход прошёл бы без сессии — петля логина (волна 2, HTTP
+// непредусмотренный 1). Проверка на старте, до базы (как ValidateOrigin); NewHandler проверяет её же.
 func ValidateCookieSecure(origin string, secure bool) error {
 	if strings.HasPrefix(origin, "https://") && !secure {
 		return fmt.Errorf("admin: ADMIN_ORIGIN %q — https, а ADMIN_COOKIE_SECURE=false: cookie сессии без Secure — только для dev по http", origin)
 	}
+	if strings.HasPrefix(origin, "http://") && secure && !loopbackOrigin(origin) {
+		return fmt.Errorf("admin: ADMIN_ORIGIN %q — http не на loopback, а ADMIN_COOKIE_SECURE=true: браузер не примет "+
+			"Secure-cookie по http, вход не создаст сессию. Нужен https-origin, либо dev по http на 127.0.0.1, [::1] или "+
+			"localhost, либо ADMIN_COOKIE_SECURE=false (только dev)", origin)
+	}
 	return nil
+}
+
+// loopbackOrigin — хост origin — 127.0.0.1, ::1 или localhost (схему и форму проверяет ValidateOrigin).
+func loopbackOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "::1", "localhost":
+		return true
+	}
+	return false
 }
 
 // ascii — только печатные символы ASCII.
