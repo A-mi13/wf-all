@@ -482,6 +482,8 @@ describe('isUnknownOutcome', () => {
     ['2xx без тела (unwrap)', api(200), true],
     ['204 без тела', api(204), true],
     ['409 idempotency.replay_unavailable', api(409, 'idempotency.replay_unavailable'), true],
+    // повторное ревью 27.10, I2: первый запрос с этим ключом ещё исполняется — итог неизвестен
+    ['409 idempotency.in_progress', api(409, 'idempotency.in_progress'), true],
     ['400 validation.failed', api(400, 'validation.failed'), false],
     ['401 auth.reauth_required', api(401, 'auth.reauth_required'), false],
     ['403 auth.forbidden', api(403, 'auth.forbidden'), false],

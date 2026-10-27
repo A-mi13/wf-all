@@ -130,6 +130,23 @@ describe('повтор после неизвестного исхода', () => 
     expect(new Set(calls.map((c) => c.key)).size).toBe(1);
   });
 
+  // Повторное ревью 27.10, I2: 409 idempotency.in_progress — первый запрос с этим ключом ещё исполняется,
+  // итог неизвестен. Счесть его известным отказом — третья отправка ушла бы НОВЫМ ключом: второе
+  // приглашение, когда первое всё-таки исполнится.
+  test('502 → 409 in_progress → третья отправка с теми же значениями — тот же ключ', async () => {
+    const { calls, fn } = failing([
+      new ApiError({ status: 502, code: 'internal' }),
+      new ApiError({ status: 409, code: 'idempotency.in_progress' }),
+    ]);
+    const { result } = renderHook(() => useAdminMutation(fn), { wrapper: wrapper() });
+    const form = () => ({ email: 'ivan@wf.example', role: 'support' });
+    await run(result, form());
+    await run(result, form());
+    await run(result, form());
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls.map((c) => c.key)).size).toBe(1);
+  });
+
   test('значения изменились — новый ключ', async () => {
     const { calls, fn } = failing([new ApiError({ status: 500, code: 'internal' })]);
     const { result } = renderHook(() => useAdminMutation(fn), { wrapper: wrapper() });

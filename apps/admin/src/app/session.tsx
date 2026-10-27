@@ -73,6 +73,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     queryFn: () => unwrap(api.GET('/v1/staff/me')),
     // me перечитывается явно: refresh() после входа и смены языка, и при 401 других запросов
     staleTime: 60_000,
+    // и при каждом возврате во вкладку, даже свежий (повторное ревью 27.10, I1): в другой вкладке мог
+    // смениться сотрудник (cookie общая) — подписка ниже сотрёт данные прежнего сразу, а не через 60 с
+    refetchOnWindowFocus: 'always',
   });
   const refresh = useCallback(
     () => queryClient.refetchQueries({ queryKey: ME_KEY, exact: true }),

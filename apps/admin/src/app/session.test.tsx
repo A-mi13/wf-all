@@ -1,3 +1,4 @@
+import { focusManager } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test } from 'vitest';
 import { ApiError, unwrap } from '../api/client';
@@ -252,6 +253,31 @@ describe('общее устройство: сотрудник сменился �
     expect(sessionStorage.getItem(LOGIN_DRAFT)).not.toBeNull();
     reauthBus.resolve();
     await waiting;
+  });
+
+  // Повторное ревью (27.10), Important 1: смена сотрудника в другой вкладке видна при возврате в эту, а не
+  // через staleTime me (60 с) — до тех пор B видел бы каркас A (меню, права, кэш, черновик). Возврат во
+  // вкладку (visibilitychange → focusManager) перечитывает me даже свежим; скрытая вкладка me не трогает.
+  test('возврат во вкладку: me перечитан сразу (свежий), данные A стёрты; скрытая вкладка — без запросов', async () => {
+    const { qc, mutations, view } = seeded();
+    let meCalls = 0;
+    server.use(
+      http.get('/v1/staff/me', ({ response }) => {
+        meCalls++;
+        return response(200).json(meAdmin);
+      }),
+    );
+    try {
+      act(() => focusManager.setFocused(false));
+      expect(meCalls).toBe(0);
+      act(() => focusManager.setFocused(true));
+      await waitFor(() => expect(view.result.current).toMatchObject({ me: meAdmin }));
+      expect(meCalls).toBe(1);
+      expect(qc.getQueryData(LIST_KEY)).toBeUndefined();
+      expect(mutations()).not.toContain('комментарий A');
+    } finally {
+      focusManager.setFocused(undefined);
+    }
   });
 
   test('сессия A истекла, вход B в этой вкладке (401 → mfa_pending → active): почта шага 2 цела', async () => {

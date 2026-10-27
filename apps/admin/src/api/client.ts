@@ -56,8 +56,9 @@ export function isApiError(e: unknown, code?: string): e is ApiError {
 
 // Исход изменяющего запроса неизвестен — сервер мог исполнить, а ответа нет: обрыв сети (не
 // ApiError), 5xx (сбой после коммита), 408/499 прокси, 2xx без тела (unwrap: прокси или расхождение с
-// контрактом), 409 idempotency.replay_unavailable (ключ закоммичен, ответ не сохранён). Повтор НОВЫМ
-// ключом был бы вторым действием: итог — перечитыванием (решения подтверждений) или повтором тем же
+// контрактом), 409 idempotency.replay_unavailable (ключ закоммичен, ответ не сохранён), 409
+// idempotency.in_progress (первый запрос с этим ключом ещё исполняется, повторное ревью 27.10 I2).
+// Повтор НОВЫМ ключом был бы вторым действием: итог — перечитыванием (решения подтверждений) или повтором тем же
 // ключом (useAdminMutation: те же значения формы). Остальные 4xx — отказ сервера, исход известен.
 export function isUnknownOutcome(e: unknown): boolean {
   if (!isApiError(e)) return true;
@@ -66,7 +67,8 @@ export function isUnknownOutcome(e: unknown): boolean {
     e.status < 300 ||
     e.status === 408 ||
     e.status === 499 ||
-    e.code === 'idempotency.replay_unavailable'
+    e.code === 'idempotency.replay_unavailable' ||
+    e.code === 'idempotency.in_progress'
   );
 }
 
