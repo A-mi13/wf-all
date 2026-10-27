@@ -77,26 +77,36 @@ async function enterCode(user: UserEvent, code: string) {
   await user.keyboard(code);
 }
 
+// Запросы выпуска считаются в момент отправки (fetch зовётся синхронно с выпуском, задолго до ответа);
+// шпион снимается в finally.
+async function withFetchSpy(body: (sentSetup: () => number) => Promise<void>) {
+  const spy = vi.spyOn(globalThis, 'fetch');
+  try {
+    await body(
+      () =>
+        spy.mock.calls.filter(([r]) => r instanceof Request && r.url.includes('/mfa/setup')).length,
+    );
+  } finally {
+    spy.mockRestore();
+  }
+}
+
 describe('настройка 2FA', () => {
-  test('секрет выпускается один раз и в StrictMode; QR (SVG) и секрет текстом', async () => {
-    // запросы считаются в момент отправки: fetch зовётся синхронно с выпуском, задолго до ответа
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    const sentSetup = () =>
-      fetchSpy.mock.calls.filter(([r]) => r instanceof Request && r.url.includes('/mfa/setup'))
-        .length;
-    const app = renderApp('/setup-2fa', { me: meSetup, strict: true });
-    const ctl = setupServer(app);
-    await page('Настройка двухфакторной защиты');
-    const qr = await screen.findByRole('img', { name: 'QR-код для приложения-аутентификатора' });
-    expect(qr.tagName.toLowerCase()).toBe('svg');
-    expect(qr.querySelector('path')?.getAttribute('d')).toMatch(/^M\d/);
-    expect(screen.getByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')).toBeInTheDocument();
-    // все отправленные выпуски дошли до сервера — и он один
-    await waitFor(() => expect(ctl.setup).toHaveLength(sentSetup()));
-    expect(sentSetup()).toBe(1);
-    expect(ctl.setup).toHaveLength(1);
-    expect(ctl.setup[0]).toBeTruthy();
-  });
+  test('секрет выпускается один раз и в StrictMode; QR (SVG) и секрет текстом', () =>
+    withFetchSpy(async (sentSetup) => {
+      const app = renderApp('/setup-2fa', { me: meSetup, strict: true });
+      const ctl = setupServer(app);
+      await page('Настройка двухфакторной защиты');
+      const qr = await screen.findByRole('img', { name: 'QR-код для приложения-аутентификатора' });
+      expect(qr.tagName.toLowerCase()).toBe('svg');
+      expect(qr.querySelector('path')?.getAttribute('d')).toMatch(/^M\d/);
+      expect(screen.getByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')).toBeInTheDocument();
+      // все отправленные выпуски дошли до сервера — и он один
+      await waitFor(() => expect(ctl.setup).toHaveLength(sentSetup()));
+      expect(sentSetup()).toBe(1);
+      expect(ctl.setup).toHaveLength(1);
+      expect(ctl.setup[0]).toBeTruthy();
+    }));
 
   test('«Скопировать» кладёт секрет в буфер без пробелов', async () => {
     const app = renderApp('/setup-2fa', { me: meSetup });
@@ -384,37 +394,34 @@ describe('общее устройство: сменился сотрудник',
     display_name: 'Борис К.',
   };
 
-  test('me другого сотрудника на /setup-2fa — секрет не выпускается заново (POST setup — один)', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    const sentSetup = () =>
-      fetchSpy.mock.calls.filter(([r]) => r instanceof Request && r.url.includes('/mfa/setup'))
-        .length;
-    const app = renderApp('/setup-2fa', { me: meSetup });
-    const ctl = setupServer(app);
-    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
-    expect(sentSetup()).toBe(1);
+  test('me другого сотрудника на /setup-2fa — секрет не выпускается заново (POST setup — один)', () =>
+    withFetchSpy(async (sentSetup) => {
+      const app = renderApp('/setup-2fa', { me: meSetup });
+      const ctl = setupServer(app);
+      await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+      expect(sentSetup()).toBe(1);
 
-    app.me.current = meSetupB;
-    await app.refetchMe();
-    // секрет A снят, свой B не выпущен: экран говорит, где настройка, и даёт начать здесь
-    await screen.findByText(/продолжают в другой вкладке/);
-    expect(screen.queryByText(/JBSW Y3DP/)).not.toBeInTheDocument();
-    expect(sentSetup()).toBe(1);
-    expect(ctl.setup).toHaveLength(1);
-    expect(app.queryClient.getQueryData(['staff', 'mfa', 'setup'])).toBeUndefined();
+      app.me.current = meSetupB;
+      await app.refetchMe();
+      // секрет A снят, свой B не выпущен: экран говорит, где настройка, и даёт начать здесь
+      await screen.findByText(/продолжают в другой вкладке/);
+      expect(screen.queryByText(/JBSW Y3DP/)).not.toBeInTheDocument();
+      expect(sentSetup()).toBe(1);
+      expect(ctl.setup).toHaveLength(1);
+      expect(app.queryClient.getQueryData(['staff', 'mfa', 'setup'])).toBeUndefined();
 
-    // «Начать заново» — явное решение: новый выпуск, новым ключом
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Начать заново' }));
-    expect(
-      screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
-    ).toHaveFocus();
-    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
-    expect(
-      screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
-    ).toHaveFocus();
-    expect(ctl.setup).toHaveLength(2);
-    expect(ctl.setup[1]).not.toBe(ctl.setup[0]);
-  });
+      // «Начать заново» — явное решение: новый выпуск, новым ключом
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Начать заново' }));
+      expect(
+        screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
+      ).toHaveFocus();
+      await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+      expect(
+        screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
+      ).toHaveFocus();
+      expect(ctl.setup).toHaveLength(2);
+      expect(ctl.setup[1]).not.toBe(ctl.setup[0]);
+    }));
 
   test('коды A на экране — при me B сняты, выпуска нет', async () => {
     const app = renderApp('/setup-2fa', { me: meSetup });
@@ -490,5 +497,35 @@ describe('общее устройство: сменился сотрудник',
     await app.refetchMe();
     await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
     expect(ctl.setup).toHaveLength(1);
+  });
+
+  // Ревью волны 2: A → B → A на смонтированном экране. Вернулся A, но его настройка тоже могла уйти в другую
+  // вкладку (метка смены): экран не выпускает секрет A сам — POST сжёг бы QR A там.
+  test('A → B → A без 401: снова «в другой вкладке», выпуск один', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    const ctl = setupServer(app);
+    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+    app.me.current = meSetupB;
+    await app.refetchMe();
+    await screen.findByText(/продолжают в другой вкладке/);
+    app.me.current = meSetup;
+    await app.refetchMe();
+    await waitFor(() => expect(app.queryClient.getQueryData(['staff', 'me'])).toEqual(meSetup));
+    expect(screen.getByText(/продолжают в другой вкладке/)).toBeInTheDocument();
+    expect(ctl.setup).toHaveLength(1);
+  });
+
+  test('смена сотрудника при фокусе в коде — фокус на заголовок, не на body', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    setupServer(app);
+    const group = await screen.findByRole('group', { name: CODE });
+    await userEvent.setup().click(within(group).getAllByRole('textbox')[0]!);
+    expect(within(group).getAllByRole('textbox')[0]).toHaveFocus();
+    app.me.current = meSetupB;
+    await app.refetchMe();
+    await screen.findByText(/продолжают в другой вкладке/);
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
+    ).toHaveFocus();
   });
 });

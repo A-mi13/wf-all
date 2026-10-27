@@ -53,11 +53,18 @@ export function SetupMfaPage() {
   const { switched, acknowledge } = useStaffSwitched(staffId);
   const [owner, setOwner] = useState<string | null | undefined>(() => (switched ? null : staffId));
   // шаги — только своей настройки; без сессии (вышли, 401) — ни шагов, ни выпуска, пока роутер уводит на вход
-  const mine = staffId !== undefined && staffId === owner;
+  // метка смены без 401 — и для вернувшегося прежнего (A → B → A): его настройка тоже могла уйти в другую
+  // вкладку; «Начать заново» метку снимает (acknowledge)
+  const mine = staffId !== undefined && staffId === owner && !switched;
   const other = staffId !== undefined && !mine;
   // «Начать заново» (здесь и в ScanStep) исчезает с экрана — фокус на заголовок страницы, не на body
   const heading = useRef<HTMLHeadingElement>(null);
   const focusTitle = () => heading.current?.focus();
+  // настройка стала чужой (смена сотрудника), а фокус был в шаге (код) — шаг снят, фокус на заголовок;
+  // текст состояния читалка прочтёт следом (без role=status — одно объявление)
+  useEffect(() => {
+    if (other) heading.current?.focus();
+  }, [other]);
   const startHere = () => {
     focusTitle();
     queryClient.removeQueries({ queryKey: SETUP_KEY, exact: true });
