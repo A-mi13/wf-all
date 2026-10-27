@@ -161,7 +161,8 @@ PASSWORD '<генерируется>'`; проверка `pg_default_acl` (не�
 `('api','staff_accounts','SELECT') = f`, `('api','staff_rate_limits','SELECT') = f`,
 `('worker','staff_accounts','SELECT') = f`; `SELECT max(version_id) FROM goose_db_version` = номер последней миграции
 `main`.
-- Ожидающие приглашения под ужесточённые правила имени (журнал плана A, 27.10): `SELECT count(*) FROM approvals WHERE
+- **Повтор после выкатки** (первый раз — до PR плана B, его Task 25): ожидающие приглашения под ужесточённые правила
+  имени (журнал плана A, 27.10): `SELECT count(*) FROM approvals WHERE
   action = 'staff.invite' AND status = 'pending'` → ожидаемо 0 (admin-api на стенде не работал). Имена (ПД) агент не
   выводит (ревью планов, minor 13); при ненулевом — пользователь смотрит список у себя и решает (отклонить или
   переподать).
@@ -193,6 +194,9 @@ PASSWORD '<генерируется>'`; проверка `pg_default_acl` (не�
 - `func WaitSchema(ctx context.Context, db *pgxpool.Pool, want int64, timeout, poll time.Duration, c clock.Clock) error`
   — `SELECT max(version_id) FROM goose_db_version WHERE is_applied` раз в `poll`, пока не `≥ want`; таймаут — ошибка
   `ErrSchemaBehind` с текущей и нужной версией; база **новее** бинарника — не ошибка (старый инстанс при откате).
+  Нет прав на `goose_db_version` (42501: первый деплой с этой правкой — права выдаст `migrate up` `wf-api`) или нет
+  самой таблицы (42P01: пустая база) — считаются «схема отстаёт»: опрос до таймаута с одной записью WARN, а не
+  ошибка сразу; прочие ошибки базы — ошибка сразу (повторное ревью планов, minor 11).
 - Зовётся в сервере admin-api и в режиме воркера после подключения к базе, до старта HTTP и River; команды оператора
   и разовые команды воркера — без ожидания, ошибка сразу (их запускают руками).
 
@@ -206,7 +210,9 @@ PASSWORD '<генерируется>'`; проверка `pg_default_acl` (не�
 
 **Тесты:** `TestLatest` (совпадает с номером последнего файла миграций), `TestWaitSchemaReady` (сразу), `TestWaitSchemaBehind`
 (фейковые часы: версия ниже → ждёт, поднялась → успех; не поднялась за `timeout` → `ErrSchemaBehind` с числами),
-`TestWaitSchemaNewer` (база новее → успех), `grants_test.go` (`api`, `admin`, `worker` — `SELECT` на
+`TestWaitSchemaNewer` (база новее → успех), `TestWaitSchemaNoPrivilege` (роль без `SELECT` на `goose_db_version` →
+опрос; права выдали — успех; не выдали за `timeout` — `ErrSchemaBehind`), `TestWaitSchemaOtherError` (обрыв соединения →
+ошибка сразу), `grants_test.go` (`api`, `admin`, `worker` — `SELECT` на
 `goose_db_version`, без записи), `TestAdminAPIWaitsSchema` (cmd: база без последней миграции → процесс не слушает
 порт до наката; по таймауту — код выхода 1 и понятная ошибка), `TestOperatorCommandNoWait` (команда `staff …` при
 отстающей схеме — ошибка сразу).
@@ -231,14 +237,16 @@ PASSWORD '<генерируется>'`; проверка `pg_default_acl` (не�
 
 **Файлы.** Изменить: `backend/cmd/admin-api/main.go` (константы бюджета; + тест), `backend/cmd/worker/main.go`
 (+ тест), `backend/internal/platform/events/relay.go` (срок остановки relay; + тест), `backend/internal/platform/queue/*`
-(помощник «слотов очередей», + тест), `backend/internal/platform/config/render_stand_test.go`, `docs/deploy-dev.md`.
+(помощник «слотов очередей», + тест), `backend/internal/platform/config/render_stand_test.go`, `docs/deploy-dev.md`,
+`.claude/rules/backend-platform.md` (строка «10 + 12 + 5 = 27 с» — новый расчёт; повторное ревью планов, minor 8).
 
 **Решения (R4).**
 - Окно — 30 с (умолчание Render; `maxShutdownDelaySeconds` на бесплатном тарифе не проверен и в `render.yaml` не
-  задаётся). Бюджет процесса = дренаж HTTP + мягкая остановка River + жёсткая (5 с `queue.Stop`) + закрытие пула;
-  должен быть ≤ 25 с (5 с запаса).
-  - admin-api: сейчас 10 + 12 + 5 = 27 с без закрытия пула — **не** укладывается в 25 с. Новые значения выбирает
-    исполнитель с тестом (например, дренаж `ADMIN_SHUTDOWN_TIMEOUT` 8 с + мягкая 8 с + жёсткая 5 с + пул ≤ 2 с = 23 с);
+  задаётся). Бюджет процесса = дренаж HTTP + мягкая остановка River + жёсткая (5 с `queue.Stop`); должен быть ≤ 25 с
+  (5 с запаса — на закрытие пула и выход процесса: `pgxpool.Close` срока не имеет, но к этому моменту все соединения
+  возвращены — River и HTTP остановлены; в бюджет как доказуемое слагаемое не входит).
+  - admin-api: сейчас 10 + 12 + 5 = 27 с — **не** укладывается в 25 с. Новые значения выбирает исполнитель с тестом
+    (например, дренаж `ADMIN_SHUTDOWN_TIMEOUT` 8 с + мягкая 10 с + жёсткая 5 с = 23 с);
     письмо, не уложившееся в мягкую остановку, вернётся в повтор (как сейчас).
   - воркер (локально): остановка relay ограничена сроком (сейчас `wg.Wait()` без срока; LISTEN закрывается без
     таймаута — фундамент 2/3) — 5 с; мягкая River 25 → по бюджету окна, если воркер когда-нибудь встанет на Render.
@@ -330,8 +338,9 @@ dev не ломаются).
 **Приёмка.** Живой e2e админки, `./task dev` (Mailpit) и проверка образа (Task 1: loopback, закрытый порт, без
 логина) не затронуты.
 
-**Ловушки.** Порт 465 (TLS сразу) против 587 (STARTTLS): какой режим поддерживает `mail.SMTP` (go-mail) при
-`mandatory` и какие порты даёт Resend — сверить с документацией Resend и записать в `docs/deploy-dev.md`.
+**Ловушки.** `mail.SMTP` умеет только STARTTLS (неявного TLS нет: `smtp.go` не включает `WithSSL`) — годятся только
+порты Resend со STARTTLS (587 или альтернативный STARTTLS-порт Resend); 465 (TLS сразу) потребовал бы правки кода —
+не в этом плане (повторное ревью планов, minor 9). Порты — по документации Resend, записать в `docs/deploy-dev.md`.
 
 ## Этап 2. Выкатка и проверки на стенде (после мержа кода плана C в `main`)
 
@@ -347,7 +356,8 @@ dev не ломаются).
 журнал плана `.superpowers/sdd/<план C>/progress.md`.
 
 **Шаги (порядок важен):**
-0. **Исходящий SMTP на бесплатном Render** (ответ Q2): агент проверяет по документации Render, закрыты ли исходящие
+0. **Исходящий SMTP на бесплатном Render** (ответ Q2; годятся только STARTTLS-порты Resend — Task 6): агент проверяет
+   по документации Render, закрыты ли исходящие
    SMTP-порты у бесплатных веб-сервисов (и какие именно), и сверяет с портами SMTP Resend. Закрыты все подходящие —
    **стоп**: вопрос пользователю (платный инстанс `wf-admin-api`, отправка через HTTP API Resend — отдельная задача
    кода, или иное); дальше не идти. Открыт хоть один порт Resend — записать порт и источник, продолжить.
@@ -373,7 +383,8 @@ dev не ломаются).
    - `read -rs ADMIN_DATABASE_URL && export ADMIN_DATABASE_URL` — строка под ролью `admin`;
    - `read -rs ADMIN_STAFF_SECRET_KEYS && export ADMIN_STAFF_SECRET_KEYS` — ключ из менеджера паролей (тот же, что в
      Render, тот же порядок); ключ base64url — переписывать нечего; если кольцо всё же в стандартном base64 —
-     `export MSYS2_ENV_CONV_EXCL='ADMIN_*'` до запуска;
+     `export MSYS2_ENV_CONV_EXCL='ADMIN_STAFF_SECRET_KEYS;ADMIN_DATABASE_URL'` до запуска (список имён через «;» без
+     шаблонов — как в `scripts/e2e-admin.sh`);
    - остальные `ADMIN_*`, которых требует конфигурация команды (сверить по `config.Admin` в момент выкатки): как
      минимум `ADMIN_ORIGIN` (адрес стенда — ссылка в письме), `ADMIN_MAIL_SMTP_ADDR` и `ADMIN_MAIL_FROM` (обязательны
      в конфиге, хотя команда сама не шлёт), `ADMIN_LOG_FORMAT=text`;
