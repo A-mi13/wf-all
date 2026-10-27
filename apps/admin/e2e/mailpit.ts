@@ -47,13 +47,28 @@ export function inviteCode(text: string): string {
   return m[1];
 }
 
-// Все письма получателю (id) — чтобы потом ждать только новые.
-export async function mailIds(to: string): Promise<Set<string>> {
+// Письма получателю: id и момент приёма Mailpit (мс), новые первыми.
+export async function mailList(to: string): Promise<{ id: string; created: number }[]> {
   const list = await json<{ messages: Summary[] }>(`${MAILPIT_URL}/api/v1/messages?limit=200`);
   const want = to.toLowerCase();
-  return new Set(
-    list.messages
-      .filter((m) => m.To.some((a) => a.Address.toLowerCase() === want))
-      .map((m) => m.ID),
-  );
+  return list.messages
+    .filter((m) => m.To.some((a) => a.Address.toLowerCase() === want))
+    .map((m) => ({ id: m.ID, created: Date.parse(m.Created) }));
+}
+
+// Все письма получателю (id) — чтобы потом ждать только новые.
+export async function mailIds(to: string): Promise<Set<string>> {
+  return new Set((await mailList(to)).map((m) => m.id));
+}
+
+// Писем получателю ровно n всё окно ms (опрос): фон admin-api шлёт не сразу, и одна проверка «сейчас
+// одно» не доказывает, что второго не будет (повторное ревью 27.10, Minor 3).
+export async function expectMailCountStable(to: string, n: number, ms = 3_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const got = (await mailList(to)).length;
+    if (got !== n) throw new Error(`e2e: писем для ${to} — ${got}, ждали ровно ${n}`);
+    if (Date.now() > deadline) return;
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }

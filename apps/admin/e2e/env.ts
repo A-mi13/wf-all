@@ -69,13 +69,41 @@ function required(name: string): string {
   return v;
 }
 
+// Значения прогона проверяются до старта (повторное ревью 27.10, Minor 1): Git Bash (MSYS)
+// переписывает значение окружения с ведущим «/» в путь Windows («C:/Program Files/Git/…»), когда
+// запускает не-MSYS программу (pnpm → node). scripts/e2e-admin.sh выдаёт ключ в base64url и исключает
+// WF_E2E_* из конверсии (MSYS2_ENV_CONV_EXCL); здесь — страж на случай другого запуска. Значения в
+// текст ошибки не попадают.
+const BASE64URL = /^[A-Za-z0-9_-]+={0,2}$/;
+const MIN_KEY_BYTES = 32; // как keys.NewRing
+
+function runKey(name: string): string {
+  const v = required(name);
+  if (!BASE64URL.test(v) || Buffer.from(v, 'base64url').length < MIN_KEY_BYTES) {
+    throw new Error(
+      `e2e: ${name} — нужен ключ base64url не короче ${MIN_KEY_BYTES} байт (значение переписано или испорчено; в Git Bash — MSYS2_ENV_CONV_EXCL, см. scripts/e2e-admin.sh)`,
+    );
+  }
+  return v;
+}
+
+function runDatabaseUrl(name: string): string {
+  const v = required(name);
+  if (!v.startsWith('postgres://') && !v.startsWith('postgresql://')) {
+    throw new Error(
+      `e2e: ${name} — нужен адрес postgres:// (значение переписано или испорчено; в Git Bash — MSYS2_ENV_CONV_EXCL, см. scripts/e2e-admin.sh)`,
+    );
+  }
+  return v;
+}
+
 // Окружение admin-api пары: сервер и подкоманды оператора (staff bootstrap) — одно и то же.
 export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
   return {
     ...cleanEnv(),
     ...RUN_SECRETS,
     ADMIN_HTTP_ADDR: `127.0.0.1:${p.api}`,
-    ADMIN_DATABASE_URL: required('WF_E2E_ADMIN_DATABASE_URL'),
+    ADMIN_DATABASE_URL: runDatabaseUrl('WF_E2E_ADMIN_DATABASE_URL'),
     ADMIN_LOG_FORMAT: 'text',
     // журнал запросов admin-api в выводе прогона — шум; предупреждения и ошибки остаются
     ADMIN_LOG_LEVEL: 'warn',
@@ -84,7 +112,7 @@ export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
     ADMIN_CLIENT_IP_HEADER: '',
     ADMIN_RATE_LIMITS: '',
     ADMIN_ORIGIN: origin(p),
-    ADMIN_STAFF_SECRET_KEYS: required('WF_E2E_STAFF_SECRET_KEYS'),
+    ADMIN_STAFF_SECRET_KEYS: runKey('WF_E2E_STAFF_SECRET_KEYS'),
     ADMIN_IP_ALLOWLIST: '',
     ADMIN_COOKIE_SECURE: String(p.secure),
     // статику отдаёт Vite (dev-сервер e2e), не admin-api

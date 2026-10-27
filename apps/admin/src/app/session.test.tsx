@@ -348,3 +348,35 @@ describe('403 auth.forbidden', () => {
     expect(meCalls).toBe(3);
   });
 });
+
+// Повторное ревью 27.10, Minor 6: серия отказов разом (раздел из нескольких запросов после снятия прав)
+// — me перечитывается одним запросом: следующий отказ не отменяет идущее перечитывание и не начинает своё.
+test('три параллельных 403 auth.forbidden — me перечитан один раз, без отмен', async () => {
+  let meCalls = 0;
+  let open = () => {};
+  const gate = new Promise<void>((r) => (open = r));
+  server.use(
+    http.get('/v1/staff/me', async ({ response }) => {
+      meCalls++;
+      if (meCalls > 1) await gate;
+      return response(200).json(meOwner);
+    }),
+  );
+  const wrapper = providers({ me: null });
+  const { result } = renderHook(() => useSession(), { wrapper });
+  await waitFor(() => expect(result.current.status).toBe('active'));
+  const qc = wrapper.queryClient;
+  const forbidden = (n: number) =>
+    qc
+      .fetchQuery({
+        queryKey: ['staff', 'accounts', n],
+        queryFn: () => Promise.reject(new ApiError({ status: 403, code: 'auth.forbidden' })),
+      })
+      .catch(() => {});
+  await act(() => Promise.all([forbidden(1), forbidden(2), forbidden(3)]));
+  await waitFor(() => expect(meCalls).toBe(2));
+  expect(qc.getQueryState(ME_KEY)?.fetchStatus).toBe('fetching');
+  open();
+  await waitFor(() => expect(qc.getQueryState(ME_KEY)?.fetchStatus).toBe('idle'));
+  expect(meCalls).toBe(2);
+});

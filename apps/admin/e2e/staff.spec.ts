@@ -1,7 +1,7 @@
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 import { origin, PAIRS } from './env';
 import { t } from './keys';
-import { mailIds } from './mailpit';
+import { expectMailCountStable, mailIds, mailList } from './mailpit';
 import {
   acceptAndSetup,
   api,
@@ -149,6 +149,8 @@ test('4. A приглашает админа (202) → B подтверждае�
     (r) =>
       r.request().method() === 'POST' && r.url().endsWith(`/v1/approvals/${approvalId}/approve`),
   );
+  // момент до подтверждения: письмо с кодом должно быть принято Mailpit не раньше (часы — одной машины)
+  const beforeApprove = Date.now();
   await row.getByRole('button', { name: t('approvals.approve') }).click();
   // «Подтвердить» уходит сразу: ответ пришёл, окна не было
   const decided = await approved;
@@ -158,9 +160,14 @@ test('4. A приглашает админа (202) → B подтверждае�
   await expect(pageB.getByText(t('approvals.done.executed'), { exact: true })).toBeVisible();
 
   await receiveInvite(admin);
-  // правило двух рук: письмо с кодом — одно, от подтверждения; приглашение на 202 его не слало (оно
-  // ушло бы в ту же очередь раньше и к этому моменту уже лежало бы в Mailpit)
-  expect((await mailIds(admin.email)).size).toBe(1);
+  // правило двух рук: письмо с кодом — одно, от подтверждения (повторное ревью 27.10, Minor 3). Письмо от
+  // 202 могло прийти раньше письма подтверждения — тогда receiveInvite вернул бы его, а второе ещё было бы
+  // в очереди: поэтому письмо принято не раньше подтверждения, и писем ровно одно всё окно опроса.
+  const mails = await mailList(admin.email);
+  expect(mails).toHaveLength(1);
+  // с точностью до секунды — на случай, если Mailpit отдаёт время без долей
+  expect(mails[0]?.created ?? 0).toBeGreaterThanOrEqual(Math.floor(beforeApprove / 1000) * 1000);
+  await expectMailCountStable(admin.email, 1);
 });
 
 test('5. админ принимает приглашение, настраивает 2FA и видит свой раздел', async () => {

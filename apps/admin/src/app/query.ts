@@ -33,7 +33,8 @@ export function createQueryClient(opts: { retry?: boolean } = {}): QueryClient {
       !isMe &&
       (isApiError(error, 'auth.unauthenticated') || isApiError(error, 'auth.forbidden'))
     ) {
-      void client.invalidateQueries({ queryKey: ME_KEY });
+      // серия отказов разом (повторное ревью 27.10, m6) — одно перечитывание: идущее не отменяется
+      void client.invalidateQueries({ queryKey: ME_KEY }, { cancelRefetch: false });
     }
   };
   const client: QueryClient = new QueryClient({

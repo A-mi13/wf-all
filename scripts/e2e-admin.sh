@@ -12,7 +12,7 @@
 #      идут по реальным часам — общие данные dev не трогаем;
 #   3. миграции и права ролей (cmd/migrate up → grants.sql);
 #   4. admin-api собран в .tools/e2e/;
-#   5. одноразовый ключ сотрудников ADMIN_STAFF_SECRET_KEYS (только в окружении прогона, не выводится).
+#   5. одноразовый ключ сотрудников ADMIN_STAFF_SECRET_KEYS (base64url, только в окружении прогона, не выводится).
 # Dev-значения ADMIN_* (корневой Taskfile грузит backend/.env) из окружения убираются: admin-api получает
 # только окружение e2e (apps/admin/e2e/env.ts).
 #
@@ -51,22 +51,39 @@ PSQL=psql
 command -v "$PSQL" >/dev/null || die "нет psql (локально — bash scripts/pg.sh install)"
 [ -f ".tools/bin/mailpit$exe" ] || die "нет .tools/bin/mailpit — сначала bash scripts/bootstrap.sh"
 
-# 0. Замок прогона: mkdir атомарен; в замке — PID держателя. Держатель жив — отказ; умер (брошенный
-# замок после kill) — замок забирается. Снимается при любом выходе (trap), поэтому без exec ниже.
+# 0. Замок прогона — каталог с PID держателя. Появляется сразу с PID (ревью 27.10, Minor 4): каталог
+# собирается рядом и переименовывается в замок (rename атомарен и не заменяет непустой каталог) — иначе
+# второй прогон между mkdir и записью PID видел пустой замок, считал его брошенным и забирал. Держатель жив —
+# отказ; умер (брошенный замок после kill) — замок уводится в сторону переименованием (из двух забирающих
+# успевает один) и берётся заново. Снимается при любом выходе (trap), поэтому без exec ниже.
 LOCK=.tools/e2e/run.lock
 mkdir -p .tools/e2e
-if ! mkdir "$LOCK" 2>/dev/null; then
+take_lock() {
+  local fresh="$LOCK.new.$$"
+  mkdir "$fresh" && echo $$ >"$fresh/pid" || return 1
+  if mv -T "$fresh" "$LOCK" 2>/dev/null; then return 0; fi
+  rm -f "$fresh/pid"
+  rmdir "$fresh" 2>/dev/null || true
+  return 1
+}
+if ! take_lock; then
   holder=$(cat "$LOCK/pid" 2>/dev/null || true)
   if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
     die "уже идёт прогон e2e (PID $holder, замок $LOCK) — дождитесь его конца"
   fi
   echo "e2e-admin: замок $LOCK брошен (PID ${holder:-?} не жив) — забираю" >&2
-  rm -f "$LOCK/pid"
-  rmdir "$LOCK" 2>/dev/null || true
-  mkdir "$LOCK" || die "замок $LOCK занят другим прогоном"
+  stale="$LOCK.stale.$$"
+  mv -T "$LOCK" "$stale" 2>/dev/null || die "замок $LOCK занят другим прогоном"
+  # увели не тот замок (его успел взять другой прогон) — вернуть и отказаться
+  if [ "$(cat "$stale/pid" 2>/dev/null || true)" != "$holder" ]; then
+    mv -T "$stale" "$LOCK" 2>/dev/null || true
+    die "замок $LOCK занят другим прогоном"
+  fi
+  rm -f "$stale/pid"
+  rmdir "$stale" 2>/dev/null || true
+  take_lock || die "замок $LOCK занят другим прогоном"
 fi
-echo $$ >"$LOCK/pid"
-unlock() { rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null || true; }
+unlock() { [ "$(cat "$LOCK/pid" 2>/dev/null || true)" = "$$" ] && rm -f "$LOCK/pid" && rmdir "$LOCK" 2>/dev/null || true; }
 trap unlock EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -110,10 +127,16 @@ fi
 for k in $(compgen -e); do
   case "$k" in ADMIN_* | WF_ADMIN_API_ORIGIN) unset "$k" ;; esac
 done
-WF_E2E_STAFF_SECRET_KEYS=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')
+# Ключ — base64url (ревью 27.10, Minor 1): Git Bash (MSYS), запуская не-MSYS программу (pnpm → node →
+# admin-api), переписывает значение окружения с ведущим «/» в путь Windows («C:/Program Files/Git/…») —
+# base64-ключ начинался с «/» в 1 из 64 прогонов, и admin-api не стартовал. В base64url нет «/» (keys.Decode
+# его принимает), а WF_E2E_* ещё и исключены из конверсии (MSYS2_ENV_CONV_EXCL — имена через «;», вне MSYS
+# ни на что не влияет). Адрес базы начинается с postgres:// — MSYS такие не трогает. Страж — e2e/env.ts.
+WF_E2E_STAFF_SECRET_KEYS=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
 export WF_E2E_STAFF_SECRET_KEYS
 export WF_E2E_ADMIN_DATABASE_URL="postgres://admin:admin@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
 export WF_E2E_PROJECTS="$PROJECTS"
+export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
 
 cd apps/admin
 # не exec: замок снимает trap EXIT этого процесса после конца прогона
