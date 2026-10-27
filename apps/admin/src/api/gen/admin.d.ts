@@ -464,6 +464,10 @@ export interface paths {
          *     - 409 `staff.email_taken` — почта уже у действующей учётки.
          *     - 422 `staff.city_not_found` — города из `city_ids` нет.
          *     - 400 `validation.failed` по `body.city_ids` с кодом `min_items` — модератор без городов.
+         *     - 400 `validation.failed` по `body.city_ids`: `max_items` — города у роли не `moderator`
+         *       (города бывают только у модератора); `maxItems` — больше 100 городов.
+         *     - 400 `validation.failed` по `body.email`: `minLength` — короче 3 символов, `maxLength` — длиннее
+         *       320 символов (до проверки формата).
          *     - 400 `validation.failed` по `body.email` с кодом `format` — не адрес почты по правилам админки:
          *       ровно одна `@`, локальная часть — ASCII dot-atom (RFC 5322) не длиннее 64 байт, домен — в том
          *       числе IDN (хранится в форме A-label `xn--…`) без невидимых и запрещённых IDNA символов, весь
@@ -472,8 +476,9 @@ export interface paths {
          *       пробелов; `maxLength` — длиннее 80 символов; `format` — в имени управляющие символы (перевод
          *       строки, табуляция), форматирующие и bidi (U+202A–U+202E, U+2066–U+2069, U+200E/U+200F),
          *       разделители строк или невидимые символы (U+200B и подобные): они подменяют или прячут текст в
-         *       письмах, подписях подтверждений и журнале. Соединитель эмодзи (U+200D) и селекторы
-         *       варианта (U+FE0E, U+FE0F) допустимы.
+         *       письмах, подписях подтверждений и журнале. Только внутри эмодзи допустимы соединитель
+         *       U+200D (между двумя эмодзи) и селекторы U+FE0E, U+FE0F (сразу после эмодзи или цифры
+         *       кейкапа); имя без единого видимого символа — тоже `format`.
          */
         post: operations["createStaffInvite"];
         delete?: never;
@@ -548,7 +553,8 @@ export interface paths {
          *     - 403 `auth.forbidden` — нет права на такое изменение.
          *     - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свою роль менять нельзя.
          *     - 422 `staff.city_not_found` — города из `city_ids` нет; 400 `validation.failed` по
-         *       `body.city_ids` с кодом `min_items` — модератор без городов.
+         *       `body.city_ids` с кодом `min_items` — модератор без городов, `max_items` — города у роли не
+         *       `moderator` (города бывают только у модератора), `maxItems` — больше 100 городов.
          *     - 409 `staff.last_owner` — понижение последнего активного владельца.
          */
         put: operations["changeStaffRole"];
@@ -829,6 +835,9 @@ export interface paths {
          *     - 409 `platform.approval_stale` — цель изменилась после запроса (запрос помечен `failed`).
          *     - 409 `platform.approval_stale` — также если инициатор изменился после запроса (`error` =
          *       `initiator_changed`).
+         *     - 409 `platform.approval_stale` — также если почта или имя приглашения (`staff.invite`) больше не
+         *       проходят правила приглашения (правила стали строже, пока запрос ждал): запрос помечен `failed`,
+         *       приглашение нужно подать заново.
          *     - Отказ исполнения — код действия (запрос помечен `failed`): 409 `staff.last_owner`,
          *       409 `staff.email_taken`, 422 `staff.city_not_found`.
          */
@@ -1268,18 +1277,18 @@ export interface components {
         /** @description Приглашение нового сотрудника — почта, имя, роль и города (у модератора) */
         StaffInviteRequest: {
             /**
-             * @description Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же учётку через сброс доступа. Регистр и крайние пробелы не важны; не адрес (локальная часть не ASCII dot-atom, домен с невидимыми символами) — 400 validation.failed по body.email, код format
+             * @description Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же учётку через сброс доступа. Регистр и крайние пробелы не важны; не адрес (локальная часть не ASCII dot-atom, домен с невидимыми символами) — 400 validation.failed по body.email, код format; короче 3 или длиннее 320 символов — код minLength или maxLength
              * @example ivan.p@wf.example
              */
             email: string;
             /**
-             * @description Отображаемое имя — его видят журнал, письма и другие сотрудники. Крайние пробелы обрезаются; управляющие, форматирующие и bidi-символы, разделители строк и невидимые символы (U+200B и подобные) — 400 validation.failed по body.display_name, код format (соединитель эмодзи U+200D допустим)
+             * @description Отображаемое имя — его видят журнал, письма и другие сотрудники. Крайние пробелы обрезаются; управляющие, форматирующие и bidi-символы, разделители строк и невидимые символы (U+200B и подобные), имя без видимых символов — 400 validation.failed по body.display_name, код format. Только внутри эмодзи допустимы соединитель U+200D (между двумя эмодзи) и селекторы U+FE0E, U+FE0F (сразу после эмодзи или цифры кейкапа)
              * @example Иван П.
              */
             display_name: string;
             role: components["schemas"]["StaffRole"];
             /**
-             * @description Города модератора — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пусто или нет поля
+             * @description Города модератора — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пусто или нет поля (иначе код max_items); больше 100 — код maxItems
              * @example [
              *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47"
              *     ]
@@ -1290,7 +1299,7 @@ export interface components {
         StaffRoleUpdate: {
             role: components["schemas"]["StaffRole"];
             /**
-             * @description Города модератора целиком — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пустой список
+             * @description Города модератора целиком — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пустой список (иначе код max_items); больше 100 — код maxItems
              * @example [
              *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47",
              *       "7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65"
