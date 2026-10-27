@@ -122,16 +122,19 @@ describe('Problem → ApiError', () => {
 
   test('429 без заголовка — срока нет, поле тела не читается', async () => {
     server.use(
-      http.post('/v1/staff/auth/login', () =>
-        HttpResponse.json(
-          {
-            type: 'about:blank',
-            title: 'Error',
-            status: 429,
-            code: 'ratelimit.exceeded',
-            retry_after: 30,
-          },
-          { status: 429, headers: { 'Content-Type': 'application/problem+json' } },
+      // поле старого сервера — вне контракта, поэтому untyped
+      http.post('/v1/staff/auth/login', ({ response }) =>
+        response.untyped(
+          HttpResponse.json(
+            {
+              type: 'about:blank',
+              title: 'Error',
+              status: 429,
+              code: 'ratelimit.exceeded',
+              retry_after: 30,
+            },
+            { status: 429, headers: { 'Content-Type': 'application/problem+json' } },
+          ),
         ),
       ),
     );
@@ -308,13 +311,25 @@ describe('reauth_required → разблокировка и повтор (P20)',
     expect(state.bodies).toEqual([body, body]);
   });
 
+  // Оба повтора считаются после того, как оба запроса завершились: Promise.all отклонился бы на первом
+  // и второй повтор мог ещё не дойти до сервера (hits = 3 — гонка теста, не клиента).
   test('повтор снова получил reauth_required — ошибка, без второго круга', async () => {
-    const { state, bus, run } = setup();
-    const done = run();
+    const { state, bus, api } = setup();
+    const done = Promise.allSettled([
+      api.GET('/v1/staff/me/sessions'),
+      api.POST('/v1/staff/me/password', {
+        params: { header: { 'Idempotency-Key': KEY } },
+        body,
+      }),
+    ]);
     await until(() => state.hits === 2 && bus.pending());
     bus.resolve();
-    const err = await caught(done);
-    expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required' });
+    const results = await done;
+    for (const r of results) {
+      expect(r.status).toBe('rejected');
+      const err = r.status === 'rejected' ? r.reason : undefined;
+      expect(err).toMatchObject({ status: 401, code: 'auth.reauth_required' });
+    }
     expect(state.hits).toBe(4);
     expect(bus.pending()).toBe(false);
   });

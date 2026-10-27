@@ -18,7 +18,7 @@
   "devDependencies": {
     "@wf/config": "workspace:*",
     "eslint": "catalog:",
-    "lefthook": "2.1.14",
+    "lefthook": "2.2.2",
     "prettier": "catalog:",
     "typescript-eslint": "catalog:"
   }
