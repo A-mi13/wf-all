@@ -42,6 +42,11 @@ export type Session = SessionState & {
 
 const SessionContext = createContext<Session | null>(null);
 
+// Сотрудник, пришедший в эту вкладку сменой без 401 (подписка ниже): id или null. Экран настройки 2FA
+// по нему не выпускает секрет сам — выпуск сжёг бы QR, который этот сотрудник сканирует в другой вкладке.
+type Switched = { staffId: string | null; acknowledge(): void };
+const SwitchedContext = createContext<Switched>({ staffId: null, acknowledge: () => {} });
+
 function stateOf(data: Me | undefined, error: Error | null): SessionState {
   if (isApiError(error, 'auth.unauthenticated')) return { status: 'anonymous' };
   if (data) {
@@ -128,6 +133,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // A сам (key по me.id в router.tsx). Тот же сотрудник (язык, права) ничего не стирает; после 401
   // данные уже стёрты выше — вход в этой же вкладке (mfa_pending, active) ничего не стирает.
   const owner = useRef<string | null | undefined>(undefined);
+  // кто пришёл сменой без 401 (доделка W5-front): вход после 401 и новый монтаж его снимают
+  const [switchedTo, setSwitchedTo] = useState<string | null>(null);
   useEffect(() => {
     const cached = queryClient.getQueryData<Me>(ME_KEY);
     owner.current = cached ? ownerOf(cached) : undefined;
@@ -135,7 +142,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (event.type !== 'updated' || !isMeKey(event.query.queryKey)) return;
       const { action } = event;
       if (action.type === 'error') {
-        if (isApiError(action.error, 'auth.unauthenticated')) owner.current = null;
+        if (isApiError(action.error, 'auth.unauthenticated')) {
+          owner.current = null;
+          setSwitchedTo(null);
+        }
         return;
       }
       if (action.type !== 'success') return;
@@ -145,6 +155,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const next = ownerOf(data);
       owner.current = next;
       if (typeof prev !== 'string' || next === prev) return;
+      setSwitchedTo(next);
       // одноразовые выпуски (секрет 2FA: каждый запрос — новый секрет) удаляются, а не перезапускаются:
       // повтор под cookie нового сотрудника сжёг бы секрет, который он сканирует в другой вкладке
       // (повторное ревью 27.10, m2); остальное сбрасывается и перечитывается уже под ним
@@ -163,7 +174,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     reauthBus.request().then(refresh, () => {});
   }, [reauthRequired, refresh]);
 
-  return <SessionContext value={value}>{children}</SessionContext>;
+  const acknowledge = useCallback(() => setSwitchedTo(null), []);
+  const switched = useMemo(() => ({ staffId: switchedTo, acknowledge }), [switchedTo, acknowledge]);
+
+  return (
+    <SessionContext value={value}>
+      <SwitchedContext value={switched}>{children}</SwitchedContext>
+    </SessionContext>
+  );
 }
 
 // react-refresh не различает хуки среди именованных экспортов файла с компонентом —
@@ -173,6 +191,17 @@ export function useSession(): Session {
   const s = useContext(SessionContext);
   if (!s) throw new Error('useSession: нет SessionProvider выше по дереву');
   return s;
+}
+
+// Текущий сотрудник пришёл в эту вкладку сменой без 401 (в другой вкладке прежний вышел, он вошёл или
+// принял приглашение); acknowledge() — пользователь решил продолжить здесь.
+// eslint-disable-next-line react-refresh/only-export-components
+export function useStaffSwitched(staffId: string | undefined): {
+  switched: boolean;
+  acknowledge(): void;
+} {
+  const { staffId: to, acknowledge } = useContext(SwitchedContext);
+  return { switched: staffId !== undefined && to === staffId, acknowledge };
 }
 
 // Право по me.permissions: allow, scoped в скоупе городов; dual — true как «можно запросить».

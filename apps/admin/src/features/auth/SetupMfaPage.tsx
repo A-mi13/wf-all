@@ -8,7 +8,7 @@ import { useAdminMutation } from '../../api/mutation';
 import { useLogout } from '../../app/logout';
 import type { Me } from '../../app/permissions';
 import { ME_KEY, ONE_SHOT } from '../../app/query';
-import { useSession } from '../../app/session';
+import { useSession, useStaffSwitched } from '../../app/session';
 import {
   Button,
   CheckboxField,
@@ -49,10 +49,19 @@ export function SetupMfaPage() {
   const queryClient = useQueryClient();
   const staffId =
     session.status === 'setup' || session.status === 'active' ? session.me.id : undefined;
-  const [owner, setOwner] = useState(staffId);
-  const other = staffId !== undefined && owner !== undefined && staffId !== owner;
+  // пришёл сюда сменой сотрудника без 401 (каркас прежнего → стадия setup) — тоже не выпускать самому
+  const { switched, acknowledge } = useStaffSwitched(staffId);
+  const [owner, setOwner] = useState<string | null | undefined>(() => (switched ? null : staffId));
+  // шаги — только своей настройки; без сессии (вышли, 401) — ни шагов, ни выпуска, пока роутер уводит на вход
+  const mine = staffId !== undefined && staffId === owner;
+  const other = staffId !== undefined && !mine;
+  // «Начать заново» (здесь и в ScanStep) исчезает с экрана — фокус на заголовок страницы, не на body
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focusTitle = () => heading.current?.focus();
   const startHere = () => {
+    focusTitle();
     queryClient.removeQueries({ queryKey: SETUP_KEY, exact: true });
+    acknowledge();
     setOwner(staffId);
     setRescanned(false);
     setView({ kind: 'scan' });
@@ -72,8 +81,9 @@ export function SetupMfaPage() {
   return (
     <AuthLayout
       title={tp('setup2fa.title')}
-      lead={view.kind === 'scan' && !other ? t('lead') : undefined}
+      lead={view.kind === 'scan' && mine ? t('lead') : undefined}
       wide
+      titleRef={heading}
       below={
         <Button variant="link" loading={logout.isPending} onClick={() => logout.mutate()}>
           {t('logout')}
@@ -88,14 +98,15 @@ export function SetupMfaPage() {
           </Button>
         </>
       )}
-      {!other && view.kind === 'scan' && (
+      {mine && view.kind === 'scan' && (
         <ScanStep
+          onRestart={focusTitle}
           onConfirmed={(codes) => setView({ kind: 'codes', codes })}
           onAlreadyConfirmed={() => setView({ kind: 'confirmed' })}
         />
       )}
-      {!other && view.kind === 'codes' && <CodesStep codes={view.codes} onRescan={rescan} />}
-      {!other && view.kind === 'confirmed' && <ConfirmedStep onRescan={rescan} />}
+      {mine && view.kind === 'codes' && <CodesStep codes={view.codes} onRescan={rescan} />}
+      {mine && view.kind === 'confirmed' && <ConfirmedStep onRescan={rescan} />}
     </AuthLayout>
   );
 }
@@ -127,9 +138,11 @@ function useAck(onRescan: () => boolean) {
 }
 
 function ScanStep({
+  onRestart,
   onConfirmed,
   onAlreadyConfirmed,
 }: {
+  onRestart: () => void;
   onConfirmed: (codes: string[]) => void;
   onAlreadyConfirmed: () => void;
 }) {
@@ -186,6 +199,7 @@ function ScanStep({
 
   // Ответы с секретами не кэшируются на сервере: повтор тем же ключом — replay_unavailable.
   const restart = () => {
+    onRestart();
     confirm.reset();
     otp.current?.reset();
     void secret.refetch();

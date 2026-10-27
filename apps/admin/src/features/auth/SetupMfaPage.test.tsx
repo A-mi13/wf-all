@@ -342,7 +342,14 @@ describe('перезагрузки и повторы', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Ответ с секретом не сохраняется');
     fail = false;
     await user.click(screen.getByRole('button', { name: 'Начать заново' }));
+    // кнопка исчезла — фокус на заголовке страницы, не на body (доделка W5-front, п. 3)
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
+    ).toHaveFocus();
     expect(await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
+    ).toHaveFocus();
     expect(ctl.setup).toHaveLength(2);
   });
 
@@ -398,7 +405,13 @@ describe('общее устройство: сменился сотрудник',
 
     // «Начать заново» — явное решение: новый выпуск, новым ключом
     await userEvent.setup().click(screen.getByRole('button', { name: 'Начать заново' }));
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
+    ).toHaveFocus();
     await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
+    ).toHaveFocus();
     expect(ctl.setup).toHaveLength(2);
     expect(ctl.setup[1]).not.toBe(ctl.setup[0]);
   });
@@ -424,6 +437,58 @@ describe('общее устройство: сменился сотрудник',
     await app.refetchMe();
     expect(screen.getByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')).toBeInTheDocument();
     expect(screen.queryByText(/продолжают в другой вкладке/)).not.toBeInTheDocument();
+    expect(ctl.setup).toHaveLength(1);
+  });
+
+  // Доделка W5-front (решение контроллера): вкладка была в каркасе A, в другой вкладке A вышел и B принял
+  // приглашение — эта вкладка получает me B (setup) без 401, роутер монтирует /setup-2fa заново. Выпуск
+  // сжёг бы QR во вкладке B: экран сам не выпускает, выпуск — по «Начать заново».
+  test('каркас A → me B (setup) без 401: /setup-2fa без выпуска, «Начать заново» — один POST', async () => {
+    const app = renderApp('/audit', { me: meOwner });
+    const ctl = setupServer(app);
+    await screen.findByRole('heading', { level: 1, name: 'Журнал действий' });
+
+    app.me.current = meSetupB;
+    await app.refetchMe();
+    await screen.findByText(/продолжают в другой вкладке/);
+    expect(app.at()).toBe('/setup-2fa');
+    expect(ctl.setup).toHaveLength(0);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Начать заново' }));
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Настройка двухфакторной защиты' }),
+    ).toHaveFocus();
+    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+    expect(ctl.setup).toHaveLength(1);
+  });
+
+  test('обычный путь: вход после 401 в этой вкладке (A истекла → B setup) — секрет выпускается сразу', async () => {
+    const app = renderApp('/audit', { me: meOwner });
+    const ctl = setupServer(app);
+    await screen.findByRole('heading', { level: 1, name: 'Журнал действий' });
+    app.me.current = null;
+    await app.refetchMe();
+    await screen.findByRole('heading', { level: 1, name: 'Вход администратора' });
+    app.me.current = meSetupB;
+    await app.refetchMe();
+    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
+    expect(screen.queryByText(/продолжают в другой вкладке/)).not.toBeInTheDocument();
+    expect(ctl.setup).toHaveLength(1);
+  });
+
+  test('метка смены снимается 401: смена без 401 → вход заново в этой вкладке — секрет выпускается сразу', async () => {
+    const app = renderApp('/audit', { me: meOwner });
+    const ctl = setupServer(app);
+    await screen.findByRole('heading', { level: 1, name: 'Журнал действий' });
+    app.me.current = meSetupB;
+    await app.refetchMe();
+    await screen.findByText(/продолжают в другой вкладке/);
+    app.me.current = null;
+    await app.refetchMe();
+    await screen.findByRole('heading', { level: 1, name: 'Вход администратора' });
+    app.me.current = meSetupB;
+    await app.refetchMe();
+    await screen.findByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
     expect(ctl.setup).toHaveLength(1);
   });
 });
