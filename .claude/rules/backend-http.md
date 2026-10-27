@@ -54,7 +54,9 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   (`admin.ValidateOrigin`: схема http/https, хост в нижнем регистре и только ASCII — IDN в A-label `xn--…`, без пути и
   стандартного порта), аллоулист без `/0` (`admin.ValidateAllowlist`) — проверка на старте, до подключения к базе.
   `admin.ValidateCookieSecure(origin, secure)`: https-origin и `ADMIN_COOKIE_SECURE=false` — отказ старта (cookie без
-  `Secure` и без `__Host-` — только dev по http); зовётся в `cmd/admin-api/main.go` рядом с `ValidateOrigin`, до
+  `Secure` и без `__Host-` — только dev по http); http-origin и `ADMIN_COOKIE_SECURE=true` — только на loopback
+  (`127.0.0.1`, `[::1]`, `localhost`: Secure-cookie по http браузер принимает лишь от них), иначе отказ старта с
+  подсказкой — вход без сессии и петля логина (`TestCookieSecureOnHTTPNeedsLoopback`); зовётся в `cmd/admin-api/main.go` рядом с `ValidateOrigin`, до
   подключения к базе, и ещё раз в `NewHandler`.
 - **Права** (`x-permission`): правила строятся из контракта на старте — операция без `x-permission`, ключ вне каталога
   или черновой, `handler` без `x-permission-any` — отказ старта; маршрут без правила в работе — 500 в лог (fail-closed).
@@ -77,9 +79,10 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   собранных staff, geo и подтверждениях отвечает не 501); нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
   `501 http.not_implemented` без паники. Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод
   ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`)
-  и `requestMeta` (внешний: `approvals.Meta{IP: peer, UserAgent: заголовок}` в ctx операций платформы — `meta` staff
-  их не видит; `auth.ErrSessionInvalid` операции — 401 и стирание cookie `clearSessionCookie`, как у Middleware staff,
-  страж `TestDecisionRevokedSessionClearsCookie`); операция — метод вида `(ctx, oapi.<Операция>RequestObject) (ответ, error)` (`staffadmin.IsOperation`:
+  и `requestMeta` (внешний: `approvals.Meta{IP: peer, UserAgent: httpx.UserAgent(r)}` — UA не длиннее 512 байт,
+  страж `TestDecisionHugeUserAgent` — в ctx операций платформы, `meta` staff их не видит; `auth.ErrSessionInvalid`
+  операции — 401 и стирание cookie `clearSessionCookie`, как у Middleware staff, стражи
+  `TestDecisionRevokedSessionClearsCookie`, `TestApproveSessionRevokedUnderLockClearsCookie`); операция — метод вида `(ctx, oapi.<Операция>RequestObject) (ответ, error)` (`staffadmin.IsOperation`:
   служебные методы той же формы, `Label`, — не операции). Cookie собранного хендлера staff (`CookieConfig`) обязана
   совпасть с `CookieName(CookieSecure)`/`CookieSecure` конвейера — иначе отказ старта (`TestNewHandlerCookieMismatch`).
 - **Операции платформы** (`server.go`, Task 10b): `Options.Approvals` (`ApprovalService` — `*approvals.Service`)
@@ -88,8 +91,13 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   роль сменилась — 403, до записей).
   approve — `200` только `executed`; неудача исполнения — ошибка с кодом при закоммиченном `failed`: `ErrStale` (и
   `ErrInitiatorChanged`) — 409 `platform.approval_stale`, бизнес-отказ — код из `approveStaffCodes` (= `staff.*`
-  `x-error-codes` approve, `TestApproveCodesMatchContract`), иной `staff.*` и отказ без кода — 500. Ошибки —
-  `staffadmin.Problem`. Журнал: скоуп модератора по `GrantScoped` (не-nil копия `CityIDs` + `OwnStaffID`), `from ≥ to`
+  `x-error-codes` approve, `TestApproveCodesMatchContract`), иной `staff.*` и отказ без кода — 500. Приглашение,
+  чьи почта или имя к подтверждению не проходят текущие правила, — тоже `ErrStale` (`failed`, переподать;
+  `TestApproveInviteInvalidPayloadFails`). Ошибки решений (approve, reject, cancel) — только `decisionProblem`
+  (approve — через `approveProblem`): `auth.ErrSessionInvalid` уходит обёрнутой к `requestMeta` (401 со стиранием),
+  остальное — `staffadmin.Problem`; `auth.ErrSessionReplaced` (подпись решившего или `checkActor` под замком
+  исполнителя) — 401 **без** стирания cookie, запрос `pending` (стражи `TestDecisionReplacedSessionKeepsCookie`,
+  `TestApproveSessionReplacedUnderLockKeepsCookie`). Журнал: скоуп модератора по `GrantScoped` (не-nil копия `CityIDs` + `OwnStaffID`), `from ≥ to`
   — 400 `query.from` `range`; `action_prefix` — по сегментам (`backend-platform.md`).
 - Тесты: cookie в запросе ставится руками (`net/http/cookiejar` не шлёт Secure-cookie по http, P24); проход конвейера
   — 501 нулевых хендлеров (журнал — 200); `{cityId}` — на подменённом контракте (`admin.Permissions` в

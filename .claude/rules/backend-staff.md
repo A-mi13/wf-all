@@ -51,7 +51,9 @@ paths:
   входе не роняет проверку в 500: строка пропускается, в журнал сервера — Warn с `staff_id` и `key_id`, без кода (одно
   предупреждение на ключ за проверку; страж `TestRecoveryCodeSkipsUnknownKey`). Все строки на чужом ключе — код не
   подойдёт, неудача засчитывается как обычная (`staff.mfa_invalid`, сервер не отличит верный код от неверного); выход —
-  `reset-access` оператором.
+  `reset-access` оператором. Асимметрия с TOTP принята (m3 повторного ревью): секрет TOTP на ключе вне кольца —
+  `openTOTP` даёт ошибку, ответ 500 без записи неудачи (не `withFactor`-неудача), а резервный код — `mfa_invalid` со
+  счётом; выход у обоих — тот же `reset-access`.
 - **Аудит:** действие сотрудника — `ActorStaffID`, роль учётки, `ActorLabel` = `display_name`; неудача пароля —
   без автора (`anonymous`), почта в `After["email"]` (маскирует `audit.Mask`); неудача второго фактора — от
   учётки (шаг `mfa` входа — `staff.login_failed`, прочие — `staff.factor_failed`); блокировка — `system`;
@@ -142,8 +144,14 @@ paths:
   («код: комментарий»), не в before/after. `display_name` приглашаемого (`validateInvitee`): 1–80 символов без крайних
   пробелов и `domain.DisplayNameOK` — отказ управляющих (Cc), форматирующих (Cf: bidi U+202A–202E и U+2066–2069, LRM/RLM,
   мягкий перенос, BOM, U+200B, теговые), Zl/Zp и невидимых «пустых» символов (`isInvisible`, как у домена почты) →
-  `400 validation.failed` по `body.display_name`, правило `format`; допустимы только ZWJ (эмодзи-последовательности) и
-  VS15/VS16, прочие селекторы варианта — отказ: имя попадает в письма, подписи подтверждений и журнал.
+  `400 validation.failed` по `body.display_name`, правило `format`; имя попадает в письма, подписи подтверждений и
+  журнал. Невидимые допустимы только внутри эмодзи (волна 2, m1): ZWJ — между пиктограммами `Extended_Pictographic`
+  (слева — с необязательными VS15/VS16 и модификатором тона, как GB11), VS15/VS16 — сразу после пиктограммы или
+  основы кейкапа `0–9 # *`; прочие селекторы варианта — отказ; хотя бы один видимый символ. Таблица свойства —
+  `domain/pictographic.go` (в stdlib её нет; Unicode 15.0, страж формы `TestPictographicTable`).
+  Исполнитель `staff.invite` повторяет `validateInvitee` после `execLocks` на обоих путях (новая учётка и `existing_id`):
+  запрос мог ждать, пока правила ужесточили, — отказ `ErrStale` (`failed`, 409 `platform.approval_stale`), не
+  `FieldError` (`TestApproveInviteInvalidPayloadFails`).
   - **Порядок замков (m7, M-4):** `lockOwners` (`pg_advisory_xact_lock(ownersLockKey)` — только где возможен страж
     последнего владельца: выключение, сброс, смена роли, `OperatorDisable`; всегда первым) → `lockAccounts` — учётки
     по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`) → сессии → `staff_mfa` →

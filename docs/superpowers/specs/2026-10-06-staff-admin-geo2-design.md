@@ -495,6 +495,8 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
   - срок не истёк, запрос `pending` (`409 platform.approval_closed`);
   - инициатор всё ещё `active` и имеет право запроса;
   - версия цели (`version` в `payload`) — изменилась → статус `failed`, `409 platform.approval_stale`.
+  - у `staff.invite` почта и имя проходят ТЕКУЩИЕ правила приглашения (правила могли ужесточить, пока запрос
+    ждал) — нет → тоже `failed`, `409 platform.approval_stale` (переподать приглашение).
 - Срок 24 ч. Исполнение само проверяет срок; просроченные помечает `expired` `ExpireDue`
   из тикера чистки admin-api (`staff/jobs.Cleaner.Tick`, раз в час, §4.10) — не задача River.
 - Каждый шаг пишется в аудит; событие `platform.approval_decided`. Письма о новых запросах — в этом срезе
@@ -653,6 +655,8 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 - Cookie `__Host-wf_admin_session`: `HttpOnly; Secure; SameSite=Strict; Path=/`, без `Domain`, без
   `Max-Age` (сессионная; сроки — на сервере). Контракт меняет имя в `securitySchemes.session`.
   `ADMIN_COOKIE_SECURE=false` при `https://` в `ADMIN_ORIGIN` — отказ старта (только dev по http);
+  `ADMIN_COOKIE_SECURE=true` при `http://` не на loopback (не `127.0.0.1`, `[::1]`, `localhost`) — тоже отказ старта:
+  Secure-cookie по http браузер не примет, вход не создал бы сессию;
   `ADMIN_ORIGIN` с IDN-хостом — в форме A-label (`xn--…`), как его шлёт браузер, иначе отказ старта.
 - **Один origin без rewrite:** admin-api сам отдаёт собранную `apps/admin` из `ADMIN_STATIC_DIR`
   (пусто — не отдаёт). `/v1/*` — API, остальное — статика с fallback на `index.html`; заголовки CSP,
@@ -782,7 +786,7 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 | `auth.setup_required` | 403 | стадия `setup`, операция недоступна |
 | `platform.approval_not_found` | 404 | — |
 | `platform.approval_self` | 409 | подтвердить свой запрос или запрос о себе |
-| `platform.approval_stale` | 409 | цель изменилась после запроса |
+| `platform.approval_stale` | 409 | цель изменилась после запроса или его данные больше не проходят правила |
 | `platform.approval_closed` | 409 | запрос уже решён, отменён или просрочен |
 | `http.not_implemented` | 501 | общий код admin: операция объявлена в контракте, но ещё не реализована; только admin |
 

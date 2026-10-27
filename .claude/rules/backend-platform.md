@@ -14,7 +14,8 @@ paths:
   Ключ — `(user_id, key)`, где `user_id` — id субъекта `auth.SubjectFrom` (игрок или сотрудник; колонки вида нет —
   UUIDv7 не совпадают). Таблица — параметр `Config.Table` (`idempotency.Table`): `Players` (нулевое значение) —
   `idempotency_keys` у public API, `Staff` — `staff_idempotency_keys` у admin-api (ответы сотрудников с ПД; права на неё
-  только у роли `admin`); неизвестная — паника при сборке. Чистка — `idempotency.DeleteExpired(ctx, db, таблица)` пулом
+  только у роли `admin`); неизвестная — паника при сборке. Запросы — пары `X`/`StaffX` в `queries/idempotency.sql`,
+  равные текстом после замены имени таблицы (страж `TestStaffQueriesMirrorPublic`). Чистка — `idempotency.DeleteExpired(ctx, db, таблица)` пулом
   роли с правами на таблицу: `Players` — воркер (`CleanupWorker`, River, раз в час), `Staff` — тикер admin-api (шаг
   `staff/jobs.Cleaner.Tick`). Операция с `x-idempotency: no-store` (ответ с секретами) хранит только хэш и статус: повтор —
   `409 idempotency.replay_unavailable`; `Cache-Control: no-store` ставит хендлер.
@@ -29,7 +30,9 @@ paths:
   `staff_idempotency_keys`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +
   `ExpireDue` + `PurgeDecided` + `idempotency.DeleteExpired(…, Staff)`).
   Исполняющий клиент River — только `queue.ClientConfig(очереди, исполнители, периодика, журнал)` у обоих бинарников
-  (`riverConfig` в `cmd/worker` и `cmd/admin-api`; свой `&river.Config{…}` не собирать): общая часть —
+  (`riverConfig` в `cmd/worker` и `cmd/admin-api`), клиент только для вставки — `queue.InsertConfig(журнал)`; свой
+  `river.Config{…}` вне `platform/queue` (литерал, `new`, переменная типа) не собирать — страж
+  `archtest.TestRiverConfigOnlyInQueue` (тесты `*_test.go` — исключение): общая часть —
   `queue.MaintenanceConfig` (сроки чистки выполненных, отменённых и «мёртвых» задач, порог рескьюера — умолчания River
   v0.47–v0.49, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
   `TestMaintenanceConfig`, `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance`
