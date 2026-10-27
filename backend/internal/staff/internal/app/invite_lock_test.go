@@ -13,15 +13,19 @@ import (
 	"wf/backend/internal/staff"
 )
 
-// holdAccount — отдельная транзакция держит замок строки учётки (FOR UPDATE) до release: сценарий,
-// который полез бы за замком, ждал бы её.
-func (e *env) holdAccount(staffID uuid.UUID) (release func()) {
+// holdAccount — отдельная транзакция держит замки строк учёток (FOR UPDATE) до release: сценарий,
+// который полез бы за замком, ждал бы её. Все замки — одной транзакцией, то есть одним соединением пула:
+// по транзакции на учётку тест держал бы столько соединений, сколько учёток, и при пуле меньше этого ждал бы
+// свободное вечно (dbtest.PoolMaxConns, PR #12). Срок на получение соединения — отказ, а не зависание.
+func (e *env) holdAccount(staffIDs ...uuid.UUID) (release func()) {
 	e.t.Helper()
-	tx, err := e.owner.Begin(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tx, err := e.owner.Begin(ctx)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if _, err := tx.Exec(context.Background(), `SELECT 1 FROM staff_accounts WHERE id = $1 FOR UPDATE`, staffID); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM staff_accounts WHERE id = ANY($1) FOR UPDATE`, staffIDs); err != nil {
 		e.t.Fatal(err)
 	}
 	release = func() { _ = tx.Rollback(context.Background()) }
@@ -44,9 +48,7 @@ func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 	expired, _ := e.invitee("expired@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	e.exec(`UPDATE staff_invites SET expires_at = $2 WHERE staff_id = $1`, expired.ID, t0)
 	valid, validCode := e.invitee("valid@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	for _, m := range []member{active, off, paused, closed, expired, valid} {
-		e.holdAccount(m.ID)
-	}
+	e.holdAccount(active.ID, off.ID, paused.ID, closed.ID, expired.ID, valid.ID)
 	// неверный код к годному приглашению: ответ без замка учётки и строки, неудача — в аудите
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

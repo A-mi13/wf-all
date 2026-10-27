@@ -78,10 +78,28 @@ func NewURL(t testing.TB) string {
 	return pgtestdb.Custom(t, c, migrator()).URL()
 }
 
+// PoolMaxConns — размер каждого пула тестов. По умолчанию pgx берёт max(4, число CPU): на машине разработчика
+// (24 ядра) тест, держащий одновременно пять соединений, проходил, а на раннере CI (4 vCPU) ждал свободное
+// соединение вечно (PR #12: TestInviteIneligibleTakesNoLocks — таймаут пакета 10 мин). Размер задан явно и равен
+// раннеру: тест ведёт себя одинаково везде. Тесту нужно больше одновременных соединений — значит, он держит их
+// лишние (несколько замков — одной транзакцией).
+const PoolMaxConns = 4
+
+// poolConfig — конфигурация пула тестов с размером PoolMaxConns.
+func poolConfig(t testing.TB, url string) *pgxpool.Config {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = PoolMaxConns
+	return cfg
+}
+
 // NewPool — пул pgx: код на sqlc (sql_package pgx/v5) работает с ним, а не с *sql.DB.
 func NewPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
-	pool, err := pgxpool.New(context.Background(), NewURL(t))
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig(t, NewURL(t)))
 	if err != nil {
 		t.Fatalf("pgxpool: %v", err)
 	}
@@ -103,7 +121,7 @@ func NewPoolsAs(t testing.TB, role string) Pools {
 	t.Helper()
 	url := NewURL(t)
 	ctx := context.Background()
-	owner, err := pgxpool.New(ctx, url)
+	owner, err := pgxpool.NewWithConfig(ctx, poolConfig(t, url))
 	if err != nil {
 		t.Fatalf("pgxpool: %v", err)
 	}
@@ -116,10 +134,7 @@ func NewPoolsAs(t testing.TB, role string) Pools {
 	if err := grants.Apply(ctx, sqldb); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := poolConfig(t, url)
 	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
 		_, err := c.Exec(ctx, "SET ROLE "+pgx.Identifier{role}.Sanitize())
 		return err
