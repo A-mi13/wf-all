@@ -1085,9 +1085,8 @@ geo,versions,flags}/`, `src/api/`. Правила — новое `.claude/rules/
   функцией `apps/admin/e2e/totp.ts` (векторы RFC 4226 и RFC 6238 — `e2e/totp.test.ts`; код каждого шага —
   один раз, иначе ждёт следующий шаг).
 - Версии TanStack Router, react-hook-form, `@fontsource/*`, генератора QR — **записаны в
-  `docs/versions.md`**: TanStack Router 1.170.42 (исключение: свежие патчи были моложе `minimumReleaseAge`),
-  react-hook-form 7.90.0, `@fontsource/oswald` и `@fontsource/manrope` 5.3.0, QR — `uqr` 0.1.3; Playwright
-  1.63.0 — одна версия у `apps/web` и `apps/admin`.
+  `docs/versions.md`** (числа — только там, здесь не дублируются): TanStack Router, react-hook-form,
+  `@fontsource/oswald` и `@fontsource/manrope`, QR — `uqr`; Playwright — одна версия у `apps/web` и `apps/admin`.
 - `ALTER TYPE … DROP VALUE` недоступен в PostgreSQL — **сделано в `0020_staff.sql`**: типы `role_name` и
   `role_scope` пересоздаются (только `captain` и `city`); пустая таблица не требуется — строки вне
   `captain`/`city` миграция отвергает с понятной ошибкой (§3.2).
