@@ -43,6 +43,13 @@ func ClientConfig(queues map[string]river.QueueConfig, workers *river.Workers, p
 	return &c
 }
 
+// InsertConfig — конфигурация клиента River только для вставки задач (Deps.River сценариев admin-api, команды
+// воркера): журнал, без очередей и исполнителей — клиент не стартует и обслуживания не делает. river.Config
+// собирается только в этом пакете (страж archtest TestRiverConfigOnlyInQueue).
+func InsertConfig(log *slog.Logger) *river.Config {
+	return &river.Config{Logger: log}
+}
+
 // MaintenanceDiff — имена полей c вне binaryFields, отличных от MaintenanceConfig (пусто — совпадает). Для
 // стражей бинарников: любое поле river.Config, заданное в одном бинарнике мимо MaintenanceConfig, — расхождение,
 // в том числе поле, которое появится в новой версии River.

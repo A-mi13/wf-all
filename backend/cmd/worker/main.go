@@ -144,7 +144,7 @@ func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.
 		return fmt.Errorf("--since: нужен RFC 3339, например 2026-10-01T00:00:00Z")
 	}
 	// клиент только для вставки: очереди обслуживает работающий воркер
-	ins, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Logger: log})
+	ins, err := river.NewClient(riverpgxv5.New(pool), queue.InsertConfig(log))
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"log/slog"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -65,5 +66,23 @@ func TestMaintenanceDiff(t *testing.T) {
 	c.Queues, c.Workers, c.PeriodicJobs, c.Logger = nil, nil, []*river.PeriodicJob{}, nil
 	if d := queue.MaintenanceDiff(&c); len(d) != 0 {
 		t.Fatalf("поля бинарника посчитаны расхождением: %v", d)
+	}
+}
+
+// Волна 2, m2: клиент только для вставки (сценарии, команды) — queue.InsertConfig: только журнал, без очередей,
+// исполнителей и периодики (клиент не стартует и обслуживания не делает). Любое другое заданное поле — ошибка:
+// river.Config собирается только здесь (archtest TestRiverConfigOnlyInQueue), правка — сознательно и с тестом.
+func TestInsertConfig(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	c := queue.InsertConfig(log)
+	if c.Logger != log {
+		t.Fatal("журнал не передан")
+	}
+	c.Logger = nil
+	v := reflect.ValueOf(c).Elem()
+	for i := range v.NumField() {
+		if f := v.Type().Field(i); f.IsExported() && !v.Field(i).IsZero() {
+			t.Errorf("поле %s задано у клиента только для вставки", f.Name)
+		}
 	}
 }

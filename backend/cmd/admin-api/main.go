@@ -173,7 +173,7 @@ type assembly struct {
 // команды ставят staff.mail в транзакции действия; исполняет письма отдельный клиент фона (у него в
 // исполнителях Deps — иначе цикл). Реестр подтверждений проверяется сразу: невалидный — отказ старта.
 func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys.Ring, cat *i18n.Catalog) (assembly, error) {
-	ins, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Logger: log})
+	ins, err := river.NewClient(riverpgxv5.New(pool), queue.InsertConfig(log))
 	if err != nil {
 		return assembly{}, err
 	}
