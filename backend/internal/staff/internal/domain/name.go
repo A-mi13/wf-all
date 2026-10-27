@@ -24,7 +24,7 @@ const (
 //   - VS15/VS16 — только сразу после пиктограммы или основы кейкапа (0–9, #, *): не первым, не после ZWJ, другого
 //     селектора, пробела или буквы (двойник «Иван<VS16>»).
 //
-// И хотя бы один видимый символ (не пробел, не ZWJ и не селектор). Длину и крайние пробелы проверяет вызывающий.
+// И хотя бы один видимый символ (не пробел, не ZWJ, не селектор и не метка категории M). Длину и крайние пробелы проверяет вызывающий.
 func DisplayNameOK(name string) bool {
 	rs := []rune(name)
 	visible := false
@@ -40,7 +40,8 @@ func DisplayNameOK(name string) bool {
 			}
 		case unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) || isInvisible(r):
 			return false
-		case !unicode.IsSpace(r):
+		case !unicode.IsSpace(r) && !unicode.Is(unicode.M, r):
+			// метка (Mn, Mc, Me) без основы — не видимый символ: имя из одних ударений или U+20DD — пустая подпись
 			visible = true
 		}
 	}

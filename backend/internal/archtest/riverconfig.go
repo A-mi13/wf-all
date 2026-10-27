@@ -14,8 +14,9 @@ const riverPath = "github.com/riverqueue/river"
 // riverConfigViolations — места файла name, где собирается river.Config: составной литерал (с & и без),
 // new(river.Config), объявление переменной этого типа (нулевое значение, затем поля по одному). Тип в сигнатуре и
 // указатель (*river.Config) — не сборка. Импорт River под другим именем и точкой учитывается. Синтаксический разбор
-// без проверки типов: копию готового значения (c := *queue.ClientConfig(…); c.X = …) страж не увидит — это
-// ловят стражи бинарников по riverConfig.
+// без проверки типов: копию готового значения (c := *queue.ClientConfig(…); c.X = …), элемент литерала среза или
+// карты с опущенным типом ([]river.Config{{…}}) и псевдоним типа (type cfg = river.Config) страж не увидит — первое
+// ловят стражи бинарников по riverConfig, остальное в кодовой базе не встречается (повторное ревью волны 2, m3).
 func riverConfigViolations(name string, src []byte) ([]string, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution)
