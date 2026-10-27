@@ -42,11 +42,13 @@ func TestRunRejectsClientIPHeaderWithoutProxies(t *testing.T) {
 	}
 }
 
-// Неверный ADMIN_ORIGIN и аллоулист «пускает всех» — отказ старта до подключения к базе.
+// Неверный ADMIN_ORIGIN, аллоулист «пускает всех» и https-origin с ADMIN_COOKIE_SECURE=false — отказ старта
+// до подключения к базе.
 func TestRunRejectsBadOriginAndAllowlist(t *testing.T) {
 	for _, extra := range [][]string{
 		{"ADMIN_ORIGIN=http://127.0.0.1:5173/"},
 		{"ADMIN_IP_ALLOWLIST=10.0.0.0/8,0.0.0.0/0"},
+		{"ADMIN_ORIGIN=https://admin.wf.example", "ADMIN_COOKIE_SECURE=false"},
 	} {
 		err := run(context.Background(), nil, offlineEnv(extra...), io.Discard, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "ADMIN_") || strings.Contains(err.Error(), "connect") {

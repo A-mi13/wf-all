@@ -101,6 +101,9 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	if err := admin.ValidateOrigin(cfg.Origin); err != nil {
 		return err
 	}
+	if err := admin.ValidateCookieSecure(cfg.Origin, cfg.CookieSecure); err != nil {
+		return err
+	}
 	if err := admin.ValidateAllowlist(cfg.IPAllowlist); err != nil {
 		return err
 	}
