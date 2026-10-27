@@ -642,6 +642,10 @@ paths:
         - 409 `staff.email_taken` — почта уже у действующей учётки.
         - 422 `staff.city_not_found` — города из `city_ids` нет.
         - 400 `validation.failed` по `body.city_ids` с кодом `min_items` — модератор без городов.
+        - 400 `validation.failed` по `body.city_ids`: `max_items` — города у роли не `moderator`
+          (города бывают только у модератора); `maxItems` — больше 100 городов.
+        - 400 `validation.failed` по `body.email`: `minLength` — короче 3 символов, `maxLength` — длиннее
+          320 символов (до проверки формата).
         - 400 `validation.failed` по `body.email` с кодом `format` — не адрес почты по правилам админки:
           ровно одна `@`, локальная часть — ASCII dot-atom (RFC 5322) не длиннее 64 байт, домен — в том
           числе IDN (хранится в форме A-label `xn--…`) без невидимых и запрещённых IDNA символов, весь
@@ -772,7 +776,8 @@ paths:
         - 403 `auth.forbidden` — нет права на такое изменение.
         - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свою роль менять нельзя.
         - 422 `staff.city_not_found` — города из `city_ids` нет; 400 `validation.failed` по
-          `body.city_ids` с кодом `min_items` — модератор без городов.
+          `body.city_ids` с кодом `min_items` — модератор без городов, `max_items` — города у роли не
+          `moderator` (города бывают только у модератора), `maxItems` — больше 100 городов.
         - 409 `staff.last_owner` — понижение последнего активного владельца.
       parameters:
         - $ref: '#/components/parameters/StaffId'
@@ -1962,7 +1967,7 @@ components:
           type: string
           minLength: 3
           maxLength: 320
-          description: Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же учётку через сброс доступа. Регистр и крайние пробелы не важны; не адрес (локальная часть не ASCII dot-atom, домен с невидимыми символами) — 400 validation.failed по body.email, код format
+          description: Рабочая почта — на неё уйдёт код приглашения. Почта выключенной учётки возвращает ту же учётку через сброс доступа. Регистр и крайние пробелы не важны; не адрес (локальная часть не ASCII dot-atom, домен с невидимыми символами) — 400 validation.failed по body.email, код format; короче 3 или длиннее 320 символов — код minLength или maxLength
           example: ivan.p@wf.example
         display_name:
           type: string
@@ -1976,7 +1981,7 @@ components:
           type: array
           maxItems: 100
           uniqueItems: true
-          description: Города модератора — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пусто или нет поля
+          description: Города модератора — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пусто или нет поля (иначе код max_items); больше 100 — код maxItems
           items:
             type: string
             format: uuid
@@ -1996,7 +2001,7 @@ components:
           type: array
           maxItems: 100
           uniqueItems: true
-          description: Города модератора целиком — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пустой список
+          description: Города модератора целиком — у moderator хотя бы один (иначе 400 validation.failed по body.city_ids, код min_items), у остальных ролей — пустой список (иначе код max_items); больше 100 — код maxItems
           items:
             type: string
             format: uuid

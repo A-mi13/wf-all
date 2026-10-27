@@ -534,6 +534,10 @@ invites:
       - 409 `staff.email_taken` — почта уже у действующей учётки.
       - 422 `staff.city_not_found` — города из `city_ids` нет.
       - 400 `validation.failed` по `body.city_ids` с кодом `min_items` — модератор без городов.
+      - 400 `validation.failed` по `body.city_ids`: `max_items` — города у роли не `moderator`
+        (города бывают только у модератора); `maxItems` — больше 100 городов.
+      - 400 `validation.failed` по `body.email`: `minLength` — короче 3 символов, `maxLength` — длиннее
+        320 символов (до проверки формата).
       - 400 `validation.failed` по `body.email` с кодом `format` — не адрес почты по правилам админки:
         ровно одна `@`, локальная часть — ASCII dot-atom (RFC 5322) не длиннее 64 байт, домен — в том
         числе IDN (хранится в форме A-label `xn--…`) без невидимых и запрещённых IDNA символов, весь
@@ -653,7 +657,8 @@ account-role:
       - 403 `auth.forbidden` — нет права на такое изменение.
       - 404 `staff.not_found` — учётки нет; 409 `staff.self_action` — свою роль менять нельзя.
       - 422 `staff.city_not_found` — города из `city_ids` нет; 400 `validation.failed` по
-        `body.city_ids` с кодом `min_items` — модератор без городов.
+        `body.city_ids` с кодом `min_items` — модератор без городов, `max_items` — города у роли не
+        `moderator` (города бывают только у модератора), `maxItems` — больше 100 городов.
       - 409 `staff.last_owner` — понижение последнего активного владельца.
     parameters:
       - $ref: '../root.yaml#/components/parameters/StaffId'
