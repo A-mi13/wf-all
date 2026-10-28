@@ -218,3 +218,90 @@ WHERE p.geoname_id = ANY (sqlc.arg(ids)::bigint[]);
 -- Какие из id есть в cities (все статусы и страны; проверка городов флага, R19).
 -- name: ExistingCityIDs :many
 SELECT id FROM cities WHERE id = ANY (sqlc.arg(ids)::uuid[]) ORDER BY id;
+
+-- ---------------------------------------------------------------------------
+-- Активация города (activateGeoCity, Task 10; спека geo §5.3, R13). Всё — в одной транзакции сценария.
+-- ---------------------------------------------------------------------------
+
+-- Место источника для активации; missing — пропало из источника (missing_since не NULL, R13).
+-- name: ActivatePlace :one
+SELECT p.geoname_id, p.country_code::text AS country_code, coalesce(p.admin1_code, '')::text AS admin1_code,
+       p.name, p.ascii_name, p.population, p.timezone, (p.missing_since IS NOT NULL)::boolean AS missing
+FROM geonames_places p
+WHERE p.geoname_id = sqlc.arg(geoname_id)::bigint;
+
+-- Страна активации по коду: id, язык, включена ли.
+-- name: ActivateCountry :one
+SELECT id, default_locale, is_enabled FROM countries WHERE code = sqlc.arg(code)::text;
+
+-- На месте уже есть город (быстрый ответ 409; гонку ловит cities_geoname_id_key).
+-- name: ActivateCityOnPlace :one
+SELECT EXISTS (SELECT 1 FROM cities WHERE geoname_id = sqlc.arg(geoname_id)::bigint) AS found;
+
+-- Регион из запроса — только своей страны; ascii-название admin1 региона (для суффикса slug), если есть.
+-- name: ActivateRegionOfCountry :one
+SELECT r.id, coalesce(a.ascii_name, '')::text AS ascii_name
+FROM regions r
+JOIN countries co ON co.id = r.country_id
+LEFT JOIN geonames_admin1 a ON a.country_code = co.code AND a.admin1_code = r.geoname_admin1_code
+WHERE r.id = sqlc.arg(id)::uuid AND r.country_id = sqlc.arg(country_id)::uuid;
+
+-- admin1 источника: ascii-название и название на языке страны (выбрано импортом по §3.4; пусто — нет).
+-- name: ActivateAdmin1 :one
+SELECT a.ascii_name, coalesce(an.name, '')::text AS local_name
+FROM geonames_admin1 a
+LEFT JOIN geonames_admin1_names an
+       ON an.country_code = a.country_code AND an.admin1_code = a.admin1_code AND an.locale = sqlc.arg(locale)::text
+WHERE a.country_code = sqlc.arg(country_code)::text AND a.admin1_code = sqlc.arg(admin1_code)::text;
+
+-- Новый регион страны с кодом admin1; уже есть (в том числе параллельная активация вставила и закоммитила) —
+-- ни одной строки, без 23505 (regions_country_admin1_key — частичный уникальный индекс).
+-- name: ActivateInsertRegion :one
+INSERT INTO regions (id, country_id, name, geoname_admin1_code, created_at)
+VALUES (sqlc.arg(id)::uuid, sqlc.arg(country_id)::uuid, sqlc.arg(name)::text, sqlc.arg(admin1_code)::text,
+        sqlc.arg(created_at)::timestamptz)
+ON CONFLICT (country_id, geoname_admin1_code) WHERE geoname_admin1_code IS NOT NULL DO NOTHING
+RETURNING id;
+
+-- Регион страны по коду admin1.
+-- name: ActivateRegionByAdmin1 :one
+SELECT id FROM regions
+WHERE country_id = sqlc.arg(country_id)::uuid AND geoname_admin1_code = sqlc.arg(admin1_code)::text;
+
+-- Названия нового региона: строка языка страны — каноническое имя, прочие — из admin1 источника.
+-- name: ActivateRegionNames :exec
+INSERT INTO region_names (region_id, locale, name)
+SELECT sqlc.arg(region_id)::uuid, sqlc.arg(country_locale)::text, sqlc.arg(canonical)::text
+UNION ALL
+SELECT sqlc.arg(region_id)::uuid, an.locale, an.name
+FROM geonames_admin1_names an
+WHERE an.country_code = sqlc.arg(country_code)::text
+  AND an.admin1_code = sqlc.arg(admin1_code)::text
+  AND an.locale <> sqlc.arg(country_locale)::text
+  AND btrim(an.name) <> ''
+ON CONFLICT DO NOTHING;
+
+-- Названия места по языкам (выбраны импортом по §3.4).
+-- name: ActivatePlaceNames :many
+SELECT locale, name FROM geonames_place_names WHERE geoname_id = sqlc.arg(geoname_id)::bigint;
+
+-- Адрес занят: текущий slug города или прежний адрес из истории.
+-- name: SlugTaken :one
+SELECT (EXISTS (SELECT 1 FROM cities WHERE slug = sqlc.arg(slug)::text)
+        OR EXISTS (SELECT 1 FROM city_slug_history WHERE slug = sqlc.arg(slug)::text))::boolean AS taken;
+
+-- Новый город из места: точка — из источника, версия 1, время — часов сценария.
+-- name: ActivateInsertCity :exec
+INSERT INTO cities (id, country_id, region_id, name, slug, timezone, centroid, status, population, geoname_id,
+                    version, created_at, updated_at)
+SELECT sqlc.arg(id)::uuid, sqlc.arg(country_id)::uuid, sqlc.narg(region_id)::uuid, sqlc.arg(name)::text,
+       sqlc.arg(slug)::text, sqlc.arg(timezone)::text, p.location, sqlc.arg(status)::text::city_status,
+       p.population, p.geoname_id, 1, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+FROM geonames_places p
+WHERE p.geoname_id = sqlc.arg(geoname_id)::bigint;
+
+-- Названия нового города по языкам (массивы одной длины).
+-- name: ActivateCityNames :exec
+INSERT INTO city_names (city_id, locale, name)
+SELECT sqlc.arg(city_id)::uuid, u.locale, u.name
+FROM (SELECT unnest(sqlc.arg(locales)::text[]) AS locale, unnest(sqlc.arg(names)::text[]) AS name) AS u;

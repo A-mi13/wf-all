@@ -29,6 +29,10 @@ func TestEventShapes(t *testing.T) {
 	}{
 		{geo.CityLinkedEvent(eventCity, 3, 487846), "geo.city_linked", "city",
 			`{"city_id":"01920000-0000-7000-8000-000000000001","geoname_id":487846}`, eventCity, 3},
+		{geo.CityActivatedEvent(eventCity, "RU", &eventImport, geo.StatusWaitlist, 526815), "geo.city_activated", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","country_code":"RU","region_id":"01920000-0000-7000-8000-000000000002","status":"waitlist","geoname_id":526815}`, eventCity, 1},
+		{geo.CityActivatedEvent(eventCity, "XB", nil, geo.StatusPilot, 1), "geo.city_activated", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","country_code":"XB","region_id":null,"status":"pilot","geoname_id":1}`, eventCity, 1},
 		{geo.ImportFinishedEvent(eventImport, "RU", "succeeded"), "geo.import_finished", "geonames_import",
 			`{"import_id":"01920000-0000-7000-8000-000000000002","country_code":"RU","status":"succeeded"}`, eventImport, 1},
 	}

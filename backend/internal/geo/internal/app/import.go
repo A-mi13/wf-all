@@ -346,17 +346,22 @@ func prepare(raw source.Raw, run importRun, now time.Time) prepared {
 	return p
 }
 
-// chooseName — §3.4 шаг 7: запасное название для языка страны — name, для en — ascii_name,
-// для прочих — нет (строка не пишется).
+// chooseName — название по §3.4 с запасным шага 7 (nameFallback).
 func chooseName(cands []domain.AltName, locale, countryLocale, name, ascii string) string {
-	fallback := ""
+	return strings.TrimSpace(domain.ChooseName(cands, locale, locale == countryLocale,
+		nameFallback(locale, countryLocale, name, ascii)))
+}
+
+// nameFallback — §3.4 шаг 7: запасное название для языка страны — name GeoNames, для en — ascii_name, для
+// прочих — нет (строка не пишется). Общее для импорта (chooseName) и активации (activationNames).
+func nameFallback(locale, countryLocale, name, ascii string) string {
 	switch locale {
 	case countryLocale:
-		fallback = name
+		return name
 	case "en":
-		fallback = ascii
+		return ascii
 	}
-	return strings.TrimSpace(domain.ChooseName(cands, locale, locale == countryLocale, fallback))
+	return ""
 }
 
 // validZone — таймзона известна встроенной базе (clock.In: пустая и Local — отказ).

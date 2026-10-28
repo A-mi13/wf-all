@@ -6,6 +6,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,6 +14,7 @@ import (
 	"wf/backend/internal/geo"
 	"wf/backend/internal/geo/internal/app"
 	"wf/backend/internal/httpapi/admin/oapi"
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/i18n"
 )
@@ -26,24 +28,39 @@ const (
 // Handler — операции тега geo; встраивается в internal/httpapi/admin.Server указателем. Собирается New;
 // нулевой Handler (тесты конвейера; cmd/admin-api собирает настоящий) отвечает 501 http.not_implemented.
 type Handler struct {
-	svc  geo.Service
-	read *app.AdminReader // чтения админки (план B, Task 9); nil — 501
+	svc   geo.Service
+	read  *app.AdminReader // чтения админки (план B, Task 9); nil — 501
+	admin *app.Admin       // сценарии с записью (Task 10–14); nil — 501
 }
 
-// Deps — зависимости сценариев админки geo на пуле admin-api (план B; Task 16 дополняет часами, очередью и
-// журналом для записи).
+// Deps — зависимости сценариев админки geo на пуле admin-api (план B): пул, часы, клиент River для импорта
+// (Task 14; активации не нужен) и журнал. Task 16 собирает их в cmd/admin-api.
 type Deps struct {
-	Pool *pgxpool.Pool
+	Pool  *pgxpool.Pool
+	Clock clock.Clock
+	River app.RiverInserter
+	Log   *slog.Logger
 }
 
 // New — хендлер поверх чтения справочника (geo.New на пуле admin-api) и сценариев админки (d.Pool — тот же
-// пул; nil — операции плана B отвечают 501, как нулевой Handler).
+// пул). Без пула операции плана B отвечают 501, без часов — 501 операции с записью (как нулевой Handler).
 func New(svc geo.Service, d Deps) *Handler {
 	h := &Handler{svc: svc}
 	if d.Pool != nil {
 		h.read = app.NewAdminReader(d.Pool)
+		if d.Clock != nil {
+			h.admin = app.NewAdmin(app.AdminDeps{Pool: d.Pool, Clock: d.Clock, River: d.River, Log: d.Log})
+		}
 	}
 	return h
+}
+
+// writer — сценарии с записью; nil — хендлер без пула или часов: 501.
+func (h *Handler) writer() (*app.Admin, error) {
+	if h == nil || h.admin == nil {
+		return nil, errNotImplemented
+	}
+	return h.admin, nil
 }
 
 var (
@@ -115,11 +132,6 @@ func negotiate(header *string) (locale string, contentLanguage *string) {
 // Операции плана B, объявленные контрактом раньше хендлеров (Task 7, R17): отвечают 501 http.not_implemented
 // и перечислены в pendingOps (internal/httpapi/admin/nostub_test.go). Задача из комментария заменяет
 // заглушку хендлером и убирает операцию из pendingOps.
-
-// ActivateGeoCity — заглушка до Task 10.
-func (h *Handler) ActivateGeoCity(context.Context, oapi.ActivateGeoCityRequestObject) (oapi.ActivateGeoCityResponseObject, error) {
-	return nil, errNotImplemented
-}
 
 // UpdateGeoCity — заглушка до Task 11.
 func (h *Handler) UpdateGeoCity(context.Context, oapi.UpdateGeoCityRequestObject) (oapi.UpdateGeoCityResponseObject, error) {

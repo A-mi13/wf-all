@@ -9,6 +9,7 @@ import (
 // События модуля geo (спека geo §6) — контракт для подписчиков. Payload — только
 // идентификаторы и непрофильные значения, схема v1. Подписчиков пока нет.
 const (
+	EventCityActivated  = "geo.city_activated"
 	EventCityLinked     = "geo.city_linked"
 	EventImportFinished = "geo.import_finished"
 
@@ -45,5 +46,24 @@ func ImportFinishedEvent(importID uuid.UUID, countryCode, status string) events.
 		Type: EventImportFinished, SchemaVersion: 1,
 		AggregateType: AggregateGeonamesImport, AggregateID: importID, AggregateVersion: 1,
 		Payload: ImportFinished{ImportID: importID, CountryCode: countryCode, Status: status},
+	}
+}
+
+// CityActivated — payload geo.city_activated: город заведён из места GeoNames (активация, Task 10).
+// RegionID nil — регион не задан (null).
+type CityActivated struct {
+	CityID      uuid.UUID  `json:"city_id"`
+	CountryCode string     `json:"country_code"`
+	RegionID    *uuid.UUID `json:"region_id"`
+	Status      Status     `json:"status"`
+	GeonameID   int64      `json:"geoname_id"`
+}
+
+// CityActivatedEvent — событие активации; версия агрегата — 1 (новый город, cities.version = 1).
+func CityActivatedEvent(cityID uuid.UUID, countryCode string, regionID *uuid.UUID, status Status, geonameID int64) events.Event {
+	return events.Event{
+		Type: EventCityActivated, SchemaVersion: 1,
+		AggregateType: AggregateCity, AggregateID: cityID, AggregateVersion: 1,
+		Payload: CityActivated{CityID: cityID, CountryCode: countryCode, RegionID: regionID, Status: status, GeonameID: geonameID},
 	}
 }

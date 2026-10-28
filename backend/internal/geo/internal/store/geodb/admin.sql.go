@@ -12,6 +12,296 @@ import (
 	"github.com/google/uuid"
 )
 
+const activateAdmin1 = `-- name: ActivateAdmin1 :one
+SELECT a.ascii_name, coalesce(an.name, '')::text AS local_name
+FROM geonames_admin1 a
+LEFT JOIN geonames_admin1_names an
+       ON an.country_code = a.country_code AND an.admin1_code = a.admin1_code AND an.locale = $1::text
+WHERE a.country_code = $2::text AND a.admin1_code = $3::text
+`
+
+type ActivateAdmin1Params struct {
+	Locale      string
+	CountryCode string
+	Admin1Code  string
+}
+
+type ActivateAdmin1Row struct {
+	AsciiName string
+	LocalName string
+}
+
+// admin1 источника: ascii-название и название на языке страны (выбрано импортом по §3.4; пусто — нет).
+func (q *Queries) ActivateAdmin1(ctx context.Context, arg ActivateAdmin1Params) (ActivateAdmin1Row, error) {
+	row := q.db.QueryRow(ctx, activateAdmin1, arg.Locale, arg.CountryCode, arg.Admin1Code)
+	var i ActivateAdmin1Row
+	err := row.Scan(&i.AsciiName, &i.LocalName)
+	return i, err
+}
+
+const activateCityNames = `-- name: ActivateCityNames :exec
+INSERT INTO city_names (city_id, locale, name)
+SELECT $1::uuid, u.locale, u.name
+FROM (SELECT unnest($2::text[]) AS locale, unnest($3::text[]) AS name) AS u
+`
+
+type ActivateCityNamesParams struct {
+	CityID  uuid.UUID
+	Locales []string
+	Names   []string
+}
+
+// Названия нового города по языкам (массивы одной длины).
+func (q *Queries) ActivateCityNames(ctx context.Context, arg ActivateCityNamesParams) error {
+	_, err := q.db.Exec(ctx, activateCityNames, arg.CityID, arg.Locales, arg.Names)
+	return err
+}
+
+const activateCityOnPlace = `-- name: ActivateCityOnPlace :one
+SELECT EXISTS (SELECT 1 FROM cities WHERE geoname_id = $1::bigint) AS found
+`
+
+// На месте уже есть город (быстрый ответ 409; гонку ловит cities_geoname_id_key).
+func (q *Queries) ActivateCityOnPlace(ctx context.Context, geonameID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, activateCityOnPlace, geonameID)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
+}
+
+const activateCountry = `-- name: ActivateCountry :one
+SELECT id, default_locale, is_enabled FROM countries WHERE code = $1::text
+`
+
+type ActivateCountryRow struct {
+	ID            uuid.UUID
+	DefaultLocale string
+	IsEnabled     bool
+}
+
+// Страна активации по коду: id, язык, включена ли.
+func (q *Queries) ActivateCountry(ctx context.Context, code string) (ActivateCountryRow, error) {
+	row := q.db.QueryRow(ctx, activateCountry, code)
+	var i ActivateCountryRow
+	err := row.Scan(&i.ID, &i.DefaultLocale, &i.IsEnabled)
+	return i, err
+}
+
+const activateInsertCity = `-- name: ActivateInsertCity :exec
+INSERT INTO cities (id, country_id, region_id, name, slug, timezone, centroid, status, population, geoname_id,
+                    version, created_at, updated_at)
+SELECT $1::uuid, $2::uuid, $3::uuid, $4::text,
+       $5::text, $6::text, p.location, $7::text::city_status,
+       p.population, p.geoname_id, 1, $8::timestamptz, $8::timestamptz
+FROM geonames_places p
+WHERE p.geoname_id = $9::bigint
+`
+
+type ActivateInsertCityParams struct {
+	ID        uuid.UUID
+	CountryID uuid.UUID
+	RegionID  *uuid.UUID
+	Name      string
+	Slug      string
+	Timezone  string
+	Status    string
+	Now       time.Time
+	GeonameID int64
+}
+
+// Новый город из места: точка — из источника, версия 1, время — часов сценария.
+func (q *Queries) ActivateInsertCity(ctx context.Context, arg ActivateInsertCityParams) error {
+	_, err := q.db.Exec(ctx, activateInsertCity,
+		arg.ID,
+		arg.CountryID,
+		arg.RegionID,
+		arg.Name,
+		arg.Slug,
+		arg.Timezone,
+		arg.Status,
+		arg.Now,
+		arg.GeonameID,
+	)
+	return err
+}
+
+const activateInsertRegion = `-- name: ActivateInsertRegion :one
+INSERT INTO regions (id, country_id, name, geoname_admin1_code, created_at)
+VALUES ($1::uuid, $2::uuid, $3::text, $4::text,
+        $5::timestamptz)
+ON CONFLICT (country_id, geoname_admin1_code) WHERE geoname_admin1_code IS NOT NULL DO NOTHING
+RETURNING id
+`
+
+type ActivateInsertRegionParams struct {
+	ID         uuid.UUID
+	CountryID  uuid.UUID
+	Name       string
+	Admin1Code string
+	CreatedAt  time.Time
+}
+
+// Новый регион страны с кодом admin1; уже есть (в том числе параллельная активация вставила и закоммитила) —
+// ни одной строки, без 23505 (regions_country_admin1_key — частичный уникальный индекс).
+func (q *Queries) ActivateInsertRegion(ctx context.Context, arg ActivateInsertRegionParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, activateInsertRegion,
+		arg.ID,
+		arg.CountryID,
+		arg.Name,
+		arg.Admin1Code,
+		arg.CreatedAt,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const activatePlace = `-- name: ActivatePlace :one
+
+SELECT p.geoname_id, p.country_code::text AS country_code, coalesce(p.admin1_code, '')::text AS admin1_code,
+       p.name, p.ascii_name, p.population, p.timezone, (p.missing_since IS NOT NULL)::boolean AS missing
+FROM geonames_places p
+WHERE p.geoname_id = $1::bigint
+`
+
+type ActivatePlaceRow struct {
+	GeonameID   int64
+	CountryCode string
+	Admin1Code  string
+	Name        string
+	AsciiName   string
+	Population  int64
+	Timezone    string
+	Missing     bool
+}
+
+// ---------------------------------------------------------------------------
+// Активация города (activateGeoCity, Task 10; спека geo §5.3, R13). Всё — в одной транзакции сценария.
+// ---------------------------------------------------------------------------
+// Место источника для активации; missing — пропало из источника (missing_since не NULL, R13).
+func (q *Queries) ActivatePlace(ctx context.Context, geonameID int64) (ActivatePlaceRow, error) {
+	row := q.db.QueryRow(ctx, activatePlace, geonameID)
+	var i ActivatePlaceRow
+	err := row.Scan(
+		&i.GeonameID,
+		&i.CountryCode,
+		&i.Admin1Code,
+		&i.Name,
+		&i.AsciiName,
+		&i.Population,
+		&i.Timezone,
+		&i.Missing,
+	)
+	return i, err
+}
+
+const activatePlaceNames = `-- name: ActivatePlaceNames :many
+SELECT locale, name FROM geonames_place_names WHERE geoname_id = $1::bigint
+`
+
+type ActivatePlaceNamesRow struct {
+	Locale string
+	Name   string
+}
+
+// Названия места по языкам (выбраны импортом по §3.4).
+func (q *Queries) ActivatePlaceNames(ctx context.Context, geonameID int64) ([]ActivatePlaceNamesRow, error) {
+	rows, err := q.db.Query(ctx, activatePlaceNames, geonameID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ActivatePlaceNamesRow
+	for rows.Next() {
+		var i ActivatePlaceNamesRow
+		if err := rows.Scan(&i.Locale, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const activateRegionByAdmin1 = `-- name: ActivateRegionByAdmin1 :one
+SELECT id FROM regions
+WHERE country_id = $1::uuid AND geoname_admin1_code = $2::text
+`
+
+type ActivateRegionByAdmin1Params struct {
+	CountryID  uuid.UUID
+	Admin1Code string
+}
+
+// Регион страны по коду admin1.
+func (q *Queries) ActivateRegionByAdmin1(ctx context.Context, arg ActivateRegionByAdmin1Params) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, activateRegionByAdmin1, arg.CountryID, arg.Admin1Code)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const activateRegionNames = `-- name: ActivateRegionNames :exec
+INSERT INTO region_names (region_id, locale, name)
+SELECT $1::uuid, $2::text, $3::text
+UNION ALL
+SELECT $1::uuid, an.locale, an.name
+FROM geonames_admin1_names an
+WHERE an.country_code = $4::text
+  AND an.admin1_code = $5::text
+  AND an.locale <> $2::text
+  AND btrim(an.name) <> ''
+ON CONFLICT DO NOTHING
+`
+
+type ActivateRegionNamesParams struct {
+	RegionID      uuid.UUID
+	CountryLocale string
+	Canonical     string
+	CountryCode   string
+	Admin1Code    string
+}
+
+// Названия нового региона: строка языка страны — каноническое имя, прочие — из admin1 источника.
+func (q *Queries) ActivateRegionNames(ctx context.Context, arg ActivateRegionNamesParams) error {
+	_, err := q.db.Exec(ctx, activateRegionNames,
+		arg.RegionID,
+		arg.CountryLocale,
+		arg.Canonical,
+		arg.CountryCode,
+		arg.Admin1Code,
+	)
+	return err
+}
+
+const activateRegionOfCountry = `-- name: ActivateRegionOfCountry :one
+SELECT r.id, coalesce(a.ascii_name, '')::text AS ascii_name
+FROM regions r
+JOIN countries co ON co.id = r.country_id
+LEFT JOIN geonames_admin1 a ON a.country_code = co.code AND a.admin1_code = r.geoname_admin1_code
+WHERE r.id = $1::uuid AND r.country_id = $2::uuid
+`
+
+type ActivateRegionOfCountryParams struct {
+	ID        uuid.UUID
+	CountryID uuid.UUID
+}
+
+type ActivateRegionOfCountryRow struct {
+	ID        uuid.UUID
+	AsciiName string
+}
+
+// Регион из запроса — только своей страны; ascii-название admin1 региона (для суффикса slug), если есть.
+func (q *Queries) ActivateRegionOfCountry(ctx context.Context, arg ActivateRegionOfCountryParams) (ActivateRegionOfCountryRow, error) {
+	row := q.db.QueryRow(ctx, activateRegionOfCountry, arg.ID, arg.CountryID)
+	var i ActivateRegionOfCountryRow
+	err := row.Scan(&i.ID, &i.AsciiName)
+	return i, err
+}
+
 const adminCityExists = `-- name: AdminCityExists :one
 SELECT EXISTS (SELECT 1 FROM cities WHERE id = $1::uuid) AS found
 `
@@ -816,4 +1106,17 @@ func (q *Queries) ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.
 		return nil, err
 	}
 	return items, nil
+}
+
+const slugTaken = `-- name: SlugTaken :one
+SELECT (EXISTS (SELECT 1 FROM cities WHERE slug = $1::text)
+        OR EXISTS (SELECT 1 FROM city_slug_history WHERE slug = $1::text))::boolean AS taken
+`
+
+// Адрес занят: текущий slug города или прежний адрес из истории.
+func (q *Queries) SlugTaken(ctx context.Context, slug string) (bool, error) {
+	row := q.db.QueryRow(ctx, slugTaken, slug)
+	var taken bool
+	err := row.Scan(&taken)
+	return taken, err
 }

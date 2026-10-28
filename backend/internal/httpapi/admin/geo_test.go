@@ -51,7 +51,7 @@ func newGeoEnv(t *testing.T, sessions map[string]*auth.Staff) geoEnv {
 	}
 	o := testOptions(t)
 	o.DB = pools.As
-	o.Geo = geoadmin.New(geo.New(pools.As), geoadmin.Deps{Pool: pools.As})
+	o.Geo = geoadmin.New(geo.New(pools.As), geoadmin.Deps{Pool: pools.As, Clock: o.Clock})
 	o.Sessions = &fakeSessions{staff: all}
 	e.h = newHandler(t, o)
 	return e

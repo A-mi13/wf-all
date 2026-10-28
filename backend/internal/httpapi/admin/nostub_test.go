@@ -24,7 +24,7 @@ import (
 // отвечать 501 http.not_implemented; операция из списка, ответившая иначе, — падение («убрать из
 // pendingOps»). Задачи 9–15 убирают свои операции, Task 16 удаляет пустой список.
 func TestNoStubOperations(t *testing.T) {
-	e := newStaffEnv(t, func(o *admin.Options) { o.Geo = geoadmin.New(geo.New(o.DB), geoadmin.Deps{Pool: o.DB}) })
+	e := newStaffEnv(t, func(o *admin.Options) { o.Geo = geoadmin.New(geo.New(o.DB), geoadmin.Deps{Pool: o.DB, Clock: o.Clock}) })
 	owner := e.firstLogin("olga.v@wf.example", string(perm.Owner))
 	spec, err := oapi.GetSpec()
 	if err != nil {
@@ -85,8 +85,6 @@ func TestNoStubOperations(t *testing.T) {
 // pendingOps — операции плана B, объявленные в контракте (Task 7) раньше своих хендлеров (R17): отвечают
 // 501. Каждая задача 9–15 убирает свои строки, Task 16 удаляет список.
 var pendingOps = map[string]bool{
-	// Task 10 — активация
-	"activateGeoCity": true,
 	// Task 11 — правка города и ручная привязка
 	"updateGeoCity": true,
 	"linkGeoCity":   true,

@@ -18,3 +18,9 @@ func (im *Importer) SetFetch(f func(context.Context, source.FetchConfig, string)
 func (im *Importer) SetBeforeLink(f func(ctx context.Context, cityID uuid.UUID, geonameID int64)) {
 	im.beforeLink = f
 }
+
+// SetStageHook — хук активации (тесты гонок): stage "region" — перед выбором региона, "insert" — после проверки
+// занятости slug, перед вставкой города (в транзакции сценария). В проде nil.
+func (a *Admin) SetStageHook(f func(ctx context.Context, stage string)) {
+	a.hook = f
+}

@@ -11,6 +11,32 @@ import (
 )
 
 type Querier interface {
+	// admin1 источника: ascii-название и название на языке страны (выбрано импортом по §3.4; пусто — нет).
+	ActivateAdmin1(ctx context.Context, arg ActivateAdmin1Params) (ActivateAdmin1Row, error)
+	// Названия нового города по языкам (массивы одной длины).
+	ActivateCityNames(ctx context.Context, arg ActivateCityNamesParams) error
+	// На месте уже есть город (быстрый ответ 409; гонку ловит cities_geoname_id_key).
+	ActivateCityOnPlace(ctx context.Context, geonameID int64) (bool, error)
+	// Страна активации по коду: id, язык, включена ли.
+	ActivateCountry(ctx context.Context, code string) (ActivateCountryRow, error)
+	// Новый город из места: точка — из источника, версия 1, время — часов сценария.
+	ActivateInsertCity(ctx context.Context, arg ActivateInsertCityParams) error
+	// Новый регион страны с кодом admin1; уже есть (в том числе параллельная активация вставила и закоммитила) —
+	// ни одной строки, без 23505 (regions_country_admin1_key — частичный уникальный индекс).
+	ActivateInsertRegion(ctx context.Context, arg ActivateInsertRegionParams) (uuid.UUID, error)
+	// ---------------------------------------------------------------------------
+	// Активация города (activateGeoCity, Task 10; спека geo §5.3, R13). Всё — в одной транзакции сценария.
+	// ---------------------------------------------------------------------------
+	// Место источника для активации; missing — пропало из источника (missing_since не NULL, R13).
+	ActivatePlace(ctx context.Context, geonameID int64) (ActivatePlaceRow, error)
+	// Названия места по языкам (выбраны импортом по §3.4).
+	ActivatePlaceNames(ctx context.Context, geonameID int64) ([]ActivatePlaceNamesRow, error)
+	// Регион страны по коду admin1.
+	ActivateRegionByAdmin1(ctx context.Context, arg ActivateRegionByAdmin1Params) (uuid.UUID, error)
+	// Названия нового региона: строка языка страны — каноническое имя, прочие — из admin1 источника.
+	ActivateRegionNames(ctx context.Context, arg ActivateRegionNamesParams) error
+	// Регион из запроса — только своей страны; ascii-название admin1 региона (для суффикса slug), если есть.
+	ActivateRegionOfCountry(ctx context.Context, arg ActivateRegionOfCountryParams) (ActivateRegionOfCountryRow, error)
 	// Город есть (любой статус и страна) — 404 geo.city_not_found у районов.
 	AdminCityExists(ctx context.Context, id uuid.UUID) (bool, error)
 	// Названия города по всем языкам (GeoCityDetails.names).
@@ -131,6 +157,8 @@ type Querier interface {
 	// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity. Ветка истории
 	// намеренно первой: без ORDER BY s.prio выиграла бы она — это ловит TestResolveCitySlugPrefersCurrent.
 	ResolveCitySlug(ctx context.Context, slug string) (uuid.UUID, error)
+	// Адрес занят: текущий slug города или прежний адрес из истории.
+	SlugTaken(ctx context.Context, slug string) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)
