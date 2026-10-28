@@ -117,12 +117,13 @@ WHERE ($1::uuid IS NULL OR actor_staff_id = $1)
        OR action = $3::text)
   AND ($4::text IS NULL OR object_type = $4)
   AND ($5::uuid IS NULL OR object_id = $5)
-  AND ($6::timestamptz IS NULL OR created_at >= $6)
-  AND ($7::timestamptz IS NULL OR created_at < $7)
-  AND (NOT $8::bool OR scope_city_id = ANY($9::uuid[]) OR actor_staff_id = $10::uuid)
-  AND (NOT $11::bool OR (created_at, id) < ($12::timestamptz, $13::uuid))
+  AND (NOT $6::bool OR object_id = ANY($7::uuid[]))
+  AND ($8::timestamptz IS NULL OR created_at >= $8)
+  AND ($9::timestamptz IS NULL OR created_at < $9)
+  AND (NOT $10::bool OR scope_city_id = ANY($11::uuid[]) OR actor_staff_id = $12::uuid)
+  AND (NOT $13::bool OR (created_at, id) < ($14::timestamptz, $15::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $14
+LIMIT $16
 `
 
 type ListAuditParams struct {
@@ -131,6 +132,8 @@ type ListAuditParams struct {
 	ActionExact  *string
 	ObjectType   *string
 	ObjectID     *uuid.UUID
+	ByObjectIds  bool
+	ObjectIds    []uuid.UUID
 	FromAt       *time.Time
 	ToAt         *time.Time
 	Scoped       bool
@@ -171,6 +174,8 @@ func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]ListAud
 		arg.ActionExact,
 		arg.ObjectType,
 		arg.ObjectID,
+		arg.ByObjectIds,
+		arg.ObjectIds,
 		arg.FromAt,
 		arg.ToAt,
 		arg.Scoped,
