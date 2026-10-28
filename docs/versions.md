@@ -28,7 +28,7 @@
 | chi / pgx | 5.5.0 / 5.11.0 | `backend/go.mod` |
 | oapi-codegen / sqlc | 2.8.1 / 1.31.1 | `backend/tools/go.mod` |
 | oapi-codegen runtime | 1.8.0 | `backend/go.mod` (биндинг параметров запроса в сгенерированном коде `internal/httpapi/*/oapi`) |
-| River | 0.49.0 | `backend/go.mod` (рантайм-библиотека воркера и admin-api), CLI — `backend/tools/go.mod`; почему не 0.50.0 — в исключениях |
+| River | 0.50.0 | `backend/go.mod` (рантайм-библиотека воркера и admin-api; `river`, `riverpgxv5`, `rivertype`, `rivershared`, `riverdriver` — одной версией), CLI — `backend/tools/go.mod`; схема — линия v1–v8, v8 (`job_id_autoincrement`) для Postgres пустая (`SELECT 1`) и не накатывается: goose-миграции `0011–0016` = v2–v7 |
 | goose / pgtestdb / kin-openapi | 3.29.0 / 0.1.1 / 0.152.0 | `backend/go.mod` |
 | google/uuid | 1.6.0 | `backend/go.mod` (UUIDv7 — `internal/platform/id`) |
 | golang-jwt/jwt | 5.3.1 | `backend/go.mod` (access-токены, EdDSA — `internal/platform/token`) |
@@ -51,7 +51,6 @@
 | --- | --- | --- | --- | --- |
 | TypeScript (приложения) | 6.0.3 | 7.0.2 | typescript-eslint 8.72 поддерживает TS < 6.1 (проверено 27.10.2026); у 7.x нет классического JS API | когда typescript-eslint и eslint-config-next объявят поддержку TS 7 |
 | TypeScript (генератор) | 5.9.3 | 7.0.2 | openapi-typescript 7.13 требует `typescript ^5.x` | когда openapi-typescript поднимет peer |
-| River | 0.49.0 | 0.50.0 | 0.50.0 опубликована 27.10.2026 00:53 UTC — моложе суток на момент подъёма Go-зависимостей ветки (27.10.2026; та же защита, что `minimumReleaseAge` у pnpm); 0.x — минорный подъём River может ломать API, а заглушки чужих видов (`queue.AddForeign`) опираются на его внутренности | после 28.10.2026 01:00 UTC — поднять River, riverpgxv5, rivertype и CLI до последней 0.x, прогнать `go test ./cmd/... ./internal/platform/queue/...` и тесты рескьюера |
 | ESLint | 9.39.5 | 10.13.0 | eslint-config-next 16.4.3 тянет eslint-plugin-react 7.37.5 (peer ESLint ≤ 9.7; проверено 27.10.2026) | когда eslint-config-next перейдёт на ESLint 10 |
 
 ## Ловушки

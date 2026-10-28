@@ -38,6 +38,30 @@ func TestMaintenanceConfig(t *testing.T) {
 	}
 }
 
+// Task 0 плана B (R23): сроки в MaintenanceConfig заданы явно, но равны умолчаниям River — смену умолчания при
+// подъёме River ловит этот тест (сверка с WithDefaults текущей версии), а не прод. Каждое заданное поле
+// MaintenanceConfig обязано совпасть с умолчанием River; расхождение — осознанное решение: правка теста, причины в
+// комментарии maintenance.go и строка в docs/versions.md.
+func TestMaintenanceMatchesRiverDefaults(t *testing.T) {
+	c := queue.MaintenanceConfig()
+	def := (&river.Config{}).WithDefaults()
+	got, want := reflect.ValueOf(&c).Elem(), reflect.ValueOf(def).Elem()
+	checked := 0
+	for i := range got.NumField() {
+		f := got.Type().Field(i)
+		if !f.IsExported() || got.Field(i).IsZero() {
+			continue
+		}
+		checked++
+		if !reflect.DeepEqual(got.Field(i).Interface(), want.Field(i).Interface()) {
+			t.Errorf("%s = %v, умолчание River %v", f.Name, got.Field(i).Interface(), want.Field(i).Interface())
+		}
+	}
+	if checked != 4 {
+		t.Fatalf("сверено полей: %d, ждали 4 (сроки чистки и рескьюер)", checked)
+	}
+}
+
 // MaintenanceDiff видит любое поле river.Config вне полей бинарника (очереди, исполнители, периодика, журнал),
 // отличное от MaintenanceConfig; поля бинарника — не расхождение.
 func TestMaintenanceDiff(t *testing.T) {

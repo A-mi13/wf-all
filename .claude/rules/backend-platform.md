@@ -34,10 +34,11 @@ paths:
   `river.Config{…}` вне `platform/queue` (литерал, `new`, переменная типа) не собирать — страж
   `archtest.TestRiverConfigOnlyInQueue` (тесты `*_test.go` — исключение): общая часть —
   `queue.MaintenanceConfig` (сроки чистки выполненных, отменённых и «мёртвых» задач, порог рескьюера — умолчания River
-  v0.47–v0.49, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
-  `TestMaintenanceConfig`, `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance`
-  (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
-  сверить умолчания с константами `queue/maintenance.go`.
+  v0.47–v0.50, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
+  `TestMaintenanceConfig`, `TestMaintenanceMatchesRiverDefaults` (сверка с `WithDefaults` River),
+  `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance` (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
+  changelog (`JobSnooze`, `UniqueOpts`, рескьюер, `AddWorkerArgs`) и линия миграций `riverpgxv5`; разошедшееся умолчание
+  красит `TestMaintenanceMatchesRiverDefaults`.
 - HTTP-бинарник с фоном — `server.RunService(ctx, name, cfg, logOut, build)`: `build(log, pool)` → `Service{Handler,
   Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
   фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены
