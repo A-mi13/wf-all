@@ -514,6 +514,20 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
   нет: счётчик в меню (§9.3).
 - Регистрируются в этом срезе (модуль `staff`): `staff.invite`, `staff.role_change`, `staff.access_reset`,
   `staff.revoke_owner`. Подписи действий — в локалях админки (`approvals.actions.<action>`).
+- **Действия модулей не из `staff`** (план B, R5, R21; первым — `geo.country_create`, `geo.country_rules`):
+  - инициатор в payload — `approvals.Initiator{init_id, init_ver}` (`approvals.InitiatorOf(auth.Staff)`): версия и
+    подпись учётки несёт принципал (`auth.Staff.Version`, `Label` — заполняет загрузчик сессии `staff`), модуль
+    таблиц `staff_*` не читает; проверка инициатора `staff` читает те же поля из любого payload. Отставшая версия
+    ведёт к отказу (`failed`, `initiator_changed`), а не к пропуску;
+  - действие объявляет `LockActors: true`: платформа в транзакции подтверждения — после замка строки запроса и
+    проверки инициатора, до savepoint исполнителя — зовёт хук `Registry.SetActorLock` (регистрирует `staff`):
+    `FOR SHARE` учёток инициатора и подтверждающего по возрастанию id (порядок «строка `approvals` → учётки» тот
+    же, что у `staff`), инициатор изменился — `failed` (`initiator_changed`, `409 platform.approval_stale`),
+    подтверждающий выключен, сменил роль или сессия погашена — откат, запрос `pending`. Действие с `LockActors`
+    без хука — отказ `Registry.Validate()` при сборке. У `staff.*` `LockActors = false`: их исполнитель сам берёт
+    замок владельцев раньше учёток;
+  - исполнитель получает копию принципала подтверждающего с `Label` = `decided_by_label` (подпись решения, а не
+    загрузки сессии): аудит модуля и запрос не расходятся при смене имени между ними.
 
 ### 4.9. Управление сотрудниками
 
