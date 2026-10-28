@@ -142,14 +142,16 @@ func TestErrorsMapToContractCodes(t *testing.T) {
 
 // Защита в глубину (geo 1, Task 7/8): точку уже проверил хендлер, но если сценарий всё же отверг её
 // (geo.ErrBadPoint — другой диапазон или новая проверка в сценарии), клиент получает 400 validation.failed,
-// а не 500.
+// а не 500. Форма — как у валидатора контракта (m5-3 ревью G2: на lat=91 kin-openapi отвечает одним полем
+// query.lat с правилом maximum): одно поле. Какую координату отверг сценарий, он не сообщает — поле точки
+// query.lat, правило format.
 func TestNearestBadPointMaps400(t *testing.T) {
 	_, err := geohttp.New(&stub{err: fmt.Errorf("geo: nearest: %w", geo.ErrBadPoint)}).
 		FindNearestCity(context.Background(), nearest(45.04, 41.97))
 	p := problemOf(t, err)
 	if p.Status != http.StatusBadRequest || p.Code != httpx.CodeValidationFailed ||
-		!reflect.DeepEqual(p.Errors, []httpx.FieldError{{Field: "query.lat", Code: "format"}, {Field: "query.lon", Code: "format"}}) {
-		t.Fatalf("problem = %+v, want 400 validation.failed по query.lat и query.lon", p)
+		!reflect.DeepEqual(p.Errors, []httpx.FieldError{{Field: "query.lat", Code: "format"}}) {
+		t.Fatalf("problem = %+v, want 400 validation.failed с одним полем query.lat (format)", p)
 	}
 }
 
