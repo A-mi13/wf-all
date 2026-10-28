@@ -365,15 +365,16 @@ func (q *Queries) NormalizeQuery(ctx context.Context, input string) (string, err
 
 const resolveCitySlug = `-- name: ResolveCitySlug :one
 SELECT s.city_id FROM (
-  SELECT id AS city_id, 0 AS prio FROM cities WHERE slug = $1::text
-  UNION ALL
   SELECT h.city_id, 1 AS prio FROM city_slug_history h WHERE h.slug = $1::text
+  UNION ALL
+  SELECT id AS city_id, 0 AS prio FROM cities WHERE slug = $1::text
 ) s
 ORDER BY s.prio
 LIMIT 1
 `
 
-// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity.
+// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity. Ветка истории
+// намеренно первой: без ORDER BY s.prio выиграла бы она — это ловит TestResolveCitySlugPrefersCurrent.
 func (q *Queries) ResolveCitySlug(ctx context.Context, slug string) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, resolveCitySlug, slug)
 	var city_id uuid.UUID

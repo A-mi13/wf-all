@@ -69,3 +69,8 @@ func (s *Store) VisiblePlace(ctx context.Context, geonameID int64, locale string
 func (s *Store) CitySettings(ctx context.Context, id uuid.UUID) (geodb.GetCitySettingsRow, bool, error) {
 	return one(s.q.GetCitySettings(ctx, id))
 }
+
+// ExistingCityIDs — какие из ids есть в cities (без фильтра видимости), по id.
+func (s *Store) ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+	return s.q.ExistingCityIDs(ctx, ids)
+}

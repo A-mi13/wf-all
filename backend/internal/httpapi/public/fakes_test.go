@@ -85,6 +85,12 @@ func (f *fakeGeo) CitySettings(context.Context, uuid.UUID) (geo.CitySettings, er
 	return geo.CitySettings{}, errors.New("CitySettings не вызывается публичным API")
 }
 
+// ExistingCityIDs публичный API не вызывает (проверка городов флагов — админка, R19).
+func (f *fakeGeo) ExistingCityIDs(context.Context, []uuid.UUID) ([]uuid.UUID, error) {
+	f.calls = append(f.calls, "ExistingCityIDs")
+	return nil, errors.New("ExistingCityIDs не вызывается публичным API")
+}
+
 // fakeVersions — appversion.Reader: заданный ответ и запомненная платформа.
 type fakeVersions struct {
 	v     appversion.Versions

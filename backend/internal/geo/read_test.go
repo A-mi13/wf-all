@@ -741,3 +741,32 @@ func TestNearestRejectsBadPoint(t *testing.T) {
 		}
 	}
 }
+
+// slug текущий у города A (Михайловск) и в истории города B (Ставрополь, вставка посева в обход сценария):
+// getCityBySlug отдаёт A. Ветки UNION ALL в ResolveCitySlug — история первой: без ORDER BY s.prio запрос отдал бы
+// строку истории, и тест это ловит (geo 1, Task 5 minor: при обратном порядке веток удаление ORDER BY не ловилось).
+func TestResolveCitySlugPrefersCurrent(t *testing.T) {
+	for range 5 { // план исполнения не меняется между вызовами, но повтор отсекает случайную удачу
+		d, err := reads(t).CityBySlug(context.Background(), "mihaylovsk", "")
+		if err != nil || d.ID != cityID(t, "mihaylovsk") {
+			t.Fatalf("slug mihaylovsk: %v %v — ждали город с текущим slug", d.ID, err)
+		}
+	}
+}
+
+// ExistingCityIDs — города всех статусов и стран (выключенная тоже), несуществующие и повторы отброшены, по id;
+// пустой ввод — пустой результат без запроса.
+func TestExistingCityIDs(t *testing.T) {
+	ctx := context.Background()
+	svc := reads(t)
+	stav, sk := cityID(t, "stavropol"), cityID(t, "skrytsk")
+	got, err := svc.ExistingCityIDs(ctx, []uuid.UUID{sk, uuid.New(), stav, stav})
+	want := []uuid.UUID{stav, sk}
+	slices.SortFunc(want, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("got %v %v, ждали %v", got, err, want)
+	}
+	if got, err := svc.ExistingCityIDs(ctx, nil); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("пустой ввод: %v %v", got, err)
+	}
+}

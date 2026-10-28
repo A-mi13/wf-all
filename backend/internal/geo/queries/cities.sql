@@ -74,12 +74,13 @@ LEFT JOIN region_names rn ON rn.region_id = r.id AND rn.locale = sqlc.arg(locale
 LEFT JOIN country_names con ON con.country_id = co.id AND con.locale = sqlc.arg(locale)::text
 WHERE c.id = sqlc.arg(id)::uuid AND co.is_enabled;
 
--- Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity.
+-- Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity. Ветка истории
+-- намеренно первой: без ORDER BY s.prio выиграла бы она — это ловит TestResolveCitySlugPrefersCurrent.
 -- name: ResolveCitySlug :one
 SELECT s.city_id FROM (
-  SELECT id AS city_id, 0 AS prio FROM cities WHERE slug = sqlc.arg(slug)::text
-  UNION ALL
   SELECT h.city_id, 1 AS prio FROM city_slug_history h WHERE h.slug = sqlc.arg(slug)::text
+  UNION ALL
+  SELECT id AS city_id, 0 AS prio FROM cities WHERE slug = sqlc.arg(slug)::text
 ) s
 ORDER BY s.prio
 LIMIT 1;

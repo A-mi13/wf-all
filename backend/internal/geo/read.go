@@ -214,3 +214,14 @@ func cityFromDetails(row geodb.GetVisibleCityRow) City {
 	return newCity(row.ID, row.Slug, row.Name, row.Status, row.Timezone, row.Lat, row.Lon,
 		row.RegionID, row.RegionName, row.CountryCode, row.CountryName)
 }
+
+func (r *reader) ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+	if len(ids) == 0 {
+		return []uuid.UUID{}, nil
+	}
+	found, err := r.st.ExistingCityIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return append(make([]uuid.UUID, 0, len(found)), found...), nil
+}

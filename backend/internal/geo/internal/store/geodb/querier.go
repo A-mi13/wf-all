@@ -11,6 +11,51 @@ import (
 )
 
 type Querier interface {
+	// Город есть (любой статус и страна) — 404 geo.city_not_found у районов.
+	AdminCityExists(ctx context.Context, id uuid.UUID) (bool, error)
+	// Названия города по всем языкам (GeoCityDetails.names).
+	AdminCityNames(ctx context.Context, cityID uuid.UUID) ([]AdminCityNamesRow, error)
+	// История адресов города, новые сверху (GeoCityDetails.slug_history).
+	AdminCitySlugHistory(ctx context.Context, cityID uuid.UUID) ([]AdminCitySlugHistoryRow, error)
+	// Страна есть в справочнике (включённая или нет) — 404 geo.country_not_found у регионов.
+	AdminCountryExists(ctx context.Context, code string) (bool, error)
+	// Названия всех стран по всем языкам (GeoCountry.names).
+	AdminCountryNames(ctx context.Context) ([]AdminCountryNamesRow, error)
+	// Карточка города админки (getGeoCity): без фильтра видимости страны; canonical_locale — язык страны.
+	AdminGetCity(ctx context.Context, arg AdminGetCityParams) (AdminGetCityRow, error)
+	// Строка журнала импорта с отчётом сверки (getGeoImport).
+	AdminGetImport(ctx context.Context, id uuid.UUID) (AdminGetImportRow, error)
+	// Города админки (listGeoCities): все статусы и страны (country_enabled в ответе), фильтры и порядок — как у
+	// публичного ListCities (ранг статуса, population DESC, id) плюс region_id; uuid.Nil в region_id — без
+	// фильтра (has_region). districts_count — районы без архивных.
+	AdminListCities(ctx context.Context, arg AdminListCitiesParams) ([]AdminListCitiesRow, error)
+	// Все страны по коду: правила, название на локали (иначе каноническое), число городов pilot/live.
+	AdminListCountries(ctx context.Context, locale string) ([]AdminListCountriesRow, error)
+	// Районы города включая архивные: действующие по названию, затем архивные по названию.
+	AdminListDistricts(ctx context.Context, cityID uuid.UUID) ([]AdminListDistrictsRow, error)
+	// Журнал импортов, новые сверху (started_at DESC, id DESC); пустой country и has_job false — без фильтра;
+	// курсор — строго после (after_started_at, after_id) в этом порядке.
+	AdminListImports(ctx context.Context, arg AdminListImportsParams) ([]AdminListImportsRow, error)
+	// Запросы админки geo (план B, Task 9–10; спека сотрудников §6, спека geo §4.1, §5.3). Отдельно от
+	// публичных cities.sql: админка видит все статусы и страны, в том числе выключенные (без co.is_enabled).
+	// Исполняет admin-api под ролью admin (grants.sql: SELECT на справочник и источник, запись справочника).
+	// Перед «||» — sqlc.arg(x), не @x (см. cities.sql).
+	// Места источника для активации (listGeoPlaces). Страна места — по §4.1: заведено городом — страна
+	// города (в том числе переопределённая), иначе страна источника; её нет в справочнике — код источника
+	// вместо названия. Название: запрошенная локаль → язык страны → name источника; регион: у заведённого —
+	// регион города, иначе admin1 источника (локаль → язык страны → ascii_name); пустая строка — нет.
+	// пустой q_prefix — без поиска (уже нормализован normalize_text); пустой country — без фильтра (по стране места).
+	// Порядок: population по убыванию, geoname_id; курсор — строго после (after_population, after_geoname_id).
+	AdminListPlaces(ctx context.Context, arg AdminListPlacesParams) ([]AdminListPlacesRow, error)
+	// Регионы страны по названию на языке ответа (иначе каноническое), затем id.
+	AdminListRegions(ctx context.Context, arg AdminListRegionsParams) ([]AdminListRegionsRow, error)
+	// Места-кандидаты отчёта сверки: название и регион на языке ответа (иначе язык страны источника, затем
+	// name/ascii_name источника), население. Пропавших из таблицы мест (удалены следующим импортом) нет в ответе.
+	AdminPlacesByIDs(ctx context.Context, arg AdminPlacesByIDsParams) ([]AdminPlacesByIDsRow, error)
+	// Названия регионов страны по всем языкам (GeoRegion.names).
+	AdminRegionNames(ctx context.Context, code string) ([]RegionName, error)
+	// Какие из id есть в cities (все статусы и страны; проверка городов флага, R19).
+	ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 	// Настройки города для других модулей (§7): без фильтра видимости — country_enabled в ответе.
 	GetCitySettings(ctx context.Context, id uuid.UUID) (GetCitySettingsRow, error)
 	// Город с правилами страны (CityDetails без районов); страна выключена или города нет — 0 строк.
@@ -83,7 +128,8 @@ type Querier interface {
 	// Кандидаты «here» (спека geo §4.3): места источника в радиусе поиска, ближайшие первыми.
 	// Накрытие r(population) отбирает Go (domain.CoverRadiusMeters) — константы в одном месте.
 	PlacesWithin(ctx context.Context, arg PlacesWithinParams) ([]PlacesWithinRow, error)
-	// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity.
+	// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity. Ветка истории
+	// намеренно первой: без ORDER BY s.prio выиграла бы она — это ловит TestResolveCitySlugPrefersCurrent.
 	ResolveCitySlug(ctx context.Context, slug string) (uuid.UUID, error)
 }
 

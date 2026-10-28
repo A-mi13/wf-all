@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/geo"
 	geoadmin "wf/backend/internal/geo/admin"
@@ -27,6 +28,7 @@ import (
 
 type geoEnv struct {
 	h         http.Handler
+	owner     *pgxpool.Pool // подготовка данных теста
 	v         *apitest.Validator
 	stav, mih uuid.UUID
 }
@@ -34,7 +36,7 @@ type geoEnv struct {
 func newGeoEnv(t *testing.T, sessions map[string]*auth.Staff) geoEnv {
 	t.Helper()
 	pools := dbtest.NewPoolsAs(t, "admin")
-	e := geoEnv{v: apitest.New(t, oapi.GetSpec)}
+	e := geoEnv{v: apitest.New(t, oapi.GetSpec), owner: pools.Owner}
 	for slug, dst := range map[string]*uuid.UUID{"stavropol": &e.stav, "mihaylovsk": &e.mih} {
 		if err := pools.Owner.QueryRow(context.Background(), `SELECT id FROM cities WHERE slug = $1`, slug).Scan(dst); err != nil {
 			t.Fatalf("город %s: %v", slug, err)
@@ -49,7 +51,7 @@ func newGeoEnv(t *testing.T, sessions map[string]*auth.Staff) geoEnv {
 	}
 	o := testOptions(t)
 	o.DB = pools.As
-	o.Geo = geoadmin.New(geo.New(pools.As))
+	o.Geo = geoadmin.New(geo.New(pools.As), geoadmin.Deps{Pool: pools.As})
 	o.Sessions = &fakeSessions{staff: all}
 	e.h = newHandler(t, o)
 	return e

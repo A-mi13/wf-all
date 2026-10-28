@@ -53,6 +53,11 @@ func (s *stub) CitySettings(context.Context, uuid.UUID) (geo.CitySettings, error
 	return geo.CitySettings{}, s.err
 }
 
+func (s *stub) ExistingCityIDs(context.Context, []uuid.UUID) ([]uuid.UUID, error) {
+	s.calls++
+	return nil, s.err
+}
+
 func problemOf(t *testing.T, err error) httpx.Problem {
 	t.Helper()
 	pe, ok := errors.AsType[httpx.ProblemError](err)

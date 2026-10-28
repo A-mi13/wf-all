@@ -147,7 +147,7 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 				Staff:          a.staff,
 				// тот же сервис, в котором staff зарегистрировал действия (ревью 10b: два сервиса — approve 500)
 				Approvals: a.approvals,
-				Geo:       geoadmin.New(geo.New(pool)),
+				Geo:       geoadmin.New(geo.New(pool), geoadmin.Deps{Pool: pool}),
 				Clock:     a.deps.Clock,
 			})
 			if err != nil {
