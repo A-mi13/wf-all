@@ -14,7 +14,11 @@ paths:
   очередь `queue.Staff`); корень не импортирует `internal/app`, `admin`, `jobs` (страж
   `TestRootDoesNotImportInnerPackages`). SQL — только `staff_*` (`queries/` → `internal/store/staffdb`,
   генерация — `go tool -modfile=tools/go.mod sqlc generate`).
-- **Права** — `perm.Grants(role)` при загрузке сессии (`LoadStaff`); модуль своих матриц не держит.
+- **Права** — `perm.Grants(role)` при загрузке сессии (`LoadStaff`); модуль своих матриц не держит. `LoadStaff`
+  кладёт в принципал и `Version` учётки, и `Label` (`display_name` без крайних пробелов) во всех стадиях (R5,
+  `TestLoadStaffCarriesVersionAndLabel`). Хук замка акторов для действий модулей не из `staff` — `lockActors`
+  (`RegisterApprovals` → `SetActorLock`): та же перепроверка, что `execLocks`, без `lockOwners`; у `staff.*`
+  `LockActors = false` (страж порядка «владельцы → учётки» — `TestStaffActionsDoNotLockActors`).
 - **Блокировки строк — всегда в порядке учётка → сессия → `staff_mfa` → резервные коды** (`LockAccount`,
   `LockSession`, `LockMFA`, `LockUnusedRecoveryCodes`). Иначе блокировка (гасит все сессии под замком учётки) и
   разблокировка в другой вкладке взаимно ждут.

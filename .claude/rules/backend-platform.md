@@ -175,6 +175,17 @@ paths:
   (`errors.Is(err, staff.ErrLastOwner)`). Ошибка без `Fail` или паника — откат всего, запрос `pending` (500).
   `approvals.ErrInitiatorChanged` (обёртка `ErrStale`) — отказ исполнителя из-за изменившегося инициатора:
   наружу `ErrStale`, у `failed` — `error = initiator_changed`; голый `ErrStale` — `platform.approval_stale`.
+- **Действие модуля не из `staff`** (R5, R21): payload — `v` + встроенный `approvals.Initiator` (`InitiatorOf(s)`:
+  `init_id`, `init_ver` из `auth.Staff.Version`), `Action.LockActors: true`. Платформа после замка строки и проверки
+  инициатора, до savepoint зовёт хук `Registry.SetActorLock` (один, регистрирует `staff`): `FOR SHARE` учёток
+  инициатора и подтверждающего по id; `Fail(ErrInitiatorChanged)` — `failed` (`initiator_changed`), иная ошибка —
+  откат, `pending`. `LockActors` без хука — отказ `Validate`, в `Approve` — сбой (fail-closed). Исполнитель (и хук)
+  получает копию принципала подтверждающего с `Label` = `decided_by_label` (подпись решения из `Approve`, не загрузки
+  сессии) — ей и подписывать аудит модуля. Стражи — `approvals/actor_lock_test.go`, гонка с выключением инициатора —
+  `staff` `TestCountryRulesInitiatorDisabledConcurrently`.
+- Детерминированный uuid сущности без своей строки (агрегат флага, версий приложения, объект задачи импорта) —
+  `id.Named(space, name)` (UUIDv5, R18; golden — `TestNamedUUIDGolden`). Журнал по списку объектов —
+  `audit.ListParams.ObjectIDs` (nil — без фильтра, пустой не-nil — ни одной записи).
 - **Каждое решение** — аудит `platform.approval_<status>` (`executed|rejected|cancelled|expired|failed`; актор —
   решивший, у просрочки и гашения — `system`, комментарий — в `Reason`) и событие `platform.approval_decided`
   (агрегат `approval`, версия 1) в той же транзакции.
