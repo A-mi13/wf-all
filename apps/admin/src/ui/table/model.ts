@@ -43,6 +43,15 @@ export type DataTableProps<T> = {
   // Карточки вместо строк (сетка, макет «Города и запуск»): та же панель, сводка, «Показать ещё» и
   // состояния; данные — список с именем label, columns не используются.
   card?: (row: T) => ReactNode;
+  // Список выбора вместо строк (шаг «найти место» в панели): role="listbox", строка — option с
+  // выделением, клик и стрелки выбирают, Enter и двойной клик — главное действие (onActivate).
+  // Прокручивается только сам список (родитель задаёт высоту), действие — в подвале панели у экрана.
+  select?: {
+    value: string | null; // rowKey выбранной строки
+    onChange: (row: T) => void;
+    onActivate?: (row: T) => void;
+    option: (row: T) => ReactNode;
+  };
   onRowClick?: (row: T) => void;
   activeRowKey?: string; // строка, открытая в панели справа
 };

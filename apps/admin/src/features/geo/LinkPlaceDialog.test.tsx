@@ -25,7 +25,9 @@ async function open(opts: Parameters<typeof cityEditServer>[0] = {}) {
 
 async function choose(dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) {
   await user.type(within(dialog).getByRole('searchbox', { name: 'Поиск' }), 'м');
-  await user.click(await within(dialog).findByRole('button', { name: 'Выбрать Михайловск' }));
+  // V1 п. 9: место — строка списка выбора, «Выбрать» — в подвале окна
+  await user.click(await within(dialog).findByRole('option', { name: /^Михайловск/ }));
+  await user.click(within(dialog).getByRole('button', { name: 'Выбрать Михайловск' }));
 }
 
 describe('привязка', () => {

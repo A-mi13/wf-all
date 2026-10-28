@@ -5,7 +5,15 @@ import { afterEach, describe, expect, test } from 'vitest';
 import type { components } from '../../api/gen/admin';
 import type { Me } from '../../app/permissions';
 import { renderApp } from '../../test/app';
-import { cityDetails, COUNTRIES, country, geoServer, REGION_SVERD } from '../../test/geo';
+import {
+  cityDetails,
+  COUNTRIES,
+  country,
+  geoServer,
+  place,
+  PLACES,
+  REGION_SVERD,
+} from '../../test/geo';
 import { meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { sectionsServer } from '../../test/sections';
@@ -56,11 +64,15 @@ async function openDrawer() {
   return { user, drawer };
 }
 
+// Шаг 1 (V1 п. 9): места — список выбора (listbox), «Выбрать» — в закреплённом подвале панели.
 async function choose(user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement, q: string) {
   await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), q);
-  const button = await within(drawer).findByRole('button', { name: 'Выбрать Михайловск' });
-  await user.click(button);
+  await user.click(await within(drawer).findByRole('option', { name: /^Михайловск/ }));
+  await user.click(within(drawer).getByRole('button', { name: 'Выбрать Михайловск' }));
 }
+
+// Подвал панели — вне прокручиваемого содержимого (Overlay: .body прокручивается, .footer — нет).
+const inFooter = (el: HTMLElement) => el.closest('[class*="footer"]') !== null;
 
 describe('поиск места', () => {
   test('пустой поиск — запроса нет, подсказка; набор — места с регионом, страной, населением', async () => {
@@ -70,9 +82,7 @@ describe('поиск места', () => {
     expect(within(drawer).getByText('Введите название места')).toBeInTheDocument();
     expect(seen.places).toEqual([]);
     await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), 'м');
-    const row = (await within(drawer).findByRole('button', { name: 'Выбрать Михайловск' })).closest(
-      'tr',
-    );
+    const row = await within(drawer).findByRole('option', { name: /^Михайловск/ });
     expect(row).toHaveTextContent('Ставропольский край');
     expect(row).toHaveTextContent('Россия');
     expect(row).toHaveTextContent('56 000');
@@ -84,12 +94,66 @@ describe('поиск места', () => {
     const app = renderApp('/geo/cities', { me: meActivator });
     const { user, drawer } = await openDrawer();
     await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), 'с');
-    const open = await within(drawer).findByRole('button', { name: 'Открыть город Ставрополь' });
-    const row = open.closest('tr');
+    const row = await within(drawer).findByRole('option', { name: /^Ставрополь/ });
     expect(row).toHaveTextContent('уже заведён');
-    expect(within(row!).queryByRole('button', { name: /Выбрать/ })).toBeNull();
+    await user.click(row);
+    // выбрано заведённое — в подвале «Открыть город», а не «Выбрать»
+    const open = within(drawer).getByRole('button', { name: 'Открыть город Ставрополь' });
+    expect(inFooter(open)).toBe(true);
+    expect(within(drawer).queryByRole('button', { name: /Выбрать/ })).toBeNull();
     await user.click(open);
     await waitFor(() => expect(app.at()).toMatch(/^\/geo\/cities\/3f2c8e1a/));
+  });
+
+  test('список выбора: «Выбрать» в подвале, недоступна до выбора; клик выделяет строку', async () => {
+    geoServer();
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    const choose = within(drawer).getByRole('button', { name: 'Выбрать' });
+    expect(inFooter(choose)).toBe(true);
+    expect(choose).toBeDisabled();
+    await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), 'м');
+    const list = await within(drawer).findByRole('listbox', { name: 'Места GeoNames' });
+    const option = within(list).getByRole('option', { name: /^Михайловск/ });
+    expect(option).toHaveAttribute('aria-selected', 'false');
+    await user.click(option);
+    expect(option).toHaveAttribute('aria-selected', 'true');
+    expect(list).toHaveAttribute('aria-activedescendant', option.id);
+    const action = within(drawer).getByRole('button', { name: 'Выбрать Михайловск' });
+    expect(inFooter(action)).toBe(true);
+    expect(action).toBeEnabled();
+  });
+
+  test('с клавиатуры: стрелки двигают выбор, Enter — следующий шаг', async () => {
+    geoServer({
+      places: [
+        ...PLACES,
+        place({ geoname_id: 500001, name: 'Сенгилей', ascii_name: 'Sengiley' }),
+        place({ geoname_id: 500002, name: 'Светлоград', ascii_name: 'Svetlograd' }),
+      ],
+    });
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), 'с');
+    const list = await within(drawer).findByRole('listbox', { name: 'Места GeoNames' });
+    const options = within(list).getAllByRole('option');
+    expect(options.length).toBeGreaterThan(1);
+    list.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{ArrowDown}');
+    expect(options[1]).toHaveAttribute('aria-selected', 'true');
+    expect(options[0]).toHaveAttribute('aria-selected', 'false');
+    await user.keyboard('{Home}');
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{End}');
+    expect(options.at(-1)).toHaveAttribute('aria-selected', 'true');
+    // последняя — свободное место «Светлоград»: Enter ведёт на шаг 2
+    expect(options.at(-1)).toHaveAccessibleName(/^Светлоград/);
+    await user.keyboard('{Enter}');
+    expect(
+      await within(drawer).findByText('Светлоград · Ставропольский край · Россия'),
+    ).toBeInTheDocument();
   });
 
   test('фильтр страны мест — в запрос', async () => {

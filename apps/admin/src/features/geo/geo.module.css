@@ -13,6 +13,41 @@
   gap: var(--wf-space-4);
 }
 
+/* Панель окна на шаге поиска: во всю высоту тела окна (Drawer) — список мест прокручивается сам */
+.fillPanel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+  height: 100%;
+}
+
+/* Шаг «найти место» в панели: заполняет высоту тела окна, прокручивается только список мест */
+.searchStep {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+}
+
+.searchStepBounded {
+  height: min(480px, 60dvh);
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.optionHead {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
 .text {
   margin: 0;
   color: var(--wf-color-text-subtle);

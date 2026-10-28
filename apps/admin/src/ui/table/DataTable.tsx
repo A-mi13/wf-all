@@ -1,4 +1,11 @@
-import { type ReactNode, useEffect, useEffectEvent, useId, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useState,
+} from 'react';
 import { useTranslations } from 'use-intl';
 import { Button } from '../Button';
 import { CountBadge } from '../CountBadge';
@@ -34,7 +41,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
   } else if (rows.length === 0) {
     body = dirty ? <EmptyState action={reset} /> : (props.empty ?? <EmptyState />);
   } else {
-    body = props.card ? (
+    body = props.select ? (
+      <Options {...props} rows={rows} select={props.select} />
+    ) : props.card ? (
       <Cards {...props} rows={rows} card={props.card} />
     ) : (
       <Rows {...props} rows={rows} />
@@ -42,7 +51,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
   }
 
   return (
-    <div className={styles.root}>
+    <div className={cx(styles.root, props.select && styles.fill)}>
       <Toolbar {...props} />
       {rows !== undefined && (props.summary !== false || reset) && (
         <div className={styles.summary}>
@@ -343,6 +352,86 @@ function Cards<T>({
           </li>
         ))}
       </ul>
+      <LoadMore {...{ hasMore, loadingMore, loadMoreError, onLoadMore }} />
+    </>
+  );
+}
+
+// Список выбора (select): фокус — на самом списке (одна остановка Tab), выбранная строка —
+// aria-activedescendant; стрелки, Home/End выбирают (выбор следует за фокусом), Enter — onActivate.
+// Выбранная строка прокручивается в видимую часть списка.
+function Options<T>({
+  label,
+  rowKey,
+  rows,
+  select,
+  hasMore,
+  loadingMore,
+  loadMoreError,
+  onLoadMore,
+}: DataTableProps<T> & { rows: T[]; select: NonNullable<DataTableProps<T>['select']> }) {
+  const base = useId();
+  const optionId = (i: number) => `${base}-option-${i}`;
+  const index = rows.findIndex((r) => rowKey(r) === select.value);
+  const activeId = index === -1 ? undefined : optionId(index);
+  useEffect(() => {
+    // jsdom не умеет scrollIntoView — в тестах вызова нет
+    if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeId]);
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    const last = rows.length - 1;
+    const current = rows[index];
+    if (e.key === 'Enter') {
+      if (current && select.onActivate) {
+        e.preventDefault();
+        select.onActivate(current);
+      }
+      return;
+    }
+    const next =
+      e.key === 'ArrowDown'
+        ? Math.min(index + 1, last)
+        : e.key === 'ArrowUp'
+          ? Math.max(index - 1, 0)
+          : e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? last
+              : -1;
+    const row = rows[next];
+    if (!row) return;
+    e.preventDefault();
+    select.onChange(row);
+  };
+
+  return (
+    <>
+      <div
+        role="listbox"
+        aria-label={label}
+        aria-activedescendant={activeId}
+        tabIndex={0}
+        className={styles.options}
+        onKeyDown={onKeyDown}
+      >
+        {rows.map((row, i) => {
+          const selected = i === index;
+          return (
+            <div
+              key={rowKey(row)}
+              id={optionId(i)}
+              role="option"
+              aria-selected={selected}
+              className={styles.option}
+              onClick={() => select.onChange(row)}
+              onDoubleClick={select.onActivate && (() => select.onActivate?.(row))}
+            >
+              {select.option(row)}
+            </div>
+          );
+        })}
+      </div>
       <LoadMore {...{ hasMore, loadingMore, loadMoreError, onLoadMore }} />
     </>
   );

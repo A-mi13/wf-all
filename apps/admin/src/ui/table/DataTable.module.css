@@ -330,6 +330,51 @@
   font-weight: 700;
 }
 
+/* Список выбора (select): таблица заполняет высоту родителя, прокручивается только список */
+.fill {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.options {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  padding: var(--wf-space-1);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+}
+
+.options:focus-visible {
+  outline: 2px solid var(--wf-color-accent);
+  outline-offset: 2px;
+}
+
+.option {
+  flex-shrink: 0;
+  padding: var(--wf-space-2) var(--wf-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--wf-radius-sm);
+  color: var(--wf-color-text-secondary);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--wf-color-bg-elevated);
+}
+
+.option[aria-selected='true'] {
+  border-color: var(--wf-color-chip-accent-bg);
+  background: var(--wf-color-pitch);
+  color: var(--wf-color-text);
+}
+
 /* Карточки вместо строк (card): сетка, карточка — от 280 px */
 .cards {
   display: grid;

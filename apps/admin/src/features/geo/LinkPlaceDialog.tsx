@@ -5,7 +5,7 @@ import type { components } from '../../api/gen/admin';
 import { Button, FormError, Modal, useToast } from '../../ui';
 import styles from './geo.module.css';
 import { useLinkCity } from './mutations';
-import { PlaceSearch } from './PlaceSearch';
+import { PlaceAction, PlaceSearch } from './PlaceSearch';
 
 type GeoCityDetails = components['schemas']['GeoCityDetails'];
 type GeoPlace = components['schemas']['GeoPlace'];
@@ -14,6 +14,8 @@ type GeoPlace = components['schemas']['GeoPlace'];
 // сверки импорта): поиск места, как при активации (фильтр — страна города), выбор → linkGeoCity
 // {geoname_id}. 409 geo.city_already_linked / geo.city_already_active, 404 geo.place_not_found —
 // текст в окне, окно открыто (можно выбрать другое место). Пока запрос идёт, окно не закрывается.
+// Действие шага («Выбрать», «Привязать») — в закреплённом подвале окна (V1 п. 9); закрытое окно не
+// рендерится — выбор при новом открытии чистый.
 export function LinkPlaceDialog({
   city,
   open,
@@ -25,16 +27,10 @@ export function LinkPlaceDialog({
   onClose: () => void;
   onLinked: () => void; // привязано: окно закрыто, открывателя «Привязать» больше нет — фокус ставит страница
 }) {
-  const t = useTranslations('geo.link');
-  const busy = useIsMutating({ mutationKey: ['geo', 'link', city.id] }) > 0;
-  return (
-    <Modal open={open} onClose={onClose} title={t('title')} dismissible={!busy}>
-      <LinkBody city={city} onClose={onClose} onLinked={onLinked} />
-    </Modal>
-  );
+  return open ? <LinkFlow city={city} onClose={onClose} onLinked={onLinked} /> : null;
 }
 
-function LinkBody({
+function LinkFlow({
   city,
   onClose,
   onLinked,
@@ -47,6 +43,8 @@ function LinkBody({
   const ta = useTranslations('geo.activate');
   const toast = useToast();
   const link = useLinkCity(city.id);
+  const busy = useIsMutating({ mutationKey: ['geo', 'link', city.id] }) > 0;
+  const [selected, setSelected] = useState<GeoPlace | null>(null);
   const [place, setPlace] = useState<GeoPlace | null>(null);
 
   const submit = () => {
@@ -60,45 +58,59 @@ function LinkBody({
     });
   };
 
+  const footer = place ? (
+    <Button loading={link.isPending} onClick={submit}>
+      {t('submit')}
+    </Button>
+  ) : (
+    <PlaceAction selected={selected} onChoose={setPlace} onClose={onClose} />
+  );
+
   return (
-    <div className={styles.panel}>
-      <p className={styles.text}>{t('text')}</p>
-      {place ? (
-        <>
-          <div className={styles.chosen}>
-            <span className={styles.place}>
-              <span className={styles.label}>{t('chosen')}</span>
-              <span className={styles.name}>
-                {place.region_name
-                  ? ta('place_value', {
-                      name: place.name,
-                      region: place.region_name,
-                      country: place.country.name,
-                    })
-                  : ta('place_value_no_region', { name: place.name, country: place.country.name })}
+    <Modal open onClose={onClose} title={t('title')} dismissible={!busy} footer={footer}>
+      <div className={styles.panel}>
+        <p className={styles.text}>{t('text')}</p>
+        {place ? (
+          <>
+            <div className={styles.chosen}>
+              <span className={styles.place}>
+                <span className={styles.label}>{t('chosen')}</span>
+                <span className={styles.name}>
+                  {place.region_name
+                    ? ta('place_value', {
+                        name: place.name,
+                        region: place.region_name,
+                        country: place.country.name,
+                      })
+                    : ta('place_value_no_region', {
+                        name: place.name,
+                        country: place.country.name,
+                      })}
+                </span>
               </span>
-            </span>
-            <Button
-              variant="link"
-              disabled={link.isPending}
-              onClick={() => {
-                link.reset();
-                setPlace(null);
-              }}
-            >
-              {ta('change_place')}
-            </Button>
-          </div>
-          <FormError error={link.error} />
-          <div className={styles.row}>
-            <Button loading={link.isPending} onClick={submit}>
-              {t('submit')}
-            </Button>
-          </div>
-        </>
-      ) : (
-        <PlaceSearch onChoose={setPlace} onClose={onClose} defaultCountry={city.country.code} />
-      )}
-    </div>
+              <Button
+                variant="link"
+                disabled={link.isPending}
+                onClick={() => {
+                  link.reset();
+                  setPlace(null);
+                }}
+              >
+                {ta('change_place')}
+              </Button>
+            </div>
+            <FormError error={link.error} />
+          </>
+        ) : (
+          <PlaceSearch
+            selected={selected}
+            onSelect={setSelected}
+            onChoose={setPlace}
+            defaultCountry={city.country.code}
+            bounded
+          />
+        )}
+      </div>
+    </Modal>
   );
 }

@@ -98,3 +98,13 @@ test('вкладки: выбранная отличается цветом и п
     /font|letter-spacing|padding/,
   );
 });
+
+// V1 п. 9: в панели поиска места прокручивается только список, действие — в подвале окна.
+test('список выбора таблицы прокручивается сам и заполняет высоту родителя; подвал окна не сжимается', () => {
+  expect(rule('ui/table/DataTable.module.css', '.options')).toMatch(/overflow-y:\s*auto/);
+  expect(rule('ui/table/DataTable.module.css', '.options')).toMatch(/min-height:\s*0/);
+  expect(rule('ui/table/DataTable.module.css', '.fill')).toMatch(/min-height:\s*0/);
+  expect(rule('features/geo/geo.module.css', '.fillPanel')).toMatch(/height:\s*100%/);
+  expect(rule('features/geo/geo.module.css', '.searchStep')).toMatch(/min-height:\s*0/);
+  expect(rule('ui/overlay/Overlay.module.css', '.footer')).toMatch(/flex-shrink:\s*0/);
+});

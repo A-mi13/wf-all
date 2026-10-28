@@ -1,6 +1,6 @@
 import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import { type ApiError, isApiError, unwrap } from '../../api/client';
@@ -12,7 +12,7 @@ import { useLocale } from '../../i18n/locale';
 import { Button, Drawer, Form, type Option, SelectField, useErrorText, useToast } from '../../ui';
 import styles from './geo.module.css';
 import { invalidateCityLists } from './mutations';
-import { PlaceSearch } from './PlaceSearch';
+import { PlaceAction, PlaceSearch } from './PlaceSearch';
 import { geoKeys, useGeoCountries, useGeoRegions } from './queries';
 
 type GeoPlace = components['schemas']['GeoPlace'];
@@ -23,30 +23,38 @@ const ACTIVATE_KEY = ['geo', 'activate'] as const;
 const STATUSES: readonly CityStatus[] = ['waitlist', 'pilot', 'live'];
 
 // «Активировать город» (*; спека §9.4 п. 8, спека geo §5.3): поиск места GeoNames → выбор →
-// страна и регион → статус. Заведённое место (city_id) не выбирается — ссылка на его город. Пока
-// запрос идёт, панель не закрывается: ответ должен дойти до экрана.
+// страна и регион → статус. Заведённое место (city_id) не выбирается — «Открыть город». Пока
+// запрос идёт, панель не закрывается: ответ должен дойти до экрана. Действие шага («Выбрать»,
+// «Активировать») — в закреплённом подвале панели (V1 п. 9), прокручивается только список мест.
+// Закрытая панель не рендерится: выбор и шаг при новом открытии чистые.
 export function ActivateDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const t = useTranslations('geo.activate');
-  const busy = useIsMutating({ mutationKey: ACTIVATE_KEY }) > 0;
-  return (
-    <Drawer open={open} onClose={onClose} title={t('title')} dismissible={!busy}>
-      <ActivateBody onClose={onClose} />
-    </Drawer>
-  );
+  return open ? <ActivateFlow onClose={onClose} /> : null;
 }
 
-function ActivateBody({ onClose }: { onClose: () => void }) {
+function ActivateFlow({ onClose }: { onClose: () => void }) {
   const t = useTranslations('geo.activate');
+  const busy = useIsMutating({ mutationKey: ACTIVATE_KEY }) > 0;
+  const formId = useId();
+  const [selected, setSelected] = useState<GeoPlace | null>(null);
   const [place, setPlace] = useState<GeoPlace | null>(null);
+  const footer = place ? (
+    <Button type="submit" form={formId} loading={busy}>
+      {t('submit')}
+    </Button>
+  ) : (
+    <PlaceAction selected={selected} onChoose={setPlace} onClose={onClose} />
+  );
   return (
-    <div className={styles.panel}>
-      <p className={styles.text}>{t('text')}</p>
-      {place ? (
-        <ActivateForm place={place} onBack={() => setPlace(null)} onClose={onClose} />
-      ) : (
-        <PlaceSearch onChoose={setPlace} onClose={onClose} />
-      )}
-    </div>
+    <Drawer open onClose={onClose} title={t('title')} dismissible={!busy} footer={footer}>
+      <div className={place ? styles.panel : styles.fillPanel}>
+        <p className={styles.text}>{t('text')}</p>
+        {place ? (
+          <ActivateForm id={formId} place={place} onBack={() => setPlace(null)} onClose={onClose} />
+        ) : (
+          <PlaceSearch selected={selected} onSelect={setSelected} onChoose={setPlace} />
+        )}
+      </div>
+    </Drawer>
   );
 }
 
@@ -59,10 +67,12 @@ type Values = { country_code: string; region_id: string; status: CityStatus };
 // 422 geo.country_not_enabled / geo.region_not_found — у поля. Повтор отправки после обрыва —
 // тот же ключ (useAdminMutation: те же значения, исход неизвестен).
 function ActivateForm({
+  id,
   place,
   onBack,
   onClose,
 }: {
+  id: string; // форма — по id: кнопка «Активировать» в подвале панели (form={id})
   place: GeoPlace;
   onBack: () => void;
   onClose: () => void;
@@ -169,7 +179,7 @@ function ActivateForm({
           {t('change_place')}
         </Button>
       </div>
-      <Form form={form} onSubmit={submit} onError={onError}>
+      <Form id={id} form={form} onSubmit={submit} onError={onError}>
         <SelectField
           name="country_code"
           label={t('country')}
@@ -205,9 +215,6 @@ function ActivateForm({
             {t('find_city')}
           </Button>
         )}
-        <Button type="submit" loading={activate.isPending}>
-          {t('submit')}
-        </Button>
       </Form>
     </>
   );
