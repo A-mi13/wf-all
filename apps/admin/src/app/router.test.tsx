@@ -34,6 +34,11 @@ const citiesHandler = () =>
         status: 'live' as const,
         country_code: 'RU',
         region_name: null,
+        region_id: null,
+        country_enabled: true,
+        geoname_id: null,
+        population: 0,
+        districts_count: 0,
       })),
       next_cursor: null,
     });

@@ -421,7 +421,7 @@
       "import_in_progress": "An import of this country is already queued or running",
       "import_job_not_cancellable": "The job is already running or finished and cannot be cancelled",
       "district_name_taken": "A district with this name already exists",
-      "country_not_enabled": "The country is disabled — enable it first",
+      "country_not_enabled": "The country is not in the directory or is disabled",
       "region_not_found": "The region is not from this country"
     }
   },

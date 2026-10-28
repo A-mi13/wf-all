@@ -136,13 +136,24 @@ export function city(over: Partial<GeoCity> = {}): GeoCity {
     status: 'live',
     country_code: 'RU',
     region_name: 'Ставропольский край',
+    region_id: 'b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38',
+    country_enabled: true,
+    geoname_id: 487846,
+    population: 450680,
+    districts_count: 0,
     ...over,
   };
 }
 
 export const CITIES: GeoCity[] = [
   city(),
-  city({ id: CITY_OTHER, slug: 'pyatigorsk', name: 'Пятигорск' }),
+  city({
+    id: CITY_OTHER,
+    slug: 'pyatigorsk',
+    name: 'Пятигорск',
+    geoname_id: 511565,
+    population: 145448,
+  }),
 ];
 
 // Ответ 202 — запрос на подтверждение.

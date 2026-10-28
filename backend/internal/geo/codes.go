@@ -18,7 +18,7 @@ const (
 	CodeSlugTaken               = "geo.slug_taken"                 // 409: адрес занят другим городом или его историей
 	CodeCountryExists           = "geo.country_exists"             // 409: страна с этим кодом уже есть
 	CodeImportInProgress        = "geo.import_in_progress"         // 409: импорт страны уже в очереди или идёт
-	CodeImportJobNotCancellable = "geo.import_job_not_cancellable" // 409: задача импорта уже выполняется или завершена
+	CodeImportJobNotCancellable = "geo.import_job_not_cancellable" // 409: задача импорта выполняется, выполнена или выброшена (уже отменённая — 200)
 	CodeDistrictNameTaken       = "geo.district_name_taken"        // 409: название занято действующим районом города
 	CodeCountryNotEnabled       = "geo.country_not_enabled"        // 422: страна активации выключена или её нет
 	CodeRegionNotFound          = "geo.region_not_found"           // 422: region_id не из страны города

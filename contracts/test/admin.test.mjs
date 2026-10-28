@@ -675,6 +675,9 @@ test('план B: описания фиксируют поведение, на �
   assert.match(d('startGeoImport'), /в очереди/);
   assert.match(d('cancelGeoImportJob'), /воркер/);
   assert.match(d('listGeoImports'), /started_by_label/);
+  // K6 (раунд 1 ревью G4): повторная отмена уже отменённой задачи — 200 без второй записи журнала
+  assert.match(d('cancelGeoImportJob'), /уже отменённ[а-я]* задач[а-я]* — 200/);
+  assert.match(d('cancelGeoImportJob'), /второй записи журнала нет/);
 });
 
 // Ревью G3 (⚠️): approve описывает отказ исполнителей geo — наружу только platform.approval_stale (R4,
