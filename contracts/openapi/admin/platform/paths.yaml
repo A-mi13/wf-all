@@ -164,6 +164,12 @@ approval-approve:
         приглашение нужно подать заново.
       - Отказ исполнения — код действия (запрос помечен `failed`): 409 `staff.last_owner`,
         409 `staff.email_taken`, 422 `staff.city_not_found`.
+      - Правила и создание страны (`geo.country_rules`, `geo.country_create`) своих кодов у подтверждения не
+        имеют: отказ исполнителя — 409 `platform.approval_stale`, запрос помечен `failed`. Так бывает, если
+        страну правили после запроса (версия не совпала) или её уже нет, правила из запроса больше не
+        проходят проверку (например, валюта перестала быть действующей), страну с этим кодом успели завести
+        (второй из двух запросов на один код), инициатор изменился (`initiator_changed`). Запрос нужно
+        подать заново.
     parameters:
       - $ref: '../root.yaml#/components/parameters/ApprovalId'
       - $ref: '../root.yaml#/components/parameters/IdempotencyKey'

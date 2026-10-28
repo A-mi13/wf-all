@@ -126,14 +126,18 @@ geo»), §5 и §11. Дизайн: `design/screens/07-Админка.dc.html`, `
 | `geo.cities.rename` — названия по локалям | allow | allow | scoped | deny |
 | `geo.districts.manage` | allow | allow | scoped | deny |
 | `geo.countries.read` | allow | allow | allow | allow |
-| `geo.countries.manage` | allow | allow | deny | deny |
-| `geo.countries.rules` — создание страны, валюта, возрастные пороги, выключение страны (U7, всегда вдвоём) | dual | dual | deny | deny |
+| `geo.countries.manage` — включение страны и прочие её поля | allow | allow | deny | deny |
+| `geo.countries.rules` — создание страны, валюта, пороги, выключение | dual | dual | deny | deny |
 | `geo.imports.read` | allow | allow | deny | allow |
 | `geo.imports.run` | allow | allow | deny | deny |
 | `platform.versions.read` | allow | allow | allow | allow |
 | `platform.versions.manage` | allow | allow | deny | deny |
 | `platform.flags.read` | allow | allow | allow | allow |
 | `platform.flags.manage` | allow | allow | deny | deny |
+
+Правила страны (U7, `docs/05` 5.3; решение пользователя 27.10): создание страны, смена валюты и возрастных порогов
+и выключение страны — всегда вдвоём (`geo.countries.rules`, действия `geo.country_create` и `geo.country_rules`,
+§4.8), независимо от статусов городов; включение страны и прочие её поля — сразу (`geo.countries.manage`).
 
 Строки будущих модулей — по макету 07, раздел «Роли и доступ»: капитаны, площадки, жалобы, ограничения,
 вечная блокировка (`dual`), аннулирование протокола (`dual`), персональные данные (с аудитом чтения),
@@ -742,7 +746,7 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 | `POST /v1/geo/cities/{cityId}/link {geoname_id}` | `geo.cities.manage` | **новая**: ручная привязка неоднозначного города из отчёта сверки |
 | `GET …/{cityId}/districts` | `geo.cities.read` | — |
 | `POST …/{cityId}/districts`, `PATCH …/districts/{districtId}` | `geo.districts.manage` | район чужого города → `404 geo.district_not_found` (тест: модератор своего города, район чужого) |
-| `GET /v1/geo/countries`, `POST`, `PATCH /{code}` | read / `geo.countries.manage` | валюта — по списку ISO 4217, `country_code` — ISO 3166-1 alpha-2 |
+| `GET /v1/geo/countries`, `POST`, `PATCH /{code}` | `geo.countries.read` / `geo.countries.rules` (`POST` — всегда `202`, U7) / `handler`: `geo.countries.manage`, `geo.countries.rules` (`PATCH`: валюта, пороги, выключение — `202`; включение и прочее — сразу) | валюта — по списку ISO 4217, `country_code` — ISO 3166-1 alpha-2 |
 | `GET /v1/geo/countries/{code}/regions` | `geo.cities.read` | **новая**: выбор региона при активации |
 | `POST /v1/geo/imports {country}`, `GET /v1/geo/imports`, `GET …/{importId}` | `geo.imports.run` / `…read` | **новая** `GET {id}` — отчёт сверки (ambiguous, conflict) |
 | `GET /v1/app/versions`, `PUT /v1/app/versions/{platform}` | `platform.versions.read` / `…manage` | **новая** `GET` |

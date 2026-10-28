@@ -244,7 +244,7 @@
       },
       "countries": {
         "read": "Countries and their rules",
-        "manage": "Country rules and enabling a country",
+        "manage": "Enabling a country and its other fields (phone code, week, names)",
         "rules": "Creating a country, currency, age thresholds and disabling a country"
       },
       "imports": {

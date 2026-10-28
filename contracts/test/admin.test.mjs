@@ -676,3 +676,22 @@ test('план B: описания фиксируют поведение, на �
   assert.match(d('cancelGeoImportJob'), /воркер/);
   assert.match(d('listGeoImports'), /started_by_label/);
 });
+
+// Ревью G3 (⚠️): approve описывает отказ исполнителей geo — наружу только platform.approval_stale (R4,
+// Task 13): бизнес-кодов geo.* у approve нет, x-error-codes не растёт.
+test('approveApproval: отказ исполнителей geo.country_rules и geo.country_create — 409 approval_stale', () => {
+  const { op } = ops.get('approveApproval');
+  // пункты списка кодов — по «- » в начале строки (пункт занимает несколько строк)
+  const lines = op.description
+    .split(/\n\s*- /)
+    .filter((l) => /geo\.country_(rules|create)/.test(l));
+  assert.ok(lines.length > 0, 'описание не называет действия geo');
+  assert.ok(
+    lines.some((l) => l.includes('platform.approval_stale')),
+    'отказ исполнителя geo — 409 platform.approval_stale',
+  );
+  assert.ok(
+    !op['x-error-codes'].some((c) => c.startsWith('geo.')),
+    'бизнес-кодов geo у approve нет',
+  );
+});
