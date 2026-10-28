@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -399,11 +400,24 @@ func (a *App) execRoleChange(ctx context.Context, tx pgx.Tx, raw json.RawMessage
 }
 
 // rolePayloadShaped — роль «стало» и её города проходят roleShape и уже в его нормальной форме (по
-// возрастанию, без повторов — так их пишет ChangeRole), роль «было» — из perm.Roles. Города «было» — только
-// снимок для права D16: исполнитель читает их из базы (citiesOf), форма не проверяется.
+// возрастанию, без повторов — так их пишет ChangeRole), роль «было» — из perm.Roles, города «было» — по
+// возрастанию без повторов (их снимок из базы, citiesOf; M2 ревью G3: иначе rolePermission увидит изменение там,
+// где его нет). Пару «роль было — её города» не сверяем: это снимок базы на момент запроса, а не ввод;
+// исполнитель читает города заново под замком (citiesOf).
 func rolePayloadShaped(p rolePayload) bool {
 	cities, err := roleShape(p.Role, p.CityIDs)
-	return err == nil && slices.Equal(cities, p.CityIDs) && validRole(p.FromRole, fieldRole) == nil
+	return err == nil && slices.Equal(cities, p.CityIDs) && validRole(p.FromRole, fieldRole) == nil &&
+		strictlyAscending(p.FromCityIDs)
+}
+
+// strictlyAscending — id по возрастанию байтов и без повторов (нормальная форма normCities и citiesOf).
+func strictlyAscending(ids []uuid.UUID) bool {
+	for i := 1; i < len(ids); i++ {
+		if bytes.Compare(ids[i-1][:], ids[i][:]) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // execAccessReset — исполнитель staff.access_reset (§4.9): цель той же версии, страж последнего

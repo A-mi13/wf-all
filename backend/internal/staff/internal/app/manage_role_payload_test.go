@@ -147,3 +147,36 @@ func TestExecRoleChangeShapeBeforeLocks(t *testing.T) {
 	res, err := e.svc.Approve(ctx, e.b, "Подтверждающий", apMeta, e.ap.ID, "")
 	e.wantStaleNothingApplied(res, err, "root")
 }
+
+// Города «было» из payload (M2 ревью G3): сценарий пишет их из базы по возрастанию и без повторов (citiesOf), иначе
+// payload не от сценария — ErrStale до execLocks. Подложный неотсортированный список при той же роли «было» и
+// «стало» давал rolePermission «изменение» и проводил смену роли, которой нет (версия +1, аудит). Регресс: null у
+// не-модератора (старый формат и nil-срез) исполняется.
+func TestExecRoleChangeRejectsFromCityShape(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		fields func(s []uuid.UUID) map[string]any
+	}{
+		{"было не по возрастанию", func(s []uuid.UUID) map[string]any {
+			return map[string]any{"from_role": "moderator", "from_city_ids": []uuid.UUID{s[1], s[0]}, "role": "moderator", "city_ids": s}
+		}},
+		{"повтор в было", func(s []uuid.UUID) map[string]any {
+			return map[string]any{"from_role": "moderator", "from_city_ids": []uuid.UUID{s[0], s[0], s[1]}, "role": "moderator", "city_ids": s}
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newRolePayloadEnv(t)
+			e.patch(c.fields(sortedIDs(e.city("kazan"), e.city("perm"))))
+			res, err := e.approve(e.b, e.ap.ID)
+			e.wantStaleNothingApplied(res, err, "")
+		})
+	}
+	t.Run("регресс: было null", func(t *testing.T) {
+		e := newRolePayloadEnv(t)
+		e.patch(map[string]any{"from_city_ids": nil})
+		e.mustApprove(e.b, e.ap.ID)
+		if got := e.acct(e.x.ID); got.Role != "support" {
+			t.Fatalf("учётка %+v", got)
+		}
+	})
+}
