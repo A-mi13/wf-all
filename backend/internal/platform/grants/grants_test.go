@@ -110,6 +110,9 @@ func TestRolePrivileges(t *testing.T) {
 		// справочник geo (спека geo §3.8): API только читает справочник, источник без журнала и
 		// версии приложения
 		{"api", "SELECT 1 FROM countries", true},
+		{"api", "SELECT 1 FROM regions", true},
+		{"api", "SELECT 1 FROM region_names", true},
+		{"api", "INSERT INTO regions (country_id, name) SELECT id, 'Проба' FROM countries WHERE code = 'RU'", false},
 		{"api", "SELECT 1 FROM cities", true},
 		{"api", "SELECT 1 FROM districts", true},
 		{"api", "SELECT 1 FROM country_names", true},
@@ -131,6 +134,14 @@ func TestRolePrivileges(t *testing.T) {
 		// переводы (районы архивируются, города и страны не удаляются); источник пишет только воркер
 		{"admin", "SELECT 1 FROM geonames_imports", true},
 		{"admin", "SELECT 1 FROM geonames_place_names", true},
+		{"admin", "SELECT 1 FROM geonames_places", true},
+		{"admin", "SELECT 1 FROM geonames_admin1", true},
+		// создание страны и правила страны (geo 2/2), регион при активации города
+		{"admin", "INSERT INTO countries (code, name, currency, default_locale, phone_prefix, min_signup_age, age_of_majority) " +
+			"VALUES ('KZ', 'Казахстан', 'KZT', 'ru', '+7', 14, 18)", true},
+		{"admin", "UPDATE countries SET is_enabled = is_enabled WHERE false", true},
+		{"admin", "INSERT INTO regions (country_id, name) SELECT id, 'Проба' FROM countries WHERE code = 'RU'", true},
+		{"admin", "UPDATE regions SET name = name WHERE false", true},
 		{"admin", "INSERT INTO geonames_imports (country_code, status, started_at) VALUES ('RU', 'running', now())", false},
 		{"admin", "UPDATE geonames_places SET population = population WHERE false", false},
 		{"admin", "INSERT INTO cities (country_id, name, slug, timezone, centroid) " +
@@ -155,6 +166,7 @@ func TestRolePrivileges(t *testing.T) {
 		{"worker", "DELETE FROM geonames_places WHERE false", true},
 		{"worker", "UPDATE geonames_admin1 SET ascii_name = ascii_name WHERE false", true},
 		{"worker", "DELETE FROM geonames_admin1_names WHERE false", true},
+		{"worker", "INSERT INTO geonames_place_names (geoname_id, locale, name) SELECT geoname_id, 'ru', 'Проба' FROM geonames_places LIMIT 1", true},
 		{"worker", "UPDATE cities SET geoname_id = geoname_id, version = version + 1 WHERE false", true},
 		{"worker", "UPDATE regions SET geoname_admin1_code = geoname_admin1_code WHERE false", true},
 		{"worker", "INSERT INTO city_names (city_id, locale, name) SELECT id, 'de', 'Stawropol' FROM cities WHERE slug = 'stavropol' ON CONFLICT DO NOTHING", true},

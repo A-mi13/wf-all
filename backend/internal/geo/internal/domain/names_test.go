@@ -50,7 +50,7 @@ func TestChooseName(t *testing.T) {
 	}{
 		// реальные данные (спека §3.4, «Проверено на данных 02.10.2026»)
 		{"Ставрополь ru: шаг 3 — не краткое кириллицей", stavropol487846, "ru", true, "Stavropol", "Ставрополь"},
-		{"Ставрополь en: шаг 4 — предпочтительное краткое", stavropol487846, "en", false, "Stavropol", "Stavropol"},
+		{"Ставрополь en: единственный кандидат — предпочтительное краткое латиницей (шаг 4; его выбрал бы и шаг 5)", stavropol487846, "en", false, "Stavropol", "Stavropol"},
 		{"Михайловск ru: шаг 2 — предпочтительное", mikhaylovsk493702, "ru", true, "Mikhaylovsk", "Михайловск"},
 		{"Михайловск en: шаг 2 — предпочтительное", mikhaylovsk493702, "en", false, "Mikhaylovsk", "Mikhaylovsk"},
 		{"Ставропольский край ru: шаг 3 вместо краткого предпочтительного", stavropolKrai, "ru", true, "Stavropol Kray", "Ставропольский Край"},
