@@ -346,8 +346,15 @@ export function cityEditServer(
         ? response(200).json(state.details)
         : response.untyped(problem(404, 'geo.city_not_found')),
     ),
+    // порядок сервера: действующие по имени, затем архивные по имени
     http.get('/v1/geo/cities/{cityId}/districts', ({ response }) =>
-      response(200).json({ items: state.districts }),
+      response(200).json({
+        items: [...state.districts].sort(
+          (a, b) =>
+            Number(a.archived_at !== null) - Number(b.archived_at !== null) ||
+            a.name.localeCompare(b.name, 'ru'),
+        ),
+      }),
     ),
     http.patch('/v1/geo/cities/{cityId}', async ({ request, response }) => {
       const { body, own } = await record('patch', request);

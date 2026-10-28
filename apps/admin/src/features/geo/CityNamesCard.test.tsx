@@ -48,6 +48,10 @@ describe('названия', () => {
       expect(within(card).getByRole('textbox', { name: /English/ })).toHaveValue(''),
     );
     expect(within(card).queryByRole('button', { name: 'Удалить перевод: English' })).toBeNull();
+    // ревью G8, m4: кнопки-открывателя больше нет — фокус на поле этого языка, не на body
+    await waitFor(() =>
+      expect(within(card).getByRole('textbox', { name: /English/ })).toHaveFocus(),
+    );
   });
 
   test('сохранение — только изменённые языки, пробелы по краям сервер обрежет', async () => {
@@ -71,9 +75,17 @@ describe('названия', () => {
     expect(sent).toHaveLength(0);
   });
 
+  // Ревью G8, m7: проверка «запроса нет» сразу после клика прошла бы и раньше запроса. Здесь за
+  // пустым «Сохранить» идёт настоящая правка: запросы уходят по порядку, и к ответу на вторую первый
+  // уже был бы в sent — после тоста второй правки запрос ровно один.
   test('ничего не изменено — запроса нет', async () => {
     const { card, user, sent } = await open();
     await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
-    expect(sent).toHaveLength(0);
+    const en = within(card).getByRole('textbox', { name: /English/ });
+    await user.clear(en);
+    await user.type(en, 'Stavropol City');
+    await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    expect(await screen.findByText('Названия сохранены')).toBeInTheDocument();
+    expect(sent.map((r) => r.body)).toEqual([{ names: { en: 'Stavropol City' } }]);
   });
 });

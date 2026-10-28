@@ -91,7 +91,11 @@ describe('geo.country_rules', () => {
       'geo.country_rules',
     );
     expect(s).toEqual({
-      country: { code: 'RU', changes: [{ field: 'currency', from: 'RUB', to: 'KZT' }] },
+      country: {
+        code: 'RU',
+        changes: [{ field: 'currency', from: 'RUB', to: 'KZT' }],
+        others: [],
+      },
     });
     expect(text(s)).toBe('RU: валюта RUB → KZT');
   });
@@ -104,28 +108,70 @@ describe('geo.country_rules', () => {
     expect(text(s)).toBe('RU: включена → выключена');
   });
 
-  test('пороги — по порядку полей; незнакомое поле и неверный тип не показаны', () => {
+  // Ревью G8, I1: подтверждающий видит ВСЁ, что исполнится, — запрос несёт весь patch (поля «сразу»
+  // тоже), а аудит запишет автором подтверждающего. Знакомые поля — «было → стало», незнакомые и
+  // неверного типа — «и ещё N полей: <ключи>», а не молча мимо.
+  test('валюта и телефонный код вместе — видны обе правки', () => {
+    const s = summarizePayload(
+      payload({ currency: 'RUB', phone_prefix: '+7' }, { currency: 'KZT', phone_prefix: '+8' }),
+      'geo.country_rules',
+    );
+    expect(text(s)).toBe('RU: валюта RUB → KZT; телефонный код +7 → +8');
+  });
+
+  test('все поля patch по порядку: пороги, неделя, включение, названия', () => {
     const s = summarizePayload(
       payload(
-        { age_of_majority: 18, min_signup_age: 14, phone_prefix: '+7', currency: 5 },
-        { age_of_majority: 21, min_signup_age: 16, phone_prefix: '+8', currency: 'KZT' },
+        {
+          age_of_majority: 18,
+          min_signup_age: 14,
+          week_starts_on: 1,
+          is_enabled: false,
+          names: { en: 'Russia', ru: 'Россия' },
+        },
+        {
+          age_of_majority: 21,
+          min_signup_age: 16,
+          week_starts_on: 7,
+          is_enabled: true,
+          names: { en: 'Russian Federation', ru: null },
+        },
       ),
       'geo.country_rules',
     );
     expect(s.country?.changes).toEqual([
+      { field: 'week_starts_on', from: 1, to: 7 },
       { field: 'min_signup_age', from: 14, to: 16 },
       { field: 'age_of_majority', from: 18, to: 21 },
+      { field: 'is_enabled', from: false, to: true },
+      { field: 'names', locale: 'en', from: 'Russia', to: 'Russian Federation' },
+      { field: 'names', locale: 'ru', from: 'Россия', to: null },
     ]);
-    expect(text(s)).toBe('RU: возраст регистрации 14 → 16; совершеннолетие 18 → 21');
+    expect(text(s)).toBe(
+      'RU: начало недели пн → вс; возраст регистрации 14 → 16; совершеннолетие 18 → 21; ' +
+        'выключена → включена; название (en) Russia → Russian Federation; название (ru) Россия → —',
+    );
+  });
+
+  test('незнакомое поле и неверный тип — не молча: «и ещё N полей: ключи»', () => {
+    const s = summarizePayload(
+      payload(
+        { currency: 5, min_signup_age: 14, timezone: 'Europe/Moscow' },
+        { currency: 'KZT', min_signup_age: 16, timezone: 'Asia/Almaty', vat: 20 },
+      ),
+      'geo.country_rules',
+    );
+    expect(s.country?.others).toEqual(['currency', 'timezone', 'vat']);
+    expect(text(s)).toBe('RU: возраст регистрации 14 → 16; и ещё 3 поля: currency, timezone, vat');
   });
 
   test('мусор: нет кода, from/to не объекты — ничего про страну', () => {
     expect(summarizePayload({ code: 7, from: {}, to: {} }, 'geo.country_rules')).toEqual({});
     expect(summarizePayload({ code: 'RU', from: 'x', to: null }, 'geo.country_rules')).toEqual({
-      country: { code: 'RU', changes: [] },
+      country: { code: 'RU', changes: [], others: [] },
     });
     expect(summarizePayload({ code: 'RU', from: [1], to: [2] }, 'geo.country_rules')).toEqual({
-      country: { code: 'RU', changes: [] },
+      country: { code: 'RU', changes: [], others: [] },
     });
   });
 

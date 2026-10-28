@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type UseFormReturn, useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import type { ApiError } from '../../api/client';
@@ -33,14 +33,26 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
   const update = useUpdateDistrict(cityId);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<GeoDistrict | null>(null);
+  // Архив и возврат меняют порядок строк (архивные — внизу): React переставляет строку в DOM, и в
+  // браузере фокус с её кнопки слетает на body (ревью G8, m4). После ответа — на кнопку этой строки.
+  const root = useRef<HTMLDivElement>(null);
+  const [refocus, setRefocus] = useState<{ id: string } | null>(null);
+  useEffect(() => {
+    if (!refocus) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    root.current?.querySelector<HTMLElement>(`[data-district-action="${refocus.id}"]`)?.focus();
+  }, [refocus, list.data]);
 
   const setArchived = (d: GeoDistrict, archived: boolean) => {
     setPendingId(d.id);
     update.mutate(
       { id: d.id, patch: { archived } },
       {
-        onSuccess: () =>
-          toast.success(t(archived ? 'archived_toast' : 'restored_toast', { name: d.name })),
+        onSuccess: () => {
+          toast.success(t(archived ? 'archived_toast' : 'restored_toast', { name: d.name }));
+          setRefocus({ id: d.id });
+        },
         onError: (e) => toast.error(errorText(e)),
         onSettled: () => setPendingId(null),
       },
@@ -83,6 +95,7 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
               <Button
                 variant="danger-outline"
                 aria-label={t('archive_label', { name: d.name })}
+                data-district-action={d.id}
                 loading={pendingId === d.id}
                 disabled={busy && pendingId !== d.id}
                 onClick={() => setArchived(d, true)}
@@ -93,6 +106,7 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
               <Button
                 variant="secondary"
                 aria-label={t('restore_label', { name: d.name })}
+                data-district-action={d.id}
                 loading={pendingId === d.id}
                 disabled={busy && pendingId !== d.id}
                 onClick={() => setArchived(d, false)}
@@ -106,7 +120,7 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
     });
 
   return (
-    <div className={styles.panel}>
+    <div ref={root} className={styles.panel}>
       {canEdit && <AddDistrict cityId={cityId} />}
       <DataTable
         label={t('label')}

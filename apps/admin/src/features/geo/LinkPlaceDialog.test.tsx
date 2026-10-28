@@ -43,6 +43,8 @@ describe('привязка', () => {
     const facts = screen.getByRole('list', { name: 'Сведения о городе' });
     expect(facts).toHaveTextContent('526815');
     expect(screen.queryByRole('button', { name: 'Привязать к GeoNames' })).toBeNull();
+    // ревью G8, m4: открывателя больше нет — фокус на сведениях о городе, не на body
+    await waitFor(() => expect(facts).toHaveFocus());
   });
 
   test.each([
@@ -55,6 +57,33 @@ describe('привязка', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Привязать' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(text);
     expect(screen.getByRole('dialog', { name: 'Привязать к GeoNames' })).toBeInTheDocument();
+  });
+
+  // Ревью G8, m2: город уже привязан (сверкой импорта, пока окно было открыто) — карточка перечитана,
+  // страница показывает привязку, «Привязать» исчезает (не ходить по кругу до перезагрузки).
+  test('409 geo.city_already_linked — карточка перечитана, «Привязать» исчезает', async () => {
+    const box: { srv?: ReturnType<typeof cityEditServer> } = {};
+    box.srv = cityEditServer({
+      details: cityDetails({ geoname_id: null }),
+      answer: () => {
+        const srv = box.srv;
+        if (srv) srv.state.details = { ...srv.state.details, geoname_id: 487846 };
+        return problem(409, 'geo.city_already_linked');
+      },
+    });
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await screen.findByRole('heading', { level: 1, name: 'Ставрополь' });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Привязать к GeoNames' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязать к GeoNames' });
+    await choose(dialog, user);
+    await user.click(within(dialog).getByRole('button', { name: 'Привязать' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Город уже привязан к месту GeoNames',
+    );
+    const facts = screen.getByRole('list', { name: 'Сведения о городе' });
+    await waitFor(() => expect(facts).toHaveTextContent('487846'));
+    expect(facts).not.toHaveTextContent('не привязан');
   });
 
   test('«Другое место» — снова поиск', async () => {

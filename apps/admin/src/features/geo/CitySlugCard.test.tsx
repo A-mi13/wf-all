@@ -54,6 +54,17 @@ describe('адрес', () => {
     expect(field).toHaveValue('stavropol-city');
   });
 
+  // Ревью G8, m7: тот же адрес — запроса нет (за ним — настоящая правка, см. CityNamesCard.test).
+  test('тот же адрес — запроса нет', async () => {
+    const { card, field, user, sent } = await open();
+    await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await user.clear(field);
+    await user.type(field, 'stavropol-city');
+    await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    expect(await screen.findByText('Адрес сохранён')).toBeInTheDocument();
+    expect(sent.map((r) => r.body)).toEqual([{ slug: 'stavropol-city' }]);
+  });
+
   test('409 geo.slug_taken — у поля', async () => {
     const { card, field, user } = await open({ taken: ['pyatigorsk'] });
     await user.clear(field);

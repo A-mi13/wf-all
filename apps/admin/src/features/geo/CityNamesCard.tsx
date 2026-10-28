@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import type { components } from '../../api/gen/admin';
@@ -44,6 +44,15 @@ function NamesForm({ city }: { city: GeoCityDetails }) {
   const save = useUpdateCity(city.id, ['geo', 'city', city.id, 'names']);
   const remove = useUpdateCity(city.id, ['geo', 'city', city.id, 'names', 'delete']);
   const [deleting, setDeleting] = useState<Locale | null>(null);
+  // Перевод удалён — кнопки «Удалить перевод» (открывателя окна) больше нет, и фокус упал бы на body
+  // (ревью G8, m4): ставим его на поле этого языка. Окно закрывается и кнопка исчезает в разных
+  // отрисовках (ответ в кэше — отдельным уведомлением): эффект ждёт и того, и другого.
+  const [deleted, setDeleted] = useState<{ locale: Locale } | null>(null);
+  useEffect(() => {
+    if (!deleted || city.names[deleted.locale] !== undefined) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) form.setFocus(`names.${deleted.locale}`);
+  }, [deleted, form, city.names]);
 
   const submit = async (v: Values) => {
     const changed = Object.fromEntries(
@@ -59,12 +68,14 @@ function NamesForm({ city }: { city: GeoCityDetails }) {
 
   const confirmDelete = () => {
     if (!deleting) return;
+    const locale = deleting;
     remove.mutate(
       { names: { [deleting]: null } },
       {
         onSuccess: () => {
           toast.success(t('deleted'));
           setDeleting(null);
+          setDeleted({ locale });
         },
       },
     );

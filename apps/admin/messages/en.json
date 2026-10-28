@@ -342,6 +342,20 @@
           "5": "week starts Fri",
           "6": "week starts Sat",
           "7": "week starts Sun"
+        },
+        "phone_prefix": "phone code {from} → {to}",
+        "week_starts_on": "week start {from} → {to}",
+        "names": "name ({locale}) {from} → {to}",
+        "none": "—",
+        "others": "{count, plural, one {and # more field} other {and # more fields}}: {keys}",
+        "weekday": {
+          "1": "Mon",
+          "2": "Tue",
+          "3": "Wed",
+          "4": "Thu",
+          "5": "Fri",
+          "6": "Sat",
+          "7": "Sun"
         }
       }
     },

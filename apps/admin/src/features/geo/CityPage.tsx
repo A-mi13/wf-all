@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from '@tanstack/react-router';
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from 'react';
 import { useFormatter, useTranslations } from 'use-intl';
 import { isApiError } from '../../api/client';
 import type { components } from '../../api/gen/admin';
@@ -65,6 +65,17 @@ function CityView({ city }: { city: GeoCityDetails }) {
   const canRename = useCan('geo.cities.rename', city.id);
   const canDistricts = useCan('geo.districts.manage', city.id);
   const [linking, setLinking] = useState(false);
+  // Привязка удалась — кнопки «Привязать» (открывателя окна) больше нет, и фокус упал бы на body
+  // (ревью G8, m4): ставим его на сведения о городе, где видна привязка. Окно закрывается и кнопка
+  // исчезает в разных отрисовках (ответ в кэше — отдельным уведомлением), порядок любой: эффект ждёт
+  // и закрытия (linked), и привязки в карточке.
+  const facts = useRef<HTMLUListElement>(null);
+  const [linked, setLinked] = useState(0);
+  useEffect(() => {
+    if (linked === 0 || city.geoname_id === null) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) facts.current?.focus();
+  }, [linked, city.geoname_id]);
   const status = statusOf(city.status);
   return (
     <div className={styles.page}>
@@ -80,7 +91,7 @@ function CityView({ city }: { city: GeoCityDetails }) {
           </>
         }
       />
-      <CityFacts city={city} />
+      <CityFacts city={city} ref={facts} />
       {canManage && (
         <Section title={t('status.title')}>
           <CityStatusCard city={city} />
@@ -98,7 +109,12 @@ function CityView({ city }: { city: GeoCityDetails }) {
         <DistrictsCard cityId={city.id} canEdit={canDistricts} />
       </Section>
       {canManage && (
-        <LinkPlaceDialog city={city} open={linking} onClose={() => setLinking(false)} />
+        <LinkPlaceDialog
+          city={city}
+          open={linking}
+          onClose={() => setLinking(false)}
+          onLinked={() => setLinked((n) => n + 1)}
+        />
       )}
     </div>
   );
@@ -117,7 +133,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function CityFacts({ city }: { city: GeoCityDetails }) {
+function CityFacts({ city, ref }: { city: GeoCityDetails; ref?: Ref<HTMLUListElement> }) {
   const t = useTranslations('geo.city.facts');
   const format = useFormatter();
   const facts: [string, ReactNode][] = [
@@ -135,7 +151,7 @@ function CityFacts({ city }: { city: GeoCityDetails }) {
     [t('slug'), city.slug],
   ];
   return (
-    <ul aria-label={t('label')} className={styles.facts}>
+    <ul ref={ref} tabIndex={-1} aria-label={t('label')} className={styles.facts}>
       {facts.map(([label, value]) => (
         <li key={label} className={styles.fact}>
           <span className={styles.label}>{label}</span>

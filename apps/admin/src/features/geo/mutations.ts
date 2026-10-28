@@ -1,5 +1,5 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
-import { unwrap } from '../../api/client';
+import { isApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
@@ -53,10 +53,13 @@ export function useUpdateCity(cityId: string, mutationKey: readonly unknown[]) {
   );
 }
 
-// linkGeoCity: ручная привязка к месту GeoNames.
+// linkGeoCity: ручная привязка к месту GeoNames. 409 geo.city_already_linked — город уже привязан
+// (например, сверкой импорта, пока окно было открыто): карточка перечитывается, иначе страница так и
+// показывала бы «не привязан» и «Привязать» до перезагрузки (ревью G8, m2).
 export function useLinkCity(cityId: string) {
   const api = useApi();
   const locale = useLocale();
+  const queryClient = useQueryClient();
   const onResult = useCityResult();
   return useAdminMutation(
     (geonameId: number, key: string) =>
@@ -69,7 +72,14 @@ export function useLinkCity(cityId: string) {
           body: { geoname_id: geonameId },
         }),
       ),
-    { mutationKey: ['geo', 'link', cityId], onSuccess: onResult },
+    {
+      mutationKey: ['geo', 'link', cityId],
+      onSuccess: onResult,
+      onError: (e) => {
+        if (isApiError(e, 'geo.city_already_linked'))
+          void queryClient.invalidateQueries({ queryKey: [...CITIES_KEY, 'card', cityId] });
+      },
+    },
   );
 }
 

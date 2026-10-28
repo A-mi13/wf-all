@@ -18,21 +18,31 @@ export function LinkPlaceDialog({
   city,
   open,
   onClose,
+  onLinked,
 }: {
   city: GeoCityDetails;
   open: boolean;
   onClose: () => void;
+  onLinked: () => void; // привязано: окно закрыто, открывателя «Привязать» больше нет — фокус ставит страница
 }) {
   const t = useTranslations('geo.link');
   const busy = useIsMutating({ mutationKey: ['geo', 'link', city.id] }) > 0;
   return (
     <Modal open={open} onClose={onClose} title={t('title')} dismissible={!busy}>
-      <LinkBody city={city} onClose={onClose} />
+      <LinkBody city={city} onClose={onClose} onLinked={onLinked} />
     </Modal>
   );
 }
 
-function LinkBody({ city, onClose }: { city: GeoCityDetails; onClose: () => void }) {
+function LinkBody({
+  city,
+  onClose,
+  onLinked,
+}: {
+  city: GeoCityDetails;
+  onClose: () => void;
+  onLinked: () => void;
+}) {
   const t = useTranslations('geo.link');
   const ta = useTranslations('geo.activate');
   const toast = useToast();
@@ -44,6 +54,7 @@ function LinkBody({ city, onClose }: { city: GeoCityDetails; onClose: () => void
     link.mutate(place.geoname_id, {
       onSuccess: () => {
         toast.success(t('linked'));
+        onLinked();
         onClose();
       },
     });
