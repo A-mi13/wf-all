@@ -131,7 +131,8 @@ func TestRolePrivileges(t *testing.T) {
 		{"api", "DELETE FROM geonames_places WHERE false", false},
 		{"api", "UPDATE app_versions SET version = version WHERE false", false},
 		// админка: читает всё, включая журнал импорта; правит справочник и версии; удаляет только
-		// переводы (районы архивируются, города и страны не удаляются); источник пишет только воркер
+		// переводы и строки истории slug (районы архивируются, города и страны не удаляются); источник
+		// пишет только воркер
 		{"admin", "SELECT 1 FROM geonames_imports", true},
 		{"admin", "SELECT 1 FROM geonames_place_names", true},
 		{"admin", "SELECT 1 FROM geonames_places", true},
@@ -154,7 +155,10 @@ func TestRolePrivileges(t *testing.T) {
 		{"admin", "DELETE FROM cities WHERE false", false},
 		{"admin", "DELETE FROM districts WHERE false", false},
 		{"admin", "DELETE FROM countries WHERE false", false},
-		{"admin", "DELETE FROM city_slug_history WHERE false", false},
+		// возврат к своему старому slug удаляет его из истории (спека сотрудников §3.3, план B)
+		{"admin", "DELETE FROM city_slug_history WHERE false", true},
+		{"api", "DELETE FROM city_slug_history WHERE false", false},
+		{"worker", "DELETE FROM city_slug_history WHERE false", false},
 		{"admin", "INSERT INTO app_versions (platform, min_version, recommended_version, store_url) " +
 			"VALUES ('ios', '1.0.0', '1.1.0', 'https://apps.apple.com/app/id1') " +
 			"ON CONFLICT (platform) DO UPDATE SET min_version = excluded.min_version, version = app_versions.version + 1", true},

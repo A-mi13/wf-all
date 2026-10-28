@@ -243,6 +243,9 @@ func violates(query, code, constraint, column string) func(context.Context, *sql
 		if _, rbErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT probe"); rbErr != nil {
 			return rbErr
 		}
+		if err == nil {
+			return fmt.Errorf("%s: ждали %s на %q/%q, оператор прошёл", query, code, constraint, column)
+		}
 		var pg *pgconn.PgError
 		if !errors.As(err, &pg) || pg.Code != code || pg.ConstraintName != constraint || pg.ColumnName != column {
 			return fmt.Errorf("%s: ждали %s на %q/%q, получили: %w", query, code, constraint, column, err)
@@ -285,6 +288,38 @@ func rolledBack(t *testing.T, db *sql.DB, fn func(ctx context.Context, tx *sql.T
 	}
 	defer func() { _ = tx.Rollback() }()
 	return fn(ctx, tx)
+}
+
+// runGuards — каждый страж дважды в откатываемой транзакции: на схеме как есть check проходит, после
+// plant (ограничение снято) — обязан упасть.
+func runGuards(t *testing.T, db *sql.DB, guards []r13Guard) {
+	t.Helper()
+	for _, g := range guards {
+		t.Run(g.name, func(t *testing.T) {
+			run := func(plant string) error {
+				return rolledBack(t, db, func(ctx context.Context, tx *sql.Tx) error {
+					for _, q := range []string{plant, g.setup} {
+						if q == "" {
+							continue
+						}
+						if _, err := tx.ExecContext(ctx, q); err != nil {
+							t.Fatalf("%s: %v", q, err)
+						}
+					}
+					return g.check(ctx, tx)
+				})
+			}
+			if err := run(""); err != nil {
+				t.Fatalf("гарантия не держится: %v", err)
+			}
+			if g.plant == "" {
+				t.Fatal("у стража нет подсадки — нечем доказать, что он не вакуумен")
+			}
+			if err := run(g.plant); err == nil {
+				t.Fatalf("без ограничения (%s) случай всё равно проходит — страж вакуумен", g.plant)
+			}
+		})
+	}
 }
 
 const (
@@ -442,32 +477,7 @@ func TestGeo0019R13Guards(t *testing.T) {
 			SELECT id, 'de', '   ' FROM cities WHERE slug = 'stavropol'`, "23514", "city_names_name_check", ""),
 			plant: `ALTER TABLE city_names DROP CONSTRAINT city_names_name_check`},
 	}
-	for _, g := range guards {
-		t.Run(g.name, func(t *testing.T) {
-			run := func(plant string) error {
-				return rolledBack(t, db, func(ctx context.Context, tx *sql.Tx) error {
-					for _, q := range []string{plant, g.setup} {
-						if q == "" {
-							continue
-						}
-						if _, err := tx.ExecContext(ctx, q); err != nil {
-							t.Fatalf("%s: %v", q, err)
-						}
-					}
-					return g.check(ctx, tx)
-				})
-			}
-			if err := run(""); err != nil {
-				t.Fatalf("гарантия не держится: %v", err)
-			}
-			if g.plant == "" {
-				t.Fatal("у стража нет подсадки — нечем доказать, что он не вакуумен")
-			}
-			if err := run(g.plant); err == nil {
-				t.Fatalf("без ограничения (%s) случай всё равно проходит — страж вакуумен", g.plant)
-			}
-		})
-	}
+	runGuards(t, db, guards)
 
 	// допустимое значение истории slug — тот же формат, что у cities.slug
 	if err := rolledBack(t, db, func(ctx context.Context, tx *sql.Tx) error {

@@ -58,11 +58,13 @@ BEGIN
         WHEN r.name LIKE 'river\_%' THEN CASE who WHEN 'api' THEN NULL
                                                   ELSE 'SELECT, INSERT, UPDATE, DELETE' END
         -- справочник geo (спека geo §3.8): API только читает; админка правит, но не удаляет —
-        -- районы архивируются, города и страны остаются; воркер (сверка импорта, §5.4) обновляет
-        -- города и регионы, страны только читает
+        -- районы архивируются, города и страны остаются; исключение — строка истории slug: возврат
+        -- города к своему старому slug удаляет её (спека сотрудников §3.3); воркер (сверка импорта,
+        -- §5.4) обновляет города и регионы, страны только читает
         WHEN r.name IN ('countries', 'regions', 'cities', 'districts', 'city_slug_history') THEN CASE who
           WHEN 'api' THEN 'SELECT'
-          WHEN 'admin' THEN 'SELECT, INSERT, UPDATE'
+          WHEN 'admin' THEN CASE r.name WHEN 'city_slug_history' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                        ELSE 'SELECT, INSERT, UPDATE' END
           WHEN 'worker' THEN CASE WHEN r.name IN ('cities', 'regions') THEN 'SELECT, UPDATE'
                                   WHEN r.name = 'countries' THEN 'SELECT' END
         END
