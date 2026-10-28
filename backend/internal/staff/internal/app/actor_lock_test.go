@@ -5,9 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,6 +19,7 @@ import (
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/db"
+	"wf/backend/internal/platform/id"
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/staff/internal/app"
 )
@@ -304,5 +309,46 @@ func TestStaffActionsDoNotLockActors(t *testing.T) {
 	}
 	if free {
 		t.Fatal("approve staff.role_change ждёт учётку, не взяв замок владельцев: хук замка акторов вызван до execLocks")
+	}
+}
+
+// Ни одно действие staff.* реестра не зовёт хук замка акторов (M3 ревью G3): перебор Registry.Actions(), а не
+// список руками — новое действие staff.* попадёт под страж само. Наблюдаемо одинаково для всех действий: учётку
+// инициатора держит третья транзакция FOR UPDATE, payload запроса — неизвестной версии формата. Без хука approve
+// доходит до исполнителя, тот отказывает на decode (сбой, запрос pending) сразу; хук встал бы на учётке
+// инициатора FOR SHARE раньше исполнителя — approve ждал бы до истечения ctx.
+func TestStaffRegistryActionsSkipActorLock(t *testing.T) {
+	e := newManageEnv(t)
+	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
+	b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))
+	var names []string
+	for _, n := range e.reg.Actions() {
+		if strings.HasPrefix(n, "staff.") {
+			names = append(names, n)
+		}
+	}
+	if !slices.Contains(names, app.ActionRoleChange) {
+		t.Fatalf("действия staff.* реестра: %v — перебор пуст?", names)
+	}
+	payload := fmt.Sprintf(`{"v": 999, "init_id": %q, "init_ver": %d}`, a.StaffID, a.Version)
+	release := e.holdAccount(a.StaffID)
+	defer release()
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			apID := id.New()
+			now := e.clock.Now()
+			e.exec(`INSERT INTO approvals (id, action, permission, payload, requested_by, requested_by_label, requested_at, expires_at)
+				VALUES ($1, $2, 'staff.roles.grant_elevated', $3::jsonb, $4, 'Инициатор', $5, $6)`,
+				apID, name, payload, a.StaffID, now, now.Add(24*time.Hour))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, err := e.svc.Approve(ctx, b, "Подтверждающий", apMeta, apID, "")
+			if err == nil || errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "payload v = 999") {
+				t.Fatalf("approve %s: %v — ждали отказ исполнителя на decode без ожидания учётки инициатора", name, err)
+			}
+			if st, _ := e.apState(apID); st != approvals.StatusPending {
+				t.Fatalf("статус %s", st)
+			}
+		})
 	}
 }
