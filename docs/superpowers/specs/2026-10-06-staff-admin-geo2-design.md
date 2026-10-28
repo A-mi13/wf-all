@@ -261,6 +261,13 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
   комментарии), а у роли `api` на `idempotency_keys` DML — она читала бы их, подменяла сохранённый ответ и
   снимала ключ. admin-api собирает `idempotency.Middleware` с `Config{Table: idempotency.Staff}`; публичный
   API — по умолчанию `idempotency_keys` (не меняется). Права — §3.3; чистка — §4.10.
+- **`staff_rate_limits`** (платформа, `platform/ratelimit`; план B, R2, миграция `0022`) — счётчики лимитов admin-api:
+  вход по почте (`email:<hmac>`), IP класса `staff_auth`, субъект `staff:<класс>:<id>`, потолок аудита приглашений,
+  классы `default` конвейера. Схема — копия `rate_limits` (`UNLOGGED`, PK `key`, индекс по `tat`). Своя таблица по той
+  же причине, что ключи идемпотентности: у роли `api` на `rate_limits` DML — взлом публичного API стирал бы счётчики
+  перебора входа сотрудника или закрывал вход всем вставкой большого `tat`. admin-api собирает лимитер
+  `ratelimit.NewPG(pool, clock, ratelimit.Staff)` (`assemble`: сценарии, конвейер, команды оператора); публичный API —
+  `ratelimit.Players`. Права — §3.3; чистка — тикер admin-api (§4.10).
 - **`feature_flags`** (план B): `version bigint`. Ключи флагов заводятся миграциями модулей, админ только
   переключает.
 
@@ -271,6 +278,9 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
   ничего (страж `TestRolePrivileges`, сквозной — `TestStaffIdempotencyOwnTable`). Обратно: у `admin` на
   `idempotency_keys` игроков — ничего (admin-api в неё не ходит; периодику `idempotency.cleanup` лидер только
   ставит в `river_job`, исполняет воркер).
+- `staff_rate_limits` (§3.2) — тоже ветка `staff_*`: DML только у `admin`; у `api` и `worker` — ничего (страж
+  `TestRolePrivileges`, сквозной — `TestStaffRateLimitsOwnTable`). На `rate_limits` игроков у `admin` — ничего (своя
+  ветка `grants.sql`; `api` и `worker` — DML, как было; периодику `ratelimit.cleanup` лидер admin-api только ставит).
 - `admin` — права на служебные таблицы River, как у воркера (исполнение задач очереди `staff`, §4.10).
 - `admin`: `DELETE` на `city_slug_history` (план B; спека geo §3.8).
 - `api`: к `staff_*` и `approvals` доступа нет, sequence-прав тоже (страж §11).
@@ -568,7 +578,9 @@ admin-api запускает свой River-клиент с исполнител
     (`PurgeDecided`);
   - удаляет просроченные ключи идемпотентности admin-api (`idempotency.DeleteExpired(ctx, pool,
     idempotency.Staff)`: порции по 1000, как у чистки `idempotency_keys` воркером; у воркера прав на
-    `staff_idempotency_keys` нет).
+    `staff_idempotency_keys` нет);
+  - удаляет строки лимитов admin-api с `tat` в прошлом по часам сервиса (`ratelimit.DeleteExpired(ctx, pool,
+    clock, ratelimit.Staff)`: порции по 1000; у воркера прав на `staff_rate_limits` нет; план B, R2).
 
 ### 4.11. Ротация ключей
 

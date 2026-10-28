@@ -27,8 +27,8 @@ paths:
   admin-api — лидер River один на схему и ставит периодику по своему списку (P27), исполняет воркер (River не проверяет
   исполнителя у периодической вставки; страж `TestLeaderWithoutWorkersEnqueuesPlatformJobs` под ролью `admin`). Новая
   чистка платформы — в `Jobs()`, не в `cmd/worker`. Чистки, которым нужны права `admin` (`staff_*`, `approvals`,
-  `staff_idempotency_keys`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +
-  `ExpireDue` + `PurgeDecided` + `idempotency.DeleteExpired(…, Staff)`).
+  `staff_idempotency_keys`, `staff_rate_limits`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +
+  `ExpireDue` + `PurgeDecided` + `idempotency.DeleteExpired(…, Staff)` + `ratelimit.DeleteExpired(…, Staff)`).
   Исполняющий клиент River — только `queue.ClientConfig(очереди, исполнители, периодика, журнал)` у обоих бинарников
   (`riverConfig` в `cmd/worker` и `cmd/admin-api`), клиент только для вставки — `queue.InsertConfig(журнал)`; свой
   `river.Config{…}` вне `platform/queue` (литерал, `new`, переменная типа) не собирать — страж
@@ -105,7 +105,9 @@ paths:
   подтеги (`ru`, `en`)); свой разбор заголовка модули не пишут. «Нет языка» (`ok=false`) решает вызывающий: `i18n.Default` не подставляется.
 - Версии нативного приложения — пакет `appversion`: чтение `Reader.Get` (нет строки — `ok=false`, не ошибка),
   сравнение только `appversion.Compare` (semver `MAJOR.MINOR.PATCH`, строкой версии не сравнивать), перед записью —
-  `appversion.Validate` (формат, `min ≤ recommended`, `https` и точный хост стора платформы); нарушения —
+  `appversion.Validate` (формат, `min ≤ recommended`, `https://` в нижнем регистре без пробельных и управляющих
+  символов в любом месте — в том числе U+00A0, U+0085, C1, — и точный хост стора платформы; CHECK `0021` — защита в
+  глубину); нарушения —
   `ValidationError` с полями контракта, ручка переводит их в 400 `validation.failed`.
 - `*auth.Principal` из `auth.From(ctx)` — общий для всех запросов сессии (кэш отдаёт один указатель): срезы
   `Roles` и `Restrictions` не изменять (append, sort, запись по индексу).
@@ -117,6 +119,13 @@ paths:
 - Ключ лимита — только `ratelimit.IPKey` / `SubjectKey` / `SessionDeviceKey` / `BFFDeviceKey` / `EmailKey`
   (`<вид>:<класс>:<значение>`; виды `ip`, `user`, `staff`, `device`, `email`): счётчик, который сценарий ведёт
   сам через `Limiter`, попадает в то же пространство, что и `ratelimit.Middleware`.
+  Таблица счётчиков — параметр `ratelimit.NewPG(db, clock, ratelimit.Table)` (план B, R2), как у идемпотентности:
+  `Players` — `rate_limits` публичного API (`cmd/api`, чистит воркер `CleanupWorker`), `Staff` — `staff_rate_limits`
+  admin-api (`assemble` в `cmd/admin-api` — один лимитер на сценарии, конвейер и команды оператора; права только у
+  `admin`, у `admin` на `rate_limits` — ничего; чистит тикер `staff/jobs.Cleaner` через
+  `ratelimit.DeleteExpired(ctx, pool, clock, Staff)`); неизвестная — паника при сборке. Запросы — пары `X`/`StaffX` в
+  `queries/ratelimit.sql`, равные текстом после замены имени таблицы (страж `TestStaffQueriesMirrorPublic` на
+  `testkit/sqlmirror`, общий с идемпотентностью). Тесты лимитов admin-api — `ratelimit.Staff` под ролью `admin`.
 - В логи — только строки и ошибки: `logx` маскирует ПД (почту, телефоны) только в них; структуры, `Stringer`
   и срезы не маскируются — с ПД их в лог не класть.
 - Права сотрудников — каталог и матрица `platform/perm` (`docs/05-ролевая-модель.md`): ключ

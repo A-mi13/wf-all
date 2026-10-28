@@ -7,7 +7,7 @@
 package sqlmirror
 
 import (
-	"os"
+	"io/fs"
 	"regexp"
 	"strings"
 	"testing"
@@ -17,12 +17,12 @@ type query struct{ kind, body string }
 
 var nameLine = regexp.MustCompile(`^-- name: (\w+) (:\w+)\s*$`)
 
-// Check — в файле file каждый запрос над table имеет пару Staff<имя> того же вида, который обращается к
+// Check — в файле file из fsys каждый запрос над table имеет пару Staff<имя> того же вида, который обращается к
 // staffTable и после замены staffTable → table равен оригиналу (комментарии отброшены, пробелы схлопнуты);
 // у каждого Staff-запроса есть оригинал. minPairs — сколько пар обязано найтись (страж не вхолостую).
-func Check(t testing.TB, file, table, staffTable string, minPairs int) {
+func Check(t testing.TB, fsys fs.FS, file, table, staffTable string, minPairs int) {
 	t.Helper()
-	src, err := os.ReadFile(file)
+	src, err := fs.ReadFile(fsys, file)
 	if err != nil {
 		t.Fatal(err)
 	}

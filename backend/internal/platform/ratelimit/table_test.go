@@ -23,9 +23,9 @@ func TestTableString(t *testing.T) {
 // Неизвестная таблица — паника при сборке, а не тихий уход в таблицу игроков.
 func TestNewPGUnknownTable(t *testing.T) {
 	for name, f := range map[string]func(){
-		"NewPG": func() { ratelimit.NewPG(nil, clocktest.New(start), ratelimit.Table(7)) },
+		"NewPG": func() { ratelimit.NewPG(noRows{}, clocktest.New(start), ratelimit.Table(7)) },
 		"DeleteExpired": func() {
-			_, _ = ratelimit.DeleteExpired(context.Background(), nil, clocktest.New(start), ratelimit.Table(7))
+			_, _ = ratelimit.DeleteExpired(context.Background(), noRows{}, clocktest.New(start), ratelimit.Table(7))
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

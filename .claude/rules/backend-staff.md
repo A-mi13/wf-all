@@ -241,7 +241,7 @@ paths:
   `GetLastInvite` берёт назначение; порции `FOR UPDATE SKIP LOCKED`, строку под замком сценария пропускают, страж
   `TestCleanupSkipsLockedRows`) + `ExpireDue` + `PurgeDecided(DecidedRetention)` + `idempotency.DeleteExpired(ctx,
   d.Pool, idempotency.Staff)` (просроченные `staff_idempotency_keys`: прав у воркера на них нет; число — в строке журнала
-  `idempotency_keys=N`, `TestCleanerTickStaffIdempotencyKeys`); `Run` — проход сразу, затем раз
+  `idempotency_keys=N`, `TestCleanerTickStaffIdempotencyKeys`) + `ratelimit.DeleteExpired(ctx, d.Pool, d.Clock, ratelimit.Staff)` (строки `staff_rate_limits` с `tat` в прошлом по часам сервиса, план B R2; `rate_limits=N`, `TestCleanerDeletesStaffRateLimits`); `Run` — проход сразу, затем раз
   в час; шаги независимы (сбой одного не отменяет другие, ошибки вместе — `TestCleanupStepsIndependent`); ошибка
   прохода — `log.Error`, тикер живёт; отмена ctx — не сбой.
 - **Хендлеры (`staff/admin`, Task 10a):** тонкие — запрос → сценарий `internal/app` → ответ контракта; логики

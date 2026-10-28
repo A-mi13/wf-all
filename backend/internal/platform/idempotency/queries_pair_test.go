@@ -1,6 +1,7 @@
 package idempotency_test
 
 import (
+	"os"
 	"testing"
 
 	"wf/backend/internal/platform/testkit/sqlmirror"
@@ -12,5 +13,5 @@ import (
 // идемпотентности public и admin. Каждый запрос над idempotency_keys — с парой, каждая пара — с оригиналом.
 // Страж не вхолостую: пары Get, Claim, SaveResponse, DeleteExpired.
 func TestStaffQueriesMirrorPublic(t *testing.T) {
-	sqlmirror.Check(t, "queries/idempotency.sql", "idempotency_keys", "staff_idempotency_keys", 4)
+	sqlmirror.Check(t, os.DirFS("queries"), "idempotency.sql", "idempotency_keys", "staff_idempotency_keys", 4)
 }

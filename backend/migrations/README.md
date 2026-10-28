@@ -37,6 +37,7 @@ PostGIS обязателен двум миграциям: `0005_pitches.sql` (п
 0019_geo.sql             geo: источник GeoNames, названия по локалям, история slug, точки и geoname_id городов, архив районов, geo_read_city_settings; app_versions (платформа)
 0020_staff.sql           сотрудники (staff_*): учётки, роль и города модератора, TOTP, резервные коды, приглашения, сессии; approvals и staff_idempotency_keys — ключи идемпотентности admin-api, права только admin (платформа); audit_log: автор-сотрудник, снимок имени, город; role_assignments — только допуск капитана
 0021_geo_admin.sql       geo 2/2 в админке: feature_flags.version, store_url без пробельных и управляющих, CHECK форматов правил страны; DELETE истории slug у admin — в grants.sql
+0022_staff_rate_limits.sql  staff_rate_limits — лимиты admin-api (копия rate_limits, UNLOGGED), права только admin; у admin на rate_limits — ничего (grants.sql)
 ```
 
 Правка миграции: пока она не слита в `main` и не накатана на стенд (стенд накатывает `migrate up` из `main`,
@@ -93,6 +94,7 @@ bash scripts/pg.sh psql -d postgres -c "CREATE DATABASE wf OWNER migrator"
 | Пробельный или управляющий символ в `store_url`, схема не `https://` в нижнем регистре (с `0021`) | `CHECK` `app_versions_store_url_check` (`^https://[^[:space:][:cntrl:]]+$`); U+00A0 и U+0085 ловит код (`appversion.Validate`) |
 | Правила страны не в формате: код не ISO alpha-2, валюта не три заглавные, язык не две строчные, префикс не `+` и 1–4 цифры (без ведущего нуля), возраст вне 1–120 (с `0021`) | `CHECK` `countries_code_format`, `countries_currency_format`, `countries_default_locale_format`, `countries_phone_prefix_format`, `countries_ages_range` (порядок порогов — `countries_age_order`); действующие ISO и поддерживаемые локали проверяет код |
 | Версия флага функции не положительная (с `0021`) | `CHECK` `feature_flags_version_check` |
+| Публичный API стирает счётчики перебора входа сотрудников или закрывает им вход большим `tat` (с `0022`) | своя таблица `staff_rate_limits`, права только у `admin` (ветка `staff_*` в `grants.sql`); у `admin` на `rate_limits` — ничего |
 | Две учётки сотрудника на одну почту, почта не в нормализованном виде | `UNIQUE` `staff_accounts_email_key` (`citext`), `CHECK` `staff_accounts_email_format` |
 | Модератор без городов или города у не-модератора | отложенный триггер `staff_role_cities_check()` (на `COMMIT`, `23514` `staff_role_cities_moderator`) |
 | Два живых приглашения у одной учётки; код у закрытого приглашения | частичный уникальный индекс `staff_invites_live_key`; `CHECK` `staff_invites_closed_no_code`, `staff_invites_code_pair` |
@@ -147,7 +149,10 @@ River на каждого подписчика и отмечает `published_at
 сама почта не хранится; у устройства значение с префиксом источника — `device:<класс>:s:<uuid>`
 (устройство сессии) или `device:<класс>:b:<метка>` (метка BFF), чтобы метка из cookie не совпала с чужим
 устройством. Строка одна на ключ, `tat` — GCRA,
-интервал усечён до микросекунды (точность `timestamptz`). Решение PoW
+интервал усечён до микросекунды (точность `timestamptz`). Ключи admin-api (`staff:`, `email:`, `ip:staff_auth`,
+потолок аудита приглашений) с `0022` живут в своей таблице `staff_rate_limits` (копия `rate_limits`, тоже
+`UNLOGGED`; права только у `admin`, чистит тикер admin-api): у роли `api` на `rate_limits` DML, и взлом
+публичного API иначе давал бы рычаг над входом в админку (план B, R2). Решение PoW
 хранится до `expires_at` задачи. `idempotency_keys` хранит ответ повтора: статус, тело (`jsonb`) и
 заголовки `Content-Type`, `Location`, `ETag` (`response_headers`); ключ живёт 24 часа.
 
