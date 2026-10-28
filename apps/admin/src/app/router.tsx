@@ -9,6 +9,7 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'use-intl';
 import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
 import { useIncomingApprovalsCount } from '../features/approvals/queries';
 import { parseApprovalsSearch } from '../features/approvals/search';
@@ -23,7 +24,7 @@ import { MyAccessPage } from '../features/me/MyAccessPage';
 import { parseStaffSearch } from '../features/staff/search';
 import { StaffPage } from '../features/staff/StaffPage';
 import { isApiError } from '../api/client';
-import { AppShell, ConnectionErrorState, RateLimitedState } from '../ui';
+import { AppShell, ConnectionErrorState, PageHeader, RateLimitedState } from '../ui';
 import { useAccountCard } from './account';
 import { resolveRoute } from './guard';
 import { useLogout } from './logout';
@@ -113,6 +114,16 @@ function ActiveShell({ me }: { me: Me }) {
   );
 }
 
+// Разделы «Справочников», экраны которых строят следующие задачи плана B (Task 18–22): пока — только
+// шапка раздела. Маршрут нужен уже сейчас: без него прямой адрес дал бы «не найдено» вместо
+// ForbiddenState / DesktopOnlyState каркаса. Задача экрана заменяет component своим.
+function pendingSection(titleKey: string) {
+  return function PendingSection() {
+    const t = useTranslations();
+    return <PageHeader title={t(titleKey)} />;
+  };
+}
+
 const shellRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'shell',
@@ -147,6 +158,36 @@ const routeTree = rootRoute.addChildren([
       component: ApprovalsPage,
     }),
     createRoute({ getParentRoute: () => shellRoute, path: paths.me, component: MyAccessPage }),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.cities,
+      component: pendingSection('nav.cities'),
+    }),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.city,
+      component: pendingSection('nav.cities'),
+    }),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.countries,
+      component: pendingSection('nav.countries'),
+    }),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.imports,
+      component: pendingSection('nav.imports'),
+    }),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.versions,
+      component: pendingSection('nav.versions'),
+    }),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.flags,
+      component: pendingSection('nav.flags'),
+    }),
   ]),
 ]);
 

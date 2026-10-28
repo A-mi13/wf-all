@@ -7,15 +7,23 @@ import type { operations } from '../../api/gen/admin';
 
 // Вкладки по разделам → начало кода действия (`<модуль>.<действие>`, действия аудита бэкенда:
 // staff.* — модуль сотрудников, platform.approval_* — решения подтверждений, geo.* — справочники
-// (города, импорт GeoNames); flags.* — флаги функций (план B, по ключам прав flags.*)).
+// (города, районы, страны, импорт GeoNames); platform.flag_* — флаги функций, platform.app_versions_* —
+// версии приложения (план B, R15: действия флагов — platform.flag_changed, не flags.*)).
 export const AUDIT_SECTIONS = {
   staff: 'staff.',
   approvals: 'platform.approval_',
   directories: 'geo.',
-  flags: 'flags.',
+  flags: 'platform.flag_',
+  versions: 'platform.app_versions_',
 } as const;
 export type AuditSection = keyof typeof AUDIT_SECTIONS;
-export const SECTIONS: readonly AuditSection[] = ['staff', 'approvals', 'directories', 'flags'];
+export const SECTIONS: readonly AuditSection[] = [
+  'staff',
+  'approvals',
+  'directories',
+  'flags',
+  'versions',
+];
 
 export type AuditSearch = {
   tab?: AuditSection; // без вкладки — «Все»

@@ -1,0 +1,93 @@
+/* Карточка «Города и запуск» (макет 07): 320 px в сетке, радиус xl, фон bg-elevated */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  min-width: 0;
+  padding: var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-xl);
+  background: var(--wf-color-bg-elevated);
+}
+
+.card[data-selected] {
+  border-color: var(--wf-color-border-strong);
+  background: var(--wf-color-surface-sunken);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-3);
+}
+
+.title {
+  flex-grow: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-lg);
+  line-height: var(--wf-text-lg-line);
+  font-weight: 600;
+  color: var(--wf-color-text);
+}
+
+.stats {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stat {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--wf-space-1);
+  min-width: 0;
+  text-align: center;
+}
+
+.stat + .stat {
+  border-left: 1px solid var(--wf-color-border);
+}
+
+.value {
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-lg);
+  line-height: 1;
+  font-weight: 600;
+  color: var(--wf-color-text);
+}
+
+.statLabel {
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  color: var(--wf-color-text-subtle);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-3);
+  margin-top: auto;
+  padding-top: var(--wf-space-3);
+  border-top: 1px solid var(--wf-color-border);
+}
+
+.note {
+  flex-grow: 1;
+  min-width: 0;
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+  color: var(--wf-color-text-subtle);
+}
+
+.action {
+  flex-shrink: 0;
+  margin-left: auto;
+}

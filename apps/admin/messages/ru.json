@@ -5,7 +5,8 @@
   },
   "nav": {
     "groups": {
-      "security": "Безопасность"
+      "security": "Безопасность",
+      "directories": "Справочники"
     },
     "audit": "Журнал действий",
     "staff": "Роли и доступ",
@@ -17,7 +18,12 @@
     "logout": "Выйти",
     "counts": {
       "approvals": "{count, plural, one {# запрос ждёт решения} few {# запроса ждут решения} many {# запросов ждут решения} other {# запроса ждут решения}}"
-    }
+    },
+    "cities": "Города и запуск",
+    "countries": "Страны",
+    "imports": "Импорт GeoNames",
+    "versions": "Версии приложения",
+    "flags": "Флаги функций"
   },
   "pages": {
     "login": {
@@ -318,7 +324,26 @@
       "reason": "Причина",
       "comment": "Комментарий",
       "target": "сотрудник {id}",
-      "none": "—"
+      "none": "—",
+      "country": "Страна",
+      "geo": {
+        "rules": "{code}: {changes}",
+        "currency": "валюта {from} → {to}",
+        "min_signup_age": "возраст регистрации {from} → {to}",
+        "age_of_majority": "совершеннолетие {from} → {to}",
+        "is_enabled": "{from} → {to}",
+        "create": "новая страна {code}: {details}",
+        "ages": "{min}/{majority}",
+        "week": {
+          "1": "неделя с пн",
+          "2": "неделя со вт",
+          "3": "неделя со ср",
+          "4": "неделя с чт",
+          "5": "неделя с пт",
+          "6": "неделя с сб",
+          "7": "неделя с вс"
+        }
+      }
     },
     "failure": {
       "initiator_changed": "Инициатор изменился после запроса: его выключили, сбросили доступ или сменили роль",
@@ -679,7 +704,8 @@
       "staff": "Сотрудники",
       "approvals": "Подтверждения",
       "directories": "Справочники",
-      "flags": "Флаги"
+      "flags": "Флаги",
+      "versions": "Версии"
     },
     "table": {
       "label": "Записи журнала",
@@ -704,7 +730,8 @@
       "approvals": "подтверждение",
       "directories": "справочник",
       "flags": "флаг",
-      "other": "система"
+      "other": "система",
+      "versions": "версии"
     },
     "actions": {
       "staff": {
@@ -735,12 +762,21 @@
         "approval_rejected": "Запрос отклонён",
         "approval_cancelled": "Запрос отменён",
         "approval_expired": "Запрос истёк",
-        "approval_failed": "Запрос подтверждён, но не исполнен"
+        "approval_failed": "Запрос подтверждён, но не исполнен",
+        "flag_changed": "Флаг функции изменён",
+        "app_versions_changed": "Версии приложения изменены"
       },
       "geo": {
         "import": "Импорт GeoNames",
         "import_requested": "Импорт GeoNames поставлен в очередь",
-        "import_cancelled": "Задача импорта GeoNames отменена"
+        "import_cancelled": "Задача импорта GeoNames отменена",
+        "city_activated": "Город активирован",
+        "city_updated": "Город изменён",
+        "city_linked": "Город привязан к GeoNames",
+        "district_created": "Район добавлен",
+        "district_updated": "Район изменён",
+        "country_created": "Страна создана",
+        "country_updated": "Страна изменена"
       }
     },
     "objects": {
@@ -749,7 +785,11 @@
       "geonames_import": "импорт GeoNames",
       "city": "город",
       "staff_keys": "ключи сотрудников",
-      "geonames_import_job": "задача импорта GeoNames"
+      "geonames_import_job": "задача импорта GeoNames",
+      "country": "страна",
+      "district": "район",
+      "feature_flag": "флаг функции",
+      "app_versions": "версии приложения"
     },
     "details": {
       "show": "Подробнее",
@@ -820,6 +860,18 @@
     "gk_rotation": {
       "title": "Сменный вратарь",
       "note": "Вратарь меняется по ходу матча"
+    }
+  },
+  "geo": {
+    "status": {
+      "waitlist": "ожидание",
+      "pilot": "пилот",
+      "live": "живой",
+      "unknown": "—"
+    },
+    "countries": {
+      "enabled": "включена",
+      "disabled": "выключена"
     }
   }
 }

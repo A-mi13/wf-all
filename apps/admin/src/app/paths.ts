@@ -8,6 +8,13 @@ export const paths = {
   staff: '/staff',
   approvals: '/approvals',
   audit: '/audit',
+  // «Справочники» (план B): города и страница города, страны, импорт GeoNames, версии, флаги
+  cities: '/geo/cities',
+  city: '/geo/cities/$cityId',
+  countries: '/geo/countries',
+  imports: '/geo/imports',
+  versions: '/app/versions',
+  flags: '/flags',
 } as const;
 
 export type AppPath = (typeof paths)[keyof typeof paths];

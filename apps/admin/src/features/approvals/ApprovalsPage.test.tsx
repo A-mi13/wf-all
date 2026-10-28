@@ -844,6 +844,71 @@ describe('телефон', () => {
     expect(within(row!).queryByRole('button', { name: 'Отклонить' })).toBeNull();
     expect(row).toHaveTextContent('Выдача прав — только с компьютера');
   });
+
+  // План B, Task 17: ограничение «только с компьютера» — для выдачи прав (staff.*); правила страны
+  // (geo.*) на телефоне решаются (спека §9.4).
+  test('решения по geo.* на телефоне доступны', async () => {
+    phone();
+    directory();
+    approvalsServer({ incoming: [GEO_RULES] });
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    expect(within(row!).getByRole('button', { name: 'Подтвердить' })).toBeInTheDocument();
+    expect(within(row!).getByRole('button', { name: 'Отклонить' })).toBeInTheDocument();
+    expect(row).not.toHaveTextContent('Выдача прав — только с компьютера');
+  });
+});
+
+// Правила и создание страны (план B, Task 17): «что будет сделано» — страна и «было → стало».
+const GEO_RULES = approval({
+  id: '0192f1e2-4c5d-7e6f-a081-0000000000a1',
+  action: 'geo.country_rules',
+  permission: 'geo.countries.rules',
+  payload: {
+    v: 1,
+    code: 'RU',
+    version: 7,
+    from: { currency: 'RUB' },
+    to: { currency: 'KZT' },
+    patch: { currency: 'KZT' },
+  },
+  requested_by: IGOR,
+});
+
+test('geo: правила страны и новая страна — в «что будет сделано», без «Кому»', async () => {
+  directory();
+  approvalsServer({
+    incoming: [
+      GEO_RULES,
+      approval({
+        id: '0192f1e2-4c5d-7e6f-a081-0000000000a2',
+        action: 'geo.country_create',
+        permission: 'geo.countries.rules',
+        payload: {
+          v: 1,
+          code: 'KZ',
+          currency: 'KZT',
+          default_locale: 'ru',
+          phone_prefix: '+7',
+          week_starts_on: 1,
+          min_signup_age: 14,
+          age_of_majority: 18,
+          is_enabled: false,
+          names: { ru: 'Казахстан' },
+        },
+        requested_by: IGOR,
+      }),
+    ],
+  });
+  renderApp('/approvals', { me: meOwner });
+  const [rules, create] = rows(await table('Входящие запросы'));
+  expect(rules).toHaveTextContent('Правила страны');
+  expect(within(rules!).getByText('Страна')).toBeInTheDocument();
+  expect(within(rules!).getByText('RU: валюта RUB → KZT')).toBeInTheDocument();
+  expect(within(rules!).queryByText('Кому')).toBeNull();
+  expect(create).toHaveTextContent('Новая страна');
+  expect(create).toHaveTextContent('новая страна KZ: KZT, ru, +7, неделя с пн, 14/18, выключена');
+  expect(within(create!).queryByText('Кому')).toBeNull();
 });
 
 // Общее устройство: сессия A истекла (401 → вход с return), за компьютер сел B. Кэш запросов живёт

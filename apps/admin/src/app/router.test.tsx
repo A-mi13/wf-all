@@ -192,6 +192,80 @@ describe('права разделов', () => {
   });
 });
 
+// «Справочники» (план B, Task 17): пять разделов, каждый со своим правом чтения и только с компьютера;
+// страница города — вложенный адрес раздела «Города и запуск» (его право и desktopOnly).
+describe('«Справочники»', () => {
+  const meModeratorGeo: Me = {
+    ...meModerator,
+    permissions: {
+      ...meModerator.permissions,
+      'geo.countries.read': 'allow',
+      'platform.versions.read': 'allow',
+      'platform.flags.read': 'allow',
+    },
+  };
+  const meAllDirectories: Me = {
+    ...meOwner,
+    permissions: {
+      ...meOwner.permissions,
+      'geo.countries.read': 'allow',
+      'geo.imports.read': 'allow',
+      'platform.versions.read': 'allow',
+      'platform.flags.read': 'allow',
+    },
+  };
+
+  test('модератор: группа в меню без «Импорта»; прямой адрес импорта — ForbiddenState', async () => {
+    const app = mount('/geo/imports', meModeratorGeo);
+    await page('Нет доступа к разделу');
+    expect(app.at()).toBe('/geo/imports');
+    const nav = screen.getByRole('navigation', { name: 'Разделы' });
+    expect(nav).toHaveTextContent('Справочники');
+    expect(nav).toHaveTextContent('Города и запуск');
+    expect(nav).toHaveTextContent('Страны');
+    expect(nav).toHaveTextContent('Версии приложения');
+    expect(nav).toHaveTextContent('Флаги функций');
+    expect(nav).not.toHaveTextContent('Импорт GeoNames');
+  });
+
+  test('страница города без geo.cities.read — ForbiddenState (вложенный адрес раздела)', async () => {
+    mount(`/geo/cities/${CITY_OWN}`, { ...meOwner, permissions: { 'audit.log.read': 'allow' } });
+    await page('Нет доступа к разделу');
+  });
+
+  test.each([
+    ['/geo/cities', 'Города и запуск'],
+    ['/geo/countries', 'Страны'],
+    ['/geo/imports', 'Импорт GeoNames'],
+    ['/app/versions', 'Версии приложения'],
+    ['/flags', 'Флаги функций'],
+  ])('%s с правом — раздел открыт (моки по умолчанию — sectionsServer)', async (path, title) => {
+    const app = mount(path, meAllDirectories);
+    await page(title);
+    expect(app.at()).toBe(path);
+  });
+
+  test('телефон: раздел «Справочников» — «только с компьютера»', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })),
+    );
+    mount('/geo/cities', meAllDirectories);
+    await page('Только с компьютера');
+  });
+
+  test('стартовая страница не изменилась — журнал', async () => {
+    const app = mount('/', meAllDirectories);
+    await page('Журнал действий');
+    expect(app.at()).toBe('/audit');
+  });
+});
+
 test('стадия error (нет связи с admin-api) — экран с понятным текстом и «Повторить»', async () => {
   let up = false;
   server.use(

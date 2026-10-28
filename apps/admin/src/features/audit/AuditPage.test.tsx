@@ -94,7 +94,8 @@ describe('вкладки и строки', () => {
     ['Сотрудники', 'staff', 'staff.'],
     ['Подтверждения', 'approvals', 'platform.approval_'],
     ['Справочники', 'directories', 'geo.'],
-    ['Флаги', 'flags', 'flags.'],
+    ['Флаги', 'flags', 'platform.flag_'],
+    ['Версии', 'versions', 'platform.app_versions_'],
   ])('вкладка «%s» → action_prefix, в адресе', async (name, tab, prefix) => {
     const seen = auditServer();
     const app = renderApp('/audit', { me: meOwner });

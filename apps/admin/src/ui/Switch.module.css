@@ -1,0 +1,95 @@
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+  min-height: var(--wf-size-touch-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wf-color-text-secondary);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--wf-color-accent);
+  outline-offset: 2px;
+  border-radius: var(--wf-radius-sm);
+}
+
+/* Дорожка и бегунок (макет 07, матрица флагов): выключен — slot-empty, включён — accent */
+.track {
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 22px;
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-full);
+  background: var(--wf-color-slot-empty);
+  transition:
+    background-color var(--wf-duration-fast) var(--wf-ease),
+    border-color var(--wf-duration-fast) var(--wf-ease);
+}
+
+.thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--wf-radius-full);
+  background: var(--wf-color-text-muted);
+  transition: transform var(--wf-duration-fast) var(--wf-ease);
+}
+
+.on {
+  border-color: var(--wf-color-accent);
+  background: var(--wf-color-accent);
+}
+
+.on .thumb {
+  transform: translateX(18px);
+  background: var(--wf-color-text-inverse);
+}
+
+.switch:disabled,
+.switch[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: var(--wf-color-text-ghost);
+}
+
+.switch:disabled .track {
+  opacity: 0.5;
+}
+
+.switch[aria-busy='true'] .track {
+  opacity: 0.7;
+}
+
+.label {
+  min-width: 0;
+}
+
+/* Только для читалки экрана */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track,
+  .thumb {
+    transition: none;
+  }
+}

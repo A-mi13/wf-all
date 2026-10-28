@@ -1,13 +1,16 @@
 import { auditServer } from './audit';
+import { geoServer } from './geo';
 import { http, server } from './server';
 import { staffServer } from './staff';
 
 // Первые запросы разделов каркаса, куда приводит роутер (стартовая страница, возврат по ?return=, вход
 // после выхода): журнал (пусто), «Роли и доступ» (матрица и одна учётка), «Мой доступ» (второй фактор,
-// сеансы). Для тестов маршрутов и входа: содержимое раздела им не важно, но неописанный запрос роняет тест
-// (src/test/setup.ts). Тест раздела ставит свои ответы (server.use позже — важнее).
+// сеансы), «Справочники» (чтения по умолчанию — src/test/geo.ts). Для тестов маршрутов и входа:
+// содержимое раздела им не важно, но неописанный запрос роняет тест (src/test/setup.ts). Тест раздела
+// ставит свои ответы (server.use позже — важнее).
 export function sectionsServer() {
   auditServer({ records: [] });
+  geoServer();
   staffServer();
   server.use(
     http.get('/v1/staff/me/mfa', ({ response }) =>

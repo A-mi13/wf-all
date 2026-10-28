@@ -147,12 +147,37 @@ describe('период → UTC', () => {
     expect(toAuditQuery({}, 'UTC')).toEqual({});
   });
 
+  // План B, R15: действия флагов — platform.flag_changed, версий — platform.app_versions_changed (не
+  // flags.*, как было заложено до появления действий).
   test.each([
     ['approvals', 'platform.approval_'],
     ['directories', 'geo.'],
-    ['flags', 'flags.'],
+    ['flags', 'platform.flag_'],
+    ['versions', 'platform.app_versions_'],
   ] as const)('вкладка %s → %s', (tab, prefix) => {
     expect(toAuditQuery({ tab }, 'UTC')).toEqual({ action_prefix: prefix });
+  });
+
+  test('вкладки плана B: действия флагов и версий — в своих вкладках, не в «Справочниках»', () => {
+    expect(parseAuditSearch({ tab: 'directories', action: 'platform.flag_changed' })).toEqual({
+      tab: 'directories',
+    });
+    expect(parseAuditSearch({ tab: 'flags', action: 'platform.flag_changed' })).toEqual({
+      tab: 'flags',
+      action: 'platform.flag_changed',
+    });
+    expect(parseAuditSearch({ tab: 'versions', action: 'platform.app_versions_changed' })).toEqual({
+      tab: 'versions',
+      action: 'platform.app_versions_changed',
+    });
+    // решения подтверждений и версии не пересекаются (platform.approval_ ≠ platform.app_versions_)
+    expect(parseAuditSearch({ tab: 'approvals', action: 'platform.app_versions_changed' })).toEqual(
+      { tab: 'approvals' },
+    );
+    expect(parseAuditSearch({ tab: 'directories', action: 'geo.city_activated' })).toEqual({
+      tab: 'directories',
+      action: 'geo.city_activated',
+    });
   });
 
   // Правило сервера для action_prefix (контракт, 305026c): оканчивается на «.» или «_» — начало

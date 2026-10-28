@@ -20,7 +20,12 @@ import {
 } from '../../ui';
 import { cityLabel, useCityNames } from '../staff/cities';
 import { ACCOUNTS_KEY, accountKey, useRoleLabel } from '../staff/queries';
-import { useApprovalAction, useApprovalFailureText, useApprovalStatus } from './labels';
+import {
+  useApprovalAction,
+  useApprovalFailureText,
+  useApprovalStatus,
+  useCountrySummary,
+} from './labels';
 import { approvalsListKey, useFindApproval, useSettleDecision } from './queries';
 import { RejectDialog } from './RejectDialog';
 import type { ApprovalBox } from './search';
@@ -46,7 +51,8 @@ const DECIDE_KEY = ['approvals', 'decide'] as const;
 // - Исход решения неизвестен (isUnknownOutcome: 5xx, обрыв, 408/499, 2xx без тела, 409
 //   idempotency.replay_unavailable) — решение не повторяется: запрос перечитывается (useFindApproval:
 //   подтвердить и отклонить — «Входящие», отменить — «Мои»), тост и строка — по его итогу.
-// - На телефоне решения по staff.* скрыты (D22, ограничение интерфейса — решает сервер).
+// - На телефоне решения по staff.* скрыты (D22, ограничение интерфейса — решает сервер); geo.* (правила
+//   и создание страны) решаются и с телефона (спека §9.4).
 export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
   const t = useTranslations('approvals');
   const api = useApi();
@@ -335,8 +341,18 @@ function Subject({ approval: a, me }: { approval: Approval; me: Me }) {
   const t = useTranslations('approvals.summary');
   const tr = useTranslations('reasons');
   const roleLabel = useRoleLabel();
-  const s = summarizePayload(a.payload);
+  const countryText = useCountrySummary();
+  const s = summarizePayload(a.payload, a.action);
   const reason = s.reason && (tr.has(s.reason) ? tr(s.reason) : s.reason);
+  // Правила и создание страны (geo.*): цели-сотрудника нет — «Страна» вместо «Кому».
+  const country = countryText(s);
+  if (country)
+    return (
+      <dl className={styles.facts} aria-label={t('label')}>
+        <dt>{t('country')}</dt>
+        <dd>{country}</dd>
+      </dl>
+    );
   return (
     <dl className={styles.facts} aria-label={t('label')}>
       <dt>{t('to')}</dt>

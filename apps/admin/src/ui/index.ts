@@ -2,6 +2,7 @@
 // тосты, каркас, таблицу и состояния только отсюда (.claude/rules/admin.md).
 export { Avatar } from './Avatar';
 export { Button, type ButtonProps, type ButtonVariant } from './Button';
+export { Card, type CardProps, type CardStat } from './Card';
 export { CountBadge } from './CountBadge';
 export { useCountdown } from './countdown';
 export { useErrorText } from './errorText';
@@ -53,6 +54,7 @@ export {
 } from './states';
 export { QrCode } from './QrCode';
 export { type ChipTone, StatusChip } from './StatusChip';
+export { Switch, type SwitchProps } from './Switch';
 export {
   type ChipOption,
   type Column,
