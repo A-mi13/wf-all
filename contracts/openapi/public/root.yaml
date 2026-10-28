@@ -195,6 +195,13 @@ components:
             Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после
             которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
           example: 3
+        job_id:
+          type: integer
+          format: int64
+          description: >-
+            Только у geo.import_in_progress админки — id задачи импорта страны, которая уже стоит в
+            очереди или выполняется; её можно отменить cancelGeoImportJob
+          example: 1842
         challenge:
           type: object
           description: >-

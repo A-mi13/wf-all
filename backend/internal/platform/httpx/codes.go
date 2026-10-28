@@ -34,7 +34,7 @@ var PlatformCodes = []string{
 // Коды admin-api: только в контракте admin (спека сотрудников §5.1, §7; D18), в публичный не
 // попадают. Каждый — константа здесь, запись в своём списке, строка контракта admin и текст
 // errors.<код> в apps/admin/messages. Сверку держат TestPlatformCodesDocumented и
-// TestAdminApprovalCodesDocumented (internal/httpapi/admin) и TestAdminCodesNotInPublic
+// TestAdminPlatformCodesDocumented (internal/httpapi/admin) и TestAdminCodesNotInPublic
 // (internal/httpapi/public).
 const (
 	CodeForbidden        = "auth.forbidden"              // 403: нет права на операцию или город вне скоупа
@@ -47,6 +47,11 @@ const (
 	CodeApprovalSelf     = "platform.approval_self"      // 409: свой запрос или запрос о себе
 	CodeApprovalStale    = "platform.approval_stale"     // 409: цель изменилась после запроса
 	CodeApprovalClosed   = "platform.approval_closed"    // 409: запрос уже решён, отменён или просрочен
+
+	// флаги функций (план B, спека сотрудников §6.1, R4)
+	CodeFlagNotFound     = "platform.flag_not_found"      // 404: флага с таким ключом нет
+	CodeFlagStale        = "platform.flag_stale"          // 409: флаг изменили после чтения (version не совпала)
+	CodeFlagCityNotFound = "platform.flag_city_not_found" // 422: несуществующий город в enabled_city_ids
 )
 
 // AdminCommonCodes — коды конвейера admin-api: их может вернуть любая операция админки
@@ -61,5 +66,8 @@ var AdminApprovalCodes = []string{
 	CodeApprovalNotFound, CodeApprovalSelf, CodeApprovalStale, CodeApprovalClosed,
 }
 
-// AdminPlatformCodes — все коды платформы admin-api: конвейер и подтверждения.
-var AdminPlatformCodes = slices.Concat(AdminCommonCodes, AdminApprovalCodes)
+// AdminFlagCodes — коды операции правки флага (x-error-codes updateFeatureFlag).
+var AdminFlagCodes = []string{CodeFlagNotFound, CodeFlagStale, CodeFlagCityNotFound}
+
+// AdminPlatformCodes — все коды платформы admin-api: конвейер, подтверждения и флаги.
+var AdminPlatformCodes = slices.Concat(AdminCommonCodes, AdminApprovalCodes, AdminFlagCodes)

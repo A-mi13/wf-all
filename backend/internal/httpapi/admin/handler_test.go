@@ -15,6 +15,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
+	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/approvals"
@@ -55,7 +56,7 @@ func TestStubAnswersNotImplementedThroughPipeline(t *testing.T) {
 	}
 }
 
-// Все 33 операции плана A собраны в Server (операции platform — свои, staff и geo — встроенные
+// Все 54 операции (33 плана A и 21 плана B) собраны в Server (операции platform — свои, staff и geo — встроенные
 // хендлеры модулей). У нулевого Server{} (нулевые хендлеры — тесты конвейера; cmd/admin-api собирает
 // настоящие) каждая — через strict-middleware модуля staff, который подключает NewHandler, — отвечает 501
 // http.not_implemented: операции staff — из Middleware нулевого хендлера (Task 10a), остальные — проверка
@@ -83,8 +84,8 @@ func TestServerStubsNotImplemented(t *testing.T) {
 			t.Errorf("%s: ответ %v, ошибка %v — ждали 501 http.not_implemented", m.Name, resp, err)
 		}
 	}
-	if n != 33 {
-		t.Fatalf("операций сервера %d, ждали 33", n)
+	if n != 54 {
+		t.Fatalf("операций сервера %d, ждали 54", n)
 	}
 }
 
@@ -165,10 +166,39 @@ func TestPlatformCodesDocumented(t *testing.T) {
 	}
 }
 
-// Спека сотрудников §7: коды подтверждений (httpx.AdminApprovalCodes) и коды platform.* в
-// x-error-codes операций контракта admin совпадают в обе стороны — ни кода без документа, ни
-// документа без кода.
-func TestAdminApprovalCodesDocumented(t *testing.T) {
+// Спека сотрудников §7, план B (Task 7): коды platform.* в x-error-codes операций контракта admin —
+// ровно коды подтверждений и флагов (httpx.AdminApprovalCodes ∪ httpx.AdminFlagCodes), в обе стороны:
+// ни кода без документа, ни документа без кода.
+func TestAdminPlatformCodesDocumented(t *testing.T) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documented := documentedWithPrefix(t, spec, "platform.")
+	want := slices.Sorted(slices.Values(slices.Concat(httpx.AdminApprovalCodes, httpx.AdminFlagCodes)))
+	if !slices.Equal(documented, want) {
+		t.Fatalf("коды platform.* операций %v, httpx.AdminApprovalCodes ∪ AdminFlagCodes %v", documented, want)
+	}
+}
+
+// План B (Task 7, спека сотрудников §6.3 п.7): коды geo.* в x-error-codes операций контракта admin и
+// geo.AdminCodes совпадают в обе стороны.
+func TestGeoAdminCodesDocumented(t *testing.T) {
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documented := documentedWithPrefix(t, spec, "geo.")
+	if want := slices.Sorted(slices.Values(geo.AdminCodes)); !slices.Equal(documented, want) {
+		t.Fatalf("коды geo.* операций %v, geo.AdminCodes %v", documented, want)
+	}
+}
+
+// Спека сотрудников §6.3 п.7: у каждого кода x-error-codes операций контракта admin — префикс модуля,
+// у которого есть свой список кодов и страж сверки (staff. — TestStaffCodesDocumented, geo. —
+// TestGeoAdminCodesDocumented, platform. — TestAdminPlatformCodesDocumented), либо это общий код
+// платформы или конвейера. Код нового модуля без своего списка и стража сюда не пройдёт.
+func TestAdminCodePrefixesKnown(t *testing.T) {
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -177,19 +207,52 @@ func TestAdminApprovalCodesDocumented(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if bad := unknownCodePrefixes(byOp); len(bad) != 0 {
+		t.Fatalf("коды без списка модуля и стража: %v", bad)
+	}
+	// страж не вакуумен: код чужого модуля и код без модуля ловятся, известные — нет
+	probe := map[string][]string{"x": {"teams.not_found", "oops", "geo.slug_taken", "staff.not_found", "platform.flag_stale", "auth.forbidden"}}
+	if bad := unknownCodePrefixes(probe); !slices.Equal(bad, []string{"x: oops", "x: teams.not_found"}) {
+		t.Fatalf("подсадка: %v", bad)
+	}
+}
+
+// adminCodePrefixes — модули, у которых есть список кодов и страж сверки с контрактом admin.
+var adminCodePrefixes = []string{"staff.", "geo.", "platform."}
+
+// unknownCodePrefixes — «операция: код» для кодов без известного префикса и вне общих кодов.
+func unknownCodePrefixes(byOp map[string][]string) []string {
+	common := slices.Concat(httpx.PlatformCodes, httpx.AdminCommonCodes)
+	var bad []string
+	for op, codes := range byOp {
+		for _, c := range codes {
+			if slices.Contains(common, c) || slices.ContainsFunc(adminCodePrefixes, func(p string) bool { return strings.HasPrefix(c, p) }) {
+				continue
+			}
+			bad = append(bad, op+": "+c)
+		}
+	}
+	slices.Sort(bad)
+	return bad
+}
+
+// documentedWithPrefix — коды x-error-codes всех операций контракта с этим префиксом, по порядку без повторов.
+func documentedWithPrefix(t *testing.T, spec *openapi3.T, prefix string) []string {
+	t.Helper()
+	byOp, err := apitest.OperationCodes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var documented []string
 	for _, codes := range byOp {
 		for _, c := range codes {
-			if strings.HasPrefix(c, "platform.") {
+			if strings.HasPrefix(c, prefix) {
 				documented = append(documented, c)
 			}
 		}
 	}
 	slices.Sort(documented)
-	documented = slices.Compact(documented)
-	if want := slices.Sorted(slices.Values(httpx.AdminApprovalCodes)); !slices.Equal(documented, want) {
-		t.Fatalf("коды platform.* операций %v, httpx.AdminApprovalCodes %v", documented, want)
-	}
+	return slices.Compact(documented)
 }
 
 // Решение подтверждения (approveApproval, rejectApproval) доступно по любому праву «вдвоём»:

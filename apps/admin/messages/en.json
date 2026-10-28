@@ -196,7 +196,8 @@
       "too_long": "Password is too long",
       "common": "This password is too common — choose another one",
       "mismatch": "Does not match",
-      "range": "Invalid period"
+      "range": "Invalid period",
+      "host": "Not this platform's store link"
     }
   },
   "permissions": {
@@ -269,6 +270,10 @@
         "role_change": "Role or cities change",
         "access_reset": "Access reset",
         "revoke_owner": "Disabling an owner"
+      },
+      "geo": {
+        "country_rules": "Country rules",
+        "country_create": "New country"
       }
     },
     "subtitle": "Two-person actions are carried out by a second staff member with the permission. A request lives for 24 hours.",
@@ -384,7 +389,10 @@
       "approval_not_found": "Approval request not found",
       "approval_self": "You can't decide your own request or a request about you",
       "approval_stale": "The data changed after the request — create it again",
-      "approval_closed": "The request is already decided, cancelled or expired"
+      "approval_closed": "The request is already decided, cancelled or expired",
+      "flag_not_found": "Flag not found",
+      "flag_stale": "The flag was changed while you were editing it. Refresh the page",
+      "flag_city_not_found": "One of the selected cities does not exist"
     },
     "staff": {
       "invalid_credentials": "Wrong email or password",
@@ -398,6 +406,23 @@
       "city_not_found": "City not found",
       "last_owner": "The platform can't be left without an owner",
       "self_action": "You can't do this to yourself — use My access"
+    },
+    "geo": {
+      "city_not_found": "City not found",
+      "district_not_found": "District not found",
+      "place_not_found": "Place not found in GeoNames or removed from the source",
+      "country_not_found": "Country not found",
+      "import_not_found": "Import not found",
+      "import_job_not_found": "Import job not found",
+      "city_already_active": "There is already a city at this place",
+      "city_already_linked": "The city is already linked to a GeoNames place",
+      "slug_taken": "This address is already taken by another city",
+      "country_exists": "This country already exists",
+      "import_in_progress": "An import of this country is already queued or running",
+      "import_job_not_cancellable": "The job is already running or finished and cannot be cancelled",
+      "district_name_taken": "A district with this name already exists",
+      "country_not_enabled": "The country is disabled — enable it first",
+      "region_not_found": "The region is not from this country"
     }
   },
   "roles": {
@@ -713,7 +738,9 @@
         "approval_failed": "Request approved but not carried out"
       },
       "geo": {
-        "import": "GeoNames import"
+        "import": "GeoNames import",
+        "import_requested": "GeoNames import queued",
+        "import_cancelled": "GeoNames import job cancelled"
       }
     },
     "objects": {
@@ -721,7 +748,8 @@
       "approval": "approval request",
       "geonames_import": "GeoNames import",
       "city": "city",
-      "staff_keys": "staff keys"
+      "staff_keys": "staff keys",
+      "geonames_import_job": "GeoNames import job"
     },
     "details": {
       "show": "Details",
@@ -746,6 +774,52 @@
       "to": "To",
       "period_hint": "Dates use your local time, both days inclusive.",
       "apply": "Apply"
+    }
+  },
+  "flags": {
+    "subscriptions": {
+      "title": "Subscriptions",
+      "note": "Paid plans for players and captains"
+    },
+    "economy": {
+      "title": "Economy",
+      "note": "Points, credits, cosmetics"
+    },
+    "lootboxes": {
+      "title": "Loot boxes",
+      "note": "Loot boxes as a quest reward"
+    },
+    "predictions": {
+      "title": "Predictions",
+      "note": "Match predictions for points"
+    },
+    "competitions": {
+      "title": "Tournaments",
+      "note": "Tournaments between teams"
+    },
+    "city_tables": {
+      "title": "City tables",
+      "note": "City tables and rankings"
+    },
+    "challenges": {
+      "title": "Challenges",
+      "note": "Challenges between teams"
+    },
+    "match_comments": {
+      "title": "Comments",
+      "note": "Comments under a match"
+    },
+    "payment_flags": {
+      "title": "Payment flags",
+      "note": "Flags for disputed rent settlements"
+    },
+    "ads": {
+      "title": "Ads",
+      "note": "Ad placements"
+    },
+    "gk_rotation": {
+      "title": "Rotating goalkeeper",
+      "note": "The goalkeeper changes during the match"
     }
   }
 }

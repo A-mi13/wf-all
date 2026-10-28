@@ -1,5 +1,5 @@
 // Package admin — операции модуля geo в админке (тег geo контракта admin). План A — список городов
-// для выбора городов модератора (D24, P28, M10); план B расширяет.
+// для выбора городов модератора (D24, P28, M10); план B расширяет (заглушки — до задач 9–14).
 package admin
 
 import (
@@ -117,4 +117,93 @@ func negotiate(header *string) (locale string, contentLanguage *string) {
 		return "", nil
 	}
 	return l, &l
+}
+
+// Операции плана B, объявленные контрактом раньше хендлеров (Task 7, R17): отвечают 501 http.not_implemented
+// и перечислены в pendingOps (internal/httpapi/admin/nostub_test.go). Задача из комментария заменяет
+// заглушку хендлером и убирает операцию из pendingOps.
+
+// ListGeoPlaces — заглушка до Task 9.
+func (h *Handler) ListGeoPlaces(context.Context, oapi.ListGeoPlacesRequestObject) (oapi.ListGeoPlacesResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// GetGeoCity — заглушка до Task 9.
+func (h *Handler) GetGeoCity(context.Context, oapi.GetGeoCityRequestObject) (oapi.GetGeoCityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ListGeoDistricts — заглушка до Task 9.
+func (h *Handler) ListGeoDistricts(context.Context, oapi.ListGeoDistrictsRequestObject) (oapi.ListGeoDistrictsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ListGeoCountries — заглушка до Task 9.
+func (h *Handler) ListGeoCountries(context.Context, oapi.ListGeoCountriesRequestObject) (oapi.ListGeoCountriesResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ListGeoRegions — заглушка до Task 9.
+func (h *Handler) ListGeoRegions(context.Context, oapi.ListGeoRegionsRequestObject) (oapi.ListGeoRegionsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ListGeoImports — заглушка до Task 9.
+func (h *Handler) ListGeoImports(context.Context, oapi.ListGeoImportsRequestObject) (oapi.ListGeoImportsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// GetGeoImport — заглушка до Task 9.
+func (h *Handler) GetGeoImport(context.Context, oapi.GetGeoImportRequestObject) (oapi.GetGeoImportResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ActivateGeoCity — заглушка до Task 10.
+func (h *Handler) ActivateGeoCity(context.Context, oapi.ActivateGeoCityRequestObject) (oapi.ActivateGeoCityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// UpdateGeoCity — заглушка до Task 11.
+func (h *Handler) UpdateGeoCity(context.Context, oapi.UpdateGeoCityRequestObject) (oapi.UpdateGeoCityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// LinkGeoCity — заглушка до Task 11.
+func (h *Handler) LinkGeoCity(context.Context, oapi.LinkGeoCityRequestObject) (oapi.LinkGeoCityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// CreateGeoDistrict — заглушка до Task 12.
+func (h *Handler) CreateGeoDistrict(context.Context, oapi.CreateGeoDistrictRequestObject) (oapi.CreateGeoDistrictResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// UpdateGeoDistrict — заглушка до Task 12.
+func (h *Handler) UpdateGeoDistrict(context.Context, oapi.UpdateGeoDistrictRequestObject) (oapi.UpdateGeoDistrictResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// CreateGeoCountry — заглушка до Task 13.
+func (h *Handler) CreateGeoCountry(context.Context, oapi.CreateGeoCountryRequestObject) (oapi.CreateGeoCountryResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// UpdateGeoCountry — заглушка до Task 13.
+func (h *Handler) UpdateGeoCountry(context.Context, oapi.UpdateGeoCountryRequestObject) (oapi.UpdateGeoCountryResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// StartGeoImport — заглушка до Task 14.
+func (h *Handler) StartGeoImport(context.Context, oapi.StartGeoImportRequestObject) (oapi.StartGeoImportResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// GetGeoImportJob — заглушка до Task 14.
+func (h *Handler) GetGeoImportJob(context.Context, oapi.GetGeoImportJobRequestObject) (oapi.GetGeoImportJobResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// CancelGeoImportJob — заглушка до Task 14.
+func (h *Handler) CancelGeoImportJob(context.Context, oapi.CancelGeoImportJobRequestObject) (oapi.CancelGeoImportJobResponseObject, error) {
+	return nil, errNotImplemented
 }

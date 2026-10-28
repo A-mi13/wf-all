@@ -728,6 +728,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/geo/places": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Поиск мест GeoNames
+         * @description Поиск по источнику GeoNames (CC BY 4.0) — выбор места для активации города («Города и
+         *     запуск»). Порядок: население по убыванию, затем `geoname_id`. У места — `city_id`, если город на
+         *     нём уже заведён (тогда страна места — страна города).
+         *
+         *     Фильтры складываются: `q` — начало названия на любом поддерживаемом языке (ru, en) или
+         *     латиницей (`ascii_name`), без учёта регистра и ё/е; `country` — только места этой страны. Без
+         *     `q` — все места (по стране, если задана). Места, пропавшие из источника, не показываются.
+         *
+         *     `q`, пустой после нормализации (одни знаки препинания или пробелы), — 400
+         *     `validation.failed` по полю `query.q` с правилом `minLength`. Названия — на языке из
+         *     `Accept-Language`.
+         */
+        get: operations["listGeoPlaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/geo/cities": {
         parameters: {
             query?: never;
@@ -737,14 +767,16 @@ export interface paths {
         };
         /**
          * Города платформы
-         * @description Города платформы всех статусов (`waitlist`, `pilot`, `live`) — выбор городов модератора в
+         * @description Города платформы всех статусов (`waitlist`, `pilot`, `live`) и всех стран, в том числе
+         *     выключенных (`country_enabled = false`), — «Города и запуск», выбор городов модератора в
          *     «Ролях и доступе» и подписи уже назначенных городов. Владелец, админ и поддержка видят все
          *     города; модератору — только его города (право `scoped`): фильтры сужают внутри них.
          *
          *     Порядок: статус (`live`, затем `pilot`, затем `waitlist`), население по убыванию, id.
-         *     Фильтры складываются: `q` — начало названия на любом поддерживаемом языке (ru, en) без учёта
-         *     регистра и ё/е; `ids` — только эти города (подписи назначенных модератору городов, до 100 id;
-         *     несуществующие id пропускаются).
+         *     Фильтры складываются: `status` — только эти статусы (несколько — повторите параметр);
+         *     `country` — города страны; `region_id` — города региона; `q` — начало названия на любом
+         *     поддерживаемом языке (ru, en) без учёта регистра и ё/е; `ids` — только эти города (подписи
+         *     назначенных модератору городов, до 100 id; несуществующие id пропускаются).
          *
          *     `q`, пустой после нормализации (одни знаки препинания или пробелы), — 400
          *     `validation.failed` по полю `query.q` с правилом `minLength`. Больше 100 `ids` — 400
@@ -752,7 +784,379 @@ export interface paths {
          */
         get: operations["listGeoCities"];
         put?: never;
+        /**
+         * Активировать город
+         * @description Заводит город платформы из места GeoNames («Города и запуск» → «Активировать»). Страна —
+         *     `country_code` или страна места, регион — `region_id` или регион места (заводится по GeoNames
+         *     с названиями ru и en, если его ещё нет; при переопределённой стране без `region_id` — без
+         *     региона). Названия — на языке страны и en; адрес (`slug`) — из латинского названия, занятый
+         *     получает суффикс региона, затем `-2`, `-3`…; таймзона, координаты и население — из места.
+         *     Статус — `status` или `waitlist`. В той же транзакции — запись журнала `geo.city_activated` и
+         *     событие. Ответ — карточка нового города (200, без `Location`).
+         *
+         *     Коды ошибок:
+         *     - 404 `geo.place_not_found` — места нет в источнике или оно пропало из него.
+         *     - 422 `geo.country_not_enabled` — страны нет в справочнике или она выключена.
+         *     - 422 `geo.region_not_found` — `region_id` не из страны города.
+         *     - 409 `geo.city_already_active` — город на этом месте уже есть (в том числе одновременная
+         *       активация того же места).
+         */
+        post: operations["activateGeoCity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/cities/{cityId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Карточка города
+         * @description Город с названиями по всем языкам, историей адресов (новые сверху), привязкой к GeoNames,
+         *     страной (в том числе выключенной), регионом, числом действующих районов и версией. Модератор —
+         *     только своего города (чужой — 403 `auth.forbidden`).
+         *
+         *     Коды ошибок: 404 `geo.city_not_found` — города нет. Названия — на языке из `Accept-Language`.
+         */
+        get: operations["getGeoCity"];
+        put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Править город
+         * @description Меняет статус, адрес (`slug`) и названия города — только присланные поля. Права — по полям:
+         *     `status` и `slug` — `geo.cities.manage`, `names` — `geo.cities.rename` (модератор — только
+         *     названия своего города). Поле без права — 403 `auth.forbidden` на весь запрос, ничего не
+         *     записано (частичного применения нет).
+         *
+         *     Статус — любой переход. Новый адрес — прежний уходит в историю и продолжает находить город;
+         *     возврат к своему прежнему адресу убирает его из истории. Строка названия на языке страны
+         *     переписывает каноническое название. Версии в теле нет: последняя запись выигрывает. Ничего не
+         *     изменилось — 200 с текущей карточкой, без записи в журнал. Иначе — одна запись журнала
+         *     `geo.city_updated` и события по каждому виду изменения в той же транзакции.
+         *
+         *     Коды ошибок:
+         *     - 404 `geo.city_not_found` — города нет.
+         *     - 409 `geo.slug_taken` — адрес занят другим городом или в истории другого города (в том
+         *       числе одновременная смена двух городов на один адрес).
+         *     - 400 `validation.failed` — пустое тело (`body`, `minProperties`), формат адреса
+         *       (`body.slug`), незнакомый язык или удаление названия на языке страны (`body.names.<язык>`).
+         */
+        patch: operations["updateGeoCity"];
+        trace?: never;
+    };
+    "/v1/geo/cities/{cityId}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Привязать город к месту GeoNames
+         * @description Ручная привязка города без `geoname_id` к месту — кандидату из отчёта сверки импорта
+         *     (`ambiguous`, `conflict`). Как автоматическая привязка сверки: дописываются только
+         *     недостающие переводы города и региона, региону — код GeoNames; координаты и население
+         *     города не меняются. В той же транзакции — запись журнала `geo.city_linked` и событие.
+         *
+         *     Коды ошибок:
+         *     - 404 `geo.city_not_found` — города нет.
+         *     - 404 `geo.place_not_found` — места нет в источнике или оно пропало из него.
+         *     - 409 `geo.city_already_linked` — город уже привязан.
+         *     - 409 `geo.city_already_active` — место уже у другого города.
+         */
+        post: operations["linkGeoCity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/cities/{cityId}/districts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Районы города
+         * @description Районы города, включая архивные: сначала действующие по названию, затем архивные. Без
+         *     пагинации — районов единицы. Модератор — только своего города (чужой — 403 `auth.forbidden`).
+         *
+         *     Коды ошибок: 404 `geo.city_not_found` — города нет.
+         */
+        get: operations["listGeoDistricts"];
+        put?: never;
+        /**
+         * Добавить район
+         * @description Новый район города. Модератор — только в своём городе (чужой — 403 `auth.forbidden`). В той же
+         *     транзакции — запись журнала `geo.district_created` и событие. Ответ — район (200, без
+         *     `Location`).
+         *
+         *     Коды ошибок:
+         *     - 404 `geo.city_not_found` — города нет.
+         *     - 409 `geo.district_name_taken` — действующий район города с таким названием уже есть (без
+         *       учёта регистра и ё/е; в том числе одновременное создание двух одноимённых).
+         */
+        post: operations["createGeoDistrict"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/cities/{cityId}/districts/{districtId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Править район
+         * @description Переименование, архивирование и возврат из архива района — только присланные поля. Районы не
+         *     удаляются: архивный скрыт из приложений, ссылки полей и матчей на него остаются. Версии в
+         *     теле нет: последняя запись выигрывает. Ничего не изменилось — 200 без записи в журнал; иначе
+         *     — запись `geo.district_updated` и событие в той же транзакции.
+         *
+         *     Коды ошибок:
+         *     - 404 `geo.district_not_found` — района нет или он не из города пути (существование чужого
+         *       района не раскрывается).
+         *     - 409 `geo.district_name_taken` — новое название или название возвращаемого из архива района
+         *       занято действующим районом города.
+         */
+        patch: operations["updateGeoDistrict"];
+        trace?: never;
+    };
+    "/v1/geo/countries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Страны
+         * @description Все страны справочника — включённые и выключенные — с правилами, названиями по языкам, числом
+         *     открытых городов (`pilot` и `live`, справочно) и версией. Порядок — по коду. Названия — на
+         *     языке из `Accept-Language`.
+         */
+        get: operations["listGeoCountries"];
+        put?: never;
+        /**
+         * Завести страну (вдвоём)
+         * @description Новую страну подтверждает второй сотрудник: он проверяет валюту и пороги. Операция страну не
+         *     создаёт, а всегда отвечает 202 с запросом на подтверждение (`geo.country_create`, право
+         *     `geo.countries.rules`); страна появится, когда другой владелец или админ подтвердит запрос в
+         *     «Подтверждениях». Правила проверяются здесь и ещё раз при подтверждении: код — действующая
+         *     страна ISO 3166-1, валюта — действующий код ISO 4217, язык — из поддерживаемых, телефонный
+         *     код, первый день недели, возрасты 1–120 и `min_signup_age ≤ age_of_majority`; название на
+         *     языке страны обязательно (`body.names.<язык>`, `required`).
+         *
+         *     Коды ошибок:
+         *     - 409 `geo.country_exists` — страна с этим кодом уже в справочнике (до запроса). Два ждущих
+         *       запроса на один код допустимы: второй при подтверждении не исполнится (`failed`, 409
+         *       `platform.approval_stale`).
+         *     - 400 `validation.failed` — нарушение правил по полю (`body.currency`, `body.age_of_majority`…).
+         */
+        post: operations["createGeoCountry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/countries/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Править страну
+         * @description Правила страны — всегда вдвоём: смена `currency`, `min_signup_age`, `age_of_majority` и
+         *     выключение страны (`is_enabled: false` у включённой) не исполняются, а отвечают 202 с
+         *     запросом на подтверждение (`geo.country_rules`, право `geo.countries.rules`) — независимо от
+         *     статусов городов страны. В запрос уходит весь patch (и поля «сразу» тоже), страна до
+         *     подтверждения не меняется; подтверждающий исполняет его, только если страна с тех пор не
+         *     менялась (иначе 409 `platform.approval_stale`). Поле, присланное с текущим значением, правилом
+         *     не считается.
+         *
+         *     Включение страны и прочие поля (`phone_prefix`, `week_starts_on`, `names`) — сразу, по
+         *     `geo.countries.manage`: 200 со страной, версия растёт, запись журнала `geo.country_updated` и
+         *     событие в той же транзакции. Версии в теле нет: последняя запись выигрывает. Правила
+         *     проверяются против итоговых значений (новый `min_signup_age` с текущим `age_of_majority`).
+         *
+         *     Коды ошибок:
+         *     - 404 `geo.country_not_found` — страны нет.
+         *     - 400 `validation.failed` — пустое тело, `code` или `default_locale` в теле (лишнее поле),
+         *       нарушение правил по полю.
+         */
+        patch: operations["updateGeoCountry"];
+        trace?: never;
+    };
+    "/v1/geo/countries/{code}/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Регионы страны
+         * @description Регионы страны с кодом GeoNames и названиями по языкам — выбор региона при активации и фильтр
+         *     списка городов. Порядок — по названию на языке ответа. Доступно и модератору: данные
+         *     справочные.
+         *
+         *     Коды ошибок: 404 `geo.country_not_found` — страны нет. Названия — на языке из
+         *     `Accept-Language`.
+         */
+        get: operations["listGeoRegions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Журнал импортов GeoNames
+         * @description Импорты GeoNames, новые сверху (время начала, затем id). Фильтры складываются: `country` —
+         *     импорты страны; `job_id` — строка задачи очереди (строку создаёт сама задача, когда начинает
+         *     работу: до этого задачу видно только в `getGeoImportJob`).
+         *
+         *     «Кто поставил» — `started_by_label`: имя сотрудника из записи журнала о постановке
+         *     (`geo.import_requested`) на тот момент; права на журнал действий для этого не нужно.
+         *     Команда оператора сервера — `started_by` и `started_by_label` равны null.
+         */
+        get: operations["listGeoImports"];
+        put?: never;
+        /**
+         * Поставить импорт GeoNames
+         * @description Ставит задачу импорта GeoNames страны в очередь и отвечает 202 с `job_id`; импорт выполняет
+         *     воркер (до 30 минут). Строку журнала создаёт сама задача, когда начинает работу, — экран
+         *     следит за задачей через `getGeoImportJob`. Там, где воркер не запущен (dev-стенд), задача
+         *     стоит «в очереди» и держит страну занятой, пока её не отменят (`cancelGeoImportJob`). В той
+         *     же транзакции — запись журнала `geo.import_requested` от сотрудника.
+         *
+         *     Коды ошибок:
+         *     - 404 `geo.country_not_found` — страны нет в справочнике (выключенная — можно).
+         *     - 409 `geo.import_in_progress` — импорт страны уже стоит в очереди или идёт. В ответе —
+         *       `job_id` этой задачи (её можно отменить, пока она «в очереди»); у импорта командой
+         *       оператора `job_id` нет.
+         *     - 400 `validation.failed` — `body.country` не из двух заглавных латинских букв.
+         */
+        post: operations["startGeoImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Импорт с отчётом сверки
+         * @description Строка журнала импорта с отчётом сверки заведённых городов: привязанные автоматически
+         *     (`linked`), с несколькими подходящими местами (`ambiguous`) и с конфликтом (`conflict`) — с
+         *     кандидатами для ручной привязки (`linkGeoCity`), без подходящих мест (`not_found`), места
+         *     городов, пропавшие из источника (`missing`), число мест без таймзоны (`skipped_timezone`).
+         *
+         *     Коды ошибок: 404 `geo.import_not_found` — импорта нет. Названия кандидатов — на языке из
+         *     `Accept-Language`.
+         */
+        get: operations["getGeoImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/imports/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Задача импорта в очереди
+         * @description Состояние задачи импорта после `startGeoImport`: `queued` (ждёт воркер), `running`,
+         *     `completed`, `failed`, `cancelled`; `import_id` — строка журнала, когда задача её создала.
+         *     Экран опрашивает её с заголовком `X-WF-Background: 1`, пока задача не завершится.
+         *
+         *     Коды ошибок: 404 `geo.import_job_not_found` — задачи нет, она не задача импорта или уже
+         *     удалена очередью после завершения.
+         */
+        get: operations["getGeoImportJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/geo/imports/jobs/{jobId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отменить задачу импорта «в очереди»
+         * @description Отменяет задачу импорта, которая ещё ждёт в очереди. Зачем: там, где воркер не запущен
+         *     (dev-стенд), поставленная задача держит страну занятой вечно — новый импорт получает 409
+         *     `geo.import_in_progress`. Выполняющийся импорт не отменяется. В той же транзакции — запись
+         *     журнала `geo.import_cancelled`. Ответ — задача в состоянии `cancelled`.
+         *
+         *     Коды ошибок:
+         *     - 404 `geo.import_job_not_found` — задачи нет или она не задача импорта.
+         *     - 409 `geo.import_job_not_cancellable` — задача уже выполняется или завершена (перечитайте
+         *       `getGeoImportJob`).
+         */
+        post: operations["cancelGeoImportJob"];
         delete?: never;
         options?: never;
         head?: never;
@@ -898,6 +1302,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/app/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Версии приложения
+         * @description Минимальная и рекомендуемая версии нативного приложения и ссылка на магазин — для обеих
+         *     платформ, всегда два элемента (`ios`, затем `android`). Платформа без заведённых версий —
+         *     элемент с `null` в версиях, ссылке, `version` и `updated_at` (как у публичного
+         *     `getAppMinVersion`: приложение работает без проверки).
+         */
+        get: operations["listAppVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/app/versions/{platform}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Задать версии приложения
+         * @description Заводит или заменяет версии платформы целиком: минимальную (ниже неё приложение требует
+         *     обновиться), рекомендуемую (ниже неё — предлагает) и ссылку на магазин. Приложения узнают
+         *     новые значения из публичного `getAppMinVersion` не позже чем через минуту. Версия записи
+         *     растёт; в той же транзакции — запись журнала `platform.app_versions_changed` и событие.
+         *     Версии в теле нет: последняя запись выигрывает.
+         *
+         *     Проверки — все нарушения сразу, 400 `validation.failed` с полями: формат `MAJOR.MINOR.PATCH`
+         *     (`body.min_version`, `body.recommended_version` — `pattern` схемы или `format`),
+         *     `recommended_version` не ниже `min_version` (`body.recommended_version`, `minimum`), ссылка —
+         *     `https://` в нижнем регистре, без пробелов и управляющих символов (`body.store_url`, `format`)
+         *     и хост магазина платформы — `apps.apple.com` у ios, `play.google.com` у android
+         *     (`body.store_url`, `host`). Незнакомая платформа в пути — 400 `validation.failed` по
+         *     `path.platform`.
+         */
+        put: operations["putAppVersions"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Флаги функций
+         * @description Все флаги функций по ключу: включён ли везде, в каких городах включён, версия и время
+         *     правки. Подпись флага — в локалях админки (`flags.<ключ>.title` и `.note`); незнакомый ключ
+         *     (флаг новее админки) экран показывает самим ключом. Функция выключенного флага отвечает 403
+         *     `feature.disabled`.
+         */
+        get: operations["listFeatureFlags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/flags/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Переключить флаг
+         * @description Включает или выключает флаг везде (`enabled_globally`) и задаёт города, где он включён
+         *     (`enabled_city_ids` — список целиком, повторы схлопываются; без поля — города не меняются).
+         *     `version` — версия флага, которую видел экран: правка проходит, только если флаг с тех пор не
+         *     меняли (две вкладки не затирают друг друга). Ничего не изменилось — 200 без записи в журнал,
+         *     версия не растёт; иначе версия растёт, в той же транзакции — запись журнала
+         *     `platform.flag_changed` и событие.
+         *
+         *     Коды ошибок:
+         *     - 404 `platform.flag_not_found` — флага с таким ключом нет.
+         *     - 409 `platform.flag_stale` — флаг изменили после того, как экран его прочитал (`version` не
+         *       совпала): перечитайте флаг и повторите.
+         *     - 422 `platform.flag_city_not_found` — в `enabled_city_ids` есть несуществующий город (город
+         *       выключенной страны допустим).
+         *     - 400 `validation.failed` — ключ в пути не по шаблону (`path.key`), больше 1000 городов.
+         */
+        patch: operations["updateFeatureFlag"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -952,6 +1467,12 @@ export interface components {
              * @example 3
              */
             attempts_left?: number;
+            /**
+             * Format: int64
+             * @description Только у geo.import_in_progress админки — id задачи импорта страны, которая уже стоит в очереди или выполняется; её можно отменить cancelGeoImportJob
+             * @example 1842
+             */
+            job_id?: number;
             /** @description Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature) */
             challenge?: {
                 /**
@@ -1438,7 +1959,7 @@ export interface components {
          * @enum {string}
          */
         CityStatus: "waitlist" | "pilot" | "live";
-        /** @description Город платформы в списке админки — для выбора и подписи городов модератора */
+        /** @description Город платформы в списке админки — выбор и подпись городов модератора, список «Города и запуск». Города выключенных стран тоже в списке (country_enabled = false) */
         GeoCity: {
             /**
              * Format: uuid
@@ -1467,6 +1988,34 @@ export interface components {
              * @example Ставропольский край
              */
             region_name: string | null;
+            /**
+             * Format: uuid
+             * @description Id региона города; null — регион не задан
+             * @example b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+             */
+            region_id: string | null;
+            /**
+             * @description Страна города включена; false — город скрыт из публичного API вместе со страной
+             * @example true
+             */
+            country_enabled: boolean;
+            /**
+             * Format: int64
+             * @description Место GeoNames, к которому привязан город; null — не привязан (город заведён до импорта и сверка его не нашла — привязать вручную из отчёта импорта)
+             * @example 487846
+             */
+            geoname_id: number | null;
+            /**
+             * Format: int64
+             * @description Население — из GeoNames на момент активации; импорт его у заведённого города не меняет
+             * @example 450680
+             */
+            population: number;
+            /**
+             * @description Число районов города без архивных
+             * @example 4
+             */
+            districts_count: number;
         };
         /** @description Страница городов */
         GeoCityPage: {
@@ -1479,10 +2028,723 @@ export interface components {
             next_cursor: string | null;
         };
         /**
-         * @description Действие запроса на подтверждение — подпись берётся из локалей админки (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца
+         * @description Названия по языкам: ключ — язык ISO 639-1 из поддерживаемых (ru, en), значение — название на нём, 1–100 символов. Строка языка страны — каноническое название записи. В запросе незнакомый язык — 400 validation.failed по body.names.<язык> с правилом enum
+         * @example {
+         *       "ru": "Ставрополь",
+         *       "en": "Stavropol"
+         *     }
+         */
+        GeoNames: {
+            [key: string]: string;
+        };
+        /**
+         * @description Правка названий по языкам: ключ — язык (ru, en), значение — новое название (1–100 символов, пробелы по краям обрезаются) или null — удалить перевод. Языки, которых нет в объекте, не меняются. Незнакомый язык — 400 validation.failed по body.names.<язык> с правилом enum; удалить название на языке страны нельзя — то же поле с правилом required
+         * @example {
+         *       "en": "Stavropol",
+         *       "ru": "Ставрополь"
+         *     }
+         */
+        GeoNamesPatch: {
+            [key: string]: string | null;
+        };
+        /** @description Точка на карте, WGS 84, градусы */
+        GeoPoint: {
+            /**
+             * Format: double
+             * @description Широта, от -90 (юг) до 90 (север)
+             * @example 45.04484
+             */
+            lat: number;
+            /**
+             * Format: double
+             * @description Долгота, от -180 (запад) до 180 (восток)
+             * @example 41.9691
+             */
+            lon: number;
+        };
+        /** @description Страна записи — код и название на языке ответа */
+        GeoCountryRef: {
+            /**
+             * @description Код страны ISO 3166-1 alpha-2
+             * @example RU
+             */
+            code: string;
+            /**
+             * @description Название страны на языке ответа; перевода нет — на языке страны
+             * @example Россия
+             */
+            name: string;
+        };
+        /** @description Страна города в карточке — код, название на языке ответа и включена ли страна */
+        GeoCityCountry: {
+            /**
+             * @description Код страны ISO 3166-1 alpha-2
+             * @example RU
+             */
+            code: string;
+            /**
+             * @description Название страны на языке ответа; перевода нет — на языке страны
+             * @example Россия
+             */
+            name: string;
+            /**
+             * @description Страна включена. Города выключенной страны админка видит и правит, публичный API и приложения — нет
+             * @example true
+             */
+            is_enabled: boolean;
+        };
+        /** @description Регион (субъект, область) — id и название на языке ответа */
+        GeoRegionRef: {
+            /**
+             * Format: uuid
+             * @description Id региона
+             * @example b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+             */
+            id: string;
+            /**
+             * @description Название региона на языке ответа; перевода нет — на языке страны
+             * @example Ставропольский край
+             */
+            name: string;
+        };
+        /** @description Прежний адрес города — продолжает находить город в вебе */
+        GeoSlugHistoryEntry: {
+            /**
+             * @description Прежний адрес
+             * @example stavropol-city
+             */
+            slug: string;
+            /**
+             * Format: date-time
+             * @description Когда адрес заменён новым
+             * @example 2026-10-20T08:30:00Z
+             */
+            replaced_at: string;
+        };
+        /** @description Карточка города в админке: названия по всем языкам, история адресов, привязка к GeoNames, страна, регион и версия */
+        GeoCityDetails: {
+            /**
+             * Format: uuid
+             * @description Id города
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            id: string;
+            /**
+             * @description Текущий адрес города в вебе
+             * @example stavropol
+             */
+            slug: string;
+            /** @description Прежние адреса, новые сверху; пусто — адрес не менялся */
+            slug_history: components["schemas"]["GeoSlugHistoryEntry"][];
+            /**
+             * @description Название на языке ответа; перевода нет — каноническое, на языке страны
+             * @example Ставрополь
+             */
+            name: string;
+            names: components["schemas"]["GeoNames"];
+            /**
+             * @description Язык страны — название на нём каноническое, удалить его нельзя
+             * @example ru
+             */
+            canonical_locale: string;
+            status: components["schemas"]["CityStatus"];
+            /**
+             * Format: int64
+             * @description Место GeoNames города; null — не привязан (linkGeoCity)
+             * @example 487846
+             */
+            geoname_id: number | null;
+            /**
+             * Format: int64
+             * @description Население — из GeoNames на момент активации
+             * @example 450680
+             */
+            population: number;
+            /**
+             * @description Таймзона IANA — местное время матчей города считается по ней
+             * @example Europe/Moscow
+             */
+            timezone: string;
+            location: components["schemas"]["GeoPoint"];
+            country: components["schemas"]["GeoCityCountry"];
+            /** @description Регион города; null — регион не задан */
+            region: components["schemas"]["GeoRegionRef"] | null;
+            /**
+             * @description Число районов без архивных
+             * @example 4
+             */
+            districts_count: number;
+            /**
+             * Format: int64
+             * @description Версия города — растёт на каждое изменение (справочно; правки не сверяют её)
+             * @example 3
+             */
+            version: number;
+        };
+        /** @description Активация города из места GeoNames. Страна и регион по умолчанию — места; country_code переопределяет страну (тогда регион — только region_id или без региона) */
+        GeoCityActivateRequest: {
+            /**
+             * Format: int64
+             * @description Место GeoNames — из поиска listGeoPlaces
+             * @example 526815
+             */
+            geoname_id: number;
+            status?: components["schemas"]["CityStatus"];
+            /**
+             * @description Страна города вместо страны места (включённая); без поля — страна места
+             * @example RU
+             */
+            country_code?: string;
+            /**
+             * Format: uuid
+             * @description Регион города — из listGeoRegions той же страны; без поля — регион места (заводится по GeoNames, если его ещё нет), при переопределённой стране — без региона
+             * @example b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+             */
+            region_id?: string;
+        };
+        /** @description Правка города — только присланные поля. status и slug требуют geo.cities.manage, names — geo.cities.rename; поле без права — 403 auth.forbidden на весь запрос, ничего не записано */
+        GeoCityPatch: {
+            status?: components["schemas"]["CityStatus"];
+            /**
+             * @description Новый адрес в вебе: латиница в нижнем регистре, цифры, дефис только между частями, до 100 символов. Прежний уходит в историю и продолжает находить город
+             * @example stavropol
+             */
+            slug?: string;
+            names?: components["schemas"]["GeoNamesPatch"];
+        };
+        /** @description Ручная привязка города к месту GeoNames — кандидат из отчёта импорта */
+        GeoCityLinkRequest: {
+            /**
+             * Format: int64
+             * @description Место GeoNames — один из кандидатов отчёта сверки (ambiguous, conflict)
+             * @example 487846
+             */
+            geoname_id: number;
+        };
+        /** @description Место справочника GeoNames (CC BY 4.0) — кандидат в города платформы */
+        GeoPlace: {
+            /**
+             * Format: int64
+             * @description Id места в GeoNames
+             * @example 526815
+             */
+            geoname_id: number;
+            /**
+             * @description Название места на языке ответа; перевода нет — на языке страны
+             * @example Михайловск
+             */
+            name: string;
+            /**
+             * @description Название латиницей из GeoNames — из него строится адрес города
+             * @example Mikhaylovsk
+             */
+            ascii_name: string;
+            /**
+             * @description Код вида места GeoNames: PPL — населённый пункт, PPLA — центр региона, PPLC — столица…
+             * @example PPL
+             */
+            feature_code: string;
+            /**
+             * Format: int64
+             * @description Население по GeoNames
+             * @example 56000
+             */
+            population: number;
+            /**
+             * @description Таймзона IANA места
+             * @example Asia/Yekaterinburg
+             */
+            timezone: string;
+            /**
+             * @description Регион места на языке ответа; null — регион неизвестен
+             * @example Свердловская область
+             */
+            region_name: string | null;
+            country: components["schemas"]["GeoCountryRef"];
+            /**
+             * Format: uuid
+             * @description Город платформы на этом месте; null — город ещё не заведён (можно активировать). У заведённого города страна места — страна города
+             * @example null
+             */
+            city_id: string | null;
+        };
+        /** @description Страница мест GeoNames */
+        GeoPlacePage: {
+            /** @description Места страницы — по населению, крупные сверху */
+            items: components["schemas"]["GeoPlace"][];
+            /**
+             * @description Курсор следующей страницы; null — страниц больше нет
+             * @example eyJ2IjoyLCJmIjoicDNHeVZtSHNhR2MiLCJrIjpbIjU2MDAwIiwiNTI2ODE1Il19
+             */
+            next_cursor: string | null;
+        };
+        /** @description Район города */
+        GeoDistrict: {
+            /**
+             * Format: uuid
+             * @description Id района
+             * @example c1d9e3a7-5b2f-4a8c-8e6d-0f4b7a2c9e15
+             */
+            id: string;
+            /**
+             * @description Название района
+             * @example Промышленный
+             */
+            name: string;
+            /**
+             * Format: date-time
+             * @description Когда район отправлен в архив; null — район действующий. Архивный скрыт из приложений, ссылки полей и матчей на него остаются, его имя свободно для нового района
+             * @example null
+             */
+            archived_at: string | null;
+            /**
+             * Format: int64
+             * @description Версия района — растёт на каждое изменение (справочно)
+             * @example 1
+             */
+            version: number;
+        };
+        /** @description Районы города — действующие по имени, затем архивные; без пагинации (районов единицы) */
+        GeoDistrictList: {
+            /** @description Районы */
+            items: components["schemas"]["GeoDistrict"][];
+        };
+        /** @description Новый район города */
+        GeoDistrictCreate: {
+            /**
+             * @description Название района, 1–100 символов (пробелы по краям обрезаются); занято действующим районом города (без учёта регистра и ё/е) — 409 geo.district_name_taken
+             * @example Промышленный
+             */
+            name: string;
+        };
+        /** @description Правка района — только присланные поля */
+        GeoDistrictPatch: {
+            /**
+             * @description Новое название района, 1–100 символов
+             * @example Юго-Западный
+             */
+            name?: string;
+            /**
+             * @description true — в архив (район скрыт из приложений), false — вернуть из архива (имя должно быть свободно среди действующих)
+             * @example true
+             */
+            archived?: boolean;
+        };
+        /** @description Страна с правилами: валюта, язык, телефонный код, первый день недели, возрастные пороги. Значения вносит человек, сверяя с законом страны; из GeoNames они не берутся */
+        GeoCountry: {
+            /**
+             * @description Код страны ISO 3166-1 alpha-2
+             * @example RU
+             */
+            code: string;
+            /**
+             * @description Название страны на языке ответа; перевода нет — на языке страны
+             * @example Россия
+             */
+            name: string;
+            names: components["schemas"]["GeoNames"];
+            /**
+             * @description Валюта страны ISO 4217 — суммы городов страны в ней, в минорных единицах
+             * @example RUB
+             */
+            currency: string;
+            /**
+             * @description Язык страны ISO 639-1 — на нём канонические названия; задаётся только при создании
+             * @example ru
+             */
+            default_locale: string;
+            /**
+             * @description Телефонный код страны
+             * @example +7
+             */
+            phone_prefix: string;
+            /**
+             * @description Первый день недели — 1 понедельник … 7 воскресенье (ISO 8601)
+             * @example 1
+             */
+            week_starts_on: number;
+            /**
+             * @description Минимальный возраст регистрации, полных лет
+             * @example 14
+             */
+            min_signup_age: number;
+            /**
+             * @description Возраст совершеннолетия, полных лет — с него капитанство и покупки; не меньше min_signup_age
+             * @example 18
+             */
+            age_of_majority: number;
+            /**
+             * @description Страна включена — её города видны в приложениях
+             * @example true
+             */
+            is_enabled: boolean;
+            /**
+             * @description Справочно: число городов страны в статусах pilot и live — экрану для предупреждения при выключении страны (на правило «вдвоём» не влияет)
+             * @example 2
+             */
+            open_cities: number;
+            /**
+             * Format: int64
+             * @description Версия страны — растёт на каждое изменение; подтверждение правил сверяет её
+             * @example 4
+             */
+            version: number;
+        };
+        /** @description Все страны справочника — включённые и выключенные, по коду */
+        GeoCountryList: {
+            /** @description Страны */
+            items: components["schemas"]["GeoCountry"][];
+        };
+        /** @description Новая страна — тело запроса на подтверждение (страна появится после подтверждения вторым сотрудником). Все правила обязательны; название на языке страны (default_locale) обязательно */
+        GeoCountryCreate: {
+            /**
+             * @description Код действующей страны ISO 3166-1 alpha-2; уже есть в справочнике — 409 geo.country_exists
+             * @example KZ
+             */
+            code: string;
+            /**
+             * @description Действующая валюта ISO 4217 (исторические коды вроде RUR не принимаются)
+             * @example KZT
+             */
+            currency: string;
+            /**
+             * @description Язык страны из поддерживаемых (ru, en); потом не меняется
+             * @example ru
+             */
+            default_locale: string;
+            /**
+             * @description Телефонный код страны — «+» и 1–4 цифры
+             * @example +7
+             */
+            phone_prefix: string;
+            /**
+             * @description Первый день недели — 1 понедельник … 7 воскресенье
+             * @example 1
+             */
+            week_starts_on: number;
+            /**
+             * @description Минимальный возраст регистрации, полных лет
+             * @example 14
+             */
+            min_signup_age: number;
+            /**
+             * @description Возраст совершеннолетия, не меньше min_signup_age (иначе 400 по body.age_of_majority)
+             * @example 18
+             */
+            age_of_majority: number;
+            names: components["schemas"]["GeoNames"];
+            /**
+             * @description Включить страну сразу при создании; без поля — выключена
+             * @default false
+             * @example false
+             */
+            is_enabled: boolean;
+        };
+        /** @description Правка страны — только присланные поля; code и default_locale не меняются (лишнее поле — 400). Смена currency, min_signup_age, age_of_majority и выключение (is_enabled: false у включённой) — всегда через подтверждение вторым сотрудником (202); включение и прочие поля — сразу */
+        GeoCountryPatch: {
+            /**
+             * @description Действующая валюта ISO 4217 — вдвоём
+             * @example RUB
+             */
+            currency?: string;
+            /**
+             * @description Телефонный код — сразу
+             * @example +7
+             */
+            phone_prefix?: string;
+            /**
+             * @description Первый день недели — сразу
+             * @example 1
+             */
+            week_starts_on?: number;
+            /**
+             * @description Минимальный возраст регистрации — вдвоём
+             * @example 14
+             */
+            min_signup_age?: number;
+            /**
+             * @description Возраст совершеннолетия — вдвоём
+             * @example 18
+             */
+            age_of_majority?: number;
+            /**
+             * @description true — включить сразу; false — выключить (вдвоём)
+             * @example false
+             */
+            is_enabled?: boolean;
+            names?: components["schemas"]["GeoNamesPatch"];
+        };
+        /** @description Регион страны (субъект, область) */
+        GeoRegion: {
+            /**
+             * Format: uuid
+             * @description Id региона
+             * @example b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+             */
+            id: string;
+            /**
+             * @description Название региона на языке ответа; перевода нет — на языке страны
+             * @example Ставропольский край
+             */
+            name: string;
+            names: components["schemas"]["GeoNames"];
+            /**
+             * @description Код региона в GeoNames (admin1); null — регион заведён без привязки
+             * @example 70
+             */
+            geoname_admin1_code: string | null;
+        };
+        /** @description Регионы страны по названию на языке ответа */
+        GeoRegionList: {
+            /** @description Регионы */
+            items: components["schemas"]["GeoRegion"][];
+        };
+        /**
+         * @description Состояние импорта. running — идёт; succeeded — завершён, данные записаны; failed — упал, данные не изменились (причина — error)
          * @enum {string}
          */
-        ApprovalAction: "staff.invite" | "staff.role_change" | "staff.access_reset" | "staff.revoke_owner";
+        GeoImportStatus: "running" | "succeeded" | "failed";
+        /** @description Строка журнала импорта GeoNames по стране */
+        GeoImport: {
+            /**
+             * Format: uuid
+             * @description Id импорта — отчёт сверки в getGeoImport
+             * @example 0192f2a0-3c4d-7e5f-8a9b-0c1d2e3f4a5b
+             */
+            id: string;
+            /**
+             * @description Страна импорта
+             * @example RU
+             */
+            country_code: string;
+            status: components["schemas"]["GeoImportStatus"];
+            /**
+             * Format: date-time
+             * @description Когда импорт начался
+             * @example 2026-10-28T09:00:00Z
+             */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description Когда закончился; null — ещё идёт
+             * @example 2026-10-28T09:04:12Z
+             */
+            finished_at: string | null;
+            /**
+             * Format: uuid
+             * @description Id сотрудника, поставившего импорт; null — команда оператора сервера
+             * @example 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+             */
+            started_by: string | null;
+            /**
+             * @description Кто поставил — имя сотрудника из записи журнала о постановке (geo.import_requested) на тот момент; null — команда оператора или запись не найдена (показывать «сотрудник»)
+             * @example Мария К.
+             */
+            started_by_label: string | null;
+            /**
+             * Format: int64
+             * @description Задача очереди, исполнившая импорт (getGeoImportJob); null — команда оператора
+             * @example 1842
+             */
+            river_job_id: number | null;
+            /**
+             * @description Мест записано или обновлено; null — до завершения
+             * @example 12450
+             */
+            places_upserted: number | null;
+            /**
+             * @description Мест удалено (пропали из источника, городов на них нет); null — до завершения
+             * @example 37
+             */
+            places_removed: number | null;
+            /**
+             * @description Мест пропало из источника, но на них есть города — помечены; null — до завершения
+             * @example 0
+             */
+            places_missing: number | null;
+            /**
+             * @description Названий по языкам записано; null — до завершения
+             * @example 24810
+             */
+            names_upserted: number | null;
+            /**
+             * @description Почему импорт упал (текст для оператора); null — не падал
+             * @example null
+             */
+            error: string | null;
+        };
+        /** @description Страница журнала импортов, новые сверху */
+        GeoImportPage: {
+            /** @description Импорты страницы */
+            items: components["schemas"]["GeoImport"][];
+            /**
+             * @description Курсор следующей страницы; null — страниц больше нет
+             * @example eyJ2IjoyLCJmIjoiZDFtWGs5UXR6V2ciLCJrIjpbIjIwMjYtMTAtMjhUMDk6MDA6MDBaIl19
+             */
+            next_cursor: string | null;
+        };
+        /** @description Город, который сверка привязала к месту GeoNames */
+        GeoReconcileLinked: {
+            /**
+             * Format: uuid
+             * @description Id города
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            city_id: string;
+            /**
+             * @description Адрес города
+             * @example stavropol
+             */
+            slug: string;
+            /**
+             * Format: int64
+             * @description Место, к которому привязан
+             * @example 487846
+             */
+            geoname_id: number;
+        };
+        /** @description Место GeoNames — кандидат для ручной привязки города */
+        GeoReconcileCandidate: {
+            /**
+             * Format: int64
+             * @description Id места — его передают в linkGeoCity
+             * @example 526815
+             */
+            geoname_id: number;
+            /**
+             * @description Название места на языке ответа
+             * @example Михайловск
+             */
+            name: string;
+            /**
+             * @description Регион места на языке ответа; null — неизвестен
+             * @example Свердловская область
+             */
+            region_name: string | null;
+            /**
+             * Format: int64
+             * @description Население места
+             * @example 9000
+             */
+            population: number;
+        };
+        /** @description Город, который сверка не привязала сама, и кандидаты для ручной привязки */
+        GeoReconcileCity: {
+            /**
+             * Format: uuid
+             * @description Id города
+             * @example 7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65
+             */
+            city_id: string;
+            /**
+             * @description Адрес города
+             * @example mihaylovsk
+             */
+            slug: string;
+            /** @description Подходящие места; пусто — ни одного */
+            candidates: components["schemas"]["GeoReconcileCandidate"][];
+        };
+        /** @description Город, для которого сверка не нашла ни одного места */
+        GeoReconcileNotFound: {
+            /**
+             * Format: uuid
+             * @description Id города
+             * @example 9c3b1a7e-4d2f-4e8a-b5c6-7d8e9f0a1b2c
+             */
+            city_id: string;
+            /**
+             * @description Адрес города
+             * @example zarechny-3
+             */
+            slug: string;
+        };
+        /** @description Отчёт сверки заведённых городов страны с GeoNames */
+        GeoReconcileReport: {
+            /** @description Привязаны автоматически */
+            linked: components["schemas"]["GeoReconcileLinked"][];
+            /** @description Несколько подходящих мест — привязать вручную (linkGeoCity) */
+            ambiguous: components["schemas"]["GeoReconcileCity"][];
+            /** @description Ни одного подходящего места (в том числе город без региона) */
+            not_found: components["schemas"]["GeoReconcileNotFound"][];
+            /** @description Место за время импорта занял другой город или сам город уже привязали — проверить вручную */
+            conflict: components["schemas"]["GeoReconcileCity"][];
+            /**
+             * @description Места городов, пропавшие из источника (geoname_id)
+             * @example [
+             *       524901
+             *     ]
+             */
+            missing: number[];
+            /**
+             * @description Мест пропущено из-за пустой или неизвестной таймзоны
+             * @example 3
+             */
+            skipped_timezone: number;
+        };
+        /** @description Импорт с отчётом сверки городов */
+        GeoImportReport: components["schemas"]["GeoImport"] & {
+            /** @description Отчёт сверки; null — импорт идёт или упал до сверки */
+            reconciled: components["schemas"]["GeoReconcileReport"] | null;
+        };
+        /** @description Поставить импорт GeoNames страны */
+        GeoImportStartRequest: {
+            /**
+             * @description Код страны ISO 3166-1 alpha-2 заглавными; страна должна быть в справочнике (может быть выключена)
+             * @example RU
+             */
+            country: string;
+        };
+        /** @description Импорт поставлен в очередь */
+        GeoImportStarted: {
+            /**
+             * Format: int64
+             * @description Задача очереди — её состояние в getGeoImportJob, строка журнала появится с её стартом
+             * @example 1842
+             */
+            job_id: number;
+        };
+        /**
+         * @description Состояние задачи импорта в очереди. queued — ждёт исполнителя (на стенде без воркера стоит так, пока её не отменят); running — выполняется; completed — выполнена (итог импорта — в журнале); failed — выброшена после попыток; cancelled — отменена
+         * @enum {string}
+         */
+        GeoImportJobState: "queued" | "running" | "completed" | "failed" | "cancelled";
+        /** @description Задача импорта в очереди */
+        GeoImportJob: {
+            /**
+             * Format: int64
+             * @description Id задачи
+             * @example 1842
+             */
+            job_id: number;
+            state: components["schemas"]["GeoImportJobState"];
+            /**
+             * Format: uuid
+             * @description Строка журнала, созданная задачей (getGeoImport); null — задача ещё не начиналась
+             * @example null
+             */
+            import_id: string | null;
+            /**
+             * @description Номер текущей попытки; 0 — ещё не начиналась
+             * @example 0
+             */
+            attempt: number;
+            /**
+             * @description Сколько попыток всего
+             * @example 3
+             */
+            max_attempts: number;
+            /**
+             * Format: date-time
+             * @description Когда задача поставлена
+             * @example 2026-10-28T08:59:58Z
+             */
+            created_at: string;
+        };
+        /**
+         * @description Действие запроса на подтверждение — подпись берётся из локалей админки (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца; geo.country_rules — правила страны (валюта, возрастные пороги, выключение); geo.country_create — новая страна
+         * @enum {string}
+         */
+        ApprovalAction: "staff.invite" | "staff.role_change" | "staff.access_reset" | "staff.revoke_owner" | "geo.country_rules" | "geo.country_create";
         /**
          * @description Состояние запроса. pending — ждёт решения (24 часа); executed — подтверждён и исполнен; rejected — отклонён; cancelled — отозван инициатором или погашен системой; expired — истёк срок; failed — подтверждён, но не исполнился (причина в error)
          * @enum {string}
@@ -1712,6 +2974,130 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /**
+         * @description Платформа мобильного приложения. Список открытый в ответах; в пути незнакомое значение — 400 validation.failed (валидатор запросов его отвергает)
+         * @enum {string}
+         */
+        AppPlatform: "ios" | "android";
+        /** @description Версии приложения платформы. Версии, ссылка, version и updated_at — null, если версии для платформы ещё не заводили (приложение работает без проверки) */
+        AppVersions: {
+            platform: components["schemas"]["AppPlatform"];
+            /**
+             * @description Минимальная версия MAJOR.MINOR.PATCH — ниже неё приложение требует обновиться
+             * @example 1.4.0
+             */
+            min_version: string | null;
+            /**
+             * @description Рекомендуемая версия — ниже неё приложение предлагает обновиться; не ниже min_version
+             * @example 1.6.2
+             */
+            recommended_version: string | null;
+            /**
+             * @description Страница приложения в магазине платформы (App Store, Google Play)
+             * @example https://apps.apple.com/app/id6740000000
+             */
+            store_url: string | null;
+            /**
+             * Format: int64
+             * @description Версия записи — растёт на каждую правку (справочно); null — версии не заводили
+             * @example 3
+             */
+            version: number | null;
+            /**
+             * Format: date-time
+             * @description Когда версии меняли последний раз; null — не заводили
+             * @example 2026-10-27T15:40:00Z
+             */
+            updated_at: string | null;
+        };
+        /** @description Версии обеих платформ — всегда два элемента, ios и android */
+        AppVersionsList: {
+            /** @description Версии по платформам */
+            items: components["schemas"]["AppVersions"][];
+        };
+        /** @description Версии платформы целиком — все три поля обязательны */
+        AppVersionsPut: {
+            /**
+             * @description Минимальная версия MAJOR.MINOR.PATCH (без ведущих нулей и сборки)
+             * @example 1.4.0
+             */
+            min_version: string;
+            /**
+             * @description Рекомендуемая версия MAJOR.MINOR.PATCH, не ниже min_version
+             * @example 1.6.2
+             */
+            recommended_version: string;
+            /**
+             * @description Страница приложения в магазине: https:// в нижнем регистре, без пробелов и управляющих символов, хост стора платформы — apps.apple.com (ios) или play.google.com (android)
+             * @example https://apps.apple.com/app/id6740000000
+             */
+            store_url: string;
+        };
+        /**
+         * @description Ключ флага функции — подпись в локалях админки (flags.<ключ>.title и .note). Список открытый: флаг из новой миграции, которого нет в этом списке, приходит своим ключом — экран показывает сам ключ. Только в ответах: путь updateFeatureFlag принимает любой ключ по шаблону
+         * @enum {string}
+         */
+        FeatureFlagKey: "subscriptions" | "economy" | "lootboxes" | "predictions" | "competitions" | "city_tables" | "challenges" | "match_comments" | "payment_flags" | "ads" | "gk_rotation";
+        /** @description Флаг функции. Функция включена в городе, если флаг включён везде или город в enabled_city_ids */
+        FeatureFlag: {
+            key: components["schemas"]["FeatureFlagKey"];
+            /**
+             * @description Описание флага для разработчика (из миграции); экрану — подпись из локалей
+             * @example Очки, кредиты, косметика
+             */
+            description: string;
+            /**
+             * @description Включён во всех городах
+             * @example false
+             */
+            enabled_globally: boolean;
+            /**
+             * @description Города, где флаг включён, когда он не включён везде; по возрастанию id
+             * @example [
+             *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47"
+             *     ]
+             */
+            enabled_city_ids: string[];
+            /**
+             * Format: int64
+             * @description Версия флага — передайте её в updateFeatureFlag; растёт на каждую правку
+             * @example 2
+             */
+            version: number;
+            /**
+             * Format: date-time
+             * @description Когда флаг меняли последний раз
+             * @example 2026-10-27T15:40:00Z
+             */
+            updated_at: string;
+        };
+        /** @description Все флаги функций по ключу */
+        FeatureFlagList: {
+            /** @description Флаги */
+            items: components["schemas"]["FeatureFlag"][];
+        };
+        /** @description Правка флага: версия, которую видел экран, и новые значения (присланные поля); без enabled_globally и enabled_city_ids — ничего не меняется */
+        FeatureFlagPatch: {
+            /**
+             * Format: int64
+             * @description Версия флага из listFeatureFlags; флаг с тех пор изменили — 409 platform.flag_stale
+             * @example 2
+             */
+            version: number;
+            /**
+             * @description Включить во всех городах (true) или только в enabled_city_ids (false)
+             * @example false
+             */
+            enabled_globally?: boolean;
+            /**
+             * @description Города, где флаг включён, — список целиком, заменяет прежний; повторы схлопываются; пусто — ни одного города. Несуществующий город — 422 platform.flag_city_not_found
+             * @example [
+             *       "3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47",
+             *       "7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65"
+             *     ]
+             */
+            enabled_city_ids?: string[];
+        };
     };
     responses: {
         /** @description Ошибка в формате RFC 9457 */
@@ -1760,6 +3146,41 @@ export interface components {
          * @example 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
          */
         ApprovalId: string;
+        /**
+         * @description Id города платформы
+         * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+         */
+        CityId: string;
+        /**
+         * @description Id района города пути
+         * @example c1d9e3a7-5b2f-4a8c-8e6d-0f4b7a2c9e15
+         */
+        DistrictId: string;
+        /**
+         * @description Код страны ISO 3166-1 alpha-2 заглавными
+         * @example RU
+         */
+        CountryCode: string;
+        /**
+         * @description Id строки журнала импорта GeoNames
+         * @example 0192f2a0-3c4d-7e5f-8a9b-0c1d2e3f4a5b
+         */
+        ImportId: string;
+        /**
+         * @description Id задачи импорта в очереди — job_id из startGeoImport
+         * @example 1842
+         */
+        JobId: number;
+        /**
+         * @description Платформа приложения — ios или android
+         * @example ios
+         */
+        AppPlatformPath: components["schemas"]["AppPlatform"];
+        /**
+         * @description Ключ флага функции — строка, а не список (флаг из новой миграции переключается без правки контракта): латиница в нижнем регистре, цифры и «_», с буквы, до 64 символов
+         * @example economy
+         */
+        FlagKey: string;
         /**
          * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
          * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
@@ -2728,9 +4149,78 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    listGeoPlaces: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Начало названия места на любом поддерживаемом языке или латиницей
+                 * @example михайл
+                 */
+                q?: string;
+                /**
+                 * @description Только места этой страны (ISO 3166-1 alpha-2)
+                 * @example RU
+                 */
+                country?: string;
+                /**
+                 * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+                 * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Размер страницы, от 1 до 100; без параметра — 20
+                 * @example 20
+                 */
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: {
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница мест */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoPlacePage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     listGeoCities: {
         parameters: {
             query?: {
+                /**
+                 * @description Только города с этими статусами; несколько значений — повторите параметр (status=pilot&status=live). Без параметра — все статусы
+                 * @example [
+                 *       "pilot",
+                 *       "live"
+                 *     ]
+                 */
+                status?: components["schemas"]["CityStatus"][];
+                /**
+                 * @description Только города этой страны (ISO 3166-1 alpha-2)
+                 * @example RU
+                 */
+                country?: string;
+                /**
+                 * @description Только города этого региона (id из listGeoRegions)
+                 * @example b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+                 */
+                region_id?: string;
                 /**
                  * @description Начало названия города на любом поддерживаемом языке (ru, en), без учёта регистра и ё/е
                  * @example став
@@ -2777,6 +4267,668 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GeoCityPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    activateGeoCity: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Место GeoNames и, при необходимости, статус, страна и регион */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoCityActivateRequest"];
+            };
+        };
+        responses: {
+            /** @description Город заведён */
+            200: {
+                headers: {
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCityDetails"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getGeoCity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path: {
+                /**
+                 * @description Id города платформы
+                 * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+                 */
+                cityId: components["parameters"]["CityId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Карточка города */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCityDetails"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateGeoCity: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path: {
+                /**
+                 * @description Id города платформы
+                 * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+                 */
+                cityId: components["parameters"]["CityId"];
+            };
+            cookie?: never;
+        };
+        /** @description Изменяемые поля города */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoCityPatch"];
+            };
+        };
+        responses: {
+            /** @description Карточка города после правки */
+            200: {
+                headers: {
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCityDetails"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    linkGeoCity: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path: {
+                /**
+                 * @description Id города платформы
+                 * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+                 */
+                cityId: components["parameters"]["CityId"];
+            };
+            cookie?: never;
+        };
+        /** @description Место GeoNames */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoCityLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Карточка привязанного города */
+            200: {
+                headers: {
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCityDetails"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listGeoDistricts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Id города платформы
+                 * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+                 */
+                cityId: components["parameters"]["CityId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Районы города */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoDistrictList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createGeoDistrict: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id города платформы
+                 * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+                 */
+                cityId: components["parameters"]["CityId"];
+            };
+            cookie?: never;
+        };
+        /** @description Название района */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoDistrictCreate"];
+            };
+        };
+        responses: {
+            /** @description Район создан */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoDistrict"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateGeoDistrict: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id города платформы
+                 * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+                 */
+                cityId: components["parameters"]["CityId"];
+                /**
+                 * @description Id района города пути
+                 * @example c1d9e3a7-5b2f-4a8c-8e6d-0f4b7a2c9e15
+                 */
+                districtId: components["parameters"]["DistrictId"];
+            };
+            cookie?: never;
+        };
+        /** @description Изменяемые поля района */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoDistrictPatch"];
+            };
+        };
+        responses: {
+            /** @description Район после правки */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoDistrict"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listGeoCountries: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страны */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCountryList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createGeoCountry: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код, правила и названия новой страны */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoCountryCreate"];
+            };
+        };
+        responses: {
+            /** @description Создан запрос на подтверждение новой страны */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalAccepted"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateGeoCountry: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path: {
+                /**
+                 * @description Код страны ISO 3166-1 alpha-2 заглавными
+                 * @example RU
+                 */
+                code: components["parameters"]["CountryCode"];
+            };
+            cookie?: never;
+        };
+        /** @description Изменяемые поля страны */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoCountryPatch"];
+            };
+        };
+        responses: {
+            /** @description Правка исполнена сразу — страна после правки */
+            200: {
+                headers: {
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCountry"];
+                };
+            };
+            /** @description Правка затрагивает правила страны — создан запрос на подтверждение */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalAccepted"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listGeoRegions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path: {
+                /**
+                 * @description Код страны ISO 3166-1 alpha-2 заглавными
+                 * @example RU
+                 */
+                code: components["parameters"]["CountryCode"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Регионы страны */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoRegionList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listGeoImports: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Только импорты этой страны (ISO 3166-1 alpha-2)
+                 * @example RU
+                 */
+                country?: string;
+                /**
+                 * @description Только импорт этой задачи очереди (job_id из startGeoImport)
+                 * @example 1842
+                 */
+                job_id?: number;
+                /**
+                 * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+                 * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMDFUMTc6MDA6MDBaIiwiMDE5MmYxYzQiXX0
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Размер страницы, от 1 до 100; без параметра — 20
+                 * @example 20
+                 */
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница журнала импортов */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoImportPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startGeoImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Страна импорта */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoImportStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Задача импорта поставлена в очередь */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoImportStarted"];
+                };
+            };
+            /** @description Импорт страны уже в очереди или идёт — job_id существующей задачи */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "about:blank",
+                     *       "title": "Conflict",
+                     *       "status": 409,
+                     *       "code": "geo.import_in_progress",
+                     *       "request_id": "wf-admin-7d9f/Yx3kQp1bZt-000042",
+                     *       "job_id": 1842
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getGeoImport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Языки по RFC 9110 с q-весами; названия — на первом поддерживаемом (ru, en; регион отбрасывается). Без заголовка или без поддерживаемого языка — на языке страны каждой записи. Админка шлёт язык своего интерфейса
+                 * @example ru-RU,ru;q=0.9,en;q=0.8
+                 */
+                "Accept-Language"?: components["parameters"]["AcceptLanguage"];
+            };
+            path: {
+                /**
+                 * @description Id строки журнала импорта GeoNames
+                 * @example 0192f2a0-3c4d-7e5f-8a9b-0c1d2e3f4a5b
+                 */
+                importId: components["parameters"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Импорт и отчёт сверки */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    Vary: components["headers"]["Vary"];
+                    "Content-Language": components["headers"]["ContentLanguage"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoImportReport"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getGeoImportJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Id задачи импорта в очереди — job_id из startGeoImport
+                 * @example 1842
+                 */
+                jobId: components["parameters"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Задача импорта */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoImportJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    cancelGeoImportJob: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Id задачи импорта в очереди — job_id из startGeoImport
+                 * @example 1842
+                 */
+                jobId: components["parameters"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Задача отменена */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoImportJob"];
                 };
             };
             default: components["responses"]["Problem"];
@@ -3002,6 +5154,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Approval"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listAppVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Версии обеих платформ */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppVersionsList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    putAppVersions: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Платформа приложения — ios или android
+                 * @example ios
+                 */
+                platform: components["parameters"]["AppPlatformPath"];
+            };
+            cookie?: never;
+        };
+        /** @description Версии и ссылка на магазин */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppVersionsPut"];
+            };
+        };
+        responses: {
+            /** @description Версии платформы после записи */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppVersions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listFeatureFlags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Флаги функций */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureFlagList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateFeatureFlag: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description Всегда 1 — запрос отправлен страницей админки. Вместе с Origin админки защищает изменяющие запросы от подделки с чужого сайта; без заголовка — 403 auth.csrf_failed
+                 * @example 1
+                 */
+                "X-WF-Admin": components["parameters"]["AdminHeader"];
+            };
+            path: {
+                /**
+                 * @description Ключ флага функции — строка, а не список (флаг из новой миграции переключается без правки контракта): латиница в нижнем регистре, цифры и «_», с буквы, до 64 символов
+                 * @example economy
+                 */
+                key: components["parameters"]["FlagKey"];
+            };
+            cookie?: never;
+        };
+        /** @description Версия флага и новые значения */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureFlagPatch"];
+            };
+        };
+        responses: {
+            /** @description Флаг после правки */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureFlag"];
                 };
             };
             default: components["responses"]["Problem"];

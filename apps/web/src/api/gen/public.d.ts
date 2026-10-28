@@ -209,6 +209,12 @@ export interface components {
              * @example 3
              */
             attempts_left?: number;
+            /**
+             * Format: int64
+             * @description Только у geo.import_in_progress админки — id задачи импорта страны, которая уже стоит в очереди или выполняется; её можно отменить cancelGeoImportJob
+             * @example 1842
+             */
+            job_id?: number;
             /** @description Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature) */
             challenge?: {
                 /**

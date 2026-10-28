@@ -367,3 +367,26 @@ func optText(s string) *string {
 	}
 	return &s
 }
+
+// Операции платформы плана B — версии приложения и флаги функций (спека §6.1): контракт объявил их раньше
+// хендлеров (Task 7, R17) — 501 http.not_implemented, строки pendingOps в nostub_test.go. Task 15 заменяет.
+
+// ListAppVersions — заглушка до Task 15.
+func (s Server) ListAppVersions(context.Context, oapi.ListAppVersionsRequestObject) (oapi.ListAppVersionsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// PutAppVersions — заглушка до Task 15.
+func (s Server) PutAppVersions(context.Context, oapi.PutAppVersionsRequestObject) (oapi.PutAppVersionsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ListFeatureFlags — заглушка до Task 15.
+func (s Server) ListFeatureFlags(context.Context, oapi.ListFeatureFlagsRequestObject) (oapi.ListFeatureFlagsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// UpdateFeatureFlag — заглушка до Task 15.
+func (s Server) UpdateFeatureFlag(context.Context, oapi.UpdateFeatureFlagRequestObject) (oapi.UpdateFeatureFlagResponseObject, error) {
+	return nil, errNotImplemented
+}

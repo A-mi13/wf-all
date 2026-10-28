@@ -148,9 +148,9 @@ func TestAdminCodesNotInPublic(t *testing.T) {
 	}
 }
 
-// Страж «коды модуля задокументированы» (.claude/rules/backend-http.md): geo.Codes и x-error-codes
-// операций с тегом geo совпадают в обе стороны. Админские операции geo (этап 2) добавят свой
-// контракт в сверку.
+// Страж «коды модуля задокументированы» (.claude/rules/backend-http.md): geo.PublicCodes и x-error-codes
+// операций с тегом geo публичного контракта совпадают в обе стороны. Админские коды geo сверяет
+// TestGeoAdminCodesDocumented (internal/httpapi/admin) с geo.AdminCodes.
 func TestGeoCodesDocumented(t *testing.T) {
 	spec, err := oapi.GetSpec()
 	if err != nil {
@@ -180,9 +180,9 @@ func TestGeoCodesDocumented(t *testing.T) {
 	}
 	slices.Sort(documented)
 	documented = slices.Compact(documented)
-	want := slices.Sorted(slices.Values(geo.Codes))
+	want := slices.Sorted(slices.Values(geo.PublicCodes))
 	if !slices.Equal(documented, want) {
-		t.Fatalf("x-error-codes операций geo %v, geo.Codes %v", documented, want)
+		t.Fatalf("x-error-codes операций geo %v, geo.PublicCodes %v", documented, want)
 	}
 }
 

@@ -1,5 +1,6 @@
 # Схемы модуля geo в админке. Каждая регистрируется в ../root.yaml components.schemas. Контракты
-# admin и public версионируются независимо: CityStatus — своя копия, не ссылка на public.
+# admin и public версионируются независимо: CityStatus и GeoPoint — свои копии, не ссылки на public.
+# План B (geo 2/2, Task 7) — Приложение 2 плана: поля, обязательность, ограничения.
 CityStatus:
   type: string
   description: >-
@@ -7,10 +8,119 @@ CityStatus:
     работает. Список открытый — незнакомое значение клиент обязан пережить
   enum: [waitlist, pilot, live]
   x-extensible-enum: true
+GeoNames:
+  type: object
+  description: >-
+    Названия по языкам: ключ — язык ISO 639-1 из поддерживаемых (ru, en), значение — название на
+    нём, 1–100 символов. Строка языка страны — каноническое название записи. В запросе незнакомый
+    язык — 400 validation.failed по body.names.<язык> с правилом enum
+  additionalProperties:
+    type: string
+    minLength: 1
+    maxLength: 100
+  example:
+    ru: Ставрополь
+    en: Stavropol
+GeoNamesPatch:
+  type: object
+  description: >-
+    Правка названий по языкам: ключ — язык (ru, en), значение — новое название (1–100 символов,
+    пробелы по краям обрезаются) или null — удалить перевод. Языки, которых нет в объекте, не
+    меняются. Незнакомый язык — 400 validation.failed по body.names.<язык> с правилом enum;
+    удалить название на языке страны нельзя — то же поле с правилом required
+  minProperties: 1
+  additionalProperties:
+    type: string
+    nullable: true
+    minLength: 1
+    maxLength: 100
+  example:
+    en: Stavropol
+    ru: Ставрополь
+GeoPoint:
+  type: object
+  description: Точка на карте, WGS 84, градусы
+  required: [lat, lon]
+  properties:
+    lat:
+      type: number
+      format: double
+      minimum: -90
+      maximum: 90
+      description: Широта, от -90 (юг) до 90 (север)
+      example: 45.04484
+    lon:
+      type: number
+      format: double
+      minimum: -180
+      maximum: 180
+      description: Долгота, от -180 (запад) до 180 (восток)
+      example: 41.96910
+GeoCountryRef:
+  type: object
+  description: Страна записи — код и название на языке ответа
+  required: [code, name]
+  properties:
+    code:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Код страны ISO 3166-1 alpha-2
+      example: RU
+    name:
+      type: string
+      description: Название страны на языке ответа; перевода нет — на языке страны
+      example: Россия
+GeoCityCountry:
+  type: object
+  description: Страна города в карточке — код, название на языке ответа и включена ли страна
+  required: [code, name, is_enabled]
+  properties:
+    code:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Код страны ISO 3166-1 alpha-2
+      example: RU
+    name:
+      type: string
+      description: Название страны на языке ответа; перевода нет — на языке страны
+      example: Россия
+    is_enabled:
+      type: boolean
+      description: >-
+        Страна включена. Города выключенной страны админка видит и правит, публичный API и
+        приложения — нет
+      example: true
+GeoRegionRef:
+  type: object
+  description: Регион (субъект, область) — id и название на языке ответа
+  required: [id, name]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id региона
+      example: b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+    name:
+      type: string
+      description: Название региона на языке ответа; перевода нет — на языке страны
+      example: Ставропольский край
 GeoCity:
   type: object
-  description: Город платформы в списке админки — для выбора и подписи городов модератора
-  required: [id, slug, name, status, country_code, region_name]
+  description: >-
+    Город платформы в списке админки — выбор и подпись городов модератора, список «Города и
+    запуск». Города выключенных стран тоже в списке (country_enabled = false)
+  required:
+    - id
+    - slug
+    - name
+    - status
+    - country_code
+    - region_name
+    - region_id
+    - country_enabled
+    - geoname_id
+    - population
+    - districts_count
   properties:
     id:
       type: string
@@ -38,6 +148,35 @@ GeoCity:
       nullable: true
       description: Регион на языке ответа — различает одноимённые города; null — регион не задан
       example: Ставропольский край
+    region_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: Id региона города; null — регион не задан
+      example: b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+    country_enabled:
+      type: boolean
+      description: Страна города включена; false — город скрыт из публичного API вместе со страной
+      example: true
+    geoname_id:
+      type: integer
+      format: int64
+      nullable: true
+      description: >-
+        Место GeoNames, к которому привязан город; null — не привязан (город заведён до импорта и
+        сверка его не нашла — привязать вручную из отчёта импорта)
+      example: 487846
+    population:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Население — из GeoNames на момент активации; импорт его у заведённого города не меняет
+      example: 450680
+    districts_count:
+      type: integer
+      minimum: 0
+      description: Число районов города без архивных
+      example: 4
 GeoCityPage:
   type: object
   description: Страница городов
@@ -53,3 +192,829 @@ GeoCityPage:
       nullable: true
       description: Курсор следующей страницы; null — страниц больше нет
       example: eyJ2IjoyLCJmIjoiTHUtZXVQODNGd3ciLCJrIjpbIjEiLCI0MzM5MzEiXX0
+GeoSlugHistoryEntry:
+  type: object
+  description: Прежний адрес города — продолжает находить город в вебе
+  required: [slug, replaced_at]
+  properties:
+    slug:
+      type: string
+      pattern: '^[a-z0-9-]+$'
+      description: Прежний адрес
+      example: stavropol-city
+    replaced_at:
+      type: string
+      format: date-time
+      description: Когда адрес заменён новым
+      example: '2026-10-20T08:30:00Z'
+GeoCityDetails:
+  type: object
+  description: >-
+    Карточка города в админке: названия по всем языкам, история адресов, привязка к GeoNames,
+    страна, регион и версия
+  required:
+    - id
+    - slug
+    - slug_history
+    - name
+    - names
+    - canonical_locale
+    - status
+    - geoname_id
+    - population
+    - timezone
+    - location
+    - country
+    - region
+    - districts_count
+    - version
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id города
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    slug:
+      type: string
+      pattern: '^[a-z0-9-]+$'
+      description: Текущий адрес города в вебе
+      example: stavropol
+    slug_history:
+      type: array
+      description: Прежние адреса, новые сверху; пусто — адрес не менялся
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoSlugHistoryEntry'
+    name:
+      type: string
+      description: Название на языке ответа; перевода нет — каноническое, на языке страны
+      example: Ставрополь
+    names:
+      $ref: '../root.yaml#/components/schemas/GeoNames'
+    canonical_locale:
+      type: string
+      pattern: '^[a-z]{2}$'
+      description: Язык страны — название на нём каноническое, удалить его нельзя
+      example: ru
+    status:
+      $ref: '../root.yaml#/components/schemas/CityStatus'
+    geoname_id:
+      type: integer
+      format: int64
+      nullable: true
+      description: Место GeoNames города; null — не привязан (linkGeoCity)
+      example: 487846
+    population:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Население — из GeoNames на момент активации
+      example: 450680
+    timezone:
+      type: string
+      description: Таймзона IANA — местное время матчей города считается по ней
+      example: Europe/Moscow
+    location:
+      $ref: '../root.yaml#/components/schemas/GeoPoint'
+    country:
+      $ref: '../root.yaml#/components/schemas/GeoCityCountry'
+    region:
+      type: object
+      nullable: true
+      description: Регион города; null — регион не задан
+      allOf:
+        - $ref: '../root.yaml#/components/schemas/GeoRegionRef'
+    districts_count:
+      type: integer
+      minimum: 0
+      description: Число районов без архивных
+      example: 4
+    version:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Версия города — растёт на каждое изменение (справочно; правки не сверяют её)
+      example: 3
+GeoCityActivateRequest:
+  type: object
+  description: >-
+    Активация города из места GeoNames. Страна и регион по умолчанию — места; country_code
+    переопределяет страну (тогда регион — только region_id или без региона)
+  required: [geoname_id]
+  additionalProperties: false
+  properties:
+    geoname_id:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Место GeoNames — из поиска listGeoPlaces
+      example: 526815
+    status:
+      $ref: '../root.yaml#/components/schemas/CityStatus'
+    country_code:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Страна города вместо страны места (включённая); без поля — страна места
+      example: RU
+    region_id:
+      type: string
+      format: uuid
+      description: >-
+        Регион города — из listGeoRegions той же страны; без поля — регион места (заводится по
+        GeoNames, если его ещё нет), при переопределённой стране — без региона
+      example: b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+GeoCityPatch:
+  type: object
+  description: >-
+    Правка города — только присланные поля. status и slug требуют geo.cities.manage, names —
+    geo.cities.rename; поле без права — 403 auth.forbidden на весь запрос, ничего не записано
+  minProperties: 1
+  additionalProperties: false
+  properties:
+    status:
+      $ref: '../root.yaml#/components/schemas/CityStatus'
+    slug:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      description: >-
+        Новый адрес в вебе: латиница в нижнем регистре, цифры, дефис только между частями, до 100
+        символов. Прежний уходит в историю и продолжает находить город
+      example: stavropol
+    names:
+      $ref: '../root.yaml#/components/schemas/GeoNamesPatch'
+GeoCityLinkRequest:
+  type: object
+  description: Ручная привязка города к месту GeoNames — кандидат из отчёта импорта
+  required: [geoname_id]
+  additionalProperties: false
+  properties:
+    geoname_id:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Место GeoNames — один из кандидатов отчёта сверки (ambiguous, conflict)
+      example: 487846
+GeoPlace:
+  type: object
+  description: Место справочника GeoNames (CC BY 4.0) — кандидат в города платформы
+  required:
+    - geoname_id
+    - name
+    - ascii_name
+    - feature_code
+    - population
+    - timezone
+    - region_name
+    - country
+    - city_id
+  properties:
+    geoname_id:
+      type: integer
+      format: int64
+      description: Id места в GeoNames
+      example: 526815
+    name:
+      type: string
+      description: Название места на языке ответа; перевода нет — на языке страны
+      example: Михайловск
+    ascii_name:
+      type: string
+      description: Название латиницей из GeoNames — из него строится адрес города
+      example: Mikhaylovsk
+    feature_code:
+      type: string
+      description: 'Код вида места GeoNames: PPL — населённый пункт, PPLA — центр региона, PPLC — столица…'
+      example: PPL
+    population:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Население по GeoNames
+      example: 56000
+    timezone:
+      type: string
+      description: Таймзона IANA места
+      example: Asia/Yekaterinburg
+    region_name:
+      type: string
+      nullable: true
+      description: Регион места на языке ответа; null — регион неизвестен
+      example: Свердловская область
+    country:
+      $ref: '../root.yaml#/components/schemas/GeoCountryRef'
+    city_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: >-
+        Город платформы на этом месте; null — город ещё не заведён (можно активировать). У
+        заведённого города страна места — страна города
+      example: null
+GeoPlacePage:
+  type: object
+  description: Страница мест GeoNames
+  required: [items, next_cursor]
+  properties:
+    items:
+      type: array
+      description: Места страницы — по населению, крупные сверху
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoPlace'
+    next_cursor:
+      type: string
+      nullable: true
+      description: Курсор следующей страницы; null — страниц больше нет
+      example: eyJ2IjoyLCJmIjoicDNHeVZtSHNhR2MiLCJrIjpbIjU2MDAwIiwiNTI2ODE1Il19
+GeoDistrict:
+  type: object
+  description: Район города
+  required: [id, name, archived_at, version]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id района
+      example: c1d9e3a7-5b2f-4a8c-8e6d-0f4b7a2c9e15
+    name:
+      type: string
+      description: Название района
+      example: Промышленный
+    archived_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: >-
+        Когда район отправлен в архив; null — район действующий. Архивный скрыт из приложений,
+        ссылки полей и матчей на него остаются, его имя свободно для нового района
+      example: null
+    version:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Версия района — растёт на каждое изменение (справочно)
+      example: 1
+GeoDistrictList:
+  type: object
+  description: Районы города — действующие по имени, затем архивные; без пагинации (районов единицы)
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: Районы
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoDistrict'
+GeoDistrictCreate:
+  type: object
+  description: Новый район города
+  required: [name]
+  additionalProperties: false
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: >-
+        Название района, 1–100 символов (пробелы по краям обрезаются); занято действующим районом
+        города (без учёта регистра и ё/е) — 409 geo.district_name_taken
+      example: Промышленный
+GeoDistrictPatch:
+  type: object
+  description: Правка района — только присланные поля
+  minProperties: 1
+  additionalProperties: false
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: Новое название района, 1–100 символов
+      example: Юго-Западный
+    archived:
+      type: boolean
+      description: >-
+        true — в архив (район скрыт из приложений), false — вернуть из архива (имя должно быть
+        свободно среди действующих)
+      example: true
+GeoCountry:
+  type: object
+  description: >-
+    Страна с правилами: валюта, язык, телефонный код, первый день недели, возрастные пороги.
+    Значения вносит человек, сверяя с законом страны; из GeoNames они не берутся
+  required:
+    - code
+    - name
+    - names
+    - currency
+    - default_locale
+    - phone_prefix
+    - week_starts_on
+    - min_signup_age
+    - age_of_majority
+    - is_enabled
+    - open_cities
+    - version
+  properties:
+    code:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Код страны ISO 3166-1 alpha-2
+      example: RU
+    name:
+      type: string
+      description: Название страны на языке ответа; перевода нет — на языке страны
+      example: Россия
+    names:
+      $ref: '../root.yaml#/components/schemas/GeoNames'
+    currency:
+      type: string
+      pattern: '^[A-Z]{3}$'
+      description: Валюта страны ISO 4217 — суммы городов страны в ней, в минорных единицах
+      example: RUB
+    default_locale:
+      type: string
+      pattern: '^[a-z]{2}$'
+      description: Язык страны ISO 639-1 — на нём канонические названия; задаётся только при создании
+      example: ru
+    phone_prefix:
+      type: string
+      pattern: '^\+[1-9][0-9]{0,3}$'
+      description: Телефонный код страны
+      example: '+7'
+    week_starts_on:
+      type: integer
+      minimum: 1
+      maximum: 7
+      description: Первый день недели — 1 понедельник … 7 воскресенье (ISO 8601)
+      example: 1
+    min_signup_age:
+      type: integer
+      minimum: 1
+      maximum: 120
+      description: Минимальный возраст регистрации, полных лет
+      example: 14
+    age_of_majority:
+      type: integer
+      minimum: 1
+      maximum: 120
+      description: Возраст совершеннолетия, полных лет — с него капитанство и покупки; не меньше min_signup_age
+      example: 18
+    is_enabled:
+      type: boolean
+      description: Страна включена — её города видны в приложениях
+      example: true
+    open_cities:
+      type: integer
+      minimum: 0
+      description: >-
+        Справочно: число городов страны в статусах pilot и live — экрану для предупреждения при
+        выключении страны (на правило «вдвоём» не влияет)
+      example: 2
+    version:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Версия страны — растёт на каждое изменение; подтверждение правил сверяет её
+      example: 4
+GeoCountryList:
+  type: object
+  description: Все страны справочника — включённые и выключенные, по коду
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: Страны
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoCountry'
+GeoCountryCreate:
+  type: object
+  description: >-
+    Новая страна — тело запроса на подтверждение (страна появится после подтверждения вторым
+    сотрудником). Все правила обязательны; название на языке страны (default_locale) обязательно
+  required:
+    - code
+    - currency
+    - default_locale
+    - phone_prefix
+    - week_starts_on
+    - min_signup_age
+    - age_of_majority
+    - names
+  additionalProperties: false
+  properties:
+    code:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Код действующей страны ISO 3166-1 alpha-2; уже есть в справочнике — 409 geo.country_exists
+      example: KZ
+    currency:
+      type: string
+      pattern: '^[A-Z]{3}$'
+      description: Действующая валюта ISO 4217 (исторические коды вроде RUR не принимаются)
+      example: KZT
+    default_locale:
+      type: string
+      pattern: '^[a-z]{2}$'
+      description: Язык страны из поддерживаемых (ru, en); потом не меняется
+      example: ru
+    phone_prefix:
+      type: string
+      pattern: '^\+[1-9][0-9]{0,3}$'
+      description: Телефонный код страны — «+» и 1–4 цифры
+      example: '+7'
+    week_starts_on:
+      type: integer
+      minimum: 1
+      maximum: 7
+      description: Первый день недели — 1 понедельник … 7 воскресенье
+      example: 1
+    min_signup_age:
+      type: integer
+      minimum: 1
+      maximum: 120
+      description: Минимальный возраст регистрации, полных лет
+      example: 14
+    age_of_majority:
+      type: integer
+      minimum: 1
+      maximum: 120
+      description: Возраст совершеннолетия, не меньше min_signup_age (иначе 400 по body.age_of_majority)
+      example: 18
+    names:
+      $ref: '../root.yaml#/components/schemas/GeoNames'
+    is_enabled:
+      type: boolean
+      default: false
+      description: Включить страну сразу при создании; без поля — выключена
+      example: false
+GeoCountryPatch:
+  type: object
+  description: >-
+    Правка страны — только присланные поля; code и default_locale не меняются (лишнее поле — 400).
+    Смена currency, min_signup_age, age_of_majority и выключение (is_enabled: false у включённой)
+    — всегда через подтверждение вторым сотрудником (202); включение и прочие поля — сразу
+  minProperties: 1
+  additionalProperties: false
+  properties:
+    currency:
+      type: string
+      pattern: '^[A-Z]{3}$'
+      description: Действующая валюта ISO 4217 — вдвоём
+      example: RUB
+    phone_prefix:
+      type: string
+      pattern: '^\+[1-9][0-9]{0,3}$'
+      description: Телефонный код — сразу
+      example: '+7'
+    week_starts_on:
+      type: integer
+      minimum: 1
+      maximum: 7
+      description: Первый день недели — сразу
+      example: 1
+    min_signup_age:
+      type: integer
+      minimum: 1
+      maximum: 120
+      description: Минимальный возраст регистрации — вдвоём
+      example: 14
+    age_of_majority:
+      type: integer
+      minimum: 1
+      maximum: 120
+      description: Возраст совершеннолетия — вдвоём
+      example: 18
+    is_enabled:
+      type: boolean
+      description: true — включить сразу; false — выключить (вдвоём)
+      example: false
+    names:
+      $ref: '../root.yaml#/components/schemas/GeoNamesPatch'
+GeoRegion:
+  type: object
+  description: Регион страны (субъект, область)
+  required: [id, name, names, geoname_admin1_code]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id региона
+      example: b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
+    name:
+      type: string
+      description: Название региона на языке ответа; перевода нет — на языке страны
+      example: Ставропольский край
+    names:
+      $ref: '../root.yaml#/components/schemas/GeoNames'
+    geoname_admin1_code:
+      type: string
+      nullable: true
+      description: Код региона в GeoNames (admin1); null — регион заведён без привязки
+      example: '70'
+GeoRegionList:
+  type: object
+  description: Регионы страны по названию на языке ответа
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: Регионы
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoRegion'
+GeoImportStatus:
+  type: string
+  description: >-
+    Состояние импорта. running — идёт; succeeded — завершён, данные записаны; failed — упал, данные
+    не изменились (причина — error)
+  enum: [running, succeeded, failed]
+  x-extensible-enum: true
+GeoImport:
+  type: object
+  description: Строка журнала импорта GeoNames по стране
+  required:
+    - id
+    - country_code
+    - status
+    - started_at
+    - finished_at
+    - started_by
+    - started_by_label
+    - river_job_id
+    - places_upserted
+    - places_removed
+    - places_missing
+    - names_upserted
+    - error
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id импорта — отчёт сверки в getGeoImport
+      example: 0192f2a0-3c4d-7e5f-8a9b-0c1d2e3f4a5b
+    country_code:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Страна импорта
+      example: RU
+    status:
+      $ref: '../root.yaml#/components/schemas/GeoImportStatus'
+    started_at:
+      type: string
+      format: date-time
+      description: Когда импорт начался
+      example: '2026-10-28T09:00:00Z'
+    finished_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Когда закончился; null — ещё идёт
+      example: '2026-10-28T09:04:12Z'
+    started_by:
+      type: string
+      format: uuid
+      nullable: true
+      description: Id сотрудника, поставившего импорт; null — команда оператора сервера
+      example: 0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d
+    started_by_label:
+      type: string
+      nullable: true
+      description: >-
+        Кто поставил — имя сотрудника из записи журнала о постановке (geo.import_requested) на тот
+        момент; null — команда оператора или запись не найдена (показывать «сотрудник»)
+      example: Мария К.
+    river_job_id:
+      type: integer
+      format: int64
+      nullable: true
+      description: Задача очереди, исполнившая импорт (getGeoImportJob); null — команда оператора
+      example: 1842
+    places_upserted:
+      type: integer
+      nullable: true
+      description: Мест записано или обновлено; null — до завершения
+      example: 12450
+    places_removed:
+      type: integer
+      nullable: true
+      description: Мест удалено (пропали из источника, городов на них нет); null — до завершения
+      example: 37
+    places_missing:
+      type: integer
+      nullable: true
+      description: Мест пропало из источника, но на них есть города — помечены; null — до завершения
+      example: 0
+    names_upserted:
+      type: integer
+      nullable: true
+      description: Названий по языкам записано; null — до завершения
+      example: 24810
+    error:
+      type: string
+      nullable: true
+      description: Почему импорт упал (текст для оператора); null — не падал
+      example: null
+GeoImportPage:
+  type: object
+  description: Страница журнала импортов, новые сверху
+  required: [items, next_cursor]
+  properties:
+    items:
+      type: array
+      description: Импорты страницы
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoImport'
+    next_cursor:
+      type: string
+      nullable: true
+      description: Курсор следующей страницы; null — страниц больше нет
+      example: eyJ2IjoyLCJmIjoiZDFtWGs5UXR6V2ciLCJrIjpbIjIwMjYtMTAtMjhUMDk6MDA6MDBaIl19
+GeoReconcileLinked:
+  type: object
+  description: Город, который сверка привязала к месту GeoNames
+  required: [city_id, slug, geoname_id]
+  properties:
+    city_id:
+      type: string
+      format: uuid
+      description: Id города
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    slug:
+      type: string
+      description: Адрес города
+      example: stavropol
+    geoname_id:
+      type: integer
+      format: int64
+      description: Место, к которому привязан
+      example: 487846
+GeoReconcileCandidate:
+  type: object
+  description: Место GeoNames — кандидат для ручной привязки города
+  required: [geoname_id, name, region_name, population]
+  properties:
+    geoname_id:
+      type: integer
+      format: int64
+      description: Id места — его передают в linkGeoCity
+      example: 526815
+    name:
+      type: string
+      description: Название места на языке ответа
+      example: Михайловск
+    region_name:
+      type: string
+      nullable: true
+      description: Регион места на языке ответа; null — неизвестен
+      example: Свердловская область
+    population:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Население места
+      example: 9000
+GeoReconcileCity:
+  type: object
+  description: Город, который сверка не привязала сама, и кандидаты для ручной привязки
+  required: [city_id, slug, candidates]
+  properties:
+    city_id:
+      type: string
+      format: uuid
+      description: Id города
+      example: 7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65
+    slug:
+      type: string
+      description: Адрес города
+      example: mihaylovsk
+    candidates:
+      type: array
+      description: Подходящие места; пусто — ни одного
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoReconcileCandidate'
+GeoReconcileNotFound:
+  type: object
+  description: Город, для которого сверка не нашла ни одного места
+  required: [city_id, slug]
+  properties:
+    city_id:
+      type: string
+      format: uuid
+      description: Id города
+      example: 9c3b1a7e-4d2f-4e8a-b5c6-7d8e9f0a1b2c
+    slug:
+      type: string
+      description: Адрес города
+      example: zarechny-3
+GeoReconcileReport:
+  type: object
+  description: Отчёт сверки заведённых городов страны с GeoNames
+  required: [linked, ambiguous, not_found, conflict, missing, skipped_timezone]
+  properties:
+    linked:
+      type: array
+      description: Привязаны автоматически
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoReconcileLinked'
+    ambiguous:
+      type: array
+      description: Несколько подходящих мест — привязать вручную (linkGeoCity)
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoReconcileCity'
+    not_found:
+      type: array
+      description: Ни одного подходящего места (в том числе город без региона)
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoReconcileNotFound'
+    conflict:
+      type: array
+      description: Место за время импорта занял другой город или сам город уже привязали — проверить вручную
+      items:
+        $ref: '../root.yaml#/components/schemas/GeoReconcileCity'
+    missing:
+      type: array
+      description: Места городов, пропавшие из источника (geoname_id)
+      items:
+        type: integer
+        format: int64
+      example: [524901]
+    skipped_timezone:
+      type: integer
+      minimum: 0
+      description: Мест пропущено из-за пустой или неизвестной таймзоны
+      example: 3
+GeoImportReport:
+  type: object
+  description: Импорт с отчётом сверки городов
+  allOf:
+    - $ref: '../root.yaml#/components/schemas/GeoImport'
+    - type: object
+      required: [reconciled]
+      properties:
+        reconciled:
+          type: object
+          nullable: true
+          description: Отчёт сверки; null — импорт идёт или упал до сверки
+          allOf:
+            - $ref: '../root.yaml#/components/schemas/GeoReconcileReport'
+GeoImportStartRequest:
+  type: object
+  description: Поставить импорт GeoNames страны
+  required: [country]
+  additionalProperties: false
+  properties:
+    country:
+      type: string
+      pattern: '^[A-Z]{2}$'
+      description: Код страны ISO 3166-1 alpha-2 заглавными; страна должна быть в справочнике (может быть выключена)
+      example: RU
+GeoImportStarted:
+  type: object
+  description: Импорт поставлен в очередь
+  required: [job_id]
+  properties:
+    job_id:
+      type: integer
+      format: int64
+      description: Задача очереди — её состояние в getGeoImportJob, строка журнала появится с её стартом
+      example: 1842
+GeoImportJobState:
+  type: string
+  description: >-
+    Состояние задачи импорта в очереди. queued — ждёт исполнителя (на стенде без воркера стоит так,
+    пока её не отменят); running — выполняется; completed — выполнена (итог импорта — в журнале);
+    failed — выброшена после попыток; cancelled — отменена
+  enum: [queued, running, completed, failed, cancelled]
+  x-extensible-enum: true
+GeoImportJob:
+  type: object
+  description: Задача импорта в очереди
+  required: [job_id, state, import_id, attempt, max_attempts, created_at]
+  properties:
+    job_id:
+      type: integer
+      format: int64
+      description: Id задачи
+      example: 1842
+    state:
+      $ref: '../root.yaml#/components/schemas/GeoImportJobState'
+    import_id:
+      type: string
+      format: uuid
+      nullable: true
+      description: Строка журнала, созданная задачей (getGeoImport); null — задача ещё не начиналась
+      example: null
+    attempt:
+      type: integer
+      minimum: 0
+      description: Номер текущей попытки; 0 — ещё не начиналась
+      example: 0
+    max_attempts:
+      type: integer
+      minimum: 1
+      description: Сколько попыток всего
+      example: 3
+    created_at:
+      type: string
+      format: date-time
+      description: Когда задача поставлена
+      example: '2026-10-28T08:59:58Z'

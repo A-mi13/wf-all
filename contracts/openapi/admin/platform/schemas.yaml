@@ -1,12 +1,21 @@
-# Схемы платформы админки: подтверждения вдвоём (спека сотрудников §4.8) и журнал действий (§5.3).
+# Схемы платформы админки: подтверждения вдвоём (спека сотрудников §4.8), журнал действий (§5.3),
+# версии приложения и флаги функций (§6.1, план B Task 7).
 # Каждая регистрируется в ../root.yaml components.schemas.
 ApprovalAction:
   type: string
   description: >-
     Действие запроса на подтверждение — подпись берётся из локалей админки
     (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или
-    городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца
-  enum: [staff.invite, staff.role_change, staff.access_reset, staff.revoke_owner]
+    городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца;
+    geo.country_rules — правила страны (валюта, возрастные пороги, выключение); geo.country_create —
+    новая страна
+  enum:
+    - staff.invite
+    - staff.role_change
+    - staff.access_reset
+    - staff.revoke_owner
+    - geo.country_rules
+    - geo.country_create
   x-extensible-enum: true
 ApprovalStatus:
   type: string
@@ -284,3 +293,175 @@ AuditPage:
       nullable: true
       description: Курсор следующей страницы; null — страниц больше нет
       example: eyJ2IjoxLCJrIjpbIjIwMjYtMTAtMTNUMDk6MjA6MDBaIiwiMDE5MmYxZjAiXX0
+AppPlatform:
+  type: string
+  description: >-
+    Платформа мобильного приложения. Список открытый в ответах; в пути незнакомое значение — 400
+    validation.failed (валидатор запросов его отвергает)
+  enum: [ios, android]
+  x-extensible-enum: true
+AppVersions:
+  type: object
+  description: >-
+    Версии приложения платформы. Версии, ссылка, version и updated_at — null, если версии для
+    платформы ещё не заводили (приложение работает без проверки)
+  required: [platform, min_version, recommended_version, store_url, version, updated_at]
+  properties:
+    platform:
+      $ref: '../root.yaml#/components/schemas/AppPlatform'
+    min_version:
+      type: string
+      nullable: true
+      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+      description: Минимальная версия MAJOR.MINOR.PATCH — ниже неё приложение требует обновиться
+      example: 1.4.0
+    recommended_version:
+      type: string
+      nullable: true
+      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+      description: Рекомендуемая версия — ниже неё приложение предлагает обновиться; не ниже min_version
+      example: 1.6.2
+    store_url:
+      type: string
+      nullable: true
+      description: Страница приложения в магазине платформы (App Store, Google Play)
+      example: https://apps.apple.com/app/id6740000000
+    version:
+      type: integer
+      format: int64
+      minimum: 1
+      nullable: true
+      description: Версия записи — растёт на каждую правку (справочно); null — версии не заводили
+      example: 3
+    updated_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Когда версии меняли последний раз; null — не заводили
+      example: '2026-10-27T15:40:00Z'
+AppVersionsList:
+  type: object
+  description: Версии обеих платформ — всегда два элемента, ios и android
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: Версии по платформам
+      items:
+        $ref: '../root.yaml#/components/schemas/AppVersions'
+AppVersionsPut:
+  type: object
+  description: Версии платформы целиком — все три поля обязательны
+  required: [min_version, recommended_version, store_url]
+  additionalProperties: false
+  properties:
+    min_version:
+      type: string
+      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+      description: Минимальная версия MAJOR.MINOR.PATCH (без ведущих нулей и сборки)
+      example: 1.4.0
+    recommended_version:
+      type: string
+      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+      description: Рекомендуемая версия MAJOR.MINOR.PATCH, не ниже min_version
+      example: 1.6.2
+    store_url:
+      type: string
+      maxLength: 2048
+      pattern: '^https://'
+      description: >-
+        Страница приложения в магазине: https:// в нижнем регистре, без пробелов и управляющих
+        символов, хост стора платформы — apps.apple.com (ios) или play.google.com (android)
+      example: https://apps.apple.com/app/id6740000000
+FeatureFlagKey:
+  type: string
+  description: >-
+    Ключ флага функции — подпись в локалях админки (flags.<ключ>.title и .note). Список открытый:
+    флаг из новой миграции, которого нет в этом списке, приходит своим ключом — экран показывает
+    сам ключ. Только в ответах: путь updateFeatureFlag принимает любой ключ по шаблону
+  enum:
+    - subscriptions
+    - economy
+    - lootboxes
+    - predictions
+    - competitions
+    - city_tables
+    - challenges
+    - match_comments
+    - payment_flags
+    - ads
+    - gk_rotation
+  x-extensible-enum: true
+FeatureFlag:
+  type: object
+  description: >-
+    Флаг функции. Функция включена в городе, если флаг включён везде или город в enabled_city_ids
+  required: [key, description, enabled_globally, enabled_city_ids, version, updated_at]
+  properties:
+    key:
+      $ref: '../root.yaml#/components/schemas/FeatureFlagKey'
+    description:
+      type: string
+      description: Описание флага для разработчика (из миграции); экрану — подпись из локалей
+      example: Очки, кредиты, косметика
+    enabled_globally:
+      type: boolean
+      description: Включён во всех городах
+      example: false
+    enabled_city_ids:
+      type: array
+      description: Города, где флаг включён, когда он не включён везде; по возрастанию id
+      items:
+        type: string
+        format: uuid
+      example: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47]
+    version:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Версия флага — передайте её в updateFeatureFlag; растёт на каждую правку
+      example: 2
+    updated_at:
+      type: string
+      format: date-time
+      description: Когда флаг меняли последний раз
+      example: '2026-10-27T15:40:00Z'
+FeatureFlagList:
+  type: object
+  description: Все флаги функций по ключу
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: Флаги
+      items:
+        $ref: '../root.yaml#/components/schemas/FeatureFlag'
+FeatureFlagPatch:
+  type: object
+  description: >-
+    Правка флага: версия, которую видел экран, и новые значения (присланные поля); без
+    enabled_globally и enabled_city_ids — ничего не меняется
+  required: [version]
+  additionalProperties: false
+  properties:
+    version:
+      type: integer
+      format: int64
+      minimum: 1
+      description: >-
+        Версия флага из listFeatureFlags; флаг с тех пор изменили — 409 platform.flag_stale
+      example: 2
+    enabled_globally:
+      type: boolean
+      description: Включить во всех городах (true) или только в enabled_city_ids (false)
+      example: false
+    enabled_city_ids:
+      type: array
+      maxItems: 1000
+      description: >-
+        Города, где флаг включён, — список целиком, заменяет прежний; повторы схлопываются; пусто —
+        ни одного города. Несуществующий город — 422 platform.flag_city_not_found
+      items:
+        type: string
+        format: uuid
+      example: [3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47, 7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65]

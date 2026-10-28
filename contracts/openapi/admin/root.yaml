@@ -5,7 +5,7 @@
 # каждая регистрируется ниже в components.schemas.
 # Каждая операция объявляет право x-permission (страж contracts/src/permissions.mjs по каталогу
 # admin/permissions.json — его генерирует ./task gen из backend/internal/platform/perm).
-# После Task 9a плана A контракт заморожен (P16): правка — только через контроллера плана.
+# После Task 9a плана A (P16) и Task 7 плана B контракт заморожен: правка — только через контроллера плана.
 # Схема Problem и ответ Problem продублированы в public/root.yaml намеренно (контракты версионируются
 # независимо); тест бандлов в contracts/ падает после сборки, если копии разошлись.
 openapi: 3.0.3
@@ -77,10 +77,14 @@ tags:
       Сотрудники админки — вход, второй фактор, сессии, «Мой доступ», приглашения, роли и доступ
       других сотрудников
   - name: geo
-    description: Справочник городов в админке — выбор городов модератора
+    description: >-
+      Справочник geo в админке — города (активация из GeoNames, правка, привязка), районы, страны и
+      их правила, регионы, импорт GeoNames; выбор городов модератора
+
   - name: platform
     description: >-
-      Механизмы платформы админки — журнал действий и подтверждения вдвоём
+      Механизмы платформы админки — журнал действий, подтверждения вдвоём, версии нативного
+      приложения и флаги функций
 # Аутентификация по умолчанию; анонимная операция объявляет `security: []` и `x-permission: anonymous`.
 security:
   - session: []
@@ -168,8 +172,32 @@ paths:
     $ref: './staff/paths.yaml#/account-sessions-revoke-all'
   /v1/staff/roles:
     $ref: './staff/paths.yaml#/roles'
+  /v1/geo/places:
+    $ref: './geo/paths.yaml#/places'
   /v1/geo/cities:
     $ref: './geo/paths.yaml#/cities'
+  /v1/geo/cities/{cityId}:
+    $ref: './geo/paths.yaml#/city'
+  /v1/geo/cities/{cityId}/link:
+    $ref: './geo/paths.yaml#/city-link'
+  /v1/geo/cities/{cityId}/districts:
+    $ref: './geo/paths.yaml#/city-districts'
+  /v1/geo/cities/{cityId}/districts/{districtId}:
+    $ref: './geo/paths.yaml#/city-district'
+  /v1/geo/countries:
+    $ref: './geo/paths.yaml#/countries'
+  /v1/geo/countries/{code}:
+    $ref: './geo/paths.yaml#/country'
+  /v1/geo/countries/{code}/regions:
+    $ref: './geo/paths.yaml#/country-regions'
+  /v1/geo/imports:
+    $ref: './geo/paths.yaml#/imports'
+  /v1/geo/imports/{importId}:
+    $ref: './geo/paths.yaml#/import'
+  /v1/geo/imports/jobs/{jobId}:
+    $ref: './geo/paths.yaml#/import-job'
+  /v1/geo/imports/jobs/{jobId}/cancel:
+    $ref: './geo/paths.yaml#/import-job-cancel'
   /v1/audit:
     $ref: './platform/paths.yaml#/audit'
   /v1/approvals:
@@ -180,6 +208,14 @@ paths:
     $ref: './platform/paths.yaml#/approval-reject'
   /v1/approvals/{approvalId}/cancel:
     $ref: './platform/paths.yaml#/approval-cancel'
+  /v1/app/versions:
+    $ref: './platform/paths.yaml#/app-versions'
+  /v1/app/versions/{platform}:
+    $ref: './platform/paths.yaml#/app-version'
+  /v1/flags:
+    $ref: './platform/paths.yaml#/flags'
+  /v1/flags/{key}:
+    $ref: './platform/paths.yaml#/flag'
 components:
   securitySchemes:
     session:
@@ -250,6 +286,72 @@ components:
         type: string
         format: uuid
       example: 0192f1e2-4c5d-7e6f-a081-92b3c4d5e6f7
+    CityId:
+      name: cityId
+      in: path
+      required: true
+      description: Id города платформы
+      schema:
+        type: string
+        format: uuid
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    DistrictId:
+      name: districtId
+      in: path
+      required: true
+      description: Id района города пути
+      schema:
+        type: string
+        format: uuid
+      example: c1d9e3a7-5b2f-4a8c-8e6d-0f4b7a2c9e15
+    CountryCode:
+      name: code
+      in: path
+      required: true
+      description: Код страны ISO 3166-1 alpha-2 заглавными
+      schema:
+        type: string
+        pattern: '^[A-Z]{2}$'
+      example: RU
+    ImportId:
+      name: importId
+      in: path
+      required: true
+      description: Id строки журнала импорта GeoNames
+      schema:
+        type: string
+        format: uuid
+      example: 0192f2a0-3c4d-7e5f-8a9b-0c1d2e3f4a5b
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      description: Id задачи импорта в очереди — job_id из startGeoImport
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+      example: 1842
+    AppPlatformPath:
+      name: platform
+      in: path
+      required: true
+      description: Платформа приложения — ios или android
+      schema:
+        $ref: '#/components/schemas/AppPlatform'
+      example: ios
+    FlagKey:
+      name: key
+      in: path
+      required: true
+      description: >-
+        Ключ флага функции — строка, а не список (флаг из новой миграции переключается без правки
+        контракта): латиница в нижнем регистре, цифры и «_», с буквы, до 64 символов
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9_]*$'
+        maxLength: 64
+      example: economy
     Cursor:
       name: cursor
       in: query
@@ -378,6 +480,13 @@ components:
             Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после
             которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
           example: 3
+        job_id:
+          type: integer
+          format: int64
+          description: >-
+            Только у geo.import_in_progress админки — id задачи импорта страны, которая уже стоит в
+            очереди или выполняется; её можно отменить cancelGeoImportJob
+          example: 1842
         challenge:
           type: object
           description: >-
@@ -481,6 +590,78 @@ components:
       $ref: './geo/schemas.yaml#/GeoCity'
     GeoCityPage:
       $ref: './geo/schemas.yaml#/GeoCityPage'
+    GeoNames:
+      $ref: './geo/schemas.yaml#/GeoNames'
+    GeoNamesPatch:
+      $ref: './geo/schemas.yaml#/GeoNamesPatch'
+    GeoPoint:
+      $ref: './geo/schemas.yaml#/GeoPoint'
+    GeoCountryRef:
+      $ref: './geo/schemas.yaml#/GeoCountryRef'
+    GeoCityCountry:
+      $ref: './geo/schemas.yaml#/GeoCityCountry'
+    GeoRegionRef:
+      $ref: './geo/schemas.yaml#/GeoRegionRef'
+    GeoSlugHistoryEntry:
+      $ref: './geo/schemas.yaml#/GeoSlugHistoryEntry'
+    GeoCityDetails:
+      $ref: './geo/schemas.yaml#/GeoCityDetails'
+    GeoCityActivateRequest:
+      $ref: './geo/schemas.yaml#/GeoCityActivateRequest'
+    GeoCityPatch:
+      $ref: './geo/schemas.yaml#/GeoCityPatch'
+    GeoCityLinkRequest:
+      $ref: './geo/schemas.yaml#/GeoCityLinkRequest'
+    GeoPlace:
+      $ref: './geo/schemas.yaml#/GeoPlace'
+    GeoPlacePage:
+      $ref: './geo/schemas.yaml#/GeoPlacePage'
+    GeoDistrict:
+      $ref: './geo/schemas.yaml#/GeoDistrict'
+    GeoDistrictList:
+      $ref: './geo/schemas.yaml#/GeoDistrictList'
+    GeoDistrictCreate:
+      $ref: './geo/schemas.yaml#/GeoDistrictCreate'
+    GeoDistrictPatch:
+      $ref: './geo/schemas.yaml#/GeoDistrictPatch'
+    GeoCountry:
+      $ref: './geo/schemas.yaml#/GeoCountry'
+    GeoCountryList:
+      $ref: './geo/schemas.yaml#/GeoCountryList'
+    GeoCountryCreate:
+      $ref: './geo/schemas.yaml#/GeoCountryCreate'
+    GeoCountryPatch:
+      $ref: './geo/schemas.yaml#/GeoCountryPatch'
+    GeoRegion:
+      $ref: './geo/schemas.yaml#/GeoRegion'
+    GeoRegionList:
+      $ref: './geo/schemas.yaml#/GeoRegionList'
+    GeoImportStatus:
+      $ref: './geo/schemas.yaml#/GeoImportStatus'
+    GeoImport:
+      $ref: './geo/schemas.yaml#/GeoImport'
+    GeoImportPage:
+      $ref: './geo/schemas.yaml#/GeoImportPage'
+    GeoReconcileLinked:
+      $ref: './geo/schemas.yaml#/GeoReconcileLinked'
+    GeoReconcileCandidate:
+      $ref: './geo/schemas.yaml#/GeoReconcileCandidate'
+    GeoReconcileCity:
+      $ref: './geo/schemas.yaml#/GeoReconcileCity'
+    GeoReconcileNotFound:
+      $ref: './geo/schemas.yaml#/GeoReconcileNotFound'
+    GeoReconcileReport:
+      $ref: './geo/schemas.yaml#/GeoReconcileReport'
+    GeoImportReport:
+      $ref: './geo/schemas.yaml#/GeoImportReport'
+    GeoImportStartRequest:
+      $ref: './geo/schemas.yaml#/GeoImportStartRequest'
+    GeoImportStarted:
+      $ref: './geo/schemas.yaml#/GeoImportStarted'
+    GeoImportJobState:
+      $ref: './geo/schemas.yaml#/GeoImportJobState'
+    GeoImportJob:
+      $ref: './geo/schemas.yaml#/GeoImportJob'
     # platform
     ApprovalAction:
       $ref: './platform/schemas.yaml#/ApprovalAction'
@@ -502,3 +683,19 @@ components:
       $ref: './platform/schemas.yaml#/AuditRecord'
     AuditPage:
       $ref: './platform/schemas.yaml#/AuditPage'
+    AppPlatform:
+      $ref: './platform/schemas.yaml#/AppPlatform'
+    AppVersions:
+      $ref: './platform/schemas.yaml#/AppVersions'
+    AppVersionsList:
+      $ref: './platform/schemas.yaml#/AppVersionsList'
+    AppVersionsPut:
+      $ref: './platform/schemas.yaml#/AppVersionsPut'
+    FeatureFlagKey:
+      $ref: './platform/schemas.yaml#/FeatureFlagKey'
+    FeatureFlag:
+      $ref: './platform/schemas.yaml#/FeatureFlag'
+    FeatureFlagList:
+      $ref: './platform/schemas.yaml#/FeatureFlagList'
+    FeatureFlagPatch:
+      $ref: './platform/schemas.yaml#/FeatureFlagPatch'

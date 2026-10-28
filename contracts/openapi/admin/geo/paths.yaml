@@ -1,5 +1,63 @@
-# Операции модуля geo в админке (спека сотрудников §6; план A — D24, P28, M10). Тег geo — реализует
-# internal/geo/admin (встроен в internal/httpapi/admin.Server). План B расширяет список, а не создаёт.
+# Операции модуля geo в админке (спека сотрудников §6; план A — D24, P28, M10; план B — Task 7,
+# Приложение 1). Тег geo — реализует internal/geo/admin (встроен в internal/httpapi/admin.Server).
+# Правки geo — «последняя запись выигрывает» (R11): тела не несут версии, кроме подтверждения правил
+# страны (сверяет версию страны сам).
+places:
+  get:
+    operationId: listGeoPlaces
+    tags: [geo]
+    x-permission: geo.places.search
+    x-error-codes: []
+    summary: Поиск мест GeoNames
+    description: |
+      Поиск по источнику GeoNames (CC BY 4.0) — выбор места для активации города («Города и
+      запуск»). Порядок: население по убыванию, затем `geoname_id`. У места — `city_id`, если город на
+      нём уже заведён (тогда страна места — страна города).
+
+      Фильтры складываются: `q` — начало названия на любом поддерживаемом языке (ru, en) или
+      латиницей (`ascii_name`), без учёта регистра и ё/е; `country` — только места этой страны. Без
+      `q` — все места (по стране, если задана). Места, пропавшие из источника, не показываются.
+
+      `q`, пустой после нормализации (одни знаки препинания или пробелы), — 400
+      `validation.failed` по полю `query.q` с правилом `minLength`. Названия — на языке из
+      `Accept-Language`.
+    parameters:
+      - name: q
+        in: query
+        required: false
+        description: Начало названия места на любом поддерживаемом языке или латиницей
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+        example: михайл
+      - name: country
+        in: query
+        required: false
+        description: Только места этой страны (ISO 3166-1 alpha-2)
+        schema:
+          type: string
+          pattern: '^[A-Z]{2}$'
+        example: RU
+      - $ref: '../root.yaml#/components/parameters/Cursor'
+      - $ref: '../root.yaml#/components/parameters/Limit'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    responses:
+      '200':
+        description: Страница мест
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoPlacePage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
 cities:
   get:
     operationId: listGeoCities
@@ -8,19 +66,51 @@ cities:
     x-error-codes: []
     summary: Города платформы
     description: |
-      Города платформы всех статусов (`waitlist`, `pilot`, `live`) — выбор городов модератора в
+      Города платформы всех статусов (`waitlist`, `pilot`, `live`) и всех стран, в том числе
+      выключенных (`country_enabled = false`), — «Города и запуск», выбор городов модератора в
       «Ролях и доступе» и подписи уже назначенных городов. Владелец, админ и поддержка видят все
       города; модератору — только его города (право `scoped`): фильтры сужают внутри них.
 
       Порядок: статус (`live`, затем `pilot`, затем `waitlist`), население по убыванию, id.
-      Фильтры складываются: `q` — начало названия на любом поддерживаемом языке (ru, en) без учёта
-      регистра и ё/е; `ids` — только эти города (подписи назначенных модератору городов, до 100 id;
-      несуществующие id пропускаются).
+      Фильтры складываются: `status` — только эти статусы (несколько — повторите параметр);
+      `country` — города страны; `region_id` — города региона; `q` — начало названия на любом
+      поддерживаемом языке (ru, en) без учёта регистра и ё/е; `ids` — только эти города (подписи
+      назначенных модератору городов, до 100 id; несуществующие id пропускаются).
 
       `q`, пустой после нормализации (одни знаки препинания или пробелы), — 400
       `validation.failed` по полю `query.q` с правилом `minLength`. Больше 100 `ids` — 400
       `validation.failed` по `query.ids`. Названия — на языке из `Accept-Language`.
     parameters:
+      - name: status
+        in: query
+        required: false
+        description: >-
+          Только города с этими статусами; несколько значений — повторите параметр
+          (status=pilot&status=live). Без параметра — все статусы
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '../root.yaml#/components/schemas/CityStatus'
+        example: [pilot, live]
+      - name: country
+        in: query
+        required: false
+        description: Только города этой страны (ISO 3166-1 alpha-2)
+        schema:
+          type: string
+          pattern: '^[A-Z]{2}$'
+        example: RU
+      - name: region_id
+        in: query
+        required: false
+        description: Только города этого региона (id из listGeoRegions)
+        schema:
+          type: string
+          format: uuid
+        example: b7e4d2c9-1a3f-4e8b-9c6d-5f0a2e7b1c38
       - name: q
         in: query
         required: false
@@ -63,5 +153,635 @@ cities:
           application/json:
             schema:
               $ref: '../root.yaml#/components/schemas/GeoCityPage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+  post:
+    operationId: activateGeoCity
+    tags: [geo]
+    x-permission: geo.cities.activate
+    x-error-codes:
+      - geo.place_not_found
+      - geo.country_not_enabled
+      - geo.region_not_found
+      - geo.city_already_active
+    summary: Активировать город
+    description: |
+      Заводит город платформы из места GeoNames («Города и запуск» → «Активировать»). Страна —
+      `country_code` или страна места, регион — `region_id` или регион места (заводится по GeoNames
+      с названиями ru и en, если его ещё нет; при переопределённой стране без `region_id` — без
+      региона). Названия — на языке страны и en; адрес (`slug`) — из латинского названия, занятый
+      получает суффикс региона, затем `-2`, `-3`…; таймзона, координаты и население — из места.
+      Статус — `status` или `waitlist`. В той же транзакции — запись журнала `geo.city_activated` и
+      событие. Ответ — карточка нового города (200, без `Location`).
+
+      Коды ошибок:
+      - 404 `geo.place_not_found` — места нет в источнике или оно пропало из него.
+      - 422 `geo.country_not_enabled` — страны нет в справочнике или она выключена.
+      - 422 `geo.region_not_found` — `region_id` не из страны города.
+      - 409 `geo.city_already_active` — город на этом месте уже есть (в том числе одновременная
+        активация того же места).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    requestBody:
+      description: Место GeoNames и, при необходимости, статус, страна и регион
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/GeoCityActivateRequest'
+    responses:
+      '200':
+        description: Город заведён
+        headers:
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoCityDetails'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+city:
+  get:
+    operationId: getGeoCity
+    tags: [geo]
+    x-permission: geo.cities.read
+    x-error-codes: [geo.city_not_found]
+    summary: Карточка города
+    description: |
+      Город с названиями по всем языкам, историей адресов (новые сверху), привязкой к GeoNames,
+      страной (в том числе выключенной), регионом, числом действующих районов и версией. Модератор —
+      только своего города (чужой — 403 `auth.forbidden`).
+
+      Коды ошибок: 404 `geo.city_not_found` — города нет. Названия — на языке из `Accept-Language`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CityId'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    responses:
+      '200':
+        description: Карточка города
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoCityDetails'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+  patch:
+    operationId: updateGeoCity
+    tags: [geo]
+    x-permission: handler
+    x-permission-any: [geo.cities.manage, geo.cities.rename]
+    x-error-codes: [geo.city_not_found, geo.slug_taken]
+    summary: Править город
+    description: |
+      Меняет статус, адрес (`slug`) и названия города — только присланные поля. Права — по полям:
+      `status` и `slug` — `geo.cities.manage`, `names` — `geo.cities.rename` (модератор — только
+      названия своего города). Поле без права — 403 `auth.forbidden` на весь запрос, ничего не
+      записано (частичного применения нет).
+
+      Статус — любой переход. Новый адрес — прежний уходит в историю и продолжает находить город;
+      возврат к своему прежнему адресу убирает его из истории. Строка названия на языке страны
+      переписывает каноническое название. Версии в теле нет: последняя запись выигрывает. Ничего не
+      изменилось — 200 с текущей карточкой, без записи в журнал. Иначе — одна запись журнала
+      `geo.city_updated` и события по каждому виду изменения в той же транзакции.
+
+      Коды ошибок:
+      - 404 `geo.city_not_found` — города нет.
+      - 409 `geo.slug_taken` — адрес занят другим городом или в истории другого города (в том
+        числе одновременная смена двух городов на один адрес).
+      - 400 `validation.failed` — пустое тело (`body`, `minProperties`), формат адреса
+        (`body.slug`), незнакомый язык или удаление названия на языке страны (`body.names.<язык>`).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CityId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    requestBody:
+      description: Изменяемые поля города
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/GeoCityPatch'
+    responses:
+      '200':
+        description: Карточка города после правки
+        headers:
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoCityDetails'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+city-link:
+  post:
+    operationId: linkGeoCity
+    tags: [geo]
+    x-permission: geo.cities.manage
+    x-error-codes:
+      - geo.city_not_found
+      - geo.place_not_found
+      - geo.city_already_linked
+      - geo.city_already_active
+    summary: Привязать город к месту GeoNames
+    description: |
+      Ручная привязка города без `geoname_id` к месту — кандидату из отчёта сверки импорта
+      (`ambiguous`, `conflict`). Как автоматическая привязка сверки: дописываются только
+      недостающие переводы города и региона, региону — код GeoNames; координаты и население
+      города не меняются. В той же транзакции — запись журнала `geo.city_linked` и событие.
+
+      Коды ошибок:
+      - 404 `geo.city_not_found` — города нет.
+      - 404 `geo.place_not_found` — места нет в источнике или оно пропало из него.
+      - 409 `geo.city_already_linked` — город уже привязан.
+      - 409 `geo.city_already_active` — место уже у другого города.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CityId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    requestBody:
+      description: Место GeoNames
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/GeoCityLinkRequest'
+    responses:
+      '200':
+        description: Карточка привязанного города
+        headers:
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoCityDetails'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+city-districts:
+  get:
+    operationId: listGeoDistricts
+    tags: [geo]
+    x-permission: geo.cities.read
+    x-error-codes: [geo.city_not_found]
+    summary: Районы города
+    description: |
+      Районы города, включая архивные: сначала действующие по названию, затем архивные. Без
+      пагинации — районов единицы. Модератор — только своего города (чужой — 403 `auth.forbidden`).
+
+      Коды ошибок: 404 `geo.city_not_found` — города нет.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CityId'
+    responses:
+      '200':
+        description: Районы города
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoDistrictList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+  post:
+    operationId: createGeoDistrict
+    tags: [geo]
+    x-permission: geo.districts.manage
+    x-error-codes: [geo.city_not_found, geo.district_name_taken]
+    summary: Добавить район
+    description: |
+      Новый район города. Модератор — только в своём городе (чужой — 403 `auth.forbidden`). В той же
+      транзакции — запись журнала `geo.district_created` и событие. Ответ — район (200, без
+      `Location`).
+
+      Коды ошибок:
+      - 404 `geo.city_not_found` — города нет.
+      - 409 `geo.district_name_taken` — действующий район города с таким названием уже есть (без
+        учёта регистра и ё/е; в том числе одновременное создание двух одноимённых).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CityId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Название района
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/GeoDistrictCreate'
+    responses:
+      '200':
+        description: Район создан
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoDistrict'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+city-district:
+  patch:
+    operationId: updateGeoDistrict
+    tags: [geo]
+    x-permission: geo.districts.manage
+    x-error-codes: [geo.district_not_found, geo.district_name_taken]
+    summary: Править район
+    description: |
+      Переименование, архивирование и возврат из архива района — только присланные поля. Районы не
+      удаляются: архивный скрыт из приложений, ссылки полей и матчей на него остаются. Версии в
+      теле нет: последняя запись выигрывает. Ничего не изменилось — 200 без записи в журнал; иначе
+      — запись `geo.district_updated` и событие в той же транзакции.
+
+      Коды ошибок:
+      - 404 `geo.district_not_found` — района нет или он не из города пути (существование чужого
+        района не раскрывается).
+      - 409 `geo.district_name_taken` — новое название или название возвращаемого из архива района
+        занято действующим районом города.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CityId'
+      - $ref: '../root.yaml#/components/parameters/DistrictId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Изменяемые поля района
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/GeoDistrictPatch'
+    responses:
+      '200':
+        description: Район после правки
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoDistrict'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+countries:
+  get:
+    operationId: listGeoCountries
+    tags: [geo]
+    x-permission: geo.countries.read
+    x-error-codes: []
+    summary: Страны
+    description: |
+      Все страны справочника — включённые и выключенные — с правилами, названиями по языкам, числом
+      открытых городов (`pilot` и `live`, справочно) и версией. Порядок — по коду. Названия — на
+      языке из `Accept-Language`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    responses:
+      '200':
+        description: Страны
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoCountryList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+  post:
+    operationId: createGeoCountry
+    tags: [geo]
+    x-permission: geo.countries.rules
+    x-error-codes: [geo.country_exists]
+    summary: Завести страну (вдвоём)
+    description: |
+      Новую страну подтверждает второй сотрудник: он проверяет валюту и пороги. Операция страну не
+      создаёт, а всегда отвечает 202 с запросом на подтверждение (`geo.country_create`, право
+      `geo.countries.rules`); страна появится, когда другой владелец или админ подтвердит запрос в
+      «Подтверждениях». Правила проверяются здесь и ещё раз при подтверждении: код — действующая
+      страна ISO 3166-1, валюта — действующий код ISO 4217, язык — из поддерживаемых, телефонный
+      код, первый день недели, возрасты 1–120 и `min_signup_age ≤ age_of_majority`; название на
+      языке страны обязательно (`body.names.<язык>`, `required`).
+
+      Коды ошибок:
+      - 409 `geo.country_exists` — страна с этим кодом уже в справочнике (до запроса). Два ждущих
+        запроса на один код допустимы: второй при подтверждении не исполнится (`failed`, 409
+        `platform.approval_stale`).
+      - 400 `validation.failed` — нарушение правил по полю (`body.currency`, `body.age_of_majority`…).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Код, правила и названия новой страны
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/GeoCountryCreate'
+    responses:
+      '202':
+        description: Создан запрос на подтверждение новой страны
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ApprovalAccepted'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+country:
+  patch:
+    operationId: updateGeoCountry
+    tags: [geo]
+    x-permission: handler
+    x-permission-any: [geo.countries.manage, geo.countries.rules]
+    x-error-codes: [geo.country_not_found]
+    summary: Править страну
+    description: |
+      Правила страны — всегда вдвоём: смена `currency`, `min_signup_age`, `age_of_majority` и
+      выключение страны (`is_enabled: false` у включённой) не исполняются, а отвечают 202 с
+      запросом на подтверждение (`geo.country_rules`, право `geo.countries.rules`) — независимо от
+      статусов городов страны. В запрос уходит весь patch (и поля «сразу» тоже), страна до
+      подтверждения не меняется; подтверждающий исполняет его, только если страна с тех пор не
+      менялась (иначе 409 `platform.approval_stale`). Поле, присланное с текущим значением, правилом
+      не считается.
+
+      Включение страны и прочие поля (`phone_prefix`, `week_starts_on`, `names`) — сразу, по
+      `geo.countries.manage`: 200 со страной, версия растёт, запись журнала `geo.country_updated` и
+      событие в той же транзакции. Версии в теле нет: последняя запись выигрывает. Правила
+      проверяются против итоговых значений (новый `min_signup_age` с текущим `age_of_majority`).
+
+      Коды ошибок:
+      - 404 `geo.country_not_found` — страны нет.
+      - 400 `validation.failed` — пустое тело, `code` или `default_locale` в теле (лишнее поле),
+        нарушение правил по полю.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CountryCode'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    requestBody:
+      description: Изменяемые поля страны
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/GeoCountryPatch'
+    responses:
+      '200':
+        description: Правка исполнена сразу — страна после правки
+        headers:
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoCountry'
+      '202':
+        description: Правка затрагивает правила страны — создан запрос на подтверждение
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ApprovalAccepted'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+country-regions:
+  get:
+    operationId: listGeoRegions
+    tags: [geo]
+    x-permission: geo.cities.read
+    x-error-codes: [geo.country_not_found]
+    summary: Регионы страны
+    description: |
+      Регионы страны с кодом GeoNames и названиями по языкам — выбор региона при активации и фильтр
+      списка городов. Порядок — по названию на языке ответа. Доступно и модератору: данные
+      справочные.
+
+      Коды ошибок: 404 `geo.country_not_found` — страны нет. Названия — на языке из
+      `Accept-Language`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CountryCode'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    responses:
+      '200':
+        description: Регионы страны
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoRegionList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+imports:
+  get:
+    operationId: listGeoImports
+    tags: [geo]
+    x-permission: geo.imports.read
+    x-error-codes: []
+    summary: Журнал импортов GeoNames
+    description: |
+      Импорты GeoNames, новые сверху (время начала, затем id). Фильтры складываются: `country` —
+      импорты страны; `job_id` — строка задачи очереди (строку создаёт сама задача, когда начинает
+      работу: до этого задачу видно только в `getGeoImportJob`).
+
+      «Кто поставил» — `started_by_label`: имя сотрудника из записи журнала о постановке
+      (`geo.import_requested`) на тот момент; права на журнал действий для этого не нужно.
+      Команда оператора сервера — `started_by` и `started_by_label` равны null.
+    parameters:
+      - name: country
+        in: query
+        required: false
+        description: Только импорты этой страны (ISO 3166-1 alpha-2)
+        schema:
+          type: string
+          pattern: '^[A-Z]{2}$'
+        example: RU
+      - name: job_id
+        in: query
+        required: false
+        description: Только импорт этой задачи очереди (job_id из startGeoImport)
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+        example: 1842
+      - $ref: '../root.yaml#/components/parameters/Cursor'
+      - $ref: '../root.yaml#/components/parameters/Limit'
+    responses:
+      '200':
+        description: Страница журнала импортов
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoImportPage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+  post:
+    operationId: startGeoImport
+    tags: [geo]
+    x-permission: geo.imports.run
+    x-error-codes: [geo.country_not_found, geo.import_in_progress]
+    summary: Поставить импорт GeoNames
+    description: |
+      Ставит задачу импорта GeoNames страны в очередь и отвечает 202 с `job_id`; импорт выполняет
+      воркер (до 30 минут). Строку журнала создаёт сама задача, когда начинает работу, — экран
+      следит за задачей через `getGeoImportJob`. Там, где воркер не запущен (dev-стенд), задача
+      стоит «в очереди» и держит страну занятой, пока её не отменят (`cancelGeoImportJob`). В той
+      же транзакции — запись журнала `geo.import_requested` от сотрудника.
+
+      Коды ошибок:
+      - 404 `geo.country_not_found` — страны нет в справочнике (выключенная — можно).
+      - 409 `geo.import_in_progress` — импорт страны уже стоит в очереди или идёт. В ответе —
+        `job_id` этой задачи (её можно отменить, пока она «в очереди»); у импорта командой
+        оператора `job_id` нет.
+      - 400 `validation.failed` — `body.country` не из двух заглавных латинских букв.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Страна импорта
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/GeoImportStartRequest'
+    responses:
+      '202':
+        description: Задача импорта поставлена в очередь
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoImportStarted'
+      '409':
+        description: Импорт страны уже в очереди или идёт — job_id существующей задачи
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            example:
+              type: about:blank
+              title: Conflict
+              status: 409
+              code: geo.import_in_progress
+              request_id: wf-admin-7d9f/Yx3kQp1bZt-000042
+              job_id: 1842
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+import:
+  get:
+    operationId: getGeoImport
+    tags: [geo]
+    x-permission: geo.imports.read
+    x-error-codes: [geo.import_not_found]
+    summary: Импорт с отчётом сверки
+    description: |
+      Строка журнала импорта с отчётом сверки заведённых городов: привязанные автоматически
+      (`linked`), с несколькими подходящими местами (`ambiguous`) и с конфликтом (`conflict`) — с
+      кандидатами для ручной привязки (`linkGeoCity`), без подходящих мест (`not_found`), места
+      городов, пропавшие из источника (`missing`), число мест без таймзоны (`skipped_timezone`).
+
+      Коды ошибок: 404 `geo.import_not_found` — импорта нет. Названия кандидатов — на языке из
+      `Accept-Language`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ImportId'
+      - $ref: '../root.yaml#/components/parameters/AcceptLanguage'
+    responses:
+      '200':
+        description: Импорт и отчёт сверки
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+          Vary:
+            $ref: '../root.yaml#/components/headers/Vary'
+          Content-Language:
+            $ref: '../root.yaml#/components/headers/ContentLanguage'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoImportReport'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+import-job:
+  get:
+    operationId: getGeoImportJob
+    tags: [geo]
+    x-permission: geo.imports.read
+    x-error-codes: [geo.import_job_not_found]
+    summary: Задача импорта в очереди
+    description: |
+      Состояние задачи импорта после `startGeoImport`: `queued` (ждёт воркер), `running`,
+      `completed`, `failed`, `cancelled`; `import_id` — строка журнала, когда задача её создала.
+      Экран опрашивает её с заголовком `X-WF-Background: 1`, пока задача не завершится.
+
+      Коды ошибок: 404 `geo.import_job_not_found` — задачи нет, она не задача импорта или уже
+      удалена очередью после завершения.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/JobId'
+    responses:
+      '200':
+        description: Задача импорта
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoImportJob'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+import-job-cancel:
+  post:
+    operationId: cancelGeoImportJob
+    tags: [geo]
+    x-permission: geo.imports.run
+    x-error-codes: [geo.import_job_not_found, geo.import_job_not_cancellable]
+    summary: Отменить задачу импорта «в очереди»
+    description: |
+      Отменяет задачу импорта, которая ещё ждёт в очереди. Зачем: там, где воркер не запущен
+      (dev-стенд), поставленная задача держит страну занятой вечно — новый импорт получает 409
+      `geo.import_in_progress`. Выполняющийся импорт не отменяется. В той же транзакции — запись
+      журнала `geo.import_cancelled`. Ответ — задача в состоянии `cancelled`.
+
+      Коды ошибок:
+      - 404 `geo.import_job_not_found` — задачи нет или она не задача импорта.
+      - 409 `geo.import_job_not_cancellable` — задача уже выполняется или завершена (перечитайте
+        `getGeoImportJob`).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/JobId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '200':
+        description: Задача отменена
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/GeoImportJob'
       default:
         $ref: '../root.yaml#/components/responses/Problem'

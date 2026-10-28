@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -63,6 +64,28 @@ var (
 		"approveApproval":              {http.MethodPost, "/v1/approvals/" + anyID.String() + "/approve", `{}`},
 		"rejectApproval":               {http.MethodPost, "/v1/approvals/" + anyID.String() + "/reject", `{"comment":"Сначала обучение"}`},
 		"cancelApproval":               {http.MethodPost, "/v1/approvals/" + anyID.String() + "/cancel", ""},
+		// план B (Task 7): тела — по схемам контракта, город пути — cityInPath
+		"listGeoPlaces":      {http.MethodGet, "/v1/geo/places?q=%D1%81%D1%82%D0%B0%D0%B2&country=RU", ""},
+		"getGeoCity":         {http.MethodGet, "/v1/geo/cities/" + cityInPath.String(), ""},
+		"activateGeoCity":    {http.MethodPost, "/v1/geo/cities", `{"geoname_id":526815}`},
+		"updateGeoCity":      {http.MethodPatch, "/v1/geo/cities/" + cityInPath.String(), `{"names":{"en":"Stavropol"}}`},
+		"linkGeoCity":        {http.MethodPost, "/v1/geo/cities/" + cityInPath.String() + "/link", `{"geoname_id":487846}`},
+		"listGeoDistricts":   {http.MethodGet, "/v1/geo/cities/" + cityInPath.String() + "/districts", ""},
+		"createGeoDistrict":  {http.MethodPost, "/v1/geo/cities/" + cityInPath.String() + "/districts", `{"name":"Промышленный"}`},
+		"updateGeoDistrict":  {http.MethodPatch, "/v1/geo/cities/" + cityInPath.String() + "/districts/" + anyID.String(), `{"archived":true}`},
+		"listGeoCountries":   {http.MethodGet, "/v1/geo/countries", ""},
+		"createGeoCountry":   {http.MethodPost, "/v1/geo/countries", `{"code":"KZ","currency":"KZT","default_locale":"ru","phone_prefix":"+7","week_starts_on":1,"min_signup_age":14,"age_of_majority":18,"names":{"ru":"Казахстан","en":"Kazakhstan"}}`},
+		"updateGeoCountry":   {http.MethodPatch, "/v1/geo/countries/RU", `{"phone_prefix":"+7"}`},
+		"listGeoRegions":     {http.MethodGet, "/v1/geo/countries/RU/regions", ""},
+		"startGeoImport":     {http.MethodPost, "/v1/geo/imports", `{"country":"RU"}`},
+		"listGeoImports":     {http.MethodGet, "/v1/geo/imports?country=RU", ""},
+		"getGeoImport":       {http.MethodGet, "/v1/geo/imports/" + anyID.String(), ""},
+		"getGeoImportJob":    {http.MethodGet, "/v1/geo/imports/jobs/42", ""},
+		"cancelGeoImportJob": {http.MethodPost, "/v1/geo/imports/jobs/42/cancel", ""},
+		"listAppVersions":    {http.MethodGet, "/v1/app/versions", ""},
+		"putAppVersions":     {http.MethodPut, "/v1/app/versions/ios", `{"min_version":"1.4.0","recommended_version":"1.6.2","store_url":"https://apps.apple.com/app/id6740000000"}`},
+		"listFeatureFlags":   {http.MethodGet, "/v1/flags", ""},
+		"updateFeatureFlag":  {http.MethodPatch, "/v1/flags/economy", `{"version":1,"enabled_globally":true}`},
 	}
 	// handlerRoles — ручная таблица операций x-permission: handler: какие роли конвейер пропускает (точное
 	// право и цель решает сценарий). Сверяется с матрицей: хоть одно право из x-permission-any не Deny.
@@ -73,6 +96,9 @@ var (
 		"resetStaffAccess":    {perm.Owner, perm.Admin},
 		"approveApproval":     {perm.Owner, perm.Admin},
 		"rejectApproval":      {perm.Owner, perm.Admin},
+		// план B: названия — geo.cities.rename (модератор — scoped, свой город сверяет сценарий, R10)
+		"updateGeoCity":    {perm.Owner, perm.Admin, perm.Moderator},
+		"updateGeoCountry": {perm.Owner, perm.Admin},
 	}
 )
 
@@ -80,11 +106,17 @@ var (
 type cityRow struct{ own, foreign outcome }
 
 // cityRows — ручная таблица операций с {cityId} в пути (ревью 10b m6): ожидания модератора своего и чужого
-// города задаются здесь явно, а не выводятся из expected. На контракте плана A таких операций нет —
-// субъекты moderator-own и moderator-foreign пока отвечают одинаково на всё; различимы станут с первой
-// операцией с {cityId} (план B): без строки здесь она уронит TestPermissionsAllOperations
-// (cityRowViolations), а путь её строки opsBase обязан вести в cityInPath.
-var cityRows = map[string]cityRow{}
+// города задаются здесь явно, а не выводятся из expected. Операция с {cityId} без строки здесь уронит
+// TestPermissionsAllOperations (cityRowViolations), а путь её строки opsBase обязан вести в cityInPath.
+var cityRows = map[string]cityRow{
+	"getGeoCity":       {own: pass, foreign: forbidden}, // geo.cities.read — scoped
+	"listGeoDistricts": {own: pass, foreign: forbidden}, // geo.cities.read — scoped
+	// handler: конвейер город пути не сверяет — чужой город отсекает сценарий (Decide по полю, R10, Review Focus 1)
+	"updateGeoCity":     {own: pass, foreign: pass},
+	"linkGeoCity":       {own: forbidden, foreign: forbidden}, // geo.cities.manage — у модератора deny
+	"createGeoDistrict": {own: pass, foreign: forbidden},      // geo.districts.manage — scoped
+	"updateGeoDistrict": {own: pass, foreign: forbidden},      // geo.districts.manage — scoped
+}
 
 // cityRowViolations — операции контракта с {cityId} без строки rows (или со строкой opsBase не в город
 // cityInPath) и строки rows без такой операции.
@@ -283,13 +315,14 @@ func TestCityRowsGuard(t *testing.T) {
 	if bad := cityRowViolations(spec, cityRows); len(bad) != 0 {
 		t.Fatalf("текущий контракт: %v", bad)
 	}
-	spec.Paths.Set("/v1/geo/cities/{cityId}", &openapi3.PathItem{Get: &openapi3.Operation{
-		OperationID: "getGeoCity", Extensions: map[string]any{"x-permission": "geo.cities.read"},
+	spec.Paths.Set("/v1/geo/cities/{cityId}/probe", &openapi3.PathItem{Get: &openapi3.Operation{
+		OperationID: "probeGeoCity", Extensions: map[string]any{"x-permission": "geo.cities.read"},
 	}})
-	if bad := cityRowViolations(spec, cityRows); len(bad) != 1 || !strings.Contains(bad[0], "getGeoCity") {
+	if bad := cityRowViolations(spec, cityRows); len(bad) != 1 || !strings.Contains(bad[0], "probeGeoCity") {
 		t.Fatalf("операция с {cityId} без строки: %v", bad)
 	}
-	rows := map[string]cityRow{"getGeoCity": {own: pass, foreign: forbidden}}
+	rows := maps.Clone(cityRows)
+	rows["probeGeoCity"] = cityRow{own: pass, foreign: forbidden}
 	if bad := cityRowViolations(spec, rows); len(bad) != 0 {
 		t.Fatalf("со строкой: %v", bad)
 	}
