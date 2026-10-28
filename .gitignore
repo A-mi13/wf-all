@@ -18,3 +18,12 @@ test-results/
 *.tsbuildinfo
 .env.local
 .env.*.local
+
+# бинарники `go build ./cmd/<имя>` из backend/ (Windows — .exe, Linux/macOS — без расширения);
+# `go build ./cmd/...` (несколько пакетов) ничего не пишет
+/backend/*.exe
+/backend/api
+/backend/admin-api
+/backend/worker
+/backend/migrate
+/backend/permdoc
