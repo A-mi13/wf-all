@@ -138,7 +138,16 @@ func TestScriptOf(t *testing.T) {
 }
 
 func TestSupportedLocales(t *testing.T) {
-	if !slices.Equal(domain.SupportedLocales, []string{"ru", "en"}) {
-		t.Fatalf("SupportedLocales = %q, ждали [ru en] (спека §3.3)", domain.SupportedLocales)
+	if !slices.Equal(domain.SupportedLocales(), []string{"ru", "en"}) {
+		t.Fatalf("SupportedLocales() = %q, ждали [ru en] (спека §3.3)", domain.SupportedLocales())
+	}
+}
+
+// TestSupportedLocalesIsCopy — правка полученного среза не меняет языки справочника (geo 1, Task 4 M1).
+func TestSupportedLocalesIsCopy(t *testing.T) {
+	l := domain.SupportedLocales()
+	l[0] = "de"
+	if got := domain.SupportedLocales(); !slices.Equal(got, []string{"ru", "en"}) {
+		t.Fatalf("после правки снаружи SupportedLocales() = %q", got)
 	}
 }

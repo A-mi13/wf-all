@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -116,7 +115,7 @@ func Fetch(ctx context.Context, cfg FetchConfig, country string) (Raw, error) {
 		return Raw{Files: raw.Files}, err
 	}
 	raw.AltNames, err = parseAltNames(rc, func(a AltName) bool {
-		return ids[a.GeonameID] && (a.Locale == "" || slices.Contains(domain.SupportedLocales, a.Locale))
+		return ids[a.GeonameID] && (a.Locale == "" || domain.LocaleSupported(a.Locale))
 	})
 	_ = rc.Close()
 	if err != nil {

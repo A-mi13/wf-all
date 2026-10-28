@@ -1,14 +1,22 @@
 package domain
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 )
 
-// SupportedLocales — языки названий справочника (спека §3.3); совпадает с языками
+// supportedLocales — языки названий справочника (спека §3.3); совпадает с языками
 // backend/locales (i18n.Supported) — страж в тестах модуля geo. Свой список, а не i18n.Supported:
-// domain — только stdlib (чистые правила), а source/app берут языки отсюда.
-var SupportedLocales = []string{"ru", "en"}
+// domain не зависит от платформы (чистые правила), а source/app берут языки отсюда.
+var supportedLocales = []string{"ru", "en"}
+
+// SupportedLocales — копия списка языков: правка полученного среза снаружи не меняет языки
+// справочника (geo 1, Task 4 M1).
+func SupportedLocales() []string { return slices.Clone(supportedLocales) }
+
+// LocaleSupported — язык из поддерживаемых, без копии списка.
+func LocaleSupported(locale string) bool { return slices.Contains(supportedLocales, locale) }
 
 // AltName — альтернативное название места GeoNames (alternateNamesV2), уже в виде правил:
 // Ended — поле to заполнено и в прошлом; считает вызывающий по своим часам (domain без часов).

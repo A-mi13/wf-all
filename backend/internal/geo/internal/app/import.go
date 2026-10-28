@@ -324,7 +324,7 @@ func prepare(raw source.Raw, run importRun, now time.Time) prepared {
 			continue
 		}
 		p.places = append(p.places, pl)
-		for _, l := range domain.SupportedLocales {
+		for _, l := range domain.SupportedLocales() {
 			if n := chooseName(alts[pl.GeonameID], l, run.locale, pl.Name, pl.ASCIIName); n != "" {
 				p.names = append(p.names, placeName{pl.GeonameID, l, n})
 			}
@@ -337,7 +337,7 @@ func prepare(raw source.Raw, run importRun, now time.Time) prepared {
 		}
 		codes[a.Code] = true
 		p.admin1 = append(p.admin1, a)
-		for _, l := range domain.SupportedLocales {
+		for _, l := range domain.SupportedLocales() {
 			if n := chooseName(alts[a.GeonameID], l, run.locale, a.Name, a.ASCIIName); n != "" {
 				p.admin1Names = append(p.admin1Names, admin1Name{a.Code, l, n})
 			}
