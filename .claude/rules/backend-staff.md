@@ -151,7 +151,11 @@ paths:
   `domain/pictographic.go` (в stdlib её нет; Unicode 15.0, страж формы `TestPictographicTable`).
   Исполнитель `staff.invite` повторяет `validateInvitee` после `execLocks` на обоих путях (новая учётка и `existing_id`):
   запрос мог ждать, пока правила ужесточили, — отказ `ErrStale` (`failed`, 409 `platform.approval_stale`), не
-  `FieldError` (`TestApproveInviteInvalidPayloadFails`).
+  `FieldError` (`TestApproveInviteInvalidPayloadFails`). Исполнитель `staff.role_change` до `execLocks` проверяет
+  форму payload тем же предикатом, что сценарии (`roleShape` = `validRole` + `normCities`): роль «стало» и её города
+  (в нормальной форме — по возрастанию, без повторов), роль «было» ∈ `perm.Roles`; нарушение — `Fail(ErrStale)`, не
+  500 от enum/CHECK базы (`rolePayloadShaped`; стражи `TestExecRoleChangeRejectsUnknownRole`,
+  `TestExecRoleChangeRejectsCityShape`, `TestExecRoleChangeShapeBeforeLocks`).
   - **Порядок замков (m7, M-4):** `lockOwners` (`pg_advisory_xact_lock(ownersLockKey)` — только где возможен страж
     последнего владельца: выключение, сброс, смена роли, `OperatorDisable`; всегда первым) → `lockAccounts` — учётки
     по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`) → сессии → `staff_mfa` →

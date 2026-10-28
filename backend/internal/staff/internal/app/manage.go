@@ -183,6 +183,16 @@ func validRole(role, field string) error {
 	return nil
 }
 
+// roleShape — форма роли и городов, один предикат для сценариев (Invite, ChangeRole) и исполнителя
+// staff.role_change (W5-back): роль из perm.Roles (validRole), города — normCities. Возвращает города в
+// нормальной форме (по возрастанию, без повторов) — в ней их кладёт в payload сценарий.
+func roleShape(role string, cities []uuid.UUID) ([]uuid.UUID, error) {
+	if err := validRole(role, fieldRole); err != nil {
+		return nil, err
+	}
+	return normCities(role, cities)
+}
+
 // normCities — города роли: у модератора 1–100 (body.city_ids min_items | max_items), у других ролей —
 // ни одного (max_items); без повторов, по возрастанию (сравнение «было/стало» — как множеств).
 func normCities(role string, cities []uuid.UUID) ([]uuid.UUID, error) {
@@ -346,10 +356,7 @@ func (a *App) Invite(ctx context.Context, s *auth.Staff, in staff.InviteInput, m
 	if err != nil {
 		return approvals.Approval{}, err
 	}
-	if err := validRole(in.Role, fieldRole); err != nil {
-		return approvals.Approval{}, err
-	}
-	cities, err := normCities(in.Role, in.CityIDs)
+	cities, err := roleShape(in.Role, in.CityIDs)
 	if err != nil {
 		return approvals.Approval{}, err
 	}
@@ -397,10 +404,7 @@ func (a *App) Invite(ctx context.Context, s *auth.Staff, in staff.InviteInput, m
 // последнего владельца (и при запросе, и при исполнении).
 func (a *App) ChangeRole(ctx context.Context, s *auth.Staff, staffID uuid.UUID, role perm.Role, cities []uuid.UUID, m staff.Meta) (*approvals.Approval, error) {
 	to := string(role)
-	if err := validRole(to, fieldRole); err != nil {
-		return nil, err
-	}
-	cities, err := normCities(to, cities)
+	cities, err := roleShape(to, cities)
 	if err != nil {
 		return nil, err
 	}

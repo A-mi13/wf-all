@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -315,12 +316,19 @@ func (a *App) reinvite(ctx context.Context, tx pgx.Tx, q *staffdb.Queries, t acc
 	return err
 }
 
-// execRoleChange — исполнитель staff.role_change (D16): цель той же версии, что при запросе (иначе
-// ErrStale), страж последнего владельца при понижении, applyRole от подтвердившего.
+// execRoleChange — исполнитель staff.role_change (D16): форма роли и городов из payload (rolePayloadShaped),
+// цель той же версии, что при запросе (иначе ErrStale), страж последнего владельца при понижении, applyRole от
+// подтвердившего.
 func (a *App) execRoleChange(ctx context.Context, tx pgx.Tx, raw json.RawMessage, approver *auth.Staff) error {
 	p, err := decode(raw, (*rolePayload).b)
 	if err != nil {
 		return err
+	}
+	// Исполнитель — последняя граница перед записью роли (W5-back): payload пишет только сценарий, но
+	// проверка — тем же предикатом и ДО execLocks (отказ не держит замок владельцев). Нарушение — бизнес-отказ
+	// (failed, 409 platform.approval_stale), а не 500 от enum или CHECK базы; payload в текст не попадает.
+	if !rolePayloadShaped(p) {
+		return approvals.Fail(approvals.ErrStale)
 	}
 	permission, changed := rolePermission(p.FromRole, p.FromCityIDs, p.Role, p.CityIDs)
 	if !changed {
@@ -344,6 +352,14 @@ func (a *App) execRoleChange(ctx context.Context, tx pgx.Tx, raw json.RawMessage
 		cities = []uuid.UUID{}
 	}
 	return business(a.applyRole(ctx, tx, q, t, from, p.Role, cities, by, p.InitID, staff.Meta{}, a.clock.Now()))
+}
+
+// rolePayloadShaped — роль «стало» и её города проходят roleShape и уже в его нормальной форме (по
+// возрастанию, без повторов — так их пишет ChangeRole), роль «было» — из perm.Roles. Города «было» — только
+// снимок для права D16: исполнитель читает их из базы (citiesOf), форма не проверяется.
+func rolePayloadShaped(p rolePayload) bool {
+	cities, err := roleShape(p.Role, p.CityIDs)
+	return err == nil && slices.Equal(cities, p.CityIDs) && validRole(p.FromRole, fieldRole) == nil
 }
 
 // execAccessReset — исполнитель staff.access_reset (§4.9): цель той же версии, страж последнего
