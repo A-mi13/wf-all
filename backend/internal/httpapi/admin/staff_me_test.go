@@ -288,7 +288,7 @@ func TestStaffResendInviteSelfIPLimit(t *testing.T) {
 		r := rules["staff_auth"]
 		r.IP = ratelimit.Policy{Limit: 1, Period: time.Minute, Burst: 1}
 		rules["staff_auth"] = r
-		o.RateRules, o.Limiter = rules, ratelimit.NewPG(o.DB, o.Clock)
+		o.RateRules, o.Limiter = rules, ratelimit.NewPG(o.DB, o.Clock, ratelimit.Staff)
 	})
 	body := jsonOf(t, map[string]string{"email": "new@wf.example"})
 	wantStatus(t, e.anon(pathResend, "", body), http.StatusAccepted)

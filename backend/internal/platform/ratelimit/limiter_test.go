@@ -22,7 +22,7 @@ func limiter(t *testing.T) (*ratelimit.PG, *clocktest.Fake, dbtest.Pools) {
 	t.Helper()
 	pools := dbtest.NewPoolsAs(t, "api") // права прода: api считает лимиты
 	c := clocktest.New(start)
-	return ratelimit.NewPG(pools.As, c), c, pools
+	return ratelimit.NewPG(pools.As, c, ratelimit.Players), c, pools
 }
 
 // allow — Allow без проглатывания ошибки.
@@ -209,7 +209,7 @@ func TestPolicyValidate(t *testing.T) {
 
 // Невалидная политика до базы не доходит: ошибка, а не случайный пропуск или блокировка.
 func TestInvalidPolicyRejected(t *testing.T) {
-	l := ratelimit.NewPG(nil, clocktest.New(start)) // база не нужна: проверка раньше
+	l := ratelimit.NewPG(nil, clocktest.New(start), ratelimit.Players) // база не нужна: проверка раньше
 	ctx := context.Background()
 	p := ratelimit.Policy{Limit: 1, Period: time.Second, Burst: -1}
 	if _, err := l.Allow(ctx, "k", p); err == nil {
@@ -239,7 +239,7 @@ func (noRow) Scan(...any) error { return pgx.ErrNoRows }
 
 // Строку удалили между отказом и чтением tat — отказ с повтором через интервал, не ошибка.
 func TestAllowDeniedRowGone(t *testing.T) {
-	l := ratelimit.NewPG(noRows{}, clocktest.New(start))
+	l := ratelimit.NewPG(noRows{}, clocktest.New(start), ratelimit.Players)
 	r, err := l.Allow(context.Background(), "k", ratelimit.Policy{Limit: 6, Period: time.Minute})
 	if err != nil {
 		t.Fatal(err)

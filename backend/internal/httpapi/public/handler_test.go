@@ -285,7 +285,7 @@ func TestRateLimitByClientIPHeader(t *testing.T) {
 		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 		ClientIPHeader: "CF-Connecting-IP",
 	}
-	o.Limiter = ratelimit.NewPG(o.DB, clock.System)
+	o.Limiter = ratelimit.NewPG(o.DB, clock.System, ratelimit.Players)
 	o.RateRules = ratelimit.DefaultRules()
 	d := o.RateRules[ratelimit.DefaultClass]
 	d.IP = ratelimit.Policy{Limit: 1, Period: time.Hour}

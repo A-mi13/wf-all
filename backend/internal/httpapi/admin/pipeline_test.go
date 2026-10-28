@@ -89,7 +89,7 @@ func TestInvalidCookiesHitStaffAuthLimit(t *testing.T) {
 	o := testOptions(t)
 	clk := clocktest.New(t0)
 	o.Clock = clk
-	o.Limiter = ratelimit.NewPG(o.DB, clk)
+	o.Limiter = ratelimit.NewPG(o.DB, clk, ratelimit.Staff)
 	sessions := &fakeSessions{}
 	o.Sessions = sessions
 	h := newHandler(t, o)
@@ -125,7 +125,7 @@ func TestInvalidCookiesHitStaffAuthLimit(t *testing.T) {
 	}
 	// счётчик — IP-ключ класса staff_auth: тот же, что у ratelimit.Middleware
 	var n int
-	if err := o.DB.QueryRow(context.Background(), `SELECT count(*) FROM rate_limits WHERE key = $1`,
+	if err := o.DB.QueryRow(context.Background(), `SELECT count(*) FROM staff_rate_limits WHERE key = $1`,
 		ratelimit.IPKey("staff_auth", netip.MustParseAddr(clientIP))).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("строка лимита ip:staff_auth: %d, %v", n, err)
 	}

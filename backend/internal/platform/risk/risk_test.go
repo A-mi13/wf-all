@@ -15,7 +15,7 @@ import (
 func TestAssessor(t *testing.T) {
 	ctx := context.Background()
 	c := clocktest.New(time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))
-	l := ratelimit.NewPG(dbtest.NewPoolsAs(t, "api").As, c)
+	l := ratelimit.NewPG(dbtest.NewPoolsAs(t, "api").As, c, ratelimit.Players)
 	a, err := risk.NewAssessor(l, map[risk.Signal]ratelimit.Policy{
 		risk.LoginFailed: {Limit: 3, Period: 15 * time.Minute},
 	})

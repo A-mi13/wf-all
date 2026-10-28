@@ -31,3 +31,30 @@ SELECT tat FROM rate_limits WHERE key = @key;
 DELETE FROM rate_limits
 WHERE tat < @now::timestamptz
   AND key IN (SELECT key FROM rate_limits WHERE tat < @now::timestamptz LIMIT @batch);
+
+-- Пары StaffX — те же запросы над staff_rate_limits (лимиты admin-api, план B R2): sqlc не параметризует
+-- имя таблицы. Текст пары после замены имени таблицы обязан совпасть с оригиналом (страж
+-- TestStaffQueriesMirrorPublic, testkit/sqlmirror).
+
+-- name: StaffTake :one
+INSERT INTO staff_rate_limits AS r (key, tat)
+VALUES (@key, sqlc.arg(now)::timestamptz + make_interval(secs => @interval_s::float8))
+ON CONFLICT (key) DO UPDATE
+SET tat = greatest(r.tat, @now::timestamptz) + make_interval(secs => @interval_s::float8)
+WHERE greatest(r.tat, @now::timestamptz) + make_interval(secs => @interval_s::float8)
+      <= sqlc.arg(now)::timestamptz + make_interval(secs => @window_s::float8)
+RETURNING tat;
+
+-- name: StaffAdd :exec
+INSERT INTO staff_rate_limits AS r (key, tat)
+VALUES (@key, sqlc.arg(now)::timestamptz + make_interval(secs => @interval_s::float8))
+ON CONFLICT (key) DO UPDATE
+SET tat = greatest(r.tat, @now::timestamptz) + make_interval(secs => @interval_s::float8);
+
+-- name: StaffGetTAT :one
+SELECT tat FROM staff_rate_limits WHERE key = @key;
+
+-- name: StaffDeleteExpired :execrows
+DELETE FROM staff_rate_limits
+WHERE tat < @now::timestamptz
+  AND key IN (SELECT key FROM staff_rate_limits WHERE tat < @now::timestamptz LIMIT @batch);

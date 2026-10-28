@@ -97,7 +97,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	d := staff.Deps{
-		Pool: pools.As, Clock: clk, Keys: ring, Hasher: h, Limiter: ratelimit.NewPG(pools.As, clk),
+		Pool: pools.As, Clock: clk, Keys: ring, Hasher: h, Limiter: ratelimit.NewPG(pools.As, clk, ratelimit.Staff),
 		River: rc, Rand: rand.Reader, Origin: testOrigin, Locales: cat, Log: slog.New(slog.DiscardHandler),
 	}
 	return &env{t: t, owner: pools.Owner, clock: clk, ring: ring, app: app.New(d), deps: d}

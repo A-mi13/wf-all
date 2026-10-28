@@ -362,7 +362,7 @@ func TestAppMinVersion(t *testing.T) {
 // geo_nearest не трогает справочник (класс default).
 func TestNearestHasOwnRateClass(t *testing.T) {
 	o := testOptions(t)
-	o.Limiter = ratelimit.NewPG(o.DB, clock.System)
+	o.Limiter = ratelimit.NewPG(o.DB, clock.System, ratelimit.Players)
 	o.RateRules = ratelimit.DefaultRules()
 	o.RateRules["geo_nearest"] = ratelimit.ClassPolicy{IP: ratelimit.Policy{Limit: 1, Period: time.Hour}}
 	h := newPublic(t, o)

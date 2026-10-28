@@ -183,7 +183,7 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 		return assembly{}, err
 	}
 	d := staff.Deps{
-		Pool: pool, Clock: clock.System, Keys: ring, Hasher: hasher, Limiter: ratelimit.NewPG(pool, clock.System),
+		Pool: pool, Clock: clock.System, Keys: ring, Hasher: hasher, Limiter: ratelimit.NewPG(pool, clock.System, ratelimit.Staff),
 		River: ins, Rand: rand.Reader, Origin: cfg.Origin, Locales: cat, Log: log,
 	}
 	h := staffadmin.New(d, staffadmin.Cookie{Name: admin.CookieName(cfg.CookieSecure), Secure: cfg.CookieSecure})

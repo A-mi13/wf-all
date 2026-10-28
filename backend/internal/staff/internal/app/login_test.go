@@ -135,15 +135,15 @@ func TestLoginEmailRateLimit(t *testing.T) {
 			t.Fatalf("%s: ответ лимита %v", email, err)
 		}
 	}
-	// ключ — HMAC почты, самой почты в rate_limits нет
+	// ключ — HMAC почты, самой почты в staff_rate_limits нет
 	key, err := e.app.LoginEmailKey("ghost@wf.example")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := e.count(`SELECT count(*) FROM rate_limits WHERE key = $1`, key); n != 1 {
+	if n := e.count(`SELECT count(*) FROM staff_rate_limits WHERE key = $1`, key); n != 1 {
 		t.Fatalf("строк лимита по почте %d", n)
 	}
-	if n := e.count(`SELECT count(*) FROM rate_limits WHERE key LIKE '%wf.example%'`); n != 0 {
+	if n := e.count(`SELECT count(*) FROM staff_rate_limits WHERE key LIKE '%wf.example%'`); n != 0 {
 		t.Fatal("почта в ключе лимита открытым текстом")
 	}
 	// через 15 минут — снова можно

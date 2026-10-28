@@ -1,5 +1,6 @@
 // Package ratelimit — ограничение частоты запросов (спека бэкенда §6.6): GCRA, одна строка
-// rate_limits на ключ, один UPSERT на проверку вне бизнес-транзакции. Ключи (keys.go) IP, субъект
+// на ключ (rate_limits публичного API, staff_rate_limits admin-api — Table), один UPSERT на проверку
+// вне бизнес-транзакции. Ключи (keys.go) IP, субъект
 // (игрок или сотрудник), устройство — в Middleware; почта (EmailKey) — в app/ модуля через Limiter
 // (тело запроса middleware не видит).
 // Подсеть — только сигнал риска (пакет risk), не жёсткий 429: за CGNAT тысячи людей.
@@ -95,13 +96,14 @@ type Limiter interface {
 	Over(ctx context.Context, key string, p Policy) (bool, error)
 }
 
-// PG — Limiter на таблице rate_limits.
+// PG — Limiter на таблице t (Players — rate_limits публичного API, Staff — staff_rate_limits admin-api).
 type PG struct {
-	q     *ratelimitdb.Queries
+	q     store
 	clock clock.Clock
 }
 
-func NewPG(db ratelimitdb.DBTX, c clock.Clock) *PG { return &PG{q: ratelimitdb.New(db), clock: c} }
+// NewPG — лимитер на таблице t; неизвестная таблица — паника при сборке.
+func NewPG(db ratelimitdb.DBTX, c clock.Clock, t Table) *PG { return &PG{q: storeOf(t, db), clock: c} }
 
 func (l *PG) Allow(ctx context.Context, key string, p Policy) (Result, error) {
 	if off, err := p.check(); err != nil || off {
@@ -109,14 +111,14 @@ func (l *PG) Allow(ctx context.Context, key string, p Policy) (Result, error) {
 	}
 	now := l.clock.Now()
 	t, w := p.interval(), p.window()
-	_, err := l.q.Take(ctx, ratelimitdb.TakeParams{Key: key, Now: now, IntervalS: t.Seconds(), WindowS: w.Seconds()})
+	_, err := l.q.take(ctx, ratelimitdb.TakeParams{Key: key, Now: now, IntervalS: t.Seconds(), WindowS: w.Seconds()})
 	if err == nil {
 		return Result{Allowed: true}, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Result{}, fmt.Errorf("ratelimit: %w", err)
 	}
-	tat, err := l.q.GetTAT(ctx, key)
+	tat, err := l.q.getTAT(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// строку между отказом и чтением удалила чистка — повтор через интервал
 		return Result{RetryAfter: t}, nil
@@ -140,7 +142,7 @@ func (l *PG) Add(ctx context.Context, key string, p Policy) error {
 	if off, err := p.check(); err != nil || off {
 		return err
 	}
-	if err := l.q.Add(ctx, ratelimitdb.AddParams{Key: key, Now: l.clock.Now(), IntervalS: p.interval().Seconds()}); err != nil {
+	if err := l.q.add(ctx, ratelimitdb.AddParams{Key: key, Now: l.clock.Now(), IntervalS: p.interval().Seconds()}); err != nil {
 		return fmt.Errorf("ratelimit: %w", err)
 	}
 	return nil
@@ -150,7 +152,7 @@ func (l *PG) Over(ctx context.Context, key string, p Policy) (bool, error) {
 	if off, err := p.check(); err != nil || off {
 		return false, err
 	}
-	tat, err := l.q.GetTAT(ctx, key)
+	tat, err := l.q.getTAT(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
