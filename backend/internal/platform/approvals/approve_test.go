@@ -46,7 +46,9 @@ func TestApproveExecutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != b || !strings.Contains(gotPayload, tg.String()) {
+	// R21: исполнитель получает копию принципала с подписью решения (Label = decided_by_label)
+	if got == nil || got == b || got.StaffID != b.StaffID || got.SessionID != b.SessionID || got.Role != b.Role ||
+		got.Label != "Борис" || !strings.Contains(gotPayload, tg.String()) {
 		t.Fatalf("исполнитель: approver=%v payload=%s", got, gotPayload)
 	}
 	if res.Status != approvals.StatusExecuted || res.DecidedBy != b.StaffID || res.DecidedByLabel != "Борис" ||

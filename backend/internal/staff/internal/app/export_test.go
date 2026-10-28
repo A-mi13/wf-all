@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/staff"
 	"wf/backend/internal/staff/internal/store/staffdb"
@@ -73,4 +74,10 @@ func SetCleanupBatch(n int32) func() {
 	old := cleanupBatch
 	cleanupBatch = n
 	return func() { cleanupBatch = old }
+}
+
+// LockActors — хук замка акторов staff (approvals.ActorLock) напрямую: защита в глубину, недостижимая через
+// Approve (checkInitiator отсекает раньше).
+func (a *App) LockActors(ctx context.Context, tx pgx.Tx, ap approvals.Approval, approver *auth.Staff) error {
+	return a.lockActors(ctx, tx, ap, approver)
 }

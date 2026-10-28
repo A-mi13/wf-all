@@ -109,7 +109,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 const loadSession = `-- name: LoadSession :one
 SELECT s.id, s.staff_id, s.stage::text AS stage, s.last_seen_at, s.expires_at, s.ip,
        s.revoked_at, s.revoked_reason,
-       a.status::text AS status, a.locked_until,
+       a.status::text AS status, a.locked_until, a.version, a.display_name,
        r.role::text AS role,
        coalesce((SELECT array_agg(c.city_id ORDER BY c.city_id) FROM staff_role_cities c
                  WHERE c.staff_id = s.staff_id), '{}')::uuid[] AS city_ids
@@ -130,11 +130,13 @@ type LoadSessionRow struct {
 	RevokedReason *string
 	Status        string
 	LockedUntil   *time.Time
+	Version       int64
+	DisplayName   string
 	Role          string
 	CityIds       []uuid.UUID
 }
 
-// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка, роль и города модератора.
+// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка (версия и имя — R5), роль и города модератора.
 func (q *Queries) LoadSession(ctx context.Context, tokenHash []byte) (LoadSessionRow, error) {
 	row := q.db.QueryRow(ctx, loadSession, tokenHash)
 	var i LoadSessionRow
@@ -149,6 +151,8 @@ func (q *Queries) LoadSession(ctx context.Context, tokenHash []byte) (LoadSessio
 		&i.RevokedReason,
 		&i.Status,
 		&i.LockedUntil,
+		&i.Version,
+		&i.DisplayName,
 		&i.Role,
 		&i.CityIds,
 	)

@@ -55,6 +55,8 @@ func (a *App) LoadStaff(ctx context.Context, raw string, ip netip.Addr, backgrou
 	st := &auth.Staff{
 		StaffID: row.StaffID, SessionID: row.ID, Role: row.Role, Stage: row.Stage,
 		Grants: perm.Grants(perm.Role(row.Role)),
+		// R5: версия и подпись учётки — для approvals.InitiatorOf и аудита модулей, не читающих staff_*
+		Version: row.Version, Label: label(row.DisplayName),
 	}
 	if row.Role == auth.RoleModerator {
 		st.CityIDs = row.CityIds

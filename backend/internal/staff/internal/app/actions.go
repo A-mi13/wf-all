@@ -97,7 +97,7 @@ func (p *invitePayload) b() *payloadBase { return &p.payloadBase }
 func (p *rolePayload) b() *payloadBase   { return &p.payloadBase }
 func (p *targetPayload) b() *payloadBase { return &p.payloadBase }
 
-// RegisterApprovals — действия staff.* и проверка инициатора в реестре платформы (сборка admin-api,
+// RegisterApprovals — действия staff.*, проверка инициатора и хук замка акторов в реестре платформы (сборка admin-api,
 // 10c: approvals.New → RegisterApprovals → Registry.Validate). svc — сервис подтверждений для запросов и
 // гашения (CancelByInitiator).
 func (a *App) RegisterApprovals(r *approvals.Registry, svc *approvals.Service) {
@@ -146,6 +146,8 @@ func (a *App) RegisterApprovals(r *approvals.Registry, svc *approvals.Service) {
 		Name: ActionRevokeOwner, Permission: permRevokeOwner, Exec: a.execRevokeOwner, Target: targetOf,
 	})
 	r.SetInitiatorCheck(a.checkInitiator)
+	// хук замка акторов — для действий модулей не из staff (R21): staff.* его не зовут (LockActors = false)
+	r.SetActorLock(a.lockActors)
 }
 
 func targetOf(raw json.RawMessage) (uuid.UUID, uuid.UUID) {
@@ -184,6 +186,35 @@ func (a *App) checkInitiator(ctx context.Context, tx pgx.Tx, ap approvals.Approv
 	}
 	if !initiatorValid(st.Status, st.Role, st.Version, st.LockedUntil, p, ap.Permission, ap.ScopeCityID, a.clock.Now()) {
 		return approvals.Fail(approvals.ErrStale)
+	}
+	return nil
+}
+
+// lockActors — approvals.ActorLock для действий модулей не из staff (R21; у staff.* LockActors = false): та же
+// перепроверка, что execLocks, без замка владельцев. Платформа зовёт его после замка строки запроса — порядок
+// «строка approvals → учётки по возрастанию id» тот же, что у staff. Учётки инициатора и подтверждающего —
+// FOR SHARE; подтверждающий — checkActor (выключен, сессия погашена или заменена, роль сменилась — обычная
+// ошибка: откат всего, запрос pending); инициатор — init_id из payload (approvals.Initiator) = requested_by и
+// initiatorValid по праву и городу запроса, иначе Fail(ErrInitiatorChanged): failed (initiator_changed), 409.
+func (a *App) lockActors(ctx context.Context, tx pgx.Tx, ap approvals.Approval, approver *auth.Staff) error {
+	var in approvals.Initiator
+	if err := json.Unmarshal(ap.Payload, &in); err != nil {
+		return fmt.Errorf("staff: payload запроса %s не разбирается", ap.ID)
+	}
+	q := staffdb.New(tx)
+	locked, err := lockAccounts(ctx, q, uuid.Nil, in.ID, approver.StaffID)
+	if err != nil {
+		return err
+	}
+	now := a.clock.Now()
+	if _, err := checkActor(ctx, q, approver, locked, now); err != nil {
+		return err
+	}
+	init, ok := locked[in.ID]
+	p := payloadBase{V: payloadVersion, InitID: in.ID, InitVer: in.Ver}
+	if in.ID != ap.RequestedBy || !ok ||
+		!initiatorValid(init.status, init.role, init.version, init.lockedUntil, p, ap.Permission, ap.ScopeCityID, now) {
+		return approvals.Fail(approvals.ErrInitiatorChanged)
 	}
 	return nil
 }

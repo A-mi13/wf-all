@@ -33,6 +33,13 @@ type Staff struct {
 	// x-permission=session (разблокировка, me, выход).
 	Reauth bool
 	Grants map[string]Grant
+	// Version — версия учётки на момент загрузки сессии (R5): модуль, не читающий staff_*, кладёт её в payload
+	// запроса подтверждения (approvals.InitiatorOf). Может отстать от базы — только в сторону отказа: проверка
+	// инициатора сравнивает её с текущей версией.
+	Version int64
+	// Label — отображаемое имя на момент загрузки (снимок для audit.Entry.ActorLabel). У подтверждающего в
+	// исполнителе — подпись решения (decided_by_label), а не загрузки (approvals.Approve).
+	Label string
 }
 
 // Grant — значение права для роли сотрудника; нет ключа — GrantDeny. От стадии сессии не
