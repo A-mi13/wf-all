@@ -18,8 +18,8 @@ type query struct{ kind, body string }
 var nameLine = regexp.MustCompile(`^-- name: (\w+) (:\w+)\s*$`)
 
 // Check — в файле file из fsys каждый запрос над table имеет пару Staff<имя> того же вида, который обращается к
-// staffTable и после замены staffTable → table равен оригиналу (комментарии отброшены, пробелы схлопнуты);
-// у каждого Staff-запроса есть оригинал. minPairs — сколько пар обязано найтись (страж не вхолостую).
+// staffTable и равен оригиналу после замены в нём table → staffTable (комментарии отброшены, пробелы схлопнуты);
+// у каждого Staff-запроса есть оригинал, оригинал к staffTable не обращается. minPairs — сколько пар обязано найтись (страж не вхолостую).
 func Check(t testing.TB, fsys fs.FS, file, table, staffTable string, minPairs int) {
 	t.Helper()
 	src, err := fs.ReadFile(fsys, file)
@@ -42,10 +42,16 @@ func Check(t testing.TB, fsys fs.FS, file, table, staffTable string, minPairs in
 			if !strings.Contains(q.body, staffTable) {
 				t.Errorf("%s не обращается к %s", name, staffTable)
 			}
-			if got := strings.ReplaceAll(q.body, staffTable, table); got != orig.body {
-				t.Errorf("%s расходится с %s после замены таблицы:\n%s\n---\n%s", name, base, got, orig.body)
+			// Замена в прямую сторону (m2 ревью G1): оригинал с таблицей сотрудников вместо таблицы игроков == StaffX.
+			// Обратная (staff → игроков) склеивала с оригиналом «смешанный» StaffX, читающий обе таблицы.
+			if want := strings.ReplaceAll(orig.body, table, staffTable); want != q.body {
+				t.Errorf("%s расходится с %s после замены таблицы:\n%s\n---\n%s", name, base, q.body, want)
 			}
 			continue
+		}
+		if strings.Contains(q.body, staffTable) {
+			// в оригинале прямая замена неоднозначна (staff_ + staff_…) — и таблица сотрудников ему не положена
+			t.Errorf("%s обращается к %s, а это запрос над %s", name, staffTable, table)
 		}
 		if strings.Contains(q.body, table) {
 			if _, ok := queries["Staff"+name]; !ok {
