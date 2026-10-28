@@ -96,6 +96,8 @@ type Querier interface {
 	DeleteCityName(ctx context.Context, arg DeleteCityNameParams) error
 	// Свой прежний адрес возвращается текущим — строка истории удаляется.
 	DeleteOwnSlugHistory(ctx context.Context, arg DeleteOwnSlugHistoryParams) (int64, error)
+	// Район города под замком правки; район другого города — ни одной строки (404 без раскрытия существования).
+	DistrictForUpdate(ctx context.Context, arg DistrictForUpdateParams) (DistrictForUpdateRow, error)
 	// Какие из id есть в cities (все статусы и страны; проверка городов флага, R19).
 	ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 	// Настройки города для других модулей (§7): без фильтра видимости — country_enabled в ответе.
@@ -152,6 +154,12 @@ type Querier interface {
 	ImportUpsertAdmin1(ctx context.Context, arg ImportUpsertAdmin1Params) error
 	// Пачка мест (до 1000): массивы одной длины, по элементу на место.
 	ImportUpsertPlaces(ctx context.Context, arg ImportUpsertPlacesParams) error
+	// ---------------------------------------------------------------------------
+	// Районы (createGeoDistrict, updateGeoDistrict, Task 12; спека geo §3.2, §5.2). Дубль имени среди действующих —
+	// 23505 districts_city_name_active_key (normalize_text: регистр, ё/е).
+	// ---------------------------------------------------------------------------
+	// Новый район города; время — часов сценария.
+	InsertDistrict(ctx context.Context, arg InsertDistrictParams) (InsertDistrictRow, error)
 	// Прежний текущий адрес — в историю; время — часов сценария.
 	InsertSlugHistory(ctx context.Context, arg InsertSlugHistoryParams) error
 	// Районы города без архивных (§3.2).
@@ -184,6 +192,8 @@ type Querier interface {
 	SlugTaken(ctx context.Context, slug string) (bool, error)
 	// Поля города после правки; версия растёт на число событий транзакции (R11).
 	UpdateCityFields(ctx context.Context, arg UpdateCityFieldsParams) (int64, error)
+	// Имя и архив района после правки, версия + 1.
+	UpdateDistrict(ctx context.Context, arg UpdateDistrictParams) (UpdateDistrictRow, error)
 	// Название города на языке (новое или переписанное).
 	UpsertCityName(ctx context.Context, arg UpsertCityNameParams) error
 }

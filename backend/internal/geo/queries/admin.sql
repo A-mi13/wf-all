@@ -365,3 +365,27 @@ ON CONFLICT (city_id, locale) DO UPDATE SET name = EXCLUDED.name;
 -- Перевод города удалён (строку языка страны сценарий не удаляет).
 -- name: DeleteCityName :exec
 DELETE FROM city_names WHERE city_id = sqlc.arg(city_id)::uuid AND locale = sqlc.arg(locale)::text;
+
+-- ---------------------------------------------------------------------------
+-- Районы (createGeoDistrict, updateGeoDistrict, Task 12; спека geo §3.2, §5.2). Дубль имени среди действующих —
+-- 23505 districts_city_name_active_key (normalize_text: регистр, ё/е).
+-- ---------------------------------------------------------------------------
+
+-- Новый район города; время — часов сценария.
+-- name: InsertDistrict :one
+INSERT INTO districts (id, city_id, name, created_at)
+VALUES (sqlc.arg(id)::uuid, sqlc.arg(city_id)::uuid, sqlc.arg(name)::text, sqlc.arg(created_at)::timestamptz)
+RETURNING id, name, archived_at, version;
+
+-- Район города под замком правки; район другого города — ни одной строки (404 без раскрытия существования).
+-- name: DistrictForUpdate :one
+SELECT id, name, archived_at, version FROM districts
+WHERE id = sqlc.arg(id)::uuid AND city_id = sqlc.arg(city_id)::uuid
+FOR UPDATE;
+
+-- Имя и архив района после правки, версия + 1.
+-- name: UpdateDistrict :one
+UPDATE districts
+SET name = sqlc.arg(name)::text, archived_at = sqlc.narg(archived_at)::timestamptz, version = version + 1
+WHERE id = sqlc.arg(id)::uuid
+RETURNING id, name, archived_at, version;

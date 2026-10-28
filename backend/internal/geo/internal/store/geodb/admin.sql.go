@@ -1194,6 +1194,37 @@ func (q *Queries) DeleteOwnSlugHistory(ctx context.Context, arg DeleteOwnSlugHis
 	return result.RowsAffected(), nil
 }
 
+const districtForUpdate = `-- name: DistrictForUpdate :one
+SELECT id, name, archived_at, version FROM districts
+WHERE id = $1::uuid AND city_id = $2::uuid
+FOR UPDATE
+`
+
+type DistrictForUpdateParams struct {
+	ID     uuid.UUID
+	CityID uuid.UUID
+}
+
+type DistrictForUpdateRow struct {
+	ID         uuid.UUID
+	Name       string
+	ArchivedAt *time.Time
+	Version    int64
+}
+
+// Район города под замком правки; район другого города — ни одной строки (404 без раскрытия существования).
+func (q *Queries) DistrictForUpdate(ctx context.Context, arg DistrictForUpdateParams) (DistrictForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, districtForUpdate, arg.ID, arg.CityID)
+	var i DistrictForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ArchivedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
 const existingCityIDs = `-- name: ExistingCityIDs :many
 SELECT id FROM cities WHERE id = ANY ($1::uuid[]) ORDER BY id
 `
@@ -1217,6 +1248,49 @@ func (q *Queries) ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.
 		return nil, err
 	}
 	return items, nil
+}
+
+const insertDistrict = `-- name: InsertDistrict :one
+
+INSERT INTO districts (id, city_id, name, created_at)
+VALUES ($1::uuid, $2::uuid, $3::text, $4::timestamptz)
+RETURNING id, name, archived_at, version
+`
+
+type InsertDistrictParams struct {
+	ID        uuid.UUID
+	CityID    uuid.UUID
+	Name      string
+	CreatedAt time.Time
+}
+
+type InsertDistrictRow struct {
+	ID         uuid.UUID
+	Name       string
+	ArchivedAt *time.Time
+	Version    int64
+}
+
+// ---------------------------------------------------------------------------
+// Районы (createGeoDistrict, updateGeoDistrict, Task 12; спека geo §3.2, §5.2). Дубль имени среди действующих —
+// 23505 districts_city_name_active_key (normalize_text: регистр, ё/е).
+// ---------------------------------------------------------------------------
+// Новый район города; время — часов сценария.
+func (q *Queries) InsertDistrict(ctx context.Context, arg InsertDistrictParams) (InsertDistrictRow, error) {
+	row := q.db.QueryRow(ctx, insertDistrict,
+		arg.ID,
+		arg.CityID,
+		arg.Name,
+		arg.CreatedAt,
+	)
+	var i InsertDistrictRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ArchivedAt,
+		&i.Version,
+	)
+	return i, err
 }
 
 const insertSlugHistory = `-- name: InsertSlugHistory :exec
@@ -1297,6 +1371,39 @@ func (q *Queries) UpdateCityFields(ctx context.Context, arg UpdateCityFieldsPara
 	var version int64
 	err := row.Scan(&version)
 	return version, err
+}
+
+const updateDistrict = `-- name: UpdateDistrict :one
+UPDATE districts
+SET name = $1::text, archived_at = $2::timestamptz, version = version + 1
+WHERE id = $3::uuid
+RETURNING id, name, archived_at, version
+`
+
+type UpdateDistrictParams struct {
+	Name       string
+	ArchivedAt *time.Time
+	ID         uuid.UUID
+}
+
+type UpdateDistrictRow struct {
+	ID         uuid.UUID
+	Name       string
+	ArchivedAt *time.Time
+	Version    int64
+}
+
+// Имя и архив района после правки, версия + 1.
+func (q *Queries) UpdateDistrict(ctx context.Context, arg UpdateDistrictParams) (UpdateDistrictRow, error) {
+	row := q.db.QueryRow(ctx, updateDistrict, arg.Name, arg.ArchivedAt, arg.ID)
+	var i UpdateDistrictRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ArchivedAt,
+		&i.Version,
+	)
+	return i, err
 }
 
 const upsertCityName = `-- name: UpsertCityName :exec

@@ -123,3 +123,27 @@ func CitySlugChangedEvent(cityID uuid.UUID, cityVersion int64, oldSlug, newSlug 
 		Payload: CitySlugChanged{CityID: cityID, OldSlug: oldSlug, NewSlug: newSlug},
 	}
 }
+
+// Районы (Task 12; спека geo §6): агрегат district, версия — districts.version.
+const (
+	EventDistrictCreated  = "geo.district_created"
+	EventDistrictUpdated  = "geo.district_updated"
+	EventDistrictArchived = "geo.district_archived"
+
+	AggregateDistrict = "district"
+)
+
+// DistrictChanged — payload событий района: какой район какого города.
+type DistrictChanged struct {
+	DistrictID uuid.UUID `json:"district_id"`
+	CityID     uuid.UUID `json:"city_id"`
+}
+
+// DistrictEvent — событие района типа typ (EventDistrict…); version — версия района после изменения.
+func DistrictEvent(typ string, districtID, cityID uuid.UUID, version int64) events.Event {
+	return events.Event{
+		Type: typ, SchemaVersion: 1,
+		AggregateType: AggregateDistrict, AggregateID: districtID, AggregateVersion: version,
+		Payload: DistrictChanged{DistrictID: districtID, CityID: cityID},
+	}
+}

@@ -154,7 +154,7 @@ func (h *Handler) ListGeoDistricts(ctx context.Context, req oapi.ListGeoDistrict
 	}
 	body := oapi.GeoDistrictList{Items: make([]oapi.GeoDistrict, 0, len(ds))}
 	for _, d := range ds {
-		body.Items = append(body.Items, oapi.GeoDistrict{Id: d.ID, Name: d.Name, ArchivedAt: d.ArchivedAt, Version: d.Version})
+		body.Items = append(body.Items, districtOf(d))
 	}
 	return oapi.ListGeoDistricts200JSONResponse{Body: body,
 		Headers: oapi.ListGeoDistricts200ResponseHeaders{CacheControl: cachePrivate}}, nil
