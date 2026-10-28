@@ -137,12 +137,19 @@ func applyGrants(ctx context.Context, url string) error {
 	return grants.Apply(ctx, sqldb)
 }
 
-// Main — запуск тестов пакета, где есть SharedAs: m.Run, затем уборка общих клонов (пулы, DROP DATABASE; при
-// упавших тестах pgtestdb оставляет базы для разбора, как и у New*). Ошибка уборки — код выхода 1.
+// Main — запуск тестов пакета, где есть SharedAs: m.Run, затем уборка общих клонов (пулы, DROP DATABASE) при любом
+// исходе тестов (клоны New* упавших тестов pgtestdb оставляет для разбора, общий — нет). Ошибка уборки — код выхода 1.
 func Main(m *testing.M) int {
 	mainActive.Store(true)
-	code := m.Run()
-	if err := sharedHost.finish(code != 0); err != nil {
+	return finishShared(sharedHost, m.Run())
+}
+
+// finishShared — уборка общих клонов host после m.Run с кодом code — при ЛЮБОМ исходе (m5-2 ревью G2): общий клон
+// засеян посевом и только на чтение, разбирать в нём нечего, а оставленный копит базы. Ошибка уборки — код 1.
+// Таймаут -timeout и паника теста роняют процесс до возврата m.Run — туда уборка не дотянется (брошенный клон
+// убирает уборка локальной базы).
+func finishShared(host *processTB, code int) int {
+	if err := host.finish(); err != nil {
 		fmt.Fprintln(os.Stderr, "dbtest: уборка общих клонов:", err)
 		if code == 0 {
 			code = 1
@@ -155,11 +162,11 @@ func Main(m *testing.M) int {
 type processFatal struct{ error }
 
 // processTB — pgtestdb.TB на весь процесс тестов: Cleanup копит уборку до Main, Fatalf — паника processFatal,
-// журнал не пишется (pgtestdb логирует строку подключения).
+// журнал не пишется (pgtestdb логирует строку подключения). Failed всегда false: общий клон удаляется и после
+// упавших тестов.
 type processTB struct {
 	mu       sync.Mutex
 	cleanups []func()
-	failed   bool
 }
 
 func (p *processTB) Cleanup(f func()) {
@@ -168,11 +175,7 @@ func (p *processTB) Cleanup(f func()) {
 	p.cleanups = append(p.cleanups, f)
 }
 
-func (p *processTB) Failed() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.failed
-}
+func (*processTB) Failed() bool { return false }
 
 func (*processTB) Fatalf(format string, args ...any) {
 	panic(processFatal{fmt.Errorf(format, args...)})
@@ -181,9 +184,8 @@ func (*processTB) Helper()             {}
 func (*processTB) Logf(string, ...any) {}
 
 // finish — уборка в обратном порядке регистрации; первая ошибка возвращается, остальная уборка всё равно идёт.
-func (p *processTB) finish(failed bool) error {
+func (p *processTB) finish() error {
 	p.mu.Lock()
-	p.failed = failed
 	cleanups := slices.Clone(p.cleanups)
 	p.cleanups = nil
 	p.mu.Unlock()

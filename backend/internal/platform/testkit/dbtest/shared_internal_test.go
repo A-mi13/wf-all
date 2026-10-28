@@ -8,7 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/peterldowns/pgtestdb"
 )
 
 // Общие клоны пакета (SharedAs) удаляются после всех тестов — их освобождает Main.
@@ -64,5 +66,56 @@ func TestSharedNeedsMain(t *testing.T) {
 	})
 	if !strings.Contains(msg, "dbtest.Main") {
 		t.Fatalf("Fatalf %q, ждали подсказку про dbtest.Main", msg)
+	}
+}
+
+// Общий клон удаляется при любом исходе тестов пакета (m5-2 ревью G2): упавший тест не оставляет базу — она
+// общая, засеяна посевом и для разбора не нужна (свои строки упавшего теста — в клоне New*, его pgtestdb
+// оставляет). Код выхода — как у m.Run.
+func TestFinishSharedDropsCloneOnFailure(t *testing.T) {
+	c := Config()
+	if err := dial(c); err != nil {
+		t.Fatal(err)
+	}
+	host := &processTB{}
+	clone := pgtestdb.Custom(host, c, migrator())
+	t.Cleanup(func() { dropDatabase(t, c, clone.Database) }) // красный прогон не копит базы
+	if !databaseExists(t, c, clone.Database) {
+		t.Fatalf("клон %s не создан", clone.Database)
+	}
+	if code := finishShared(host, 1); code != 1 {
+		t.Fatalf("код выхода %d, ждали 1 (как у m.Run)", code)
+	}
+	if databaseExists(t, c, clone.Database) {
+		t.Fatalf("клон %s остался после упавшего пакета", clone.Database)
+	}
+}
+
+// databaseExists — база name есть на сервере c.
+func databaseExists(t *testing.T, c pgtestdb.Config, name string) bool {
+	t.Helper()
+	sqldb, err := c.Connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqldb.Close()
+	var n int
+	if err := sqldb.QueryRowContext(context.Background(), `SELECT count(*) FROM pg_database WHERE datname = $1`, name).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n == 1
+}
+
+// dropDatabase — база name удалена, если осталась.
+func dropDatabase(t *testing.T, c pgtestdb.Config, name string) {
+	t.Helper()
+	sqldb, err := c.Connect()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer sqldb.Close()
+	if _, err := sqldb.ExecContext(context.Background(), `DROP DATABASE IF EXISTS `+pgx.Identifier{name}.Sanitize()+` WITH (FORCE)`); err != nil {
+		t.Error(err)
 	}
 }
