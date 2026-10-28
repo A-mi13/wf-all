@@ -598,7 +598,7 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 	if err != nil {
 		return false, fmt.Errorf("geo: savepoint привязки %s: %w", c.Slug, err)
 	}
-	if err := link(ctx, geodb.New(sp), run, c, p); err != nil {
+	if err := link(ctx, sp, run, c, p); err != nil {
 		if rerr := sp.Rollback(ctx); rerr != nil {
 			return false, errors.Join(err, fmt.Errorf("geo: откат привязки %s: %w", c.Slug, rerr))
 		}
@@ -617,31 +617,17 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 	return false, nil
 }
 
-// link — город получает geoname_id, version + 1, недостающие переводы; регион — код admin1 и
-// недостающие переводы; событие geo.city_linked. centroid и population города не меняются.
+// link — привязка города сверки к месту: общая linkCity (R14, та же у ручной привязки linkGeoCity).
 // Замки: город (geoname_id), затем регион (страна, admin1) — у каждого города сверки, в одной транзакции на все
-// города страны, поэтому общий порядок задаёт slug городов, а не правило. Активацию городов этой страны исключает
-// эксклюзивный advisory-замок страны в начале reconcile (ревью G5 I1-r1), а не порядок замков.
-func link(ctx context.Context, q *geodb.Queries, run importRun, c geodb.ImportUnlinkedCitiesRow, p geodb.ImportCityCandidatesRow) error {
-	version, err := q.ImportLinkCity(ctx, geodb.ImportLinkCityParams{ID: c.ID, GeonameID: p.GeonameID})
+// города страны, поэтому общий порядок задаёт slug городов, а не правило. Активацию и ручную привязку городов этой
+// страны исключает эксклюзивный advisory-замок страны в начале reconcile (ревью G5 I1-r1), а не порядок замков.
+func link(ctx context.Context, tx pgx.Tx, run importRun, c geodb.ImportUnlinkedCitiesRow, p geodb.ImportCityCandidatesRow) error {
+	_, err := linkCity(ctx, tx, linkInput{CityID: c.ID, RegionID: c.RegionID, GeonameID: p.GeonameID, Admin1: p.Admin1Code,
+		Country: run.country, CountryLocale: run.locale})
 	if err != nil {
 		return fmt.Errorf("geo: привязка %s: %w", c.Slug, err)
 	}
-	if _, err := q.ImportCityNamesFromPlace(ctx, geodb.ImportCityNamesFromPlaceParams{
-		CityID: c.ID, GeonameID: p.GeonameID, CountryLocale: run.locale}); err != nil {
-		return fmt.Errorf("geo: переводы %s: %w", c.Slug, err)
-	}
-	if c.RegionID != nil && p.Admin1Code != nil {
-		if _, err := q.ImportLinkRegion(ctx, geodb.ImportLinkRegionParams{ID: *c.RegionID, Admin1Code: *p.Admin1Code}); err != nil {
-			return fmt.Errorf("geo: код региона %s: %w", c.Slug, err)
-		}
-		if _, err := q.ImportRegionNamesFromAdmin1(ctx, geodb.ImportRegionNamesFromAdmin1Params{
-			RegionID: *c.RegionID, CountryCode: run.country, Admin1Code: *p.Admin1Code, CountryLocale: run.locale}); err != nil {
-			return fmt.Errorf("geo: переводы региона %s: %w", c.Slug, err)
-		}
-	}
-	_, err = events.Publish(ctx, geo.CityLinkedEvent(c.ID, version, p.GeonameID))
-	return err
+	return nil
 }
 
 type journalFile struct {

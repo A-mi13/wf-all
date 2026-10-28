@@ -68,6 +68,7 @@ var (
 	errUnauthenticated = httpx.NewError(http.StatusUnauthorized, httpx.CodeUnauthenticated)
 	errForbidden       = httpx.NewError(http.StatusForbidden, httpx.CodeForbidden)
 	errBadQuery        = httpx.NewFieldError("query.q", "minLength")
+	errNoBody          = httpx.NewFieldError("body", "required") // тело обязательно — валидатор отверг бы раньше
 )
 
 // reader — чтения админки; nil — хендлер не собран (нулевой или без Deps.Pool): 501.
@@ -132,16 +133,6 @@ func negotiate(header *string) (locale string, contentLanguage *string) {
 // Операции плана B, объявленные контрактом раньше хендлеров (Task 7, R17): отвечают 501 http.not_implemented
 // и перечислены в pendingOps (internal/httpapi/admin/nostub_test.go). Задача из комментария заменяет
 // заглушку хендлером и убирает операцию из pendingOps.
-
-// UpdateGeoCity — заглушка до Task 11.
-func (h *Handler) UpdateGeoCity(context.Context, oapi.UpdateGeoCityRequestObject) (oapi.UpdateGeoCityResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// LinkGeoCity — заглушка до Task 11.
-func (h *Handler) LinkGeoCity(context.Context, oapi.LinkGeoCityRequestObject) (oapi.LinkGeoCityResponseObject, error) {
-	return nil, errNotImplemented
-}
 
 // CreateGeoDistrict — заглушка до Task 12.
 func (h *Handler) CreateGeoDistrict(context.Context, oapi.CreateGeoDistrictRequestObject) (oapi.CreateGeoDistrictResponseObject, error) {

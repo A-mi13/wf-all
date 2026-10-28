@@ -19,8 +19,10 @@ func (im *Importer) SetBeforeLink(f func(ctx context.Context, cityID uuid.UUID, 
 	im.beforeLink = f
 }
 
-// SetStageHook — хук активации (тесты гонок): stage "region" — перед выбором региона, "insert" — после проверки
-// занятости slug, перед вставкой города (в транзакции сценария). В проде nil.
+// SetStageHook — хук сценариев админки (тесты гонок, в транзакции сценария). Активация: "lock" — после первого
+// чтения места, перед замком страны; "region" — перед выбором региона; "insert" — после проверки занятости slug,
+// перед вставкой города. Правка города: "slug" — после проверки занятости нового адреса. Ручная привязка: "link" —
+// после проверки «место свободно», перед привязкой. В проде nil.
 func (a *Admin) SetStageHook(f func(ctx context.Context, stage string)) {
 	a.hook = f
 }

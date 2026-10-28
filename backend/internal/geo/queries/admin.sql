@@ -312,3 +312,56 @@ FROM (SELECT unnest(sqlc.arg(locales)::text[]) AS locale, unnest(sqlc.arg(names)
 -- эксклюзивный) ждёт их и наоборот. Ключ — app.countryLockKey.
 -- name: ActivateCountryLock :exec
 SELECT pg_advisory_xact_lock_shared(sqlc.arg(class)::int, sqlc.arg(country)::int);
+
+-- ---------------------------------------------------------------------------
+-- Правка города (updateGeoCity, Task 11; спека geo §5.2, R10, R11) и ручная привязка (linkGeoCity, R14).
+-- ---------------------------------------------------------------------------
+
+-- Город под замком правки: текущие значения для сравнения «изменилось ли», язык страны (каноническое имя).
+-- name: CityForUpdate :one
+SELECT c.id, c.slug, c.name, c.status::text AS status, c.version, c.geoname_id, c.region_id,
+       co.code::text AS country_code, co.default_locale
+FROM cities c
+JOIN countries co ON co.id = c.country_id
+WHERE c.id = sqlc.arg(id)::uuid
+FOR UPDATE OF c;
+
+-- Страна города без замка — ключ разделяемого замка страны до замка строки (linkGeoCity).
+-- name: CityCountryCode :one
+SELECT co.code::text AS country_code
+FROM cities c JOIN countries co ON co.id = c.country_id
+WHERE c.id = sqlc.arg(id)::uuid;
+
+-- Чей адрес: текущий slug города (history = false) или строка истории (history = true); нет — ни одной строки.
+-- name: SlugOwner :one
+SELECT id AS city_id, false AS history FROM cities WHERE slug = sqlc.arg(slug)::text
+UNION ALL
+SELECT city_id, true AS history FROM city_slug_history WHERE slug = sqlc.arg(slug)::text
+LIMIT 1;
+
+-- Свой прежний адрес возвращается текущим — строка истории удаляется.
+-- name: DeleteOwnSlugHistory :execrows
+DELETE FROM city_slug_history WHERE slug = sqlc.arg(slug)::text AND city_id = sqlc.arg(city_id)::uuid;
+
+-- Прежний текущий адрес — в историю; время — часов сценария.
+-- name: InsertSlugHistory :exec
+INSERT INTO city_slug_history (slug, city_id, replaced_at)
+VALUES (sqlc.arg(slug)::text, sqlc.arg(city_id)::uuid, sqlc.arg(replaced_at)::timestamptz);
+
+-- Поля города после правки; версия растёт на число событий транзакции (R11).
+-- name: UpdateCityFields :one
+UPDATE cities
+SET status = sqlc.arg(status)::text::city_status, slug = sqlc.arg(slug)::text, name = sqlc.arg(name)::text,
+    version = version + sqlc.arg(bump)::bigint
+WHERE id = sqlc.arg(id)::uuid
+RETURNING version;
+
+-- Название города на языке (новое или переписанное).
+-- name: UpsertCityName :exec
+INSERT INTO city_names (city_id, locale, name)
+VALUES (sqlc.arg(city_id)::uuid, sqlc.arg(locale)::text, sqlc.arg(name)::text)
+ON CONFLICT (city_id, locale) DO UPDATE SET name = EXCLUDED.name;
+
+-- Перевод города удалён (строку языка страны сценарий не удаляет).
+-- name: DeleteCityName :exec
+DELETE FROM city_names WHERE city_id = sqlc.arg(city_id)::uuid AND locale = sqlc.arg(locale)::text;

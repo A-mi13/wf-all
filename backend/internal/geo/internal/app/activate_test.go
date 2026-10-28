@@ -581,3 +581,28 @@ func TestCountryLockKey(t *testing.T) {
 		t.Fatalf("класс %x, RU %d, KZ %d", class, ru, kz)
 	}
 }
+
+// m-r5 ревью G5: место перенесли в другую страну между первым чтением и замком страны (хук «lock» — перед замком):
+// замок взят по старой стране, поэтому активация откатывается с ошибкой без кода контракта (повтор с тем же ключом
+// перечитает место), а не заводит город в старой стране с admin1 новой; ничего не записано.
+func TestActivatePlaceCountryChanged(t *testing.T) {
+	e := newActEnv(t)
+	a := e.admin()
+	a.SetStageHook(func(ctx context.Context, stage string) {
+		if stage == "lock" {
+			if _, err := e.owner.Exec(ctx, `UPDATE geonames_places SET country_code = 'XB' WHERE geoname_id = 526815`); err != nil {
+				t.Errorf("перенос места: %v", err)
+			}
+		}
+	})
+	_, err := activate(e, a, app.Activation{GeonameID: 526815})
+	if err == nil || errors.Is(err, geo.ErrPlaceNotFound) || errors.Is(err, geo.ErrCountryNotEnabled) {
+		t.Fatalf("ждали ошибку без кода: %v", err)
+	}
+	if status, _, _ := problem(err); status != 0 {
+		t.Fatalf("ошибка с кодом: %v", err)
+	}
+	if n := e.count(t, `SELECT (SELECT count(*) FROM cities WHERE geoname_id = 526815) + (SELECT count(*) FROM regions WHERE geoname_admin1_code = '71')`); n != 0 {
+		t.Fatalf("записано: %d", n)
+	}
+}

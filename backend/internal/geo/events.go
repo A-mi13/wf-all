@@ -67,3 +67,59 @@ func CityActivatedEvent(cityID uuid.UUID, countryCode string, regionID *uuid.UUI
 		Payload: CityActivated{CityID: cityID, CountryCode: countryCode, RegionID: regionID, Status: status, GeonameID: geonameID},
 	}
 }
+
+// Правка города админкой (Task 11; спека geo §6): событие на каждый вид изменения, версии агрегата —
+// последовательные в транзакции (R11).
+const (
+	EventCityStatusChanged = "geo.city_status_changed"
+	EventCityRenamed       = "geo.city_renamed"
+	EventCitySlugChanged   = "geo.city_slug_changed"
+)
+
+// CityStatusChanged — payload geo.city_status_changed: статус города сменился с From на To.
+type CityStatusChanged struct {
+	CityID uuid.UUID `json:"city_id"`
+	From   Status    `json:"from"`
+	To     Status    `json:"to"`
+}
+
+// CityRenamed — payload geo.city_renamed: изменились (добавлены, переписаны или удалены) названия на языках
+// Locales (по алфавиту).
+type CityRenamed struct {
+	CityID  uuid.UUID `json:"city_id"`
+	Locales []string  `json:"locales"`
+}
+
+// CitySlugChanged — payload geo.city_slug_changed: адрес города сменился, старый остался в истории.
+type CitySlugChanged struct {
+	CityID  uuid.UUID `json:"city_id"`
+	OldSlug string    `json:"old_slug"`
+	NewSlug string    `json:"new_slug"`
+}
+
+// CityStatusChangedEvent — событие смены статуса; cityVersion — версия города после этого изменения.
+func CityStatusChangedEvent(cityID uuid.UUID, cityVersion int64, from, to Status) events.Event {
+	return events.Event{
+		Type: EventCityStatusChanged, SchemaVersion: 1,
+		AggregateType: AggregateCity, AggregateID: cityID, AggregateVersion: cityVersion,
+		Payload: CityStatusChanged{CityID: cityID, From: from, To: to},
+	}
+}
+
+// CityRenamedEvent — событие правки названий; locales — изменённые языки по алфавиту.
+func CityRenamedEvent(cityID uuid.UUID, cityVersion int64, locales []string) events.Event {
+	return events.Event{
+		Type: EventCityRenamed, SchemaVersion: 1,
+		AggregateType: AggregateCity, AggregateID: cityID, AggregateVersion: cityVersion,
+		Payload: CityRenamed{CityID: cityID, Locales: locales},
+	}
+}
+
+// CitySlugChangedEvent — событие смены адреса.
+func CitySlugChangedEvent(cityID uuid.UUID, cityVersion int64, oldSlug, newSlug string) events.Event {
+	return events.Event{
+		Type: EventCitySlugChanged, SchemaVersion: 1,
+		AggregateType: AggregateCity, AggregateID: cityID, AggregateVersion: cityVersion,
+		Payload: CitySlugChanged{CityID: cityID, OldSlug: oldSlug, NewSlug: newSlug},
+	}
+}

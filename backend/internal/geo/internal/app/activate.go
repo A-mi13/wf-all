@@ -87,6 +87,10 @@ type Activation struct {
 // errSlugExhausted — все кандидаты slug заняты: нарушенный инвариант (тёзок больше maxSlugAttempts) — 500 с логом.
 var errSlugExhausted = errors.New("geo: кандидаты адреса города исчерпаны")
 
+// errPlaceCountryChanged — страна места после замка страны не та, по которой замок взят (m-r5 ревью G5): 500 без
+// сохранения ключа идемпотентности, повтор перечитает место.
+var errPlaceCountryChanged = errors.New("geo: страна места сменилась во время активации")
+
 // Activate — город из места GeoNames (спека geo §5.3, R13) в одной транзакции под Idempotency-Key вызывающего:
 //  1. место — нет или пропало из источника (missing_since) → geo.ErrPlaceNotFound;
 //  2. страна — из запроса или места; нет или выключена → geo.ErrCountryNotEnabled; на месте уже город →
@@ -133,13 +137,22 @@ func (a *Admin) Activate(ctx context.Context, s *auth.Staff, in Activation, m ap
 		// транзакции — без сериализации порядок замков города и региона у неё задаёт slug городов, и встречный порядок
 		// с активацией даёт 40P01 (db.InTx его не повторяет). До замка — только чтение места без замков; после —
 		// место перечитывается (пока ждали, импорт мог его пометить пропавшим).
+		a.at(ctx, "lock")
 		if err := lockCountries(ctx, q, place.CountryCode, code); err != nil {
 			return err
 		}
+		locked := place.CountryCode
 		if place, err = q.ActivatePlace(ctx, in.GeonameID); errors.Is(err, pgx.ErrNoRows) || err == nil && place.Missing {
 			return geo.ErrPlaceNotFound
 		} else if err != nil {
 			return err
+		}
+		// m-r5 ревью G5: место перенесли в другую страну между чтениями — замок взят не по той стране. Откат с
+		// ошибкой без кода (500): ключ идемпотентности не сохраняется, повтор с тем же ключом перечитает место.
+		if place.CountryCode != locked {
+			a.d.Log.WarnContext(ctx, "geo: активация — страна места сменилась во время замка, повторить",
+				"geoname_id", place.GeonameID, "was", locked, "now", place.CountryCode)
+			return fmt.Errorf("%w: место %d, %s → %s", errPlaceCountryChanged, place.GeonameID, locked, place.CountryCode)
 		}
 		country, err := q.ActivateCountry(ctx, code)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && !country.IsEnabled {

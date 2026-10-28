@@ -85,6 +85,17 @@ type Querier interface {
 	AdminPlacesByIDs(ctx context.Context, arg AdminPlacesByIDsParams) ([]AdminPlacesByIDsRow, error)
 	// Названия регионов страны по всем языкам (GeoRegion.names).
 	AdminRegionNames(ctx context.Context, code string) ([]RegionName, error)
+	// Страна города без замка — ключ разделяемого замка страны до замка строки (linkGeoCity).
+	CityCountryCode(ctx context.Context, id uuid.UUID) (string, error)
+	// ---------------------------------------------------------------------------
+	// Правка города (updateGeoCity, Task 11; спека geo §5.2, R10, R11) и ручная привязка (linkGeoCity, R14).
+	// ---------------------------------------------------------------------------
+	// Город под замком правки: текущие значения для сравнения «изменилось ли», язык страны (каноническое имя).
+	CityForUpdate(ctx context.Context, id uuid.UUID) (CityForUpdateRow, error)
+	// Перевод города удалён (строку языка страны сценарий не удаляет).
+	DeleteCityName(ctx context.Context, arg DeleteCityNameParams) error
+	// Свой прежний адрес возвращается текущим — строка истории удаляется.
+	DeleteOwnSlugHistory(ctx context.Context, arg DeleteOwnSlugHistoryParams) (int64, error)
 	// Какие из id есть в cities (все статусы и страны; проверка городов флага, R19).
 	ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 	// Настройки города для других модулей (§7): без фильтра видимости — country_enabled в ответе.
@@ -141,6 +152,8 @@ type Querier interface {
 	ImportUpsertAdmin1(ctx context.Context, arg ImportUpsertAdmin1Params) error
 	// Пачка мест (до 1000): массивы одной длины, по элементу на место.
 	ImportUpsertPlaces(ctx context.Context, arg ImportUpsertPlacesParams) error
+	// Прежний текущий адрес — в историю; время — часов сценария.
+	InsertSlugHistory(ctx context.Context, arg InsertSlugHistoryParams) error
 	// Районы города без архивных (§3.2).
 	ListActiveDistricts(ctx context.Context, cityID uuid.UUID) ([]ListActiveDistrictsRow, error)
 	// Публичный список городов (спека geo §4.2). Видимость — только страны is_enabled (§4.1).
@@ -165,8 +178,14 @@ type Querier interface {
 	// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity. Ветка истории
 	// намеренно первой: без ORDER BY s.prio выиграла бы она — это ловит TestResolveCitySlugPrefersCurrent.
 	ResolveCitySlug(ctx context.Context, slug string) (uuid.UUID, error)
+	// Чей адрес: текущий slug города (history = false) или строка истории (history = true); нет — ни одной строки.
+	SlugOwner(ctx context.Context, slug string) (SlugOwnerRow, error)
 	// Адрес занят: текущий slug города или прежний адрес из истории.
 	SlugTaken(ctx context.Context, slug string) (bool, error)
+	// Поля города после правки; версия растёт на число событий транзакции (R11).
+	UpdateCityFields(ctx context.Context, arg UpdateCityFieldsParams) (int64, error)
+	// Название города на языке (новое или переписанное).
+	UpsertCityName(ctx context.Context, arg UpsertCityNameParams) error
 }
 
 var _ Querier = (*Queries)(nil)

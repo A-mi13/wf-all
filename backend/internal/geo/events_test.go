@@ -33,6 +33,12 @@ func TestEventShapes(t *testing.T) {
 			`{"city_id":"01920000-0000-7000-8000-000000000001","country_code":"RU","region_id":"01920000-0000-7000-8000-000000000002","status":"waitlist","geoname_id":526815}`, eventCity, 1},
 		{geo.CityActivatedEvent(eventCity, "XB", nil, geo.StatusPilot, 1), "geo.city_activated", "city",
 			`{"city_id":"01920000-0000-7000-8000-000000000001","country_code":"XB","region_id":null,"status":"pilot","geoname_id":1}`, eventCity, 1},
+		{geo.CityStatusChangedEvent(eventCity, 4, geo.StatusPilot, geo.StatusLive), "geo.city_status_changed", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","from":"pilot","to":"live"}`, eventCity, 4},
+		{geo.CityRenamedEvent(eventCity, 5, []string{"en", "ru"}), "geo.city_renamed", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","locales":["en","ru"]}`, eventCity, 5},
+		{geo.CitySlugChangedEvent(eventCity, 6, "stavropol", "stav"), "geo.city_slug_changed", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","old_slug":"stavropol","new_slug":"stav"}`, eventCity, 6},
 		{geo.ImportFinishedEvent(eventImport, "RU", "succeeded"), "geo.import_finished", "geonames_import",
 			`{"import_id":"01920000-0000-7000-8000-000000000002","country_code":"RU","status":"succeeded"}`, eventImport, 1},
 	}

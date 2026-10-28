@@ -1104,6 +1104,96 @@ func (q *Queries) AdminRegionNames(ctx context.Context, code string) ([]RegionNa
 	return items, nil
 }
 
+const cityCountryCode = `-- name: CityCountryCode :one
+SELECT co.code::text AS country_code
+FROM cities c JOIN countries co ON co.id = c.country_id
+WHERE c.id = $1::uuid
+`
+
+// Страна города без замка — ключ разделяемого замка страны до замка строки (linkGeoCity).
+func (q *Queries) CityCountryCode(ctx context.Context, id uuid.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, cityCountryCode, id)
+	var country_code string
+	err := row.Scan(&country_code)
+	return country_code, err
+}
+
+const cityForUpdate = `-- name: CityForUpdate :one
+
+SELECT c.id, c.slug, c.name, c.status::text AS status, c.version, c.geoname_id, c.region_id,
+       co.code::text AS country_code, co.default_locale
+FROM cities c
+JOIN countries co ON co.id = c.country_id
+WHERE c.id = $1::uuid
+FOR UPDATE OF c
+`
+
+type CityForUpdateRow struct {
+	ID            uuid.UUID
+	Slug          string
+	Name          string
+	Status        string
+	Version       int64
+	GeonameID     *int64
+	RegionID      *uuid.UUID
+	CountryCode   string
+	DefaultLocale string
+}
+
+// ---------------------------------------------------------------------------
+// Правка города (updateGeoCity, Task 11; спека geo §5.2, R10, R11) и ручная привязка (linkGeoCity, R14).
+// ---------------------------------------------------------------------------
+// Город под замком правки: текущие значения для сравнения «изменилось ли», язык страны (каноническое имя).
+func (q *Queries) CityForUpdate(ctx context.Context, id uuid.UUID) (CityForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, cityForUpdate, id)
+	var i CityForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Status,
+		&i.Version,
+		&i.GeonameID,
+		&i.RegionID,
+		&i.CountryCode,
+		&i.DefaultLocale,
+	)
+	return i, err
+}
+
+const deleteCityName = `-- name: DeleteCityName :exec
+DELETE FROM city_names WHERE city_id = $1::uuid AND locale = $2::text
+`
+
+type DeleteCityNameParams struct {
+	CityID uuid.UUID
+	Locale string
+}
+
+// Перевод города удалён (строку языка страны сценарий не удаляет).
+func (q *Queries) DeleteCityName(ctx context.Context, arg DeleteCityNameParams) error {
+	_, err := q.db.Exec(ctx, deleteCityName, arg.CityID, arg.Locale)
+	return err
+}
+
+const deleteOwnSlugHistory = `-- name: DeleteOwnSlugHistory :execrows
+DELETE FROM city_slug_history WHERE slug = $1::text AND city_id = $2::uuid
+`
+
+type DeleteOwnSlugHistoryParams struct {
+	Slug   string
+	CityID uuid.UUID
+}
+
+// Свой прежний адрес возвращается текущим — строка истории удаляется.
+func (q *Queries) DeleteOwnSlugHistory(ctx context.Context, arg DeleteOwnSlugHistoryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOwnSlugHistory, arg.Slug, arg.CityID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const existingCityIDs = `-- name: ExistingCityIDs :many
 SELECT id FROM cities WHERE id = ANY ($1::uuid[]) ORDER BY id
 `
@@ -1129,6 +1219,43 @@ func (q *Queries) ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.
 	return items, nil
 }
 
+const insertSlugHistory = `-- name: InsertSlugHistory :exec
+INSERT INTO city_slug_history (slug, city_id, replaced_at)
+VALUES ($1::text, $2::uuid, $3::timestamptz)
+`
+
+type InsertSlugHistoryParams struct {
+	Slug       string
+	CityID     uuid.UUID
+	ReplacedAt time.Time
+}
+
+// Прежний текущий адрес — в историю; время — часов сценария.
+func (q *Queries) InsertSlugHistory(ctx context.Context, arg InsertSlugHistoryParams) error {
+	_, err := q.db.Exec(ctx, insertSlugHistory, arg.Slug, arg.CityID, arg.ReplacedAt)
+	return err
+}
+
+const slugOwner = `-- name: SlugOwner :one
+SELECT id AS city_id, false AS history FROM cities WHERE slug = $1::text
+UNION ALL
+SELECT city_id, true AS history FROM city_slug_history WHERE slug = $1::text
+LIMIT 1
+`
+
+type SlugOwnerRow struct {
+	CityID  uuid.UUID
+	History bool
+}
+
+// Чей адрес: текущий slug города (history = false) или строка истории (history = true); нет — ни одной строки.
+func (q *Queries) SlugOwner(ctx context.Context, slug string) (SlugOwnerRow, error) {
+	row := q.db.QueryRow(ctx, slugOwner, slug)
+	var i SlugOwnerRow
+	err := row.Scan(&i.CityID, &i.History)
+	return i, err
+}
+
 const slugTaken = `-- name: SlugTaken :one
 SELECT (EXISTS (SELECT 1 FROM cities WHERE slug = $1::text)
         OR EXISTS (SELECT 1 FROM city_slug_history WHERE slug = $1::text))::boolean AS taken
@@ -1140,4 +1267,52 @@ func (q *Queries) SlugTaken(ctx context.Context, slug string) (bool, error) {
 	var taken bool
 	err := row.Scan(&taken)
 	return taken, err
+}
+
+const updateCityFields = `-- name: UpdateCityFields :one
+UPDATE cities
+SET status = $1::text::city_status, slug = $2::text, name = $3::text,
+    version = version + $4::bigint
+WHERE id = $5::uuid
+RETURNING version
+`
+
+type UpdateCityFieldsParams struct {
+	Status string
+	Slug   string
+	Name   string
+	Bump   int64
+	ID     uuid.UUID
+}
+
+// Поля города после правки; версия растёт на число событий транзакции (R11).
+func (q *Queries) UpdateCityFields(ctx context.Context, arg UpdateCityFieldsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, updateCityFields,
+		arg.Status,
+		arg.Slug,
+		arg.Name,
+		arg.Bump,
+		arg.ID,
+	)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
+}
+
+const upsertCityName = `-- name: UpsertCityName :exec
+INSERT INTO city_names (city_id, locale, name)
+VALUES ($1::uuid, $2::text, $3::text)
+ON CONFLICT (city_id, locale) DO UPDATE SET name = EXCLUDED.name
+`
+
+type UpsertCityNameParams struct {
+	CityID uuid.UUID
+	Locale string
+	Name   string
+}
+
+// Название города на языке (новое или переписанное).
+func (q *Queries) UpsertCityName(ctx context.Context, arg UpsertCityNameParams) error {
+	_, err := q.db.Exec(ctx, upsertCityName, arg.CityID, arg.Locale, arg.Name)
+	return err
 }
