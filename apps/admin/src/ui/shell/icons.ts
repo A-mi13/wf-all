@@ -15,6 +15,8 @@ export const NAV_ICONS = {
   phone:
     'M8 3 H16 A1.6 1.6 0 0 1 17.6 4.6 V19.4 A1.6 1.6 0 0 1 16 21 H8 A1.6 1.6 0 0 1 6.4 19.4 V4.6 A1.6 1.6 0 0 1 8 3 M11 18 H13',
   more: 'M5 12 H5.01 M12 12 H12.01 M19 12 H19.01',
+  // «Выйти» в карточке сотрудника: дверь и стрелка наружу
+  logout: 'M10 4 H6 A2 2 0 0 0 4 6 V18 A2 2 0 0 0 6 20 H10 M15 8 L19 12 L15 16 M19 12 H9',
 } as const;
 
 export type NavIcon = keyof typeof NAV_ICONS;

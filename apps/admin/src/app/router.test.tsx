@@ -363,6 +363,19 @@ describe('каркас AppShell', () => {
     expect(await screen.findByText('модератор · Ставрополь')).toBeInTheDocument();
   });
 
+  test('карточка сотрудника: почта (логин) из getStaffMe', async () => {
+    mount('/audit', meOwner);
+    await page('Журнал действий');
+    expect(screen.getByText(meOwner.email ?? '')).toHaveAttribute('title', meOwner.email);
+  });
+
+  test('без отображаемого имени почта — вместо имени и не дублируется', async () => {
+    const noName: Me = { ...meOwner, display_name: undefined };
+    mount('/audit', noName);
+    await page('Журнал действий');
+    expect(screen.getAllByText(meOwner.email ?? '')).toHaveLength(1);
+  });
+
   test('без права на города — их число вместо названий', async () => {
     mount('/audit', { ...meModerator, permissions: { 'audit.log.read': 'scoped' } });
     await page('Журнал действий');

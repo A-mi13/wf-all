@@ -15,7 +15,8 @@ import { filterNav, findNavItem, type NavGroup, type NavItem } from './types';
 
 export type AppShellProps = {
   groups: NavGroup[]; // всё меню; пункты без права AppShell убирает сам (usePermissionCheck)
-  account: { name: string; details: string }; // «Мария К.», «модератор · Ставрополь»
+  // «Мария К.», почта-логин (нет — не показывается), «модератор · Ставрополь»
+  account: { name: string; email?: string; details: string };
   counts?: Partial<Record<string, number>>; // счётчики пунктов по path («Подтверждения» — Task 15)
   onLogout: () => void;
   loggingOut?: boolean;
@@ -27,8 +28,8 @@ export type AppShellProps = {
 const TABBAR_ITEMS = 4;
 
 // Каркас админки (спека §9.2–9.4, макеты 07 и 08).
-// - Десктоп: сайдбар — бренд, группы меню со счётчиками, карточка сотрудника («имя, роль · города»,
-//   меню профиля, «Выйти»).
+// - Десктоп: сайдбар — бренд, группы меню со счётчиками, карточка сотрудника (имя, почта, «роль ·
+//   города»; ниже в строку — меню профиля и кнопка «Выйти» с иконкой).
 // - Уже breakpoint-mobile (useIsMobile): нижний таббар — первые разделы, открытые на телефоне, и
 //   «Ещё» (шторка: карточка, все разрешённые разделы, меню профиля, «Выйти»).
 // - Меню — по правам (D23): пункта без права нет; прямой адрес такого раздела — ForbiddenState.
@@ -80,14 +81,53 @@ function Sidebar({ menu, current, counts, account, profileMenu, onLogout, loggin
         <Groups menu={menu} current={current} counts={counts} />
       </nav>
       <div className={styles.account}>
-        <p className={styles.accountName}>{account.name}</p>
-        <p className={styles.accountDetails}>{account.details}</p>
-        {profileMenu && <div className={styles.profileMenu}>{profileMenu}</div>}
-        <Button variant="link" className={styles.logout} loading={loggingOut} onClick={onLogout}>
-          {t('nav.logout')}
-        </Button>
+        <AccountText account={account} />
+        <div className={styles.accountActions}>
+          {profileMenu && <div className={styles.profileMenu}>{profileMenu}</div>}
+          <LogoutButton loading={loggingOut} onClick={onLogout} />
+        </div>
       </div>
     </aside>
+  );
+}
+
+// Имя, почта (длинная — многоточием, полная — в подсказке) и «роль · города».
+function AccountText({ account }: { account: AppShellProps['account'] }) {
+  return (
+    <div className={styles.accountText}>
+      <p className={styles.accountName}>{account.name}</p>
+      {account.email && (
+        <p className={styles.accountEmail} title={account.email}>
+          {account.email}
+        </p>
+      )}
+      <p className={styles.accountDetails}>{account.details}</p>
+    </div>
+  );
+}
+
+// «Выйти» — вторичная кнопка с иконкой (иконка декоративная, имя — текст); пока выход идёт — спиннер.
+function LogoutButton({
+  loading,
+  onClick,
+  block,
+}: {
+  loading?: boolean;
+  onClick: () => void;
+  block?: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <Button
+      variant="secondary"
+      block={block}
+      className={styles.logout}
+      loading={loading}
+      onClick={onClick}
+    >
+      {!loading && <Icon name="logout" size={16} />}
+      {t('nav.logout')}
+    </Button>
   );
 }
 
@@ -197,9 +237,9 @@ function NavLink({
   );
 }
 
-function Icon({ name }: { name: NavIcon }) {
+function Icon({ name, size = 19 }: { name: NavIcon; size?: number }) {
   return (
-    <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" className={styles.icon}>
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" className={styles.icon}>
       <path d={NAV_ICONS[name]} />
     </svg>
   );
@@ -243,18 +283,13 @@ function TabBar({ menu, current, counts, account, profileMenu, onLogout, logging
       <Sheet open={open} onClose={() => setOpen(false)} title={t('nav.more_title')}>
         <div className={styles.moreAccount}>
           <Avatar name={account.name} size="md" />
-          <div>
-            <p className={styles.accountName}>{account.name}</p>
-            <p className={styles.accountDetails}>{account.details}</p>
-          </div>
+          <AccountText account={account} />
         </div>
         <nav aria-label={t('nav.label')} className={styles.nav}>
           <Groups menu={menu} current={current} counts={counts} onNavigate={() => setOpen(false)} />
         </nav>
         {profileMenu && <div className={styles.profileMenu}>{profileMenu}</div>}
-        <Button variant="secondary" block loading={loggingOut} onClick={onLogout}>
-          {t('nav.logout')}
-        </Button>
+        <LogoutButton block loading={loggingOut} onClick={onLogout} />
       </Sheet>
     </>
   );

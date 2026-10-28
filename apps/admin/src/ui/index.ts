@@ -53,6 +53,7 @@ export {
   RateLimitedState,
 } from './states';
 export { QrCode } from './QrCode';
+export { type SegmentedProps, type SegmentOption, Segmented } from './Segmented';
 export { type ChipTone, StatusChip } from './StatusChip';
 export { Switch, type SwitchProps } from './Switch';
 export {

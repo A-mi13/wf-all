@@ -146,12 +146,29 @@
   background: var(--wf-color-bg-elevated);
 }
 
+.accountText {
+  flex-grow: 1;
+  min-width: 0;
+}
+
 .accountName {
   margin: 0;
   color: var(--wf-color-text);
   font-size: var(--wf-text-sm);
   line-height: var(--wf-text-sm-line);
   font-weight: 800;
+}
+
+/* Почта-логин: одна строка, длинная — многоточием (полная — в title) */
+.accountEmail {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .accountDetails {
@@ -162,14 +179,36 @@
   font-weight: 500;
 }
 
-.profileMenu {
+/* Язык и «Выйти» — одной строкой под именем; не влезли — переносятся */
+.accountActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wf-space-2);
   margin-top: var(--wf-space-3);
 }
 
+.profileMenu {
+  min-width: 0;
+}
+
+/* в шторке «Ещё» меню профиля — отдельным блоком над «Выйти» */
+.moreAccount ~ .profileMenu {
+  margin: var(--wf-space-3) 0;
+}
+
 .logout {
-  margin-top: var(--wf-space-3);
-  color: var(--wf-color-text-muted);
+  min-height: 36px;
+  padding: 0 var(--wf-space-3);
   font-size: var(--wf-text-xs);
+}
+
+/* сенсорный экран — цель касания не меньше touch-min */
+@media (pointer: coarse) {
+  .logout {
+    min-height: var(--wf-size-touch-min);
+  }
 }
 
 /* ---------- телефон ---------- */

@@ -157,7 +157,12 @@
   "locale": {
     "label": "Interface language",
     "ru": "Русский",
-    "en": "English"
+    "en": "English",
+    "short": {
+      "ru": "RU",
+      "en": "EN"
+    },
+    "option": "{code} — {name}"
   },
   "ui": {
     "close": "Close",

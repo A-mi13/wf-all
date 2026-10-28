@@ -40,6 +40,9 @@ const NAV: NavGroup[] = [
   },
 ];
 
+// Длинная почта: в карточке обрезается многоточием, полная — в подсказке.
+const LONG_EMAIL = 'olga.vladimirovna.moderator@stavropol.wf.example';
+
 // Модератор без права на «Роли и доступ» (в каталоге оно у всех ролей — здесь проверяется
 // механизм: нет права — нет пункта).
 const meNoRoles: Me = {
@@ -53,7 +56,7 @@ function mount(path: string, me: Me, opts: { counts?: Record<string, number> } =
     component: () => (
       <AppShell
         groups={NAV}
-        account={{ name: 'Ольга В.', details: 'модератор · Ставрополь' }}
+        account={{ name: 'Ольга В.', email: LONG_EMAIL, details: 'модератор · Ставрополь' }}
         counts={opts.counts}
         onLogout={onLogout}
         profileMenu={<p>Переключатель языка</p>}
@@ -126,6 +129,31 @@ describe('десктоп: сайдбар', () => {
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
+  test('карточка: почта сотрудника — полной строкой в подсказке (длинная обрезается многоточием)', async () => {
+    mount('/audit', meOwner);
+    await screen.findByRole('heading', { name: 'Страница журнала' });
+    const email = screen.getByText(LONG_EMAIL);
+    expect(email).toHaveAttribute('title', LONG_EMAIL);
+    // имя, почта, роль — сверху вниз
+    const name = screen.getByText('Ольга В.');
+    const details = screen.getByText('модератор · Ставрополь');
+    expect(name.compareDocumentPosition(email) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(email.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('«Выйти» — заметная кнопка с иконкой, с клавиатуры: Tab до неё и Enter', async () => {
+    const { onLogout } = mount('/audit', meOwner);
+    await screen.findByRole('heading', { name: 'Страница журнала' });
+    const logout = screen.getByRole('button', { name: 'Выйти' });
+    // иконка выхода — декоративная: имя кнопки остаётся «Выйти»
+    expect(logout.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    // не текст-ссылка (variant link), а вторичная кнопка
+    expect(logout.className).toMatch(/secondary/);
+    logout.focus();
+    await userEvent.setup().keyboard('{Enter}');
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
   test('счётчик пункта: число и подпись для читалки; 0 не рисуется', async () => {
     mount('/audit', meOwner, { counts: { '/approvals': 3, '/audit': 0 } });
     await screen.findByRole('heading', { name: 'Страница журнала' });
@@ -163,6 +191,7 @@ describe('телефон (< breakpoint-mobile): таббар и «Ещё»', () 
     await user.click(screen.getByRole('button', { name: 'Ещё' }));
     const sheet = screen.getByRole('dialog', { name: 'Разделы и доступ' });
     expect(within(sheet).getByText('Ольга В.')).toBeInTheDocument();
+    expect(within(sheet).getByText(LONG_EMAIL)).toHaveAttribute('title', LONG_EMAIL);
     expect(within(sheet).getByText('Переключатель языка')).toBeInTheDocument();
     expect(within(sheet).getByRole('link', { name: 'Мой доступ' })).toBeInTheDocument();
     await user.click(within(sheet).getByRole('link', { name: 'Роли и доступ' }));

@@ -1,0 +1,63 @@
+/* Сегментный переключатель: контур-«пилюля», выбранный сегмент — заливка pitch и текст accent
+   (как выбранный чип в DataTable), остальные — приглушённые. */
+.root {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+}
+
+.segment {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 32px;
+  padding: 0 var(--wf-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--wf-radius-sm);
+  background: none;
+  color: var(--wf-color-text-subtle);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  transition:
+    background-color var(--wf-duration-fast) var(--wf-ease),
+    color var(--wf-duration-fast) var(--wf-ease);
+}
+
+.segment:hover:not([aria-pressed='true'], [aria-disabled='true']) {
+  color: var(--wf-color-text);
+}
+
+.segment[aria-pressed='true'] {
+  border-color: var(--wf-color-chip-accent-bg);
+  background: var(--wf-color-pitch);
+  color: var(--wf-color-accent);
+  cursor: default;
+}
+
+.segment[aria-disabled='true'] {
+  cursor: progress;
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--wf-color-accent);
+  outline-offset: 1px;
+}
+
+/* Сенсорный экран (шторка «Ещё» на телефоне) — цель касания не меньше touch-min */
+@media (pointer: coarse) {
+  .segment {
+    min-width: var(--wf-size-touch-min);
+    height: var(--wf-size-touch-min);
+  }
+}
