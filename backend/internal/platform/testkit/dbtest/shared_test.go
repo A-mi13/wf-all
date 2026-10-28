@@ -85,5 +85,8 @@ func TestSharedOtherSeedPanics(t *testing.T) {
 			t.Fatal("другой посев для той же роли принят")
 		}
 	}()
-	dbtest.SharedAs(t, "worker", func(context.Context, *pgxpool.Pool) error { return nil })
+	dbtest.SharedAs(t, "worker", otherSeed)
 }
+
+// otherSeed — посев, отличный от probeSeed (функция верхнего уровня: замыкания SharedAs отвергает).
+func otherSeed(context.Context, *pgxpool.Pool) error { return nil }

@@ -119,3 +119,31 @@ func dropDatabase(t *testing.T, c pgtestdb.Config, name string) {
 		t.Error(err)
 	}
 }
+
+// Посев — только функция верхнего уровня (m5-5 ревью G2): «тот же посев» SharedAs узнаёт по коду функции, а два
+// замыкания одного литерала (и два значения метода) делят код при разных захваченных данных — второе молча
+// получило бы клон первого. Замыкание и значение метода — Fatalf с подсказкой, клон не создаётся.
+func TestSharedRejectsClosureSeed(t *testing.T) {
+	data := "посев теста"
+	closure := func(ctx context.Context, owner *pgxpool.Pool) error {
+		_, err := owner.Exec(ctx, "SELECT $1::text", data)
+		return err
+	}
+	var s seeder
+	for name, seed := range map[string]SeedFunc{"замыкание": closure, "значение метода": s.seed} {
+		msg := fatalOf(t, func(tb testing.TB) { SharedAs(tb, "api", seed) })
+		if !strings.Contains(msg, "верхнего уровня") {
+			t.Errorf("%s: Fatalf %q, ждали отказ «функция верхнего уровня»", name, msg)
+		}
+	}
+	sharedMu.Lock()
+	_, registered := shared["api"]
+	sharedMu.Unlock()
+	if registered {
+		t.Fatal("отвергнутый посев занял роль api")
+	}
+}
+
+type seeder struct{}
+
+func (seeder) seed(context.Context, *pgxpool.Pool) error { return nil }

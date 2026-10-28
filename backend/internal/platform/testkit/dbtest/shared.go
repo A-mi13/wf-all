@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -44,11 +46,25 @@ var (
 	sharedHost = &processTB{}
 )
 
+// closureName — имя кода замыкания (`pkg.F.func1`, вложенного `pkg.F.func1.2`, литерала пакетной переменной
+// `pkg.init.func1`/`pkg.glob..func1`) или значения метода (`pkg.T.M-fm`): их код общий у всех экземпляров при разных
+// захваченных данных, поэтому посевом SharedAs они быть не могут (m5-5 ревью G2).
+var closureName = regexp.MustCompile(`\.func\d+(\.\d+)*$|-fm$`)
+
+// funcName — имя функции по адресу кода ("" — nil).
+func funcName(ptr uintptr) string {
+	if ptr == 0 {
+		return ""
+	}
+	return runtime.FuncForPC(ptr).Name()
+}
+
 // SharedAs — общий клон для чтений под ролью role (api, admin, worker): первый вызов для роли клонирует шаблон,
 // применяет grants.sql, вызывает seed пулом владельца и отдаёт Pools{As} — пул под ролью с
 // default_transaction_read_only = on; Owner = nil (владелец — только для посева). Следующие вызовы отдают тот
 // же пул без посева. Ошибка посева или клонирования — Fatalf в каждом вызове для этой роли. Другой seed для той
-// же роли — паника: два набора данных в одном клоне. Пакет обязан объявить
+// же роли — паника: два набора данных в одном клоне. seed — функция верхнего уровня (замыкание и значение метода —
+// Fatalf): «тот же посев» узнаётся по коду функции. Пакет обязан объявить
 // func TestMain(m *testing.M) { os.Exit(dbtest.Main(m)) }.
 func SharedAs(tb testing.TB, role string, seed SeedFunc) Pools {
 	tb.Helper()
@@ -58,6 +74,11 @@ func SharedAs(tb testing.TB, role string, seed SeedFunc) Pools {
 		return Pools{}
 	}
 	ptr := reflect.ValueOf(seed).Pointer()
+	if name := funcName(ptr); seed == nil || closureName.MatchString(name) {
+		tb.Fatalf("dbtest.SharedAs(%s): посев %q — не функция верхнего уровня: замыкание или значение метода с разными "+
+			"данными делят код, и «тот же посев» не различить; объяви посев func seedX(ctx, owner) error", role, name)
+		return Pools{}
+	}
 	sharedMu.Lock()
 	e, ok := shared[role]
 	if !ok {
