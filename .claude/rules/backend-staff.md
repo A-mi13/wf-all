@@ -18,7 +18,8 @@ paths:
   кладёт в принципал и `Version` учётки, и `Label` (`display_name` без крайних пробелов) во всех стадиях (R5,
   `TestLoadStaffCarriesVersionAndLabel`). Хук замка акторов для действий модулей не из `staff` — `lockActors`
   (`RegisterApprovals` → `SetActorLock`): та же перепроверка, что `execLocks`, без `lockOwners`; у `staff.*`
-  `LockActors = false` (страж порядка «владельцы → учётки» — `TestStaffActionsDoNotLockActors`).
+  `LockActors = false` (страж порядка «владельцы → учётки» — `TestStaffActionsDoNotLockActors`; у всех `staff.*`
+  реестра перебором `Registry.Actions()` — `TestStaffRegistryActionsSkipActorLock`).
 - **Блокировки строк — всегда в порядке учётка → сессия → `staff_mfa` → резервные коды** (`LockAccount`,
   `LockSession`, `LockMFA`, `LockUnusedRecoveryCodes`). Иначе блокировка (гасит все сессии под замком учётки) и
   разблокировка в другой вкладке взаимно ждут.
@@ -157,9 +158,12 @@ paths:
   запрос мог ждать, пока правила ужесточили, — отказ `ErrStale` (`failed`, 409 `platform.approval_stale`), не
   `FieldError` (`TestApproveInviteInvalidPayloadFails`). Исполнитель `staff.role_change` до `execLocks` проверяет
   форму payload тем же предикатом, что сценарии (`roleShape` = `validRole` + `normCities`): роль «стало» и её города
-  (в нормальной форме — по возрастанию, без повторов), роль «было» ∈ `perm.Roles`; нарушение — `Fail(ErrStale)`, не
+  (в нормальной форме — по возрастанию, без повторов), роль «было» ∈ `perm.Roles`, города «было» — по возрастанию без
+  повторов (снимок `citiesOf`; иначе `rolePermission` видит изменение, которого нет); нарушение — `Fail(ErrStale)`, не
   500 от enum/CHECK базы (`rolePayloadShaped`; стражи `TestExecRoleChangeRejectsUnknownRole`,
-  `TestExecRoleChangeRejectsCityShape`, `TestExecRoleChangeShapeBeforeLocks`).
+  `TestExecRoleChangeRejectsCityShape`, `TestExecRoleChangeRejectsFromCityShape`, `TestExecRoleChangeShapeBeforeLocks`).
+  Исполнитель `staff.invite` — так же до `execLocks` (`invitePayloadShaped`: роль и города приглашения; стражи
+  `TestExecInviteRejectsUnknownRole`, `TestExecInviteRejectsCityShape`, `TestExecInviteShapeBeforeLocks`).
   - **Порядок замков (m7, M-4):** `lockOwners` (`pg_advisory_xact_lock(ownersLockKey)` — только где возможен страж
     последнего владельца: выключение, сброс, смена роли, `OperatorDisable`; всегда первым) → `lockAccounts` — учётки
     по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`) → сессии → `staff_mfa` →
