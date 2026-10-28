@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,22 +31,27 @@ func fatalOf(t *testing.T, f func(tb testing.TB)) string {
 	return rec.msg
 }
 
+// failingSeeds — сколько раз вызван failingSeed за процесс тестов пакета: счётчик пакетный, как и общий клон роли
+// (Once роли отрабатывает один раз на процесс, а не на итерацию -count).
+var failingSeeds atomic.Int32
+
+// failingSeed — посев, который всегда падает (функция верхнего уровня, как требует SharedAs).
+func failingSeed(context.Context, *pgxpool.Pool) error {
+	failingSeeds.Add(1)
+	return errors.New("посев сломался")
+}
+
 // Ошибка посева — Fatal во всех вызовах SharedAs этой роли, посев не повторяется (второй тест не получает
-// наполовину засеянный клон и не сеет его заново).
+// наполовину засеянный клон и не сеет его заново). Посев — ровно один за процесс: тест повторяем (-count=N).
 func TestSharedSeedErrorFailsEveryCall(t *testing.T) {
-	calls := 0
-	seed := func(context.Context, *pgxpool.Pool) error {
-		calls++
-		return errors.New("посев сломался")
-	}
 	for i := range 2 {
-		msg := fatalOf(t, func(tb testing.TB) { SharedAs(tb, "admin", seed) })
+		msg := fatalOf(t, func(tb testing.TB) { SharedAs(tb, "admin", failingSeed) })
 		if !strings.Contains(msg, "посев сломался") {
 			t.Fatalf("вызов %d: Fatalf %q, ждали ошибку посева", i+1, msg)
 		}
 	}
-	if calls != 1 {
-		t.Fatalf("посевов: %d, ждали 1", calls)
+	if n := failingSeeds.Load(); n != 1 {
+		t.Fatalf("посевов за процесс: %d, ждали 1", n)
 	}
 }
 
