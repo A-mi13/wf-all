@@ -103,6 +103,9 @@ var rows = []row{
 	city(changing("geo.districts.manage", "районы города", allow, allow, scoped, deny)),
 	reading("geo.countries.read", "страны и их правила", allow, allow, allow, allow),
 	changing("geo.countries.manage", "правила страны и её включение", allow, allow, deny, deny),
+	// U7 (docs/05, 5.3) и решение пользователя 27.10: создание страны, валюта, пороги и выключение — всегда вдвоём
+	changing("geo.countries.rules", "создание страны, валюта, возрастные пороги и выключение страны", dual, dual,
+		deny, deny),
 	reading("geo.imports.read", "журнал импорта GeoNames", allow, allow, deny, allow),
 	changing("geo.imports.run", "запустить импорт GeoNames", allow, allow, deny, deny),
 	// platform — версии приложения и флаги функций

@@ -127,6 +127,7 @@ geo»), §5 и §11. Дизайн: `design/screens/07-Админка.dc.html`, `
 | `geo.districts.manage` | allow | allow | scoped | deny |
 | `geo.countries.read` | allow | allow | allow | allow |
 | `geo.countries.manage` | allow | allow | deny | deny |
+| `geo.countries.rules` — создание страны, валюта, возрастные пороги, выключение страны (U7, всегда вдвоём) | dual | dual | deny | deny |
 | `geo.imports.read` | allow | allow | deny | allow |
 | `geo.imports.run` | allow | allow | deny | deny |
 | `platform.versions.read` | allow | allow | allow | allow |

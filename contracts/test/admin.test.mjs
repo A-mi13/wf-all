@@ -22,6 +22,7 @@ const DUAL = [
   'staff.roles.revoke_owner',
   'staff.access.reset_elevated',
   'staff.access.reset',
+  'geo.countries.rules',
 ];
 const expected = {
   staffLogin: ['post', '/v1/staff/auth/login', 'staff', 'anonymous'],

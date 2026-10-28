@@ -134,6 +134,7 @@ approval-approve:
       - staff.roles.revoke_owner
       - staff.access.reset_elevated
       - staff.access.reset
+      - geo.countries.rules
     x-error-codes:
       - platform.approval_not_found
       - platform.approval_self
@@ -193,6 +194,7 @@ approval-reject:
       - staff.roles.revoke_owner
       - staff.access.reset_elevated
       - staff.access.reset
+      - geo.countries.rules
     x-error-codes:
       - platform.approval_not_found
       - platform.approval_self

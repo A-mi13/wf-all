@@ -243,7 +243,8 @@
       },
       "countries": {
         "read": "Countries and their rules",
-        "manage": "Country rules and enabling a country"
+        "manage": "Country rules and enabling a country",
+        "rules": "Creating a country, currency, age thresholds and disabling a country"
       },
       "imports": {
         "read": "GeoNames import log",
