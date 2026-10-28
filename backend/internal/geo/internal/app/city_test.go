@@ -206,7 +206,7 @@ func TestUpdateCityNamesInvalid(t *testing.T) {
 	a := e.admin()
 	for _, c := range []struct{ locale, name, rule string }{
 		{"en", "   ", "minLength"},
-		{"en", "Stav​ropol", "pattern"},
+		{"en", "Stav" + string(rune(0x200b)) + "ropol", "pattern"},
 		{"en", "Stav\nropol", "pattern"},
 		{"de", "Stawropol", "enum"},
 	} {
