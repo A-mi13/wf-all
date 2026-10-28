@@ -161,7 +161,9 @@ paths:
   (в нормальной форме — по возрастанию, без повторов), роль «было» ∈ `perm.Roles`, города «было» — по возрастанию без
   повторов (снимок `citiesOf`; иначе `rolePermission` видит изменение, которого нет); нарушение — `Fail(ErrStale)`, не
   500 от enum/CHECK базы (`rolePayloadShaped`; стражи `TestExecRoleChangeRejectsUnknownRole`,
-  `TestExecRoleChangeRejectsCityShape`, `TestExecRoleChangeRejectsFromCityShape`, `TestExecRoleChangeShapeBeforeLocks`).
+  `TestExecRoleChangeRejectsCityShape`, `TestExecRoleChangeRejectsFromCityShape`, `TestExecRoleChangeShapeBeforeLocks`;
+  законное «было» из ≥ 2 городов — `TestExecRoleChangeFromTwoCities`). Под замком (после `lockedTarget`) «было» payload
+  сверяется с базой — роль цели и `citiesOf`: расхождение — `Fail(ErrStale)` (`TestExecRoleChangeRejectsFromMismatch`).
   Исполнитель `staff.invite` — так же до `execLocks` (`invitePayloadShaped`: роль и города приглашения; стражи
   `TestExecInviteRejectsUnknownRole`, `TestExecInviteRejectsCityShape`, `TestExecInviteShapeBeforeLocks`).
   - **Порядок замков (m7, M-4):** `lockOwners` (`pg_advisory_xact_lock(ownersLockKey)` — только где возможен страж

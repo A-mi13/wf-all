@@ -31,7 +31,7 @@ PostGIS обязателен двум миграциям: `0005_pitches.sql` (п
 0008_economy.sql         очки, кредиты, подписки, косметика, достижения, прогнозы
 0009_moderation_notifications.sql  жалобы, санкции, уведомления, реклама
 0010_seed.sql            Россия, Ставрополь, Михайловск, фича-флаги, достижения
-0011–0016_river_v2..v7.sql  схема очереди River, по файлу на версию (v1 — таблица версий River, у нас её ведёт goose; v8 — пустая для Postgres; страж — TestRiverMigrationLineCovered)
+0011–0016_river_v2..v7.sql  схема очереди River, по файлу на версию (v1 — таблица версий River `river_migration` — не нужна и не создаётся: версии наших миграций River ведёт goose, `0014` отсутствие таблицы терпит; v8 — пустая для Postgres; страж — TestRiverMigrationLineCovered)
 0017_platform_events.sql события: outbox с конвертом (UUIDv7, версии), inbox, курсоры, NOTIFY
 0018_platform_edge.sql   край платформы: rate limit (GCRA), решения антибота, заголовки ответа идемпотентности
 0019_geo.sql             geo: источник GeoNames, названия по локалям, история slug, точки и geoname_id городов, архив районов, geo_read_city_settings; app_versions (платформа)
