@@ -1,0 +1,71 @@
+/* «Справочники» (план B): «Города и запуск» — карточки по макету 07, активация и страница города —
+   панели и карточки в той же стилистике (*). Разделы только с компьютера (desktopOnly). */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-6);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+}
+
+.text {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
+.muted {
+  color: var(--wf-color-text-subtle);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+}
+
+.place {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  min-width: 0;
+}
+
+.name {
+  color: var(--wf-color-text);
+  font-weight: 700;
+}
+
+.chosen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-surface-sunken);
+}
+
+.label {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}

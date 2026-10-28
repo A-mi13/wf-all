@@ -34,7 +34,11 @@ export function DataTable<T>(props: DataTableProps<T>) {
   } else if (rows.length === 0) {
     body = dirty ? <EmptyState action={reset} /> : (props.empty ?? <EmptyState />);
   } else {
-    body = <Rows {...props} rows={rows} />;
+    body = props.card ? (
+      <Cards {...props} rows={rows} card={props.card} />
+    ) : (
+      <Rows {...props} rows={rows} />
+    );
   }
 
   return (
@@ -204,7 +208,6 @@ function Rows<T>({
   loadMoreError,
   onLoadMore,
 }: DataTableProps<T> & { rows: T[] }) {
-  const t = useTranslations('table');
   const stacked = useIsMobile();
   const toggle = (column: string) =>
     onSortChange?.({
@@ -315,18 +318,55 @@ function Rows<T>({
           </tbody>
         </table>
       </div>
-      {hasMore && onLoadMore && (
-        <div className={styles.footer}>
-          {loadMoreError !== undefined && (
-            <p role="alert" className={styles.footerError}>
-              {t('load_more_failed')}
-            </p>
-          )}
-          <Button variant="secondary" loading={loadingMore} onClick={onLoadMore}>
-            {t('load_more')}
-          </Button>
-        </div>
-      )}
+      <LoadMore {...{ hasMore, loadingMore, loadMoreError, onLoadMore }} />
     </>
+  );
+}
+
+// Карточки вместо строк: список с именем таблицы, карточку рисует экран.
+function Cards<T>({
+  label,
+  rowKey,
+  rows,
+  card,
+  hasMore,
+  loadingMore,
+  loadMoreError,
+  onLoadMore,
+}: DataTableProps<T> & { rows: T[]; card: (row: T) => ReactNode }) {
+  return (
+    <>
+      <ul aria-label={label} className={styles.cards}>
+        {rows.map((row) => (
+          <li key={rowKey(row)} className={styles.cardItem}>
+            {card(row)}
+          </li>
+        ))}
+      </ul>
+      <LoadMore {...{ hasMore, loadingMore, loadMoreError, onLoadMore }} />
+    </>
+  );
+}
+
+// «Показать ещё» под данными; не удалось — текст ошибки, строки остаются.
+function LoadMore({
+  hasMore,
+  loadingMore,
+  loadMoreError,
+  onLoadMore,
+}: Pick<DataTableProps<unknown>, 'hasMore' | 'loadingMore' | 'loadMoreError' | 'onLoadMore'>) {
+  const t = useTranslations('table');
+  if (!hasMore || !onLoadMore) return null;
+  return (
+    <div className={styles.footer}>
+      {loadMoreError !== undefined && (
+        <p role="alert" className={styles.footerError}>
+          {t('load_more_failed')}
+        </p>
+      )}
+      <Button variant="secondary" loading={loadingMore} onClick={onLoadMore}>
+        {t('load_more')}
+      </Button>
+    </div>
   );
 }

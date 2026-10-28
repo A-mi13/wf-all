@@ -464,3 +464,31 @@ test('summary={false} — без «Показано N», строки на ме�
   expect(screen.getAllByRole('row')).toHaveLength(3);
   expect(screen.queryByText(/Показано/)).toBeNull();
 });
+
+// Карточки вместо строк (план B, Task 18: «Города и запуск», макет 07) — та же панель фильтров,
+// «Показано N», «Показать ещё» и состояния; данные — список именованный label, карточка — card(row).
+test('card — список карточек вместо таблицы, «Показать ещё» на месте', async () => {
+  const onLoadMore = vi.fn();
+  const { user } = { user: userEvent.setup() };
+  renderWithProviders(
+    <DataTable
+      label="Города"
+      columns={[]}
+      rowKey={(a) => a.id}
+      rows={[account(1), account(2)]}
+      onRetry={() => {}}
+      hasMore
+      onLoadMore={onLoadMore}
+      card={(a) => <article aria-label={a.display_name}>{a.email}</article>}
+    />,
+  );
+  expect(screen.queryByRole('table')).toBeNull();
+  const list = screen.getByRole('list', { name: 'Города' });
+  expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+  expect(within(list).getByRole('article', { name: 'Сотрудник 2' })).toHaveTextContent(
+    'staff2@wf.example',
+  );
+  expect(screen.getByText('Показано 2')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Показать ещё' }));
+  expect(onLoadMore).toHaveBeenCalledOnce();
+});

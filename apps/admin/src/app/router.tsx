@@ -15,6 +15,8 @@ import { useIncomingApprovalsCount } from '../features/approvals/queries';
 import { parseApprovalsSearch } from '../features/approvals/search';
 import { AuditPage } from '../features/audit/AuditPage';
 import { parseAuditSearch } from '../features/audit/search';
+import { CitiesPage } from '../features/geo/CitiesPage';
+import { parseCitiesSearch } from '../features/geo/search';
 import { AcceptInvitePage } from '../features/auth/AcceptInvitePage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { ReauthModal } from '../features/auth/ReauthModal';
@@ -114,7 +116,7 @@ function ActiveShell({ me }: { me: Me }) {
   );
 }
 
-// Разделы «Справочников», экраны которых строят следующие задачи плана B (Task 18–22): пока — только
+// Разделы «Справочников», экраны которых строят следующие задачи плана B (Task 19–22): пока — только
 // шапка раздела. Маршрут нужен уже сейчас: без него прямой адрес дал бы «не найдено» вместо
 // ForbiddenState / DesktopOnlyState каркаса. Задача экрана заменяет component своим.
 function pendingSection(titleKey: string) {
@@ -161,7 +163,9 @@ const routeTree = rootRoute.addChildren([
     createRoute({
       getParentRoute: () => shellRoute,
       path: paths.cities,
-      component: pendingSection('nav.cities'),
+      // фильтры карточек — search-параметры (перезагрузка, «Назад»)
+      validateSearch: parseCitiesSearch,
+      component: CitiesPage,
     }),
     createRoute({
       getParentRoute: () => shellRoute,

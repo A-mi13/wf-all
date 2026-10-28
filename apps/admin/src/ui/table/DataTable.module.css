@@ -325,3 +325,22 @@
   line-height: var(--wf-text-xs-line);
   font-weight: 700;
 }
+
+/* Карточки вместо строк (card): сетка, карточка — от 280 px */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--wf-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cardItem {
+  display: flex;
+  min-width: 0;
+}
+
+.cardItem > * {
+  flex-grow: 1;
+}

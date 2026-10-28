@@ -872,6 +872,69 @@
     "countries": {
       "enabled": "включена",
       "disabled": "выключена"
+    },
+    "cities": {
+      "subtitle": "Лист ожидания, пилот и живые города",
+      "label": "Города",
+      "search": "Название города",
+      "status_filter": "Статус",
+      "status_all": "Все",
+      "statuses": {
+        "live": "Живые",
+        "pilot": "Пилот",
+        "waitlist": "Ожидание"
+      },
+      "country_filter": "Страна",
+      "country_all": "Все страны",
+      "region_filter": "Регион",
+      "region_all": "Все регионы",
+      "population": "жителей",
+      "districts": "{count, plural, one {район} few {района} many {районов} other {района}}",
+      "country_disabled": "страна выключена",
+      "no_region": "регион не задан",
+      "open": "Открыть",
+      "empty_title": "Городов пока нет",
+      "empty_text": "Активируйте первый город из справочника GeoNames."
+    },
+    "activate": {
+      "open": "Активировать город",
+      "title": "Активировать город",
+      "text": "Найдите место в справочнике GeoNames, проверьте страну и регион и выберите статус. Город появится в приложениях, когда страна включена.",
+      "places_label": "Места GeoNames",
+      "search": "Название места",
+      "place_country": "Страна места",
+      "place_country_all": "Все страны",
+      "prompt": "Введите название места",
+      "prompt_text": "Поиск — по началу названия на русском, английском или латиницей.",
+      "columns": {
+        "place": "Место",
+        "region": "Регион",
+        "country": "Страна",
+        "population": "Население",
+        "action": "Действие"
+      },
+      "choose": "Выбрать",
+      "choose_label": "Выбрать {name}",
+      "already": "уже заведён",
+      "open_city": "Открыть город",
+      "open_city_label": "Открыть город {name}",
+      "place": "Место",
+      "place_value": "{name} · {region} · {country}",
+      "place_value_no_region": "{name} · {country}",
+      "change_place": "Другое место",
+      "country": "Страна города",
+      "country_hint": "По умолчанию — страна места. В списке — включённые страны.",
+      "country_off": "{name} (выключена)",
+      "region": "Регион",
+      "region_default": "По данным GeoNames: {region}",
+      "region_default_unknown": "По данным GeoNames",
+      "region_none": "Без региона",
+      "region_hint": "Регион из GeoNames заведётся сам, если его ещё нет.",
+      "region_hint_override": "Страна изменена: регион места к ней не относится. Без выбора у города не будет региона.",
+      "status": "Статус",
+      "submit": "Активировать",
+      "success": "Город «{name}» активирован",
+      "find_city": "Найти город в списке"
     }
   }
 }

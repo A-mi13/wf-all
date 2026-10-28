@@ -40,6 +40,9 @@ export type DataTableProps<T> = {
   empty?: ReactNode;
   // «Показано N» под панелью; false — статичная таблица (матрица прав), где число строк не нужно.
   summary?: boolean;
+  // Карточки вместо строк (сетка, макет «Города и запуск»): та же панель, сводка, «Показать ещё» и
+  // состояния; данные — список с именем label, columns не используются.
+  card?: (row: T) => ReactNode;
   onRowClick?: (row: T) => void;
   activeRowKey?: string; // строка, открытая в панели справа
 };

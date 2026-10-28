@@ -872,6 +872,69 @@
     "countries": {
       "enabled": "enabled",
       "disabled": "disabled"
+    },
+    "cities": {
+      "subtitle": "Waitlist, pilot and live cities",
+      "label": "Cities",
+      "search": "City name",
+      "status_filter": "Status",
+      "status_all": "All",
+      "statuses": {
+        "live": "Live",
+        "pilot": "Pilot",
+        "waitlist": "Waitlist"
+      },
+      "country_filter": "Country",
+      "country_all": "All countries",
+      "region_filter": "Region",
+      "region_all": "All regions",
+      "population": "residents",
+      "districts": "{count, plural, one {district} other {districts}}",
+      "country_disabled": "country disabled",
+      "no_region": "no region",
+      "open": "Open",
+      "empty_title": "No cities yet",
+      "empty_text": "Activate the first city from the GeoNames directory."
+    },
+    "activate": {
+      "open": "Activate city",
+      "title": "Activate city",
+      "text": "Find a place in the GeoNames directory, check the country and region and choose a status. The city appears in the apps once its country is enabled.",
+      "places_label": "GeoNames places",
+      "search": "Place name",
+      "place_country": "Place country",
+      "place_country_all": "All countries",
+      "prompt": "Type a place name",
+      "prompt_text": "Search matches the start of the name in Russian, English or Latin script.",
+      "columns": {
+        "place": "Place",
+        "region": "Region",
+        "country": "Country",
+        "population": "Population",
+        "action": "Action"
+      },
+      "choose": "Choose",
+      "choose_label": "Choose {name}",
+      "already": "already added",
+      "open_city": "Open city",
+      "open_city_label": "Open city {name}",
+      "place": "Place",
+      "place_value": "{name} · {region} · {country}",
+      "place_value_no_region": "{name} · {country}",
+      "change_place": "Another place",
+      "country": "City country",
+      "country_hint": "Defaults to the place country. Only enabled countries are listed.",
+      "country_off": "{name} (disabled)",
+      "region": "Region",
+      "region_default": "From GeoNames: {region}",
+      "region_default_unknown": "From GeoNames",
+      "region_none": "No region",
+      "region_hint": "The GeoNames region is created automatically if it does not exist yet.",
+      "region_hint_override": "Country changed: the place region does not belong to it. Without a choice the city has no region.",
+      "status": "Status",
+      "submit": "Activate",
+      "success": "City “{name}” activated",
+      "find_city": "Find the city in the list"
     }
   }
 }
