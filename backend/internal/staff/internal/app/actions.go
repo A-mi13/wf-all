@@ -81,6 +81,9 @@ type targetPayload struct {
 	Comment  string    `json:"comment,omitempty"`
 }
 
+// errPayloadVersion — payload действия другой версии формата (сбой исполнителя, запрос pending).
+var errPayloadVersion = errors.New("staff: версия формата payload не поддерживается")
+
 // decode — payload действия формата payloadVersion. Иное — сбой (500, запрос pending): payload пишет
 // только сам модуль.
 func decode[T any](raw json.RawMessage, base func(*T) *payloadBase) (T, error) {
@@ -89,7 +92,7 @@ func decode[T any](raw json.RawMessage, base func(*T) *payloadBase) (T, error) {
 		return p, fmt.Errorf("staff: payload: %w", err)
 	}
 	if v := base(&p).V; v != payloadVersion {
-		return p, fmt.Errorf("staff: payload v = %d, ждали %d", v, payloadVersion)
+		return p, fmt.Errorf("staff: payload v = %d, ждали %d: %w", v, payloadVersion, errPayloadVersion)
 	}
 	return p, nil
 }
@@ -391,6 +394,11 @@ func (a *App) execRoleChange(ctx context.Context, tx pgx.Tx, raw json.RawMessage
 	from, err := citiesOf(ctx, q, t.id)
 	if err != nil {
 		return err
+	}
+	// «Было» payload — снимок базы при запросе, а версия цели та же (lockedTarget): расхождение с базой под замком
+	// значит «payload не от сценария» (m1 ревью U1) — право посчитано по подложному «было». Без payload в тексте.
+	if t.role != p.FromRole || !slices.Equal(from, p.FromCityIDs) {
+		return approvals.Fail(approvals.ErrStale)
 	}
 	cities := p.CityIDs
 	if cities == nil {

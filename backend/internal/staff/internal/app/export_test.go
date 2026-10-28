@@ -81,3 +81,6 @@ func SetCleanupBatch(n int32) func() {
 func (a *App) LockActors(ctx context.Context, tx pgx.Tx, ap approvals.Approval, approver *auth.Staff) error {
 	return a.lockActors(ctx, tx, ap, approver)
 }
+
+// ErrPayloadVersion — отказ decode на payload другой версии формата (страж хука замка акторов по реестру).
+var ErrPayloadVersion = errPayloadVersion
