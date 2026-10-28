@@ -10,6 +10,7 @@ import { useIsMobile } from '../media';
 import { Sheet } from '../overlay';
 import { DesktopOnlyState, ForbiddenState, OfflineBanner } from '../states';
 import styles from './AppShell.module.css';
+import { BackLink, BackMemoryProvider } from './BackLink';
 import { NAV_ICONS, type NavIcon } from './icons';
 import { filterNav, findNavItem, type NavGroup, type NavItem } from './types';
 
@@ -35,8 +36,12 @@ const TABBAR_ITEMS = 4;
 // - Меню — по правам (D23): пункта без права нет; прямой адрес такого раздела — ForbiddenState.
 //   desktopOnly на телефоне — DesktopOnlyState (D22). Решает всегда сервер.
 // - Над страницей — баннер «нет сети».
+// - Вложенный экран раздела (адрес внутри раздела меню: /geo/cities/$cityId) — над страницей
+//   BackLink «← раздел» на последний адрес раздела с его фильтрами (BackMemoryProvider). Один на все
+//   вложенные экраны: экран свою кнопку «назад» не заводит.
 export function AppShell(props: AppShellProps) {
   const { groups, children } = props;
+  const t = useTranslations();
   const can = usePermissionCheck();
   const mobile = useIsMobile();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -48,6 +53,13 @@ export function AppShell(props: AppShellProps) {
     content = <ForbiddenState />;
   } else if (mobile && current?.desktopOnly) {
     content = <DesktopOnlyState />;
+  } else if (current && pathname !== current.path) {
+    content = (
+      <>
+        <BackLink to={current.path} label={t(current.labelKey)} />
+        {children}
+      </>
+    );
   }
 
   const page = (
@@ -57,16 +69,20 @@ export function AppShell(props: AppShellProps) {
     </div>
   );
 
-  return mobile ? (
-    <div className={cx(styles.shell, styles.mobile)}>
-      {page}
-      <TabBar {...props} menu={menu} current={current} />
-    </div>
-  ) : (
-    <div className={styles.shell}>
-      <Sidebar {...props} menu={menu} current={current} />
-      {page}
-    </div>
+  return (
+    <BackMemoryProvider>
+      {mobile ? (
+        <div className={cx(styles.shell, styles.mobile)}>
+          {page}
+          <TabBar {...props} menu={menu} current={current} />
+        </div>
+      ) : (
+        <div className={styles.shell}>
+          <Sidebar {...props} menu={menu} current={current} />
+          {page}
+        </div>
+      )}
+    </BackMemoryProvider>
   );
 }
 

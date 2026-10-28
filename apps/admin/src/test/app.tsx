@@ -34,6 +34,8 @@ export function renderApp(path: string, opts: { me?: Me | null; strict?: boolean
     me,
     queryClient,
     at: () => history.location.pathname + history.location.search,
+    // браузерная «Назад»
+    back: () => act(() => history.back()),
     // me перечитывается (как после входа или 401 любого запроса)
     refetchMe: () => act(() => queryClient.refetchQueries({ queryKey: ME_KEY })),
   };

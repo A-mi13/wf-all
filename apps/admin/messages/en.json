@@ -14,6 +14,7 @@
     "me": "My access",
     "label": "Sections",
     "more": "More",
+    "back": "Back to",
     "more_title": "Sections and access",
     "logout": "Sign out",
     "counts": {
@@ -956,7 +957,6 @@
       "find_city": "Find the city in the list"
     },
     "city": {
-      "back": "Back to cities",
       "not_found_title": "City not found",
       "not_found_text": "It is not in the directory or the address is outdated.",
       "facts": {

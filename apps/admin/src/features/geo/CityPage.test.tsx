@@ -125,7 +125,8 @@ describe('права по карточкам', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Город не найден' }),
     ).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'К городам' }));
+    // возврат к родителю — общий BackLink каркаса (V1 п. 7)
+    await userEvent.setup().click(screen.getByRole('link', { name: 'Назад: Города и запуск' }));
     await waitFor(() => expect(app.at()).toBe('/geo/cities'));
   });
 });

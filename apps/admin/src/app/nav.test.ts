@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { meModerator, meOwner } from '../test/me';
+import { findNavItem } from '../ui/shell/types';
 import { NAV, navFor, startPath } from './nav';
-import { paths } from './paths';
+import { AUTH_PATHS, paths } from './paths';
 import type { Me } from './permissions';
 
 // Меню «Справочников» (спека §9.4, план B Task 17): пять разделов после «Безопасности», каждый — со
@@ -89,4 +90,20 @@ describe('«Справочники»', () => {
       flags: '/flags',
     });
   });
+});
+
+// V1 п. 7: у каждого вложенного экрана каркаса (адрес внутри раздела меню, `/geo/cities/$cityId`) —
+// возврат к родителю: AppShell рисует BackLink на раздел, найденный findNavItem. Новый вложенный
+// путь без раздела-родителя в NAV остался бы тупиком — страж ловит это сразу.
+test('каждый вложенный путь каркаса — внутри раздела меню (родитель для «Назад»)', () => {
+  const sections = NAV.flatMap((g) => g.items.map((i) => i.path));
+  const nested = Object.values(paths).filter(
+    (p) => !sections.includes(p) && p.split('/').length > 2 && !AUTH_PATHS.includes(p),
+  );
+  expect(nested).toContain(paths.city);
+  for (const p of nested) {
+    const parent = findNavItem(NAV, p);
+    expect(parent, p).toBeDefined();
+    expect(parent?.path, p).not.toBe(p);
+  }
 });

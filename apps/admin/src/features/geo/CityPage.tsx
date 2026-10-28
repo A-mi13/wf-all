@@ -1,9 +1,8 @@
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useParams } from '@tanstack/react-router';
 import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from 'react';
 import { useFormatter, useTranslations } from 'use-intl';
 import { isApiError } from '../../api/client';
 import type { components } from '../../api/gen/admin';
-import { paths } from '../../app/paths';
 import { useCan } from '../../app/session';
 import { Button, ErrorState, ForbiddenState, LoadingRows, PageHeader, StatusChip } from '../../ui';
 import { CityNamesCard } from './CityNamesCard';
@@ -36,25 +35,9 @@ export function CityPage() {
   );
 }
 
-function BackButton() {
-  const t = useTranslations('geo.city');
-  const navigate = useNavigate();
-  return (
-    <Button variant="secondary" onClick={() => void navigate({ to: paths.cities })}>
-      {t('back')}
-    </Button>
-  );
-}
-
 function NotFound() {
   const t = useTranslations('geo.city');
-  return (
-    <PageHeader
-      title={t('not_found_title')}
-      subtitle={t('not_found_text')}
-      actions={<BackButton />}
-    />
-  );
+  return <PageHeader title={t('not_found_title')} subtitle={t('not_found_text')} />;
 }
 
 function CityView({ city }: { city: GeoCityDetails }) {
@@ -83,12 +66,10 @@ function CityView({ city }: { city: GeoCityDetails }) {
         title={city.name}
         subtitle={<StatusChip tone={status.tone}>{status.text}</StatusChip>}
         actions={
-          <>
-            {canManage && city.geoname_id === null && (
-              <Button onClick={() => setLinking(true)}>{t('link_open')}</Button>
-            )}
-            <BackButton />
-          </>
+          canManage &&
+          city.geoname_id === null && (
+            <Button onClick={() => setLinking(true)}>{t('link_open')}</Button>
+          )
         }
       />
       <CityFacts city={city} ref={facts} />

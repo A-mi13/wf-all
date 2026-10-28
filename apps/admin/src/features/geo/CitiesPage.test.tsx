@@ -77,6 +77,42 @@ describe('карточки', () => {
     await userEvent.setup().click(within(stav).getByRole('button', { name: 'Открыть' }));
     await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
   });
+
+  // V1 п. 7: у вложенного экрана — возврат к родителю общим BackLink, фильтры родителя — из адреса.
+  test('город из отфильтрованного списка → «Назад: Города и запуск» — список с теми же фильтрами', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities?country=RU', { me: meOwner });
+    const user = userEvent.setup();
+    await user.click(within(await card('Ставрополь')).getByRole('button', { name: 'Открыть' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+    const back = await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    expect(back).toHaveAttribute('href', '/geo/cities?country=RU');
+    await user.click(back);
+    await page();
+    expect(app.at()).toBe('/geo/cities?country=RU');
+    expect(await card('Ставрополь')).toBeInTheDocument();
+  });
+
+  test('браузерная «Назад» со страницы города — список с фильтрами', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities?country=RU', { me: meOwner });
+    await userEvent
+      .setup()
+      .click(within(await card('Ставрополь')).getByRole('button', { name: 'Открыть' }));
+    await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    app.back();
+    await page();
+    expect(app.at()).toBe('/geo/cities?country=RU');
+  });
+
+  test('город по прямой ссылке — возврат на список без фильтров', async () => {
+    geoServer();
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: meOwner });
+    expect(await screen.findByRole('link', { name: 'Назад: Города и запуск' })).toHaveAttribute(
+      'href',
+      '/geo/cities',
+    );
+  });
 });
 
 describe('фильтры', () => {
