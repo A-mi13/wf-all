@@ -272,11 +272,17 @@ func business(err error) error {
 // и granted_by — подтвердивший), приглашение invite (письмо), аудит и событие staff.invited; почта занята
 // (гонка двух приглашений) — Fail(staff.email_taken), ничего не создано. Почта выключенной учётки
 // (existing_id, версия та же) — та же учётка снова: новое имя, роль и города, сброс доступа, приглашение
-// invite.
+// invite. Роль и города payload — до execLocks тем же предикатом, что сценарий (invitePayloadShaped).
 func (a *App) execInvite(ctx context.Context, tx pgx.Tx, raw json.RawMessage, approver *auth.Staff) error {
 	p, err := decode(raw, (*invitePayload).b)
 	if err != nil {
 		return err
+	}
+	// Как у staff.role_change (W5-back, M1 ревью G3): нарушение формы — бизнес-отказ (failed, 409
+	// platform.approval_stale), а не 500 от enum, CHECK или PK базы; отказ не ждёт замков учёток; payload в текст
+	// не попадает.
+	if !invitePayloadShaped(p) {
+		return approvals.Fail(approvals.ErrStale)
 	}
 	q := staffdb.New(tx)
 	target := uuid.Nil
@@ -321,6 +327,13 @@ func (a *App) execInvite(ctx context.Context, tx pgx.Tx, raw json.RawMessage, ap
 		return err
 	}
 	return publishInvited(ctx, c, p.Role)
+}
+
+// invitePayloadShaped — роль приглашения из perm.Roles и её города проходят roleShape и уже в его нормальной форме
+// (по возрастанию, без повторов — так их пишет Invite).
+func invitePayloadShaped(p invitePayload) bool {
+	cities, err := roleShape(p.Role, p.CityIDs)
+	return err == nil && slices.Equal(cities, p.CityIDs)
 }
 
 // reinvite — почта выключенной учётки t приглашена снова (§2.6): роль и города из запроса, затем сброс
