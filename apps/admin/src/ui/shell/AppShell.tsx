@@ -288,7 +288,7 @@ function TabBar({ menu, current, counts, account, profileMenu, onLogout, logging
         <nav aria-label={t('nav.label')} className={styles.nav}>
           <Groups menu={menu} current={current} counts={counts} onNavigate={() => setOpen(false)} />
         </nav>
-        {profileMenu && <div className={styles.profileMenu}>{profileMenu}</div>}
+        {profileMenu && <div className={styles.sheetProfileMenu}>{profileMenu}</div>}
         <LogoutButton block loading={loggingOut} onClick={onLogout} />
       </Sheet>
     </>

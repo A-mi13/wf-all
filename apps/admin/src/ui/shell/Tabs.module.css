@@ -36,10 +36,10 @@
   cursor: pointer;
 }
 
+/* выбранная — цветом и подчёркиванием; жирность та же, иначе вкладка шире и соседи сдвигаются */
 .tab[aria-selected='true'] {
   border-bottom-color: var(--wf-color-accent);
   color: var(--wf-color-text);
-  font-weight: 800;
 }
 
 .tab:focus-visible {

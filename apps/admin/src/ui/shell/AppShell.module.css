@@ -179,28 +179,43 @@
   font-weight: 500;
 }
 
-/* Язык и «Выйти» — одной строкой под именем; не влезли — переносятся */
+/* Язык и «Выйти» — одной строкой под именем. Сетка, а не flex с переносом: язык — своя колонка по
+   содержимому (сегменты фиксированной ширины), «Выйти» — в остатке справа. Смена языка меняет подпись
+   «Выйти» / «Sign out», но не двигает переключатель и не переносит строку (пользователь, 28.10).
+   Меню профиля раскрыто в сетку (display: contents): ошибка смены языка — второй строкой во всю
+   ширину, а не колонкой рядом с кнопкой. */
 .accountActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
   gap: var(--wf-space-2);
   margin-top: var(--wf-space-3);
 }
 
 .profileMenu {
-  min-width: 0;
+  display: contents;
+}
+
+.profileMenu > :not(:first-child) {
+  grid-column: 1 / -1;
+}
+
+.accountActions .logout {
+  grid-row: 1;
+  grid-column: 2;
+  justify-self: end;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 /* в шторке «Ещё» меню профиля — отдельным блоком над «Выйти» */
-.moreAccount ~ .profileMenu {
+.sheetProfileMenu {
   margin: var(--wf-space-3) 0;
 }
 
 .logout {
   min-height: 36px;
-  padding: 0 var(--wf-space-3);
+  padding: 0 var(--wf-space-2);
   font-size: var(--wf-text-xs);
 }
 

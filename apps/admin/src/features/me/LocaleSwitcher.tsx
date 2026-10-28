@@ -11,7 +11,8 @@ const LOCALES: Locale[] = ['ru', 'en'];
 // телефоне): компактный сегмент «RU · EN» в одну строку (в макете 07 переключателя нет). На кнопке —
 // код языка, имя «RU — Русский» начинается с видимого текста (WCAG 2.5.3), полное — и в подсказке.
 // Выбор сохраняется PATCH /v1/staff/me/locale и после 204 сразу меняет тексты, без перезагрузки.
-// Ошибка — FormError (текст по коду, откат на errors.internal).
+// Ошибка — FormError (текст по коду, откат на errors.internal). Фрагмент без обёртки: карточка
+// сотрудника раскладывает сегменты и ошибку по своей сетке (ошибка — строкой ниже во всю ширину).
 export function LocaleSwitcher() {
   const t = useTranslations('locale');
   const api = useApi();
@@ -27,7 +28,7 @@ export function LocaleSwitcher() {
   );
 
   return (
-    <div>
+    <>
       <Segmented
         label={t('label')}
         value={current}
@@ -42,6 +43,6 @@ export function LocaleSwitcher() {
         }))}
       />
       <FormError error={save.error} />
-    </div>
+    </>
   );
 }

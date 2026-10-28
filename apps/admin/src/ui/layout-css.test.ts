@@ -68,3 +68,33 @@ test('кнопка фильтров таблицы прижата к право�
     /margin-inline-start:\s*auto/,
   );
 });
+
+// Переключатель языка «прыгал» при смене языка (пользователь, 28.10): ширина сегментов не должна
+// зависеть от текста и состояния, а соседи по строке («Выйти» / «Sign out») — двигать его.
+test('сегменты: равные колонки фиксированной ширины, выбранный — без смены метрик шрифта', () => {
+  const root = rule('ui/Segmented.module.css', '.root');
+  expect(root).toMatch(/display:\s*inline-grid/);
+  // все сегменты — одной фиксированной ширины (не по тексту)
+  expect(root).toMatch(/grid-auto-columns:\s*(\d+px|var\(--wf-[\w-]+\))/);
+  expect(rule('ui/Segmented.module.css', '.segment')).toMatch(/width:\s*100%/);
+  expect(rule('ui/Segmented.module.css', ".segment[aria-pressed='true']")).not.toMatch(
+    /font|letter-spacing|padding|border-width/,
+  );
+});
+
+test('карточка сотрудника: язык — своя колонка по содержимому, «Выйти» — в остатке строки и не переносит её', () => {
+  const row = rule('ui/shell/AppShell.module.css', '.accountActions');
+  expect(row).toMatch(/display:\s*grid/);
+  expect(row).toMatch(/grid-template-columns:\s*max-content\s+minmax\(0,\s*1fr\)/);
+  // «Выйти» — во второй колонке первой строки, справа, без переноса подписи
+  const logout = rule('ui/shell/AppShell.module.css', '.accountActions .logout');
+  expect(logout).toMatch(/grid-column:\s*2/);
+  expect(logout).toMatch(/white-space:\s*nowrap/);
+  expect(row).not.toMatch(/flex-wrap/);
+});
+
+test('вкладки: выбранная отличается цветом и подчёркиванием, не жирностью (соседи не сдвигаются)', () => {
+  expect(rule('ui/shell/Tabs.module.css', ".tab[aria-selected='true']")).not.toMatch(
+    /font|letter-spacing|padding/,
+  );
+});

@@ -1,8 +1,12 @@
 /* Сегментный переключатель: контур-«пилюля», выбранный сегмент — заливка pitch и текст accent
-   (как выбранный чип в DataTable), остальные — приглушённые. */
+   (как выбранный чип в DataTable), остальные — приглушённые. Колонки равные и фиксированной ширины,
+   выбранный меняет только цвета (жирность и отступы те же): смена выбора и языка подписей не
+   двигает ни сегменты, ни соседей (пользователь, 28.10). */
 .root {
   box-sizing: border-box;
-  display: inline-flex;
+  display: inline-grid;
+  grid-auto-columns: 40px;
+  grid-auto-flow: column;
   flex-shrink: 0;
   gap: 2px;
   padding: 2px;
@@ -16,9 +20,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 36px;
+  width: 100%;
+  min-width: 0;
   height: 32px;
-  padding: 0 var(--wf-space-2);
+  padding: 0;
+  overflow: hidden;
   border: 1px solid transparent;
   border-radius: var(--wf-radius-sm);
   background: none;
@@ -56,8 +62,11 @@
 
 /* Сенсорный экран (шторка «Ещё» на телефоне) — цель касания не меньше touch-min */
 @media (pointer: coarse) {
+  .root {
+    grid-auto-columns: var(--wf-size-touch-min);
+  }
+
   .segment {
-    min-width: var(--wf-size-touch-min);
     height: var(--wf-size-touch-min);
   }
 }
