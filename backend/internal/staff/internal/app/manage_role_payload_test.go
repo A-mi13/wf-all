@@ -195,8 +195,9 @@ func TestExecRoleChangeRejectsFromMismatch(t *testing.T) {
 		fields func(s []uuid.UUID) map[string]any
 	}{
 		{"роль было не та", func(s []uuid.UUID) map[string]any {
-			// цель — admin, «было» — модератор с одним городом: право revoke/grant вместо grant_elevated
-			return map[string]any{"from_role": "moderator", "from_city_ids": s[:1], "role": "moderator", "city_ids": s}
+			// цель — admin без городов, «было» — модератор с теми же (пустыми) городами: отказ даёт только сверка роли
+			// (m4 повторного ревью U1), право revoke/grant вместо grant_elevated
+			return map[string]any{"from_role": "moderator", "from_city_ids": []uuid.UUID{}, "role": "moderator", "city_ids": s}
 		}},
 		{"города было не те", func(s []uuid.UUID) map[string]any {
 			// цель — admin без городов, «было» — admin с городом (отсортированный список)
