@@ -2,7 +2,6 @@ package geo
 
 import (
 	"context"
-	"errors"
 	"math"
 	"slices"
 	"strings"
@@ -19,10 +18,6 @@ import (
 const citiesSet = "geo.cities(rank,population,id)"
 
 var citiesKinds = []page.Kind{page.KindInt64, page.KindInt64, page.KindUUID}
-
-// errBadPoint — координаты вне диапазона или не числа. HTTP-слой отвечает на это 400 раньше
-// (спека §4.2); здесь — защита от ошибки PostGIS (500) при вызове не из HTTP.
-var errBadPoint = errors.New("geo: координаты вне диапазона")
 
 type reader struct{ st *store.Store }
 
@@ -120,7 +115,7 @@ func (r *reader) Nearest(ctx context.Context, p Point, locale string) (Nearest, 
 	// ±Inf — вне диапазона; NaN проверяется явно: сравнения с ним всегда ложны. PostGIS сам не
 	// откажет: geography молча сдвигает координаты в диапазон, а NaN пропускает.
 	if math.IsNaN(p.Lat) || math.IsNaN(p.Lon) || p.Lat < -90 || p.Lat > 90 || p.Lon < -180 || p.Lon > 180 {
-		return Nearest{}, errBadPoint
+		return Nearest{}, ErrBadPoint
 	}
 	loc := nameLocale(locale)
 	var out Nearest

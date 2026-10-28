@@ -20,6 +20,11 @@ paths:
   платный матч без суммы и бесплатный с суммой; прогнозы только за заработанные очки, не за купленные;
   больше трёх снятых броней позиции у игрока в команде; изменение записи аудит-лога.
 - Цикл TDD — `./task backend:test:watch`; `./task backend:test` всегда прогоняет заново.
-- Тесты с БД — `internal/platform/testkit/dbtest` (клон базы на тест); HTTP — `testkit/apitest` (проверка по контракту).
+- Тесты с БД — `internal/platform/testkit/dbtest`; HTTP — `testkit/apitest` (проверка по контракту). Чтения сценариев
+  (без HTTP-конвейера) — `dbtest.SharedAs(t, роль, посев)`: один засеянный клон на пакет под ролью прода
+  (`api`/`admin`/`worker`), только на чтение, пул владельца тесту не отдаётся; посев — одна функция на пакет и роль,
+  ожидания списков учитывают весь посев; пакету нужен `func TestMain(m *testing.M) { os.Exit(dbtest.Main(m)) }`
+  (уборка клона). HTTP-конвейер (пишет лимиты, `last_seen_at`, ключи идемпотентности и на `GET`) и запись —
+  `dbtest.New*` (клон на тест).
 - Кодогенерация бэкенда — `./task backend:gen` (sqlc + oapi-codegen).
 - `go tool -modfile=...` запускать с cwd внутри `backend/`, иначе `cannot find main module`.

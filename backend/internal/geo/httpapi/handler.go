@@ -156,8 +156,25 @@ func problem(err error) error {
 	case errors.Is(err, geo.ErrBadQuery):
 		// q прошёл схему (1–100 символов), но после normalize_text пуст: «!!!», одни пробелы
 		return httpx.NewFieldError("query.q", "minLength")
+	case errors.Is(err, geo.ErrBadPoint):
+		// защита в глубину: checkPoint отсекает точку раньше; отказ сценария относится к точке целиком
+		return badPoint
 	}
 	return err
+}
+
+// badPoint — 400 validation.failed на точку, отвергнутую сценарием (geo.ErrBadPoint): правило схемы, которое
+// нарушено, сценарий не сообщает, поэтому поля — обе координаты, правило — format.
+var badPoint httpx.ProblemError = pointProblem{}
+
+type pointProblem struct{}
+
+func (pointProblem) Error() string { return "geo: точка отвергнута сценарием" }
+
+func (pointProblem) Problem() httpx.Problem {
+	return httpx.Problem{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed, Errors: []httpx.FieldError{
+		{Field: "query.lat", Code: "format"}, {Field: "query.lon", Code: "format"},
+	}}
 }
 
 func city(c geo.City) oapi.City {

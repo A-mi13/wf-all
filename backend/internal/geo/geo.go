@@ -119,6 +119,9 @@ var (
 	ErrCityNotFound = errors.New("geo: город не найден")
 	// ErrBadQuery — q пуст после normalize_text (400 validation.failed).
 	ErrBadQuery = errors.New("geo: пустой запрос после нормализации")
+	// ErrBadPoint — координаты вне диапазона или не числа. HTTP-слой отвечает 400 раньше (спека §4.2); здесь —
+	// защита от ошибки PostGIS при вызове не из HTTP, а дошедшая до HTTP — тоже 400 validation.failed.
+	ErrBadPoint = errors.New("geo: координаты вне диапазона")
 )
 
 // Service — чтения справочника. locale — согласованная локаль ("" — языки стран записей).

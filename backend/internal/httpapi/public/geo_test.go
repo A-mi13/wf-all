@@ -379,19 +379,40 @@ func TestNearestHasOwnRateClass(t *testing.T) {
 }
 
 // Координаты не попадают в лог приложения (спека geo §4.2): лог доступа пишет путь без query,
-// ошибки валидации — без значений.
+// ошибки валидации — без значений (NaN и выход за диапазон — lat=91, geo 1 Task 7/8), сбой сценария (500)
+// пишет причину без запроса.
 func TestNearestCoordinatesNotLogged(t *testing.T) {
 	var logs bytes.Buffer
+	o := testOptions(t)
+	o.Geo = &fakeGeo{err: errors.New("pgx: сломалось")}
+	failing, err := public.NewHandler(slog.New(slog.NewTextHandler(&logs, nil)), o)
+	if err != nil {
+		t.Fatal(err)
+	}
 	h, err := public.NewHandler(slog.New(slog.NewTextHandler(&logs, nil)), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	serve(h, request("/v1/cities/nearest?lat=45.0417&lon=41.9734"))
-	serve(h, request("/v1/cities/nearest?lat=NaN&lon=41.9734"))
-	if !strings.Contains(logs.String(), "/v1/cities/nearest") {
-		t.Fatal("лога доступа нет — страж проверяет вхолостую")
+	for _, c := range []struct {
+		h      http.Handler
+		query  string
+		status int
+	}{
+		{h, "lat=45.0417&lon=41.9734", http.StatusOK},
+		{h, "lat=NaN&lon=41.9734", http.StatusBadRequest},
+		{h, "lat=91.0517&lon=41.9734", http.StatusBadRequest},
+		{failing, "lat=45.0417&lon=41.9734", http.StatusInternalServerError},
+	} {
+		if got := serve(c.h, request("/v1/cities/nearest?"+c.query)).Code; got != c.status {
+			t.Fatalf("%s: %d, ждали %d", c.query, got, c.status)
+		}
 	}
-	if strings.Contains(logs.String(), "45.0417") || strings.Contains(logs.String(), "41.9734") {
-		t.Fatalf("координаты в логе: %s", logs.String())
+	if !strings.Contains(logs.String(), "/v1/cities/nearest") || !strings.Contains(logs.String(), "сломалось") {
+		t.Fatal("лога доступа или причины 500 нет — страж проверяет вхолостую")
+	}
+	for _, v := range []string{"45.0417", "41.9734", "91.0517"} {
+		if strings.Contains(logs.String(), v) {
+			t.Fatalf("координата %s в логе: %s", v, logs.String())
+		}
 	}
 }
