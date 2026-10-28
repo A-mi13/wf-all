@@ -28,7 +28,6 @@ const (
 // Handler — операции тега geo; встраивается в internal/httpapi/admin.Server указателем. Собирается New;
 // нулевой Handler (тесты конвейера; cmd/admin-api собирает настоящий) отвечает 501 http.not_implemented.
 type Handler struct {
-	svc   geo.Service
 	read  *app.AdminReader // чтения админки (план B, Task 9); nil — 501
 	admin *app.Admin       // сценарии с записью (Task 10–14); nil — 501
 }
@@ -42,10 +41,11 @@ type Deps struct {
 	Log   *slog.Logger
 }
 
-// New — хендлер поверх чтения справочника (geo.New на пуле admin-api) и сценариев админки (d.Pool — тот же
-// пул). Без пула операции плана B отвечают 501, без часов — 501 операции с записью (как нулевой Handler).
-func New(svc geo.Service, d Deps) *Handler {
-	h := &Handler{svc: svc}
+// New — хендлер сценариев админки на d.Pool. Первый параметр — сервис чтения справочника по сигнатуре сборки
+// плана B (Task 16: New(svc, Deps)); с Task 9 чтения админки идут через AdminReader, сервис не используется (ревью G5
+// m6 — поле убрано). Без пула операции плана B отвечают 501, без часов — 501 операции с записью (как нулевой Handler).
+func New(_ geo.Service, d Deps) *Handler {
+	h := &Handler{}
 	if d.Pool != nil {
 		h.read = app.NewAdminReader(d.Pool)
 		if d.Clock != nil {

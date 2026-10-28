@@ -87,7 +87,7 @@ func (q *Queries) ActivateCountry(ctx context.Context, code string) (ActivateCou
 	return i, err
 }
 
-const activateInsertCity = `-- name: ActivateInsertCity :exec
+const activateInsertCity = `-- name: ActivateInsertCity :execrows
 INSERT INTO cities (id, country_id, region_id, name, slug, timezone, centroid, status, population, geoname_id,
                     version, created_at, updated_at)
 SELECT $1::uuid, $2::uuid, $3::uuid, $4::text,
@@ -109,9 +109,11 @@ type ActivateInsertCityParams struct {
 	GeonameID int64
 }
 
-// Новый город из места: точка — из источника, версия 1, время — часов сценария.
-func (q *Queries) ActivateInsertCity(ctx context.Context, arg ActivateInsertCityParams) error {
-	_, err := q.db.Exec(ctx, activateInsertCity,
+// Новый город из места: точка — из источника, версия 1, время — часов сценария. 0 строк — место удалено
+// параллельным импортом после ActivatePlace (geo.place_not_found, а не FK на city_names).
+// Регион по admin1 ставится после вставки (ActivateSetCityRegion): порядок замков «город → регион», как у сверки.
+func (q *Queries) ActivateInsertCity(ctx context.Context, arg ActivateInsertCityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, activateInsertCity,
 		arg.ID,
 		arg.CountryID,
 		arg.RegionID,
@@ -122,7 +124,10 @@ func (q *Queries) ActivateInsertCity(ctx context.Context, arg ActivateInsertCity
 		arg.Now,
 		arg.GeonameID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const activateInsertRegion = `-- name: ActivateInsertRegion :one
@@ -300,6 +305,22 @@ func (q *Queries) ActivateRegionOfCountry(ctx context.Context, arg ActivateRegio
 	var i ActivateRegionOfCountryRow
 	err := row.Scan(&i.ID, &i.AsciiName)
 	return i, err
+}
+
+const activateSetCityRegion = `-- name: ActivateSetCityRegion :exec
+UPDATE cities SET region_id = $1::uuid WHERE id = $2::uuid
+`
+
+type ActivateSetCityRegionParams struct {
+	RegionID uuid.UUID
+	ID       uuid.UUID
+}
+
+// Регион нового города по admin1 — после вставки города (порядок замков «город → регион», как у сверки импорта).
+// updated_at ставит триггер cities_updated_at (now() транзакции активации).
+func (q *Queries) ActivateSetCityRegion(ctx context.Context, arg ActivateSetCityRegionParams) error {
+	_, err := q.db.Exec(ctx, activateSetCityRegion, arg.RegionID, arg.ID)
+	return err
 }
 
 const adminCityExists = `-- name: AdminCityExists :one

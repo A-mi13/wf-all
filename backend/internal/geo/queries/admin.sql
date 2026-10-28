@@ -290,8 +290,10 @@ SELECT locale, name FROM geonames_place_names WHERE geoname_id = sqlc.arg(geonam
 SELECT (EXISTS (SELECT 1 FROM cities WHERE slug = sqlc.arg(slug)::text)
         OR EXISTS (SELECT 1 FROM city_slug_history WHERE slug = sqlc.arg(slug)::text))::boolean AS taken;
 
--- Новый город из места: точка — из источника, версия 1, время — часов сценария.
--- name: ActivateInsertCity :exec
+-- Новый город из места: точка — из источника, версия 1, время — часов сценария. 0 строк — место удалено
+-- параллельным импортом после ActivatePlace (geo.place_not_found, а не FK на city_names).
+-- Регион по admin1 ставится после вставки (ActivateSetCityRegion): порядок замков «город → регион», как у сверки.
+-- name: ActivateInsertCity :execrows
 INSERT INTO cities (id, country_id, region_id, name, slug, timezone, centroid, status, population, geoname_id,
                     version, created_at, updated_at)
 SELECT sqlc.arg(id)::uuid, sqlc.arg(country_id)::uuid, sqlc.narg(region_id)::uuid, sqlc.arg(name)::text,
@@ -305,3 +307,8 @@ WHERE p.geoname_id = sqlc.arg(geoname_id)::bigint;
 INSERT INTO city_names (city_id, locale, name)
 SELECT sqlc.arg(city_id)::uuid, u.locale, u.name
 FROM (SELECT unnest(sqlc.arg(locales)::text[]) AS locale, unnest(sqlc.arg(names)::text[]) AS name) AS u;
+
+-- Регион нового города по admin1 — после вставки города (порядок замков «город → регион», как у сверки импорта).
+-- updated_at ставит триггер cities_updated_at (now() транзакции активации).
+-- name: ActivateSetCityRegion :exec
+UPDATE cities SET region_id = sqlc.arg(region_id)::uuid WHERE id = sqlc.arg(id)::uuid;

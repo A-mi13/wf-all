@@ -145,7 +145,7 @@ func (a *Admin) Activate(ctx context.Context, s *auth.Staff, in Activation, m ap
 			return geo.ErrCityAlreadyActive
 		}
 		a.at(ctx, "region")
-		regionID, regionASCII, err := a.activationRegion(ctx, q, in.RegionID, overridden, place, country, code, now)
+		plan, err := a.planRegion(ctx, q, in.RegionID, overridden, place, country, code)
 		if err != nil {
 			return err
 		}
@@ -153,13 +153,29 @@ func (a *Admin) Activate(ctx context.Context, s *auth.Staff, in Activation, m ap
 		if err != nil {
 			return err
 		}
+		// Порядок замков «город → регион» — как у сверки импорта (import.go, link: ImportLinkCity, затем
+		// ImportLinkRegion; ревью G5 I1). Сначала город (уникальный geoname_id), регион по admin1 — после: иначе
+		// активация держала бы (страна, admin1) и ждала geoname_id, а сверка — наоборот, и PostgreSQL убил бы одну
+		// из них 40P01 (db.InTx его не повторяет: 500 на «Активировать» или падение импорта страны).
 		cityID := id.New()
-		slug, err := a.insertCity(ctx, tx, place, regionASCII, geodb.ActivateInsertCityParams{
-			ID: cityID, CountryID: country.ID, RegionID: regionID, Name: names[country.DefaultLocale],
+		slug, err := a.insertCity(ctx, tx, place, plan.ascii, geodb.ActivateInsertCityParams{
+			ID: cityID, CountryID: country.ID, RegionID: plan.id, Name: names[country.DefaultLocale],
 			Timezone: place.Timezone, Status: string(status), Now: now, GeonameID: place.GeonameID,
 		})
 		if err != nil {
 			return err
+		}
+		regionID := plan.id
+		if plan.admin1 != nil {
+			a.at(ctx, "ensure")
+			rid, err := ensureRegion(ctx, q, country.ID, code, country.DefaultLocale, place.Admin1Code, *plan.admin1, now)
+			if err != nil {
+				return err
+			}
+			if err := q.ActivateSetCityRegion(ctx, geodb.ActivateSetCityRegionParams{ID: cityID, RegionID: rid}); err != nil {
+				return err
+			}
+			regionID = &rid
 		}
 		arg := geodb.ActivateCityNamesParams{CityID: cityID}
 		for _, l := range namesOrder(country.DefaultLocale) {
@@ -190,22 +206,32 @@ func (a *Admin) Activate(ctx context.Context, s *auth.Staff, in Activation, m ap
 	return card, err
 }
 
-// activationRegion — регион нового города и ascii-название региона для суффикса slug (шаг 3).
-func (a *Admin) activationRegion(ctx context.Context, q *geodb.Queries, requested *uuid.UUID, overridden bool,
-	place geodb.ActivatePlaceRow, country geodb.ActivateCountryRow, code string, now time.Time,
-) (*uuid.UUID, string, error) {
+// regionPlan — регион нового города, решённый чтениями без замков (шаг 3): id — регион из запроса (уже есть);
+// admin1 — регион по коду места, который заводится (ensureRegion) только после вставки города; ascii — суффикс slug.
+type regionPlan struct {
+	id     *uuid.UUID
+	admin1 *geodb.ActivateAdmin1Row
+	ascii  string
+}
+
+// planRegion — регион нового города (шаг 3) только чтениями: region_id запроса — своей страны (иначе
+// geo.ErrRegionNotFound); без него и без переопределения страны — admin1 места; переопределена страна, admin1 «00»
+// или пуст — без региона.
+func (a *Admin) planRegion(ctx context.Context, q *geodb.Queries, requested *uuid.UUID, overridden bool,
+	place geodb.ActivatePlaceRow, country geodb.ActivateCountryRow, code string,
+) (regionPlan, error) {
 	if requested != nil {
 		r, err := q.ActivateRegionOfCountry(ctx, geodb.ActivateRegionOfCountryParams{ID: *requested, CountryID: country.ID})
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, "", geo.ErrRegionNotFound
+			return regionPlan{}, geo.ErrRegionNotFound
 		}
 		if err != nil {
-			return nil, "", err
+			return regionPlan{}, err
 		}
-		return &r.ID, r.AsciiName, nil
+		return regionPlan{id: &r.ID, ascii: r.AsciiName}, nil
 	}
 	if overridden || place.Admin1Code == admin1Missing || place.Admin1Code == admin1Unknown {
-		return nil, "", nil
+		return regionPlan{}, nil
 	}
 	a1, err := q.ActivateAdmin1(ctx, geodb.ActivateAdmin1Params{Locale: country.DefaultLocale, CountryCode: code,
 		Admin1Code: place.Admin1Code})
@@ -213,16 +239,12 @@ func (a *Admin) activationRegion(ctx context.Context, q *geodb.Queries, requeste
 		// импорт проверяет, что admin1 мест есть в admin1 страны (R34): без строки — регион не ставится
 		a.d.Log.WarnContext(ctx, "geo: активация — нет admin1 места, город без региона",
 			"geoname_id", place.GeonameID, "admin1", place.Admin1Code)
-		return nil, "", nil
+		return regionPlan{}, nil
 	}
 	if err != nil {
-		return nil, "", err
+		return regionPlan{}, err
 	}
-	rid, err := ensureRegion(ctx, q, country.ID, code, country.DefaultLocale, place.Admin1Code, a1, now)
-	if err != nil {
-		return nil, "", err
-	}
-	return &rid, a1.AsciiName, nil
+	return regionPlan{admin1: &a1, ascii: a1.AsciiName}, nil
 }
 
 // ensureRegion — регион страны с кодом admin1: существующий или новый с названиями по §3.4 (строка языка
@@ -311,14 +333,18 @@ func (a *Admin) insertCity(ctx context.Context, tx pgx.Tx, place geodb.ActivateP
 }
 
 // insertCitySavepoint — одна попытка вставки: false — slug заняли параллельно (23505 cities_slug_key, откат до
-// savepoint); место заняли параллельно (23505 cities_geoname_id_key) — geo.ErrCityAlreadyActive.
+// savepoint); место заняли параллельно (23505 cities_geoname_id_key) — geo.ErrCityAlreadyActive; место удалил
+// параллельный импорт (вставлено 0 строк) — geo.ErrPlaceNotFound.
 func insertCitySavepoint(ctx context.Context, tx pgx.Tx, arg geodb.ActivateInsertCityParams) (bool, error) {
 	sp, err := tx.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
-	err = geodb.New(sp).ActivateInsertCity(ctx, arg)
+	n, err := geodb.New(sp).ActivateInsertCity(ctx, arg)
 	if err == nil {
+		if n == 0 {
+			return false, errors.Join(geo.ErrPlaceNotFound, sp.Rollback(ctx))
+		}
 		return true, sp.Commit(ctx)
 	}
 	if rerr := sp.Rollback(ctx); rerr != nil {

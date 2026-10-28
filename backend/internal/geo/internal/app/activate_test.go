@@ -5,16 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/geo"
 	"wf/backend/internal/geo/internal/app"
+	"wf/backend/internal/geo/internal/source"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/testkit/clocktest"
@@ -392,5 +395,178 @@ func TestActivateDuringImportLink(t *testing.T) {
 	var owner uuid.UUID
 	if err := e.owner.QueryRow(ctx, `SELECT id FROM cities WHERE geoname_id = 526815`).Scan(&owner); err != nil || owner != activated.ID {
 		t.Fatalf("место 526815 у %s, активирован %s: %v", owner, activated.ID, err)
+	}
+}
+
+// importRaceEnv — импорт RU (под ролью worker) уже прошёл один раз (места в источнике закоммичены), затем
+// заведены регион «Свердловская область» без кода и незаведённый на месте город test-a-mikh (кандидат 526815) —
+// второй импорт будет их сверять. adm — активация на той же базе под ролью admin.
+type importRaceEnv struct {
+	env
+	raw  source.Raw
+	mikh uuid.UUID
+	adm  func() *app.Admin
+}
+
+func newImportRaceEnv(t *testing.T, more func(e env, ural uuid.UUID)) importRaceEnv {
+	t.Helper()
+	e := newEnv(t)
+	raw := fixture(t)
+	named(&raw, 9100010, "Lesnoy", "Лесной", "71")
+	if _, err := e.importer(&raw).Import(context.Background(), "RU", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	ural := addRegion(t, e, "Свердловская область")
+	r := importRaceEnv{env: e, raw: raw, mikh: addCity(t, e, ural, "test-a-mikh", map[string]string{"ru": "Михайловск"})}
+	if more != nil {
+		more(e, ural)
+	}
+	cfg := e.owner.Config().Copy()
+	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
+		_, err := c.Exec(ctx, "SET ROLE admin")
+		return err
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	r.adm = func() *app.Admin {
+		return app.NewAdmin(app.AdminDeps{Pool: pool, Clock: e.clk, Log: slog.New(slog.DiscardHandler)})
+	}
+	return r
+}
+
+// waitLockOrDone — опрос без sleep: true — в базе есть незахваченный замок (кто-то ждёт чужую транзакцию), false —
+// done закрыт раньше. Срок — 60 с (иначе тест повис бы на ошибке логики).
+func waitLockOrDone(t *testing.T, owner *pgxpool.Pool, done <-chan struct{}) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	for {
+		select {
+		case <-done:
+			return false
+		case <-ctx.Done():
+			t.Errorf("ни замка, ни завершения за 60 с")
+			return false
+		default:
+		}
+		var n int
+		if err := owner.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted`).Scan(&n); err != nil {
+			t.Errorf("pg_locks: %v", err)
+			return false
+		}
+		if n > 0 {
+			return true
+		}
+		runtime.Gosched()
+	}
+}
+
+func isDeadlock(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "40P01"
+}
+
+// Требование плана (Task 10, «Ловушки»): сверка импорта уже привязала город к месту 526815 и держит транзакцию
+// (хук перед привязкой второго города test-b-lesnoy — точка «первый привязан»), активация того же места ждёт её
+// коммита и получает 23505 → geo.ErrCityAlreadyActive; импорт успешен, место — у города импорта, взаимной блокировки нет.
+func TestActivateWaitsForImportLink(t *testing.T) {
+	var lesnoy uuid.UUID
+	r := newImportRaceEnv(t, func(e env, ural uuid.UUID) {
+		lesnoy = addCity(t, e, ural, "test-b-lesnoy", map[string]string{"ru": "Лесной"})
+	})
+	var actErr error
+	actDone := make(chan struct{})
+	im := r.importer(&r.raw)
+	im.SetBeforeLink(func(ctx context.Context, cityID uuid.UUID, _ int64) {
+		if cityID != lesnoy {
+			return
+		}
+		// своя транзакция активации: db.InTx начинает новую и подменяет tx в ctx, отмена импорта её не обрывает
+		go func() {
+			defer close(actDone)
+			_, actErr = r.adm().Activate(context.WithoutCancel(ctx), actor, app.Activation{GeonameID: 526815}, approvals.Meta{})
+		}()
+		// не t.Fatal: колбэк внутри db.InTx держит соединение
+		if !waitLockOrDone(t, r.owner, actDone) {
+			t.Errorf("активация не ждала импорт: %v", actErr)
+		}
+	})
+	res, err := im.Import(context.Background(), "RU", nil, nil)
+	<-actDone
+	if err != nil || !errors.Is(actErr, geo.ErrCityAlreadyActive) {
+		t.Fatalf("импорт: %v, активация: %v", err, actErr)
+	}
+	if len(res.Reconciled.Linked) != 2 {
+		t.Fatalf("привязаны: %+v", res.Reconciled)
+	}
+	var owner uuid.UUID
+	if err := r.owner.QueryRow(context.Background(), `SELECT id FROM cities WHERE geoname_id = 526815`).Scan(&owner); err != nil || owner != r.mikh {
+		t.Fatalf("место 526815 у %s: %v", owner, err)
+	}
+}
+
+// Встречный порядок (ревью G5 I1): активация прошла проверки и стоит перед вставкой города, импорт в это время
+// сверяет тот же город и регион. Активация берёт замки «город → регион», как сверка, — ни одна сторона не получает
+// 40P01: импорт успешен, активация — 200 или 409 по тому, кто первым занял место. Со старым порядком («регион →
+// город») активация держала бы (RU, 71), импорт ждал бы его на ImportLinkRegion, а активация — его geoname_id.
+func TestActivateImportRegionLockOrder(t *testing.T) {
+	r := newImportRaceEnv(t, nil)
+	at, release, actDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	adm := r.adm()
+	adm.SetStageHook(func(_ context.Context, stage string) {
+		if stage == "insert" {
+			once.Do(func() { close(at); <-release })
+		}
+	})
+	var actErr error
+	go func() {
+		defer close(actDone)
+		_, actErr = adm.Activate(context.Background(), actor, app.Activation{GeonameID: 526815}, approvals.Meta{})
+	}()
+	<-at
+	impDone := make(chan struct{})
+	var impErr error
+
+	go func() {
+		defer close(impDone)
+		_, impErr = r.importer(&r.raw).Import(context.Background(), "RU", nil, nil)
+	}()
+	waitLockOrDone(t, r.owner, impDone) // импорт либо закончил, либо ждёт замок активации
+	close(release)
+	<-actDone
+	<-impDone
+	if isDeadlock(actErr) || isDeadlock(impErr) {
+		t.Fatalf("взаимная блокировка: активация %v, импорт %v", actErr, impErr)
+	}
+	if impErr != nil || actErr != nil && !errors.Is(actErr, geo.ErrCityAlreadyActive) {
+		t.Fatalf("импорт: %v, активация: %v", impErr, actErr)
+	}
+	var n int
+	if err := r.owner.QueryRow(context.Background(), `SELECT count(*) FROM cities WHERE geoname_id = 526815`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("городов на 526815: %d %v", n, err)
+	}
+}
+
+// m2 ревью G5: место удалено параллельным импортом после проверки и до вставки — geo.ErrPlaceNotFound (404), а не
+// 500 по внешнему ключу city_names; ничего не записано.
+func TestActivatePlaceDeletedConcurrently(t *testing.T) {
+	e := newActEnv(t)
+	a := e.admin()
+	a.SetStageHook(func(ctx context.Context, stage string) {
+		if stage == "insert" {
+			if _, err := e.owner.Exec(ctx, `DELETE FROM geonames_places WHERE geoname_id = 700001`); err != nil {
+				t.Errorf("удаление места: %v", err)
+			}
+		}
+	})
+	if _, err := activate(e, a, app.Activation{GeonameID: 700001}); !errors.Is(err, geo.ErrPlaceNotFound) {
+		t.Fatalf("ждали geo.ErrPlaceNotFound: %v", err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM cities WHERE slug LIKE 'zarechnyy%'`); n != 0 {
+		t.Fatalf("город записан: %d", n)
 	}
 }

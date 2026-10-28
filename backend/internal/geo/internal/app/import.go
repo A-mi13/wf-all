@@ -612,6 +612,8 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 
 // link — город получает geoname_id, version + 1, недостающие переводы; регион — код admin1 и
 // недостающие переводы; событие geo.city_linked. centroid и population города не меняются.
+// Порядок замков «город (geoname_id) → регион (страна, admin1)» — тот же, что у активации (activate.go, Activate:
+// вставка города, затем ensureRegion); не менять в одиночку — встречный порядок даёт 40P01 (ревью G5 I1).
 func link(ctx context.Context, q *geodb.Queries, run importRun, c geodb.ImportUnlinkedCitiesRow, p geodb.ImportCityCandidatesRow) error {
 	version, err := q.ImportLinkCity(ctx, geodb.ImportLinkCityParams{ID: c.ID, GeonameID: p.GeonameID})
 	if err != nil {
