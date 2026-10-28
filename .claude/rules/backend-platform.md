@@ -38,7 +38,9 @@ paths:
   `TestMaintenanceConfig`, `TestMaintenanceMatchesRiverDefaults` (сверка с `WithDefaults` River),
   `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance` (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
   changelog (`JobSnooze`, `UniqueOpts`, рескьюер, `AddWorkerArgs`) и линия миграций `riverpgxv5`; разошедшееся умолчание
-  красит `TestMaintenanceMatchesRiverDefaults`.
+  красит `TestMaintenanceMatchesRiverDefaults`, миграцию схемы линии без нашего `00NN_river_vK.sql` —
+  `TestRiverMigrationLineCovered` (`queue`; через `rivermigrate.AllVersions`; v1 — таблица версий River, её ведёт goose;
+  пустая для Postgres версия — `SELECT 1;`, как v8, — файла не требует).
 - HTTP-бинарник с фоном — `server.RunService(ctx, name, cfg, logOut, build)`: `build(log, pool)` → `Service{Handler,
   Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
   фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены
