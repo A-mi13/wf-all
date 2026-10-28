@@ -59,12 +59,16 @@
   background: var(--wf-color-danger-bg);
 }
 
+/* Текстовая кнопка выравнивается как текст — по началу строки: перенесённое имя в ячейке таблицы
+   («Модератор Ставрополя» в «Кто» журнала) не центрируется (V1 п. 5) */
 .link {
+  justify-content: flex-start;
   min-height: auto;
   padding: 0;
   border: 0;
   background: none;
   color: var(--wf-color-accent);
+  text-align: start;
 }
 
 .link:hover:enabled:not([aria-disabled='true']) {

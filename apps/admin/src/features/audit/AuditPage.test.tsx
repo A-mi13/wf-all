@@ -134,9 +134,10 @@ describe('фильтры', () => {
     const seen = auditServer();
     const app = renderApp('/audit', { me: meOwner });
     const [role] = rows(await table());
-    await userEvent
-      .setup()
-      .click(within(role!).getByRole('button', { name: 'Показать действия: Ольга В.' }));
+    const actor = within(role!).getByRole('button', { name: 'Показать действия: Ольга В.' });
+    // V1 п. 5: имя в «Кто» — по левому краю и переносится внутри столбца (класс .actor)
+    expect(actor.className).toMatch(/actor/);
+    await userEvent.setup().click(actor);
     await waitFor(() => expect(last(seen).actor_staff_id).toBe(OLGA_ID));
     expect(app.at()).toBe(`/audit?actor=${OLGA_ID}`);
   });

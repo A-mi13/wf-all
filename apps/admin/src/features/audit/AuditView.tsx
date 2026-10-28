@@ -134,12 +134,17 @@ function Actor({ record: r, onFilter }: { record: AuditRecord; onFilter: (id: st
   if (r.actor_staff_id && label) {
     const id = r.actor_staff_id;
     return (
-      <Button variant="link" aria-label={t('filter', { name: label })} onClick={() => onFilter(id)}>
+      <Button
+        variant="link"
+        className={styles.actor}
+        aria-label={t('filter', { name: label })}
+        onClick={() => onFilter(id)}
+      >
         {label}
       </Button>
     );
   }
-  if (label) return <span>{label}</span>;
+  if (label) return <span className={styles.actor}>{label}</span>;
   return <span>{r.actor_role === 'anonymous' ? t('anonymous') : t('unknown')}</span>;
 }
 

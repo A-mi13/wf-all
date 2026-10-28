@@ -117,8 +117,10 @@
   color: var(--wf-color-accent);
 }
 
+/* «Ещё фильтры» — у правого края строки инструментов (V1 п. 6); перенеслась — справа и на новой строке */
 .moreButton {
   width: var(--wf-size-touch-min);
+  margin-inline-start: auto;
   padding: 0;
 }
 
@@ -158,8 +160,10 @@
   flex-grow: 1;
 }
 
+/* только горизонтальная прокрутка: overflow-y явно, иначе он стал бы auto (см. Tabs.module.css) */
 .scroll {
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .table {

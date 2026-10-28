@@ -1,4 +1,8 @@
-/* Вкладки по макету 07 (журнал по разделам): подчёркнутая выбранная вкладка */
+/* Вкладки по макету 07 (журнал по разделам): подчёркнутая выбранная вкладка.
+   Список прокручивается только по горизонтали (узкий экран): overflow-y — явно hidden, иначе при
+   overflow-x: auto он становится auto и лишний пиксель по высоте рисует вертикальную полосу (V1 п. 4).
+   Базовая линия — внутренняя тень списка, а не border: подчёркивание вкладки ложится поверх неё
+   без отрицательного отступа, который и вылезал за список на 1 px. */
 .root {
   display: flex;
   flex-direction: column;
@@ -10,7 +14,8 @@
   display: flex;
   gap: var(--wf-space-1);
   overflow-x: auto;
-  border-bottom: 1px solid var(--wf-color-slot-empty);
+  overflow-y: hidden;
+  box-shadow: inset 0 -1px 0 var(--wf-color-slot-empty);
 }
 
 .tab {
@@ -19,7 +24,6 @@
   align-items: center;
   gap: var(--wf-space-2);
   min-height: var(--wf-size-touch-min);
-  margin-bottom: -1px;
   padding: 0 var(--wf-space-3);
   border: 0;
   border-bottom: 2px solid transparent;
