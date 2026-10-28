@@ -90,7 +90,7 @@ func seedReads(ctx context.Context, owner *pgxpool.Pool) error {
 	s.exec(`INSERT INTO geonames_admin1 (country_code, admin1_code, geoname_id, ascii_name)
 	        VALUES ('RU', '70', 1, 'Stavropol Kray'), ('XB', '01', 2, 'North Province')`)
 	s.exec(`INSERT INTO geonames_admin1_names (country_code, admin1_code, locale, name)
-	        VALUES ('RU', '70', 'ru', 'Ставропольский Край'), ('RU', '70', 'en', 'Stavropol Kray'),
+	        VALUES ('RU', '70', 'ru', 'Ставропольский Край'), ('RU', '70', 'en', 'Stavropol Territory'),
 	               ('XB', '01', 'en', 'Northern Province'), ('XB', '01', 'ru', 'Северная провинция')`)
 	ru, xb := s.importRow("RU"), s.importRow("XB")
 	// Ставрополь и Михайловск — места сида (geoname_id городов из 0019): заведены городами
@@ -699,7 +699,8 @@ func TestNearestHere(t *testing.T) {
 
 // Спека §10 «смешанные страны»: без согласованной локали (locale "") каждая запись — на языке
 // своей страны: место и регион источника XB (default_locale en) — по-английски, RU — по-русски;
-// с локалью ru место XB — по-русски. Название источника (p.name) нарочно отличается от en-строки.
+// с локалью ru место XB — по-русски. Название источника (p.name) и ascii_name региона нарочно отличаются от
+// en-строк (m5-4 ревью G2): иначе запасное значение coalesce проходило бы за en-строку.
 func TestMixedCountriesLocale(t *testing.T) {
 	svc := reads(t)
 	ctx := context.Background()
@@ -720,7 +721,7 @@ func TestMixedCountriesLocale(t *testing.T) {
 	}{
 		{"XB без локали — язык страны en", geo.Point{Lat: 10, Lon: 20}, "", view{"Northtown", "Northern Province", "Testland"}},
 		{"RU без локали — язык страны ru", geo.Point{Lat: 46, Lon: 42.5}, "", view{"Деревня", "Ставропольский Край", "Россия"}},
-		{"RU с локалью en — en-строки", geo.Point{Lat: 46, Lon: 42.5}, "en", view{"Village", "Stavropol Kray", "Russia"}},
+		{"RU с локалью en — en-строки", geo.Point{Lat: 46, Lon: 42.5}, "en", view{"Village", "Stavropol Territory", "Russia"}},
 		{"XB с локалью ru — ru-строки", geo.Point{Lat: 10, Lon: 20}, "ru", view{"Нортаун", "Северная провинция", "Testland"}},
 	} {
 		if got := here(c.p, c.locale); got != c.want {
