@@ -105,6 +105,9 @@ func (p *probe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Location", "/v1/things/1")
+	w.Header().Set("Vary", "Accept-Language")
+	w.Header().Set("Content-Language", "en")
+	w.Header().Set("X-Not-Saved", "1")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write([]byte(`{"id": 1, "name": "x"}`))
@@ -270,6 +273,12 @@ func TestReplaySameRequest(t *testing.T) {
 		if again.Code != http.StatusCreated || again.Header().Get("Location") != "/v1/things/1" ||
 			again.Header().Get("Content-Type") != "application/json" || again.Header().Get("Idempotency-Replayed") != "true" {
 			t.Fatalf("повтор: %d %v", again.Code, again.Header())
+		}
+		// заголовки ответа контракта (Vary, Content-Language — admin activateGeoCity) повтор отдаёт те же;
+		// несохраняемые — нет (список явный, не «все заголовки»)
+		if again.Header().Get("Vary") != "Accept-Language" || again.Header().Get("Content-Language") != "en" ||
+			again.Header().Get("X-Not-Saved") != "" {
+			t.Fatalf("заголовки повтора: %v", again.Header())
 		}
 		var a, b map[string]any
 		_ = json.Unmarshal(first.Body.Bytes(), &a)

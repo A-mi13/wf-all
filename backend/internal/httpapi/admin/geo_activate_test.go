@@ -74,15 +74,11 @@ func TestActivateGeoCityHTTP(t *testing.T) {
 		c.GeonameId == nil || *c.GeonameId != 526815 || c.Names["ru"] != "Михайловск" {
 		t.Fatalf("карточка: %+v", c)
 	}
-	// повтор с тем же ключом — тот же ответ, второго города нет. Мимо apitest: повтор идемпотентности хранит только
-	// Content-Type, Location, ETag (idempotency.savedHeaders) — Vary и Content-Language контракта в нём теряются
-	// (дефект платформы, в отчёте Task 10)
-	r := call(http.MethodPost, "/v1/geo/cities", "admin", `{"geoname_id":526815,"status":"pilot"}`)
-	r.Header.Set("Idempotency-Key", key)
-	r.Header.Set("Accept-Language", "en")
-	again := serve(e.h, r)
+	// повтор с тем же ключом — тот же ответ по контракту (apitest: Vary и Content-Language сохранены платформой,
+	// idempotency.savedHeaders), второго города нет
+	again := e.post(t, "admin", "/v1/geo/cities", key, `{"geoname_id":526815,"status":"pilot"}`, "en")
 	if c2 := decode[oapi.GeoCityDetails](t, again); again.Code != http.StatusOK || c2.Id != c.Id || c2.Slug != c.Slug ||
-		again.Header().Get("Idempotency-Replayed") != "true" {
+		again.Header().Get("Idempotency-Replayed") != "true" || again.Header().Get("Content-Language") != "en" {
 		t.Fatalf("повтор: %d %s", again.Code, again.Body.String())
 	}
 	var n int
