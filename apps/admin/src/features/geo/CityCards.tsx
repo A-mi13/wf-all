@@ -9,11 +9,11 @@ import {
   EmptyState,
   Form,
   infiniteTableProps,
-  type Option,
   SelectField,
   StatusChip,
 } from '../../ui';
 import styles from './geo.module.css';
+import { withCurrent } from './options';
 import { useGeoCities, useGeoCountries, useGeoRegions } from './queries';
 import { CITY_STATUSES, type CitiesSearch, toCitiesQuery } from './search';
 import { useCityStatus } from './status';
@@ -142,11 +142,4 @@ export function CityCards({ search }: { search: CitiesSearch }) {
       empty={<EmptyState title={t('empty_title')} text={t('empty_text')} />}
     />
   );
-}
-
-// Значение из адреса — в списке сразу, пока справочник грузится: select не теряет выбор (подпись —
-// сам код до ответа).
-function withCurrent(options: Option[], current: string | undefined): Option[] {
-  if (!current || options.some((o) => o.value === current)) return options;
-  return [...options, { value: current, label: current }];
 }

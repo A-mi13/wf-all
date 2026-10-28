@@ -1,5 +1,6 @@
 import type { components } from '../api/gen/admin';
-import { CITY_OTHER, CITY_OWN } from './me';
+import type { Me } from '../app/permissions';
+import { CITY_OTHER, CITY_OWN, meModerator, meOwner } from './me';
 import { problem } from './problem';
 import { http, server } from './server';
 import { city } from './staff';
@@ -300,3 +301,142 @@ export function geoServer(
   );
   return { state, seen };
 }
+
+type GeoCityPatch = components['schemas']['GeoCityPatch'];
+type GeoDistrictPatch = components['schemas']['GeoDistrictPatch'];
+type Op = 'patch' | 'link' | 'createDistrict' | 'patchDistrict';
+
+// Правки города и районов (updateGeoCity, linkGeoCity, createGeoDistrict, updateGeoDistrict) — как на
+// сервере: правка меняет состояние, ответ — актуальная карточка; slug из taken — 409 geo.slug_taken
+// (прежний уходит в историю); названия: null — удалить перевод, язык страны удалить нельзя (400
+// required); имя района занято действующим районом — 409 geo.district_name_taken. answer(op) — свой
+// ответ вместо обычного (403, коды, обрыв). sent — тела, ключи идемпотентности и путь.
+export function cityEditServer(
+  opts: {
+    details?: GeoCityDetails;
+    districts?: GeoDistrict[];
+    taken?: string[];
+    answer?: (op: Op, body: unknown) => Response | undefined;
+  } = {},
+) {
+  const state = {
+    details: opts.details ?? cityDetails(),
+    districts: opts.districts ?? [district()],
+  };
+  const sent: { op: Op; body: unknown; key: string | null; path: string }[] = [];
+  const record = async (op: Op, request: Request) => {
+    const body: unknown = await request.json();
+    sent.push({
+      op,
+      body,
+      key: request.headers.get('Idempotency-Key'),
+      path: new URL(request.url).pathname,
+    });
+    return { body, own: opts.answer?.(op, body) };
+  };
+  const nameTaken = (name: string, except?: string) =>
+    state.districts.some(
+      (d) =>
+        d.id !== except && d.archived_at === null && d.name.toLowerCase() === name.toLowerCase(),
+    );
+  geoServer({ details: [state.details], districts: { [state.details.id]: state.districts } });
+  server.use(
+    http.get('/v1/geo/cities/{cityId}', ({ params, response }) =>
+      params.cityId === state.details.id
+        ? response(200).json(state.details)
+        : response.untyped(problem(404, 'geo.city_not_found')),
+    ),
+    http.get('/v1/geo/cities/{cityId}/districts', ({ response }) =>
+      response(200).json({ items: state.districts }),
+    ),
+    http.patch('/v1/geo/cities/{cityId}', async ({ request, response }) => {
+      const { body, own } = await record('patch', request);
+      if (own) return response.untyped(own);
+      const p = body as GeoCityPatch;
+      const next = { ...state.details, names: { ...state.details.names } };
+      if (p.slug !== undefined && p.slug !== next.slug) {
+        if (opts.taken?.includes(p.slug)) return response.untyped(problem(409, 'geo.slug_taken'));
+        next.slug_history = [
+          { slug: next.slug, replaced_at: '2026-10-28T10:00:00Z' },
+          ...next.slug_history,
+        ];
+        next.slug = p.slug;
+      }
+      if (p.status) next.status = p.status;
+      for (const [locale, name] of Object.entries(p.names ?? {})) {
+        if (name === null) {
+          if (locale === next.canonical_locale)
+            return response.untyped(
+              problem(400, 'validation.failed', {
+                errors: [{ field: `body.names.${locale}`, code: 'required' }],
+              }),
+            );
+          delete next.names[locale];
+        } else next.names[locale] = name;
+      }
+      next.version += 1;
+      state.details = next;
+      return response(200).json(next);
+    }),
+    http.post('/v1/geo/cities/{cityId}/link', async ({ request, response }) => {
+      const { body, own } = await record('link', request);
+      if (own) return response.untyped(own);
+      const { geoname_id } = body as { geoname_id: number };
+      state.details = { ...state.details, geoname_id, version: state.details.version + 1 };
+      return response(200).json(state.details);
+    }),
+    http.post('/v1/geo/cities/{cityId}/districts', async ({ request, response }) => {
+      const { body, own } = await record('createDistrict', request);
+      if (own) return response.untyped(own);
+      const { name } = body as { name: string };
+      if (nameTaken(name)) return response.untyped(problem(409, 'geo.district_name_taken'));
+      const d = district({
+        id: `0192f1c4-4444-7b21-9c5d-${String(state.districts.length + 1).padStart(12, '0')}`,
+        name,
+      });
+      state.districts = [...state.districts, d];
+      return response(200).json(d);
+    }),
+    http.patch(
+      '/v1/geo/cities/{cityId}/districts/{districtId}',
+      async ({ params, request, response }) => {
+        const { body, own } = await record('patchDistrict', request);
+        if (own) return response.untyped(own);
+        const p = body as GeoDistrictPatch;
+        const cur = state.districts.find((d) => d.id === params.districtId);
+        if (!cur) return response.untyped(problem(404, 'geo.district_not_found'));
+        const name = p.name ?? cur.name;
+        const archived = p.archived ?? cur.archived_at !== null;
+        if (!archived && nameTaken(name, cur.id))
+          return response.untyped(problem(409, 'geo.district_name_taken'));
+        const next: GeoDistrict = {
+          ...cur,
+          name,
+          archived_at: archived ? (cur.archived_at ?? '2026-10-28T10:00:00Z') : null,
+          version: cur.version + 1,
+        };
+        state.districts = state.districts.map((d) => (d.id === cur.id ? next : d));
+        return response(200).json(next);
+      },
+    ),
+  );
+  return { state, sent };
+}
+
+// Права «Справочников» для тестов: админ (всё про города, поиск мест) и модератор своего города
+// (названия — rename из meModerator, районы — districts.manage), оба — по docs/05.
+export const meGeoAdmin: Me = {
+  ...meOwner,
+  permissions: {
+    ...meOwner.permissions,
+    'geo.cities.manage': 'allow',
+    'geo.cities.rename': 'allow',
+    'geo.districts.manage': 'allow',
+    'geo.places.search': 'allow',
+  },
+};
+
+export const meGeoModerator: Me = {
+  ...meModerator,
+  permissions: { ...meModerator.permissions, 'geo.districts.manage': 'scoped' },
+};

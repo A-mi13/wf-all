@@ -935,6 +935,94 @@
       "submit": "Activate",
       "success": "City “{name}” activated",
       "find_city": "Find the city in the list"
+    },
+    "city": {
+      "back": "Back to cities",
+      "not_found_title": "City not found",
+      "not_found_text": "It is not in the directory or the address is outdated.",
+      "facts": {
+        "label": "City details",
+        "country": "Country",
+        "country_value": "{name} ({code})",
+        "country_disabled": "disabled",
+        "region": "Region",
+        "no_region": "not set",
+        "population": "Population",
+        "geoname": "GeoNames",
+        "not_linked": "not linked",
+        "timezone": "Time zone",
+        "slug": "Address"
+      },
+      "link_open": "Link to GeoNames",
+      "status": {
+        "title": "Status",
+        "label": "City status",
+        "save": "Save",
+        "saved": "Status saved"
+      },
+      "slug": {
+        "title": "Web address",
+        "label": "Address (slug)",
+        "hint": "Lowercase Latin letters, digits, hyphens between parts, up to 100 characters. The old address keeps working.",
+        "save": "Save",
+        "saved": "Address saved",
+        "history": "Previous addresses",
+        "replaced": "replaced {when}",
+        "history_empty": "The address has not changed"
+      },
+      "names": {
+        "title": "Names",
+        "canonical": "primary",
+        "empty": "no translation",
+        "save": "Save",
+        "saved": "Names saved",
+        "delete": "Delete translation",
+        "delete_label": "Delete translation: {locale}",
+        "confirm_title": "Delete the translation “{name}”?",
+        "confirm_text": "Apps in this language will show the name in the country language.",
+        "confirm_word": "DELETE",
+        "confirm_label": "Delete",
+        "deleted": "Translation deleted",
+        "locales": {
+          "ru": "Русский",
+          "en": "English"
+        }
+      }
+    },
+    "districts": {
+      "title": "Districts",
+      "label": "City districts",
+      "columns": {
+        "name": "District",
+        "state": "State",
+        "actions": "Actions"
+      },
+      "active": "active",
+      "archived": "archived",
+      "add_name": "New district",
+      "add": "Add district",
+      "added": "District “{name}” added",
+      "rename": "Rename",
+      "rename_label": "Rename: {name}",
+      "rename_title": "Rename district",
+      "rename_name": "Name",
+      "rename_save": "Save",
+      "renamed": "District renamed",
+      "archive": "Archive",
+      "archive_label": "Archive: {name}",
+      "restore": "Restore",
+      "restore_label": "Restore: {name}",
+      "archived_toast": "District “{name}” archived",
+      "restored_toast": "District “{name}” restored",
+      "empty_title": "No districts",
+      "empty_text": "Districts help players find matches nearby."
+    },
+    "link": {
+      "title": "Link to GeoNames",
+      "text": "Find the city place in the GeoNames directory. Linking adds missing name translations; population and coordinates do not change.",
+      "chosen": "Place",
+      "submit": "Link",
+      "linked": "City linked to GeoNames"
     }
   }
 }

@@ -1,0 +1,72 @@
+import { useForm } from 'react-hook-form';
+import { useTranslations } from 'use-intl';
+import type { ApiError } from '../../api/client';
+import type { components } from '../../api/gen/admin';
+import { useDateTime } from '../../i18n/format';
+import { Button, Form, TextField, useErrorText, useToast } from '../../ui';
+import styles from './geo.module.css';
+import { useUpdateCity } from './mutations';
+
+type GeoCityDetails = components['schemas']['GeoCityDetails'];
+
+// Формат адреса — как CHECK cities_slug_format: латиница в нижнем регистре и цифры, дефис только
+// между частями; до 100 символов (контракт GeoCityPatch.slug).
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+// Адрес города в вебе (*; geo.cities.manage): поле с форматом (проверка до запроса) и подсказкой
+// «старый адрес продолжит работать», история прежних адресов (из карточки); 409 geo.slug_taken —
+// у поля. Тот же адрес — запроса нет.
+export function CitySlugCard({ city }: { city: GeoCityDetails }) {
+  const t = useTranslations('geo.city.slug');
+  const toast = useToast();
+  const errorText = useErrorText();
+  const dateTime = useDateTime();
+  const form = useForm<{ slug: string }>({ values: { slug: city.slug } });
+  const update = useUpdateCity(city.id, ['geo', 'city', city.id, 'slug']);
+
+  const submit = async ({ slug }: { slug: string }) => {
+    if (slug === city.slug) return;
+    await update.mutateAsync({ slug });
+    toast.success(t('saved'));
+  };
+  const onError = (e: ApiError) => {
+    if (e.code !== 'geo.slug_taken') return false;
+    form.setError('slug', { type: 'server', message: errorText(e) }, { shouldFocus: true });
+    return true;
+  };
+
+  return (
+    <div className={styles.panel}>
+      <Form form={form} onSubmit={submit} onError={onError} className={styles.panel}>
+        <TextField
+          name="slug"
+          label={t('label')}
+          hint={t('hint')}
+          autoComplete="off"
+          spellCheck={false}
+          autoCapitalize="none"
+          rules={{ required: true, maxLength: 100, pattern: SLUG }}
+        />
+        <div className={styles.row}>
+          <Button type="submit" loading={update.isPending}>
+            {t('save')}
+          </Button>
+        </div>
+      </Form>
+      {city.slug_history.length > 0 ? (
+        <ul aria-label={t('history')} className={styles.history}>
+          {city.slug_history.map((h) => (
+            <li key={`${h.slug}:${h.replaced_at}`} className={styles.historyItem}>
+              <span className={styles.name}>{h.slug}</span>
+              <span className={styles.muted}>
+                {t('replaced', { when: dateTime(h.replaced_at) })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className={styles.text}>{t('history_empty')}</p>
+      )}
+    </div>
+  );
+}
