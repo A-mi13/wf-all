@@ -519,6 +519,65 @@ func (q *Queries) AdminGetCity(ctx context.Context, arg AdminGetCityParams) (Adm
 	return i, err
 }
 
+const adminGetCountry = `-- name: AdminGetCountry :one
+SELECT co.code::text AS code,
+       coalesce(con.name, co.name)::text AS name,
+       co.currency::text AS currency,
+       co.default_locale,
+       co.phone_prefix,
+       co.week_starts_on,
+       co.min_signup_age,
+       co.age_of_majority,
+       co.is_enabled,
+       (SELECT count(*) FROM cities c WHERE c.country_id = co.id AND c.status IN ('pilot', 'live'))::bigint AS open_cities,
+       co.version,
+       co.id
+FROM countries co
+LEFT JOIN country_names con ON con.country_id = co.id AND con.locale = $1::text
+WHERE co.code = $2::text
+`
+
+type AdminGetCountryParams struct {
+	Locale string
+	Code   string
+}
+
+type AdminGetCountryRow struct {
+	Code          string
+	Name          string
+	Currency      string
+	DefaultLocale string
+	PhonePrefix   string
+	WeekStartsOn  int16
+	MinSignupAge  int16
+	AgeOfMajority int16
+	IsEnabled     bool
+	OpenCities    int64
+	Version       int64
+	ID            uuid.UUID
+}
+
+// Страна с правилами по коду для ответа правки (как строка AdminListCountries).
+func (q *Queries) AdminGetCountry(ctx context.Context, arg AdminGetCountryParams) (AdminGetCountryRow, error) {
+	row := q.db.QueryRow(ctx, adminGetCountry, arg.Locale, arg.Code)
+	var i AdminGetCountryRow
+	err := row.Scan(
+		&i.Code,
+		&i.Name,
+		&i.Currency,
+		&i.DefaultLocale,
+		&i.PhonePrefix,
+		&i.WeekStartsOn,
+		&i.MinSignupAge,
+		&i.AgeOfMajority,
+		&i.IsEnabled,
+		&i.OpenCities,
+		&i.Version,
+		&i.ID,
+	)
+	return i, err
+}
+
 const adminGetImport = `-- name: AdminGetImport :one
 SELECT id, country_code::text AS country_code, status, started_at, finished_at, started_by, river_job_id,
        places_upserted, places_removed, places_missing, names_upserted, error, reconciled
@@ -1161,6 +1220,127 @@ func (q *Queries) CityForUpdate(ctx context.Context, id uuid.UUID) (CityForUpdat
 	return i, err
 }
 
+const countryForUpdate = `-- name: CountryForUpdate :one
+
+SELECT id, code::text AS code, name, currency::text AS currency, default_locale, phone_prefix,
+       week_starts_on::int AS week_starts_on, min_signup_age::int AS min_signup_age,
+       age_of_majority::int AS age_of_majority, is_enabled, version
+FROM countries
+WHERE code = $1::text
+FOR UPDATE
+`
+
+type CountryForUpdateRow struct {
+	ID            uuid.UUID
+	Code          string
+	Name          string
+	Currency      string
+	DefaultLocale string
+	PhonePrefix   string
+	WeekStartsOn  int32
+	MinSignupAge  int32
+	AgeOfMajority int32
+	IsEnabled     bool
+	Version       int64
+}
+
+// ---------------------------------------------------------------------------
+// Страны (createGeoCountry, updateGeoCountry и исполнители geo.country_create, geo.country_rules, Task 13;
+// спека geo §5.2, R12, R25). Правила страны — всегда вдвоём (решение пользователя 27.10).
+// ---------------------------------------------------------------------------
+// Страна под замком правки по коду: текущие правила для сравнения «меняется ли» и итоговой проверки.
+func (q *Queries) CountryForUpdate(ctx context.Context, code string) (CountryForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, countryForUpdate, code)
+	var i CountryForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Currency,
+		&i.DefaultLocale,
+		&i.PhonePrefix,
+		&i.WeekStartsOn,
+		&i.MinSignupAge,
+		&i.AgeOfMajority,
+		&i.IsEnabled,
+		&i.Version,
+	)
+	return i, err
+}
+
+const countryForUpdateByID = `-- name: CountryForUpdateByID :one
+SELECT id, code::text AS code, name, currency::text AS currency, default_locale, phone_prefix,
+       week_starts_on::int AS week_starts_on, min_signup_age::int AS min_signup_age,
+       age_of_majority::int AS age_of_majority, is_enabled, version
+FROM countries
+WHERE id = $1::uuid
+FOR UPDATE
+`
+
+type CountryForUpdateByIDRow struct {
+	ID            uuid.UUID
+	Code          string
+	Name          string
+	Currency      string
+	DefaultLocale string
+	PhonePrefix   string
+	WeekStartsOn  int32
+	MinSignupAge  int32
+	AgeOfMajority int32
+	IsEnabled     bool
+	Version       int64
+}
+
+// Страна под замком исполнителя по id (из payload запроса).
+func (q *Queries) CountryForUpdateByID(ctx context.Context, id uuid.UUID) (CountryForUpdateByIDRow, error) {
+	row := q.db.QueryRow(ctx, countryForUpdateByID, id)
+	var i CountryForUpdateByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Currency,
+		&i.DefaultLocale,
+		&i.PhonePrefix,
+		&i.WeekStartsOn,
+		&i.MinSignupAge,
+		&i.AgeOfMajority,
+		&i.IsEnabled,
+		&i.Version,
+	)
+	return i, err
+}
+
+const countryNamesOf = `-- name: CountryNamesOf :many
+SELECT locale, name FROM country_names WHERE country_id = $1::uuid ORDER BY locale
+`
+
+type CountryNamesOfRow struct {
+	Locale string
+	Name   string
+}
+
+// Названия страны по языкам.
+func (q *Queries) CountryNamesOf(ctx context.Context, countryID uuid.UUID) ([]CountryNamesOfRow, error) {
+	rows, err := q.db.Query(ctx, countryNamesOf, countryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountryNamesOfRow
+	for rows.Next() {
+		var i CountryNamesOfRow
+		if err := rows.Scan(&i.Locale, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteCityName = `-- name: DeleteCityName :exec
 DELETE FROM city_names WHERE city_id = $1::uuid AND locale = $2::text
 `
@@ -1173,6 +1353,21 @@ type DeleteCityNameParams struct {
 // Перевод города удалён (строку языка страны сценарий не удаляет).
 func (q *Queries) DeleteCityName(ctx context.Context, arg DeleteCityNameParams) error {
 	_, err := q.db.Exec(ctx, deleteCityName, arg.CityID, arg.Locale)
+	return err
+}
+
+const deleteCountryName = `-- name: DeleteCountryName :exec
+DELETE FROM country_names WHERE country_id = $1::uuid AND locale = $2::text
+`
+
+type DeleteCountryNameParams struct {
+	CountryID uuid.UUID
+	Locale    string
+}
+
+// Перевод страны удалён (строку языка страны сценарий не удаляет).
+func (q *Queries) DeleteCountryName(ctx context.Context, arg DeleteCountryNameParams) error {
+	_, err := q.db.Exec(ctx, deleteCountryName, arg.CountryID, arg.Locale)
 	return err
 }
 
@@ -1248,6 +1443,44 @@ func (q *Queries) ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.
 		return nil, err
 	}
 	return items, nil
+}
+
+const insertCountry = `-- name: InsertCountry :exec
+INSERT INTO countries (id, code, name, currency, default_locale, phone_prefix, week_starts_on, min_signup_age,
+                       age_of_majority, is_enabled, version)
+VALUES ($1::uuid, $2::text, $3::text, $4::text,
+        $5::text, $6::text, $7::bigint,
+        $8::bigint, $9::bigint, $10::boolean, 1)
+`
+
+type InsertCountryParams struct {
+	ID            uuid.UUID
+	Code          string
+	Name          string
+	Currency      string
+	DefaultLocale string
+	PhonePrefix   string
+	WeekStartsOn  int64
+	MinSignupAge  int64
+	AgeOfMajority int64
+	IsEnabled     bool
+}
+
+// Новая страна (исполнитель geo.country_create): версия 1; занятый код — 23505 countries_code_key.
+func (q *Queries) InsertCountry(ctx context.Context, arg InsertCountryParams) error {
+	_, err := q.db.Exec(ctx, insertCountry,
+		arg.ID,
+		arg.Code,
+		arg.Name,
+		arg.Currency,
+		arg.DefaultLocale,
+		arg.PhonePrefix,
+		arg.WeekStartsOn,
+		arg.MinSignupAge,
+		arg.AgeOfMajority,
+		arg.IsEnabled,
+	)
+	return err
 }
 
 const insertDistrict = `-- name: InsertDistrict :one
@@ -1373,6 +1606,44 @@ func (q *Queries) UpdateCityFields(ctx context.Context, arg UpdateCityFieldsPara
 	return version, err
 }
 
+const updateCountryFields = `-- name: UpdateCountryFields :one
+UPDATE countries
+SET name = $1::text, currency = $2::text, phone_prefix = $3::text,
+    week_starts_on = $4::bigint, min_signup_age = $5::bigint,
+    age_of_majority = $6::bigint, is_enabled = $7::boolean,
+    version = version + 1
+WHERE id = $8::uuid
+RETURNING version
+`
+
+type UpdateCountryFieldsParams struct {
+	Name          string
+	Currency      string
+	PhonePrefix   string
+	WeekStartsOn  int64
+	MinSignupAge  int64
+	AgeOfMajority int64
+	IsEnabled     bool
+	ID            uuid.UUID
+}
+
+// Поля страны после правки, версия + 1.
+func (q *Queries) UpdateCountryFields(ctx context.Context, arg UpdateCountryFieldsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, updateCountryFields,
+		arg.Name,
+		arg.Currency,
+		arg.PhonePrefix,
+		arg.WeekStartsOn,
+		arg.MinSignupAge,
+		arg.AgeOfMajority,
+		arg.IsEnabled,
+		arg.ID,
+	)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
+}
+
 const updateDistrict = `-- name: UpdateDistrict :one
 UPDATE districts
 SET name = $1::text, archived_at = $2::timestamptz, version = version + 1
@@ -1421,5 +1692,23 @@ type UpsertCityNameParams struct {
 // Название города на языке (новое или переписанное).
 func (q *Queries) UpsertCityName(ctx context.Context, arg UpsertCityNameParams) error {
 	_, err := q.db.Exec(ctx, upsertCityName, arg.CityID, arg.Locale, arg.Name)
+	return err
+}
+
+const upsertCountryName = `-- name: UpsertCountryName :exec
+INSERT INTO country_names (country_id, locale, name)
+VALUES ($1::uuid, $2::text, $3::text)
+ON CONFLICT (country_id, locale) DO UPDATE SET name = EXCLUDED.name
+`
+
+type UpsertCountryNameParams struct {
+	CountryID uuid.UUID
+	Locale    string
+	Name      string
+}
+
+// Название страны на языке (новое или переписанное).
+func (q *Queries) UpsertCountryName(ctx context.Context, arg UpsertCountryNameParams) error {
+	_, err := q.db.Exec(ctx, upsertCountryName, arg.CountryID, arg.Locale, arg.Name)
 	return err
 }

@@ -183,8 +183,11 @@ paths:
   инициатора и подтверждающего по id; `Fail(ErrInitiatorChanged)` — `failed` (`initiator_changed`), иная ошибка —
   откат, `pending`. `LockActors` без хука — отказ `Validate`, в `Approve` — сбой (fail-closed). Исполнитель (и хук)
   получает копию принципала подтверждающего с `Label` = `decided_by_label` (подпись решения из `Approve`, не загрузки
-  сессии) — ей и подписывать аудит модуля. Стражи — `approvals/actor_lock_test.go`, гонка с выключением инициатора —
-  `staff` `TestCountryRulesInitiatorDisabledConcurrently`.
+  сессии) — ей и подписывать аудит модуля; id исполняемого запроса — `approvals.ApprovalIDFrom(ctx)` (в аудит
+  модуля как `approval_id`). Стражи — `approvals/actor_lock_test.go`, гонка с выключением инициатора — `staff` и
+  `httpapi/admin` `TestCountryRulesInitiatorDisabledConcurrently` (второй — на настоящем `geo.country_rules`).
+  Действия geo (`geo.country_rules`, `geo.country_create`, право `geo.countries.rules`) регистрирует
+  `geo/admin.Handler.RegisterApprovals(reg, svc)` — в сборке до `reg.Validate()`.
 - Детерминированный uuid сущности без своей строки (агрегат флага, версий приложения, объект задачи импорта) —
   `id.Named(space, name)` (UUIDv5, R18; golden — `TestNamedUUIDGolden`). Журнал по списку объектов —
   `audit.ListParams.ObjectIDs` (nil — без фильтра, пустой не-nil — ни одной записи).

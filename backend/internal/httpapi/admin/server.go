@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -179,7 +180,7 @@ func (s Server) ApproveApproval(ctx context.Context, req oapi.ApproveApprovalReq
 	}
 	ap, err := s.approvals.Approve(ctx, st, label, metaFrom(ctx), req.ApprovalId, comment)
 	if err != nil {
-		return nil, approveProblem(err)
+		return nil, approveProblem(ap, err)
 	}
 	if ap.Status != approvals.StatusExecuted {
 		return nil, fmt.Errorf("admin: approve %s без ошибки, но в состоянии %s", ap.ID, ap.Status)
@@ -192,12 +193,32 @@ func (s Server) ApproveApproval(ctx context.Context, req oapi.ApproveApprovalReq
 }
 
 // approveProblem — ошибка approve клиенту: код staff.* — только из approveStaffCodes, иной — 500 (без
-// обёртки %w: Problem не должен узнать в нём код модуля); остальное — decisionProblem.
-func approveProblem(err error) error {
+// обёртки %w: Problem не должен узнать в нём код модуля); отказ исполнителя модуля не из staff с кодом (запрос
+// уже закоммичен failed, код — в его error) — 409 platform.approval_stale: бизнес-кодов модулей у approve нет
+// (R4, x-error-codes approveApproval не растёт; ревью G4, Task 13); остальное — decisionProblem.
+func approveProblem(ap approvals.Approval, err error) error {
 	if code, ok := staff.CodeOf(err); ok && !slices.Contains(approveStaffCodes, code) {
 		return fmt.Errorf("admin: approve: исполнитель вернул код %s вне x-error-codes approveApproval", code)
 	}
+	if pe, ok := errors.AsType[httpx.ProblemError](err); ok && ap.Status == approvals.StatusFailed &&
+		moduleCode(pe.Problem().Code) {
+		return approvals.ErrStale
+	}
 	return decisionProblem("approve", err)
+}
+
+// moduleCode — код бизнес-ошибки модуля, кроме staff (у staff свой список approveStaffCodes): не платформы
+// (platform.*, auth.*, validation.*, http.*, …) — у них префикс из httpx.PlatformCodes.
+func moduleCode(code string) bool {
+	if strings.HasPrefix(code, "staff.") {
+		return false
+	}
+	for _, c := range httpx.PlatformCodes {
+		if prefix, _, ok := strings.Cut(c, "."); ok && strings.HasPrefix(code, prefix+".") {
+			return false
+		}
+	}
+	return true
 }
 
 // decisionProblem — ошибка решения (approve, reject, cancel) клиенту. auth.ErrSessionInvalid уходит как есть,

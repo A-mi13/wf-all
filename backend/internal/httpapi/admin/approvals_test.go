@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/approvals"
@@ -478,6 +479,12 @@ func TestApproveStaffCodesAreCommittedFailed(t *testing.T) {
 		{"test.not_found", approvals.Fail(staff.ErrNotFound), http.StatusInternalServerError, httpx.CodeInternal, approvals.StatusFailed, staff.CodeNotFound},
 		{"test.no_code", approvals.Fail(errBoom), http.StatusInternalServerError, httpx.CodeInternal, approvals.StatusFailed, approvals.ErrorExecutionFailed},
 		{"test.crash", errBoom, http.StatusInternalServerError, httpx.CodeInternal, approvals.StatusPending, ""},
+		// ⚠️ ревью G4 (Task 13): отказ исполнителя модуля не из staff с кодом (geo.*) — x-error-codes approve не
+		// растёт (R4): наружу 409 platform.approval_stale, причина — код модуля в error запроса
+		{"test.geo_exists", approvals.Fail(httpx.NewError(http.StatusConflict, geo.CodeCountryExists)), http.StatusConflict,
+			httpx.CodeApprovalStale, approvals.StatusFailed, geo.CodeCountryExists},
+		{"test.geo_not_found", approvals.Fail(httpx.NewError(http.StatusNotFound, geo.CodeCountryNotFound)), http.StatusConflict,
+			httpx.CodeApprovalStale, approvals.StatusFailed, geo.CodeCountryNotFound},
 	}
 	for _, c := range cases {
 		e.reg.Register(approvals.Action{Name: c.action, Permission: "staff.roles.grant",

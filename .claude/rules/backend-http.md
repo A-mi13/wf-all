@@ -92,7 +92,9 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   роль сменилась — 403, до записей).
   approve — `200` только `executed`; неудача исполнения — ошибка с кодом при закоммиченном `failed`: `ErrStale` (и
   `ErrInitiatorChanged`) — 409 `platform.approval_stale`, бизнес-отказ — код из `approveStaffCodes` (= `staff.*`
-  `x-error-codes` approve, `TestApproveCodesMatchContract`), иной `staff.*` и отказ без кода — 500. Приглашение,
+  `x-error-codes` approve, `TestApproveCodesMatchContract`), иной `staff.*` и отказ без кода — 500; отказ с кодом
+  исполнителя модуля не из staff (`geo.*`: код — в `error` запроса) — 409 `platform.approval_stale` (`approveProblem`,
+  R4 плана B: бизнес-кодов модулей у approve нет, `TestApproveStaffCodesAreCommittedFailed`). Приглашение,
   чьи почта или имя к подтверждению не проходят текущие правила, — тоже `ErrStale` (`failed`, переподать;
   `TestApproveInviteInvalidPayloadFails`). Ошибки решений (approve, reject, cancel) — только `decisionProblem`
   (approve — через `approveProblem`): `auth.ErrSessionInvalid` уходит обёрнутой к `requestMeta` (401 со стиранием),

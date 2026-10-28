@@ -7,9 +7,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"wf/backend/internal/geo"
-	geoadmin "wf/backend/internal/geo/admin"
-	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
@@ -24,7 +21,8 @@ import (
 // отвечать 501 http.not_implemented; операция из списка, ответившая иначе, — падение («убрать из
 // pendingOps»). Задачи 9–15 убирают свои операции, Task 16 удаляет пустой список.
 func TestNoStubOperations(t *testing.T) {
-	e := newStaffEnv(t, func(o *admin.Options) { o.Geo = geoadmin.New(geo.New(o.DB), geoadmin.Deps{Pool: o.DB, Clock: o.Clock}) })
+	// действия geo «вдвоём» — как в сборке admin-api (Task 13): без них страны отвечали бы 501
+	e := newGeoStaffEnv(t)
 	owner := e.firstLogin("olga.v@wf.example", string(perm.Owner))
 	spec, err := oapi.GetSpec()
 	if err != nil {
@@ -85,9 +83,6 @@ func TestNoStubOperations(t *testing.T) {
 // pendingOps — операции плана B, объявленные в контракте (Task 7) раньше своих хендлеров (R17): отвечают
 // 501. Каждая задача 9–15 убирает свои строки, Task 16 удаляет список.
 var pendingOps = map[string]bool{
-	// Task 13 — страны
-	"createGeoCountry": true,
-	"updateGeoCountry": true,
 	// Task 14 — импорт
 	"startGeoImport":     true,
 	"getGeoImportJob":    true,

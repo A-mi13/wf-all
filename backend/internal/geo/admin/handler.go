@@ -134,16 +134,6 @@ func negotiate(header *string) (locale string, contentLanguage *string) {
 // и перечислены в pendingOps (internal/httpapi/admin/nostub_test.go). Задача из комментария заменяет
 // заглушку хендлером и убирает операцию из pendingOps.
 
-// CreateGeoCountry — заглушка до Task 13.
-func (h *Handler) CreateGeoCountry(context.Context, oapi.CreateGeoCountryRequestObject) (oapi.CreateGeoCountryResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// UpdateGeoCountry — заглушка до Task 13.
-func (h *Handler) UpdateGeoCountry(context.Context, oapi.UpdateGeoCountryRequestObject) (oapi.UpdateGeoCountryResponseObject, error) {
-	return nil, errNotImplemented
-}
-
 // StartGeoImport — заглушка до Task 14.
 func (h *Handler) StartGeoImport(context.Context, oapi.StartGeoImportRequestObject) (oapi.StartGeoImportResponseObject, error) {
 	return nil, errNotImplemented

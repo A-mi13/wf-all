@@ -189,7 +189,9 @@ func (s *Service) Approve(ctx context.Context, st *auth.Staff, label string, m M
 		if err != nil {
 			return err
 		}
-		if execErr := a.Exec(ctx, sp, json.RawMessage(row.Payload), &approver); execErr != nil {
+		// id запроса — в ctx исполнителя (ApprovalIDFrom): модуль пишет его в свой аудит (approval_id)
+		ectx := context.WithValue(ctx, approvalKey{}, row.ID)
+		if execErr := a.Exec(ectx, sp, json.RawMessage(row.Payload), &approver); execErr != nil {
 			visible := business(execErr)
 			if visible == nil {
 				return execErr

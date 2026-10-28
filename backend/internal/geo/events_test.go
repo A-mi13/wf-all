@@ -41,6 +41,9 @@ func TestEventShapes(t *testing.T) {
 			`{"city_id":"01920000-0000-7000-8000-000000000001","old_slug":"stavropol","new_slug":"stav"}`, eventCity, 6},
 		{geo.DistrictEvent(geo.EventDistrictArchived, eventImport, eventCity, 2), "geo.district_archived", "district",
 			`{"district_id":"01920000-0000-7000-8000-000000000002","city_id":"01920000-0000-7000-8000-000000000001"}`, eventImport, 2},
+		{geo.CountryCreatedEvent(eventImport, "KZ"), "geo.country_created", "country", `{"country_code":"KZ"}`, eventImport, 1},
+		{geo.CountryUpdatedEvent(eventImport, 7, "RU", []string{"currency", "names"}), "geo.country_updated", "country",
+			`{"country_code":"RU","changed":["currency","names"]}`, eventImport, 7},
 		{geo.ImportFinishedEvent(eventImport, "RU", "succeeded"), "geo.import_finished", "geonames_import",
 			`{"import_id":"01920000-0000-7000-8000-000000000002","country_code":"RU","status":"succeeded"}`, eventImport, 1},
 	}

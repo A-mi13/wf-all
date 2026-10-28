@@ -466,3 +466,27 @@ func assertField(t *testing.T, err error, field, code string) {
 		t.Fatalf("ошибка поля: %+v", p)
 	}
 }
+
+// Task 13 плана B: исполнитель видит id исполняемого запроса в ctx (ApprovalIDFrom) — модуль пишет его в свой аудит
+// (approval_id); вне исполнителя — нет.
+func TestApproveExecutorSeesApprovalID(t *testing.T) {
+	e := newEnv(t)
+	a, b := e.member(perm.Owner), e.member(perm.Owner)
+	tg := id.New()
+	ap := e.request(a, actGrant, payload{V: 1, Target: &tg})
+	var got uuid.UUID
+	var ok bool
+	e.setExec(func(ctx context.Context, _ pgx.Tx, _ json.RawMessage, _ *auth.Staff) error {
+		got, ok = approvals.ApprovalIDFrom(ctx)
+		return nil
+	})
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got != ap.ID {
+		t.Fatalf("id в исполнителе: %s %v, ждали %s", got, ok, ap.ID)
+	}
+	if _, ok := approvals.ApprovalIDFrom(context.Background()); ok {
+		t.Fatal("id вне исполнителя")
+	}
+}

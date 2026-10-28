@@ -389,3 +389,76 @@ UPDATE districts
 SET name = sqlc.arg(name)::text, archived_at = sqlc.narg(archived_at)::timestamptz, version = version + 1
 WHERE id = sqlc.arg(id)::uuid
 RETURNING id, name, archived_at, version;
+
+-- ---------------------------------------------------------------------------
+-- Страны (createGeoCountry, updateGeoCountry и исполнители geo.country_create, geo.country_rules, Task 13;
+-- спека geo §5.2, R12, R25). Правила страны — всегда вдвоём (решение пользователя 27.10).
+-- ---------------------------------------------------------------------------
+
+-- Страна под замком правки по коду: текущие правила для сравнения «меняется ли» и итоговой проверки.
+-- name: CountryForUpdate :one
+SELECT id, code::text AS code, name, currency::text AS currency, default_locale, phone_prefix,
+       week_starts_on::int AS week_starts_on, min_signup_age::int AS min_signup_age,
+       age_of_majority::int AS age_of_majority, is_enabled, version
+FROM countries
+WHERE code = sqlc.arg(code)::text
+FOR UPDATE;
+
+-- Страна под замком исполнителя по id (из payload запроса).
+-- name: CountryForUpdateByID :one
+SELECT id, code::text AS code, name, currency::text AS currency, default_locale, phone_prefix,
+       week_starts_on::int AS week_starts_on, min_signup_age::int AS min_signup_age,
+       age_of_majority::int AS age_of_majority, is_enabled, version
+FROM countries
+WHERE id = sqlc.arg(id)::uuid
+FOR UPDATE;
+
+-- Названия страны по языкам.
+-- name: CountryNamesOf :many
+SELECT locale, name FROM country_names WHERE country_id = sqlc.arg(country_id)::uuid ORDER BY locale;
+
+-- Новая страна (исполнитель geo.country_create): версия 1; занятый код — 23505 countries_code_key.
+-- name: InsertCountry :exec
+INSERT INTO countries (id, code, name, currency, default_locale, phone_prefix, week_starts_on, min_signup_age,
+                       age_of_majority, is_enabled, version)
+VALUES (sqlc.arg(id)::uuid, sqlc.arg(code)::text, sqlc.arg(name)::text, sqlc.arg(currency)::text,
+        sqlc.arg(default_locale)::text, sqlc.arg(phone_prefix)::text, sqlc.arg(week_starts_on)::bigint,
+        sqlc.arg(min_signup_age)::bigint, sqlc.arg(age_of_majority)::bigint, sqlc.arg(is_enabled)::boolean, 1);
+
+-- Поля страны после правки, версия + 1.
+-- name: UpdateCountryFields :one
+UPDATE countries
+SET name = sqlc.arg(name)::text, currency = sqlc.arg(currency)::text, phone_prefix = sqlc.arg(phone_prefix)::text,
+    week_starts_on = sqlc.arg(week_starts_on)::bigint, min_signup_age = sqlc.arg(min_signup_age)::bigint,
+    age_of_majority = sqlc.arg(age_of_majority)::bigint, is_enabled = sqlc.arg(is_enabled)::boolean,
+    version = version + 1
+WHERE id = sqlc.arg(id)::uuid
+RETURNING version;
+
+-- Название страны на языке (новое или переписанное).
+-- name: UpsertCountryName :exec
+INSERT INTO country_names (country_id, locale, name)
+VALUES (sqlc.arg(country_id)::uuid, sqlc.arg(locale)::text, sqlc.arg(name)::text)
+ON CONFLICT (country_id, locale) DO UPDATE SET name = EXCLUDED.name;
+
+-- Перевод страны удалён (строку языка страны сценарий не удаляет).
+-- name: DeleteCountryName :exec
+DELETE FROM country_names WHERE country_id = sqlc.arg(country_id)::uuid AND locale = sqlc.arg(locale)::text;
+
+-- Страна с правилами по коду для ответа правки (как строка AdminListCountries).
+-- name: AdminGetCountry :one
+SELECT co.code::text AS code,
+       coalesce(con.name, co.name)::text AS name,
+       co.currency::text AS currency,
+       co.default_locale,
+       co.phone_prefix,
+       co.week_starts_on,
+       co.min_signup_age,
+       co.age_of_majority,
+       co.is_enabled,
+       (SELECT count(*) FROM cities c WHERE c.country_id = co.id AND c.status IN ('pilot', 'live'))::bigint AS open_cities,
+       co.version,
+       co.id
+FROM countries co
+LEFT JOIN country_names con ON con.country_id = co.id AND con.locale = sqlc.arg(locale)::text
+WHERE co.code = sqlc.arg(code)::text;

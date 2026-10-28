@@ -62,8 +62,9 @@ type AdminDeps struct {
 
 // Admin — сценарии админки geo с записью.
 type Admin struct {
-	d    AdminDeps
-	hook func(ctx context.Context, stage string) // только тесты (SetStageHook)
+	d         AdminDeps
+	hook      func(ctx context.Context, stage string) // только тесты (SetStageHook)
+	approvals *approvals.Service                      // запросы подтверждения вдвоём (RegisterApprovals); nil — 501
 }
 
 // NewAdmin — сценарии на зависимостях; Log nil — журнал отбрасывается.

@@ -147,3 +147,41 @@ func DistrictEvent(typ string, districtID, cityID uuid.UUID, version int64) even
 		Payload: DistrictChanged{DistrictID: districtID, CityID: cityID},
 	}
 }
+
+// Страны (Task 13; спека geo §6, R15): агрегат country, версия — countries.version. geo.country_created — новое
+// событие (в каталоге спеки geo его нет; подписчиков нет).
+const (
+	EventCountryCreated = "geo.country_created"
+	EventCountryUpdated = "geo.country_updated"
+
+	AggregateCountry = "country"
+)
+
+// CountryCreated — payload geo.country_created: страна заведена (подтверждением вдвоём).
+type CountryCreated struct {
+	CountryCode string `json:"country_code"`
+}
+
+// CountryUpdated — payload geo.country_updated: изменились поля Changed (имена полей контракта, по алфавиту).
+type CountryUpdated struct {
+	CountryCode string   `json:"country_code"`
+	Changed     []string `json:"changed"`
+}
+
+// CountryCreatedEvent — событие новой страны; версия агрегата — 1.
+func CountryCreatedEvent(countryID uuid.UUID, code string) events.Event {
+	return events.Event{
+		Type: EventCountryCreated, SchemaVersion: 1,
+		AggregateType: AggregateCountry, AggregateID: countryID, AggregateVersion: 1,
+		Payload: CountryCreated{CountryCode: code},
+	}
+}
+
+// CountryUpdatedEvent — событие правки страны; version — версия страны после правки.
+func CountryUpdatedEvent(countryID uuid.UUID, version int64, code string, changed []string) events.Event {
+	return events.Event{
+		Type: EventCountryUpdated, SchemaVersion: 1,
+		AggregateType: AggregateCountry, AggregateID: countryID, AggregateVersion: version,
+		Payload: CountryUpdated{CountryCode: code, Changed: changed},
+	}
+}

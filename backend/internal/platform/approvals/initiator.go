@@ -1,6 +1,8 @@
 package approvals
 
 import (
+	"context"
+
 	"github.com/google/uuid"
 
 	"wf/backend/internal/platform/auth"
@@ -18,4 +20,14 @@ type Initiator struct {
 // версия ведёт к отказу при подтверждении, а не к пропуску.
 func InitiatorOf(s *auth.Staff) Initiator {
 	return Initiator{ID: s.StaffID, Ver: s.Version}
+}
+
+// approvalKey — ключ id исполняемого запроса в ctx исполнителя.
+type approvalKey struct{}
+
+// ApprovalIDFrom — id запроса, который сейчас исполняется (Approve кладёт его в ctx исполнителя): модуль пишет его в
+// свой аудит (approval_id). Вне исполнителя — ok = false.
+func ApprovalIDFrom(ctx context.Context) (uuid.UUID, bool) {
+	id, ok := ctx.Value(approvalKey{}).(uuid.UUID)
+	return id, ok
 }
