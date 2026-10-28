@@ -292,7 +292,6 @@ SELECT (EXISTS (SELECT 1 FROM cities WHERE slug = sqlc.arg(slug)::text)
 
 -- Новый город из места: точка — из источника, версия 1, время — часов сценария. 0 строк — место удалено
 -- параллельным импортом после ActivatePlace (geo.place_not_found, а не FK на city_names).
--- Регион по admin1 ставится после вставки (ActivateSetCityRegion): порядок замков «город → регион», как у сверки.
 -- name: ActivateInsertCity :execrows
 INSERT INTO cities (id, country_id, region_id, name, slug, timezone, centroid, status, population, geoname_id,
                     version, created_at, updated_at)
@@ -308,7 +307,8 @@ INSERT INTO city_names (city_id, locale, name)
 SELECT sqlc.arg(city_id)::uuid, u.locale, u.name
 FROM (SELECT unnest(sqlc.arg(locales)::text[]) AS locale, unnest(sqlc.arg(names)::text[]) AS name) AS u;
 
--- Регион нового города по admin1 — после вставки города (порядок замков «город → регион», как у сверки импорта).
--- updated_at ставит триггер cities_updated_at (now() транзакции активации).
--- name: ActivateSetCityRegion :exec
-UPDATE cities SET region_id = sqlc.arg(region_id)::uuid WHERE id = sqlc.arg(id)::uuid;
+-- Активация сериализуется со сверкой импорта страны (ревью G5 I1-r1): разделяемый advisory-замок транзакции
+-- (класс, страна) первым замком сценария — активации друг друга не ждут, сверка страны (ImportReconcileLock,
+-- эксклюзивный) ждёт их и наоборот. Ключ — app.countryLockKey.
+-- name: ActivateCountryLock :exec
+SELECT pg_advisory_xact_lock_shared(sqlc.arg(class)::int, sqlc.arg(country)::int);

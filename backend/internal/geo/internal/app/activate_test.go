@@ -351,55 +351,8 @@ func TestActivateRegionRace(t *testing.T) {
 	}
 }
 
-// Импорт держит транзакцию сверки (хук перед привязкой города к месту 526815), а админ в это время активирует то
-// же место: активация не ждёт импорт и успешна (место видно — оно из прошлого импорта), привязка импорта ловит
-// 23505 и уходит в conflict своим savepoint (R35), импорт успешен — взаимной блокировки нет. Обратный порядок
-// (импорт уже привязал, активация ждёт его коммита и получает 23505 → 409) детерминированно без хука «после
-// привязки» не воспроизвести; его исход — тот же перевод 23505 cities_geoname_id_key, что в TestActivateConcurrent.
-func TestActivateDuringImportLink(t *testing.T) {
-	e := newEnv(t) // импорт — под ролью worker
-	ctx := context.Background()
-	raw := fixture(t)
-	if _, err := e.importer(&raw).Import(ctx, "RU", nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	ural := addRegion(t, e, "Свердловская область")
-	mikh := addCity(t, e, ural, "test-mikhaylovsk-ural", map[string]string{"ru": "Михайловск"})
-	cfg := e.owner.Config().Copy()
-	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
-		_, err := c.Exec(ctx, "SET ROLE admin")
-		return err
-	}
-	adminPool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(adminPool.Close)
-	adm := app.NewAdmin(app.AdminDeps{Pool: adminPool, Clock: e.clk, Log: slog.New(slog.DiscardHandler)})
-	var activated geo.AdminCity
-	var actErr error
-	im := e.importer(&raw)
-	im.SetBeforeLink(func(_ context.Context, cityID uuid.UUID, gid int64) {
-		if cityID == mikh && gid == 526815 {
-			// не t.Fatal: колбэк внутри db.InTx держит соединение
-			activated, actErr = adm.Activate(context.Background(), actor, app.Activation{GeonameID: gid}, approvals.Meta{})
-		}
-	})
-	res, err := im.Import(ctx, "RU", nil, nil)
-	if err != nil || actErr != nil {
-		t.Fatalf("импорт: %v, активация: %v", err, actErr)
-	}
-	if len(res.Reconciled.Conflict) != 1 || res.Reconciled.Conflict[0].CityID != mikh {
-		t.Fatalf("конфликт: %+v", res.Reconciled)
-	}
-	var owner uuid.UUID
-	if err := e.owner.QueryRow(ctx, `SELECT id FROM cities WHERE geoname_id = 526815`).Scan(&owner); err != nil || owner != activated.ID {
-		t.Fatalf("место 526815 у %s, активирован %s: %v", owner, activated.ID, err)
-	}
-}
-
 // importRaceEnv — импорт RU (под ролью worker) уже прошёл один раз (места в источнике закоммичены), затем
-// заведены регион «Свердловская область» без кода и незаведённый на месте город test-a-mikh (кандидат 526815) —
+// заведены регион «Свердловская область» без кода и незаведённый на месте город mikhSlug (кандидат 526815) —
 // второй импорт будет их сверять. adm — активация на той же базе под ролью admin.
 type importRaceEnv struct {
 	env
@@ -408,7 +361,7 @@ type importRaceEnv struct {
 	adm  func() *app.Admin
 }
 
-func newImportRaceEnv(t *testing.T, more func(e env, ural uuid.UUID)) importRaceEnv {
+func newImportRaceEnv(t *testing.T, mikhSlug string, more func(e env, ural uuid.UUID)) importRaceEnv {
 	t.Helper()
 	e := newEnv(t)
 	raw := fixture(t)
@@ -417,7 +370,7 @@ func newImportRaceEnv(t *testing.T, more func(e env, ural uuid.UUID)) importRace
 		t.Fatal(err)
 	}
 	ural := addRegion(t, e, "Свердловская область")
-	r := importRaceEnv{env: e, raw: raw, mikh: addCity(t, e, ural, "test-a-mikh", map[string]string{"ru": "Михайловск"})}
+	r := importRaceEnv{env: e, raw: raw, mikh: addCity(t, e, ural, mikhSlug, map[string]string{"ru": "Михайловск"})}
 	if more != nil {
 		more(e, ural)
 	}
@@ -453,7 +406,7 @@ func waitLockOrDone(t *testing.T, owner *pgxpool.Pool, done <-chan struct{}) boo
 		default:
 		}
 		var n int
-		if err := owner.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted`).Scan(&n); err != nil {
+		if err := owner.QueryRow(ctx, waitingInThisDB).Scan(&n); err != nil {
 			t.Errorf("pg_locks: %v", err)
 			return false
 		}
@@ -471,10 +424,10 @@ func isDeadlock(err error) bool {
 
 // Требование плана (Task 10, «Ловушки»): сверка импорта уже привязала город к месту 526815 и держит транзакцию
 // (хук перед привязкой второго города test-b-lesnoy — точка «первый привязан»), активация того же места ждёт её
-// коммита и получает 23505 → geo.ErrCityAlreadyActive; импорт успешен, место — у города импорта, взаимной блокировки нет.
+// коммита (замок страны, I1-r1) и получает geo.ErrCityAlreadyActive; импорт успешен, место — у города импорта, без 40P01.
 func TestActivateWaitsForImportLink(t *testing.T) {
 	var lesnoy uuid.UUID
-	r := newImportRaceEnv(t, func(e env, ural uuid.UUID) {
+	r := newImportRaceEnv(t, "test-a-mikh", func(e env, ural uuid.UUID) {
 		lesnoy = addCity(t, e, ural, "test-b-lesnoy", map[string]string{"ru": "Лесной"})
 	})
 	var actErr error
@@ -508,12 +461,12 @@ func TestActivateWaitsForImportLink(t *testing.T) {
 	}
 }
 
-// Встречный порядок (ревью G5 I1): активация прошла проверки и стоит перед вставкой города, импорт в это время
-// сверяет тот же город и регион. Активация берёт замки «город → регион», как сверка, — ни одна сторона не получает
-// 40P01: импорт успешен, активация — 200 или 409 по тому, кто первым занял место. Со старым порядком («регион →
-// город») активация держала бы (RU, 71), импорт ждал бы его на ImportLinkRegion, а активация — его geoname_id.
+// Встречный порядок на одном городе (ревью G5 I1): активация взяла замок страны, завела регион (RU, 71) и стоит
+// перед вставкой города; импорт той же страны доходит до сверки и ждёт замок страны (не берёт ни город, ни регион),
+// активация коммитит — сверка идёт после неё: 526815 уже занято, импорт успешен без 40P01. Без замка страны сверка
+// привязала бы город к 526815 и ждала регион активации, а активация — geoname_id сверки (40P01).
 func TestActivateImportRegionLockOrder(t *testing.T) {
-	r := newImportRaceEnv(t, nil)
+	r := newImportRaceEnv(t, "test-a-mikh", nil)
 	at, release, actDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	adm := r.adm()
@@ -523,31 +476,74 @@ func TestActivateImportRegionLockOrder(t *testing.T) {
 		}
 	})
 	var actErr error
+	var city geo.AdminCity
 	go func() {
 		defer close(actDone)
-		_, actErr = adm.Activate(context.Background(), actor, app.Activation{GeonameID: 526815}, approvals.Meta{})
+		city, actErr = adm.Activate(context.Background(), actor, app.Activation{GeonameID: 526815}, approvals.Meta{})
 	}()
 	<-at
 	impDone := make(chan struct{})
 	var impErr error
-
 	go func() {
 		defer close(impDone)
 		_, impErr = r.importer(&r.raw).Import(context.Background(), "RU", nil, nil)
 	}()
-	waitLockOrDone(t, r.owner, impDone) // импорт либо закончил, либо ждёт замок активации
+	waited := waitLockOrDone(t, r.owner, impDone) // импорт ждёт замок активации (страны — или, без него, региона)
 	close(release)
 	<-actDone
 	<-impDone
 	if isDeadlock(actErr) || isDeadlock(impErr) {
 		t.Fatalf("взаимная блокировка: активация %v, импорт %v", actErr, impErr)
 	}
-	if impErr != nil || actErr != nil && !errors.Is(actErr, geo.ErrCityAlreadyActive) {
-		t.Fatalf("импорт: %v, активация: %v", impErr, actErr)
+	if !waited || impErr != nil || actErr != nil {
+		t.Fatalf("ждал %v, импорт: %v, активация: %v", waited, impErr, actErr)
 	}
-	var n int
-	if err := r.owner.QueryRow(context.Background(), `SELECT count(*) FROM cities WHERE geoname_id = 526815`).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("городов на 526815: %d %v", n, err)
+	var owner uuid.UUID
+	if err := r.owner.QueryRow(context.Background(), `SELECT id FROM cities WHERE geoname_id = 526815`).Scan(&owner); err != nil || owner != city.ID {
+		t.Fatalf("место 526815 у %s, активирован %s: %v", owner, city.ID, err)
+	}
+}
+
+// Два города одной сверки (ревью G5 I1-r1): сверка привязала test-a-lesnoy (регион получил код 71, транзакция
+// открыта) и подходит к test-b-mikh (кандидат 526815); в этот момент активируют 526815. Активация ждёт замок страны
+// целиком, сверка привязывает test-b-mikh и коммитит, активация получает geo.ErrCityAlreadyActive — без 40P01. Без
+// замка страны и с порядком «город → регион» (раунд 1) активация заняла бы 526815 и ждала регион сверки, а сверка —
+// её geoname_id.
+func TestActivateCrossCityImportLock(t *testing.T) {
+	var lesnoy uuid.UUID
+	r := newImportRaceEnv(t, "test-b-mikh", func(e env, ural uuid.UUID) {
+		lesnoy = addCity(t, e, ural, "test-a-lesnoy", map[string]string{"ru": "Лесной"})
+	})
+	var actErr error
+	actDone := make(chan struct{})
+	im := r.importer(&r.raw)
+	im.SetBeforeLink(func(ctx context.Context, cityID uuid.UUID, _ int64) {
+		if cityID != r.mikh {
+			return
+		}
+		go func() {
+			defer close(actDone)
+			_, actErr = r.adm().Activate(context.WithoutCancel(ctx), actor, app.Activation{GeonameID: 526815}, approvals.Meta{})
+		}()
+		// не t.Fatal: колбэк внутри db.InTx держит соединение
+		if !waitLockOrDone(t, r.owner, actDone) {
+			t.Errorf("активация не ждала сверку: %v", actErr)
+		}
+	})
+	res, err := im.Import(context.Background(), "RU", nil, nil)
+	<-actDone
+	if isDeadlock(err) || isDeadlock(actErr) {
+		t.Fatalf("взаимная блокировка: импорт %v, активация %v", err, actErr)
+	}
+	if err != nil || !errors.Is(actErr, geo.ErrCityAlreadyActive) {
+		t.Fatalf("импорт: %v, активация: %v", err, actErr)
+	}
+	linked := map[uuid.UUID]int64{}
+	for _, l := range res.Reconciled.Linked {
+		linked[l.CityID] = l.GeonameID
+	}
+	if linked[lesnoy] != 9100010 || linked[r.mikh] != 526815 {
+		t.Fatalf("привязаны: %+v", res.Reconciled)
 	}
 }
 
@@ -568,5 +564,20 @@ func TestActivatePlaceDeletedConcurrently(t *testing.T) {
 	}
 	if n := e.count(t, `SELECT count(*) FROM cities WHERE slug LIKE 'zarechnyy%'`); n != 0 {
 		t.Fatalf("город записан: %d", n)
+	}
+}
+
+// waitingInThisDB — незахваченные замки соединений своей базы (клона теста): pg_locks видит весь кластер, а ожидание
+// транзакции (transactionid) у замка без database — поэтому фильтр по базе соединения, а не по pg_locks.database
+// (ревью G5 m-r1: чужие тесты кластера отпускали барьер раньше времени).
+const waitingInThisDB = `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+	WHERE NOT l.granted AND a.datname = current_database()`
+
+// Ключ замка страны: класс «geor», код страны двумя байтами — разные страны и разные классы не совпадают.
+func TestCountryLockKey(t *testing.T) {
+	class, ru := app.CountryLockKey("RU")
+	_, kz := app.CountryLockKey("KZ")
+	if class != 0x67656f72 || ru != 'R'<<8|'U' || ru == kz {
+		t.Fatalf("класс %x, RU %d, KZ %d", class, ru, kz)
 	}
 }

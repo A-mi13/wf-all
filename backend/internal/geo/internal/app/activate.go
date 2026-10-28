@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -116,7 +117,7 @@ func (a *Admin) Activate(ctx context.Context, s *auth.Staff, in Activation, m ap
 	err := db.InTx(ctx, a.d.Pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := geodb.New(tx)
 		place, err := q.ActivatePlace(ctx, in.GeonameID)
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && place.Missing {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return geo.ErrPlaceNotFound
 		}
 		if err != nil {
@@ -127,6 +128,19 @@ func (a *Admin) Activate(ctx context.Context, s *auth.Staff, in Activation, m ap
 			code = strings.ToUpper(in.CountryCode)
 		}
 		overridden := code != place.CountryCode
+		// Первый замок сценария — разделяемый advisory-замок страны места и страны города (ревью G5 I1-r1): сверка
+		// импорта страны держит его эксклюзивно (import.go, reconcile) и привязывает все города страны в одной
+		// транзакции — без сериализации порядок замков города и региона у неё задаёт slug городов, и встречный порядок
+		// с активацией даёт 40P01 (db.InTx его не повторяет). До замка — только чтение места без замков; после —
+		// место перечитывается (пока ждали, импорт мог его пометить пропавшим).
+		if err := lockCountries(ctx, q, place.CountryCode, code); err != nil {
+			return err
+		}
+		if place, err = q.ActivatePlace(ctx, in.GeonameID); errors.Is(err, pgx.ErrNoRows) || err == nil && place.Missing {
+			return geo.ErrPlaceNotFound
+		} else if err != nil {
+			return err
+		}
 		country, err := q.ActivateCountry(ctx, code)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && !country.IsEnabled {
 			return geo.ErrCountryNotEnabled
@@ -153,29 +167,23 @@ func (a *Admin) Activate(ctx context.Context, s *auth.Staff, in Activation, m ap
 		if err != nil {
 			return err
 		}
-		// Порядок замков «город → регион» — как у сверки импорта (import.go, link: ImportLinkCity, затем
-		// ImportLinkRegion; ревью G5 I1). Сначала город (уникальный geoname_id), регион по admin1 — после: иначе
-		// активация держала бы (страна, admin1) и ждала geoname_id, а сверка — наоборот, и PostgreSQL убил бы одну
-		// из них 40P01 (db.InTx его не повторяет: 500 на «Активировать» или падение импорта страны).
-		cityID := id.New()
-		slug, err := a.insertCity(ctx, tx, place, plan.ascii, geodb.ActivateInsertCityParams{
-			ID: cityID, CountryID: country.ID, RegionID: plan.id, Name: names[country.DefaultLocale],
-			Timezone: place.Timezone, Status: string(status), Now: now, GeonameID: place.GeonameID,
-		})
-		if err != nil {
-			return err
-		}
+		// Регион — до города (вставка без промежуточного UPDATE: created_at и updated_at — часы сценария). Порядок
+		// замков внутри активации со сверкой не согласуется — их сериализует замок страны выше.
 		regionID := plan.id
 		if plan.admin1 != nil {
-			a.at(ctx, "ensure")
 			rid, err := ensureRegion(ctx, q, country.ID, code, country.DefaultLocale, place.Admin1Code, *plan.admin1, now)
 			if err != nil {
 				return err
 			}
-			if err := q.ActivateSetCityRegion(ctx, geodb.ActivateSetCityRegionParams{ID: cityID, RegionID: rid}); err != nil {
-				return err
-			}
 			regionID = &rid
+		}
+		cityID := id.New()
+		slug, err := a.insertCity(ctx, tx, place, plan.ascii, geodb.ActivateInsertCityParams{
+			ID: cityID, CountryID: country.ID, RegionID: regionID, Name: names[country.DefaultLocale],
+			Timezone: place.Timezone, Status: string(status), Now: now, GeonameID: place.GeonameID,
+		})
+		if err != nil {
+			return err
 		}
 		arg := geodb.ActivateCityNamesParams{CityID: cityID}
 		for _, l := range namesOrder(country.DefaultLocale) {
@@ -207,7 +215,7 @@ func (a *Admin) Activate(ctx context.Context, s *auth.Staff, in Activation, m ap
 }
 
 // regionPlan — регион нового города, решённый чтениями без замков (шаг 3): id — регион из запроса (уже есть);
-// admin1 — регион по коду места, который заводится (ensureRegion) только после вставки города; ascii — суффикс slug.
+// admin1 — регион по коду места, который заводится ensureRegion перед вставкой города; ascii — суффикс slug.
 type regionPlan struct {
 	id     *uuid.UUID
 	admin1 *geodb.ActivateAdmin1Row
@@ -366,4 +374,33 @@ func (a *Admin) at(ctx context.Context, stage string) {
 	if a.hook != nil {
 		a.hook(ctx, stage)
 	}
+}
+
+// countryLockClass — класс advisory-замка «сверка страны ↔ активации её городов» (ревью G5 I1-r1): «geor» в
+// ASCII. Двухаргументная форма pg_advisory_xact_lock(int, int) — своё пространство ключей PostgreSQL, не
+// пересекается с однобайтовым bigint-ключом staff (ownersLockKey) и любыми bigint-ключами.
+const countryLockClass int32 = 0x67656f72
+
+// countryLockKey — ключ advisory-замка страны: класс countryLockClass и код ISO 3166-1 alpha-2 (две заглавные
+// латинские буквы, CHECK ^[A-Z]{2}$) двумя байтами. Одна функция на оба места — сверку импорта (эксклюзивный,
+// reconcile) и активацию (разделяемый, lockCountries).
+func countryLockKey(country string) (class, key int32) {
+	var k int32
+	for i := 0; i < len(country) && i < 2; i++ {
+		k = k<<8 | int32(country[i])
+	}
+	return countryLockClass, k
+}
+
+// lockCountries — разделяемые advisory-замки стран места и города (переопределённая страна — обе, по возрастанию
+// кода, без повтора): активации не ждут друг друга, сверку импорта любой из этих стран ждут целиком и наоборот.
+func lockCountries(ctx context.Context, q *geodb.Queries, codes ...string) error {
+	slices.Sort(codes)
+	for _, c := range slices.Compact(codes) {
+		class, key := countryLockKey(c)
+		if err := q.ActivateCountryLock(ctx, geodb.ActivateCountryLockParams{Class: class, Country: key}); err != nil {
+			return fmt.Errorf("geo: замок страны %s: %w", c, err)
+		}
+	}
+	return nil
 }

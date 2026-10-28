@@ -205,3 +205,8 @@ UPDATE geonames_imports
 SET status = 'failed', finished_at = sqlc.arg(now)::timestamptz, error = sqlc.arg(reason)::text,
     source_files = COALESCE(sqlc.narg(source_files)::jsonb, source_files)
 WHERE id = sqlc.arg(id)::uuid AND status = 'running';
+
+-- name: ImportReconcileLock :exec
+-- Сверка страны исключает активации городов этой страны (ревью G5 I1-r1): эксклюзивный advisory-замок транзакции
+-- (класс, страна) — ключ app.countryLockKey; активация берёт тот же ключ разделяемым (ActivateCountryLock).
+SELECT pg_advisory_xact_lock(sqlc.arg(class)::int, sqlc.arg(country)::int);

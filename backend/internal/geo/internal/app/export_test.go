@@ -24,3 +24,6 @@ func (im *Importer) SetBeforeLink(f func(ctx context.Context, cityID uuid.UUID, 
 func (a *Admin) SetStageHook(f func(ctx context.Context, stage string)) {
 	a.hook = f
 }
+
+// CountryLockKey — ключ advisory-замка страны (сверка ↔ активация, ревью G5 I1-r1).
+func CountryLockKey(country string) (int32, int32) { return countryLockKey(country) }

@@ -530,6 +530,13 @@ func writeSource(ctx context.Context, q *geodb.Queries, run importRun, set prepa
 func (im *Importer) reconcile(ctx context.Context, tx pgx.Tx, run importRun) (Reconciled, error) {
 	q := geodb.New(tx)
 	rec := Reconciled{Linked: []LinkedCity{}, Ambiguous: []UnmatchedCity{}, NotFound: []UnmatchedCity{}, Conflict: []UnmatchedCity{}}
+	// Сверка страны исключает её активации (ревью G5 I1-r1): эксклюзивный advisory-замок страны (countryLockKey) — ждёт
+	// идущие активации и не пускает новые до коммита импорта. Активация (Activate) берёт тот же ключ разделяемым
+	// первым замком; без этого привязки нескольких городов страны и активация брали бы город и регион встречно (40P01).
+	class, key := countryLockKey(run.country)
+	if err := q.ImportReconcileLock(ctx, geodb.ImportReconcileLockParams{Class: class, Country: key}); err != nil {
+		return rec, fmt.Errorf("geo: замок страны сверки: %w", err)
+	}
 	cities, err := q.ImportUnlinkedCities(ctx, run.country)
 	if err != nil {
 		return rec, fmt.Errorf("geo: сверка: %w", err)
@@ -612,8 +619,9 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 
 // link — город получает geoname_id, version + 1, недостающие переводы; регион — код admin1 и
 // недостающие переводы; событие geo.city_linked. centroid и population города не меняются.
-// Порядок замков «город (geoname_id) → регион (страна, admin1)» — тот же, что у активации (activate.go, Activate:
-// вставка города, затем ensureRegion); не менять в одиночку — встречный порядок даёт 40P01 (ревью G5 I1).
+// Замки: город (geoname_id), затем регион (страна, admin1) — у каждого города сверки, в одной транзакции на все
+// города страны, поэтому общий порядок задаёт slug городов, а не правило. Активацию городов этой страны исключает
+// эксклюзивный advisory-замок страны в начале reconcile (ревью G5 I1-r1), а не порядок замков.
 func link(ctx context.Context, q *geodb.Queries, run importRun, c geodb.ImportUnlinkedCitiesRow, p geodb.ImportCityCandidatesRow) error {
 	version, err := q.ImportLinkCity(ctx, geodb.ImportLinkCityParams{ID: c.ID, GeonameID: p.GeonameID})
 	if err != nil {

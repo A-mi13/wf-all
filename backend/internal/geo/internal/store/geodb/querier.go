@@ -19,9 +19,12 @@ type Querier interface {
 	ActivateCityOnPlace(ctx context.Context, geonameID int64) (bool, error)
 	// Страна активации по коду: id, язык, включена ли.
 	ActivateCountry(ctx context.Context, code string) (ActivateCountryRow, error)
+	// Активация сериализуется со сверкой импорта страны (ревью G5 I1-r1): разделяемый advisory-замок транзакции
+	// (класс, страна) первым замком сценария — активации друг друга не ждут, сверка страны (ImportReconcileLock,
+	// эксклюзивный) ждёт их и наоборот. Ключ — app.countryLockKey.
+	ActivateCountryLock(ctx context.Context, arg ActivateCountryLockParams) error
 	// Новый город из места: точка — из источника, версия 1, время — часов сценария. 0 строк — место удалено
 	// параллельным импортом после ActivatePlace (geo.place_not_found, а не FK на city_names).
-	// Регион по admin1 ставится после вставки (ActivateSetCityRegion): порядок замков «город → регион», как у сверки.
 	ActivateInsertCity(ctx context.Context, arg ActivateInsertCityParams) (int64, error)
 	// Новый регион страны с кодом admin1; уже есть (в том числе параллельная активация вставила и закоммитила) —
 	// ни одной строки, без 23505 (regions_country_admin1_key — частичный уникальный индекс).
@@ -39,9 +42,6 @@ type Querier interface {
 	ActivateRegionNames(ctx context.Context, arg ActivateRegionNamesParams) error
 	// Регион из запроса — только своей страны; ascii-название admin1 региона (для суффикса slug), если есть.
 	ActivateRegionOfCountry(ctx context.Context, arg ActivateRegionOfCountryParams) (ActivateRegionOfCountryRow, error)
-	// Регион нового города по admin1 — после вставки города (порядок замков «город → регион», как у сверки импорта).
-	// updated_at ставит триггер cities_updated_at (now() транзакции активации).
-	ActivateSetCityRegion(ctx context.Context, arg ActivateSetCityRegionParams) error
 	// Город есть (любой статус и страна) — 404 geo.city_not_found у районов.
 	AdminCityExists(ctx context.Context, id uuid.UUID) (bool, error)
 	// Названия города по всем языкам (GeoCityDetails.names).
@@ -129,6 +129,9 @@ type Querier interface {
 	ImportLinkRegion(ctx context.Context, arg ImportLinkRegionParams) (int64, error)
 	// Пропали из источника, но на них ссылается город: остаются с отметкой и попадают в отчёт (шаг 4).
 	ImportMarkMissing(ctx context.Context, arg ImportMarkMissingParams) ([]int64, error)
+	// Сверка страны исключает активации городов этой страны (ревью G5 I1-r1): эксклюзивный advisory-замок транзакции
+	// (класс, страна) — ключ app.countryLockKey; активация берёт тот же ключ разделяемым (ActivateCountryLock).
+	ImportReconcileLock(ctx context.Context, arg ImportReconcileLockParams) error
 	ImportRegionNamesFromAdmin1(ctx context.Context, arg ImportRegionNamesFromAdmin1Params) (int64, error)
 	ImportRestart(ctx context.Context, arg ImportRestartParams) error
 	ImportStart(ctx context.Context, arg ImportStartParams) error

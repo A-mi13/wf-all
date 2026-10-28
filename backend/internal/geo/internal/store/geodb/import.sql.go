@@ -415,6 +415,22 @@ func (q *Queries) ImportMarkMissing(ctx context.Context, arg ImportMarkMissingPa
 	return items, nil
 }
 
+const importReconcileLock = `-- name: ImportReconcileLock :exec
+SELECT pg_advisory_xact_lock($1::int, $2::int)
+`
+
+type ImportReconcileLockParams struct {
+	Class   int32
+	Country int32
+}
+
+// Сверка страны исключает активации городов этой страны (ревью G5 I1-r1): эксклюзивный advisory-замок транзакции
+// (класс, страна) — ключ app.countryLockKey; активация берёт тот же ключ разделяемым (ActivateCountryLock).
+func (q *Queries) ImportReconcileLock(ctx context.Context, arg ImportReconcileLockParams) error {
+	_, err := q.db.Exec(ctx, importReconcileLock, arg.Class, arg.Country)
+	return err
+}
+
 const importRegionNamesFromAdmin1 = `-- name: ImportRegionNamesFromAdmin1 :execrows
 INSERT INTO region_names (region_id, locale, name)
 SELECT $1::uuid, an.locale, an.name

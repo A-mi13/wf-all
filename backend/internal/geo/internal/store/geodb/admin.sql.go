@@ -87,6 +87,23 @@ func (q *Queries) ActivateCountry(ctx context.Context, code string) (ActivateCou
 	return i, err
 }
 
+const activateCountryLock = `-- name: ActivateCountryLock :exec
+SELECT pg_advisory_xact_lock_shared($1::int, $2::int)
+`
+
+type ActivateCountryLockParams struct {
+	Class   int32
+	Country int32
+}
+
+// Активация сериализуется со сверкой импорта страны (ревью G5 I1-r1): разделяемый advisory-замок транзакции
+// (класс, страна) первым замком сценария — активации друг друга не ждут, сверка страны (ImportReconcileLock,
+// эксклюзивный) ждёт их и наоборот. Ключ — app.countryLockKey.
+func (q *Queries) ActivateCountryLock(ctx context.Context, arg ActivateCountryLockParams) error {
+	_, err := q.db.Exec(ctx, activateCountryLock, arg.Class, arg.Country)
+	return err
+}
+
 const activateInsertCity = `-- name: ActivateInsertCity :execrows
 INSERT INTO cities (id, country_id, region_id, name, slug, timezone, centroid, status, population, geoname_id,
                     version, created_at, updated_at)
@@ -111,7 +128,6 @@ type ActivateInsertCityParams struct {
 
 // Новый город из места: точка — из источника, версия 1, время — часов сценария. 0 строк — место удалено
 // параллельным импортом после ActivatePlace (geo.place_not_found, а не FK на city_names).
-// Регион по admin1 ставится после вставки (ActivateSetCityRegion): порядок замков «город → регион», как у сверки.
 func (q *Queries) ActivateInsertCity(ctx context.Context, arg ActivateInsertCityParams) (int64, error) {
 	result, err := q.db.Exec(ctx, activateInsertCity,
 		arg.ID,
@@ -305,22 +321,6 @@ func (q *Queries) ActivateRegionOfCountry(ctx context.Context, arg ActivateRegio
 	var i ActivateRegionOfCountryRow
 	err := row.Scan(&i.ID, &i.AsciiName)
 	return i, err
-}
-
-const activateSetCityRegion = `-- name: ActivateSetCityRegion :exec
-UPDATE cities SET region_id = $1::uuid WHERE id = $2::uuid
-`
-
-type ActivateSetCityRegionParams struct {
-	RegionID uuid.UUID
-	ID       uuid.UUID
-}
-
-// Регион нового города по admin1 — после вставки города (порядок замков «город → регион», как у сверки импорта).
-// updated_at ставит триггер cities_updated_at (now() транзакции активации).
-func (q *Queries) ActivateSetCityRegion(ctx context.Context, arg ActivateSetCityRegionParams) error {
-	_, err := q.db.Exec(ctx, activateSetCityRegion, arg.RegionID, arg.ID)
-	return err
 }
 
 const adminCityExists = `-- name: AdminCityExists :one
