@@ -216,6 +216,33 @@ WHERE actor_role IS NULL
 дописывается (триггер запрещает UPDATE и DELETE), исправить строки нельзя — не мержить, пока CHECK в 0020 не
 пересмотрены.
 
+`0023_normalize_text_case.sql` (поиск и уникальность без учёта регистра) пересчитывает все `*_normalized`: значения,
+раньше различавшиеся регистром строчных `b h m t` или диакритикой («Tom» и «tom», «Café» и «CAFE»), совпадут, и
+перестройка уникального индекса уронит миграцию (`23505 could not create unique index "<имя>"`, откат целиком,
+версия остаётся `22`). Новое значение — `translate` старого, поэтому столкновения считаются заранее, на версии `22`
+(только числа — групп строк, которые совпадут; данных строк запрос не выводит):
+
+```sql
+SELECT 'users_nickname_key' AS idx, count(*) AS groups FROM (
+  SELECT 1 FROM users WHERE deleted_at IS NULL
+   GROUP BY translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху') HAVING count(*) > 1) AS g
+UNION ALL
+SELECT 'teams_city_name_key', count(*) FROM (
+  SELECT 1 FROM teams WHERE deleted_at IS NULL
+   GROUP BY city_id, translate(name_normalized, 'abcehkmoptxy', 'авсенкмортху') HAVING count(*) > 1) AS g
+UNION ALL
+SELECT 'districts_city_name_active_key', count(*) FROM (
+  SELECT 1 FROM districts WHERE archived_at IS NULL
+   GROUP BY city_id, translate(name_normalized, 'abcehkmoptxy', 'авсенкмортху') HAVING count(*) > 1) AS g
+```
+
+Ожидаемо `0` по всем трём. Ненулевое — не мержить: решение по данным за пользователем (переименовать команду или
+район, сменить ник одному из игроков; кому — смотреть у себя, не в логе агента). Совпадения хранимых ников
+(`reserved_nicknames`, карантин `nickname_reservations`) миграция схлопывает сама. Тот же запрос — страж
+`Test0023ConflictCheckSQL` (`backend/migrations/platform_0023_test.go`): текст здесь и там совпадает дословно.
+Миграция переписывает таблицы с генерируемыми колонками (`ACCESS EXCLUSIVE` до конца наката), в том числе
+`geonames_places` и `geonames_place_names` — время наката растёт с их размером; объём — `SELECT count(*)` по ним.
+
 ## Импорт городов GeoNames
 
 Без импорта на стенде работают список городов, город и `nearest_open` (сид миграции `0019` — с
