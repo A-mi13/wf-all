@@ -61,6 +61,10 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
   история компонента — путь `'?shots-story=ui/icon/Icon:AllIcons'` (в кавычках; скрипт сам добавит `/`); работает на Windows, в Git Bash пути без ведущего `/`
   или `MSYS_NO_PATHCONV=1`). Каталог — `.superpowers/sdd/<сессия>/shots/<группа>/`; PNG не коммитятся и удаляются
   после ревью. Тесты скриптов репозитория — `./task scripts:test`.
+- Подсадка бага — `node scripts/plant.mjs --file F --find S --replace S --expect "<имя теста>" -- <команда>`
+  (пачка — `--spec`): база без подсадки обязана быть зелёной, возврат байт в байт со сверкой SHA при любом
+  исходе, SURVIVED — тест вакуумен; один вызов укладывается в `--budget` 540 с (вызов Bash — с `timeout: 600000`),
+  оборванный → `--recover`.
 - Кодогенерация — `./task gen`; сгенерированное коммитится (`gen:check` в CI сверяет).
 - Локальный Postgres 18 + PostGIS без Docker: `bash scripts/pg.sh install|init|start|stop|status|psql|port` → 127.0.0.1:`WF_PG_PORT` из `deploy/dev/.env` (по умолчанию 15432, `.tools/pg`).
 - `node --test` — только с глобом в кавычках: `node --test "dir/*.test.mjs"` (каталог на этой Node не сканируется).
