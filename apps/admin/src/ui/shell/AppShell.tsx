@@ -6,12 +6,12 @@ import { Avatar } from '../Avatar';
 import { Button } from '../Button';
 import { CountBadge } from '../CountBadge';
 import { cx } from '../cx';
+import { Icon } from '../icon';
 import { useIsMobile } from '../media';
 import { Sheet } from '../overlay';
 import { DesktopOnlyState, ForbiddenState, OfflineBanner } from '../states';
 import styles from './AppShell.module.css';
 import { BackLink, BackMemoryProvider } from './BackLink';
-import { NAV_ICONS, type NavIcon } from './icons';
 import { filterNav, findNavItem, type NavGroup, type NavItem } from './types';
 
 export type AppShellProps = {
@@ -232,7 +232,7 @@ function NavLink({
       {tab ? (
         <>
           <span className={styles.tabIcon}>
-            <Icon name={item.icon ?? 'list'} />
+            <Icon name={item.icon ?? 'list'} size={20} />
           </span>
           <span className={styles.tabLabel}>{t(item.labelKey)}</span>
           {count ? ' ' : null}
@@ -250,14 +250,6 @@ function NavLink({
         </>
       )}
     </Link>
-  );
-}
-
-function Icon({ name, size = 19 }: { name: NavIcon; size?: number }) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" className={styles.icon}>
-      <path d={NAV_ICONS[name]} />
-    </svg>
   );
 }
 
@@ -291,7 +283,7 @@ function TabBar({ menu, current, counts, account, profileMenu, onLogout, logging
           onClick={() => setOpen(true)}
         >
           <span className={styles.tabIcon}>
-            <Icon name="more" />
+            <Icon name="more" size={20} />
           </span>
           <span className={styles.tabLabel}>{t('nav.more')}</span>
         </button>

@@ -305,14 +305,6 @@
   left: calc(50% + 6px);
 }
 
-.icon {
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 .moreAccount {
   display: flex;
   align-items: center;

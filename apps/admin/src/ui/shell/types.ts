@@ -1,4 +1,4 @@
-import type { NavIcon } from './icons';
+import type { IconName } from '@wf/icons';
 
 // Пункт меню админки (спека §9.3–9.4, D22–D23).
 // - permission — право, без которого пункта нет в меню, а прямой адрес даёт ForbiddenState;
@@ -11,7 +11,7 @@ export type NavItem = {
   labelKey: string;
   permission: string | null;
   desktopOnly?: boolean;
-  icon?: NavIcon;
+  icon?: IconName;
   countLabelKey?: string;
 };
 

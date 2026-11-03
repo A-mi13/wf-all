@@ -1,0 +1,42 @@
+/* Лист иконок для витрины и снимков (история Icon «все иконки»). */
+.sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--wf-space-3);
+  padding: var(--wf-space-4);
+  background: var(--wf-color-bg);
+  color: var(--wf-color-text);
+  font-family: var(--wf-font-body);
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--wf-space-2);
+  padding: var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg-elevated);
+}
+
+.sizes {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--wf-space-2);
+}
+
+.name {
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  color: var(--wf-color-text-muted);
+}
+
+.group {
+  grid-column: 1 / -1;
+  margin: var(--wf-space-2) 0 0;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+  color: var(--wf-color-text-subtle);
+}

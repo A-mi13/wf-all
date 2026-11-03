@@ -1,5 +1,5 @@
 import '../app/styles';
-import { StrictMode } from 'react';
+import { type ComponentType, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '../App';
 import { createApi } from '../api/client';
@@ -17,6 +17,7 @@ import { http, server, start } from './server';
 // ?shots-locale=ru|en (язык интерфейса — me.locale; у anonymous — язык по умолчанию). Когда первая
 // отрисовка готова, шрифты загружены и запросов нет, на <html> встаёт data-shots-ready — его ждёт
 // scripts/admin-shots.mjs. В обычную сборку модуль не попадает (страж src/shots/shots.test.ts).
+// ?shots-story=<путь от src без .stories.tsx>:<экспорт> — снимок истории компонента вместо приложения.
 
 const ROLES: Record<string, Me | null> = {
   owner: meOwner,
@@ -58,12 +59,28 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 50));
 
 await start();
 
+// История компонента вместо приложения (до витрины UF3): ?shots-story=ui/icon/Icon:AllIcons —
+// путь *.stories.tsx от src без расширения и имя экспорта.
+async function loadStory(spec: string): Promise<ComponentType> {
+  const stories = import.meta.glob<Record<string, unknown>>('../**/*.stories.tsx');
+  const [file, name = 'default'] = spec.split(':');
+  const load = stories[`../${file}.stories.tsx`];
+  if (!load) throw new Error(`shots: нет истории ${file}.stories.tsx`);
+  const story = (await load())[name];
+  if (typeof story !== 'function')
+    throw new Error(`shots: в ${file}.stories.tsx нет истории ${name}`);
+  return story as ComponentType;
+}
+
+const storySpec = params.get('shots-story');
+const Story = storySpec ? await loadStory(storySpec) : null;
+
 const queryClient = createQueryClient();
 const root = document.getElementById('root');
 if (!root) throw new Error('нет #root в index.html');
 createRoot(root).render(
   <StrictMode>
-    <App api={createApi('')} queryClient={queryClient} />
+    {Story ? <Story /> : <App api={createApi('')} queryClient={queryClient} />}
   </StrictMode>,
 );
 

@@ -20,6 +20,7 @@ export {
   TextField,
   useFieldErrorText,
 } from './form';
+export { Icon, Illustration } from './icon';
 export { useIsMobile } from './media';
 export { useOnline } from './online';
 export { OtpInput, type OtpInputHandle, type OtpInputProps } from './OtpInput';
@@ -35,7 +36,6 @@ export {
   AppShell,
   type AppShellProps,
   type NavGroup,
-  type NavIcon,
   type NavItem,
   PageHeader,
   type TabItem,
