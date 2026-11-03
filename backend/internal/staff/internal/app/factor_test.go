@@ -49,6 +49,7 @@ func wantMFAInvalid(t *testing.T, err error, left int) {
 // Успех второго фактора: новый токен (стадия active), старый токен — «заменён»; mfa_at,
 // last_login_at, счётчик неудач 0, аудит staff.login от сотрудника.
 func TestVerifyMFASuccess(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{Name: "Ольга В."})
 	e.exec(`UPDATE staff_accounts SET mfa_failures = 3 WHERE id = $1`, m.ID)
@@ -91,6 +92,7 @@ func TestVerifyMFASuccess(t *testing.T) {
 // Review Focus 5: код предыдущего шага принимается один раз; тот же код вторично и код старше
 // принятого отвергаются.
 func TestTOTPPreviousStepOnce(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	ctx := context.Background()
@@ -113,6 +115,7 @@ func TestTOTPPreviousStepOnce(t *testing.T) {
 // Review Focus 5: резервный код строчными, без дефиса, с пробелами и \r\n принимается и сгорает —
 // второй раз тот же код (в любом виде) не подходит.
 func TestLoginRecoveryCodeOnce(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	ctx := context.Background()
@@ -145,6 +148,7 @@ func TestLoginRecoveryCodeOnce(t *testing.T) {
 // админам — одно в час на учётку. Аудит неудач — от учётки (шаг mfa — staff.login_failed),
 // блокировка — от системы. Пока закрыта — вход отвечает invalid_credentials.
 func TestLockoutAfterFiveFailures(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.addMember("owner@wf.example", memberOpts{Role: "owner"})
 	e.addMember("admin2@wf.example", memberOpts{Role: "admin"})
@@ -226,6 +230,7 @@ func TestLockoutAfterFiveFailures(t *testing.T) {
 // закоммиченная транзакция: хук идемпотентности видит один коммит. Обрыв соединения (отмена ctx
 // запроса) неудачу не теряет.
 func TestFailureCommittedBeforeAnswer(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.pending(m)
@@ -263,6 +268,7 @@ func TestFailureCommittedBeforeAnswer(t *testing.T) {
 
 // Неудачи unlock — staff.factor_failed от учётки и тот же счётчик блокировки.
 func TestUnlockFailureAudit(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{Role: "support", Name: "Поддержка"})
 	s := e.reauth(e.signIn(m))
@@ -281,6 +287,7 @@ func TestUnlockFailureAudit(t *testing.T) {
 // Review Focus 5: две вкладки разблокируют одним кодом — один успех и staff.mfa_invalid, без 500;
 // вторая неудачей не считается (это не перебор).
 func TestUnlockConcurrentSameCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	tok := e.signIn(m)
@@ -323,6 +330,7 @@ func TestUnlockConcurrentSameCode(t *testing.T) {
 // auth.ErrSessionReplaced (конвейер не стирает cookie), потом — ErrSessionInvalid. Новый токен —
 // active без Reauth, абсолютный срок сессии — от входа, IP — новый.
 func TestUnlockReplacesToken(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	oldTok := e.signIn(m)
@@ -368,6 +376,7 @@ func TestUnlockReplacesToken(t *testing.T) {
 // Reauth. Ответ — staff.wrong_stage до транзакции: токен не повёрнут, неудача, аудит и резервный код не тронуты,
 // под Idempotency-Key нет ни одной транзакции.
 func TestUnlockRequiresReauth(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	tok := e.signIn(m)
@@ -413,6 +422,7 @@ func TestUnlockRequiresReauth(t *testing.T) {
 // строка на известном ключе принимается и сгорает. Все строки на чужом ключе — код не проверить:
 // staff.mfa_invalid (неудача считается, выход — reset-access).
 func TestRecoveryCodeSkipsUnknownKey(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	var logs bytes.Buffer
 	d := e.deps
@@ -444,6 +454,7 @@ func TestRecoveryCodeSkipsUnknownKey(t *testing.T) {
 // (attempts_left 4…0), остальные упираются в закрытую учётку и погашенную сессию —
 // auth.ErrSessionInvalid; счётчик 5, блокировка и её событие — одни.
 func TestConcurrentFailuresLockOnce(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.pending(m)
@@ -488,6 +499,7 @@ func TestConcurrentFailuresLockOnce(t *testing.T) {
 
 // Аудит входа и разблокировки: способ второго фактора — After["method"] = totp | recovery.
 func TestFactorMethodAudited(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	ctx := context.Background()
@@ -513,6 +525,7 @@ func TestFactorMethodAudited(t *testing.T) {
 // lockLiveSession и на закрытой учётке отвечает отказом сессии; путь достижим только через шов
 // FailFactor (check без проверки сессии) и сторожит защиту в recordFailure на будущее.
 func TestNoRelockWhileLocked(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))

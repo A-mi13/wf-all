@@ -50,6 +50,7 @@ func wantPgError(t *testing.T, db *sql.DB, query, code, constraint string) {
 // городов, региона и страны, код admin1 региона; centroid обязателен; city_settings заменено
 // geo_read_city_settings с колонками §3.7 в этом порядке.
 func TestGeo0019SeedFilled(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 
@@ -172,6 +173,7 @@ func TestGeo0019SeedFilled(t *testing.T) {
 // архивного района свободно, один импорт страны за раз, коды admin1 уникальны в стране,
 // форматы локали, slug и версий приложения.
 func TestGeo0019Constraints(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 
 	// тёзка в той же стране и регионе (Михайловск 70 и 71, Заречный ×5) — не ошибка
@@ -355,6 +357,7 @@ const (
 // ограничение снимается DDL в транзакции клона (откатывается). Уникальности 23505 и cities_slug_format —
 // в TestGeo0019Constraints. Каскады проверяются от имени владельца схемы: у admin нет DELETE на cities.
 func TestGeo0019R13Guards(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 
 	guards := []r13Guard{
@@ -493,6 +496,7 @@ func TestGeo0019R13Guards(t *testing.T) {
 // колонке ascii_name_normalized — индекс по выражению с normalize_text с PG17 не строится
 // (CREATE INDEX идёт с search_path = pg_catalog, pg_temp).
 func TestGeo0019PlaceAsciiSearch(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 
@@ -595,6 +599,7 @@ func missingFrom(a, b []string) []string {
 // никогда, совпадает со снимком после up+down — city_settings, cities_country_name_key,
 // districts_city_name_key на месте, новых таблиц и колонок нет. Затем повторный up проходит.
 func TestGeo0019DownRestoresSchema(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)
@@ -638,6 +643,7 @@ func TestGeo0019DownRestoresSchema(t *testing.T) {
 // а не общим «column contains null values»; в списке только он — сид получил точки раньше
 // проверки. Транзакция миграции откатывается целиком: версия 18, новых таблиц нет.
 func TestGeo0019RefusesCityWithoutCentroid(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)

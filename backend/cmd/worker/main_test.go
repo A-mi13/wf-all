@@ -30,6 +30,7 @@ import (
 var mailEnv = []string{"WORKER_MAIL_SMTP_ADDR=127.0.0.1:1", "WORKER_MAIL_FROM=WF <noreply@wf.local>", "WORKER_MAIL_SMTP_TLS=none"}
 
 func TestRunFailsWithoutConfig(t *testing.T) {
+	t.Parallel()
 	err := run(context.Background(), nil, nil, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "WORKER_DATABASE_URL") {
 		t.Fatalf("err = %v", err)
@@ -39,6 +40,7 @@ func TestRunFailsWithoutConfig(t *testing.T) {
 // Пачка 0 зациклила бы Drain, нулевой опрос уронил бы NewTicker паникой: воркер отказывается
 // стартовать до подключения к базе и называет ключ окружения.
 func TestRunRejectsInvalidRelayConfig(t *testing.T) {
+	t.Parallel()
 	// Адрес недостижим: если проверка не сработает, ошибка будет о подключении, не о ключе.
 	base := "WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1"
 	for _, tc := range []struct{ kv, key string }{
@@ -59,6 +61,7 @@ func TestRunRejectsInvalidRelayConfig(t *testing.T) {
 // Воркер поднимает relay: событие, лежавшее в outbox, становится опубликованным; по отмене
 // ctx воркер останавливается без ошибки.
 func TestRunPublishesPendingEventsAndStops(t *testing.T) {
+	t.Parallel()
 	url := dbtest.NewURL(t)
 	pool, err := pgxpool.New(context.Background(), url)
 	if err != nil {
@@ -114,6 +117,7 @@ func TestRunPublishesPendingEventsAndStops(t *testing.T) {
 }
 
 func TestReplayCommandValidatesArguments(t *testing.T) {
+	t.Parallel()
 	env := append(mailEnv, "WORKER_DATABASE_URL="+dbtest.NewURL(t))
 	cases := map[string][]string{
 		"неизвестная команда":   {"events", "rewind"},
@@ -132,6 +136,7 @@ func TestReplayCommandValidatesArguments(t *testing.T) {
 
 // Переигровка писем не шлёт: WORKER_MAIL_* ей не нужны — команда доходит до events.Replay.
 func TestReplayDoesNotRequireMail(t *testing.T) {
+	t.Parallel()
 	env := []string{"WORKER_DATABASE_URL=" + dbtest.NewURL(t)}
 	args := []string{"events", "replay", "--type", "teams.member_joined", "--subscriber", "notify.roster", "--since", "2026-10-01T00:00:00Z"}
 	if err := run(context.Background(), args, env, io.Discard, io.Discard); !errors.Is(err, events.ErrUnknownSubscription) {
@@ -141,6 +146,7 @@ func TestReplayDoesNotRequireMail(t *testing.T) {
 
 // Воркеру почта обязательна: без WORKER_MAIL_* — отказ старта до подключения к базе.
 func TestRunRequiresMail(t *testing.T) {
+	t.Parallel()
 	env := []string{"WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1"}
 	if err := run(context.Background(), nil, env, io.Discard, io.Discard); err == nil ||
 		!strings.Contains(err.Error(), "WORKER_MAIL_SMTP_ADDR") {
@@ -149,6 +155,7 @@ func TestRunRequiresMail(t *testing.T) {
 }
 
 func TestRunRejectsInvalidMailConfig(t *testing.T) {
+	t.Parallel()
 	env := []string{"WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1",
 		"WORKER_MAIL_SMTP_ADDR=nohost", "WORKER_MAIL_FROM=WF <noreply@wf.local>"}
 	err := run(context.Background(), nil, env, io.Discard, io.Discard)
@@ -159,6 +166,7 @@ func TestRunRejectsInvalidMailConfig(t *testing.T) {
 
 // Источник GeoNames проверяется на старте, до подключения к базе: ошибка называет ключ.
 func TestRunRejectsInvalidGeoNamesConfig(t *testing.T) {
+	t.Parallel()
 	base := "WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1"
 	for _, tc := range []struct{ kv, key string }{
 		{"WORKER_GEONAMES_BASE_URL=http://download.geonames.org", "WORKER_GEONAMES_BASE_URL"},
@@ -176,6 +184,7 @@ func TestRunRejectsInvalidGeoNamesConfig(t *testing.T) {
 }
 
 func TestGeoImportCommandValidatesArguments(t *testing.T) {
+	t.Parallel()
 	env := []string{"WORKER_DATABASE_URL=" + dbtest.NewURL(t)}
 	if err := run(context.Background(), []string{"geo", "import"}, env, io.Discard, io.Discard); err == nil ||
 		!strings.Contains(err.Error(), "--country") {
@@ -240,6 +249,7 @@ func geonamesTLS(t *testing.T) *httptest.Server {
 // Итог команды: счётчики и перечень slug по каждой категории сверки; значения и длины списков
 // (4/1/2/3) разные и ненулевые — перепутанное или потерянное поле не пройдёт.
 func TestPrintGeoSummary(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	printGeoSummary(&out, "RU", geojobs.Summary{
 		ImportID:       uuid.MustParse("c41bb0df-449d-46fe-bacd-e9dd35dd3395"),
@@ -265,6 +275,7 @@ func TestPrintGeoSummary(t *testing.T) {
 // Команда оператора импортирует синхронно в своём процессе: задачу River не ставит, почта не
 // нужна, журнал — без сотрудника и без задачи, аудит — от operator.
 func TestGeoImportCommandRunsSynchronously(t *testing.T) {
+	t.Parallel()
 	url := dbtest.NewURL(t)
 	srv := geonamesTLS(t)
 	geoHTTPClient = srv.Client()
@@ -305,6 +316,7 @@ func TestGeoImportCommandRunsSynchronously(t *testing.T) {
 // geo 1 Task 11 M4: лишние позиционные аргументы разовых команд, неизвестная команда, неизвестный флаг и нет
 // обязательного флага — ошибка использования: usage в тексте, код выхода 2 (как у admin-api); прочие отказы — 1.
 func TestCommandUsageErrors(t *testing.T) {
+	t.Parallel()
 	env := []string{"WORKER_DATABASE_URL=" + dbtest.NewURL(t)}
 	for _, args := range [][]string{
 		{"geo", "import", "--country", "RU", "лишнее"},

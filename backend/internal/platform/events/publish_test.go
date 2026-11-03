@@ -34,6 +34,7 @@ func outboxCount(t *testing.T, pool *pgxpool.Pool) int {
 }
 
 func TestPublishWritesEnvelopeInTransaction(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	ctx := context.Background()
 	agg := id.New()
@@ -75,6 +76,7 @@ func TestPublishWritesEnvelopeInTransaction(t *testing.T) {
 }
 
 func TestPublishOutsideTransactionFails(t *testing.T) {
+	t.Parallel()
 	_, err := events.Publish(context.Background(), joined(id.New(), 1))
 	if !errors.Is(err, db.ErrNoTx) {
 		t.Fatalf("err = %v, ждали db.ErrNoTx", err)
@@ -83,6 +85,7 @@ func TestPublishOutsideTransactionFails(t *testing.T) {
 
 // Review Focus 4: откат бизнес-транзакции уносит и событие.
 func TestPublishRolledBackWithTransaction(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	_ = db.InTx(context.Background(), pool, func(ctx context.Context, _ pgx.Tx) error {
 		if _, err := events.Publish(ctx, joined(id.New(), 1)); err != nil {
@@ -96,6 +99,7 @@ func TestPublishRolledBackWithTransaction(t *testing.T) {
 }
 
 func TestPublishRejectsInvalidEvent(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	bad := map[string]func(e *events.Event){
 		"тип без модуля":           func(e *events.Event) { e.Type = "member_joined" },

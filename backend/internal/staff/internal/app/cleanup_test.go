@@ -72,6 +72,7 @@ func (e *env) exists(table string, rowID uuid.UUID) bool {
 // остаётся, на микросекунду больше — удаляется; живая и недавно погасшая — остаются; давно истёкшая,
 // которую погасили недавно (гашение expired при загрузке), — умерла по сроку, удаляется.
 func TestCleanupSessions(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("a@wf.example", memberOpts{})
 	e.clock.Advance(90 * 24 * time.Hour)
@@ -112,6 +113,7 @@ func TestCleanupSessions(t *testing.T) {
 // 30 суток (ровно — остаётся); последнее приглашение сотрудника остаётся всегда, даже давно просроченное:
 // по нему повторная отправка берёт назначение (GetLastInvite).
 func TestCleanupInvites(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.clock.Advance(200 * 24 * time.Hour)
 	now, cut := e.clock.Now(), e.cutoff()
@@ -161,6 +163,8 @@ func TestCleanupInvites(t *testing.T) {
 
 // Порции (как ExpireDue): строк больше порции — цикл идёт до неполной порции; ровно порция + 1 и кратное
 // порции — всё удалено.
+//
+// serial: SetCleanupBatch меняет переменную пакета cleanupBatch — параллельная чистка прочла бы чужую порцию.
 func TestCleanupBatches(t *testing.T) {
 	e := newEnv(t)
 	defer app.SetCleanupBatch(2)()
@@ -188,6 +192,8 @@ func TestCleanupBatches(t *testing.T) {
 
 // Два экземпляра admin-api чистят одновременно: порции SKIP LOCKED не пересекаются и не ждут друг друга —
 // без ошибок, каждая строка удалена ровно одним проходом.
+//
+// serial: SetCleanupBatch меняет переменную пакета cleanupBatch — параллельная чистка прочла бы чужую порцию.
 func TestCleanupConcurrent(t *testing.T) {
 	e := newEnv(t)
 	defer app.SetCleanupBatch(3)()
@@ -227,6 +233,7 @@ func TestCleanupConcurrent(t *testing.T) {
 // Строку под замком (сценарий держит сессию или приглашение) порция пропускает, а не ждёт: чистка не
 // встаёт в очередь за транзакциями сценариев и не держит их; пропущенное возьмёт следующий проход.
 func TestCleanupSkipsLockedRows(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("a@wf.example", memberOpts{})
 	e.clock.Advance(90 * 24 * time.Hour)
@@ -264,8 +271,10 @@ func TestCleanupSkipsLockedRows(t *testing.T) {
 // Шаги чистки независимы (m3 ревью 10c): сбой чистки сессий не отменяет чистку приглашений — ошибка
 // возвращается, но приглашения удалены (и наоборот).
 func TestCleanupStepsIndependent(t *testing.T) {
+	t.Parallel()
 	for _, broken := range []string{"staff_sessions", "staff_invites"} {
 		t.Run(broken, func(t *testing.T) {
+			t.Parallel()
 			e := newEnv(t)
 			m := e.addMember("a@wf.example", memberOpts{})
 			e.clock.Advance(90 * 24 * time.Hour)

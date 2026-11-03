@@ -17,6 +17,7 @@ import (
 
 // Успех пароля — новая сессия mfa_pending на 5 минут; через 5 минут она недействительна.
 func TestLoginStartsMFAPending(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	ctx := context.Background()
@@ -45,6 +46,7 @@ func TestLoginStartsMFAPending(t *testing.T) {
 // Каждый вид отказа пароля — один и тот же ErrInvalidCredentials (существование учётки не
 // раскрывается), учётку они не трогают; аудит — без автора (anonymous), почта маскирована.
 func TestLoginRejectionsLookTheSame(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.addMember("ok@wf.example", memberOpts{})
 	e.addMember("invited@wf.example", memberOpts{Status: "invited"})
@@ -97,6 +99,7 @@ func TestLoginRejectionsLookTheSame(t *testing.T) {
 // D7: закрытая учётка пароль не проверяет вовсе. Хэш в базе битый — Verify вернул бы ErrMalformed
 // (сбой, 500); закрытая учётка отвечает ErrInvalidCredentials, а открытая с тем же хэшем — сбоем.
 func TestLockedAccountSkipsVerify(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	broken := "$argon2id$v=19$m=999999999,t=1,p=1$c2FsdA$a2V5"
 	locked := e.addMember("locked@wf.example", memberOpts{PasswordHash: broken})
@@ -114,6 +117,7 @@ func TestLockedAccountSkipsVerify(t *testing.T) {
 // Лимит по почте (D7): 10 попыток за 15 минут → 429, одинаково для существующей и несуществующей
 // почты; почта считается после нормализации (регистр и пробелы — та же почта).
 func TestLoginEmailRateLimit(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.addMember("olga.v@wf.example", memberOpts{})
 	for _, email := range []string{"Olga.V@wf.example", "ghost@wf.example"} {
@@ -155,6 +159,7 @@ func TestLoginEmailRateLimit(t *testing.T) {
 
 // D9: вход со старой cookie (сотрудник в ctx от конвейера) гасит старую сессию как заменённую.
 func TestLoginReplacesCookieSession(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	oldTok := e.signIn(m)
@@ -174,6 +179,7 @@ func TestLoginReplacesCookieSession(t *testing.T) {
 
 // Logout гасит сессию (logout); повтор — без ошибки.
 func TestLogout(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	tok := e.signIn(m)
@@ -210,6 +216,7 @@ func (h *countingHasher) VerifyDummy(ctx context.Context, pw string) error {
 // Выравнивание времени (D7): закрытая учётка и несуществующая почта проходят VerifyDummy и не
 // вызывают Verify; верный путь — Verify без VerifyDummy.
 func TestLoginTimingEqualized(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	base, err := sharedHasher()
 	if err != nil {
@@ -257,6 +264,7 @@ func (h *hookHasher) Verify(ctx context.Context, pw, encoded string) (bool, bool
 // входа пароль сменили, учётку выключили, закрыли или сбросили, вход под замком учётки перепроверяет хэш и
 // состояние — ErrInvalidCredentials и аудит неудачи пароля, новой сессии нет.
 func TestLoginAccountChangedMidway(t *testing.T) {
+	t.Parallel()
 	base, err := sharedHasher()
 	if err != nil {
 		t.Fatal(err)
@@ -282,6 +290,7 @@ func TestLoginAccountChangedMidway(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newEnv(t)
 			m := e.addMember("olga.v@wf.example", memberOpts{})
 			s := e.load(e.signIn(m))

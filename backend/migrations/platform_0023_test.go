@@ -62,6 +62,7 @@ func normalize(t *testing.T, db *sql.DB, s string) string {
 // Регистр не влияет ни на одну букву латиницы и кириллицы; префикс в любом регистре — префикс названия;
 // клоны латиницей и с диакритикой совпадают; разные названия — разные; NULL, пустое и чужая письменность.
 func TestNormalizeTextCase(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 
@@ -239,6 +240,7 @@ func seed0023(t *testing.T, db *sql.DB) {
 // до/после), хранимые ники — тем же translate без потерь; откат возвращает прежнюю функцию и прежние значения
 // колонок в точности; повторный накат проходит.
 func Test0023UpDown(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)
@@ -369,6 +371,7 @@ func Test0023UpDown(t *testing.T) {
 // 23505 с именем уникального индекса, версия остаётся 22, функция прежняя (транзакция откатилась целиком).
 // Строка вне предиката частичного индекса (архивный район, удалённый игрок) накату не мешает.
 func Test0023UniqueConflict(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)
@@ -439,6 +442,7 @@ SELECT 'districts_city_name_active_key', count(*) FROM (
 // Проверка стенда до наката (docs/deploy-dev.md, Task 25 плана B): тот же SQL на версии 22 находит каждую пару,
 // которая уронит 0023, и ничего не находит без них; перечень индексов в нём — все уникальные на *_normalized.
 func Test0023ConflictCheckSQL(t *testing.T) {
+	t.Parallel()
 	doc, err := os.ReadFile("../../docs/deploy-dev.md")
 	if err != nil {
 		t.Fatal(err)

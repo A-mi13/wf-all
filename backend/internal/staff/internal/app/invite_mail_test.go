@@ -16,6 +16,7 @@ import (
 // ComposeInvite (§4.3, §4.12): письма staff.invite и staff.access_reset на языке учётки — имя, код,
 // ссылка ADMIN_ORIGIN/accept без почты в адресе, срок кода.
 func TestComposeInvite(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	ru, ruCode := e.invitee("ivan.p@wf.example", memberOpts{Role: "support", Name: "Иван П."}, purposeInvite)
@@ -53,6 +54,7 @@ func TestComposeInvite(t *testing.T) {
 // ComposeInvite отменяет письмо (mail.ErrSkip): не тот получатель, не тот вид, погашено (новым
 // приглашением), срок истёк, приглашение принято-и-закрыто, нет приглашения.
 func TestComposeInviteSkips(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, _ := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -97,6 +99,7 @@ func TestComposeInviteSkips(t *testing.T) {
 // получателя; получатель — активный владелец, ref — учётка владельца, созданная оператором, иначе
 // mail.ErrSkip.
 func TestComposeBootstrapped(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	ruOwner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})

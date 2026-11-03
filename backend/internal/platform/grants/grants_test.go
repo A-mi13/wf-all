@@ -20,6 +20,7 @@ import (
 // всем ролям всё на проверяемые объекты — так отказы доказывают, что Apply права отзывает, а не просто
 // не выдаёт (свежий кластер широких умолчаний не имеет).
 func TestRolePrivileges(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	for _, ddl := range []string{

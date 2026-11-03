@@ -291,6 +291,7 @@ func near(a, b, tolerance float64) bool { return math.Abs(a-b) <= tolerance }
 // Порядок: ранг статуса (live, pilot, waitlist), population по убыванию, id; курсор v2 проходит
 // весь список без пропусков и повторов, в том числе через ничьи по population.
 func TestListCitiesOrderAndCursor(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	want := ruAll(t)
@@ -344,6 +345,7 @@ func TestListCitiesOrderAndCursor(t *testing.T) {
 }
 
 func TestListCitiesFilters(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	all := ruAll(t)
@@ -369,6 +371,7 @@ func TestListCitiesFilters(t *testing.T) {
 // nil — ни одного (модератор без городов не видит весь справочник); с q, статусом и курсором — сужает
 // внутри, курсор фильтр не снимает.
 func TestListCitiesIDs(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	live, stav, mih := cityID(t, "livsk"), cityID(t, "stavropol"), cityID(t, "mihaylovsk")
@@ -403,6 +406,7 @@ func TestListCitiesIDs(t *testing.T) {
 
 // q — префикс на любом языке после normalize_text: регистр, ё, латиница-двойники, пробелы.
 func TestListCitiesSearch(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	cases := []struct {
@@ -434,6 +438,7 @@ func TestListCitiesSearch(t *testing.T) {
 // Review Focus 1: тёзки в разных регионах находятся оба; город без строки city_names нужной
 // локали (и вовсе без строк) не роняет ответ — название каноническое.
 func TestListCitiesNamesakesAndMissingTranslation(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	pg, err := svc.ListCities(ctx, geo.ListParams{Q: "михайловск", Locale: "en"})
@@ -476,6 +481,7 @@ func TestListCitiesNamesakesAndMissingTranslation(t *testing.T) {
 }
 
 func TestCityDetails(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	stav := cityID(t, "stavropol")
@@ -519,6 +525,7 @@ func TestCityDetails(t *testing.T) {
 }
 
 func TestCityBySlug(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	stav := cityID(t, "stavropol")
@@ -539,6 +546,7 @@ func TestCityBySlug(t *testing.T) {
 
 // Город выключенной страны не виден нигде публично; CitySettings отдаёт его с country_enabled=false.
 func TestDisabledCountryIsInvisible(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	hidden := cityID(t, "skrytsk")
@@ -569,6 +577,7 @@ func TestDisabledCountryIsInvisible(t *testing.T) {
 }
 
 func TestCitySettings(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	stav := cityID(t, "stavropol")
@@ -585,6 +594,7 @@ func TestCitySettings(t *testing.T) {
 
 // nearest_open — ближайший видимый pilot/live без ограничения расстояния; waitlist не берётся.
 func TestNearestOpen(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	cases := []struct {
@@ -619,6 +629,7 @@ func TestNearestOpen(t *testing.T) {
 // here — место, накрывающее точку: r(pop) = clamp(2 км + 20 м·√pop, 2 км, 30 км), из накрывающих —
 // ближайшее; страна места — по правилу §4.1, невидимая страна — here = nil.
 func TestNearestHere(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	type want struct {
@@ -702,6 +713,7 @@ func TestNearestHere(t *testing.T) {
 // с локалью ru место XB — по-русски. Название источника (p.name) и ascii_name региона нарочно отличаются от
 // en-строк (m5-4 ревью G2): иначе запасное значение coalesce проходило бы за en-строку.
 func TestMixedCountriesLocale(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	ctx := context.Background()
 	type view struct{ name, region, country string }
@@ -732,6 +744,7 @@ func TestMixedCountriesLocale(t *testing.T) {
 
 // Точка вне диапазона — ErrBadPoint, а не паника и не ошибка PostGIS; HTTP-слой отсекает это раньше.
 func TestNearestRejectsBadPoint(t *testing.T) {
+	t.Parallel()
 	svc := reads(t)
 	for _, p := range []geo.Point{
 		{Lat: math.NaN(), Lon: 0}, {Lat: 0, Lon: math.Inf(1)}, {Lat: 90.0001, Lon: 0}, {Lat: 0, Lon: -180.0001},
@@ -746,6 +759,7 @@ func TestNearestRejectsBadPoint(t *testing.T) {
 // getCityBySlug отдаёт A. Ветки UNION ALL в ResolveCitySlug — история первой: без ORDER BY s.prio запрос отдал бы
 // строку истории, и тест это ловит (geo 1, Task 5 minor: при обратном порядке веток удаление ORDER BY не ловилось).
 func TestResolveCitySlugPrefersCurrent(t *testing.T) {
+	t.Parallel()
 	for range 5 { // план исполнения не меняется между вызовами, но повтор отсекает случайную удачу
 		d, err := reads(t).CityBySlug(context.Background(), "mihaylovsk", "")
 		if err != nil || d.ID != cityID(t, "mihaylovsk") {
@@ -757,6 +771,7 @@ func TestResolveCitySlugPrefersCurrent(t *testing.T) {
 // ExistingCityIDs — города всех статусов и стран (выключенная тоже), несуществующие и повторы отброшены, по id;
 // пустой ввод — пустой результат без запроса.
 func TestExistingCityIDs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := reads(t)
 	stav, sk := cityID(t, "stavropol"), cityID(t, "skrytsk")

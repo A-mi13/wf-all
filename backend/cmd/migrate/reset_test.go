@@ -7,6 +7,7 @@ import (
 
 // Табличный тест parseURL + localOnly — без подключения к БД.
 func TestLocalOnly(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		url     string
@@ -35,6 +36,7 @@ func TestLocalOnly(t *testing.T) {
 }
 
 func TestParseURLRejectsMalformed(t *testing.T) {
+	t.Parallel()
 	if _, err := parseURL("not a valid connection string %%%"); !errors.Is(err, errUnparsableURL) {
 		t.Fatalf("err = %v, ждали errUnparsableURL", err)
 	}

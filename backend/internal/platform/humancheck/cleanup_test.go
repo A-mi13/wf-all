@@ -13,6 +13,7 @@ import (
 )
 
 func TestCleanupDeletesOnlyExpired(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "worker")
 	ctx := context.Background()
 	if _, err := pools.Owner.Exec(ctx, `INSERT INTO humancheck_spent (signature, expires_at) VALUES

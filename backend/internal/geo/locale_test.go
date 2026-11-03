@@ -11,6 +11,7 @@ import (
 // Языки названий справочника = языки backend/locales: HTTP-слой согласует Accept-Language по
 // i18n.Supported (domain недоступен ему из-за internal), и списки не должны разойтись.
 func TestSupportedLocalesMatchCatalog(t *testing.T) {
+	t.Parallel()
 	if !slices.Equal(domain.SupportedLocales(), i18n.Supported) {
 		t.Fatalf("domain.SupportedLocales = %q, i18n.Supported = %q — должны совпадать", domain.SupportedLocales(), i18n.Supported)
 	}

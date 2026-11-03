@@ -21,6 +21,7 @@ import (
 // (неизвестное — query.status / query.role enum); q — начало почты или имени без учёта регистра, % и _
 // — буквально; города модератора; у приглашённых — живое приглашение (назначение, срок, просрочено).
 func TestAccountsList(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c := e.city("kazan")
@@ -113,6 +114,7 @@ func ids(vs []staff.AccountView) []uuid.UUID {
 // модераторов и поддержки (403 для владельца и админа); над собой завершать нельзя (self_action); нет
 // учётки — not_found. Завершение — аудит staff.sessions_revoked от сотрудника.
 func TestAccountSessions(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	om := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
@@ -168,6 +170,7 @@ func TestAccountSessions(t *testing.T) {
 // админ — 403 (его роль elevated, сессии владельцев и админов ему закрыты, и своей тоже; свои — в «Мой
 // доступ»); чужая карточка не отмечает текущую сессию автора.
 func TestAccountSessionsOwn(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	om := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
@@ -206,6 +209,7 @@ func TestAccountSessionsOwn(t *testing.T) {
 
 // Матрица ролей — та же, что perm (без черновых строк), значения — Grant.String().
 func TestRolesMatrix(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	v := e.app.RolesMatrix()
 	if !slices.Equal(v.Roles, []string{"owner", "admin", "moderator", "support"}) {
@@ -236,6 +240,7 @@ func TestRolesMatrix(t *testing.T) {
 // Автор управляющего действия перепроверяется в момент действия (M-4): выключен между загрузкой
 // сессии и действием — auth.ErrSessionInvalid, ничего не меняется; его сессию погасили — то же.
 func TestManageActorRechecked(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c := e.city("kazan")
@@ -270,6 +275,7 @@ func TestManageActorRechecked(t *testing.T) {
 // Секретов нет в аудите, аргументах River и payload запросов: код приглашения (исполнение приглашения и
 // сброса), комментарий причины — только в audit_log.reason, не в before/after.
 func TestNoSecretsInManage(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))

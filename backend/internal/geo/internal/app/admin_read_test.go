@@ -232,6 +232,7 @@ func citySlugs(items []geo.AdminCityItem) []string {
 // Выключенная страна: список, ids и карточка админки её город отдают (country_enabled = false); публичный
 // список — нет (регресс ⚠️ плана A: WHERE co.is_enabled прятал город даже по ids).
 func TestAdminCitiesIncludeDisabledCountry(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	ctx := context.Background()
 	sk := cityOf(t, "skrytsk")
@@ -258,6 +259,7 @@ func TestAdminCitiesIncludeDisabledCountry(t *testing.T) {
 
 // Фильтры списка складываются: статусы, страна, регион, q (ru/en, ё), ids; порядок — как публичный.
 func TestAdminCitiesFilters(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	ctx := context.Background()
 	sverd := adminSeeded.regions["Свердловская область"]
@@ -305,6 +307,7 @@ func TestAdminCitiesFilters(t *testing.T) {
 
 // Курсор: порядок страниц как у полного списка; курсор публичного списка (другой Set) — page.ErrBadCursor.
 func TestAdminCitiesCursor(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	ctx := context.Background()
 	all, err := r.Cities(ctx, geo.AdminCityQuery{})
@@ -342,6 +345,7 @@ func TestAdminCitiesCursor(t *testing.T) {
 
 // Карточка: названия ru/en, история адресов по убыванию, районы без архивных, версия; нет города — 404.
 func TestGetGeoCity(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	ctx := context.Background()
 	c, err := r.City(ctx, cityOf(t, "stavropol"), "en")
@@ -371,6 +375,7 @@ func TestGetGeoCity(t *testing.T) {
 // Места: префикс кириллицей и по ascii, порядок по населению, city_id у заведённого, страна заведённого —
 // страна города (900001 из источника RU — город XA), q из одних знаков — ErrBadQuery, курсор.
 func TestListGeoPlaces(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	ctx := context.Background()
 	gids := func(pg geo.PlacePage) []int64 {
@@ -428,6 +433,7 @@ func TestListGeoPlaces(t *testing.T) {
 
 // Районы: действующие по названию, затем архивные; нет города — ErrCityNotFound; город без районов — пусто.
 func TestListGeoDistrictsWithArchived(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	ctx := context.Background()
 	ds, err := r.Districts(ctx, cityOf(t, "stavropol"))
@@ -448,6 +454,7 @@ func TestListGeoDistrictsWithArchived(t *testing.T) {
 
 // Страны: все, включая выключенные, по коду; open_cities — pilot и live (waitlist не считается).
 func TestListGeoCountriesOpenCities(t *testing.T) {
+	t.Parallel()
 	cs, err := adminReader(t).Countries(context.Background(), "en")
 	if err != nil {
 		t.Fatal(err)
@@ -475,6 +482,7 @@ func TestListGeoCountriesOpenCities(t *testing.T) {
 // Регионы: по названию на языке ответа, коды admin1 и названия; страны нет — ErrCountryNotFound; страна без
 // регионов — пусто.
 func TestListGeoRegionsUnknownCountry(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	ctx := context.Background()
 	rs, err := r.Regions(ctx, "RU", "ru")
@@ -493,6 +501,7 @@ func TestListGeoRegionsUnknownCountry(t *testing.T) {
 // Отчёт сверки: кандидаты ambiguous и conflict с названием, регионом и населением (удалённое место — без
 // строки), linked, not_found, missing, skipped_timezone; идущий импорт — без отчёта; нет строки — 404.
 func TestGetGeoImportReport(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	ctx := context.Background()
 	rep, err := r.Import(ctx, adminSeeded.report, "ru")
@@ -564,6 +573,7 @@ func labels(items []geo.Import) map[uuid.UUID]*string {
 // Подпись из аудита постановки: сотрудник — его имя; оператор — null; строка без записи (чужое действие по той
 // же задаче не в счёт) — null; страница из N строк — один запрос к audit_log.
 func TestListImportsStartedByFromAudit(t *testing.T) {
+	t.Parallel()
 	r, cnt := countingReader(t)
 	pg, err := r.Imports(context.Background(), geo.ImportQuery{Country: "XM"})
 	if err != nil || len(pg.Items) != 3 {
@@ -593,6 +603,7 @@ func TestListImportsStartedByFromAudit(t *testing.T) {
 
 // Страница из 25 строк — подпись у всех 25 (audit.List по умолчанию отдаёт 20 — лимит задан явно).
 func TestListImportsStartedByPage25(t *testing.T) {
+	t.Parallel()
 	r, cnt := countingReader(t)
 	pg, err := r.Imports(context.Background(), geo.ImportQuery{Country: "XL", Limit: new(25)})
 	if err != nil || len(pg.Items) != 25 || pg.Next != "" {
@@ -629,6 +640,7 @@ func TestListImportsStartedByPage25(t *testing.T) {
 
 // Повтор job_id после сброса последовательности: строке старого импорта — подпись старой записи, новой — новой.
 func TestListImportsStartedByReusedJobID(t *testing.T) {
+	t.Parallel()
 	r := adminReader(t)
 	pg, err := r.Imports(context.Background(), geo.ImportQuery{Country: "XR"})
 	if err != nil || len(pg.Items) != 2 {

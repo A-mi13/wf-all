@@ -14,6 +14,7 @@ import (
 // TestGeoAdminCodesDocumented сверяют контракты только со списками. Обратное направление (список → контракт) —
 // у них.
 func TestCodeConstantsListed(t *testing.T) {
+	t.Parallel()
 	consts := codeConstants(t, "codes.go", nil)
 	if len(consts) < len(AdminCodes) {
 		t.Fatalf("в codes.go найдено %d констант Code… — страж проверяет вхолостую", len(consts))
@@ -25,6 +26,7 @@ func TestCodeConstantsListed(t *testing.T) {
 
 // Подсадка бага: лишняя экспортированная константа кода без списка ловится; неэкспортированная и не Code… — нет.
 func TestCodeConstantsListedCatchesStray(t *testing.T) {
+	t.Parallel()
 	src := `package geo
 const (
 	CodeCityNotFound = "geo.city_not_found"

@@ -46,6 +46,7 @@ func failingSeed(context.Context, *pgxpool.Pool) error {
 // Ошибка посева — Fatal во всех вызовах SharedAs этой роли, посев не повторяется (второй тест не получает
 // наполовину засеянный клон и не сеет его заново). Посев — ровно один за процесс: тест повторяем (-count=N).
 func TestSharedSeedErrorFailsEveryCall(t *testing.T) {
+	t.Parallel()
 	for i := range 2 {
 		msg := fatalOf(t, func(tb testing.TB) { SharedAs(tb, "admin", failingSeed) })
 		if !strings.Contains(msg, "посев сломался") {
@@ -58,6 +59,8 @@ func TestSharedSeedErrorFailsEveryCall(t *testing.T) {
 }
 
 // Без TestMain с dbtest.Main клон некому удалить — SharedAs отказывает понятной ошибкой, а не копит базы.
+//
+// serial: снимает mainActive пакета — параллельный SharedAs получил бы ложный отказ.
 func TestSharedNeedsMain(t *testing.T) {
 	mainActive.Store(false)
 	defer mainActive.Store(true)
@@ -73,6 +76,7 @@ func TestSharedNeedsMain(t *testing.T) {
 // общая, засеяна посевом и для разбора не нужна (свои строки упавшего теста — в клоне New*, его pgtestdb
 // оставляет). Код выхода — как у m.Run.
 func TestFinishSharedDropsCloneOnFailure(t *testing.T) {
+	t.Parallel()
 	c := Config()
 	if err := dial(c); err != nil {
 		t.Fatal(err)
@@ -124,6 +128,7 @@ func dropDatabase(t *testing.T, c pgtestdb.Config, name string) {
 // замыкания одного литерала (и два значения метода) делят код при разных захваченных данных — второе молча
 // получило бы клон первого. Замыкание и значение метода — Fatalf с подсказкой, клон не создаётся.
 func TestSharedRejectsClosureSeed(t *testing.T) {
+	t.Parallel()
 	data := "посев теста"
 	closure := func(ctx context.Context, owner *pgxpool.Pool) error {
 		_, err := owner.Exec(ctx, "SELECT $1::text", data)

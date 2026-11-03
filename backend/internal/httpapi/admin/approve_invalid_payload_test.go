@@ -19,6 +19,7 @@ import (
 // (поля в approve нет), запрос висел pending до истечения. Повтор тем же ключом — сохранённый 409. Оба пути
 // исполнителя: новая учётка и повторное приглашение выключенной (existing_id: имя пишется сбросом доступа).
 func TestApproveInviteInvalidPayloadFails(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]

@@ -21,6 +21,7 @@ func (e *menv) activeOwners() int {
 // Гонка двух снятий из двух владельцев (D17, advisory lock): два выключения стартуют вместе — одно
 // проходит, второе — staff.last_owner; активный владелец остаётся ровно один. -count=30.
 func TestLastOwnerConcurrent(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	a := e.addMember("owner.a@wf.example", memberOpts{Role: "owner"})
 	b := e.addMember("owner.b@wf.example", memberOpts{Role: "owner"})
@@ -48,6 +49,7 @@ func TestLastOwnerConcurrent(t *testing.T) {
 // активный владелец остаётся; без взаимных блокировок и 500. Хотя бы одно действие прошло (первый, взявший
 // замок владельцев, всегда успешен: активных трое) — иначе тест проходил бы и при всех упавших (m7).
 func TestLastOwnerConcurrentMixed(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	a := e.addMember("owner.a@wf.example", memberOpts{Role: "owner"})
 	b := e.addMember("owner.b@wf.example", memberOpts{Role: "owner"})
@@ -88,6 +90,7 @@ func TestLastOwnerConcurrentMixed(t *testing.T) {
 // пропустило (строку держал откатывающийся approve), подтверждение — failed (ErrStale), ничего не
 // создано.
 func TestInitiatorDisabledFails(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	owner := e.as(e.addMember("owner@wf.example", memberOpts{Role: "owner"}))
@@ -119,6 +122,7 @@ func TestInitiatorDisabledFails(t *testing.T) {
 // подтверждение — failed: версия X выросла после запроса. Контроль — свежий запрос того же X
 // исполняется.
 func TestInitiatorReactivatedFails(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
@@ -154,6 +158,7 @@ func TestInitiatorReactivatedFails(t *testing.T) {
 
 // Инициатор понижен до исполнения (запрос пропущен гашением): grant у поддержки нет — failed.
 func TestInitiatorDemotedFails(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
@@ -179,6 +184,7 @@ func TestInitiatorDemotedFails(t *testing.T) {
 // приходит подтверждение; исполнитель ждёт её замок и видит новую версию — failed, запрос не исполнен
 // правами, которых у инициатора уже нет.
 func TestDisableInitiatorWhileApproving(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	owner := e.as(e.addMember("owner@wf.example", memberOpts{Role: "owner"}))
@@ -222,6 +228,7 @@ func TestDisableInitiatorWhileApproving(t *testing.T) {
 // Встречные запросы (m7): I о T и T об I подтверждают одновременно разные сотрудники — без взаимной
 // блокировки (40P01 → 500): одно исполняется, второе — failed (инициатор изменился). -count=20.
 func TestCounterRequestsNoDeadlock(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	i := e.addMember("owner.i@wf.example", memberOpts{Role: "owner"})
@@ -261,6 +268,7 @@ func TestCounterRequestsNoDeadlock(t *testing.T) {
 // Подтверждающий перепроверяется в момент решения (m4): выключен или сменил роль после загрузки
 // сессии — ошибка без записей, запрос остаётся pending (другой владелец подтвердит).
 func TestApproverRechecked(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
@@ -301,6 +309,7 @@ func TestApproverRechecked(t *testing.T) {
 // Регистрация (10c): RegisterApprovals регистрирует четыре действия и проверку инициатора — Validate
 // проходит, имена — по алфавиту.
 func TestRegisterApprovals(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	want := []string{"staff.access_reset", "staff.invite", "staff.revoke_owner", "staff.role_change"}
 	got := e.reg.Actions()

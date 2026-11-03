@@ -13,6 +13,7 @@ import (
 // любой локали — в том числе со строчными латинскими b h m t (0023_normalize_text_case.sql; до неё 'mikh' не
 // находил Mikhaylovsk, 'tv' — Tver, 'bar' — Barnaul). Свой клон: посев Твери и Барнаула не трогает общий seedReads.
 func TestListCitiesSearchIgnoresCase(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "api")
 	ctx := context.Background()
 	for _, q := range []string{

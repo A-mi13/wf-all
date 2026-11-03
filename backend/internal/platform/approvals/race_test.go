@@ -75,6 +75,7 @@ func race(f, g func()) {
 
 // Два подтверждающих одновременно — ровно одно исполнение; второй получает ErrClosed.
 func TestApproveConcurrentOnce(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b, c := e.member(perm.Owner), e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -108,6 +109,7 @@ func TestApproveConcurrentOnce(t *testing.T) {
 
 // Подтверждение и отмена инициатором одновременно — один исход, второй получает ErrClosed.
 func TestApproveCancelRace(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -143,6 +145,7 @@ func TestApproveCancelRace(t *testing.T) {
 // Срок вышел, подтверждение и ExpireDue одновременно: один переход в expired — одна запись аудита
 // и одно событие; подтверждение — ErrClosed, исполнителя нет.
 func TestApproveExpireRace(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -164,6 +167,7 @@ func TestApproveExpireRace(t *testing.T) {
 
 // Строку под замком решения ExpireDue не ждёт (SKIP LOCKED) — её переводит само решение.
 func TestExpireDueSkipsLocked(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -191,6 +195,7 @@ const staffLock = 8_100_001
 // (замок строки → InitiatorCheck ждёт замок учётки) — без взаимной блокировки: гашение пропускает
 // строку под замком, подтверждение после выключения видит инициатора выключенным — failed + ErrStale.
 func TestCancelByInitiatorNoDeadlock(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})

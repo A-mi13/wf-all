@@ -16,6 +16,7 @@ import (
 // Нулевой хендлер staff (тесты конвейера; cmd/admin-api собирает настоящий): операции тега staff за полным конвейером
 // отвечают 501 http.not_implemented — без паники (recover дал бы 500) и до сценариев.
 func TestStaffZeroHandler(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{
 		"pending": staffOf(perm.Owner, auth.StageMFAPending, false),
@@ -41,6 +42,7 @@ func TestStaffZeroHandler(t *testing.T) {
 // что TOTP уже подтверждён), ack с той же cookie проходит → новый токен, стадия active; старый токен
 // после ack — 401 без стирания новой cookie; getStaffMfa — confirmed_at и 10 кодов.
 func TestFirstLogin(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	id := e.invite("olga.v@wf.example", string(perm.Admin))
 	rec := e.anon("/v1/staff/auth/invite/accept", "", jsonOf(t, map[string]string{

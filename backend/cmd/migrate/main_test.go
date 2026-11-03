@@ -13,6 +13,7 @@ import (
 )
 
 func TestStatusListsMigrations(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	env := []string{"MIGRATOR_DATABASE_URL=" + dbtest.NewURL(t)}
 	if err := run(context.Background(), []string{"status"}, env, &out, &bytes.Buffer{}); err != nil {
@@ -24,6 +25,7 @@ func TestStatusListsMigrations(t *testing.T) {
 }
 
 func TestUnknownCommand(t *testing.T) {
+	t.Parallel()
 	env := []string{"MIGRATOR_DATABASE_URL=postgres://x@127.0.0.1:1/wf"}
 	err := run(context.Background(), []string{"drop-everything"}, env, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "up | down | status | reset") {
@@ -35,6 +37,7 @@ func TestUnknownCommand(t *testing.T) {
 // db.prod.example.internal недостижим — если бы проверка происходила после
 // sql.Open/подключения, тест бы завис или упал по таймауту, а не сразу.
 func TestResetRefusesNonLocalHost(t *testing.T) {
+	t.Parallel()
 	env := []string{"MIGRATOR_DATABASE_URL=postgres://x@db.prod.example.internal:5432/wf"}
 	err := run(context.Background(), []string{"reset"}, env, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "reset запрещён") || !strings.Contains(err.Error(), "db.prod.example.internal") {
@@ -46,6 +49,7 @@ func TestResetRefusesNonLocalHost(t *testing.T) {
 // команды: для up/down/status строку раньше лениво разбирали sql.Open/goose,
 // и pgx цитировал её с маскировкой пароля лишь «best effort».
 func TestMalformedURLDoesNotLeakPassword(t *testing.T) {
+	t.Parallel()
 	urls := []string{
 		"host=127.0.0.1 password=S3cr3t PW dbname=wf",
 		"postgres://u:S3cr3t@PW@host:bad/db",
@@ -69,6 +73,7 @@ func TestMalformedURLDoesNotLeakPassword(t *testing.T) {
 // Конфиг логов мигратора (MIGRATOR_LOG_*) реально применяется: goose пишет
 // о каждой миграции через общий slog-логгер с нужным форматом.
 func TestResetLogsMigrationsWithConfiguredLogger(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	env := []string{"MIGRATOR_DATABASE_URL=" + dbtest.NewURL(t), "MIGRATOR_LOG_FORMAT=text"}
 	if err := run(context.Background(), []string{"reset"}, env, &bytes.Buffer{}, &logs); err != nil {
@@ -82,6 +87,7 @@ func TestResetLogsMigrationsWithConfiguredLogger(t *testing.T) {
 }
 
 func TestUpAppliesGrants(t *testing.T) {
+	t.Parallel()
 	url := dbtest.NewURL(t)
 	var out bytes.Buffer
 	if err := run(context.Background(), []string{"up"}, []string{"MIGRATOR_DATABASE_URL=" + url}, &out, &bytes.Buffer{}); err != nil {
@@ -109,6 +115,7 @@ func TestUpAppliesGrants(t *testing.T) {
 // outbox) — без применения прав она осталась бы только у владельца. Права применяются после
 // любого down; проверка — по outbox, который есть в схеме при любой последней миграции.
 func TestDownAppliesGrants(t *testing.T) {
+	t.Parallel()
 	url := dbtest.NewURL(t)
 	var out bytes.Buffer
 	if err := run(context.Background(), []string{"down"}, []string{"MIGRATOR_DATABASE_URL=" + url}, &out, &bytes.Buffer{}); err != nil {

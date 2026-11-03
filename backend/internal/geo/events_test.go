@@ -21,6 +21,7 @@ var (
 
 // Конверт и payload — контракт для подписчиков (спека §6): имена полей JSON не меняются.
 func TestEventShapes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		e                     events.Event
 		typ, aggType, payload string
@@ -62,6 +63,7 @@ func TestEventShapes(t *testing.T) {
 
 // События проходят проверку конверта платформы и пишутся в outbox.
 func TestEventsPublish(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	ctx := context.Background()
 	err := db.InTx(ctx, pool, func(ctx context.Context, _ pgx.Tx) error {

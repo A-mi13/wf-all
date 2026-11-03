@@ -38,6 +38,7 @@ func pgCode(err error) string {
 // Пул As общего клона — под ролью прода, а не владельцем: таблица посева без прав у роли даёт 42501; владельца
 // тесту не отдают (посев — единственное его назначение).
 func TestSharedAsRole(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	p := dbtest.SharedAs(t, "worker", probeSeed)
 	if p.Owner != nil {
@@ -59,6 +60,7 @@ func TestSharedAsRole(t *testing.T) {
 // Общий клон — только на чтение: запись даже в таблицу с правом INSERT у роли отклоняется (25006), чтобы один
 // тест не менял данные другим.
 func TestSharedIsReadOnly(t *testing.T) {
+	t.Parallel()
 	p := dbtest.SharedAs(t, "worker", probeSeed)
 	if _, err := p.As.Exec(context.Background(), "INSERT INTO shared_probe_rw VALUES (2)"); pgCode(err) != "25006" {
 		t.Fatalf("запись в общий клон: %v, нужен отказ 25006", err)
@@ -67,6 +69,7 @@ func TestSharedIsReadOnly(t *testing.T) {
 
 // Посев — один раз на процесс и роль: повторные вызовы отдают тот же пул без второго посева.
 func TestSharedSeedOnce(t *testing.T) {
+	t.Parallel()
 	a := dbtest.SharedAs(t, "worker", probeSeed)
 	b := dbtest.SharedAs(t, "worker", probeSeed)
 	if got := probeSeeds.Load(); got != 1 {
@@ -79,6 +82,7 @@ func TestSharedSeedOnce(t *testing.T) {
 
 // Другой посев для той же роли — ошибка теста (два набора данных в одном клоне): паника, а не тихий второй посев.
 func TestSharedOtherSeedPanics(t *testing.T) {
+	t.Parallel()
 	dbtest.SharedAs(t, "worker", probeSeed)
 	defer func() {
 		if recover() == nil {

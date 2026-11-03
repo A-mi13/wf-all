@@ -103,6 +103,7 @@ var codeFormat = regexp.MustCompile(`^[a-z2-7]{5}-[a-z2-7]{5}$`)
 // не получает вовсе (не может случайно напечатать или записать в лог); с ним — настоящий код живого
 // приглашения. Ошибки сценариев — как есть (errors.Is для подсказок команды).
 func TestOperatorWrappersPrintCode(t *testing.T) {
+	t.Parallel()
 	e := newOpEnv(t, newKey(t))
 	h := e.handler(nil)
 	ctx := context.Background()
@@ -161,6 +162,7 @@ func (e *opEnv) exec(sql string, args ...any) {
 // Ключ убран раньше rekey — приглашение нечитаемо (id в UnreadableInvites, InvitesOnOldKeys = 1); с новым
 // ключом первым и старым вторым — перешифровано (Invites = 1, на старых — 0).
 func TestOperatorRekeyReport(t *testing.T) {
+	t.Parallel()
 	oldKey, newKeyB64 := newKey(t), newKey(t)
 	e := newOpEnv(t, oldKey)
 	ctx := context.Background()
@@ -211,6 +213,7 @@ func TestOperatorRekeyReport(t *testing.T) {
 
 // Несобранный хендлер (нулевой) операций оператора не исполняет — ошибка, без паники.
 func TestOperatorZeroHandler(t *testing.T) {
+	t.Parallel()
 	h := &staffadmin.Handler{}
 	if _, err := h.OperatorBootstrap(context.Background(), "o@wf.example", "Владелец", true); err == nil {
 		t.Fatal("нулевой хендлер исполнил bootstrap")

@@ -173,6 +173,7 @@ func pairs(t *testing.T, pool *pgxpool.Pool, sql string) map[string]string {
 }
 
 func TestImportLoadsPlacesNamesAndJournal(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	raw := fixture(t)
@@ -247,6 +248,7 @@ func TestImportLoadsPlacesNamesAndJournal(t *testing.T) {
 // after.started_by — id сотрудника из аргументов; «кто» — аудит постановки admin-api); команда оператора — operator/
 // operator. CHECK audit_log (служебная роль ⇔ нет автора) не падает. Журнал — started_by (id), как раньше.
 func TestImportAuditFromSystem(t *testing.T) {
+	t.Parallel()
 	type row struct {
 		role, label string
 		user, staff *uuid.UUID
@@ -262,6 +264,7 @@ func TestImportAuditFromSystem(t *testing.T) {
 		return r
 	}
 	t.Run("задача River", func(t *testing.T) {
+		t.Parallel()
 		e := newEnv(t)
 		raw := fixture(t)
 		staff := uuid.New()
@@ -279,6 +282,7 @@ func TestImportAuditFromSystem(t *testing.T) {
 		}
 	})
 	t.Run("оператор", func(t *testing.T) {
+		t.Parallel()
 		e := newEnv(t)
 		raw := fixture(t)
 		res, err := e.importer(&raw).Import(context.Background(), "RU", nil, nil)
@@ -293,6 +297,7 @@ func TestImportAuditFromSystem(t *testing.T) {
 
 // Review Focus 4: второй запуск той же страны ничего не меняет.
 func TestImportTwiceIsIdempotent(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	raw := fixture(t)
@@ -331,6 +336,7 @@ func TestImportTwiceIsIdempotent(t *testing.T) {
 // Пропавшие места удаляются; место, на которое ссылается город (Ставрополь сида), остаётся с
 // missing_since; вернулось в источник — отметка снимается. 27 из 30 — ровно порог 90 %.
 func TestImportRemovesGoneAndKeepsReferenced(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	base := fixture(t)
@@ -384,6 +390,7 @@ func TestImportRemovesGoneAndKeepsReferenced(t *testing.T) {
 // Review Focus 3: обрезанный файл (меньше 90 % прошлого импорта) — ошибка в журнале, ничего не
 // удалено; ровно 90 % — проходит.
 func TestImportRejectsTruncatedSource(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	base := fixture(t)
@@ -442,6 +449,7 @@ func zipOf(t *testing.T, entries ...entry) []byte {
 // Review Focus 3 сквозь настоящий source.Fetch: лишняя запись в zip, редирект на чужой хост,
 // файл больше лимита — импорт падает с понятной ошибкой в журнале и ничего не удаляет.
 func TestImportFetchFailuresKeepData(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	ru := string(readTestdata(t, "RU.txt"))
@@ -520,6 +528,7 @@ func TestImportFetchFailuresKeepData(t *testing.T) {
 // Review Focus 4: строка running от убитого процесса не блокирует навсегда; живой импорт — 409;
 // повтор той же задачи River продолжает свою строку.
 func TestImportStaleAndInterruptedRuns(t *testing.T) {
+	t.Parallel()
 	insertRunning := func(t *testing.T, e env, startedAt time.Time, job *int64) uuid.UUID {
 		t.Helper()
 		id := uuid.New()
@@ -532,6 +541,7 @@ func TestImportStaleAndInterruptedRuns(t *testing.T) {
 	ctx := context.Background()
 	for _, age := range []time.Duration{5 * time.Minute, 39 * time.Minute} {
 		t.Run(fmt.Sprintf("живой импорт %s — занято", age), func(t *testing.T) {
+			t.Parallel()
 			e := newEnv(t)
 			raw := fixture(t)
 			other := insertRunning(t, e, t0.Add(-age), ptr(int64(55)))
@@ -547,6 +557,7 @@ func TestImportStaleAndInterruptedRuns(t *testing.T) {
 		})
 	}
 	t.Run("зависшая дольше 40 минут закрывается", func(t *testing.T) {
+		t.Parallel()
 		e := newEnv(t)
 		raw := fixture(t)
 		stale := insertRunning(t, e, t0.Add(-41*time.Minute), nil)
@@ -574,6 +585,7 @@ func TestImportStaleAndInterruptedRuns(t *testing.T) {
 		}
 	})
 	t.Run("повтор той же задачи продолжает свою строку", func(t *testing.T) {
+		t.Parallel()
 		e := newEnv(t)
 		raw := fixture(t)
 		own := insertRunning(t, e, t0.Add(-time.Minute), ptr(int64(77)))
@@ -592,6 +604,7 @@ func TestImportStaleAndInterruptedRuns(t *testing.T) {
 
 // Отмена ctx (SIGTERM воркера, таймаут River) — строка закрывается failed на WithoutCancel.
 func TestImportCancelledMarksJournalFailed(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -616,6 +629,7 @@ func TestImportCancelledMarksJournalFailed(t *testing.T) {
 
 // R26: у Import свой срок ImportTimeout — и у команды оператора, где ctx без срока.
 func TestImportHasOwnDeadline(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	raw := fixture(t)
 	im := app.NewImporter(e.as, e.clk, source.FetchConfig{}, slog.New(slog.DiscardHandler))
@@ -635,6 +649,7 @@ func TestImportHasOwnDeadline(t *testing.T) {
 }
 
 func TestImportUnknownCountry(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	raw := fixture(t)
 	for _, cc := range []string{"ZZ", "ru", "RUS"} {
@@ -649,6 +664,7 @@ func TestImportUnknownCountry(t *testing.T) {
 
 // Пустая, Local и неизвестная таймзона — место пропускается, счёт — в отчёте.
 func TestImportSkipsUnusableTimezones(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	raw := fixture(t)
 	bad := synth(9200001, 3)
@@ -669,6 +685,7 @@ func TestImportSkipsUnusableTimezones(t *testing.T) {
 // Повтор geonameid — решает первая строка, даже негодная: годный дубль после негодной не берётся,
 // двойной негодный дубль считается в skipped_timezone один раз.
 func TestImportDuplicatePlaceFirstRowWins(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	raw := fixture(t)
 	badThenGood := synth(9400001, 1)
@@ -696,6 +713,7 @@ func TestImportDuplicatePlaceFirstRowWins(t *testing.T) {
 // Строку журнала закрыл другой запуск (счёл зависшей), пока шла загрузка: итог не пишется,
 // запись откатывается целиком, второго geo.import_finished нет.
 func TestImportClosedByOtherRunRollsBack(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	raw := fixture(t)
@@ -729,6 +747,7 @@ func TestImportClosedByOtherRunRollsBack(t *testing.T) {
 
 // Предпочтительное, но вышедшее из употребления (to в прошлом) название не выбирается.
 func TestImportIgnoresEndedNames(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	raw := fixture(t)
 	raw.Places = append(raw.Places, synth(9300001, 1)...)
@@ -779,6 +798,7 @@ func addCity(t *testing.T, e env, region uuid.UUID, slug string, names map[strin
 }
 
 func TestImportReconcilesCities(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	var stavropolKrai uuid.UUID // регион сида с geoname_admin1_code = '70'
@@ -889,6 +909,7 @@ func admin1Without(list []source.Admin1, keep func(source.Admin1) bool) []source
 // R34 (а): каждый код admin1 отобранных мест (кроме «00» — «неизвестно» в GeoNames — и пустого)
 // есть в admin1 страны из источника; иначе импорт падает до любой записи.
 func TestImportRequiresAdmin1OfPlaces(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	base := fixture(t)
@@ -924,6 +945,7 @@ func TestImportRequiresAdmin1OfPlaces(t *testing.T) {
 // R34 (б): строк admin1 страны в источнике не меньше 90 % от строк geonames_admin1 в базе —
 // обрезанный на границе строки admin1CodesASCII.txt не удаляет регионы страны.
 func TestImportRejectsTruncatedAdmin1(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	base := fixture(t)
@@ -955,6 +977,7 @@ func TestImportRejectsTruncatedAdmin1(t *testing.T) {
 // R35: гонка с активацией того же места админом — привязка откатывается до своего savepoint,
 // город — в Conflict, остальная сверка и запись источника проходят, импорт успешен.
 func TestImportReconcileConflictKeepsImport(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	ural := addRegion(t, e, "Свердловская область")
@@ -1029,6 +1052,7 @@ func TestImportReconcileConflictKeepsImport(t *testing.T) {
 // к другому месту. ImportLinkCity не находит город без geoname_id (ErrNoRows): откат savepoint,
 // город — в Conflict, его привязка админа не тронута, импорт успешен.
 func TestImportReconcileConflictCityLinkedMeanwhile(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	ural := addRegion(t, e, "Свердловская область")
@@ -1083,8 +1107,10 @@ func TestImportReconcileConflictCityLinkedMeanwhile(t *testing.T) {
 // вставлен параллельно и закоммичен, пока ImportLinkRegion ждёт уникальный индекс (23505 regions_country_admin1_key —
 // откат только savepoint кода региона).
 func TestReconcileRegionRace(t *testing.T) {
+	t.Parallel()
 	for _, concurrent := range []bool{false, true} {
 		t.Run(fmt.Sprintf("параллельно=%v", concurrent), func(t *testing.T) {
+			t.Parallel()
 			e := newEnv(t)
 			ctx := context.Background()
 			ural := addRegion(t, e, "Свердловская область")
@@ -1153,6 +1179,7 @@ func TestReconcileRegionRace(t *testing.T) {
 // geo 1 Task 10 M3, R34 (б): граница порога admin1 — ровно 90 % строк admin1 страны в базе проходит (сравнение
 // строгое: n·10 < было·9), меньше — отказ. В базе 10 кодов (3 выдержки + 7 синтетических без мест).
 func TestImportAdmin1ShareBoundary(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	base := fixture(t)

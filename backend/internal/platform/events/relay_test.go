@@ -72,6 +72,7 @@ func left(agg uuid.UUID) events.Event {
 }
 
 func TestDrainEnqueuesPerSubscriberAndMarksPublished(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	for range 3 {
 		publish(t, pool, joined(id.New(), 1))
@@ -98,6 +99,7 @@ func (failingInserter) InsertManyTx(context.Context, pgx.Tx, []river.InsertManyP
 
 // Review Focus 1: постановка задач и отметка published_at — одна транзакция.
 func TestInsertErrorRollsBackMarking(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	publish(t, pool, joined(id.New(), 1))
 	r := events.NewRelay(pool, failingInserter{}, twoSubscribers(t), discard, events.RelayConfig{Batch: 10, Poll: time.Hour})
@@ -128,6 +130,7 @@ func warm(t *testing.T, pool *pgxpool.Pool, n int) {
 
 // Review Focus 2: два relay (два инстанса воркера) не ставят одно событие дважды.
 func TestTwoRelaysEnqueueEachEventOnce(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	for range 200 {
 		publish(t, pool, joined(id.New(), 1))
@@ -183,6 +186,7 @@ func runRelay(t *testing.T, pool *pgxpool.Pool) {
 
 // Review Focus 5: опрос — раз в час, доставка — по NOTIFY.
 func TestRunWakesOnNotify(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	runRelay(t, pool)
 	publish(t, pool, joined(id.New(), 1))
@@ -191,6 +195,7 @@ func TestRunWakesOnNotify(t *testing.T) {
 
 // Review Focus 5: обрыв LISTEN-соединения — relay переподключается и не теряет событий.
 func TestRunSurvivesListenerDrop(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	runRelay(t, pool)
 	publish(t, pool, joined(id.New(), 1))

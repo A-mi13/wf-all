@@ -57,6 +57,7 @@ func activator() *auth.Staff {
 }
 
 func TestActivateGeoCityHTTP(t *testing.T) {
+	t.Parallel()
 	mod := staffOf(perm.Moderator, auth.StageActive, false)
 	e := newGeoEnv(t, map[string]*auth.Staff{"admin": activator(), "mod": mod})
 	mod.CityIDs = []uuid.UUID{e.stav}

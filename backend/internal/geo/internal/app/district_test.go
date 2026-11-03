@@ -30,6 +30,7 @@ func boolp(b bool) *bool { return &b }
 // Создание: название очищено, версия 1, время — часов сценария; событие geo.district_created (агрегат district,
 // версия 1) и аудит geo.district_created с городом записи — в той же транзакции. Нет города — 404; негодное имя — 400.
 func TestCreateDistrict(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	s := staffAs(perm.Admin)
@@ -61,6 +62,7 @@ func TestCreateDistrict(t *testing.T) {
 
 // Дубль среди действующих районов города — без учёта регистра и ё/е (normalize_text): 409; в другом городе — можно.
 func TestDistrictNameTaken(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
 	a := e.admin()
@@ -85,6 +87,7 @@ func TestDistrictNameTaken(t *testing.T) {
 // Архивный район не мешает новому с тем же именем; архивирование — время часов, событие archived; возврат из архива
 // при занятом имени — 409, ничего не записано.
 func TestArchiveFreesName(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	a := e.admin()
@@ -117,6 +120,7 @@ func TestArchiveFreesName(t *testing.T) {
 }
 
 func TestUnarchiveNameTaken(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	a := e.admin()
@@ -155,6 +159,7 @@ func TestUnarchiveNameTaken(t *testing.T) {
 // Спека §6.1: район чужого города по своему cityId в пути — 404 geo.district_not_found (существование не
 // раскрывается), ничего не записано; модератор своего города — тоже.
 func TestDistrictOfOtherCity(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
 	foreign, err := createDistrict(e.admin(), mih, "Центр")
@@ -176,6 +181,7 @@ func TestDistrictOfOtherCity(t *testing.T) {
 
 // Модератор чужого города (сценарий — защита в глубину за конвейером) — 403; своего — можно; поддержка — 403.
 func TestDistrictModeratorScope(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
 	ctx := context.Background()
@@ -190,6 +196,7 @@ func TestDistrictModeratorScope(t *testing.T) {
 
 // Ничего не изменилось (то же имя, архивирование архивного) — без события, аудита и роста версии; пустой patch — 400.
 func TestUpdateDistrictNoChange(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	a := e.admin()
@@ -211,6 +218,7 @@ func TestUpdateDistrictNoChange(t *testing.T) {
 // Два одновременных создания одноимённых районов (барьер: оба прошли проверки до вставки) — одно создано, другое —
 // 409 geo.district_name_taken (23505 districts_city_name_active_key → код, не 500).
 func TestDistrictConcurrentSameName(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	at, done := make(chan struct{}), make(chan struct{})

@@ -46,6 +46,7 @@ func keysOf(t *testing.T, pools dbtest.Pools, name string) []string {
 
 // Периодическая чистка воркера (River, роль worker) — таблица игроков; ключи admin-api она не трогает.
 func TestCleanupDeletesOnlyExpired(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "worker")
 	seedExpiry(t, pools, "idempotency_keys")
 	seedExpiry(t, pools, "staff_idempotency_keys")
@@ -64,6 +65,7 @@ func TestCleanupDeletesOnlyExpired(t *testing.T) {
 // admin-api (роль admin, тикер staff/jobs.Cleaner), у воркера прав на них нет. Порции по 1000: больше
 // порции — всё равно удаляется всё просроченное; живые и чужая таблица остаются.
 func TestDeleteExpiredStaffAsAdmin(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	ctx := context.Background()
 	seedExpiry(t, pools, "staff_idempotency_keys")
@@ -89,6 +91,7 @@ func TestDeleteExpiredStaffAsAdmin(t *testing.T) {
 
 // Под ролью worker чистка ключей admin-api — отказ в правах, а не тихий успех.
 func TestDeleteExpiredStaffDeniedForWorker(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "worker")
 	_, err := idempotency.DeleteExpired(context.Background(), pools.As, idempotency.Staff)
 	if pg, ok := errors.AsType[*pgconn.PgError](err); !ok || pg.Code != "42501" {

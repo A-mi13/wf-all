@@ -28,6 +28,7 @@ import (
 // читающий staff_*, кладёт их в payload запроса (approvals.InitiatorOf) и в аудит. После смены роли и
 // городов следующая загрузка — уже новая версия; во всех стадиях.
 func TestLoadStaffCarriesVersionAndLabel(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	c1, c2 := e.city("kazan"), e.city("perm")
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
@@ -121,6 +122,7 @@ func (e *noopEnv) wantInitiatorChanged(res approvals.Approval, err error, apID u
 // (checkInitiator читает init_id и init_ver из чужого payload); инициатора выключили и вернули (версия выросла,
 // снова active с тем же правом) — failed, initiator_changed, 409.
 func TestCheckInitiatorForeignPayload(t *testing.T) {
+	t.Parallel()
 	e := newNoopEnv(t)
 	a := e.as(e.addMember("admin.a@wf.example", memberOpts{Role: "admin"}))
 	b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))
@@ -144,6 +146,7 @@ func TestCheckInitiatorForeignPayload(t *testing.T) {
 // выключенного: 409, исполнитель не вызван. Обратный порядок: хук взял FOR SHARE первым — выключение ждёт
 // коммита approve: запрос исполнен, затем учётка выключена. 40P01 нет ни в одном порядке.
 func TestCountryRulesInitiatorDisabledConcurrently(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*noopEnv, *auth.Staff, *auth.Staff, *auth.Staff, member) {
 		e := newNoopEnv(t)
 		c := e.as(e.addMember("owner.c@wf.example", memberOpts{Role: "owner"}))
@@ -225,6 +228,7 @@ func TestCountryRulesInitiatorDisabledConcurrently(t *testing.T) {
 // Подтверждающий перепроверяется хуком под замком (как execLocks): сессию погасили, учётку выключили или
 // сменили роль после подписи — обычная ошибка (401/403), запрос остаётся pending, исполнитель не вызван.
 func TestActorLockApproverRechecked(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name string
 		sql  string
@@ -236,6 +240,7 @@ func TestActorLockApproverRechecked(t *testing.T) {
 		{"роль сменилась", `UPDATE staff_roles SET role = 'admin' WHERE staff_id = $1`, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newNoopEnv(t)
 			a := e.as(e.addMember("admin.a@wf.example", memberOpts{Role: "admin"}))
 			b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))
@@ -258,6 +263,7 @@ func TestActorLockApproverRechecked(t *testing.T) {
 // Защита в глубину: init_id в payload не тот, кто запросил (checkInitiator отсёк бы раньше), — хук сам
 // отказывает Fail(ErrInitiatorChanged), без инициатора — тоже.
 func TestActorLockForeignInitiatorMismatch(t *testing.T) {
+	t.Parallel()
 	e := newNoopEnv(t)
 	a := e.as(e.addMember("admin.a@wf.example", memberOpts{Role: "admin"}))
 	b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))
@@ -281,6 +287,7 @@ func TestActorLockForeignInitiatorMismatch(t *testing.T) {
 // Наблюдаемо: approve staff.role_change, вставший на замке учётки инициатора, уже держит замок владельцев;
 // хук перед исполнителем встал бы на учётке раньше замка владельцев.
 func TestStaffActionsDoNotLockActors(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
@@ -318,6 +325,7 @@ func TestStaffActionsDoNotLockActors(t *testing.T) {
 // доходит до исполнителя, тот отказывает на decode (сбой, запрос pending) сразу; хук встал бы на учётке
 // инициатора FOR SHARE раньше исполнителя — approve ждал бы до истечения ctx.
 func TestStaffRegistryActionsSkipActorLock(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
 	b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))

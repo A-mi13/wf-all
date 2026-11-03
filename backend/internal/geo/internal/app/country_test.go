@@ -86,6 +86,7 @@ func (e countryEnv) countryVersion(t *testing.T, code string) int64 {
 // CountryInput наверху payload; код уже есть — 409 до запроса; без названия на default_locale, RUR — 400; модератор и
 // поддержка — 403.
 func TestCreateCountryNeedsApproval(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	s := staffAs(perm.Admin)
 	ap, err := e.a.CreateCountry(context.Background(), s, kz(), approvals.Meta{})
@@ -127,6 +128,7 @@ func TestCreateCountryNeedsApproval(t *testing.T) {
 
 // m5 ревью G5 (R12): XK — пользовательский код, не ISO 3166-1 — 400 body.code format.
 func TestCreateCountryXK(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	xk := kz()
 	xk.Code, xk.Currency = "XK", "EUR"
@@ -137,6 +139,7 @@ func TestCreateCountryXK(t *testing.T) {
 // Второй владелец/админ подтверждает — страна создана (is_enabled как в запросе), названия, событие и аудит от
 // подтверждающего (requested_by, approval_id); свой запрос инициатор подтвердить не может.
 func TestCountryCreateApproveExecutes(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	a, b := staffAs(perm.Admin), staffAs(perm.Owner)
 	ap, err := e.a.CreateCountry(context.Background(), a, kz(), approvals.Meta{})
@@ -173,6 +176,7 @@ func TestCountryCreateApproveExecutes(t *testing.T) {
 
 // Два ждущих запроса на один код: первый исполнен, второй — failed (код причины geo.country_exists), страна одна.
 func TestCountryCreateTwoRequests(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	a, b := staffAs(perm.Admin), staffAs(perm.Owner)
 	ap1, err := e.a.CreateCountry(context.Background(), a, kz(), approvals.Meta{})
@@ -199,6 +203,7 @@ func TestCountryCreateTwoRequests(t *testing.T) {
 // Правила (валюта, пороги) — всегда 202 независимо от статусов городов: XB без городов, RU — с городами pilot
 // (сид) переведёнными в waitlist; страна не изменилась, запрос pending с правом geo.countries.rules.
 func TestUpdateCountryRulesAlwaysApproval(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	e.exec(t, `UPDATE cities SET status = 'waitlist'`)
 	s := staffAs(perm.Admin)
@@ -227,6 +232,7 @@ func TestUpdateCountryRulesAlwaysApproval(t *testing.T) {
 
 // Выключение включённой — 202; включение выключенной — 200 сразу: version + 1, событие и аудит сотрудника.
 func TestUpdateCountryDisableApproval(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	s := staffAs(perm.Admin)
 	_, ap, err := e.a.UpdateCountry(context.Background(), s, "XB", app.CountryPatch{IsEnabled: boolp(false)}, "", approvals.Meta{})
@@ -251,6 +257,7 @@ func TestUpdateCountryDisableApproval(t *testing.T) {
 
 // Неправила (префикс, неделя, названия) — 200 сразу; правило с текущим значением — не правило: 200 без запроса.
 func TestUpdateCountryImmediateFields(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	s := staffAs(perm.Admin)
 	v := e.countryVersion(t, "RU")
@@ -288,6 +295,7 @@ func TestUpdateCountryImmediateFields(t *testing.T) {
 
 // Префикс и валюта одним запросом — весь patch в запросе, ни одно поле не применено.
 func TestUpdateCountryMixedFields(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	_, ap, err := e.a.UpdateCountry(context.Background(), staffAs(perm.Owner), "RU",
 		app.CountryPatch{PhonePrefix: strp("+8"), Currency: strp("USD")}, "", approvals.Meta{})
@@ -302,6 +310,7 @@ func TestUpdateCountryMixedFields(t *testing.T) {
 // Правила проверяются против итоговых значений: новый min_signup_age выше текущего age_of_majority — 400
 // body.age_of_majority minimum; недействующая валюта — 400 body.currency.
 func TestUpdateCountryFinalRules(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	s := staffAs(perm.Owner)
 	_, _, err := e.a.UpdateCountry(context.Background(), s, "RU", app.CountryPatch{MinSignupAge: intp(19)}, "", approvals.Meta{})
@@ -316,6 +325,7 @@ func TestUpdateCountryFinalRules(t *testing.T) {
 // ⚠️ ревью G8 (n4): code — строкой наверху; from/to — snake_case, только меняющиеся поля, и ВСЕ меняющиеся поля patch:
 // ключи from = ключи to = ключи patch без неизменившихся; названия — по изменённым языкам; patch — весь присланный.
 func TestCountryRulesPayloadShape(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	s := staffAs(perm.Admin)
 	p := app.CountryPatch{Currency: strp("USD"), PhonePrefix: strp("+7") /* как было */, WeekStartsOn: intp(7),
@@ -363,6 +373,7 @@ func TestCountryRulesPayloadShape(t *testing.T) {
 // Подтверждение исполняет весь patch: поля «сразу» и правила, version + 1, событие и аудит от подтверждающего с
 // requested_by и approval_id.
 func TestCountryRulesApproveExecutes(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	a, b := staffAs(perm.Admin), staffAs(perm.Owner)
 	v := e.countryVersion(t, "RU")
@@ -396,6 +407,7 @@ func TestCountryRulesApproveExecutes(t *testing.T) {
 // Страну правили напрямую после запроса (версия выросла) — failed (platform.approval_stale), 409, правила не
 // применены.
 func TestCountryRulesStale(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	a, b := staffAs(perm.Admin), staffAs(perm.Owner)
 	_, ap, err := e.a.UpdateCountry(context.Background(), a, "RU", app.CountryPatch{Currency: strp("USD")}, "", approvals.Meta{})
@@ -432,6 +444,7 @@ func jsonEqual(got, want any) bool {
 // m7 ревью G6 (решение пользователя 03.11): префикс телефона страны в аудите не маскируется — и у прямой правки
 // (from/to — before/after), и у исполнения geo.country_rules (after подтверждающего), и в аудите создания страны.
 func TestCountryAuditShowsPhonePrefix(t *testing.T) {
+	t.Parallel()
 	e := newCountryEnv(t)
 	a, b := staffAs(perm.Admin), staffAs(perm.Owner)
 	if _, ap, err := e.a.UpdateCountry(context.Background(), a, "RU", app.CountryPatch{PhonePrefix: strp("+8")}, "", approvals.Meta{}); err != nil || ap != nil {

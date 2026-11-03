@@ -12,6 +12,7 @@ import (
 )
 
 func TestReplayEnqueuesForOneSubscriber(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	for range 3 {
 		publish(t, pool, joined(id.New(), 1))
@@ -44,6 +45,7 @@ func TestReplayEnqueuesForOneSubscriber(t *testing.T) {
 }
 
 func TestReplayRejectsUnknownSubscription(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	_, err := events.Replay(context.Background(), pool, inserter(t, pool), twoSubscribers(t),
 		"teams.member_left", "notify.roster", time.Now())

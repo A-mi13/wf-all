@@ -11,6 +11,7 @@ import (
 // User-Agent решения в журнале (неизменяемом) — не длиннее 512 байт (ревью ветки, HTTP Minor 4): requestMeta
 // берёт его из httpx.UserAgent. UA 100 КБ — решение проходит, в audit_log ≤ 512 байт (начало заголовка).
 func TestDecisionHugeUserAgent(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]

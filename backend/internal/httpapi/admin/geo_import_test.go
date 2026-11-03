@@ -48,6 +48,7 @@ func cancelPath(job int64) string { return fmt.Sprintf("/v1/geo/imports/jobs/%d/
 // 200 cancelled (повтор отмены другим ключом — тоже 200, аудит один, K6); третья постановка — 202. Повтор того же
 // Idempotency-Key — тот же 202 и та же задача (ответ из ключа), а не 409. Карточка — queued; чужой id — 404.
 func TestStartImportConflictCarriesJobID(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	e.v = apitest.New(t, oapi.GetSpec)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
@@ -96,6 +97,7 @@ func TestStartImportConflictCarriesJobID(t *testing.T) {
 // Импорт оператора (строка running без задачи) — 409 без job_id; страны нет — 404; «ru» — 400 схемой (запрос вне
 // контракта — мимо e.v); отмена выполняемой задачи — 409 geo.import_job_not_cancellable.
 func TestStartImportHTTPRejects(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
 	low := e.send(http.MethodPost, "/v1/geo/imports", adm.token, uuid.NewString(), `{"country":"ru"}`)
@@ -126,6 +128,7 @@ func TestStartImportHTTPRejects(t *testing.T) {
 // Права (Приложение 1): поддержка читает задачу, ставить и отменять — 403 (модератор — 403 на всё: строки
 // TestPermissionsAllOperations и сценарий, TestStartImportRejects).
 func TestImportPermissions(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
 	sup := e.firstLogin("support@wf.example", string(perm.Support))
@@ -144,6 +147,7 @@ func TestImportPermissions(t *testing.T) {
 // R20, ревью G5: операции geo пишут в аудит IP и User-Agent запроса — requestMeta кладёт approvals.Meta в ctx всех
 // операций, geo читает его (раньше UA в аудите geo был пуст). UA длиннее 512 байт — обрезается, как у платформы.
 func TestGeoOperationsCarryMeta(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
 	var stav uuid.UUID

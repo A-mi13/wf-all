@@ -23,6 +23,7 @@ const inviteAuditCap = 20
 // истекло, неверный код. Пути «нет приглашения» и «неверный код» пишут одинаково — по журналу
 // существование почты не отличить.
 func TestAcceptInviteFailureAuditedAlways(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -59,6 +60,7 @@ func TestAcceptInviteFailureAuditedAlways(t *testing.T) {
 // засыпать), ответ тот же; верный код после них всё равно принимается (потолок — только на запись).
 // Через час потолок восстанавливается.
 func TestAcceptInviteFailureAuditCap(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -94,6 +96,7 @@ func (e *env) logApp(ring *keys.Ring) (*app.App, *bytes.Buffer) {
 // задача с повторами). Журнал сервера без кода: письмо — WARN (одно на задачу), анонимное принятие —
 // только DEBUG (раунд 2: кто угодно, знающий почту, иначе засыпал бы журнал предупреждениями).
 func TestInviteUnreadableCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)

@@ -64,6 +64,7 @@ func wantSecurityHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
 // Статика из ADMIN_STATIC_DIR (спека §5.2): файл — как есть, остальное вне /v1 — index.html (SPA);
 // index.html — no-store, assets/ — immutable; у всех — CSP, nosniff, Referrer-Policy.
 func TestStaticServesAdminApp(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.StaticDir = staticDir(t)
 	h := newHandler(t, o)
@@ -109,6 +110,7 @@ func TestStaticServesAdminApp(t *testing.T) {
 // Выход за каталог статики невозможен: .., закодированные слэши, обратные слэши, абсолютные
 // пути и диски Windows — ни один запрос не отдаёт файл вне ADMIN_STATIC_DIR.
 func TestStaticNoEscape(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	dir := staticDir(t)
 	o.StaticDir = dir
@@ -132,6 +134,7 @@ func TestStaticNoEscape(t *testing.T) {
 // Без ADMIN_STATIC_DIR статики нет: вне /v1 — обычный 404 Problem. Каталог без index.html или
 // несуществующий — отказ старта.
 func TestStaticOffAndBadDir(t *testing.T) {
+	t.Parallel()
 	base := testOptions(t)
 	wantProblem(t, get(newHandler(t, base), "/"), http.StatusNotFound, httpx.CodeNotFound)
 	for _, dir := range []string{filepath.Join(t.TempDir(), "nope"), t.TempDir()} {

@@ -25,6 +25,7 @@ import (
 var tJobs = time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 
 func TestImportArgsOptions(t *testing.T) {
+	t.Parallel()
 	staff := uuid.New()
 	a := jobs.NewImportArgs("RU", &staff)
 	if a.V != 1 || a.Country != "RU" || a.StartedBy == nil || *a.StartedBy != staff || a.Kind() != "geo.import" {
@@ -58,6 +59,7 @@ func TestImportArgsOptions(t *testing.T) {
 // Уникальность по стране в настоящем River: тот же код от другого сотрудника — дубль, другая
 // страна — нет; после completed та же страна ставится снова.
 func TestImportUniquePerCountryUntilCompleted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := dbtest.NewPool(t)
 	c, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
@@ -92,6 +94,7 @@ func TestImportUniquePerCountryUntilCompleted(t *testing.T) {
 }
 
 func TestImportWorkerWork(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	staff := uuid.New()
 	var gotCountry string
@@ -123,6 +126,7 @@ func TestImportWorkerWork(t *testing.T) {
 }
 
 func TestImportWorkerRunNow(t *testing.T) {
+	t.Parallel()
 	importID := uuid.New()
 	w := jobs.NewImportWorkerWith(clocktest.New(tJobs), func(_ context.Context, country string, by *uuid.UUID, job *int64) (app.ImportResult, error) {
 		if country != "RU" || by != nil || job != nil {
@@ -154,6 +158,7 @@ func TestImportWorkerRunNow(t *testing.T) {
 // Ревью планов C1, Q1, R3: в river_job.args (их читает роль api) — только id сотрудника: ключи ровно v, country,
 // started_by, V = 1; без сотрудника started_by нет. Регистр кода нормализуется (команда оператора).
 func TestImportArgsNoPII(t *testing.T) {
+	t.Parallel()
 	staff := uuid.New()
 	for _, c := range []struct {
 		by   *uuid.UUID
@@ -180,6 +185,7 @@ func TestImportArgsNoPII(t *testing.T) {
 // тратит попытку и не уводит в discarded); задача старше 2 ч с постановки — отмена (страховка от вечного
 // откладывания). Граница: ровно 2 ч — ещё откладывание, 2 ч + 1 нс — отмена.
 func TestImportWorkerSnoozesInProgress(t *testing.T) {
+	t.Parallel()
 	clk := clocktest.New(tJobs)
 	w := jobs.NewImportWorkerWith(clk, func(context.Context, string, *uuid.UUID, *int64) (app.ImportResult, error) {
 		return app.ImportResult{}, fmt.Errorf("обёртка: %w", app.ErrImportInProgress)

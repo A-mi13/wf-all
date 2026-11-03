@@ -79,6 +79,7 @@ func uncovered(line []rivermigrate.Migration, ours []int) (missing, unknown []in
 // go tool -modfile=tools/go.mod river migrate-get --version K --up|--down → migrations/00NN_river_vK.sql
 // (номер — следующий свободный, README миграций).
 func TestRiverMigrationLineCovered(t *testing.T) {
+	t.Parallel()
 	m, err := rivermigrate.New(riverpgxv5.New(nil), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +101,7 @@ func TestRiverMigrationLineCovered(t *testing.T) {
 // Сам страж не вхолостую: новая версия линии с изменением схемы — пропущена; пустая — нет; наша версия вне линии —
 // неизвестна.
 func TestRiverMigrationUncovered(t *testing.T) {
+	t.Parallel()
 	line := []rivermigrate.Migration{
 		{Version: 1, SQLUp: "CREATE TABLE river_migration ();"},
 		{Version: 2, SQLUp: "CREATE TABLE river_job ();"},

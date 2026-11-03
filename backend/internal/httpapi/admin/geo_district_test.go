@@ -17,6 +17,7 @@ import (
 // Idempotency-Key, модератор своего города — можно, чужого — 403 конвейера; район чужого города по своему cityId —
 // 404 сценария.
 func TestGeoDistrictsHTTP(t *testing.T) {
+	t.Parallel()
 	mod := staffOf(perm.Moderator, auth.StageActive, false)
 	mod.Label = "Модератор С."
 	e := newGeoEnv(t, map[string]*auth.Staff{"admin": activator(), "mod": mod})

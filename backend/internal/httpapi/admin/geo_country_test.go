@@ -47,6 +47,7 @@ const kzBody = `{"code":"KZ","currency":"KZT","default_locale":"ru","phone_prefi
 	`"min_signup_age":14,"age_of_majority":18,"is_enabled":true,"names":{"ru":"Казахстан","en":"Kazakhstan"}}`
 
 func TestGeoCountriesHTTP(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -118,6 +119,7 @@ func TestGeoCountriesHTTP(t *testing.T) {
 // Версия учётки инициатора выросла после запроса (выключен и снова включён) — failed (initiator_changed), 409,
 // правила не применены.
 func TestCountryRulesInitiatorChanged(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	b := e.owners(1)[0]
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
@@ -138,6 +140,7 @@ func TestCountryRulesInitiatorChanged(t *testing.T) {
 // первым); инициатора выключают и коммитят; хук под FOR SHARE видит изменившегося инициатора — 409 stale,
 // initiator_changed, правило не применено. Без LockActors исполнитель применил бы правило.
 func TestCountryRulesInitiatorDisabledConcurrently(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	// два владельца: подтверждающий — с меньшим id (хук берёт учётки по возрастанию id — его первой), инициатор — с
 	// большим (порядок id учёток в одну миллисекунду не гарантирован — выбираем, а не полагаемся)

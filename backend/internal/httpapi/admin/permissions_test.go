@@ -270,6 +270,7 @@ func liveGeo(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *geoadmin.Handle
 var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "listFeatureFlags": {}, "updateFeatureFlag": {}}
 
 func TestPermissionsAllOperations(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -354,6 +355,7 @@ func TestPermissionsAllOperations(t *testing.T) {
 // Страж cityRows не вакуумен: контракт с операцией {cityId} без строки — нарушение; та же операция со
 // строкой — нет; строка без операции — нарушение. На текущем контракте нарушений нет.
 func TestCityRowsGuard(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -406,6 +408,7 @@ func pathMatches(pattern, path string) bool {
 // Ручная таблица handler сверена с матрицей: роли, у которых хоть одно право из x-permission-any не Deny, —
 // ровно роли таблицы; лишняя строка таблицы (операция не handler) — падение.
 func TestHandlerRolesMatchMatrix(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)

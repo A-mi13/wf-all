@@ -11,6 +11,7 @@ import (
 // и работает под ролью admin: забытый путь в rate_limits дал бы 42501 — лимит «недоступен» и пропуск, строк в
 // staff_rate_limits не было бы.
 func TestStaffRateLimitsOwnTable(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	sid, tok := e.staffSession("anna@wf.example", "owner")
 	cancel, done := e.startServer()

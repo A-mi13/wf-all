@@ -38,6 +38,7 @@ func names(lists ...[]queue.Kind) []string {
 // падение здесь, а без строки admin-api не узнает его и выбросит зависшую задачу), сроки списка — сроки
 // настоящих исполнителей; исполняющий клиент знает и виды admin-api (заглушки) — объединение обоих списков.
 func TestWorkerKinds(t *testing.T) {
+	t.Parallel()
 	reg, err := subscriptions()
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +73,7 @@ func TestWorkerKinds(t *testing.T) {
 // Воркер — лидер River, admin-api убит посреди письма staff.mail (задача running больше часа): рескьюер
 // воркера возвращает её в retryable (исполнит admin-api), а не выбрасывает как неизвестный вид.
 func TestRescuerKeepsAdminJobs(t *testing.T) {
+	t.Parallel()
 	url := dbtest.NewURL(t)
 	pool, err := pgxpool.New(context.Background(), url)
 	if err != nil {
@@ -121,6 +123,7 @@ func waitRescued(t *testing.T, pool *pgxpool.Pool, id int64) {
 // обслуживает воркер (queue.Config), и не в очередь admin-api (queue.Staff) — иначе её взяла бы заглушка чужого
 // бинарника. Таблица теста — по виду на строку queue.WorkerKinds (новый вид без строки — падение).
 func TestWorkerKindsQueues(t *testing.T) {
+	t.Parallel()
 	// вид — из самих аргументов (Kind), а не строкой таблицы: перепутанная пара вида и аргументов не пройдёт (m-r5)
 	queues := queuesOf(queue.PingArgs{}, events.DeliverArgs{}, events.CleanupArgs{}, ratelimit.CleanupArgs{},
 		humancheck.CleanupArgs{}, idempotency.CleanupArgs{}, geojobs.ImportArgs{}, mail.SendArgs{})

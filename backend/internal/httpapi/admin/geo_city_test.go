@@ -29,6 +29,7 @@ func (e geoEnv) send(t *testing.T, method, token, path, key, body, lang string) 
 }
 
 func TestUpdateGeoCityHTTP(t *testing.T) {
+	t.Parallel()
 	stavMod := staffOf(perm.Moderator, auth.StageActive, false)
 	mihMod := staffOf(perm.Moderator, auth.StageActive, false)
 	e := newGeoEnv(t, map[string]*auth.Staff{"admin": activator(), "stav-mod": stavMod, "mih-mod": mihMod})
@@ -75,6 +76,7 @@ func TestUpdateGeoCityHTTP(t *testing.T) {
 }
 
 func TestLinkGeoCityHTTP(t *testing.T) {
+	t.Parallel()
 	mod := staffOf(perm.Moderator, auth.StageActive, false)
 	e := newGeoEnv(t, map[string]*auth.Staff{"admin": activator(), "mod": mod})
 	e.seedPlace(t)

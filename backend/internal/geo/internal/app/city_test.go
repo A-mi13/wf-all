@@ -82,6 +82,7 @@ func statusp(s geo.Status) *geo.Status { return &s }
 // Статус — любой переход: событие geo.city_status_changed (from, to) с версией v+1, аудит geo.city_updated с
 // изменённым полем и городом записи; ответ — карточка после правки.
 func TestUpdateCityStatus(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	v := e.cityVersion(t, stav)
@@ -105,6 +106,7 @@ func TestUpdateCityStatus(t *testing.T) {
 // Новый slug: прежний — в историю с временем часов сценария, публичный поиск по старому адресу находит город;
 // событие geo.city_slug_changed (old_slug, new_slug).
 func TestUpdateCitySlug(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	c, err := update(e.admin(), staffAs(perm.Owner), stav, app.CityPatch{Slug: strp("stavropol-krai")})
@@ -127,6 +129,7 @@ func TestUpdateCitySlug(t *testing.T) {
 
 // Адрес — текущий slug другого города: 409 geo.slug_taken, ничего не записано.
 func TestUpdateCitySlugTaken(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	if _, err := update(e.admin(), staffAs(perm.Admin), stav, app.CityPatch{Slug: strp("mihaylovsk")}); !errors.Is(err, geo.ErrSlugTaken) {
@@ -139,6 +142,7 @@ func TestUpdateCitySlugTaken(t *testing.T) {
 
 // Адрес — в истории другого города: 409 geo.slug_taken (старые ссылки того города не перехватываются).
 func TestUpdateCitySlugTakenByHistory(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
 	e.exec(t, `INSERT INTO city_slug_history (slug, city_id, replaced_at) VALUES ('mikhaylovsk-old', $1, $2)`, mih, tAct)
@@ -152,6 +156,7 @@ func TestUpdateCitySlugTakenByHistory(t *testing.T) {
 
 // Возврат к своему старому адресу: строка истории удалена, прежний текущий ушёл в историю.
 func TestUpdateCitySlugBackToOwnOld(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	a := e.admin()
@@ -172,6 +177,7 @@ func TestUpdateCitySlugBackToOwnOld(t *testing.T) {
 // Строка языка страны переписывает cities.name; перевод en удаляется null; удалить строку языка страны — 400
 // body.names.ru required, ничего не записано.
 func TestUpdateCityNamesCanonical(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	a := e.admin()
@@ -201,6 +207,7 @@ func TestUpdateCityNamesCanonical(t *testing.T) {
 
 // Названия, которые не проходят CleanName, и незнакомый язык — 400 по полю.
 func TestUpdateCityNamesInvalid(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	a := e.admin()
@@ -218,6 +225,7 @@ func TestUpdateCityNamesInvalid(t *testing.T) {
 // Ничего не изменилось (тот же статус, свой slug, то же название, удаление отсутствующего перевода) — 200 с текущей
 // карточкой, без событий, аудита и роста версии. Пустой patch — 400 body.
 func TestUpdateCityNoChange(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	mih := e.cityID(t, "mihaylovsk")
 	e.exec(t, `DELETE FROM city_names WHERE city_id = $1 AND locale = 'en'`, mih)
@@ -236,6 +244,7 @@ func TestUpdateCityNoChange(t *testing.T) {
 
 // Нет города — geo.ErrCityNotFound.
 func TestUpdateCityNotFound(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	if _, err := update(e.admin(), staffAs(perm.Admin), uuid.New(), app.CityPatch{Status: statusp(geo.StatusLive)}); !errors.Is(err, geo.ErrCityNotFound) {
 		t.Fatalf("%v", err)
@@ -244,6 +253,7 @@ func TestUpdateCityNotFound(t *testing.T) {
 
 // Модератор своего города: названия — можно; статус (и вместе с названиями) — 403, ничего не записано.
 func TestUpdateCityModeratorOwnCity(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	mod := staffAs(perm.Moderator, stav)
@@ -263,6 +273,7 @@ func TestUpdateCityModeratorOwnCity(t *testing.T) {
 
 // Review Focus 1: модератор чужого города с одним names — 403 (конвейер handler город не сверяет), ничего не записано.
 func TestUpdateCityModeratorForeignCity(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
 	_, err := update(e.admin(), staffAs(perm.Moderator, mih), stav, app.CityPatch{Names: map[string]*string{"en": strp("Hacked")}})
@@ -277,6 +288,7 @@ func TestUpdateCityModeratorForeignCity(t *testing.T) {
 
 // NeedsApproval у права правки города (матрица изменилась без сценария) — ошибка без кода (500), ничего не записано.
 func TestUpdateCityNeedsApprovalIs500(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	s := staffAs(perm.Admin)
@@ -295,6 +307,7 @@ func TestUpdateCityNeedsApprovalIs500(t *testing.T) {
 
 // Статус и slug одним запросом — два события с последовательными версиями, версия города — v+2, один аудит.
 func TestUpdateCityEventsVersions(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav := e.cityID(t, "stavropol")
 	v := e.cityVersion(t, stav)
@@ -330,6 +343,7 @@ func TestUpdateCityEventsVersions(t *testing.T) {
 // Два города одновременно на один свободный slug (барьер: оба прошли проверку занятости): один успех, другой —
 // 409 geo.slug_taken (23505 cities_slug_key → код, не 500).
 func TestUpdateCityConcurrentSlug(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
 	at, done := make(chan struct{}), make(chan struct{})

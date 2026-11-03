@@ -51,6 +51,7 @@ func columnsSnapshot(t *testing.T, db *sql.DB) []string {
 // форматы правил страны, сид их проходит; down возвращает схему 0020 в точности (колонки всех
 // таблиц, индексы и ограничения, прежний CHECK store_url с прежним именем); повторный up проходит.
 func TestGeo0021UpDown(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)
@@ -97,6 +98,7 @@ func TestGeo0021UpDown(t *testing.T) {
 // остаётся 20, колонки feature_flags.version нет (частично не применяется). Исправили — проходит.
 // Перечень SELECT-проверок стенда под эти CHECK — Task 25 плана B (R24).
 func TestGeo0021RefusesBadData(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)
@@ -144,6 +146,7 @@ func TestGeo0021RefusesBadData(t *testing.T) {
 // только [:cntrl:], пробел — только [:space:]: каждый класс со своим случаем и подсадкой.
 // U+00A0 и U+0085 регулярка PostgreSQL ловить не обязана — их ловит код (appversion.Validate).
 func TestGeo0021StoreURLCheck(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	const constraint = "app_versions_store_url_check"
 	insert := func(url string) string {
@@ -177,6 +180,7 @@ func TestGeo0021StoreURLCheck(t *testing.T) {
 // Форматы правил страны (R12): каждый CHECK со своим именем; код проверяет строже (действующие ISO,
 // поддерживаемые локали), база — защита в глубину.
 func TestGeo0021CountryFormats(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	upd := func(set string) string { return `UPDATE countries SET ` + set + ` WHERE code = 'RU'` }
 	drop := func(name string) string { return `ALTER TABLE countries DROP CONSTRAINT ` + name }
@@ -204,6 +208,7 @@ func TestGeo0021CountryFormats(t *testing.T) {
 
 // Сид флагов получает version = 1 (спека сотрудников §3.2): оптимистичная версия PATCH /v1/flags/{key}.
 func TestFeatureFlagsVersion(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	var total, bad int
 	if err := db.QueryRowContext(context.Background(),

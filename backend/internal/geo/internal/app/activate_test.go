@@ -120,6 +120,7 @@ func activate(_ actEnv, a *app.Admin, in app.Activation) (geo.AdminCity, error) 
 // с суффиксом региона (свой mikhaylovsk занят), названия ru/en, время — часов сценария; аудит сотрудника с
 // городом записи и событие — в той же транзакции.
 func TestActivateFromPlace(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	e.occupy(t, "mikhaylovsk")
 	c, err := activate(e, e.admin(), app.Activation{GeonameID: 526815, Locale: "en"})
@@ -164,6 +165,7 @@ func TestActivateFromPlace(t *testing.T) {
 // Переопределённая страна без региона — регион не ставится, названия — язык страны (en); region_id чужой страны
 // или несуществующий — geo.ErrRegionNotFound; region_id своей страны — он; статус из запроса.
 func TestActivateOverrideCountry(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	// у XB тоже есть admin1 «71»: регион по коду места при переопределённой стране был бы чужим
 	e.exec(t, `INSERT INTO geonames_admin1 (country_code, admin1_code, geoname_id, ascii_name) VALUES ('XB', '71', 600071, 'Xb Province')`)
@@ -193,6 +195,7 @@ func TestActivateOverrideCountry(t *testing.T) {
 
 // admin1 «00» и пустой — без региона; ascii из одних выброшенных символов — city-<geoname_id>.
 func TestActivateEmptySlugify(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	c, err := activate(e, e.admin(), app.Activation{GeonameID: 700003})
 	if err != nil || c.Slug != "city-700003" || c.Region != nil || c.Names["ru"] != "Аин" || c.Names["en"] != "ʻ''" {
@@ -207,6 +210,7 @@ func TestActivateEmptySlugify(t *testing.T) {
 // Страна выключена или её нет — geo.ErrCountryNotEnabled; место пропало или его нет — geo.ErrPlaceNotFound; ничего
 // не записано.
 func TestActivateCountryDisabled(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	a := e.admin()
 	for _, in := range []app.Activation{{GeonameID: 700005}, {GeonameID: 526815, CountryCode: "XA"}, {GeonameID: 526815, CountryCode: "XZ"}} {
@@ -220,6 +224,7 @@ func TestActivateCountryDisabled(t *testing.T) {
 }
 
 func TestActivateMissingPlace(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	for _, gid := range []int64{700004, 999999} {
 		if _, err := activate(e, e.admin(), app.Activation{GeonameID: gid}); !errors.Is(err, geo.ErrPlaceNotFound) {
@@ -230,6 +235,7 @@ func TestActivateMissingPlace(t *testing.T) {
 
 // Повтор по тому же geoname_id — 409 до записи (проверка «на месте уже город»).
 func TestActivateAlreadyActive(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	a := e.admin()
 	if _, err := activate(e, a, app.Activation{GeonameID: 526815}); err != nil {
@@ -242,6 +248,7 @@ func TestActivateAlreadyActive(t *testing.T) {
 
 // Негодная таймзона места — нарушенный инвариант импорта: ошибка (500), ничего не записано.
 func TestActivateBadTimezone(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	_, err := activate(e, e.admin(), app.Activation{GeonameID: 700006})
 	if err == nil || errors.Is(err, geo.ErrPlaceNotFound) {
@@ -254,6 +261,7 @@ func TestActivateBadTimezone(t *testing.T) {
 
 // Адрес занят в истории другого города — следующий кандидат; все 20 кандидатов заняты — ошибка без записи.
 func TestActivateSlugFromHistory(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	other := e.occupy(t, "zarechnyy-old")
 	e.exec(t, `INSERT INTO city_slug_history (slug, city_id, replaced_at) VALUES ('zarechnyy', $1, $2)`, other, tAct)
@@ -305,6 +313,7 @@ func race(t *testing.T, e actEnv, stage string, a, b app.Activation) (geo.AdminC
 // Две активации одного места: вторая прошла проверку «места нет», ждёт, пока первая закоммитит, и получает
 // 23505 cities_geoname_id_key → geo.ErrCityAlreadyActive; в базе один город, одно событие, один аудит.
 func TestActivateConcurrent(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	in := app.Activation{GeonameID: 700001}
 	_, errA, _, errB := race(t, e, "insert", in, in)
@@ -325,6 +334,7 @@ func TestActivateConcurrent(t *testing.T) {
 // Две активации тёзок (одинаковый ascii): вторая видела адрес свободным, первая заняла его и закоммитила —
 // 23505 cities_slug_key откатывает только savepoint вставки, вторая берёт следующий кандидат; обе успешны.
 func TestActivateSlugRace(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	ca, errA, cb, errB := race(t, e, "insert", app.Activation{GeonameID: 700001}, app.Activation{GeonameID: 700002})
 	if errA != nil || errB != nil || ca.Slug != "zarechnyy" || cb.Slug != "zarechnyy-2" {
@@ -338,6 +348,7 @@ func TestActivateSlugRace(t *testing.T) {
 // Две активации мест одного нового региона: вторая проверила, что региона нет, первая завела его и закоммитила —
 // вторая не падает на regions_country_admin1_key, а берёт тот же регион; оба города в одном регионе.
 func TestActivateRegionRace(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	imp := uuid.New()
 	e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at) VALUES ($1, 'RU', 'succeeded', $2)`, imp, tAct)
@@ -432,6 +443,7 @@ func isDeadlock(err error) bool {
 // (хук перед привязкой второго города test-b-lesnoy — точка «первый привязан»), активация того же места ждёт её
 // коммита (замок страны, I1-r1) и получает geo.ErrCityAlreadyActive; импорт успешен, место — у города импорта, без 40P01.
 func TestActivateWaitsForImportLink(t *testing.T) {
+	t.Parallel()
 	var lesnoy uuid.UUID
 	r := newImportRaceEnv(t, "test-a-mikh", func(e env, ural uuid.UUID) {
 		lesnoy = addCity(t, e, ural, "test-b-lesnoy", map[string]string{"ru": "Лесной"})
@@ -472,6 +484,7 @@ func TestActivateWaitsForImportLink(t *testing.T) {
 // активация коммитит — сверка идёт после неё: 526815 уже занято, импорт успешен без 40P01. Без замка страны сверка
 // привязала бы город к 526815 и ждала регион активации, а активация — geoname_id сверки (40P01).
 func TestActivateImportRegionLockOrder(t *testing.T) {
+	t.Parallel()
 	r := newImportRaceEnv(t, "test-a-mikh", nil)
 	at, release, actDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -516,6 +529,7 @@ func TestActivateImportRegionLockOrder(t *testing.T) {
 // замка страны и с порядком «город → регион» (раунд 1) активация заняла бы 526815 и ждала регион сверки, а сверка —
 // её geoname_id.
 func TestActivateCrossCityImportLock(t *testing.T) {
+	t.Parallel()
 	var lesnoy uuid.UUID
 	r := newImportRaceEnv(t, "test-b-mikh", func(e env, ural uuid.UUID) {
 		lesnoy = addCity(t, e, ural, "test-a-lesnoy", map[string]string{"ru": "Лесной"})
@@ -556,6 +570,7 @@ func TestActivateCrossCityImportLock(t *testing.T) {
 // m2 ревью G5: место удалено параллельным импортом после проверки и до вставки — geo.ErrPlaceNotFound (404), а не
 // 500 по внешнему ключу city_names; ничего не записано.
 func TestActivatePlaceDeletedConcurrently(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	a := e.admin()
 	a.SetStageHook(func(ctx context.Context, stage string) {
@@ -581,6 +596,7 @@ const waitingInThisDB = `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a
 
 // Ключ замка страны: класс «geor», код страны двумя байтами — разные страны и разные классы не совпадают.
 func TestCountryLockKey(t *testing.T) {
+	t.Parallel()
 	class, ru := app.CountryLockKey("RU")
 	_, kz := app.CountryLockKey("KZ")
 	if class != 0x67656f72 || ru != 'R'<<8|'U' || ru == kz {
@@ -592,6 +608,7 @@ func TestCountryLockKey(t *testing.T) {
 // замок взят по старой стране, поэтому активация откатывается с ошибкой без кода контракта (повтор с тем же ключом
 // перечитает место), а не заводит город в старой стране с admin1 новой; ничего не записано.
 func TestActivatePlaceCountryChanged(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	a := e.admin()
 	a.SetStageHook(func(ctx context.Context, stage string) {

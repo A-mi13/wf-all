@@ -64,6 +64,7 @@ func job(eventID uuid.UUID, subscriber string) *river.Job[events.DeliverArgs] {
 }
 
 func TestDeliverArgsConventions(t *testing.T) {
+	t.Parallel()
 	a := events.NewDeliverArgs(id.New(), "stats.count")
 	opts := a.InsertOpts()
 	if a.Kind() != "events.deliver" || a.V != 1 || opts.Queue != events.QueueEvents ||
@@ -74,6 +75,7 @@ func TestDeliverArgsConventions(t *testing.T) {
 
 // Повтор доставки (River повторил задачу, relay переразложил) не задваивает обработку.
 func TestRedeliveryIsProcessedOnce(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	effects(t, pool)
 	reg, err := events.NewRegistry(events.Subscription{
@@ -96,6 +98,7 @@ func TestRedeliveryIsProcessedOnce(t *testing.T) {
 
 // Review Focus 3: ошибка обработчика откатывает и отметку inbox — повтор обрабатывает заново.
 func TestHandlerErrorLeavesNoInbox(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	effects(t, pool)
 	var fail atomic.Bool
@@ -132,6 +135,7 @@ func TestHandlerErrorLeavesNoInbox(t *testing.T) {
 // LatestState отбрасывает событие со строго меньшей версией; EveryEvent применяет всё;
 // события одной версии (одна транзакция агрегата) применяются оба (Решения контроллера).
 func TestDeliveryModesAndStaleVersions(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	effects(t, pool)
 	reg, err := events.NewRegistry(
@@ -182,6 +186,7 @@ func TestDeliveryModesAndStaleVersions(t *testing.T) {
 // подписчик — обычная ошибка с повтором: задачу мог взять воркер старого релиза при выкатке,
 // отмена потеряла бы событие (River повторит, после исчерпания попыток задача — discarded).
 func TestUnknownSubscriberRetriesDeletedEventCancels(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	reg, _ := events.NewRegistry()
 	w := events.NewDeliverWorker(pool, pool, reg)
@@ -216,6 +221,7 @@ func lockWaiters(t *testing.T, pool *pgxpool.Pool) int {
 // получив её, видит курсор 3 — отбрасывается как устаревшее. Курсор создан заранее доставкой v1:
 // иначе вторую доставку сериализовал бы уже INSERT … ON CONFLICT в EnsureCursor, а не LockCursor.
 func TestConcurrentLatestStateDropsStale(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	effects(t, pool)
 	holding := make(chan struct{})

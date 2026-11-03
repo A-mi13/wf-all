@@ -10,6 +10,7 @@ import (
 )
 
 func TestCompare(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		a, b string
 		want int
@@ -32,6 +33,7 @@ func TestCompare(t *testing.T) {
 }
 
 func TestCompareRejects(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []string{
 		"", "1.2", "1.2.3.4", "1.2.3+45", "1.2.3-beta", "v1.2.3", " 1.2.3", "1.2.3 ", "1..3",
 		"01.2.3", "1.02.3", "1.2.03", "1.2.x", "-1.2.3", "+1.2.3", "١.٢.٣", "18446744073709551616.0.0",
@@ -54,6 +56,7 @@ func valid(p appversion.Platform) appversion.Versions {
 }
 
 func TestValidateAccepts(t *testing.T) {
+	t.Parallel()
 	for _, v := range []appversion.Versions{
 		valid(appversion.IOS),
 		valid(appversion.Android),
@@ -66,6 +69,7 @@ func TestValidateAccepts(t *testing.T) {
 }
 
 func TestValidateRejects(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		edit  func(v *appversion.Versions)

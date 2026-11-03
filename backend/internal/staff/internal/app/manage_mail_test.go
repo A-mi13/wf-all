@@ -43,6 +43,7 @@ func (e *menv) writeDisabledAudit(object uuid.UUID, action, reason string, opera
 // метка кода (часть Reason до ": "); комментарий в письмо не попадает никогда; operator — «оператор
 // сервера»; неизвестный код — письмо без строки причины; ru и en по языку получателя.
 func TestComposeAdminDisabled(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ru := e.addMember("owner.ru@wf.example", memberOpts{Role: "owner", Name: "Анна В."})
 	en := e.addMember("owner.en@wf.example", memberOpts{Role: "owner", Locale: "en"})
@@ -101,6 +102,7 @@ func TestComposeAdminDisabled(t *testing.T) {
 // ComposeAdminDisabled — mail.ErrSkip: ref не запись аудита, запись другого действия, получатель
 // выключен, не владелец или не существует.
 func TestComposeAdminDisabledSkips(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
 	off := e.addMember("off@wf.example", memberOpts{Role: "owner", Status: "disabled"})

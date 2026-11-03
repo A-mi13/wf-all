@@ -13,6 +13,7 @@ import (
 
 // Подсадка багов: нарушения §4.1–4.2 на синтетическом SQL модуля.
 func TestOwnershipViolations(t *testing.T) {
+	t.Parallel()
 	ok := []struct {
 		module string
 		u      sqlscan.Usage
@@ -63,6 +64,7 @@ func TestOwnershipViolations(t *testing.T) {
 }
 
 func TestSchemaOwnersAreKnownModules(t *testing.T) {
+	t.Parallel()
 	for name, o := range Schema {
 		if !isKnownOwner(o.Owner) {
 			t.Errorf("%s: владелец %q не модуль из Layers и не platform", name, o.Owner)
@@ -87,6 +89,7 @@ SELECT 'function', p.proname
 // Каждая таблица, представление и функция мигрированной схемы (кроме объектов
 // расширений) имеет владельца, и в карте нет записей об объектах, которых уже нет.
 func TestEverySchemaObjectHasOwner(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	rows, err := pool.Query(context.Background(), schemaObjectsSQL)
 	if err != nil {
@@ -125,6 +128,7 @@ func TestEverySchemaObjectHasOwner(t *testing.T) {
 
 // Главный страж: SQL каждого модуля трогает только своё и экспортированное.
 func TestModuleQueriesRespectOwnership(t *testing.T) {
+	t.Parallel()
 	var files []string
 	for _, g := range queryGlobs {
 		found, err := filepath.Glob("../" + g)
@@ -164,6 +168,7 @@ func TestModuleQueriesRespectOwnership(t *testing.T) {
 // Каталоги queries из backend/sqlc.yaml лежат там, где их видит страж владения: SQL вне
 // queryGlobs выпал бы из проверки молча.
 func TestSqlcQueriesCoveredByOwnershipGuard(t *testing.T) {
+	t.Parallel()
 	cfg, err := os.ReadFile("../../sqlc.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -182,6 +187,7 @@ func TestSqlcQueriesCoveredByOwnershipGuard(t *testing.T) {
 
 // Подсадка багов: queries вне internal/<модуль>/queries/ и internal/platform/<пакет>/queries/.
 func TestSqlcQueriesViolations(t *testing.T) {
+	t.Parallel()
 	ok := []string{
 		"sql:\n  - queries: internal/platform/flags/queries/\n",
 		"sql:\n  - queries: internal/teams/queries\n",

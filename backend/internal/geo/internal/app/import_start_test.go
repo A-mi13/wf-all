@@ -97,6 +97,7 @@ var importMeta = approvals.Meta{UserAgent: "Mozilla/5.0 (test)"}
 // сотрудника с объектом id.Named(geonames_import_job, job_id), after {country_code, job_id}, без города, UA запроса;
 // повтор страны — 409 с job_id первой (уникальность River), задача одна; выключенная страна — можно.
 func TestStartImport(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	s := staffAs(perm.Admin)
 	job, err := e.admin().StartImport(context.Background(), s, "RU", importMeta)
@@ -143,6 +144,7 @@ func TestStartImport(t *testing.T) {
 // Строка running страны: импорт оператора — 409 без job_id (задачи нет); строка задачи — 409 с её river_job_id.
 // Задача не поставлена, аудита нет.
 func TestStartImportRunningRow(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at) VALUES ($1, 'RU', 'running', $2)`, uuid.New(), tAct)
 	_, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "RU", importMeta)
@@ -162,6 +164,7 @@ func TestStartImportRunningRow(t *testing.T) {
 // Нет страны — 404 geo.country_not_found; не ^[A-Z]{2}$ — 400 body.country (схема отвергнет раньше); модератор и
 // поддержка — 403; ничего не записано.
 func TestStartImportRejects(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	if _, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "ZZ", importMeta); !errors.Is(err, geo.ErrCountryNotFound) {
 		t.Fatalf("нет страны: %v", err)
@@ -183,6 +186,7 @@ func TestStartImportRejects(t *testing.T) {
 // встанет на уникальном индексе River; первая коммитит — вторая получает дубль: 409 с job_id первой. Одна задача,
 // один аудит.
 func TestStartImportConcurrent(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	var doneOnce sync.Once
 	var first atomic.Bool
@@ -232,6 +236,7 @@ func TestStartImportConcurrent(t *testing.T) {
 // Отмена задачи «в очереди»: cancelled, аудит geo.import_cancelled от сотрудника (объект — задача), уникальность
 // страны освобождена (новая постановка — 202); неизвестный id — 404.
 func TestCancelImportJob(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	s := staffAs(perm.Admin)
 	job, err := e.admin().StartImport(context.Background(), s, "RU", importMeta)
@@ -267,6 +272,7 @@ func TestCancelImportJob(t *testing.T) {
 // K6: вторая отмена той же задачи (новый ключ, второй сотрудник) — 200 cancelled, записей geo.import_cancelled по
 // задаче ровно одна.
 func TestCancelImportJobAlreadyCancelled(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	job, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "RU", importMeta)
 	if err != nil {
@@ -288,6 +294,7 @@ func TestCancelImportJobAlreadyCancelled(t *testing.T) {
 // cancel_locked), пока вторая не встанет на том же замке; обе 200 cancelled, аудит один: «отменил этот вызов» и «уже
 // была отменена» различаются под замком, а не чтением до него.
 func TestCancelImportJobConcurrent(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	job, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "RU", importMeta)
 	if err != nil {
@@ -334,6 +341,7 @@ func TestCancelImportJobConcurrent(t *testing.T) {
 // metadata.cancel_attempted_at, уведомления отмены River не было (LISTEN канала управления пуст), аудита нет.
 // Контроль слушателя: pg_notify в тот же канал доходит.
 func TestCancelImportJobRaceWithFetch(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	ctx := context.Background()
 	job, err := e.admin().StartImport(ctx, staffAs(perm.Admin), "RU", importMeta)
@@ -381,6 +389,7 @@ func TestCancelImportJobRaceWithFetch(t *testing.T) {
 
 // Задача завершена (completed) или выброшена (discarded) — 409, состояние не меняется.
 func TestCancelImportJobFinished(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	for _, st := range []string{"completed", "discarded"} {
 		job, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "RU", importMeta)
@@ -404,6 +413,7 @@ func (mailLike) Kind() string { return "staff.mail" }
 // I-1: id задачи другого вида (staff.mail) — 404 geo.import_job_not_found и для карточки, и для отмены; задача
 // осталась available, метки отмены нет.
 func TestCancelImportJobForeignKind(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	res, err := e.rc.Insert(context.Background(), mailLike{}, &river.InsertOpts{Queue: queue.Staff})
 	if err != nil {
@@ -422,6 +432,7 @@ func TestCancelImportJobForeignKind(t *testing.T) {
 
 // Состояния River → контракт (R7): ждущие — queued, discarded — failed; import_id — последняя строка журнала задачи.
 func TestImportJobState(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	s := staffAs(perm.Support) // поддержка читает (geo.imports.read)
 	job, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "RU", importMeta)
@@ -457,6 +468,7 @@ func TestImportJobState(t *testing.T) {
 // После постановки — queued, попыток 0; тестовый исполнитель River (настоящий импорт на выдержке GeoNames под
 // пулом владельца) выполняет задачу — completed и import_id строки журнала этой задачи.
 func TestGetGeoImportJob(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	s := staffAs(perm.Admin)
 	job, err := e.admin().StartImport(context.Background(), s, "RU", importMeta)
@@ -517,6 +529,7 @@ func isForbidden(err error) bool {
 // воркера; часы воркера отстают на 100 мс — подпись всё равно находится (допуск расхождения часов). Запись позже
 // started_at больше допуска — не этой строки (повтор river_job.id после сброса последовательности) — подписи нет.
 func TestListImportsStartedByClockSkew(t *testing.T) {
+	t.Parallel()
 	e := newJobEnv(t)
 	ins := func(job int64, started, recorded time.Time, label string) uuid.UUID {
 		rid := uuid.New()
@@ -548,11 +561,13 @@ func TestListImportsStartedByClockSkew(t *testing.T) {
 // Часы постановки (admin-api) и воркера — разные хосты: если воркер ещё не считает строку зависшей, его задача
 // получит ErrImportInProgress и уйдёт в JobSnooze до закрытия строки — расхождение часов лечится само.
 func TestStartImportStaleRunningRow(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name string
 		job  *int64
 	}{{"задача", ptr(int64(777))}, {"оператор", nil}} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newJobEnv(t)
 			fresh, stale := uuid.New(), uuid.New()
 			e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at, river_job_id) VALUES ($1, 'RU', 'running', $2, $3)`,

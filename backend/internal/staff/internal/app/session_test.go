@@ -30,6 +30,7 @@ func (e *env) seen(sessionID uuid.UUID) (time.Time, netip.Addr) {
 
 // Абсолютный срок 8 ч: дальше — ErrSessionInvalid, сессия гасится как expired.
 func TestSessionAbsoluteExpiry(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	tok := e.signIn(m)
@@ -52,6 +53,7 @@ func TestSessionAbsoluteExpiry(t *testing.T) {
 // Бездействие больше 20 минут → Reauth (ровно 20 — ещё нет); права остаются в Grants, но Decide
 // под Reauth — Deny.
 func TestSessionIdleReauth(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{Role: "owner"})
 	tok := e.signIn(m)
@@ -68,6 +70,7 @@ func TestSessionIdleReauth(t *testing.T) {
 
 // Смена сети: IPv4 вне /24, IPv6 вне /48 → Reauth; в пределах префикса — нет.
 func TestSessionNetworkChange(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		from, to string
@@ -82,6 +85,7 @@ func TestSessionNetworkChange(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newEnv(t)
 			m := e.addMember("olga.v@wf.example", memberOpts{})
 			from := netip.MustParseAddr(c.from)
@@ -108,6 +112,7 @@ func TestSessionNetworkChange(t *testing.T) {
 // Review Focus 2, P11, D10: last_seen_at — не чаще раза в минуту и не на фоновых запросах; фоновый
 // опрос раз в минуту 25 минут приводит к Reauth; в Reauth ни last_seen_at, ни ip не меняются.
 func TestSessionLastSeen(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	tok := e.signIn(m)
@@ -153,6 +158,7 @@ func TestSessionLastSeen(t *testing.T) {
 
 // В стадиях setup и mfa_pending Reauth не ставится (P11): свои сроки — 8 ч и 5 мин.
 func TestNoReauthBeforeActive(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	tok := e.login(context.Background(), m)
@@ -179,6 +185,7 @@ func TestNoReauthBeforeActive(t *testing.T) {
 // Права — perm.Grants(роль) при загрузке; города модератора — из staff_role_cities, у глобальных
 // ролей — пусто. Выключенная или закрытая учётка — ErrSessionInvalid.
 func TestLoadStaffGrantsAndCities(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	c1, c2 := e.city("kazan"), e.city("perm")
 	mod := e.addMember("mod@wf.example", memberOpts{Role: "moderator", Cities: []uuid.UUID{c2, c1}})

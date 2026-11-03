@@ -14,6 +14,7 @@ import (
 
 // Чтение под ролью api (права прода из grants.sql): нет строки — ok=false, не ошибка.
 func TestReaderGet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "api")
 	r := appversion.NewReader(pools.As)
@@ -50,6 +51,7 @@ func TestReaderGet(t *testing.T) {
 // Запись версий (Task 15): Put в транзакции — создание (before nil, version 1), правка (before — прежние значения,
 // version + 1), те же значения — без записи (version не растёт); List — заведённые платформы по имени.
 func TestPutAndList(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	at := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)

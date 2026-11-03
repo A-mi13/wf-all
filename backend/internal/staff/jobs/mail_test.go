@@ -69,6 +69,7 @@ func newFixture(e *env) fixture {
 // уходит получателю задачи с содержимым своего вида; таймаут задачи — минута (медленный SMTP не держит
 // исполнителя дольше).
 func TestMailWorkerSends(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	f := newFixture(e)
 	cases := []struct {
@@ -119,6 +120,7 @@ func TestMailWorkerSends(t *testing.T) {
 // и аргументы другой версии — обычная ошибка (m1 ревью 10c: при скользящем деплое повтор возьмёт экземпляр нового
 // релиза), не отмена.
 func TestMailWorkerArgs(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	f := newFixture(e)
 	invite := e.mailOf(staff.MailInvite, f.newOwner)
@@ -179,6 +181,7 @@ func (s failingSender) Send(context.Context, mail.Message) error { return s.err 
 
 // Ошибка SMTP — обычная ошибка задачи: River повторит (MaxAttempts 10), письмо не теряется и не отменяется.
 func TestMailWorkerSMTPErrorRetries(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	f := newFixture(e)
 	errSMTP := errors.New("mail: отправка: соединение отклонено")
@@ -190,6 +193,7 @@ func TestMailWorkerSMTPErrorRetries(t *testing.T) {
 
 // Журнал сервера (страж): отмены и ошибки пишутся с видом письма и id, без почты и кодов приглашений.
 func TestMailWorkerLogHasNoSecrets(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	f := newFixture(e)
 	ctx := context.Background()

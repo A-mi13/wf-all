@@ -57,6 +57,7 @@ func (e *env) setupSession(email string) (member, *auth.Staff) {
 // MFASetup (§4.5): секрет 20 байт в base32 и otpauth-ссылка (издатель — хост ADMIN_ORIGIN, аккаунт —
 // почта); повторный вызов до подтверждения выпускает новый секрет; только стадия setup.
 func TestMFASetup(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, s := e.setupSession("ivan.p@wf.example")
@@ -109,6 +110,7 @@ func TestMFASetup(t *testing.T) {
 // MFASetup и повторно после подтверждения — wrong_stage; успех — 10 кодов, confirmed_at и принятый
 // шаг в last_used_step.
 func TestMFAConfirm(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, s := e.setupSession("ivan.p@wf.example")
@@ -168,6 +170,7 @@ func TestMFAConfirm(t *testing.T) {
 // сессии (старый — replaced), учётка active, приглашение погашено, mfa_at; аудит staff.mfa_enabled.
 // Коды из confirm принимает вход 6a.
 func TestRecoveryAck(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support", Name: "Иван П."}, purposeInvite)
@@ -263,6 +266,7 @@ func (e *env) confirmedSetup(email string, after time.Duration) (member, *auth.S
 // accept, у сессии setup свой срок; иначе тупик на границе 24 ч (TOTP подтверждён, «Готово»
 // отказывает). Истёкшее, но не погашенное приглашение гасится, учётка active.
 func TestRecoveryAckExpiredInvite(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, s := e.confirmedSetup("ivan.p@wf.example", 23*time.Hour)
 	e.clock.Advance(2 * time.Hour) // за expires_at, сессия setup ещё жива
@@ -284,6 +288,7 @@ func TestRecoveryAckExpiredInvite(t *testing.T) {
 
 // Нет живого приглашения (погашено) — staff.wrong_stage, учётка остаётся invited.
 func TestRecoveryAckRevokedInvite(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, s := e.confirmedSetup("ivan.p@wf.example", 0)
 	e.exec(`UPDATE staff_invites SET revoked_at = $2, code_enc = NULL, code_key_id = NULL WHERE staff_id = $1`, m.ID, t0)
@@ -297,6 +302,7 @@ func TestRecoveryAckRevokedInvite(t *testing.T) {
 
 // Сессия настройки погашена, заменена или чужая — отказ сессии, а не wrong_stage.
 func TestSetupRechecksSession(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -323,6 +329,7 @@ func TestSetupRechecksSession(t *testing.T) {
 // Перевыпуск кодов (§4.7, M9): только TOTP; успех — 10 новых кодов, старые не работают, счётчик
 // неудач 0, шаг TOTP сгорает; аудит staff.recovery_regenerated.
 func TestRegenerateRecovery(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m := e.addMember("olga.v@wf.example", memberOpts{})
@@ -371,6 +378,7 @@ func TestRegenerateRecovery(t *testing.T) {
 
 // Резервный код вместо TOTP — неудача второго фактора (счётчик), коды не меняются.
 func TestRegenerateRecoveryRejectsRecoveryCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))
@@ -388,6 +396,7 @@ func TestRegenerateRecoveryRejectsRecoveryCode(t *testing.T) {
 // Неверный TOTP пять раз подряд — блокировка через withFactor; параллельные неверные не обходят
 // порог.
 func TestRegenerateRecoveryLockout(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))
@@ -424,6 +433,7 @@ func TestRegenerateRecoveryLockout(t *testing.T) {
 
 // ⚠️ 6b: погашенная сессия — отказ без записи неудачи (и без смены кодов).
 func TestRegenerateRecoveryRevokedSession(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))
@@ -443,6 +453,7 @@ func TestRegenerateRecoveryRevokedSession(t *testing.T) {
 
 // Перевыпуск не из стадии active — wrong_stage без записи неудачи.
 func TestRegenerateRecoveryWrongStage(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, s := e.setupSession("ivan.p@wf.example")
 	if _, err := e.app.RegenerateRecovery(context.Background(), s, "000000", metaWeb); !errors.Is(err, staff.ErrWrongStage) {
@@ -455,6 +466,7 @@ func TestRegenerateRecoveryWrongStage(t *testing.T) {
 
 // MFAStatus учётки без второго фактора — не подтверждён, 0 кодов.
 func TestMFAStatusNotConfigured(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	_, s := e.setupSession("ivan.p@wf.example")
 	st, err := e.app.MFAStatus(context.Background(), s)

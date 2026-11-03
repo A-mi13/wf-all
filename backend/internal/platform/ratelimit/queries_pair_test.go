@@ -12,5 +12,6 @@ import (
 // DeleteExpired без StaffDeleteExpired (повторная проверка tat на внешнем DELETE) молча развела бы лимиты
 // игроков и сотрудников. Страж не вхолостую: пары Take, Add, GetTAT, DeleteExpired.
 func TestStaffQueriesMirrorPublic(t *testing.T) {
+	t.Parallel()
 	sqlmirror.Check(t, os.DirFS("queries"), "ratelimit.sql", "rate_limits", "staff_rate_limits", 4)
 }

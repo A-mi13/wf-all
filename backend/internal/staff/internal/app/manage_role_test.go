@@ -21,6 +21,7 @@ import (
 // меняется или добавлен город — grant; только снятие городов — revoke, сразу), Allow — 200 (nil),
 // NeedsApproval — 202 (запрос с правом), Deny — 403, без изменений — nil без записей.
 func TestChangeRoleD16(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c1, c2, c3 := e.city("kazan"), e.city("perm"), e.city("ufa")
@@ -107,6 +108,7 @@ func TestChangeRoleD16(t *testing.T) {
 // ролей — 400 max_items; несуществующий город — 422; над собой — staff.self_action; нет учётки —
 // staff.not_found; выключенная — 403 (вернуть её — приглашением).
 func TestChangeRoleValidation(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c := e.city("kazan")
@@ -139,6 +141,7 @@ func TestChangeRoleValidation(t *testing.T) {
 // Снятие городов сразу: версия +1, города, аудит staff.role_changed (было/стало), событие
 // staff.role_revoked с removed_city_ids; ожидающие запросы сотрудника погашены.
 func TestChangeRoleRevokeNow(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	c1, c2 := e.city("kazan"), e.city("perm")
 	owner := e.as(e.addMember("owner@wf.example", memberOpts{Role: "owner"}))
@@ -166,6 +169,7 @@ func TestChangeRoleRevokeNow(t *testing.T) {
 // Исполнение смены роли: роль и города, версия +1, событие staff.role_granted, аудит от
 // подтвердившего; ожидающие запросы сотрудника (как инициатора) погашены.
 func TestChangeRoleExecute(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c := e.city("kazan")
@@ -201,6 +205,7 @@ func TestChangeRoleExecute(t *testing.T) {
 // Устаревший payload: цель изменилась после запроса (смена роли сразу) — исполнение failed
 // (platform.approval_stale), ничего не применено.
 func TestChangeRoleStale(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c1, c2, c3 := e.city("kazan"), e.city("perm"), e.city("ufa")
@@ -226,6 +231,7 @@ func TestChangeRoleStale(t *testing.T) {
 
 // LockOut цели поднимает версию (решение контроллера): ожидающий запрос о ней устаревает — ErrStale.
 func TestLockOutTargetStale(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
 	b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))

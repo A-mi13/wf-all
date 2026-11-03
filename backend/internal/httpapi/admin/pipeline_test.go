@@ -26,6 +26,7 @@ import (
 // Имя cookie — одно место (R6): с Secure — __Host-wf_admin_session, без (dev, если браузер не
 // принял __Host- на http://127.0.0.1) — wf_admin_session.
 func TestCookieName(t *testing.T) {
+	t.Parallel()
 	if admin.CookieName(true) != hostCookie || admin.CookieName(false) != "wf_admin_session" {
 		t.Fatalf("CookieName: %q %q", admin.CookieName(true), admin.CookieName(false))
 	}
@@ -34,6 +35,7 @@ func TestCookieName(t *testing.T) {
 // Сессия по cookie: загрузчик получает токен, IP клиента и признак фонового запроса
 // (X-WF-Background: 1 не продлевает сессию, D10); сотрудник доходит до хендлера.
 func TestStaffSessionLoadsByCookie(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	sessions := &fakeSessions{staff: map[string]*auth.Staff{"tok-owner": staffOf(perm.Owner, auth.StageActive, false)}}
 	o.Sessions = sessions
@@ -57,6 +59,7 @@ func TestStaffSessionLoadsByCookie(t *testing.T) {
 
 // Dev без Secure (R6 не прошла бы): имя wf_admin_session, __Host- не читается.
 func TestStaffSessionDevCookie(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.CookieSecure, o.Origin = false, "http://127.0.0.1:5173" // без Secure — только dev по http
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok": staffOf(perm.Owner, auth.StageActive, false)}}
@@ -69,6 +72,7 @@ func TestStaffSessionDevCookie(t *testing.T) {
 
 // Сотрудник кладётся в ctx до rate limit (⚠️ 3a): лимит считает его ключом staff:<класс>:<id>.
 func TestStaffPrincipalBeforeRateLimit(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	s := staffOf(perm.Owner, auth.StageActive, false)
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok": s}}
@@ -86,6 +90,7 @@ func TestStaffPrincipalBeforeRateLimit(t *testing.T) {
 // класса staff_auth и упираются в 429; каждый отказ стирает cookie. После 429 загрузчик не
 // вызывается: сессия не проверяется вовсе.
 func TestInvalidCookiesHitStaffAuthLimit(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	clk := clocktest.New(t0)
 	o.Clock = clk
@@ -145,6 +150,7 @@ func clearsCookie(rec *httptest.ResponseRecorder) bool {
 // Негативный кэш (R9): отказ по токену помнится 5 с по хэшу токена — повтор того же токена не
 // ходит в загрузчик, но считается в IP-лимите и снова стирает cookie; через 5 с — загрузка заново.
 func TestInvalidTokenNegativeCache(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	clk := clocktest.New(t0)
 	o.Clock = clk
@@ -176,6 +182,7 @@ func TestInvalidTokenNegativeCache(t *testing.T) {
 
 // Положительного кэша нет (R9): действующая сессия сверяется с загрузчиком на каждом запросе.
 func TestValidSessionNotCached(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	sessions := &fakeSessions{staff: map[string]*auth.Staff{"tok": staffOf(perm.Owner, auth.StageActive, false)}}
 	o.Sessions = sessions
@@ -190,6 +197,7 @@ func TestValidSessionNotCached(t *testing.T) {
 
 // Невалидная cookie на анонимной операции (вход) — запрос идёт дальше анонимно, cookie стирается.
 func TestInvalidCookieOnAnonymousOperation(t *testing.T) {
+	t.Parallel()
 	r := loginRequest()
 	r.AddCookie(sessionCookie(hostCookie, "stale"))
 	rec := serve(newHandler(t, testOptions(t)), r)
@@ -202,6 +210,7 @@ func TestInvalidCookieOnAnonymousOperation(t *testing.T) {
 // Сбой загрузчика (база недоступна) — 500, cookie не стирается и отказ не считается: сбой — не
 // повод выкидывать сотрудника.
 func TestSessionLoadFailureIs500(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Sessions = &fakeSessions{err: errors.New("база недоступна")}
 	lim := &recLimiter{}
@@ -217,6 +226,7 @@ func TestSessionLoadFailureIs500(t *testing.T) {
 // только active без Reauth: mfa_pending → 401 auth.unauthenticated, setup → 403
 // auth.setup_required, Reauth → 401 auth.reauth_required.
 func TestPermissionStages(t *testing.T) {
+	t.Parallel()
 	type want struct {
 		status int
 		code   string
@@ -266,6 +276,7 @@ func TestPermissionStages(t *testing.T) {
 // Ключ каталога: нет права у роли — 403 auth.forbidden (модератору список сотрудников закрыт);
 // scoped без {cityId} в пути — пропуск, список фильтрует ручка (модератор и города).
 func TestPermissionKey(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{
 		"mod": staffOf(perm.Moderator, auth.StageActive, false, cityA),
@@ -278,6 +289,7 @@ func TestPermissionKey(t *testing.T) {
 // handler: хоть одно право из x-permission-any не Deny — пропуск (точное право и город решает
 // сценарий); все Deny — 403 auth.forbidden. Решение подтверждения — по правам «вдвоём».
 func TestPermissionHandler(t *testing.T) {
+	t.Parallel()
 	scoped := staffOf(perm.Support, auth.StageActive, false)
 	scoped.Grants = map[string]auth.Grant{"staff.access.reset": auth.GrantScoped}
 	o := testOptions(t)
@@ -295,6 +307,7 @@ func TestPermissionHandler(t *testing.T) {
 // значением — 403 auth.csrf_failed до разбора тела (битый JSON не даёт 400) и до входа (анонимная
 // мутация тоже). GET без заголовков — пропуск.
 func TestCSRF(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok": staffOf(perm.Owner, auth.StageActive, false)}}
 	h := newHandler(t, o)
@@ -331,6 +344,7 @@ func TestCSRF(t *testing.T) {
 // IP-аллоулист: пустой — выключен; адрес вне списка — 403 auth.ip_not_allowed на всё, включая
 // /docs и статику; из списка — дальше по конвейеру.
 func TestIPAllowlist(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Docs = true
 	o.StaticDir = staticDir(t)
@@ -359,6 +373,7 @@ func TestIPAllowlist(t *testing.T) {
 // Ответы маршрутов контракта — Cache-Control: no-store (данные сотрудника и отказы не кэшируются);
 // хендлер может поставить свой (private, no-store) поверх.
 func TestContractResponsesNoStore(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok": staffOf(perm.Owner, auth.StageActive, false)}}
 	h := newHandler(t, o)
@@ -376,6 +391,7 @@ func TestContractResponsesNoStore(t *testing.T) {
 // Несколько строк Accept-Language сводятся в одну, как в public (httpx.CombineHeaders):
 // сгенерированный код принимает у заголовка-параметра одну строку и на вторую ответил бы 400.
 func TestAcceptLanguageCombined(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok": staffOf(perm.Owner, auth.StageActive, false)}}
 	r := call(http.MethodGet, "/v1/geo/cities", "tok", "")
@@ -386,6 +402,7 @@ func TestAcceptLanguageCombined(t *testing.T) {
 
 // Неверный ADMIN_ORIGIN и нулевой префикс в ADMIN_IP_ALLOWLIST — отказ старта.
 func TestNewHandlerRejectsBadOriginAndAllowlist(t *testing.T) {
+	t.Parallel()
 	base := testOptions(t)
 	for _, origin := range []string{"", "127.0.0.1:5173", "ftp://admin.wf.example", "https://admin.wf.example/",
 		"https://admin.wf.example/app", "https://admin.wf.example?x=1", "https://user@admin.wf.example",
@@ -438,6 +455,7 @@ func TestNewHandlerRejectsBadOriginAndAllowlist(t *testing.T) {
 // Secure ушла бы и по http, без префикса __Host- её можно подменить с поддомена; false — только dev по http
 // (R6). http + Secure (e2e на Chromium/Firefox) и https + Secure — собираются.
 func TestNewHandlerRejectsInsecureCookieOnHTTPS(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.CookieSecure = false
 	o.Origin = "https://admin.wf.example"
@@ -467,6 +485,7 @@ func TestNewHandlerRejectsInsecureCookieOnHTTPS(t *testing.T) {
 // Secure-cookie по http (исключение — только loopback, «потенциально надёжный» источник): вход без сессии и петля
 // логина. Отказ старта с подсказкой; loopback (127.0.0.1, [::1], localhost — e2e Chromium и dev) собирается.
 func TestCookieSecureOnHTTPNeedsLoopback(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		origin string
 		ok     bool
@@ -506,6 +525,7 @@ func TestCookieSecureOnHTTPNeedsLoopback(t *testing.T) {
 // хендлера: 404 http.not_found, а не 400 биндинга параметра (и не 501 заглушки) — и с сессией
 // владельца, и без неё.
 func TestEmptyPathParamNeverReachesHandler(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok-owner": staffOf(perm.Owner, auth.StageActive, false)}}
 	h := newHandler(t, o)

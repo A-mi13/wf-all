@@ -18,6 +18,7 @@ import (
 // body.confirm mismatch; reason — из списка (body.reason enum); comment ≤ 500 (body.comment maxLength);
 // над собой — self_action; нет учётки — not_found; уже выключена — wrong_stage.
 func TestDisableValidation(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	om := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
@@ -57,6 +58,7 @@ func TestDisableValidation(t *testing.T) {
 // (владелец: сразу; админ — 403), владелец — revoke_owner (владелец: запрос; админ — 403);
 // модератор — 403.
 func TestDisableRights(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c := e.city("kazan")
@@ -113,6 +115,7 @@ func TestDisableRights(t *testing.T) {
 // погашено, ожидающие запросы сотрудника погашены, аудит staff.disabled (причина «код: комментарий» —
 // только в reason, не в after), событие staff.role_revoked; загрузчик больше не пускает.
 func TestDisableEffects(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	owner := e.as(e.addMember("owner@wf.example", memberOpts{Role: "owner"}))
@@ -161,6 +164,7 @@ func TestDisableEffects(t *testing.T) {
 // Владельца выключают только вдвоём (revoke_owner): запрос с причиной, исполнение вторым владельцем;
 // письма U1 — только о выключении админа (здесь нет).
 func TestDisableOwnerViaApproval(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
 	b := e.addMember("owner.b@wf.example", memberOpts{Role: "owner"})
@@ -189,6 +193,7 @@ func TestDisableOwnerViaApproval(t *testing.T) {
 // id записи аудита staff.disabled), не A (инициатор) и не выключенному D; выключение модератора — писем
 // нет; OperatorDisable админа — всем активным владельцам.
 func TestDisableAdminMailsOwners(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c := e.city("kazan")

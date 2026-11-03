@@ -38,6 +38,9 @@ func (e *env) holdAccount(staffIDs ...uuid.UUID) (release func()) {
 // задерживает ответ. Иначе время ответа выдавало бы существование почты сильнее, чем у входа.
 // Записи (раунд 1, 14.10.2026) у всех путей принятия одинаковые — одна запись неудачи, как у входа;
 // у повторной отправки — никаких.
+//
+// serial: пороги реального времени (ответ < 3 с, повторная отправка за 300 мс) — под соседними тестами пакета
+// (argon2 общего хэшера, клоны баз) они ложно краснеют.
 func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 	e := newEnv(t)
 	active := e.addMember("active@wf.example", memberOpts{})
@@ -90,6 +93,7 @@ func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 // Шесть параллельных неверных кодов и верный в ту же секунду (общий старт): верный принят, код жив,
 // каждая неверная — своя запись аудита (параллельные неудачи не теряются и ничего не стирают).
 func TestAcceptInviteConcurrentWrong(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	before := e.inviteSecret(m.ID)
@@ -132,6 +136,7 @@ func TestAcceptInviteConcurrentWrong(t *testing.T) {
 // приглашение: под замком сверка идёт с кодом новой строки — старый код отвергается (с записью
 // неудачи), сессии нет.
 func TestAcceptInviteReissuedWhileWaiting(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, oldCode := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -197,6 +202,7 @@ func (h cancelingHasher) Hash(ctx context.Context, pw string) (string, error) {
 
 // M-3: обрыв соединения между хэшем пароля и транзакцией не теряет запись неверной попытки (detached).
 func TestAcceptInviteCanceledAfterHash(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	wrong := otherCode(code)
@@ -219,6 +225,7 @@ func TestAcceptInviteCanceledAfterHash(t *testing.T) {
 
 // M-3: два одновременных bootstrap одной почты — один успех, второй staff.email_taken.
 func TestOperatorBootstrapConcurrent(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	var (
 		wg   sync.WaitGroup

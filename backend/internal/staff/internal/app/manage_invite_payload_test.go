@@ -78,6 +78,7 @@ func (e *invitePayloadEnv) wantStaleNothingCreated(res approvals.Approval, err e
 // Роль вне perm.Roles в payload приглашения — исполнитель отказывает бизнес-отказом ErrStale, а не пишет учётку
 // (enum базы дал бы 500 и запрос pending до истечения).
 func TestExecInviteRejectsUnknownRole(t *testing.T) {
+	t.Parallel()
 	e := newInvitePayloadEnv(t)
 	e.patch(map[string]any{"role": "root"})
 	res, err := e.approve(e.b, e.ap.ID)
@@ -88,6 +89,7 @@ func TestExecInviteRejectsUnknownRole(t *testing.T) {
 // порядок не по возрастанию — ErrStale, ничего не создано. Регресс: модератор с двумя городами по возрастанию и
 // support с пустым списком (как пишет сценарий) — исполняются.
 func TestExecInviteRejectsCityShape(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name   string
 		fields func(c1, c2 uuid.UUID) map[string]any
@@ -110,6 +112,7 @@ func TestExecInviteRejectsCityShape(t *testing.T) {
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newInvitePayloadEnv(t)
 			e.patch(c.fields(e.city("kazan"), e.city("perm")))
 			res, err := e.approve(e.b, e.ap.ID)
@@ -117,6 +120,7 @@ func TestExecInviteRejectsCityShape(t *testing.T) {
 		})
 	}
 	t.Run("регресс: support без городов", func(t *testing.T) {
+		t.Parallel()
 		e := newInvitePayloadEnv(t)
 		e.mustApprove(e.b, e.ap.ID)
 		if got := e.acct(e.accountID(invitePayloadEmail)); got.Role != "support" || got.Status != "invited" {
@@ -124,6 +128,7 @@ func TestExecInviteRejectsCityShape(t *testing.T) {
 		}
 	})
 	t.Run("регресс: модератор с двумя городами", func(t *testing.T) {
+		t.Parallel()
 		e := newInvitePayloadEnv(t)
 		cities := sortedIDs(e.city("kazan"), e.city("perm"))
 		e.patch(map[string]any{"role": "moderator", "city_ids": cities})
@@ -138,6 +143,7 @@ func TestExecInviteRejectsCityShape(t *testing.T) {
 // Проверка формы приглашения — до execLocks: отказ не ждёт замка учётки инициатора (его держит третья
 // транзакция FOR UPDATE; execLocks встал бы на нём FOR SHARE до истечения ctx).
 func TestExecInviteShapeBeforeLocks(t *testing.T) {
+	t.Parallel()
 	e := newInvitePayloadEnv(t)
 	e.patch(map[string]any{"role": "root"})
 	release := e.hold(`SELECT 1 FROM staff_accounts WHERE id = $1 FOR UPDATE`, e.a.StaffID)

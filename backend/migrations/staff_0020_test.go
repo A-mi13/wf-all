@@ -100,6 +100,7 @@ func newUser(t *testing.T, db *sql.DB) string {
 // Учётка сотрудника (спека §3.1): почта уникальна и хранится нормализованной (Review Focus 1), имя
 // 1–80, язык ru|en, активной учётке нужен пароль, счётчик неудач и версия — в границах.
 func TestStaff0020Accounts(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	const ins = `INSERT INTO staff_accounts (id, email, display_name, locale, status, password_hash, mfa_failures,
 		created_at, version) VALUES (gen_random_uuid(), $1, $2, $3, $4::staff_status, $5, $6, now(), $7)`
@@ -136,6 +137,7 @@ func TestStaff0020Accounts(t *testing.T) {
 // Города бывают только у модератора, и у него хотя бы один (спека §2.3, §3.1): отложенная проверка на
 // COMMIT — роль и города меняются в одной транзакции в любом порядке.
 func TestStaff0020RoleCities(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	const (
 		role    = `INSERT INTO staff_roles (staff_id, role, granted_at) VALUES ($1, $2::staff_role, now())`
@@ -177,6 +179,7 @@ func TestStaff0020RoleCities(t *testing.T) {
 // Секреты (D4, D5): шифротекст или HMAC с key_id в форме keys.ID; хэши по 32 байта; одно живое
 // приглашение на учётку; код стирается при погашении; активная сессия — только после второго фактора.
 func TestStaff0020Secrets(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	s := newStaff(t, db, "secrets@example.com")
 	const ts = "2026-10-06T10:00:00Z"
@@ -270,6 +273,7 @@ func (a approvalRow) args() []any {
 // Подтверждение вдвоём (D2, D17): формат действия и права, версия payload, срок, согласованность
 // статуса и решения, решивший — не инициатор и не цель, отказ — с комментарием, ошибка — только у failed.
 func TestStaff0020Approvals(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	p := pendingApproval()
 	for _, a := range []approvalRow{
@@ -331,6 +335,7 @@ const insertAudit = `INSERT INTO audit_log (action, object_type, actor_user_id, 
 // сотрудника и снимок имени; служебная роль (system, operator, anonymous) — только без автора, а
 // без автора — только служебная (спека §3.2: роль обязательна); снимок имени непустой.
 func TestStaff0020AuditActors(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	for _, a := range [][]any{
 		{nil, nil, "system", "system", nil},
@@ -362,6 +367,7 @@ func TestStaff0020AuditActors(t *testing.T) {
 
 // Роли игроков после 0020 (спека §3.2, M1): только допуск капитана в городе.
 func TestStaff0020RoleAssignments(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	user := newUser(t, db)
 	var city string
@@ -378,6 +384,7 @@ func TestStaff0020RoleAssignments(t *testing.T) {
 // Роль сотрудника в role_assignments на старой базе: 0020 падает с понятным текстом, транзакция
 // миграции откатывается целиком; допуск капитана в городе переживает миграцию.
 func TestStaff0020RefusesStaffRoleAssignments(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)
@@ -485,6 +492,7 @@ func snapshotOf(t *testing.T, db *sql.DB, query string) []string {
 // role_scope_id_present с 'global', audit_log без новых колонок, без таблиц staff_* (и
 // staff_idempotency_keys) и approvals. Затем повторный up проходит.
 func TestStaff0020DownRestoresSchema(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)

@@ -30,6 +30,7 @@ func freeAddr(t *testing.T) string {
 }
 
 func TestRunHTTPServesAndStops(t *testing.T) {
+	t.Parallel()
 	addr := freeAddr(t)
 	url := dbtest.NewURL(t) // до горутины: t.Fatal нельзя звать из неё
 	ctx, cancel := context.WithCancel(context.Background())
@@ -54,6 +55,7 @@ func TestRunHTTPServesAndStops(t *testing.T) {
 // Хендлер не собрался (битый контракт) — RunHTTP отказывает до открытия порта, а не
 // поднимает сервер без хендлера.
 func TestRunHTTPFailsWhenBuildFails(t *testing.T) {
+	t.Parallel()
 	errBuild := errors.New("контракт не собрался")
 	// дедлайн — только страховка: с багом RunHTTP поднял бы сервер и не вернулся; запас —
 	// на подключение к базе под нагрузкой параллельных тестов

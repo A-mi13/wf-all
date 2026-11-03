@@ -29,6 +29,7 @@ func operations() []reflect.Method {
 // staff отвечают 501 http.not_implemented через Middleware — одно место, без вызова метода и без
 // паники на несобранных сценариях. Операции других тегов Middleware не трогает.
 func TestStubsNotImplemented(t *testing.T) {
+	t.Parallel()
 	mw := (&staffadmin.Handler{}).Middleware()
 	ops := operations()
 	if len(ops) != 27 {

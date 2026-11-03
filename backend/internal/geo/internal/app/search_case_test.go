@@ -14,6 +14,7 @@ import (
 // строчными латинскими b h m t (0023_normalize_text_case.sql; до неё 'mikh', 'tv', 'bar' не находили Mikhaylovsk,
 // Tver, Barnaul). Свой клон: общий seedAdminReads не трогается. Места 99000x — условные geoname_id.
 func TestAdminSearchIgnoresCase(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	ctx := context.Background()
 	for _, q := range []string{

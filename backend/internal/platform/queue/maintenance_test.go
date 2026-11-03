@@ -16,6 +16,7 @@ import (
 // схемы — воркер или admin-api, кто успел. Настройки у обоих бинарников из одного источника, MaintenanceConfig;
 // сроки — явные значения (равны умолчаниям River v0.47), чтобы смена умолчаний при подъёме River была видна.
 func TestMaintenanceConfig(t *testing.T) {
+	t.Parallel()
 	c := queue.MaintenanceConfig()
 	got := map[string]time.Duration{
 		"CompletedJobRetentionPeriod": c.CompletedJobRetentionPeriod,
@@ -43,6 +44,7 @@ func TestMaintenanceConfig(t *testing.T) {
 // MaintenanceConfig обязано совпасть с умолчанием River; расхождение — осознанное решение: правка теста, причины в
 // комментарии maintenance.go и строка в docs/versions.md.
 func TestMaintenanceMatchesRiverDefaults(t *testing.T) {
+	t.Parallel()
 	c := queue.MaintenanceConfig()
 	def := (&river.Config{}).WithDefaults()
 	got, want := reflect.ValueOf(&c).Elem(), reflect.ValueOf(def).Elem()
@@ -65,6 +67,7 @@ func TestMaintenanceMatchesRiverDefaults(t *testing.T) {
 // MaintenanceDiff видит любое поле river.Config вне полей бинарника (очереди, исполнители, периодика, журнал),
 // отличное от MaintenanceConfig; поля бинарника — не расхождение.
 func TestMaintenanceDiff(t *testing.T) {
+	t.Parallel()
 	log := slog.New(slog.DiscardHandler)
 	base := queue.ClientConfig(map[string]river.QueueConfig{queue.Staff: {MaxWorkers: 1}}, river.NewWorkers(), nil, log)
 	if d := queue.MaintenanceDiff(base); len(d) != 0 {
@@ -97,6 +100,7 @@ func TestMaintenanceDiff(t *testing.T) {
 // исполнителей и периодики (клиент не стартует и обслуживания не делает). Любое другое заданное поле — ошибка:
 // river.Config собирается только здесь (archtest TestRiverConfigOnlyInQueue), правка — сознательно и с тестом.
 func TestInsertConfig(t *testing.T) {
+	t.Parallel()
 	log := slog.New(slog.DiscardHandler)
 	c := queue.InsertConfig(log)
 	if c.Logger != log {

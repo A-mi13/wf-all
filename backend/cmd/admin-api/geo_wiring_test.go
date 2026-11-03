@@ -49,6 +49,7 @@ func (e *testEnv) assemble() assembly {
 // Собранный реестр знает действия geo (geo.country_rules, geo.country_create) рядом с действиями staff; geo собран
 // с клиентом вставки staff (одна переменная, урок 10b).
 func TestAssembleRegistersGeoActions(t *testing.T) {
+	t.Parallel()
 	a := newTestEnv(t).assemble()
 	acts := a.reg.Actions()
 	for _, want := range []string{"geo.country_create", "geo.country_rules", "staff.invite"} {
@@ -64,6 +65,7 @@ func TestAssembleRegistersGeoActions(t *testing.T) {
 // Действия geo держат инициатора под замком (LockActors): без хука SetActorLock от staff реестр не проходит Validate —
 // сборка без staff отказывает при старте, а не исполняет правила страны без перепроверки учёток.
 func TestAssembleActorLockRequired(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	pool, err := pgxpool.New(context.Background(), e.dbURL)
 	if err != nil {
@@ -83,6 +85,7 @@ func TestAssembleActorLockRequired(t *testing.T) {
 // approve (200 executed — действия geo в том же сервисе); импорт ставится (202 — клиент River у geo есть); аудит
 // постановки несёт UA и IP запроса (requestMeta для операций geo).
 func TestStartupWiring(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	_, a := e.staffSession("anna@wf.example", "owner")
 	_, b := e.staffSession("boris@wf.example", "owner")

@@ -13,5 +13,6 @@ import (
 // идемпотентности public и admin. Каждый запрос над idempotency_keys — с парой, каждая пара — с оригиналом.
 // Страж не вхолостую: пары Get, Claim, SaveResponse, DeleteExpired.
 func TestStaffQueriesMirrorPublic(t *testing.T) {
+	t.Parallel()
 	sqlmirror.Check(t, os.DirFS("queries"), "idempotency.sql", "idempotency_keys", "staff_idempotency_keys", 4)
 }

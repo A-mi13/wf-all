@@ -190,6 +190,7 @@ func (e *env) passwordIs(staffID uuid.UUID, pw string) bool {
 // прежнее живое гасится (код стирается); письмо — задача staff.mail вида по назначению с ref =
 // id приглашения и recipient = учётка в той же транзакции.
 func TestIssueInvite(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	if !inviteCodeFormat.MatchString(code) {
@@ -232,6 +233,7 @@ func TestIssueInvite(t *testing.T) {
 // сессия старой cookie (чья угодно) погашены replaced, новая сессия — setup на 8 ч; приглашение
 // живо; аудит staff.invite_accepted от учётки. Повтор тем же кодом — снова успех.
 func TestAcceptInvite(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support", Name: "Иван П."}, purposeInvite)
 	// следы прежнего доступа: неподтверждённый секрет, резервный код, сессии
@@ -296,6 +298,7 @@ func TestAcceptInvite(t *testing.T) {
 // шестизначного и кривого) строка приглашения не изменилась, верный код принимается. Каждая неудача
 // закоммичена (D8) и в аудите без автора, с маскированной почтой и без кода.
 func TestAcceptInviteWrongCodeKeepsCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	before, beforeRow := e.inviteSecret(m.ID), e.liveInvite(m.ID)
@@ -334,6 +337,7 @@ func TestAcceptInviteWrongCodeKeepsCode(t *testing.T) {
 // Код из письма вводится «как попало» — заглавными, без дефиса, с пробелами, с переводом строки из
 // буфера — и принимается (нормализация как у резервных кодов).
 func TestAcceptInviteCodeFormats(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	for _, in := range []string{
@@ -353,6 +357,7 @@ func TestAcceptInviteCodeFormats(t *testing.T) {
 // Политика пароля — ошибка поля body.password до обращения к базе: сценарий без пула не падает,
 // неудача кода не записывается.
 func TestAcceptInvitePasswordPolicy(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	noDB := e.deps
@@ -379,6 +384,7 @@ func TestAcceptInvitePasswordPolicy(t *testing.T) {
 // Истёкшее, погашенное, чужая почта, учётка не invited, нет почты, кривая почта — один и тот же
 // staff.invite_invalid.
 func TestAcceptInviteInvalid(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -417,6 +423,7 @@ func TestAcceptInviteInvalid(t *testing.T) {
 // Старая блокировка второго фактора (locked_until, счётчик) после принятия не закрывает ни
 // сессию setup, ни вход после настройки.
 func TestAcceptInviteClearsStaleLock(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	e.exec(`UPDATE staff_accounts SET locked_until = $2, mfa_failures = 5 WHERE id = $1`, m.ID, t0.Add(30*time.Minute))
@@ -432,6 +439,7 @@ func TestAcceptInviteClearsStaleLock(t *testing.T) {
 // новый код — чужое нажатие лишь присылает приглашённому копию его кода); несуществующая и кривая
 // почта — nil без письма. Аудит отправки — без автора, почта маскирована.
 func TestResendInviteSelf(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -509,6 +517,7 @@ func TestResendInviteSelf(t *testing.T) {
 // Самоотправка присылает тот же код: строка не перешифровывается, письмо новой задачи собирается с
 // прежним кодом, код первого письма остаётся годным.
 func TestResendInviteSelfSameCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -536,6 +545,7 @@ func TestResendInviteSelfSameCode(t *testing.T) {
 
 // Две быстрые повторные отправки одновременно — одно письмо (строка под замком).
 func TestResendInviteSelfRace(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	e.clock.Advance(61 * time.Second)
@@ -567,6 +577,7 @@ func TestResendInviteSelfRace(t *testing.T) {
 // пауза 60 с — ResendTooSoonError с остатком; новое приглашение того же назначения на 24 ч заново;
 // аудит от сотрудника.
 func TestResendInvite(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner", Name: "Анна В."})
@@ -645,6 +656,7 @@ func TestResendInvite(t *testing.T) {
 // исполнителем), а не от last_sent_at: анонимные самоотправки (их может жать кто угодно, знающий
 // почту) не блокируют админа. Две админские отправки за 60 с — ResendTooSoonError.
 func TestResendInvitePauseFromIssue(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
@@ -671,6 +683,7 @@ func TestResendInvitePauseFromIssue(t *testing.T) {
 // Секреты (код приглашения, секрет TOTP, резервные коды) не попадают ни в журнал, ни в аргументы
 // задач River.
 func TestNoSecretsInAuditAndJobs(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})

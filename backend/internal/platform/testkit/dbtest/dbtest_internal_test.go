@@ -26,6 +26,7 @@ func (r *fatalRecorder) Fatalf(format string, args ...any) {
 }
 
 func TestRequireServerNamesAddressAndPortSource(t *testing.T) {
+	t.Parallel()
 	// занимаем свободный порт и сразу освобождаем — на нём точно никого нет
 	var lc net.ListenConfig
 	l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")

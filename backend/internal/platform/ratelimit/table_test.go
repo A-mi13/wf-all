@@ -12,6 +12,7 @@ import (
 
 // Имена таблиц — для журнала чистки и сообщений об ошибках.
 func TestTableString(t *testing.T) {
+	t.Parallel()
 	if ratelimit.Players.String() != "rate_limits" || ratelimit.Staff.String() != "staff_rate_limits" {
 		t.Fatalf("Players=%q Staff=%q", ratelimit.Players, ratelimit.Staff)
 	}
@@ -22,6 +23,7 @@ func TestTableString(t *testing.T) {
 
 // Неизвестная таблица — паника при сборке, а не тихий уход в таблицу игроков.
 func TestNewPGUnknownTable(t *testing.T) {
+	t.Parallel()
 	for name, f := range map[string]func(){
 		"NewPG": func() { ratelimit.NewPG(noRows{}, clocktest.New(start), ratelimit.Table(7)) },
 		"DeleteExpired": func() {
@@ -42,6 +44,7 @@ func TestNewPGUnknownTable(t *testing.T) {
 // Лимитер admin-api (Staff) под ролью admin считает в staff_rate_limits — Allow, Add и Over; в rate_limits
 // ничего (у admin на неё прав нет, R2). Лимитер игроков под ролью api — наоборот.
 func TestLimiterTables(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	p := ratelimit.Policy{Limit: 2, Period: time.Minute}
 	for _, c := range []struct {
@@ -53,6 +56,7 @@ func TestLimiterTables(t *testing.T) {
 		{"api", ratelimit.Players, "rate_limits", "staff_rate_limits"},
 	} {
 		t.Run(c.role, func(t *testing.T) {
+			t.Parallel()
 			pools := dbtest.NewPoolsAs(t, c.role)
 			l := ratelimit.NewPG(pools.As, clocktest.New(start), c.table)
 			if r := allow(t, l, "ip:staff_auth:203.0.113.7", p); !r.Allowed {
@@ -88,6 +92,7 @@ func TestLimiterTables(t *testing.T) {
 // Чистка staff_rate_limits — DeleteExpired(…, Staff) пулом admin (тикер admin-api): прошлое удалено порциями,
 // будущее и чужая таблица не тронуты.
 func TestDeleteExpiredStaff(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	ctx := context.Background()
 	if _, err := pools.Owner.Exec(ctx, `INSERT INTO staff_rate_limits (key, tat)

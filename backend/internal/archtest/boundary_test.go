@@ -22,6 +22,7 @@ import (
 // кода — так было на этапе RED в задаче 10), проверка пройдёт вхолостую за
 // счёт пустого набора, ничего не поймав. required страхует именно от этого.
 func TestPublicBinariesDoNotDependOnAdmin(t *testing.T) {
+	t.Parallel()
 	binaries := []struct {
 		pkg      string
 		required []string
@@ -50,6 +51,7 @@ func TestPublicBinariesDoNotDependOnAdmin(t *testing.T) {
 // cmd/worker не тянут ни корень staff, ни его пакеты — даже транзитивно (у ролей БД api и worker прав на
 // staff_* нет, ключей ADMIN_STAFF_SECRET_KEYS — тоже). required — как выше: граф не пуст.
 func TestPublicBinariesDoNotDependOnStaff(t *testing.T) {
+	t.Parallel()
 	binaries := []struct {
 		pkg      string
 		required []string
@@ -73,6 +75,7 @@ func TestPublicBinariesDoNotDependOnStaff(t *testing.T) {
 }
 
 func TestIsStaffPackage(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		"wf/backend/internal/staff":                    true,
 		"wf/backend/internal/staff/jobs":               true,
@@ -94,6 +97,7 @@ func isStaffPackage(pkg string) bool {
 
 // Сам предикат проверяем отдельно: и что ловит, и что не ловит лишнего.
 func TestIsAdminPackage(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		"wf/backend/internal/httpapi/admin":     true,
 		"wf/backend/internal/httpapi/admin/gen": true,

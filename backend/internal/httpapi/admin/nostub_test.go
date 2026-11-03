@@ -18,6 +18,7 @@ import (
 // сессию владельца, D9), выход — последним. Ответ хендлера — любой, кроме 501 и отказа конвейера.
 // Временный список pendingOps плана B (R17) удалён в Task 16: операций без хендлера нет.
 func TestNoStubOperations(t *testing.T) {
+	t.Parallel()
 	// действия geo «вдвоём» — как в сборке admin-api (Task 13): без них страны отвечали бы 501
 	e := newGeoStaffEnv(t)
 	owner := e.firstLogin("olga.v@wf.example", string(perm.Owner))

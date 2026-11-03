@@ -23,6 +23,7 @@ const actLocked = "test.locked"
 // R5: Initiator — ровно поля init_id и init_ver (имена — как у payload staff: их читает checkInitiator),
 // значения — из принципала.
 func TestInitiatorOf(t *testing.T) {
+	t.Parallel()
 	st := &auth.Staff{StaffID: uuid.MustParse("01a18200-0000-7000-8000-000000000001"), Version: 7, Label: "Анна"}
 	in := approvals.InitiatorOf(st)
 	if in.ID != st.StaffID || in.Ver != 7 {
@@ -48,6 +49,7 @@ func TestInitiatorOf(t *testing.T) {
 
 // Действие с LockActors без хука — ошибка сборки (Validate); хук один на реестр, nil — паника.
 func TestRegistryValidateLockActors(t *testing.T) {
+	t.Parallel()
 	r := approvals.NewRegistry()
 	r.SetInitiatorCheck(noCheck)
 	r.Register(approvals.Action{Name: "staff.invite", Permission: "staff.roles.grant", Exec: noop})
@@ -118,6 +120,7 @@ func (e *lockEnv) seen() []lockCall {
 // (initiator_changed), наружу ErrStale, исполнитель не вызван; Fail(иное) — failed с кодом; сбой — откат всего,
 // запрос pending.
 func TestApproveCallsActorLock(t *testing.T) {
+	t.Parallel()
 	e := newLockEnv(t, true)
 	a, b := e.member(perm.Owner), e.member(perm.Admin)
 
@@ -175,6 +178,7 @@ func TestApproveCallsActorLock(t *testing.T) {
 // Fail-closed: действие с LockActors в реестре без хука (сборка пропустила Validate) — Approve ничего не
 // исполняет, запрос остаётся pending.
 func TestApproveLockActorsWithoutHook(t *testing.T) {
+	t.Parallel()
 	e := newLockEnv(t, false)
 	a, b := e.member(perm.Owner), e.member(perm.Admin)
 	ap := e.request(a, actLocked, payload{V: 1})
@@ -190,6 +194,7 @@ func TestApproveLockActorsWithoutHook(t *testing.T) {
 // решения, без крайних пробелов), а не Label загрузки сессии: имя сменили между загрузкой и решением. И у хука
 // тот же подтверждающий. Принципал запроса не меняется — исполнитель получает копию.
 func TestApproverLabelMatchesDecided(t *testing.T) {
+	t.Parallel()
 	e := newLockEnv(t, true)
 	a, b := e.member(perm.Owner), e.member(perm.Admin)
 	b.Label = "Борис (старое имя)"

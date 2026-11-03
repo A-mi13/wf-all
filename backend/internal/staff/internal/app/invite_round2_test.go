@@ -17,6 +17,7 @@ import (
 // контракт staffAcceptInvite): всплеск 20 в одну минуту, затем неудачи каждые 3 минуты весь остаток
 // часа — записей так и остаётся 20; новая — только через час после всплеска.
 func TestAcceptInviteFailureAuditHourly(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -68,6 +69,7 @@ func (e *env) limiterDownApp() *app.App {
 // отвечает staff.invalid_credentials с записью, верный проходит (лимит по почте пропускается, как
 // в ratelimit.Middleware).
 func TestLimiterDownStillAudits(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	a := e.limiterDownApp()
@@ -101,6 +103,7 @@ var mailCode = regexp.MustCompile(`[a-z2-7]{5}-[a-z2-7]{5}`)
 // сделать код нечитаемым не может — это не срыв, а самовосстановление после ошибки оператора.
 // Читаемый код самоотправка по-прежнему не меняет (TestResendInviteSelfSameCode).
 func TestResendInviteSelfHealsUnreadableCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, oldCode := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)

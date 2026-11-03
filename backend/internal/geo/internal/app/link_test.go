@@ -52,6 +52,7 @@ func link(a *app.Admin, id uuid.UUID, gid int64) (geo.AdminCity, error) {
 // Успех: geoname_id, version + 1, недостающие переводы (en админа не затёрт), региону — код admin1 и переводы;
 // точка и население города не меняются; событие и аудит в той же транзакции.
 func TestLinkCity(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	ural := e.region(t, "Свердловская обл.")
 	cid := e.unlinked(t, "mikh", &ural, map[string]string{"ru": "Михайловск", "en": "Mikhailovsk (admin)"})
@@ -79,6 +80,7 @@ func TestLinkCity(t *testing.T) {
 }
 
 func TestLinkCityAlreadyLinked(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	if _, err := link(e.admin(), e.cityID(t, "stavropol"), 526815); !errors.Is(err, geo.ErrCityAlreadyLinked) {
 		t.Fatalf("%v", err)
@@ -90,6 +92,7 @@ func TestLinkCityAlreadyLinked(t *testing.T) {
 
 // Места нет, оно пропало из источника или оно другой страны, чем город, — 404 geo.place_not_found.
 func TestLinkCityPlaceNotFound(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	cid := e.unlinked(t, "zar", nil, map[string]string{"ru": "Заречный"})
 	for _, gid := range []int64{999999, 700004, 700005} {
@@ -105,6 +108,7 @@ func TestLinkCityPlaceNotFound(t *testing.T) {
 // Место у другого города — 409 geo.city_already_active: и проверкой до записи, и 23505 cities_geoname_id_key, когда
 // город на месте завели параллельно после проверки (хук «link» — активация того же места коммитится между ними).
 func TestLinkCityPlaceTaken(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	cid := e.unlinked(t, "zar", nil, map[string]string{"ru": "Заречный"})
 	if _, err := activate(e, e.admin(), app.Activation{GeonameID: 700001}); err != nil {
@@ -134,6 +138,7 @@ func TestLinkCityPlaceTaken(t *testing.T) {
 // разделяемый замок страны, сверка привязывает mikh и коммитит, ручная — 409 geo.city_already_linked; одна привязка,
 // без 40P01. Без замка страны ручная взяла бы mikh и ждала регион сверки, а сверка — mikh (40P01).
 func TestLinkCityRaceWithImport(t *testing.T) {
+	t.Parallel()
 	r := newImportRaceEnv(t, "test-b-mikh", func(e env, ural uuid.UUID) {
 		addCity(t, e, ural, "test-a-lesnoy", map[string]string{"ru": "Лесной"})
 	})
@@ -177,6 +182,7 @@ func TestLinkCityRaceWithImport(t *testing.T) {
 // admin1 71 ставит своему региону тот же код — ждёт активацию, после её коммита 23505 regions_country_admin1_key
 // откатывает только код региона (savepoint): привязка успешна, регион без кода.
 func TestLinkCityRegionRaceWithActivation(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	imp := uuid.New()
 	e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at) VALUES ($1, 'RU', 'succeeded', $2)`, imp, tAct)
@@ -226,7 +232,9 @@ func TestLinkCityRegionRaceWithActivation(t *testing.T) {
 //     сверка не находит кандидатами тёзок с неизвестным admin1 по всей стране;
 //   - у региона уже другой код — переводы admin1 места ему не пишутся.
 func TestLinkCityRegionCodeOnlyOwnAdmin1(t *testing.T) {
+	t.Parallel()
 	t.Run("admin1 00", func(t *testing.T) {
+		t.Parallel()
 		e := newActEnv(t)
 		ural := e.region(t, "Урал")
 		cid := e.unlinked(t, "zar", &ural, map[string]string{"ru": "Заречный"})
@@ -248,6 +256,7 @@ func TestLinkCityRegionCodeOnlyOwnAdmin1(t *testing.T) {
 		}
 	})
 	t.Run("регион с другим кодом", func(t *testing.T) {
+		t.Parallel()
 		e := newActEnv(t)
 		var tyumen uuid.UUID
 		if err := e.owner.QueryRow(context.Background(), `INSERT INTO regions (country_id, name, geoname_admin1_code)
@@ -274,6 +283,7 @@ func TestLinkCityRegionCodeOnlyOwnAdmin1(t *testing.T) {
 // активация успешна, привязка — 409 geo.city_already_active, не 40P01. При встречном порядке (место привязки раньше
 // кода региона) привязка держала бы geoname_id = 526815 и ждала регион, активация — её geoname_id (40P01 → 500).
 func TestLinkCitySamePlaceRaceWithActivation(t *testing.T) {
+	t.Parallel()
 	e := newActEnv(t)
 	ural := e.region(t, "Урал")
 	cid := e.unlinked(t, "mikh", &ural, map[string]string{"ru": "Михайловск"})

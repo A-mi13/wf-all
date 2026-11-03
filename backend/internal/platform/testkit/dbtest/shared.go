@@ -3,12 +3,14 @@ package dbtest
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"os"
 	"reflect"
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -158,11 +160,38 @@ func applyGrants(ctx context.Context, url string) error {
 	return grants.Apply(ctx, sqldb)
 }
 
-// Main — запуск тестов пакета, где есть SharedAs: m.Run, затем уборка общих клонов (пулы, DROP DATABASE) при любом
-// исходе тестов (клоны New* упавших тестов pgtestdb оставляет для разбора, общий — нет). Ошибка уборки — код выхода 1.
+// Main — запуск тестов любого пакета с базой (страж archtest.TestDBTestsAreParallel): -parallel по умолчанию =
+// DefaultParallel, m.Run, затем уборка общих клонов SharedAs (пулы, DROP DATABASE) при любом исходе тестов (клоны
+// New* упавших тестов pgtestdb оставляет для разбора, общий — нет). Ошибка уборки — код выхода 1.
 func Main(m *testing.M) int {
 	mainActive.Store(true)
+	if err := defaultParallel(flag.CommandLine, os.Args[1:], DefaultParallel); err != nil {
+		fmt.Fprintln(os.Stderr, "dbtest:", err)
+		return 2
+	}
 	return finishShared(sharedHost, m.Run())
+}
+
+// DefaultParallel — сколько тестов пакета с базой идут разом, если -parallel не задан явно (S1, замер 03.11).
+// Умолчание go test — GOMAXPROCS (24 на машине разработки): столько тестов разом клонируют и удаляют базы, Postgres
+// упирается в CREATE/DROP DATABASE (запись клона, checkpoint и барьер DROP), и пакет идёт вдвое дольше
+// последовательного. Прогон всего бэкенда задаёт -parallel явно (./task backend:test).
+const DefaultParallel = 4
+
+// defaultParallel — test.parallel = n, если флаг не задан явно в args (или в уже разобранных флагах fs); флага нет —
+// ошибка Set (Main вызван не из тестового бинарника).
+func defaultParallel(fs *flag.FlagSet, args []string, n int) error {
+	if !fs.Parsed() {
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+	}
+	explicit := false
+	fs.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "test.parallel" })
+	if explicit {
+		return nil
+	}
+	return fs.Set("test.parallel", strconv.Itoa(n))
 }
 
 // finishShared — уборка общих клонов host после m.Run с кодом code — при ЛЮБОМ исходе (m5-2 ревью G2): общий клон

@@ -14,6 +14,7 @@ import (
 // стороны (как TestGeoCodesDocumented): код без операции или операция с кодом вне списка — падение.
 // Коды staff.* бывают и у операций платформы (approveApproval — отказы исполнителей подтверждений).
 func TestStaffCodesDocumented(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)

@@ -14,6 +14,7 @@ import (
 // Непредвиденное 1 финального ревью: исполняющий клиент воркера — от queue.MaintenanceConfig, как у admin-api
 // (TestAdminRiverMaintenance): лидером схемы может стать любой, обслуживание River не должно зависеть от того, кто.
 func TestWorkerRiverMaintenance(t *testing.T) {
+	t.Parallel()
 	workers := river.NewWorkers()
 	c := riverConfig(config.Queues{Events: 3, Lifecycle: 1, Notify: 1, Mail: 1, Stats: 1, Media: 1, Maintenance: 1},
 		workers, slog.New(slog.DiscardHandler))

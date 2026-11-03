@@ -17,6 +17,7 @@ var literal = regexp.MustCompile(`'([^']*)'`)
 // Списки ролей в checkActor — копия CHECK audit_log из 0020: страж ловит расхождение в обе стороны
 // (роль убрали или добавили только в Go либо только в миграции).
 func TestActorRolesMatchCheck(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	union := maps.Clone(playerRoles)
 	maps.Copy(union, staffRoles)

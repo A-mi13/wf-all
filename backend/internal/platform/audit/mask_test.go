@@ -8,6 +8,7 @@ import (
 )
 
 func TestMaskHidesPersonalData(t *testing.T) {
+	t.Parallel()
 	in := map[string]any{ //nolint:gosec // поддельные ПД и «секреты» — вход теста маскирования
 		"nickname":      "Kolya",
 		"email":         "ivan.petrov@mail.ru",
@@ -51,6 +52,7 @@ func TestMaskHidesPersonalData(t *testing.T) {
 }
 
 func TestMaskNilIsNull(t *testing.T) {
+	t.Parallel()
 	raw, err := audit.Mask(nil)
 	if err != nil || raw != nil {
 		t.Fatalf("Mask(nil) = %s, %v", raw, err)
@@ -72,6 +74,7 @@ func maskMap(t *testing.T, in any) map[string]any {
 
 // Структура без json-тегов сериализуется ключами PascalCase — они маскируются так же.
 func TestMaskStructWithoutJSONTags(t *testing.T) {
+	t.Parallel()
 	type user struct {
 		Nickname     string
 		PasswordHash string
@@ -93,6 +96,7 @@ func TestMaskStructWithoutJSONTags(t *testing.T) {
 }
 
 func TestMaskKeyRules(t *testing.T) {
+	t.Parallel()
 	const mail, phone = "ivan@mail.ru", "+79181234567"
 	cases := []struct {
 		key  string
@@ -179,6 +183,7 @@ func equalJSON(a, b any) bool {
 }
 
 func TestMaskKeepsCreatedAtInSessionsLikeRow(t *testing.T) {
+	t.Parallel()
 	got := maskMap(t, map[string]any{
 		"refresh_hash": "h", "ip": "203.0.113.7", "user_agent": "UA", "device_name": "Pixel",
 		"created_at": "2026-10-01T10:00:00Z",
@@ -195,6 +200,7 @@ func TestMaskKeepsCreatedAtInSessionsLikeRow(t *testing.T) {
 
 // Типизированный nil даёт JSON null — это SQL NULL, а не jsonb 'null'.
 func TestMaskTypedNilIsNull(t *testing.T) {
+	t.Parallel()
 	var p *struct{ A int }
 	var m map[string]any
 	for name, v := range map[string]any{"указатель": p, "map": m} {
@@ -208,6 +214,7 @@ func TestMaskTypedNilIsNull(t *testing.T) {
 // Остатки фундамента: адрес клиента в любом написании (client_ip — заголовок BFF X-WF-Client-IP)
 // и секреты входа сотрудников — коды, резервные коды, пароли, токены (решение M12).
 func TestMaskClientIPAndStaffSecrets(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		key  string
 		in   any
@@ -255,6 +262,7 @@ func TestMaskClientIPAndStaffSecrets(t *testing.T) {
 // phone_prefix (в любом написании) в аудите стран виден как есть. Исключение узкое — по полному имени поля: телефоны и
 // любые другие ключи со словом phone по-прежнему маскируются.
 func TestMaskPhonePrefixIsPublic(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		key  string
 		in   any

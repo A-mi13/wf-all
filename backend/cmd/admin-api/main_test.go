@@ -18,6 +18,7 @@ import (
 )
 
 func TestRunFailsWithoutConfig(t *testing.T) {
+	t.Parallel()
 	err := run(context.Background(), nil, nil, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "ADMIN_") {
 		t.Fatalf("err = %v", err)
@@ -36,6 +37,7 @@ func offlineEnv(extra ...string) []string {
 // Заголовок CDN без прокси хостинга — отказ старта до подключения к базе: ADMIN_CLIENT_IP_HEADER
 // доходит до peer.Config. Остальные обязательные переменные заданы: иначе отказ был бы про них.
 func TestRunRejectsClientIPHeaderWithoutProxies(t *testing.T) {
+	t.Parallel()
 	err := run(context.Background(), nil, offlineEnv("ADMIN_CLIENT_IP_HEADER=CF-Connecting-IP"), io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "CF-Connecting-IP") {
 		t.Fatalf("err = %v", err)
@@ -46,6 +48,7 @@ func TestRunRejectsClientIPHeaderWithoutProxies(t *testing.T) {
 // loopback с ADMIN_COOKIE_SECURE=true — отказ старта
 // до подключения к базе.
 func TestRunRejectsBadOriginAndAllowlist(t *testing.T) {
+	t.Parallel()
 	for _, extra := range [][]string{
 		{"ADMIN_ORIGIN=http://127.0.0.1:5173/"},
 		{"ADMIN_IP_ALLOWLIST=10.0.0.0/8,0.0.0.0/0"},
@@ -62,6 +65,7 @@ func TestRunRejectsBadOriginAndAllowlist(t *testing.T) {
 // Отказ старта лучше тихой деградации: пустое или битое кольцо ключей сотрудников — ошибка до подключения к
 // базе, и у сервера, и у подкоманд (rekey при пустом кольце не запустится).
 func TestRunRejectsBadStaffKeys(t *testing.T) {
+	t.Parallel()
 	for _, keysEnv := range []string{"ADMIN_STAFF_SECRET_KEYS=c2hvcnQ=", "ADMIN_STAFF_SECRET_KEYS=,", "ADMIN_STAFF_SECRET_KEYS=не-base64"} {
 		for _, args := range [][]string{nil, {"staff", "rekey"}} {
 			err := run(context.Background(), args, offlineEnv(keysEnv), io.Discard, io.Discard)
@@ -75,6 +79,7 @@ func TestRunRejectsBadStaffKeys(t *testing.T) {
 // SMTP серверу обязателен: без ADMIN_MAIL_* или с битым адресом — отказ старта до подключения к базе (письма
 // с кодами иначе молча копились бы в очереди).
 func TestRunRequiresMail(t *testing.T) {
+	t.Parallel()
 	var env []string
 	for _, kv := range offlineEnv() {
 		if !strings.HasPrefix(kv, "ADMIN_MAIL_SMTP_ADDR=") {
@@ -93,6 +98,7 @@ func TestRunRequiresMail(t *testing.T) {
 // Неизвестная подкоманда, флаг или нехватка аргументов — ошибка использования (код выхода 2) до чтения
 // конфига и подключения к базе: опечатка оператора не поднимает сервер.
 func TestRunUnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"stuff"},
 		{"staff"},
@@ -117,6 +123,7 @@ func TestRunUnknownSubcommand(t *testing.T) {
 // 10c m-r8: --keys-lost и --print-code принимают ровно три команды, выпускающие код (bootstrap, invite-resend,
 // reset-access); у disable и rekey флага нет (TestRunUnknownSubcommand). Без флагов — оба false.
 func TestParseCommandFlags(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		args []string
 		want command
@@ -145,6 +152,7 @@ func TestParseCommandFlags(t *testing.T) {
 }
 
 func TestExitCode(t *testing.T) {
+	t.Parallel()
 	if c := exitCode(errors.New("сбой")); c != 1 {
 		t.Fatalf("обычная ошибка: %d", c)
 	}
@@ -165,6 +173,9 @@ func (e *testEnv) operator(args ...string) (string, string, error) {
 // ни в текст ошибки); почта в выводе и ошибках — маской; письма — в очереди staff (команда SMTP не трогает:
 // адрес SMTP заглушки в этом тесте никто не слушает до запуска сервера) — вывод говорит об этом. Повторный
 // bootstrap той же почты, disable последнего владельца, неизвестная почта — подсказка и код выхода 1.
+//
+// serial: runCommand ставит slog.SetDefault на буфер журнала теста, а тест читает этот буфер — параллельный тест
+// с записью через журнал по умолчанию писал бы в него (гонка и чужие строки; ревью S1 m1).
 func TestOperatorCommands(t *testing.T) {
 	e := newTestEnv(t)
 	secretsIn := func(t *testing.T, where, text string, secrets ...string) {
@@ -236,6 +247,9 @@ func TestOperatorCommands(t *testing.T) {
 
 // rekey (§4.11, M-1b): вывод — все счётчики итога и id нечитаемых строк; нечитаемые есть (ключ убран раньше
 // rekey) — код выхода ≠ 0 и подсказка; всё на текущем ключе — «можно убрать».
+//
+// serial: runCommand ставит slog.SetDefault на буфер журнала теста, а тест читает этот буфер — параллельный тест
+// с записью через журнал по умолчанию писал бы в него (гонка и чужие строки; ревью S1 m1).
 func TestOperatorRekey(t *testing.T) {
 	e := newTestEnv(t)
 	if _, _, err := e.operator("bootstrap", "--email", "anna@wf.example", "--name", "Анна В."); err != nil {
@@ -355,6 +369,9 @@ func (e *testEnv) tryGet(path string) (int, error) {
 // письмо, поставленное подкомандой, исполняет фон сервера (River очереди staff под ролью admin, MailWorker,
 // SMTP ADMIN_MAIL_*); SIGTERM во время письма — сервис ждёт его (мягкая остановка River: ctx письма не
 // отменяется), письмо доигрывается, задача завершена, сервис останавливается без ошибки.
+//
+// serial: runCommand ставит slog.SetDefault на буфер журнала теста, а тест читает этот буфер — параллельный тест
+// с записью через журнал по умолчанию писал бы в него (гонка и чужие строки; ревью S1 m1).
 func TestServerServesStaffAndSendsMail(t *testing.T) {
 	e := newTestEnv(t)
 	hs := holdMail(t)
@@ -408,6 +425,7 @@ func TestServerServesStaffAndSendsMail(t *testing.T) {
 // действия, — approve через собранный сервер отвечает 200 executed (с двумя разными сервисами — 500 и запрос
 // висит pending). Исполнение ставит письмо сброса — его отправляет фон.
 func TestServerApproveExecutes(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	_, a := e.staffSession("anna@wf.example", "owner")
 	_, b := e.staffSession("boris@wf.example", "owner")
@@ -444,6 +462,9 @@ func TestServerApproveExecutes(t *testing.T) {
 // ADMIN_STAFF_SECRET_KEYS команды, — команда, шифрующая код (bootstrap, invite-resend, reset-access), отказывает
 // до записи (код 1, подсказка без ключей): иначе код зашифрован ключом, которого нет у сервера, письмо
 // отменится, а прежнее живое приглашение уже погашено. Кольцо сервера с новым ключом первым — проходит.
+//
+// serial: runCommand ставит slog.SetDefault на буфер журнала теста, а тест читает этот буфер — параллельный тест
+// с записью через журнал по умолчанию писал бы в него (гонка и чужие строки; ревью S1 m1).
 func TestOperatorRefusesForeignKeys(t *testing.T) {
 	e := newTestEnv(t)
 	if _, _, err := e.operator("bootstrap", "--email", "anna@wf.example", "--name", "Анна В."); err != nil {
@@ -484,6 +505,9 @@ func TestOperatorRefusesForeignKeys(t *testing.T) {
 // остальные секреты базы — на ключе кольца. Документированный выход — reset-access — выполняется (код 0) с
 // предупреждением в stderr (число чужих ключей, без самих ключей); отказ — только когда ни один ключ базы не в
 // кольце и нет --keys-lost (TestOperatorRefusesForeignKeys, TestOperatorLostWholeKey).
+//
+// serial: runCommand ставит slog.SetDefault на буфер журнала теста, а тест читает этот буфер — параллельный тест
+// с записью через журнал по умолчанию писал бы в него (гонка и чужие строки; ревью S1 m1).
 func TestOperatorWarnsOnPartlyUnknownKeys(t *testing.T) {
 	e := newTestEnv(t)
 	if _, _, err := e.operator("bootstrap", "--email", "anna@wf.example", "--name", "Анна В."); err != nil {
@@ -516,6 +540,9 @@ func TestOperatorWarnsOnPartlyUnknownKeys(t *testing.T) {
 // Потерян единственный ключ (I-r2 ревью раунда 2): все секреты базы — на ключе, которого нет нигде; по базе это
 // неотличимо от «не того кольца». Без флага — отказ (код 1) с подсказкой про --keys-lost, ничего не записано; с
 // --keys-lost — предупреждение в stderr (число ключей, без id), команда выполняется: новый код — текущим ключом.
+//
+// serial: runCommand ставит slog.SetDefault на буфер журнала теста, а тест читает этот буфер — параллельный тест
+// с записью через журнал по умолчанию писал бы в него (гонка и чужие строки; ревью S1 m1).
 func TestOperatorLostWholeKey(t *testing.T) {
 	e := newTestEnv(t)
 	if _, _, err := e.operator("bootstrap", "--email", "anna@wf.example", "--name", "Анна В."); err != nil {

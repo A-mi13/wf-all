@@ -83,6 +83,7 @@ func loadSpec(t *testing.T, src string) *openapi3.T {
 // — любой город; dual — пропуск (сценарий создаст запрос на подтверждение); без города —
 // пропуск по Grant != Deny, не Decide(perm, uuid.Nil) (он дал бы Deny, ⚠️ 3a).
 func TestPermissionCityFromPath(t *testing.T) {
+	t.Parallel()
 	spec := loadSpec(t, citySpec)
 	mod := staffOf(perm.Moderator, auth.StageActive, false, cityA)
 	admn := staffOf(perm.Admin, auth.StageActive, false)
@@ -116,6 +117,7 @@ func TestPermissionCityFromPath(t *testing.T) {
 // Fail-closed (P9): маршрут контракта без правила (правила строились по другому контракту) —
 // 500 internal, хендлер не вызывается; запрос без сессии на операции не anonymous — 401.
 func TestPermissionFailClosed(t *testing.T) {
+	t.Parallel()
 	rules := loadSpec(t, citySpec)
 	routesSpec := loadSpec(t, strings.Replace(citySpec, "/v1/stray:", "/v1/other:", 1))
 	owner := staffOf(perm.Owner, auth.StageActive, false)
@@ -133,6 +135,7 @@ func TestPermissionFailClosed(t *testing.T) {
 // вне каталога или черновой, handler без x-permission-any или с чужим ключом в нём,
 // x-permission-any не у handler — ошибка старта, а не 403 в работе.
 func TestPermissionRulesRejectBadContract(t *testing.T) {
+	t.Parallel()
 	for name, perm := range map[string]string{
 		"без x-permission":      ``,
 		"не строка":             `x-permission: 5`,
@@ -165,6 +168,7 @@ paths:
 // Отказ старта на настоящем контракте с порчей: операция без x-permission, с черновым ключом,
 // с нестроковым x-rate-limit (P22) — NewHandler не собирается.
 func TestNewHandlerRejectsBadBundle(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	for name, spoil := range map[string]func(op *openapi3.Operation){
 		"без x-permission":     func(op *openapi3.Operation) { delete(op.Extensions, "x-permission") },
@@ -198,6 +202,7 @@ func TestNewHandlerRejectsBadBundle(t *testing.T) {
 
 // Все операции настоящего контракта получают правило: страж на старте пропускает текущий бандл.
 func TestPermissionRulesForContract(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)

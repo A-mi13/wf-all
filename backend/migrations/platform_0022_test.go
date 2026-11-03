@@ -48,6 +48,7 @@ func tableShape(t *testing.T, db *sql.DB, table string) []string {
 // 0022 (план B, Task 3, R2): staff_rate_limits — копия rate_limits (колонки, PK, индекс по tat, UNLOGGED) со
 // своими именами ограничений; откат удаляет таблицу, повторный накат проходит.
 func TestStaffRateLimits0022(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	players, staff := tableShape(t, db, "rate_limits"), tableShape(t, db, "staff_rate_limits")

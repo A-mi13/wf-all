@@ -78,6 +78,7 @@ func (e *rolePayloadEnv) wantStaleNothingApplied(res approvals.Approval, err err
 // Роль вне perm.Roles в payload (и «стало», и «было») — исполнитель отказывает бизнес-отказом ErrStale,
 // а не пишет роль (enum базы дал бы 500 и запрос pending до истечения).
 func TestExecRoleChangeRejectsUnknownRole(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name   string
 		fields map[string]any
@@ -86,6 +87,7 @@ func TestExecRoleChangeRejectsUnknownRole(t *testing.T) {
 		{"from_role", map[string]any{"from_role": "root"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newRolePayloadEnv(t)
 			e.patch(c.fields)
 			res, err := e.approve(e.b, e.ap.ID)
@@ -97,6 +99,7 @@ func TestExecRoleChangeRejectsUnknownRole(t *testing.T) {
 // Форма городов роли из payload: модератор без городов, админ с городом, повтор города — ErrStale, ничего не
 // записано. Регресс: модератор с двумя городами по возрастанию (как пишет сценарий) — исполняется.
 func TestExecRoleChangeRejectsCityShape(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name   string
 		fields func(c1, c2 uuid.UUID) map[string]any
@@ -119,6 +122,7 @@ func TestExecRoleChangeRejectsCityShape(t *testing.T) {
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newRolePayloadEnv(t)
 			e.patch(c.fields(e.city("kazan"), e.city("perm")))
 			res, err := e.approve(e.b, e.ap.ID)
@@ -126,6 +130,7 @@ func TestExecRoleChangeRejectsCityShape(t *testing.T) {
 		})
 	}
 	t.Run("регресс: модератор с двумя городами", func(t *testing.T) {
+		t.Parallel()
 		e := newRolePayloadEnv(t)
 		cities := sortedIDs(e.city("kazan"), e.city("perm"))
 		e.patch(map[string]any{"role": "moderator", "city_ids": cities})
@@ -138,6 +143,7 @@ func TestExecRoleChangeRejectsCityShape(t *testing.T) {
 
 // Проверка формы — до execLocks: отказ не ждёт замка стража владельцев (его держит третья транзакция).
 func TestExecRoleChangeShapeBeforeLocks(t *testing.T) {
+	t.Parallel()
 	e := newRolePayloadEnv(t)
 	e.patch(map[string]any{"role": "root"})
 	release := e.hold(`SELECT pg_advisory_xact_lock($1)`, app.OwnersLockKey)
@@ -153,6 +159,7 @@ func TestExecRoleChangeShapeBeforeLocks(t *testing.T) {
 // Подложный неотсортированный список при той же роли «было» и «стало» давал rolePermission «изменение» и проводил
 // смену роли, которой нет (версия +1, аудит). Регресс: null у не-модератора (старый формат и nil-срез) исполняется.
 func TestExecRoleChangeRejectsFromCityShape(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name   string
 		fields func(s []uuid.UUID) map[string]any
@@ -165,6 +172,7 @@ func TestExecRoleChangeRejectsFromCityShape(t *testing.T) {
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newRolePayloadEnv(t)
 			e.patch(c.fields(sortedIDs(e.city("kazan"), e.city("perm"))))
 			release := e.hold(`SELECT pg_advisory_xact_lock($1)`, app.OwnersLockKey)
@@ -176,6 +184,7 @@ func TestExecRoleChangeRejectsFromCityShape(t *testing.T) {
 		})
 	}
 	t.Run("регресс: было null", func(t *testing.T) {
+		t.Parallel()
 		e := newRolePayloadEnv(t)
 		e.patch(map[string]any{"from_city_ids": nil})
 		e.mustApprove(e.b, e.ap.ID)
@@ -190,6 +199,7 @@ func TestExecRoleChangeRejectsFromCityShape(t *testing.T) {
 // запроса не менялась): ErrStale, ничего не применено. Иначе право пересчитывалось по подложному «было», а
 // применялось «было» из базы — та же пустая или чужая смена роли, что у неотсортированного списка.
 func TestExecRoleChangeRejectsFromMismatch(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name   string
 		fields func(s []uuid.UUID) map[string]any
@@ -205,6 +215,7 @@ func TestExecRoleChangeRejectsFromMismatch(t *testing.T) {
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newRolePayloadEnv(t)
 			e.patch(c.fields(sortedIDs(e.city("kazan"), e.city("perm"))))
 			res, err := e.approve(e.b, e.ap.ID)
@@ -216,6 +227,7 @@ func TestExecRoleChangeRejectsFromMismatch(t *testing.T) {
 // Регресс I1 ревью U1: законная смена роли модератора с двумя городами «было» (непустой список в нормальной форме)
 // исполняется — проверка формы «было» не отвергает законные списки длиной ≥ 2.
 func TestExecRoleChangeFromTwoCities(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name  string
 		role  perm.Role
@@ -225,6 +237,7 @@ func TestExecRoleChangeFromTwoCities(t *testing.T) {
 		{"модератор [c1 c2] → admin", perm.Admin, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			e := newManageEnv(t)
 			a := e.as(e.addMember("owner.a@wf.example", memberOpts{Role: "owner"}))
 			b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))

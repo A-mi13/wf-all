@@ -18,6 +18,7 @@ import (
 // Списки видов бинарников: имена уникальны, у воркера и admin-api не пересекаются (вид исполняет один
 // бинарник), у каждого — срок исполнителя.
 func TestKinds(t *testing.T) {
+	t.Parallel()
 	seen := map[string]bool{}
 	for _, list := range [][]queue.Kind{queue.WorkerKinds(), queue.AdminKinds()} {
 		for _, k := range list {
@@ -41,6 +42,7 @@ func TestKinds(t *testing.T) {
 // выбрасывает зависшую задачу (discarded). AddForeign регистрирует ровно переданные виды, со сроком настоящего
 // исполнителя (рескьюер не трогает задачу, пока не вышел её срок); исполнять их заглушка не берётся.
 func TestAddForeign(t *testing.T) {
+	t.Parallel()
 	w := river.NewWorkers()
 	queue.AddForeign(w, []queue.Kind{{Name: "staff.mail", Timeout: time.Minute}, {Name: "geo.import", Timeout: 30 * time.Minute}})
 	if got := rivertest.Kinds(w); !slices.Equal(got, []string{"geo.import", "staff.mail"}) {
@@ -52,6 +54,7 @@ func TestAddForeign(t *testing.T) {
 // в очередь ещё идущую задачу другого бинарника — двойное исполнение). Вид со сроком 3 ч, зависший 2 ч, остаётся
 // running; контрольный вид без своего срока за то же время — retryable (рескьюер точно прошёл).
 func TestForeignTimeoutRespected(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	ctx := context.Background()
 	insert := func(kind string) int64 {

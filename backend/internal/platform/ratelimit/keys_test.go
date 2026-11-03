@@ -12,6 +12,7 @@ import (
 )
 
 func TestKeys(t *testing.T) {
+	t.Parallel()
 	id := uuid.MustParse("0192f1a0-0000-7000-8000-000000000001")
 	for _, c := range []struct{ got, want string }{
 		{ratelimit.IPKey("staff_auth", netip.MustParseAddr("203.0.113.7")), "ip:staff_auth:203.0.113.7"},

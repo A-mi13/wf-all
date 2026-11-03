@@ -39,6 +39,7 @@ func ptr(n int) *int { return &n }
 // статусами, обёрнутые — так же; неудача второго фактора — с attempts_left (0 тоже); неверный текущий
 // пароль — staff.password_invalid со счётчиком; сессия погашена или заменена — 401.
 func TestProblemTable(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		err    error
 		status int
@@ -72,6 +73,7 @@ func TestProblemTable(t *testing.T) {
 
 // У каждого кода модуля есть статус: новый код без строки в таблице Problem ушёл бы клиенту 500.
 func TestProblemCoversStaffCodes(t *testing.T) {
+	t.Parallel()
 	if len(statusOf) != len(staff.Codes) {
 		t.Fatalf("статусов %d, кодов %d", len(statusOf), len(staff.Codes))
 	}
@@ -85,6 +87,7 @@ func TestProblemCoversStaffCodes(t *testing.T) {
 // ProblemError (поле, 403, лимит, пауза повторной отправки) — как есть, обёрнутая тоже: у неё свой
 // ответ (Retry-After, поле). Прочее — как есть (WriteError ответит 500 и запишет причину в лог), nil — nil.
 func TestProblemPassThrough(t *testing.T) {
+	t.Parallel()
 	field := httpx.NewFieldError("body.new_password", "too_short")
 	if got := Problem(field); !errors.Is(got, field) {
 		t.Fatalf("поле: %v", got)

@@ -27,6 +27,7 @@ const (
 // принимается в любом регистре, с пробелами вместо дефиса, и сгорает. Пятая неудача подряд —
 // attempts_left 0, сессии погашены (дальше 401 со стиранием cookie), вход закрыт.
 func TestStaffLoginFlow(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	wantProblem(t, e.anon(pathLogin, "", e.creds(m.email, "не тот пароль")), http.StatusBadRequest, staff.CodeInvalidCredentials)
@@ -85,6 +86,7 @@ func TestStaffLoginFlow(t *testing.T) {
 // D9: вход со старой живой cookie гасит прежнюю сессию (replaced): минуту её токен отвечает 401 без
 // стирания (в браузере уже новая cookie), потом — 401 со стиранием.
 func TestStaffLoginReplacesOldSession(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	rec := e.anon(pathLogin, m.token, e.creds(m.email, staffPassword))
@@ -108,6 +110,7 @@ func TestStaffLoginReplacesOldSession(t *testing.T) {
 // Вход с недействительной старой cookie (⚠️ 9b): конвейер стирает её, хендлер ставит новую — два
 // Set-Cookie, новая последней (браузер применяет по порядку).
 func TestStaffLoginAfterInvalidCookie(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	rec := e.anon(pathLogin, "garbage-token", e.creds(m.email, staffPassword))
@@ -125,6 +128,7 @@ func TestStaffLoginAfterInvalidCookie(t *testing.T) {
 // D9: принятие приглашения передаёт сценарию токен cookie запроса — её живая сессия (чужая учётка
 // тоже) гасится как replaced; ответ — одна новая cookie.
 func TestStaffAcceptReplacesOldSession(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	owner := e.firstLogin("owner@wf.example", string(perm.Owner))
 	e.invite("new@wf.example", string(perm.Support))
@@ -141,6 +145,7 @@ func TestStaffAcceptReplacesOldSession(t *testing.T) {
 
 // Принятие: слабый пароль — validation.failed по body.password (до кода); неверный код — invite_invalid.
 func TestStaffAcceptErrors(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	e.invite("new@wf.example", string(perm.Support))
 	rec := e.anon(pathAccept, "", jsonOf(t, map[string]string{"email": "new@wf.example", "code": "aaaaa-aaaaa", "password": "short"}))
@@ -152,6 +157,7 @@ func TestStaffAcceptErrors(t *testing.T) {
 // Гонка смены токена (⚠️ 6a, 9b): запрос со старым токеном после второго фактора и после unlock —
 // 401 без Set-Cookie: новая cookie в браузере не стирается.
 func TestStaffReplacedTokenKeepsCookie(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	pending := e.login(m)
@@ -176,6 +182,7 @@ func TestStaffReplacedTokenKeepsCookie(t *testing.T) {
 // mfa_pending живёт 5 минут: за секунду до срока код принимается, ровно на сроке — 401 со стиранием
 // cookie, сессия погашена как expired.
 func TestStaffMFAPendingExpiresAtBoundary(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	p1 := e.login(m)
@@ -196,6 +203,7 @@ func TestStaffMFAPendingExpiresAtBoundary(t *testing.T) {
 // reauth_required; неверный код — attempts_left; верный — новый токен, «своё» снова работает. Выход —
 // 204 со стиранием cookie (и в стадии mfa_pending), дальше токен — 401 со стиранием.
 func TestStaffUnlockAndLogout(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	e.clock.Advance(21 * time.Minute)
@@ -227,6 +235,7 @@ func TestStaffUnlockAndLogout(t *testing.T) {
 // Две вкладки разблокируют одним кодом (Review Focus 5): обе загружены конвейером до сценария (барьер
 // в загрузчике), одна получает новый токен, другая — staff.mfa_invalid без записи неудачи; без 500.
 func TestStaffUnlockTwoTabs(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	e.clock.Advance(21 * time.Minute)
@@ -273,6 +282,7 @@ func TestStaffUnlockTwoTabs(t *testing.T) {
 // Сессию погасили между конвейером и замком сценария (⚠️ 6a): 401 со стиранием cookie, как у конвейера;
 // неудача второго фактора не пишется, другие сессии не тронуты.
 func TestStaffSessionRevokedMidRequest(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	other := e.signIn(m)
@@ -299,6 +309,7 @@ func TestStaffSessionRevokedMidRequest(t *testing.T) {
 // Сессию заменили между конвейером и замком (unlock в другой вкладке, ⚠️ 7, 9b): 401 без стирания
 // cookie — в браузере уже новая; «завершить остальные» по старой сессии не гасит свежие.
 func TestStaffSessionReplacedMidRequest(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	other := e.signIn(m)

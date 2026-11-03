@@ -66,6 +66,7 @@ func (e geoEnv) seedDisabled(t *testing.T) uuid.UUID {
 
 // listGeoCities: новые поля, фильтры status (повтор параметра), country, region_id; выключенная страна видна.
 func TestAdminCitiesFieldsAndFilters(t *testing.T) {
+	t.Parallel()
 	e := newGeoEnv(t, nil)
 	sk := e.seedDisabled(t)
 	rec, ids, _ := e.cities(t, "owner", url.Values{})
@@ -109,6 +110,7 @@ func TestAdminCitiesFieldsAndFilters(t *testing.T) {
 // Модератор Ставрополя: список — только его город (ids чужого — пусто), карточка и районы чужого — 403
 // конвейера, своего — 200; регионы и страны — можно (R9).
 func TestAdminCitiesModeratorScope(t *testing.T) {
+	t.Parallel()
 	mod := staffOf(perm.Moderator, auth.StageActive, false)
 	noCities := staffOf(perm.Moderator, auth.StageActive, false)
 	e := newGeoEnv(t, map[string]*auth.Staff{"mod": mod, "no-cities": noCities})
@@ -145,6 +147,7 @@ func TestAdminCitiesModeratorScope(t *testing.T) {
 
 // getGeoCity: карточка выключенной страны, названия, заголовки; нет города — 404 geo.city_not_found.
 func TestGetGeoCityHTTP(t *testing.T) {
+	t.Parallel()
 	e := newGeoEnv(t, nil)
 	sk := e.seedDisabled(t)
 	rec := e.get(t, "owner", "/v1/geo/cities/"+e.stav.String(), "en")
@@ -169,6 +172,7 @@ func TestGetGeoCityHTTP(t *testing.T) {
 
 // Районы, страны, регионы, места, журнал импортов — 200 по контракту; ошибки — коды контракта.
 func TestGeoAdminReadsHTTP(t *testing.T) {
+	t.Parallel()
 	e := newGeoEnv(t, nil)
 	e.seedDisabled(t)
 	rec := e.get(t, "owner", "/v1/geo/cities/"+e.stav.String()+"/districts", "")
@@ -215,6 +219,7 @@ func TestGeoAdminReadsHTTP(t *testing.T) {
 
 // Курсор публичного списка городов (другой набор полей) в админке — 400 query.cursor.
 func TestAdminCitiesRejectsPublicCursor(t *testing.T) {
+	t.Parallel()
 	e := newGeoEnv(t, nil)
 	pub, err := geo.New(e.owner).ListCities(context.Background(), geo.ListParams{Limit: new(1)})
 	if err != nil || pub.Next == "" {
@@ -229,6 +234,7 @@ func TestAdminCitiesRejectsPublicCursor(t *testing.T) {
 // Маршруты: /v1/geo/cities/nearest в админке — getGeoCity с cityId=nearest (400 формата uuid), а не чужая
 // операция; пути импортов не перехватывают друг друга (jobs/{jobId} — не getGeoImport с importId=jobs).
 func TestAdminRoutes(t *testing.T) {
+	t.Parallel()
 	e := newGeoEnv(t, nil)
 	rec := serve(e.h, call(http.MethodGet, "/v1/geo/cities/nearest", "owner", ""))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"path.cityId"`) {

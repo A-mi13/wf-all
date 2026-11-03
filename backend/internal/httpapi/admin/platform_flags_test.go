@@ -66,6 +66,7 @@ func fieldErrors(t *testing.T, rec *httptest.ResponseRecorder) []httpx.FieldErro
 // сотрудника с before/after, без города; те же значения — 200 без события и аудита; все нарушения Validate сразу —
 // 400 с полями body.*; store_url с пробелом — 400.
 func TestPutAppVersions(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	e.v = apitest.New(t, oapi.GetSpec)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
@@ -119,6 +120,7 @@ func TestPutAppVersions(t *testing.T) {
 
 // listFeatureFlags — сид 0010: version = 1, городов нет.
 func TestListFeatureFlags(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	e.v = apitest.New(t, oapi.GetSpec)
 	sup := e.firstLogin("support@wf.example", string(perm.Support))
@@ -154,6 +156,7 @@ func flagBody(version int64, globally *bool, cities ...uuid.UUID) string {
 // platform.flag_changed — агрегат id.Named("feature_flag", key), версия = новая version, payload — ключ, флаг, id
 // городов; аудит сотрудника с before/after; ничего не меняется — 200 без события, version не растёт.
 func TestUpdateFlagStale(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	e.v = apitest.New(t, oapi.GetSpec)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
@@ -186,6 +189,7 @@ func TestUpdateFlagStale(t *testing.T) {
 // Города флага: город выключенной страны допустим; несуществующий — 422 platform.flag_city_not_found без записи;
 // повтор id — один в ответе; больше 1000 — 400 схемой.
 func TestUpdateFlagCities(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	e.v = apitest.New(t, oapi.GetSpec)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
@@ -220,6 +224,7 @@ func TestUpdateFlagCities(t *testing.T) {
 // PATCH несуществующего ключа — 404 platform.flag_not_found (путь — строка, не enum; R6); ключ не по шаблону — 400
 // path.key; без version — 400.
 func TestUpdateFlagUnknown(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
 	on := true
@@ -233,6 +238,7 @@ func TestUpdateFlagUnknown(t *testing.T) {
 
 // R6: ключи feature_flags после миграций = enum FeatureFlagKey контракта (подписи флагов на экране сторожит enum).
 func TestFlagKeysMatchContract(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -266,6 +272,7 @@ func TestFlagKeysMatchContract(t *testing.T) {
 
 // Права (Приложение 1): поддержка читает версии и флаги (allow), писать — 403.
 func TestPlatformVersionsFlagsPermissions(t *testing.T) {
+	t.Parallel()
 	e := newGeoStaffEnv(t)
 	sup := e.firstLogin("support@wf.example", string(perm.Support))
 	wantStatus(t, e.get("/v1/app/versions", sup.token), http.StatusOK)

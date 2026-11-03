@@ -21,6 +21,7 @@ import (
 )
 
 func TestEnabledByCity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "api")
 	moscow, kazan := uuid.New(), uuid.New()
@@ -62,6 +63,7 @@ func TestEnabledByCity(t *testing.T) {
 
 // Сид 0010 заводит флаги выключенными: «чего сейчас НЕ делаем» из CLAUDE.md.
 func TestSeededFlagIsOff(t *testing.T) {
+	t.Parallel()
 	on, err := flags.NewStore(dbtest.NewPool(t)).EnabledGlobally(context.Background(), "subscriptions")
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +74,7 @@ func TestSeededFlagIsOff(t *testing.T) {
 }
 
 func TestUnknownFlag(t *testing.T) {
+	t.Parallel()
 	_, err := flags.NewStore(dbtest.NewPool(t)).EnabledGlobally(context.Background(), "no_such_flag")
 	if !errors.Is(err, flags.ErrUnknownFlag) {
 		t.Fatalf("err = %v, ждали ErrUnknownFlag", err)
@@ -80,6 +83,7 @@ func TestUnknownFlag(t *testing.T) {
 
 // Список флагов (Task 15): сид 0010 — все ключи, version = 1, по ключу; города — как в базе.
 func TestListFlags(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	list, err := flags.NewStore(pools.As).List(ctx)
@@ -102,6 +106,7 @@ func inTx(t *testing.T, pool *pgxpool.Pool, f func(pgx.Tx) error) error {
 // не меняется; устаревшая версия — ErrStale без записи; нет ключа — ErrUnknownFlag; ничего не меняется — before ==
 // after, version не растёт.
 func TestUpdateFlag(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	s := flags.NewStore(pools.As)
@@ -155,6 +160,7 @@ func TestUpdateFlag(t *testing.T) {
 // Два обновления одной версии: первое изменило строку (транзакция открыта), второе прочитало version 1 и ждёт
 // замок строки в UPDATE; первое коммитит — второе ErrStale (WHERE version), в базе одна запись (version 2).
 func TestUpdateFlagConcurrent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	s := flags.NewStore(pools.As)
@@ -199,6 +205,7 @@ func TestUpdateFlagConcurrent(t *testing.T) {
 // R18: событие правки — агрегат feature_flag с uuid id.Named("feature_flag", ключ), версия агрегата — version флага,
 // payload — ключ, флаг и id городов (без ПД).
 func TestFlagChangedEventAggregate(t *testing.T) {
+	t.Parallel()
 	city := uuid.New()
 	ev := flags.ChangedEvent(flags.Flag{Key: "ads", EnabledGlobally: true, EnabledCityIDs: []uuid.UUID{city}, Version: 7, Description: "x"})
 	if ev.Type != "platform.flag_changed" || ev.AggregateType != "feature_flag" || ev.AggregateID != id.Named("feature_flag", "ads") ||
