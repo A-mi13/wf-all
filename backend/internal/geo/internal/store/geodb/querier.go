@@ -170,9 +170,10 @@ type Querier interface {
 	ImportRegionNamesFromAdmin1(ctx context.Context, arg ImportRegionNamesFromAdmin1Params) (int64, error)
 	ImportRestart(ctx context.Context, arg ImportRestartParams) error
 	// Постановка и отмена импорта из админки (план B, Task 14; роль admin).
-	// Строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
-	// оператора, job_id в ответе нет).
-	ImportRunningJob(ctx context.Context, countryCode string) (*int64, error)
+	// Свежая строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+	// оператора, job_id в ответе нет). Зависшая (started_at < stale_before — граница ImportFailStale) не в счёт (ревью G7
+	// I1): процесс убит без итога, её закроет begin воркера поставленной задачи.
+	ImportRunningJob(ctx context.Context, arg ImportRunningJobParams) (*int64, error)
 	ImportStart(ctx context.Context, arg ImportStartParams) error
 	ImportSucceed(ctx context.Context, arg ImportSucceedParams) (int64, error)
 	// Заведённые города страны без geoname_id — кандидаты сверки (шаг 5).

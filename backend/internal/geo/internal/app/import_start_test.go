@@ -541,3 +541,46 @@ func TestListImportsStartedByClockSkew(t *testing.T) {
 		t.Errorf("запись позже допуска: %v", *v)
 	}
 }
+
+// I1 ревью G7: зависшая строка running (старше StaleAfter — воркер убит без итога, команда оператора оборвалась) не
+// блокирует постановку: задача встаёт в очередь, а begin воркера закрывает строку как зависшую и импортирует. Граница
+// та же, что у ImportFailStale (там started_at < now − StaleAfter): ровно now − StaleAfter — ещё идущий импорт, 409.
+// Часы постановки (admin-api) и воркера — разные хосты: если воркер ещё не считает строку зависшей, его задача
+// получит ErrImportInProgress и уйдёт в JobSnooze до закрытия строки — расхождение часов лечится само.
+func TestStartImportStaleRunningRow(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		job  *int64
+	}{{"задача", ptr(int64(777))}, {"оператор", nil}} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newJobEnv(t)
+			fresh, stale := uuid.New(), uuid.New()
+			e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at, river_job_id) VALUES ($1, 'RU', 'running', $2, $3)`,
+				fresh, tAct.Add(-app.StaleAfter), c.job)
+			_, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "RU", importMeta)
+			if jid := inProgress(t, err); (c.job == nil) != (jid == nil) || jid != nil && *jid != *c.job {
+				t.Fatalf("на границе: job_id %v", jid)
+			}
+			e.exec(t, `UPDATE geonames_imports SET id = $1, started_at = $2 WHERE id = $3`, stale, tAct.Add(-app.StaleAfter-time.Second), fresh)
+			s := staffAs(perm.Admin)
+			job, err := e.admin().StartImport(context.Background(), s, "RU", importMeta)
+			if err != nil || job <= 0 {
+				t.Fatalf("зависшая строка: %d %v", job, err)
+			}
+			// воркер (настоящий импорт, те же часы) закрывает зависшую и импортирует
+			raw := fixture(t)
+			im := app.NewImporter(e.owner, e.clk, source.FetchConfig{}, slog.New(slog.DiscardHandler))
+			im.SetFetch(func(context.Context, source.FetchConfig, string) (source.Raw, error) { return raw, nil })
+			res, err := im.Import(context.Background(), "RU", &s.StaffID, &job)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if j := journalRow(t, e.owner, stale); j.Status != "failed" {
+				t.Fatalf("зависшая: %+v", j)
+			}
+			if j := journalRow(t, e.owner, res.ID); j.Status != "succeeded" || j.RiverJobID == nil || *j.RiverJobID != job {
+				t.Fatalf("новая: %+v", j)
+			}
+		})
+	}
+}

@@ -220,10 +220,12 @@ SELECT pg_advisory_xact_lock(sqlc.arg(class)::int, sqlc.arg(country)::int);
 -- Постановка и отмена импорта из админки (план B, Task 14; роль admin).
 
 -- name: ImportRunningJob :one
--- Строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
--- оператора, job_id в ответе нет).
+-- Свежая строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+-- оператора, job_id в ответе нет). Зависшая (started_at < stale_before — граница ImportFailStale) не в счёт (ревью G7
+-- I1): процесс убит без итога, её закроет begin воркера поставленной задачи.
 SELECT river_job_id FROM geonames_imports
-WHERE country_code = sqlc.arg(country_code)::text AND status = 'running';
+WHERE country_code = sqlc.arg(country_code)::text AND status = 'running'
+  AND started_at >= sqlc.arg(stale_before)::timestamptz;
 
 -- name: ImportLatestByJob :one
 -- Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id.

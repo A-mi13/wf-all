@@ -517,13 +517,20 @@ const importRunningJob = `-- name: ImportRunningJob :one
 
 SELECT river_job_id FROM geonames_imports
 WHERE country_code = $1::text AND status = 'running'
+  AND started_at >= $2::timestamptz
 `
 
+type ImportRunningJobParams struct {
+	CountryCode string
+	StaleBefore time.Time
+}
+
 // Постановка и отмена импорта из админки (план B, Task 14; роль admin).
-// Строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
-// оператора, job_id в ответе нет).
-func (q *Queries) ImportRunningJob(ctx context.Context, countryCode string) (*int64, error) {
-	row := q.db.QueryRow(ctx, importRunningJob, countryCode)
+// Свежая строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+// оператора, job_id в ответе нет). Зависшая (started_at < stale_before — граница ImportFailStale) не в счёт (ревью G7
+// I1): процесс убит без итога, её закроет begin воркера поставленной задачи.
+func (q *Queries) ImportRunningJob(ctx context.Context, arg ImportRunningJobParams) (*int64, error) {
+	row := q.db.QueryRow(ctx, importRunningJob, arg.CountryCode, arg.StaleBefore)
 	var river_job_id *int64
 	err := row.Scan(&river_job_id)
 	return river_job_id, err

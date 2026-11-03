@@ -76,7 +76,8 @@ func (ImportArgs) InsertOpts() river.InsertOpts {
 // StartImport — POST /v1/geo/imports одной транзакцией под Idempotency-Key вызывающего:
 //  1. право geo.imports.run (конвейер проверил; здесь — защита в глубину), код страны ^[A-Z]{2}$;
 //  2. страна есть (выключенная — можно, спека geo §4.1), иначе geo.ErrCountryNotFound;
-//  3. строка running страны — *geo.ImportInProgressError (JobID — river_job_id строки; у оператора — nil);
+//  3. свежая строка running страны (не старше StaleAfter, ревью G7 I1) — *geo.ImportInProgressError (JobID —
+//     river_job_id строки; у оператора — nil); зависшая не мешает — её закроет begin воркера;
 //  4. InsertTx задачи: дубль уникальности River — откат и *geo.ImportInProgressError с id существующей задачи (R26);
 //  5. аудит geo.import_requested от сотрудника (объект geonames_import_job, id.Named; after {country_code, job_id};
 //     без города) — в той же транзакции, что задача.
@@ -98,7 +99,10 @@ func (a *Admin) StartImport(ctx context.Context, s *auth.Staff, country string, 
 		} else if err != nil {
 			return err
 		}
-		running, err := q.ImportRunningJob(ctx, country)
+		// зависшая строка (старше StaleAfter по часам admin-api) не блокирует: её закроет begin воркера; если часы
+		// воркера отстают и он строку зависшей ещё не считает — задача уйдёт в JobSnooze до её закрытия
+		running, err := q.ImportRunningJob(ctx, geodb.ImportRunningJobParams{CountryCode: country,
+			StaleBefore: a.d.Clock.Now().Add(-StaleAfter)})
 		switch {
 		case err == nil:
 			return &geo.ImportInProgressError{JobID: running}
