@@ -301,3 +301,26 @@ func TestGeoImportCommandRunsSynchronously(t *testing.T) {
 		t.Fatalf("мест %d, задач %d, журнал %s %v %v, аудит %q", places, jobs, status, startedBy, riverJob, role)
 	}
 }
+
+// geo 1 Task 11 M4: лишние позиционные аргументы разовых команд, неизвестная команда, неизвестный флаг и нет
+// обязательного флага — ошибка использования: usage в тексте, код выхода 2 (как у admin-api); прочие отказы — 1.
+func TestCommandUsageErrors(t *testing.T) {
+	env := []string{"WORKER_DATABASE_URL=" + dbtest.NewURL(t)}
+	for _, args := range [][]string{
+		{"geo", "import", "--country", "RU", "лишнее"},
+		{"geo", "import", "лишнее", "--country", "RU"},
+		{"events", "replay", "--type", "geo.city_linked", "--subscriber", "a.b", "--since", "2026-10-01T00:00:00Z", "лишнее"},
+		{"geo", "import"},
+		{"geo", "import", "--cuntry", "RU"},
+		{"geo", "export"},
+		{"events", "replay", "--type", "geo.city_linked"},
+	} {
+		err := run(context.Background(), args, env, io.Discard, io.Discard)
+		if !errors.Is(err, errUsage) || exitCode(err) != 2 || !strings.Contains(err.Error(), "geo import --country") {
+			t.Errorf("%q: %v (код %d)", args, err, exitCode(err))
+		}
+	}
+	if code := exitCode(geojobs.ErrCountryNotFound); code != 1 {
+		t.Fatalf("прочий отказ: код %d", code)
+	}
+}

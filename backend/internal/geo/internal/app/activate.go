@@ -45,10 +45,12 @@ const (
 )
 
 // RiverInserter — клиент River admin-api для сценариев импорта (Task 14): вставка в транзакции действия,
-// состояние и отмена задачи. Активация его не использует.
+// состояние задачи (JobGet; JobGetTx — строка «до» отмены под замком задачи, K6) и отмена. Активация его не
+// использует. Реализует *river.Client[pgx.Tx] — тот же клиент вставки, что у staff (Task 16).
 type RiverInserter interface {
 	InsertTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
 	JobGet(ctx context.Context, id int64) (*rivertype.JobRow, error)
+	JobGetTx(ctx context.Context, tx pgx.Tx, id int64) (*rivertype.JobRow, error)
 	JobCancelTx(ctx context.Context, tx pgx.Tx, jobID int64) (*rivertype.JobRow, error)
 }
 

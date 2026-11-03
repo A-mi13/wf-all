@@ -1,10 +1,9 @@
 // Package admin — операции модуля geo в админке (тег geo контракта admin). План A — список городов
 // для выбора городов модератора (D24, P28, M10); план B — чтения (read.go, places.go, imports_read.go) и
-// сценарии записи (заглушки — до задач 10–14).
+// сценарии записи (activate.go, city.go, district.go, country.go, imports.go).
 package admin
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 
 	"wf/backend/internal/geo"
 	"wf/backend/internal/geo/internal/app"
-	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/i18n"
@@ -109,6 +107,10 @@ func Problem(err error) error {
 	if errors.Is(err, geo.ErrBadQuery) {
 		return errBadQuery
 	}
+	// 409 geo.import_in_progress с задачей (R26): job_id — в тело Problem; импорт оператора — без него (ниже)
+	if ipe, ok := errors.AsType[*geo.ImportInProgressError](err); ok && ipe.JobID != nil {
+		return httpx.NewError(http.StatusConflict, geo.CodeImportInProgress).WithJobID(*ipe.JobID)
+	}
 	for _, p := range problems {
 		if errors.Is(err, p.err) {
 			return httpx.NewError(p.status, p.code)
@@ -128,23 +130,4 @@ func negotiate(header *string) (locale string, contentLanguage *string) {
 		return "", nil
 	}
 	return l, &l
-}
-
-// Операции плана B, объявленные контрактом раньше хендлеров (Task 7, R17): отвечают 501 http.not_implemented
-// и перечислены в pendingOps (internal/httpapi/admin/nostub_test.go). Задача из комментария заменяет
-// заглушку хендлером и убирает операцию из pendingOps.
-
-// StartGeoImport — заглушка до Task 14.
-func (h *Handler) StartGeoImport(context.Context, oapi.StartGeoImportRequestObject) (oapi.StartGeoImportResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// GetGeoImportJob — заглушка до Task 14.
-func (h *Handler) GetGeoImportJob(context.Context, oapi.GetGeoImportJobRequestObject) (oapi.GetGeoImportJobResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// CancelGeoImportJob — заглушка до Task 14.
-func (h *Handler) CancelGeoImportJob(context.Context, oapi.CancelGeoImportJobRequestObject) (oapi.CancelGeoImportJobResponseObject, error) {
-	return nil, errNotImplemented
 }

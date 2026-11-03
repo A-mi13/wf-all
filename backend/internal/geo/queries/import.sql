@@ -216,3 +216,23 @@ WHERE id = sqlc.arg(id)::uuid AND status = 'running';
 -- Сверка страны исключает активации городов этой страны (ревью G5 I1-r1): эксклюзивный advisory-замок транзакции
 -- (класс, страна) — ключ app.countryLockKey; активация берёт тот же ключ разделяемым (ActivateCountryLock).
 SELECT pg_advisory_xact_lock(sqlc.arg(class)::int, sqlc.arg(country)::int);
+
+-- Постановка и отмена импорта из админки (план B, Task 14; роль admin).
+
+-- name: ImportRunningJob :one
+-- Строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+-- оператора, job_id в ответе нет).
+SELECT river_job_id FROM geonames_imports
+WHERE country_code = sqlc.arg(country_code)::text AND status = 'running';
+
+-- name: ImportLatestByJob :one
+-- Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id.
+SELECT id FROM geonames_imports
+WHERE river_job_id = sqlc.arg(river_job_id)::bigint
+ORDER BY started_at DESC, id DESC
+LIMIT 1;
+
+-- name: ImportJobCancelLock :exec
+-- Отмены одной задачи импорта сериализуются (K6): эксклюзивный advisory-замок транзакции (класс, id задачи по
+-- модулю 2^31 − 1 — совпадение ключей двух задач только заставит отмены подождать друг друга).
+SELECT pg_advisory_xact_lock(sqlc.arg(class)::int, (sqlc.arg(job_id)::bigint % 2147483647)::int);

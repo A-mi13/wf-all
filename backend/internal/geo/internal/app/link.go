@@ -27,6 +27,10 @@ const (
 	regionAdmin1Key  = "regions_country_admin1_key"
 )
 
+// errCityLinkedMeanwhile — ImportLinkCity не нашёл строку: у города уже есть geoname_id (привязали параллельно).
+// Свой sentinel, а не голый pgx.ErrNoRows (geo 1 Task 10 M2): «нет строки» другого запроса не примут за гонку.
+var errCityLinkedMeanwhile = errors.New("geo: город уже привязан к месту (ImportLinkCity без строки)")
+
 // linkInput — что привязывается: город, его регион (nil — без региона), место и его код admin1 (nil — нет), страна
 // города и её язык (строку этого языка привязка не создаёт — она источник канонического имени, §3.3).
 type linkInput struct {
@@ -39,7 +43,7 @@ type linkInput struct {
 }
 
 // linkCity — привязка в транзакции tx (события — через ctx той же транзакции). Возвращает версию города после
-// привязки. Ошибки ImportLinkCity — как есть: pgx.ErrNoRows — город уже привязан (geoname_id не NULL), 23505
+// привязки. Ошибки ImportLinkCity: errCityLinkedMeanwhile — город уже привязан (geoname_id не NULL), 23505
 // cities_geoname_id_key — место у другого города; что с ними делать, решает вызывающий (сверка — conflict, ручная
 // привязка — коды контракта).
 //
@@ -63,6 +67,9 @@ func linkCity(ctx context.Context, tx pgx.Tx, in linkInput) (int64, error) {
 		}
 	}
 	version, err := q.ImportLinkCity(ctx, geodb.ImportLinkCityParams{ID: in.CityID, GeonameID: in.GeonameID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, errCityLinkedMeanwhile
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -182,7 +189,7 @@ func linkProblem(err error) error {
 		pgErr.ConstraintName == cityGeonameKey {
 		return geo.ErrCityAlreadyActive
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, errCityLinkedMeanwhile) {
 		return geo.ErrCityAlreadyLinked
 	}
 	return err

@@ -2,7 +2,10 @@ package jobs_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -15,8 +18,11 @@ import (
 	"wf/backend/internal/geo/internal/app"
 	"wf/backend/internal/geo/jobs"
 	"wf/backend/internal/platform/queue"
+	"wf/backend/internal/platform/testkit/clocktest"
 	"wf/backend/internal/platform/testkit/dbtest"
 )
+
+var tJobs = time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 
 func TestImportArgsOptions(t *testing.T) {
 	staff := uuid.New()
@@ -33,7 +39,7 @@ func TestImportArgsOptions(t *testing.T) {
 	if !slices.Equal(o.UniqueOpts.ByState, want) {
 		t.Fatalf("ByState = %v — спека §5.4: без completed", o.UniqueOpts.ByState)
 	}
-	w := jobs.NewImportWorkerWith(nil)
+	w := jobs.NewImportWorkerWith(clocktest.New(tJobs), nil)
 	// go vet не пропускает got != 30*time.Minute || got != app.ImportTimeout (обе — константы):
 	// сравниваем по отдельности
 	got := w.Timeout(&river.Job[jobs.ImportArgs]{})
@@ -92,7 +98,7 @@ func TestImportWorkerWork(t *testing.T) {
 	var gotBy *uuid.UUID
 	var gotJob *int64
 	var result error
-	w := jobs.NewImportWorkerWith(func(_ context.Context, country string, by *uuid.UUID, job *int64) (app.ImportResult, error) {
+	w := jobs.NewImportWorkerWith(clocktest.New(tJobs), func(_ context.Context, country string, by *uuid.UUID, job *int64) (app.ImportResult, error) {
 		gotCountry, gotBy, gotJob = country, by, job
 		return app.ImportResult{}, result
 	})
@@ -108,11 +114,6 @@ func TestImportWorkerWork(t *testing.T) {
 	if err := w.Work(ctx, job); !errors.Is(err, app.ErrCountryNotFound) || !errors.Is(err, &river.JobCancelError{}) {
 		t.Fatalf("нет страны: %v", err)
 	}
-	// идёт импорт оператора — обычная ошибка: River повторит
-	result = app.ErrImportInProgress
-	if err := w.Work(ctx, job); !errors.Is(err, jobs.ErrImportInProgress) || errors.Is(err, &river.JobCancelError{}) {
-		t.Fatalf("занято: %v", err)
-	}
 	// аргументы новой версии — обычная ошибка, импорт не зовётся
 	gotCountry = ""
 	v2 := &river.Job[jobs.ImportArgs]{JobRow: &rivertype.JobRow{ID: 43}, Args: jobs.ImportArgs{V: 2, Country: "RU"}}
@@ -123,7 +124,7 @@ func TestImportWorkerWork(t *testing.T) {
 
 func TestImportWorkerRunNow(t *testing.T) {
 	importID := uuid.New()
-	w := jobs.NewImportWorkerWith(func(_ context.Context, country string, by *uuid.UUID, job *int64) (app.ImportResult, error) {
+	w := jobs.NewImportWorkerWith(clocktest.New(tJobs), func(_ context.Context, country string, by *uuid.UUID, job *int64) (app.ImportResult, error) {
 		if country != "RU" || by != nil || job != nil {
 			t.Errorf("команда оператора: %s %v %v — ждали nil, nil", country, by, job)
 		}
@@ -147,5 +148,57 @@ func TestImportWorkerRunNow(t *testing.T) {
 	if !slices.Equal(s.Linked, []string{"a"}) || !slices.Equal(s.Ambiguous, []string{"b"}) ||
 		!slices.Equal(s.NotFound, []string{"c", "d"}) || !slices.Equal(s.Conflict, []string{"e", "f", "g"}) {
 		t.Fatalf("сверка: %+v", s)
+	}
+}
+
+// Ревью планов C1, Q1, R3: в river_job.args (их читает роль api) — только id сотрудника: ключи ровно v, country,
+// started_by, V = 1; без сотрудника started_by нет. Регистр кода нормализуется (команда оператора).
+func TestImportArgsNoPII(t *testing.T) {
+	staff := uuid.New()
+	for _, c := range []struct {
+		by   *uuid.UUID
+		keys []string
+	}{{&staff, []string{"country", "started_by", "v"}}, {nil, []string{"country", "v"}}} {
+		raw, err := json.Marshal(jobs.NewImportArgs("ru", c.by))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if got := slices.Sorted(maps.Keys(m)); !slices.Equal(got, c.keys) || m["v"] != 1.0 || m["country"] != "RU" {
+			t.Fatalf("args %s, ждали ключи %v", raw, c.keys)
+		}
+		if c.by != nil && m["started_by"] != staff.String() {
+			t.Fatalf("started_by %v", m["started_by"])
+		}
+	}
+}
+
+// geo 1 Task 11 M1, R8: идёт импорт оператора (ErrImportInProgress) — задача откладывается на минуту (JobSnooze не
+// тратит попытку и не уводит в discarded); задача старше 2 ч с постановки — отмена (страховка от вечного
+// откладывания). Граница: ровно 2 ч — ещё откладывание, 2 ч + 1 нс — отмена.
+func TestImportWorkerSnoozesInProgress(t *testing.T) {
+	clk := clocktest.New(tJobs)
+	w := jobs.NewImportWorkerWith(clk, func(context.Context, string, *uuid.UUID, *int64) (app.ImportResult, error) {
+		return app.ImportResult{}, fmt.Errorf("обёртка: %w", app.ErrImportInProgress)
+	})
+	job := func(age time.Duration) *river.Job[jobs.ImportArgs] {
+		return &river.Job[jobs.ImportArgs]{JobRow: &rivertype.JobRow{ID: 7, CreatedAt: tJobs.Add(-age)}, Args: jobs.NewImportArgs("RU", nil)}
+	}
+	for _, age := range []time.Duration{0, time.Hour, 2 * time.Hour} {
+		err := w.Work(context.Background(), job(age))
+		snooze, ok := errors.AsType[*river.JobSnoozeError](err)
+		if !ok || snooze.Duration != time.Minute || errors.Is(err, &river.JobCancelError{}) {
+			t.Fatalf("возраст %s: %v — ждали JobSnooze(1m)", age, err)
+		}
+	}
+	err := w.Work(context.Background(), job(2*time.Hour+time.Nanosecond))
+	if !errors.Is(err, &river.JobCancelError{}) || !errors.Is(err, jobs.ErrImportInProgress) {
+		t.Fatalf("старше 2 ч: %v — ждали JobCancel", err)
+	}
+	if _, ok := errors.AsType[*river.JobSnoozeError](err); ok {
+		t.Fatal("старше 2 ч: snooze")
 	}
 }

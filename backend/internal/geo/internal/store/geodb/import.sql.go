@@ -319,6 +319,22 @@ func (q *Queries) ImportInsertPlaceNames(ctx context.Context, arg ImportInsertPl
 	return result.RowsAffected(), nil
 }
 
+const importJobCancelLock = `-- name: ImportJobCancelLock :exec
+SELECT pg_advisory_xact_lock($1::int, ($2::bigint % 2147483647)::int)
+`
+
+type ImportJobCancelLockParams struct {
+	Class int32
+	JobID int64
+}
+
+// Отмены одной задачи импорта сериализуются (K6): эксклюзивный advisory-замок транзакции (класс, id задачи по
+// модулю 2^31 − 1 — совпадение ключей двух задач только заставит отмены подождать друг друга).
+func (q *Queries) ImportJobCancelLock(ctx context.Context, arg ImportJobCancelLockParams) error {
+	_, err := q.db.Exec(ctx, importJobCancelLock, arg.Class, arg.JobID)
+	return err
+}
+
 const importLastSucceededPlaces = `-- name: ImportLastSucceededPlaces :one
 SELECT COALESCE(places_upserted, 0)::int AS places
 FROM geonames_imports
@@ -333,6 +349,21 @@ func (q *Queries) ImportLastSucceededPlaces(ctx context.Context, countryCode str
 	var places int32
 	err := row.Scan(&places)
 	return places, err
+}
+
+const importLatestByJob = `-- name: ImportLatestByJob :one
+SELECT id FROM geonames_imports
+WHERE river_job_id = $1::bigint
+ORDER BY started_at DESC, id DESC
+LIMIT 1
+`
+
+// Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id.
+func (q *Queries) ImportLatestByJob(ctx context.Context, riverJobID int64) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, importLatestByJob, riverJobID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const importLinkCity = `-- name: ImportLinkCity :one
@@ -480,6 +511,22 @@ type ImportRestartParams struct {
 func (q *Queries) ImportRestart(ctx context.Context, arg ImportRestartParams) error {
 	_, err := q.db.Exec(ctx, importRestart, arg.StartedAt, arg.ID)
 	return err
+}
+
+const importRunningJob = `-- name: ImportRunningJob :one
+
+SELECT river_job_id FROM geonames_imports
+WHERE country_code = $1::text AND status = 'running'
+`
+
+// Постановка и отмена импорта из админки (план B, Task 14; роль admin).
+// Строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+// оператора, job_id в ответе нет).
+func (q *Queries) ImportRunningJob(ctx context.Context, countryCode string) (*int64, error) {
+	row := q.db.QueryRow(ctx, importRunningJob, countryCode)
+	var river_job_id *int64
+	err := row.Scan(&river_job_id)
+	return river_job_id, err
 }
 
 const importStart = `-- name: ImportStart :exec

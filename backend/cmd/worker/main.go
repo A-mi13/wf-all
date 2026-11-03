@@ -41,7 +41,7 @@ func main() {
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Environ(), os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "worker:", err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 
@@ -114,6 +114,20 @@ const softStopTimeout = 25 * time.Second
 const usage = "без аргументов — воркер; events replay --type <модуль>.<факт> --subscriber <модуль>.<имя> --since <RFC 3339>; " +
 	"geo import --country <ISO 3166-1 alpha-2>"
 
+// errUsage — неверная разовая команда (неизвестная, лишние аргументы, неизвестный или недостающий флаг): код
+// выхода 2 и usage в тексте ошибки, как у admin-api (geo 1 Task 11 M4).
+var errUsage = errors.New("неверная команда")
+
+func usageError(msg string) error { return fmt.Errorf("%w: %s: %s", errUsage, msg, usage) }
+
+// exitCode — 2 для ошибки использования, 1 для остальных.
+func exitCode(err error) int {
+	if errors.Is(err, errUsage) {
+		return 2
+	}
+	return 1
+}
+
 // command — разовые команды воркера: реестр подписчиков знает только воркер, импорт GeoNames
 // оператор запускает со своей машины под ролью worker.
 func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config,
@@ -124,7 +138,7 @@ func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events
 	case len(args) >= 2 && args[0] == "geo" && args[1] == "import":
 		return geoImport(ctx, args[2:], pool, geo, out, log)
 	}
-	return fmt.Errorf("неизвестная команда %q: %s", strings.Join(args, " "), usage)
+	return usageError(fmt.Sprintf("неизвестная команда %q", strings.Join(args, " ")))
 }
 
 func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, out io.Writer, log *slog.Logger) error {
@@ -134,10 +148,13 @@ func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.
 	subscriber := fs.String("subscriber", "", "подписчик")
 	sinceRaw := fs.String("since", "", "с какого момента, RFC 3339")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %s", err, usage)
+		return usageError(fmt.Sprintf("events replay: %v", err))
+	}
+	if fs.NArg() > 0 {
+		return usageError(fmt.Sprintf("events replay: лишние аргументы %q", strings.Join(fs.Args(), " ")))
 	}
 	if *eventType == "" || *subscriber == "" || *sinceRaw == "" {
-		return fmt.Errorf("нужны --type, --subscriber и --since: %s", usage)
+		return usageError("events replay: нужны --type, --subscriber и --since")
 	}
 	since, err := time.Parse(time.RFC3339, *sinceRaw)
 	if err != nil {
@@ -163,10 +180,13 @@ func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojo
 	fs.SetOutput(io.Discard)
 	country := fs.String("country", "", "страна, ISO 3166-1 alpha-2")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %s", err, usage)
+		return usageError(fmt.Sprintf("geo import: %v", err))
+	}
+	if fs.NArg() > 0 {
+		return usageError(fmt.Sprintf("geo import: лишние аргументы %q", strings.Join(fs.Args(), " ")))
 	}
 	if *country == "" {
-		return fmt.Errorf("нужен --country: %s", usage)
+		return usageError("geo import: нужен --country")
 	}
 	cc := strings.ToUpper(*country)
 	s, err := geojobs.NewImportWorker(pool, clock.System, geo, log).RunNow(ctx, cc)

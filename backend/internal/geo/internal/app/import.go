@@ -588,8 +588,8 @@ func (im *Importer) reconcile(ctx context.Context, tx pgx.Tx, run importRun) (Re
 
 // linkSavepoint — привязка во вложенной транзакции (SAVEPOINT). Гонка с админом — откатывается
 // только эта привязка, taken = true, импорт продолжается (R35): место успели отдать другому
-// городу (23505 cities_geoname_id_key) или сам город успели привязать (ImportLinkCity без строки:
-// geoname_id уже не NULL, единственный источник ErrNoRows в link). Прочие ошибки — ошибка импорта.
+// городу (23505 cities_geoname_id_key) или сам город успели привязать (errCityLinkedMeanwhile: ImportLinkCity без
+// строки — geoname_id уже не NULL). Прочие ошибки — ошибка импорта.
 // События и аудит пишутся в tx из ctx — на том же соединении, поэтому откат до savepoint
 // снимает и событие geo.city_linked.
 func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.ImportUnlinkedCitiesRow,
@@ -606,7 +606,7 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 			pgErr.ConstraintName == cityGeonameKey {
 			return true, nil
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, errCityLinkedMeanwhile) {
 			return true, nil
 		}
 		return false, err
@@ -714,13 +714,16 @@ func (im *Importer) fail(ctx context.Context, run importRun, files []source.File
 	})
 }
 
-// writeAudit — команда оператора: роль operator без автора; задача River: сотрудник, роль admin
-// (импорт ставит только admin, §5.2).
+// writeAudit — итог импорта в аудит (ответ пользователя Q1, R3): задача River — от system (воркер действует сам; «кто
+// поставил» — запись geo.import_requested admin-api), id сотрудника — after.started_by; команда оператора — operator.
+// Автора (ActorUserID, ActorStaffID) нет никогда: сотрудник не игрок, а воркер не видит учёток сотрудников.
 func writeAudit(ctx context.Context, run importRun, after map[string]any) error {
-	actor, role := uuid.Nil, "operator"
+	role := "operator"
 	if run.startedBy != nil {
-		actor, role = *run.startedBy, "admin"
+		role = "system"
+		after = maps.Clone(after)
+		after["started_by"] = run.startedBy.String()
 	}
-	return audit.Write(ctx, audit.Entry{ActorUserID: actor, ActorRole: role, Action: auditAction,
+	return audit.Write(ctx, audit.Entry{ActorRole: role, ActorLabel: role, Action: auditAction,
 		ObjectType: geo.AggregateGeonamesImport, ObjectID: run.id, After: after})
 }

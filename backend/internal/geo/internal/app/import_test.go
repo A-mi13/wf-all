@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -242,24 +243,52 @@ func TestImportLoadsPlacesNamesAndJournal(t *testing.T) {
 	}
 }
 
-func TestImportByStaffRecordsActor(t *testing.T) {
-	e := newEnv(t)
-	raw := fixture(t)
-	staff := uuid.New()
-	res, err := e.importer(&raw).Import(context.Background(), "RU", &staff, ptr(int64(42)))
-	if err != nil {
-		t.Fatal(err)
+// Ответ пользователя Q1, R3: аудит импорта из задачи River — от system (actor_role = actor_label = system, авторов нет,
+// after.started_by — id сотрудника из аргументов; «кто» — аудит постановки admin-api); команда оператора — operator/
+// operator. CHECK audit_log (служебная роль ⇔ нет автора) не падает. Журнал — started_by (id), как раньше.
+func TestImportAuditFromSystem(t *testing.T) {
+	type row struct {
+		role, label string
+		user, staff *uuid.UUID
+		startedBy   *string
 	}
-	j := journalRow(t, e.owner, res.ID)
-	if j.StartedBy == nil || *j.StartedBy != staff || j.RiverJobID == nil || *j.RiverJobID != 42 {
-		t.Fatalf("журнал: %+v", j)
+	read := func(t *testing.T, e env, id uuid.UUID) row {
+		t.Helper()
+		var r row
+		if err := e.owner.QueryRow(context.Background(), `SELECT actor_role, actor_label, actor_user_id, actor_staff_id,
+			after->>'started_by' FROM audit_log WHERE action = 'geo.import' AND object_id = $1`, id).Scan(&r.role, &r.label, &r.user, &r.staff, &r.startedBy); err != nil {
+			t.Fatal(err)
+		}
+		return r
 	}
-	var role string
-	var actor *uuid.UUID
-	if err := e.owner.QueryRow(context.Background(), `SELECT actor_role, actor_user_id FROM audit_log WHERE object_id = $1`,
-		res.ID).Scan(&role, &actor); err != nil || role != "admin" || actor == nil || *actor != staff {
-		t.Fatalf("аудит: %v %q %v", err, role, actor)
-	}
+	t.Run("задача River", func(t *testing.T) {
+		e := newEnv(t)
+		raw := fixture(t)
+		staff := uuid.New()
+		res, err := e.importer(&raw).Import(context.Background(), "RU", &staff, ptr(int64(42)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := journalRow(t, e.owner, res.ID)
+		if j.StartedBy == nil || *j.StartedBy != staff || j.RiverJobID == nil || *j.RiverJobID != 42 {
+			t.Fatalf("журнал: %+v", j)
+		}
+		if r := read(t, e, res.ID); r.role != "system" || r.label != "system" || r.user != nil || r.staff != nil ||
+			r.startedBy == nil || *r.startedBy != staff.String() {
+			t.Fatalf("аудит: %+v", r)
+		}
+	})
+	t.Run("оператор", func(t *testing.T) {
+		e := newEnv(t)
+		raw := fixture(t)
+		res, err := e.importer(&raw).Import(context.Background(), "RU", nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := read(t, e, res.ID); r.role != "operator" || r.label != "operator" || r.user != nil || r.staff != nil || r.startedBy != nil {
+			t.Fatalf("аудит: %+v", r)
+		}
+	})
 }
 
 // Review Focus 4: второй запуск той же страны ничего не меняет.
@@ -540,7 +569,7 @@ func TestImportStaleAndInterruptedRuns(t *testing.T) {
 		var role string
 		var actor *uuid.UUID
 		if err := e.owner.QueryRow(ctx, `SELECT actor_role, actor_user_id FROM audit_log WHERE action = 'geo.import' AND object_id = $1`,
-			stale).Scan(&role, &actor); err != nil || role != "admin" || actor == nil || *actor != staff {
+			stale).Scan(&role, &actor); err != nil || role != "system" || actor != nil {
 			t.Fatalf("автор аудита зависшей: %v %q %v", err, role, actor)
 		}
 	})
@@ -976,6 +1005,11 @@ func TestImportReconcileConflictKeepsImport(t *testing.T) {
 	if n := count(t, e.owner, "SELECT count(*) FROM city_names WHERE city_id = $1", mikh); n != 1 {
 		t.Fatalf("переводов Михайловска %d — откат неполный", n)
 	}
+	// geo 1 Task 10 M1: конфликтный город — последний по slug (test-lesnoy < test-mikhaylovsk-ural); удачная привязка
+	// до него не откатилась вместе с его savepoint
+	if n := count(t, e.owner, "SELECT count(*) FROM cities WHERE id = $1 AND geoname_id = 9100010 AND version = 2", lesnoy); n != 1 {
+		t.Fatal("привязка Лесного откатилась вместе с конфликтом")
+	}
 	for id, want := range map[uuid.UUID]int{mikh: 0, lesnoy: 1} {
 		if n := count(t, e.owner, "SELECT count(*) FROM outbox WHERE event_type = $1 AND aggregate_id = $2",
 			geo.EventCityLinked, id); n != want {
@@ -1039,5 +1073,111 @@ func TestImportReconcileConflictCityLinkedMeanwhile(t *testing.T) {
 	if n := count(t, e.owner, "SELECT count(*) FROM outbox WHERE event_type = $1 AND aggregate_id = $2",
 		geo.EventCityLinked, mikh); n != 0 {
 		t.Fatalf("geo.city_linked для Михайловска: %d", n)
+	}
+}
+
+// §6.3 п.4, geo 1 Task 10 M4, ⚠️ раунда 1 G5: пока сверка привязывает город, другой регион страны получил тот же код
+// admin1 (71) — писатель в обход замка страны (owner напрямую: активация и ручная привязка ждут эксклюзивный замок
+// сверки, их так не подставить). Импорт succeeded, город привязан, его регион остаётся без кода и без переводов
+// чужого admin1, код — у того региона. Два пути: код закоммичен до ImportLinkRegion (NOT EXISTS — 0 строк) и код
+// вставлен параллельно и закоммичен, пока ImportLinkRegion ждёт уникальный индекс (23505 regions_country_admin1_key —
+// откат только savepoint кода региона).
+func TestReconcileRegionRace(t *testing.T) {
+	for _, concurrent := range []bool{false, true} {
+		t.Run(fmt.Sprintf("параллельно=%v", concurrent), func(t *testing.T) {
+			e := newEnv(t)
+			ctx := context.Background()
+			ural := addRegion(t, e, "Свердловская область")
+			other := addRegion(t, e, "Урал-2")
+			mikh := addCity(t, e, ural, "test-mikhaylovsk-ural", map[string]string{"ru": "Михайловск"})
+			raw := fixture(t)
+			im := e.importer(&raw)
+			done := make(chan struct{})
+			var waited bool
+			var wg sync.WaitGroup
+			im.SetBeforeLink(func(_ context.Context, cityID uuid.UUID, _ int64) {
+				if cityID != mikh {
+					return
+				}
+				// не t.Fatal: колбэк внутри db.InTx держит соединение
+				if !concurrent {
+					if _, err := e.owner.Exec(context.Background(), `UPDATE regions SET geoname_admin1_code = '71' WHERE id = $1`, other); err != nil {
+						t.Errorf("код другому региону: %v", err)
+					}
+					return
+				}
+				tx, err := e.owner.Begin(context.Background())
+				if err != nil {
+					t.Errorf("begin: %v", err)
+					return
+				}
+				if _, err := tx.Exec(context.Background(), `UPDATE regions SET geoname_admin1_code = '71' WHERE id = $1`, other); err != nil {
+					t.Errorf("код другому региону: %v", err)
+				}
+				// коммит — когда привязка встанет на уникальном индексе кода региона
+				wg.Go(func() {
+					waited = waitLockOrDoneWithin(t, e.owner, done, 10*time.Second)
+					if err := tx.Commit(context.Background()); err != nil {
+						t.Errorf("commit: %v", err)
+					}
+				})
+			})
+			res, err := im.Import(ctx, "RU", nil, nil)
+			close(done)
+			wg.Wait()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if concurrent && !waited {
+				t.Fatal("привязка не ждала код региона — 23505 не воспроизведён")
+			}
+			if j := journalRow(t, e.owner, res.ID); j.Status != "succeeded" {
+				t.Fatalf("журнал: %+v", j)
+			}
+			if len(res.Reconciled.Linked) != 1 || res.Reconciled.Linked[0].CityID != mikh || res.Reconciled.Linked[0].GeonameID != 526815 {
+				t.Fatalf("привязаны: %+v", res.Reconciled)
+			}
+			if n := count(t, e.owner, `SELECT count(*) FROM regions WHERE id = $1 AND geoname_admin1_code IS NULL`, ural); n != 1 {
+				t.Fatal("регион города получил код")
+			}
+			if n := count(t, e.owner, `SELECT count(*) FROM regions WHERE id = $1 AND geoname_admin1_code = '71'`, other); n != 1 {
+				t.Fatal("код у другого региона пропал")
+			}
+			if n := count(t, e.owner, `SELECT count(*) FROM region_names WHERE region_id = $1`, ural); n != 1 {
+				t.Fatalf("регион города получил переводы чужого admin1: %d", n)
+			}
+		})
+	}
+}
+
+// geo 1 Task 10 M3, R34 (б): граница порога admin1 — ровно 90 % строк admin1 страны в базе проходит (сравнение
+// строгое: n·10 < было·9), меньше — отказ. В базе 10 кодов (3 выдержки + 7 синтетических без мест).
+func TestImportAdmin1ShareBoundary(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	base := fixture(t)
+	for i := range 7 {
+		base.Admin1 = append(base.Admin1, source.Admin1{CountryCode: "RU", Code: fmt.Sprintf("S%d", i),
+			Name: fmt.Sprintf("Synth %d", i), ASCIIName: fmt.Sprintf("Synth %d", i), GeonameID: 9700000 + int64(i)})
+	}
+	raw := base
+	im := e.importer(&raw)
+	if _, err := im.Import(ctx, "RU", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, e.owner, "SELECT count(*) FROM geonames_admin1 WHERE country_code = 'RU'"); n != 10 {
+		t.Fatalf("admin1 %d, ждали 10", n)
+	}
+	// 9 из 10 — ровно 90 %: проходит
+	raw.Admin1 = admin1Without(base.Admin1, func(a source.Admin1) bool { return a.Code != "S6" })
+	e.clk.Advance(time.Hour)
+	if _, err := im.Import(ctx, "RU", nil, nil); err != nil {
+		t.Fatalf("ровно 90 %%: %v", err)
+	}
+	// 8 из 9 (88,9 %) — отказ
+	raw.Admin1 = admin1Without(base.Admin1, func(a source.Admin1) bool { return a.Code != "S6" && a.Code != "S5" })
+	e.clk.Advance(time.Hour)
+	if _, err := im.Import(ctx, "RU", nil, nil); !errors.Is(err, app.ErrSourceTruncated) {
+		t.Fatalf("меньше 90 %%: %v", err)
 	}
 }

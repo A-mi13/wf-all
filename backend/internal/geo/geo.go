@@ -8,6 +8,7 @@ package geo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -343,3 +344,36 @@ type ImportReport struct {
 
 // New — сервис чтения поверх пула (роль api или admin: нужен только SELECT).
 func New(pool *pgxpool.Pool) Service { return &reader{st: store.New(pool)} }
+
+// ImportInProgressError — 409 geo.import_in_progress с задачей, которая уже стоит в очереди или выполняется (R26):
+// JobID — id задачи River (дубль уникальности или river_job_id строки running); nil — импорт оператора (без задачи).
+// errors.Is(err, ErrImportInProgress) — true.
+type ImportInProgressError struct{ JobID *int64 }
+
+func (e *ImportInProgressError) Error() string {
+	if e.JobID == nil {
+		return ErrImportInProgress.Error() + " (импорт оператора)"
+	}
+	return fmt.Sprintf("%s (задача %d)", ErrImportInProgress, *e.JobID)
+}
+
+func (e *ImportInProgressError) Is(target error) bool { return target == ErrImportInProgress }
+
+// Состояния задачи импорта в очереди (GeoImportJob.state, R7).
+const (
+	JobQueued    = "queued"
+	JobRunning   = "running"
+	JobCompleted = "completed"
+	JobFailed    = "failed"
+	JobCancelled = "cancelled"
+)
+
+// ImportJob — задача импорта в очереди (getGeoImportJob, cancelGeoImportJob). ImportID — последняя строка журнала
+// задачи (nil — задача ещё не начиналась).
+type ImportJob struct {
+	JobID                int64
+	State                string
+	ImportID             *uuid.UUID
+	Attempt, MaxAttempts int
+	CreatedAt            time.Time
+}

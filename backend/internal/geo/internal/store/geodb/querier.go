@@ -148,8 +148,13 @@ type Querier interface {
 	ImportFindOwnRunning(ctx context.Context, arg ImportFindOwnRunningParams) (uuid.UUID, error)
 	ImportInsertAdmin1Names(ctx context.Context, arg ImportInsertAdmin1NamesParams) (int64, error)
 	ImportInsertPlaceNames(ctx context.Context, arg ImportInsertPlaceNamesParams) (int64, error)
+	// Отмены одной задачи импорта сериализуются (K6): эксклюзивный advisory-замок транзакции (класс, id задачи по
+	// модулю 2^31 − 1 — совпадение ключей двух задач только заставит отмены подождать друг друга).
+	ImportJobCancelLock(ctx context.Context, arg ImportJobCancelLockParams) error
 	// Мест в прошлом успешном импорте страны — база порога 90 % (шаг 4).
 	ImportLastSucceededPlaces(ctx context.Context, countryCode string) (int32, error)
+	// Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id.
+	ImportLatestByJob(ctx context.Context, riverJobID int64) (uuid.UUID, error)
 	ImportLinkCity(ctx context.Context, arg ImportLinkCityParams) (int64, error)
 	// Региону, найденному по названию, — код admin1 (если пуст и не занят другим регионом страны:
 	// уникальность regions_country_admin1_key).
@@ -164,6 +169,10 @@ type Querier interface {
 	// региону, — 0 строк.
 	ImportRegionNamesFromAdmin1(ctx context.Context, arg ImportRegionNamesFromAdmin1Params) (int64, error)
 	ImportRestart(ctx context.Context, arg ImportRestartParams) error
+	// Постановка и отмена импорта из админки (план B, Task 14; роль admin).
+	// Строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+	// оператора, job_id в ответе нет).
+	ImportRunningJob(ctx context.Context, countryCode string) (*int64, error)
 	ImportStart(ctx context.Context, arg ImportStartParams) error
 	ImportSucceed(ctx context.Context, arg ImportSucceedParams) (int64, error)
 	// Заведённые города страны без geoname_id — кандидаты сверки (шаг 5).

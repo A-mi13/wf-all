@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"wf/backend/internal/geo"
 	geoadmin "wf/backend/internal/geo/admin"
@@ -21,12 +23,17 @@ import (
 // Страны (Task 13) за полным конвейером на настоящих staff и подтверждениях: действия geo.country_create и
 // geo.country_rules зарегистрированы как в сборке admin-api (до Validate), хук замка акторов — staff.
 
-// newGeoStaffEnv — newStaffEnv с собранным хендлером geo и его действиями в реестре подтверждений.
+// newGeoStaffEnv — newStaffEnv с собранным хендлером geo (с клиентом River для импорта, Task 14) и его действиями в
+// реестре подтверждений.
 func newGeoStaffEnv(t *testing.T) *staffEnv {
 	t.Helper()
 	var gh *geoadmin.Handler
 	e := newStaffEnv(t, func(o *admin.Options) {
-		gh = geoadmin.New(geo.New(o.DB), geoadmin.Deps{Pool: o.DB, Clock: o.Clock})
+		rc, err := river.NewClient(riverpgxv5.New(o.DB), &river.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		gh = geoadmin.New(geo.New(o.DB), geoadmin.Deps{Pool: o.DB, Clock: o.Clock, River: rc})
 		o.Geo = gh
 	})
 	gh.RegisterApprovals(e.reg, e.approvals)

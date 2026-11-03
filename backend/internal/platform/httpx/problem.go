@@ -41,6 +41,9 @@ type Problem struct {
 	// или текущий пароль (admin-api, спека сотрудников §7). Указатель: 0 — вход закрыт, поле
 	// уходит; nil — поля нет.
 	AttemptsLeft *int `json:"attempts_left,omitempty"`
+	// JobID — id задачи импорта, которая уже стоит в очереди или выполняется (409 geo.import_in_progress админки,
+	// R26 плана B): экран находит её и предлагает отменить без памяти клиента. nil — поля нет.
+	JobID *int64 `json:"job_id,omitempty"`
 }
 
 func WriteProblem(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
@@ -87,6 +90,13 @@ func NewFieldError(field, code string) *Error {
 func (e *Error) WithAttemptsLeft(n int) *Error {
 	p := e.p
 	p.AttemptsLeft = &n
+	return &Error{p: p}
+}
+
+// WithJobID — та же ошибка с job_id = id (R26): новая *Error, исходная не меняется.
+func (e *Error) WithJobID(id int64) *Error {
+	p := e.p
+	p.JobID = &id
 	return &Error{p: p}
 }
 

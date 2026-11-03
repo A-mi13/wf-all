@@ -83,10 +83,6 @@ func TestNoStubOperations(t *testing.T) {
 // pendingOps — операции плана B, объявленные в контракте (Task 7) раньше своих хендлеров (R17): отвечают
 // 501. Каждая задача 9–15 убирает свои строки, Task 16 удаляет список.
 var pendingOps = map[string]bool{
-	// Task 14 — импорт
-	"startGeoImport":     true,
-	"getGeoImportJob":    true,
-	"cancelGeoImportJob": true,
 	// Task 15 — версии приложения и флаги
 	"listAppVersions":   true,
 	"putAppVersions":    true,

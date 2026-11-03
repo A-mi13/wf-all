@@ -165,3 +165,26 @@ func TestErrorWithAttemptsLeft(t *testing.T) {
 		t.Fatal("attempts_left у ошибки без счётчика — WithAttemptsLeft изменил исходную")
 	}
 }
+
+// R26 (ревью G4): 409 geo.import_in_progress несёт job_id существующей задачи — поле Problem job_id (int64, 0 тоже
+// уходит); WithJobID исходную ошибку не трогает, без него поля нет (прочие ответы не меняются, omitempty).
+func TestErrorWithJobID(t *testing.T) {
+	base := httpx.NewError(http.StatusConflict, httpx.CodeIdempotencyInProgress)
+	for _, id := range []int64{1842, 0, 1 << 62} {
+		rec := httptest.NewRecorder()
+		httpx.WriteError(slog.New(slog.DiscardHandler), rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil),
+			fmt.Errorf("обёртка: %w", base.WithJobID(id)))
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusConflict || string(m["job_id"]) != fmt.Sprint(id) {
+			t.Fatalf("job_id = %s, ждали %d (%d)", m["job_id"], id, rec.Code)
+		}
+	}
+	rec := httptest.NewRecorder()
+	httpx.WriteError(slog.New(slog.DiscardHandler), rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil), base)
+	if _, ok := decode(t, rec)["job_id"]; ok {
+		t.Fatal("job_id у ошибки без задачи — WithJobID изменил исходную")
+	}
+}

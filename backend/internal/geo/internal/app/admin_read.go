@@ -457,11 +457,17 @@ func reportOf(ctx context.Context, q *geodb.Queries, rep report, locale string) 
 	return out, nil
 }
 
+// labelClockSkew — допуск расхождения часов в сопоставлении подписи (m1 ревью G5): created_at записи постановки —
+// время базы (now() транзакции admin-api, как у всех записей журнала), started_at строки — часы воркера (правило
+// clock.Clock, другой хост). Схему и источник времени журнала не меняем: сравниваются два источника, поэтому с
+// допуском; настоящий повтор river_job.id (сброс последовательности River) отстоит на дни, а не на минуту.
+const labelClockSkew = time.Minute
+
 // labelImports — started_by_label строк из записей аудита постановки geo.import_requested (R3): один запрос
 // журнала по объектам id.Named(geonames_import_job, <job_id>) строк с river_job_id (страница — до auditPage
-// записей, больше — следующие страницы). Строке — новейшая запись её задачи с created_at ≤ started_at строки:
-// после сброса последовательности river_job.id повторится, и без привязки ко времени подпись досталась бы чужому
-// импорту. Оператор (river_job_id нет) и строка без записи — nil (экран: «сотрудник»).
+// записей, больше — следующие страницы). Строке — новейшая запись её задачи с created_at ≤ started_at строки +
+// labelClockSkew: после сброса последовательности river_job.id повторится, и без привязки ко времени подпись
+// досталась бы чужому импорту. Оператор (river_job_id нет) и строка без записи — nil (экран: «сотрудник»).
 func (r *AdminReader) labelImports(ctx context.Context, items []geo.Import) error {
 	objects := map[uuid.UUID]bool{}
 	var latest time.Time
@@ -483,7 +489,7 @@ func (r *AdminReader) labelImports(ctx context.Context, items []geo.Import) erro
 	}
 	// записи новые сверху; To — исключительно, поэтому +1 мкс (точность timestamptz)
 	p := audit.ListParams{ActionPrefix: importRequestedAction, ObjectType: importJobObject, ObjectIDs: ids,
-		To: latest.Add(time.Microsecond), Limit: auditPage}
+		To: latest.Add(labelClockSkew + time.Microsecond), Limit: auditPage}
 	byObject := map[uuid.UUID][]audit.Record{}
 	for {
 		recs, next, err := audit.List(ctx, r.pool, p)
@@ -505,7 +511,7 @@ func (r *AdminReader) labelImports(ctx context.Context, items []geo.Import) erro
 		}
 		// записи объекта — новые сверху: первая не позже начала строки — новейшая подходящая
 		for _, rec := range byObject[importJobID(*it.RiverJobID)] {
-			if !rec.CreatedAt.After(it.StartedAt) {
+			if !rec.CreatedAt.After(it.StartedAt.Add(labelClockSkew)) {
 				if rec.ActorLabel != "" {
 					label := rec.ActorLabel
 					it.StartedByLabel = &label
