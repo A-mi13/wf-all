@@ -1,5 +1,4 @@
-import '@wf/tokens/tokens.css';
-import './app/fonts';
+import './app/styles';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';

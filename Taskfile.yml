@@ -99,6 +99,10 @@ tasks:
     # через pnpm — чтобы работал Node из devEngines, а не предустановленный на раннере
     cmds: ['pnpm run design:test']
 
+  scripts:test:
+    desc: Тесты скриптов репозитория (scripts/*.test.mjs — снимки админки и др.)
+    cmds: ['node --test "scripts/*.test.mjs"']
+
   secrets:
     desc: gitleaks по истории репозитория
     cmds: ['{{.TOOLS}}/gitleaks git --redact --verbose']
@@ -114,6 +118,7 @@ tasks:
       - task: workflows
       - task: packages:ci
       - task: design:test
+      - task: scripts:test
       - task: backend:ci
       # ломающие правки контрактов против origin/main — как шаг job backend в CI (PR #12: выпадал локально)
       - task: contracts:breaking

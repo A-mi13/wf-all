@@ -12,6 +12,11 @@ tasks:
   e2e:
     desc: Живой e2e (Playwright + admin-api + Postgres wf_e2e + Mailpit; порты 5174/5175, 18181/18182, 18026/11026)
     cmds: ['bash ../../scripts/e2e-admin.sh {{.CLI_ARGS}}']
+  shots:
+    desc: Снимки экранов для ревьюера (Vite в режиме shots с моками MSW в браузере, порт 5176, + Playwright) — ./task admin:shots -- <пути> --out <каталог>
+    # --out — от места запуска task; снимки временные (.superpowers/sdd/<сессия>/shots/…), не коммитятся
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds: ['node "{{.TASKFILE_DIR}}/../../scripts/admin-shots.mjs" {{.CLI_ARGS}}']
   lint: { cmds: ['pnpm lint'] }
   typecheck: { cmds: ['pnpm typecheck'] }
   build: { cmds: ['pnpm build'] }
