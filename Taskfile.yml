@@ -53,6 +53,8 @@ tasks:
       - pnpm --filter @wf/contracts gen:web
       - pnpm --filter @wf/contracts gen:admin
       - pnpm --filter @wf/tokens build
+      # иконки артборда 14 → packages/icons/icons.json (дорисованное — icons.extra.json, руками)
+      - node design/tools/extract-icons.mjs
 
   contracts:breaking:
     desc: Ломающие изменения контрактов относительно базы (CONTRACTS_BASE, по умолчанию origin/main)
@@ -89,7 +91,7 @@ tasks:
   packages:ci:
     desc: Тесты, typecheck и линт границ общих пакетов и контрактов
     cmds:
-      - pnpm --filter @wf/config --filter @wf/tokens --filter @wf/i18n --filter @wf/contracts test
+      - pnpm --filter @wf/config --filter @wf/tokens --filter @wf/icons --filter @wf/i18n --filter @wf/contracts test
       - pnpm --filter @wf/i18n typecheck
       # пакеты не импортируют приложения — корневой eslint.config.mjs
       - pnpm run lint:packages

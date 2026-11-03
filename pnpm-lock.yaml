@@ -84,6 +84,9 @@ importers:
       '@wf/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@wf/icons':
+        specifier: workspace:*
+        version: link:../../packages/icons
       '@wf/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
@@ -294,6 +297,15 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 5.0.5(@types/node@26.6.2)(jsdom@30.1.1)(msw@2.15.0(@types/node@26.6.2)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.2)(yaml@2.9.1))
+
+  packages/icons:
+    devDependencies:
+      '@wf/config':
+        specifier: workspace:*
+        version: link:../config
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
 
   packages/tokens: {}
 

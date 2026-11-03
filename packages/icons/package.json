@@ -1,0 +1,16 @@
+{
+  "name": "@wf/icons",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./icons.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@wf/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}
