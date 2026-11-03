@@ -16,7 +16,7 @@ export const SHOTS_ROLES = {
 export type ShotsRole = keyof typeof SHOTS_ROLES;
 
 const isRole = (v: string): v is ShotsRole => Object.hasOwn(SHOTS_ROLES, v);
-const isLocale = (v: string): v is Me['locale'] => v === 'ru' || v === 'en';
+const isLocale = (v: string): v is NonNullable<Me['locale']> => v === 'ru' || v === 'en';
 
 export function shotsMe(params: URLSearchParams): { role: ShotsRole; me: Me | null } {
   const role = params.get('shots-role') ?? 'admin';
