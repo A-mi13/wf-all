@@ -428,3 +428,38 @@ func jsonEqual(got, want any) bool {
 	wb, _ := json.Marshal(b)
 	return string(ga) == string(wb)
 }
+
+// m7 ревью G6 (решение пользователя 03.11): префикс телефона страны в аудите не маскируется — и у прямой правки
+// (from/to — before/after), и у исполнения geo.country_rules (after подтверждающего), и в аудите создания страны.
+func TestCountryAuditShowsPhonePrefix(t *testing.T) {
+	e := newCountryEnv(t)
+	a, b := staffAs(perm.Admin), staffAs(perm.Owner)
+	if _, ap, err := e.a.UpdateCountry(context.Background(), a, "RU", app.CountryPatch{PhonePrefix: strp("+8")}, "", approvals.Meta{}); err != nil || ap != nil {
+		t.Fatalf("%+v %v", ap, err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'geo.country_updated' AND actor_staff_id = $1
+		AND before = '{"phone_prefix":"+7"}'::jsonb AND after = '{"phone_prefix":"+8"}'::jsonb`, a.StaffID); n != 1 {
+		t.Fatalf("прямая правка: %d", n)
+	}
+	_, ap, err := e.a.UpdateCountry(context.Background(), a, "RU", app.CountryPatch{PhonePrefix: strp("+9"), Currency: strp("USD")}, "", approvals.Meta{})
+	if err != nil || ap == nil {
+		t.Fatalf("%+v %v", ap, err)
+	}
+	if res, err := e.approve(t, b, ap.ID); err != nil || res.Status != approvals.StatusExecuted {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'geo.country_updated' AND actor_staff_id = $1
+		AND before->>'phone_prefix' = '+8' AND after->>'phone_prefix' = '+9'`, b.StaffID); n != 1 {
+		t.Fatalf("исполнение geo.country_rules: %d", n)
+	}
+	cr, err := e.a.CreateCountry(context.Background(), a, kz(), approvals.Meta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := e.approve(t, b, cr.ID); err != nil || res.Status != approvals.StatusExecuted {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'geo.country_created' AND after->>'phone_prefix' = '+7'`); n != 1 {
+		t.Fatalf("создание: %d", n)
+	}
+}

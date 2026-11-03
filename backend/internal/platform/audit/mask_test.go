@@ -250,3 +250,37 @@ func TestMaskClientIPAndStaffSecrets(t *testing.T) {
 		}
 	}
 }
+
+// m7 ревью G6 (решение пользователя 03.11): префикс телефона страны («+7») — код страны, не ПД: ключ ровно
+// phone_prefix (в любом написании) в аудите стран виден как есть. Исключение узкое — по полному имени поля: телефоны и
+// любые другие ключи со словом phone по-прежнему маскируются.
+func TestMaskPhonePrefixIsPublic(t *testing.T) {
+	cases := []struct {
+		key  string
+		in   any
+		want any
+	}{
+		{"phone_prefix", "+7", "+7"},
+		{"phonePrefix", "+998", "+998"},
+		{"PhonePrefix", "+1", "+1"},
+		// не ослабление маски телефонов: соседние ключи — как раньше
+		{"phone", "+79181234567", "***67"},
+		{"contact_phone", "+79181234567", "***67"},
+		{"phone_number", "+79181234567", "***67"},
+		{"contact_phone_prefix", "+7", "***"},
+		{"phone_prefix_hint", "+7", "***"},
+	}
+	for _, c := range cases {
+		got := maskMap(t, map[string]any{c.key: c.in})[c.key]
+		if !equalJSON(got, c.want) {
+			t.Errorf("%s: %v -> %v, ждали %v", c.key, c.in, got, c.want)
+		}
+	}
+	// вложенные from/to аудита правки страны
+	got := maskMap(t, map[string]any{"from": map[string]any{"phone_prefix": "+7"}, "to": map[string]any{"phone_prefix": "+8"},
+		"staff": map[string]any{"phone": "+79181234567"}})
+	if !equalJSON(got["from"], map[string]any{"phone_prefix": "+7"}) || !equalJSON(got["to"], map[string]any{"phone_prefix": "+8"}) ||
+		!equalJSON(got["staff"], map[string]any{"phone": "***67"}) {
+		t.Fatalf("вложенные: %v", got)
+	}
+}

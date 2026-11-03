@@ -65,7 +65,8 @@ paths:
   (копия `append(make([]uuid.UUID, 0, len(s.CityIDs)), s.CityIDs...)`), скоуп выбирается по `GrantScoped`, а не по
   `len`: модератор без городов видит только свои записи, а не весь журнал. IP
   наружу — подсетью `audit.MaskIP` (/24, /48). Слово `code` в ключе — секрет, кроме кода-справочника
-  (`country_code`, `error_code`: список `publicCode`).
+  (`country_code`, `error_code`: список `publicCode`). Ключ целиком из `publicKey` не маскируется: `phone_prefix`
+  (префикс телефона страны «+7» — код страны, не ПД; m7 ревью G6); узко — `phone`, `contact_phone_prefix` как раньше.
   Роль обязательна всегда; `insert` повторяет CHECK `audit_log` из 0020 (роль из списка, служебная ⇔ нет автора, у
   сотрудника — роль сотрудника и `ActorLabel` 1–120 символов) и отвергает нарушение `ErrInvalidEntry` до SQL: поменял
   CHECK — поменяй списки ролей в `audit/audit.go`; расхождение списков и CHECK ловит `TestActorRolesMatchCheck`
