@@ -1,15 +1,13 @@
 import '../app/styles';
 import { type ComponentType, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from '../App';
 import { createApi } from '../api/client';
-import type { Me } from '../app/permissions';
 import { createQueryClient } from '../app/query';
-import { meGeoModerator } from '../test/geo';
-import { meAdmin, meOwner, meSetup } from '../test/me';
 import { problem } from '../test/problem';
 import { sectionsServer } from '../test/sections';
+import { shotsMe } from './params';
 import { http, server, start } from './server';
+import { ShotsRoot } from './ShotsRoot';
 
 // Точка входа режима shots (спека §5.4, план UF1a.1): та же админка, что src/main.tsx (стили —
 // app/styles.ts, App на browser history), но API отвечают моки MSW в браузере на фикстурах тестов.
@@ -19,23 +17,12 @@ import { http, server, start } from './server';
 // scripts/admin-shots.mjs. В обычную сборку модуль не попадает (страж src/shots/shots.test.ts).
 // ?shots-story=<путь от src без .stories.tsx>:<экспорт> — снимок истории компонента вместо приложения.
 
-const ROLES: Record<string, Me | null> = {
-  owner: meOwner,
-  admin: meAdmin,
-  moderator: meGeoModerator,
-  setup: meSetup,
-  anonymous: null,
-};
-
 // Секрет-фикстура экрана настройки 2FA (как в тестах SetupMfaPage) — не настоящий.
 const MFA_SECRET = 'JBSWY3DPEHPK3PXP';
 
 const params = new URLSearchParams(location.search);
-const roleName = params.get('shots-role') ?? 'admin';
-if (!(roleName in ROLES)) throw new Error(`shots: неизвестная роль ${roleName}`);
-const locale = params.get('shots-locale');
-const base = ROLES[roleName] ?? null;
-const me: Me | null = base && locale ? { ...base, locale } : base;
+// неизвестные роль или язык — ошибка до моков (pageerror → скрипт снимков выходит с кодом 1)
+const { role: roleName, me } = shotsMe(params);
 
 sectionsServer();
 server.use(
@@ -80,7 +67,7 @@ const root = document.getElementById('root');
 if (!root) throw new Error('нет #root в index.html');
 createRoot(root).render(
   <StrictMode>
-    {Story ? <Story /> : <App api={createApi('')} queryClient={queryClient} />}
+    <ShotsRoot api={createApi('')} queryClient={queryClient} Story={Story} />
   </StrictMode>,
 );
 

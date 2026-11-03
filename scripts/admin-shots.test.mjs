@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { parseArgs, planShots, shotUrl, slug } from './admin-shots.mjs';
+import { consoleProblem, parseArgs, planShots, shotUrl, slug } from './admin-shots.mjs';
 
 // Снимки для ревьюера (спека §5.4, план UF1a.1): разбор аргументов и раскладка файлов. Браузер и Vite
 // здесь не запускаются — только чистые функции скрипта.
@@ -117,4 +117,33 @@ test('адрес снимка: роль и язык — параметрами, 
     shotUrl('http://127.0.0.1:5176', '/geo/cities?q=a', 'owner', 'en'),
     'http://127.0.0.1:5176/geo/cities?q=a&shots-role=owner&shots-locale=en',
   );
+});
+
+// Ответ мока не-2xx (401 у anonymous, 403 «нет прав», 404 «не найден») Chromium сам пишет в консоль как
+// error «Failed to load resource» — это штатный ответ, не проблема снимка (раунд 1 ревью, I-2).
+// Неописанный запрос ловят console.error MSW и счётчик __wfShots.unhandled.
+test('ошибки консоли: «Failed to load resource» для /v1/* того же origin — не проблема', () => {
+  const base = 'http://127.0.0.1:5176';
+  const failed =
+    'Failed to load resource: the server responded with a status of 401 (Unauthorized)';
+  assert.equal(consoleProblem('error', failed, `${base}/v1/staff/me`, base), null);
+  assert.equal(consoleProblem('error', failed, `${base}/v1/geo/cities/x?lang=ru`, base), null);
+  // модуль, шрифт или чужой origin — проблема
+  assert.match(
+    consoleProblem('error', failed, `${base}/src/x.tsx`, base),
+    /Failed to load resource/,
+  );
+  assert.match(consoleProblem('error', failed, 'http://evil.test/v1/staff/me', base), /Failed/);
+  assert.match(consoleProblem('error', failed, `${base}/v1x/staff`, base), /Failed/);
+  assert.match(consoleProblem('error', failed, '', base), /Failed/);
+  // неописанный запрос MSW и исключения — проблема
+  const msw = 'MSW: неописанный запрос — GET http://127.0.0.1:5176/v1/audit';
+  assert.match(
+    consoleProblem('error', msw, `${base}/src/shots/server.ts`, base),
+    /неописанный запрос/,
+  );
+  assert.match(consoleProblem('error', 'Uncaught Error', `${base}/v1/staff/me`, base), /Uncaught/);
+  // не ошибки — не проблема
+  assert.equal(consoleProblem('warning', failed, `${base}/src/x.tsx`, base), null);
+  assert.equal(consoleProblem('log', 'hello', '', base), null);
 });

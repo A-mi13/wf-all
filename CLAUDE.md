@@ -56,7 +56,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
   самому; красное — чинить до PR (на PR #11 CI дважды падал на lint, которого не было локально).
 - Снимки экранов админки для ревьюера — `./task admin:shots -- <пути> --out <каталог>` (Vite `--mode shots` с моками
   MSW в браузере на фикстурах тестов + Playwright; 1440/768/390 × тёмная/светлая, `--role`, `--locale en`,
-  история компонента — путь `/?shots-story=ui/icon/Icon:AllIcons`; работает на Windows, в Git Bash пути без ведущего `/`
+  история компонента — путь `'?shots-story=ui/icon/Icon:AllIcons'` (в кавычках; скрипт сам добавит `/`); работает на Windows, в Git Bash пути без ведущего `/`
   или `MSYS_NO_PATHCONV=1`). Каталог — `.superpowers/sdd/<сессия>/shots/<группа>/`; PNG не коммитятся и удаляются
   после ревью. Тесты скриптов репозитория — `./task scripts:test`.
 - Кодогенерация — `./task gen`; сгенерированное коммитится (`gen:check` в CI сверяет).

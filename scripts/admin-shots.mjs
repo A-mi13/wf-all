@@ -122,6 +122,23 @@ export function shotUrl(base, path, role, locale) {
   return url.href;
 }
 
+// Сообщение консоли страницы → текст проблемы или null. Ответ мока не-2xx (401 anonymous, 403 «нет прав»,
+// 404 «не найден») Chromium сам пишет как error «Failed to load resource» — для /v1/* того же origin это
+// штатный ответ моков (неописанный запрос ловят console.error MSW и __wfShots.unhandled); тот же текст
+// для модуля, шрифта или чужого адреса — проблема.
+export function consoleProblem(type, text, url, base) {
+  if (type !== 'error') return null;
+  if (text.startsWith('Failed to load resource')) {
+    try {
+      const u = new URL(url);
+      if (u.origin === new URL(base).origin && u.pathname.startsWith('/v1/')) return null;
+    } catch {
+      // адреса нет — не наш ответ API
+    }
+  }
+  return `console.error — ${text}${url ? ` (${url})` : ''}`;
+}
+
 // ——— запуск ———
 
 const adminDir = resolve(import.meta.dirname, '../apps/admin');
@@ -205,7 +222,8 @@ async function main(argv) {
       const page = await context.newPage();
       const where = `${shot.path} @${shot.width} ${shot.theme}`;
       page.on('console', (m) => {
-        if (m.type() === 'error') problems.push(`${where}: console.error — ${m.text()}`);
+        const problem = consoleProblem(m.type(), m.text(), m.location().url, base);
+        if (problem) problems.push(`${where}: ${problem}`);
       });
       page.on('pageerror', (e) => problems.push(`${where}: ${e.message}`));
       try {
