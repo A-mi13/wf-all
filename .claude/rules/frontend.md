@@ -28,6 +28,10 @@ paths:
 - Приложения не импортируют друг друга; общее — только `@wf/*` из `packages/` (eslint-plugin-boundaries). Пакеты не импортируют приложения — корневой `eslint.config.mjs`, `pnpm run lint:packages` в `packages:ci`. Клиент админского API — только в `apps/admin`.
 - Клиент API — через `ApiProvider`/`useApi`; адрес — тот же origin (`/v1` проксирует dev-сервер: rewrites в `next.config.ts` → `WF_API_ORIGIN`, `server.proxy` в `vite.config.ts` → `WF_ADMIN_API_ORIGIN`; серверные, без `VITE_`/`NEXT_PUBLIC_`).
 - Цвета, отступы, шрифты — только CSS-переменные `--wf-*` из `@wf/tokens`; `tokens.css` сгенерирован, руками не править.
+- Иконки и иллюстрации — только `@wf/icons` (`packages/icons`): `icons.json` — выгрузка артборда 14
+  (`node design/tools/extract-icons.mjs`, руками не править), `icons.extra.json` — меню (`nav`) и дорисованные
+  (`drawn`, каждая — строкой «дорисовано *» в `design/README.md`). Своих SVG-контуров в приложениях нет; пакет —
+  данные, рендер — у приложения (в админке `Icon`/`Illustration`), цвет — классами по роли слоя, не атрибутами.
 - Строки в компонентах — только через `useTranslations`; новый ключ — сразу в `ru.json` и `en.json`.
 - Тест компонента — `renderWithProviders` (`src/test/render.tsx`) + MSW-моки из `src/test/server.ts`.
 - Async Server Components Next — через Playwright (`apps/web/e2e`), Vitest их не рендерит.
