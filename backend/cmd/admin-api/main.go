@@ -147,8 +147,9 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 				Staff:          a.staff,
 				// тот же сервис, в котором staff зарегистрировал действия (ревью 10b: два сервиса — approve 500)
 				Approvals: a.approvals,
-				Geo:       geoadmin.New(geo.New(pool), geoadmin.Deps{Pool: pool, Clock: a.deps.Clock, Log: log}),
-				Clock:     a.deps.Clock,
+				// geo собран в assemble: его действия подтверждения — в том же реестре и сервисе (Task 16)
+				Geo:   a.geo,
+				Clock: a.deps.Clock,
 			})
 			if err != nil {
 				return server.Service{}, err
@@ -161,17 +162,24 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		})
 }
 
-// assembly — модуль staff на пуле admin-api: зависимости сценариев, хендлер и сервис подтверждений, в котором
-// staff зарегистрировал свои действия (одна переменная на всё: Options.Approvals, RegisterApprovals, чистка).
+// assembly — модули на пуле admin-api: зависимости staff, хендлеры staff и geo, реестр и сервис подтверждений, в
+// которых оба модуля зарегистрировали свои действия (одна переменная на всё: Options.Approvals, RegisterApprovals,
+// чистка). geoDeps — зависимости хендлера geo (клиент River — тот же, что у staff).
 type assembly struct {
 	deps      staff.Deps
 	staff     *staffadmin.Handler
+	geo       *geoadmin.Handler
+	geoDeps   geoadmin.Deps
+	reg       *approvals.Registry
 	approvals *approvals.Service
 }
 
-// assemble — сборка staff для сервера и команд оператора. Deps.River — клиент только для вставки: сценарии и
-// команды ставят staff.mail в транзакции действия; исполняет письма отдельный клиент фона (у него в
-// исполнителях Deps — иначе цикл). Реестр подтверждений проверяется сразу: невалидный — отказ старта.
+// assemble — сборка staff и geo для сервера и команд оператора. Deps.River — клиент только для вставки: сценарии и
+// команды ставят staff.mail в транзакции действия, geo — задачу geo.import (тот же клиент); исполняет письма
+// отдельный клиент фона (у него в исполнителях Deps — иначе цикл). Действия подтверждения staff и geo
+// (geo.country_rules, geo.country_create — LockActors, хук замка акторов ставит staff) регистрируются в одном реестре
+// до Validate: невалидный — отказ старта (ревью G6: без geo собранный сервер отвечал на approve стран 500). Команды
+// оператора хендлер geo не используют.
 func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys.Ring, cat *i18n.Catalog) (assembly, error) {
 	ins, err := river.NewClient(riverpgxv5.New(pool), queue.InsertConfig(log))
 	if err != nil {
@@ -190,10 +198,13 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 	reg := approvals.NewRegistry()
 	svc := approvals.New(pool, d.Clock, reg)
 	h.RegisterApprovals(reg, svc)
+	gd := geoadmin.Deps{Pool: pool, Clock: d.Clock, River: ins, Log: log}
+	gh := geoadmin.New(geo.New(pool), gd)
+	gh.RegisterApprovals(reg, svc)
 	if err := reg.Validate(); err != nil {
 		return assembly{}, fmt.Errorf("admin-api: реестр подтверждений: %w", err)
 	}
-	return assembly{deps: d, staff: h, approvals: svc}, nil
+	return assembly{deps: d, staff: h, geo: gh, geoDeps: gd, reg: reg, approvals: svc}, nil
 }
 
 // background — фон сервера: исполняющий River-клиент (очередь staff — письма; периодика платформы

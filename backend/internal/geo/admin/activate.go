@@ -38,8 +38,12 @@ func (h *Handler) ActivateGeoCity(ctx context.Context, req oapi.ActivateGeoCityR
 		Headers: oapi.ActivateGeoCity200ResponseHeaders{Vary: varyLanguage, ContentLanguage: lang}}, nil
 }
 
-// meta — откуда запрос для аудита (R20): IP — peer конвейера. User-Agent strict-хендлер не видит: его в ctx
-// операций geo кладёт requestMeta сборки (Task 16, TestGeoOperationsCarryMeta); до неё — пусто.
+// meta — откуда запрос для аудита (R20): IP и User-Agent (≤ 512 байт) кладёт в ctx requestMeta сборки
+// (approvals.WithMeta; TestGeoOperationsCarryMeta); без него (хендлер вне сборки admin) — IP из peer, UA пуст.
 func meta(ctx context.Context) approvals.Meta {
-	return approvals.Meta{IP: peer.From(ctx).IP}
+	m := approvals.MetaFrom(ctx)
+	if !m.IP.IsValid() {
+		m.IP = peer.From(ctx).IP
+	}
+	return m
 }

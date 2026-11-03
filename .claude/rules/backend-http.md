@@ -76,16 +76,23 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
-  собранных staff, geo и подтверждениях отвечает не 501; исключение до Task 16 плана B — операции из `pendingOps`, они
-  обязаны отвечать 501, реализованная операция из списка — падение); нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
+  собранных staff, geo и подтверждениях отвечает не 501; временный список `pendingOps` плана B удалён в Task 16);
+  нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
   `501 http.not_implemented` без паники. Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод
   ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`)
-  и `requestMeta` (внешний: `approvals.Meta{IP: peer, UserAgent: httpx.UserAgent(r)}` — UA не длиннее 512 байт,
-  страж `TestDecisionHugeUserAgent` — в ctx операций платформы, `meta` staff их не видит; `auth.ErrSessionInvalid`
+  и `requestMeta` (внешний: `approvals.WithMeta(ctx, approvals.Meta{IP: peer, UserAgent: httpx.UserAgent(r)})` — UA
+  не длиннее 512 байт, страж `TestDecisionHugeUserAgent` — в ctx операций платформы и geo: geo читает
+  `approvals.MetaFrom`, страж `TestGeoOperationsCarryMeta`; `meta` staff их не видит; `auth.ErrSessionInvalid`
   операции — 401 и стирание cookie `clearSessionCookie`, как у Middleware staff, стражи
   `TestDecisionRevokedSessionClearsCookie`, `TestApproveSessionRevokedUnderLockClearsCookie`); операция — метод вида `(ctx, oapi.<Операция>RequestObject) (ответ, error)` (`staffadmin.IsOperation`:
   служебные методы той же формы, `Label`, — не операции). Cookie собранного хендлера staff (`CookieConfig`) обязана
   совпасть с `CookieName(CookieSecure)`/`CookieSecure` конвейера — иначе отказ старта (`TestNewHandlerCookieMismatch`).
+- **Сборка geo** (`cmd/admin-api`, `assemble`, Task 16 плана B): `geoadmin.New(geo.New(pool), geoadmin.Deps{Pool, Clock,
+  River, Log})` — `River` тот же клиент вставки, что `staff.Deps.River`; `geoH.RegisterApprovals(reg, svc)` — в тот же
+  реестр и сервис, что staff, до `reg.Validate()` (действия geo — `LockActors`: без хука staff отказ старта). Стражи на
+  настоящей сборке — `TestAssembleRegistersGeoActions`, `TestAssembleActorLockRequired`, `TestStartupWiring`
+  (`cmd/admin-api`). Тест прав по всем операциям идёт на настоящем хендлере geo (`liveGeo`): модератор чужого города
+  на `updateGeoCity` — 403 сценария.
 - **Операции платформы** (`server.go`, Task 10b): `Options.Approvals` (`ApprovalService` — `*approvals.Service`)
   задаётся ровно вместе с собранным `Options.Staff` (иначе отказ старта, `TestNewHandlerApprovalsWiring`); подпись
   решившего — `Staff.Label` (перечитывает учётку и сессию: выключен или сессия погашена — 401 со стиранием cookie,

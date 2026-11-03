@@ -1,10 +1,12 @@
 package admin_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -136,5 +138,33 @@ func TestImportPermissions(t *testing.T) {
 	wantProblem(t, e.send(http.MethodPost, cancelPath(job), sup.token, uuid.NewString(), ""), http.StatusForbidden, httpx.CodeForbidden)
 	if n := e.count(`SELECT count(*) FROM river_job WHERE kind = 'geo.import' AND state = 'available'`); n != 1 {
 		t.Fatalf("задач %d", n)
+	}
+}
+
+// R20, ревью G5: операции geo пишут в аудит IP и User-Agent запроса — requestMeta кладёт approvals.Meta в ctx всех
+// операций, geo читает его (раньше UA в аудите geo был пуст). UA длиннее 512 байт — обрезается, как у платформы.
+func TestGeoOperationsCarryMeta(t *testing.T) {
+	e := newGeoStaffEnv(t)
+	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
+	var stav uuid.UUID
+	if err := e.owner.QueryRow(context.Background(), `SELECT id FROM cities WHERE slug = 'stavropol'`).Scan(&stav); err != nil {
+		t.Fatal(err)
+	}
+	ua := "Mozilla/5.0 (meta-test) " + strings.Repeat("x", 600)
+	rec := e.send(http.MethodPost, "/v1/geo/cities/"+stav.String()+"/districts", adm.token, uuid.NewString(), `{"name":"Промышленный"}`,
+		"User-Agent", ua)
+	wantStatus(t, rec, http.StatusOK)
+	var got string
+	if err := e.owner.QueryRow(context.Background(), `SELECT user_agent FROM audit_log WHERE action = 'geo.district_created'
+		AND ip IS NOT NULL`).Scan(&got); err != nil {
+		t.Fatalf("аудит района: %v", err)
+	}
+	if len(got) != 512 || !strings.HasPrefix(got, "Mozilla/5.0 (meta-test) ") {
+		t.Fatalf("UA в аудите: %d байт %.40q", len(got), got)
+	}
+	rec = e.send(http.MethodPost, "/v1/geo/imports", adm.token, uuid.NewString(), `{"country":"RU"}`, "User-Agent", "WF-Admin/1.0")
+	wantStatus(t, rec, http.StatusAccepted)
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'geo.import_requested' AND user_agent = 'WF-Admin/1.0' AND ip IS NOT NULL`); n != 1 {
+		t.Fatalf("аудит постановки: %d", n)
 	}
 }

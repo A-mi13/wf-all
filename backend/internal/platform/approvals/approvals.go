@@ -304,3 +304,17 @@ type Meta struct {
 	IP        netip.Addr
 	UserAgent string
 }
+
+type metaKey struct{}
+
+// WithMeta — Meta запроса в ctx операции: кладёт strict-middleware admin-api (requestMeta, план B R20) для операций
+// платформы и модулей, у которых нет своего Middleware (geo); модуль читает MetaFrom.
+func WithMeta(ctx context.Context, m Meta) context.Context {
+	return context.WithValue(ctx, metaKey{}, m)
+}
+
+// MetaFrom — Meta запроса из ctx (WithMeta); нет — нулевая (NULL в журнале).
+func MetaFrom(ctx context.Context) Meta {
+	m, _ := ctx.Value(metaKey{}).(Meta)
+	return m
+}

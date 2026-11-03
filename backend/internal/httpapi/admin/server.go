@@ -59,13 +59,10 @@ var (
 	errForbidden       = httpx.NewError(http.StatusForbidden, httpx.CodeForbidden)
 )
 
-// metaKey — approvals.Meta запроса в ctx операций (requestMeta).
-type metaKey struct{}
-
-// requestMeta — strict-middleware операций платформы (сборка ставит его внешним, после Middleware staff):
-//   - откуда запрос (IP — peer, User-Agent — httpx.UserAgent: ≤ 512 байт) в ctx: strict-сервер не передаёт операции
-//     *http.Request, а meta модуля staff заполняет только его Middleware и только для операций тега staff
-//     (ревью 10a, отказ 3);
+// requestMeta — strict-middleware операций платформы и geo (сборка ставит его внешним, после Middleware staff):
+//   - откуда запрос (IP — peer, User-Agent — httpx.UserAgent: ≤ 512 байт) в ctx — approvals.WithMeta: strict-сервер
+//     не передаёт операции *http.Request, а meta модуля staff заполняет только его Middleware и только для операций
+//     тега staff (ревью 10a, отказ 3); geo читает approvals.MetaFrom (R20, Task 16 плана B);
 //   - auth.ErrSessionInvalid операции (подпись решившего или перепроверка подтверждающего под замком
 //     исполнителя approve: сессию погасили или учётку выключили после конвейера) — 401 и стирание cookie
 //     clearCookie, как у Middleware staff (ревью 10b m3, уборка №8 m3). Ошибки операций
@@ -73,7 +70,7 @@ type metaKey struct{}
 func requestMeta(clearCookie *http.Cookie) oapi.StrictMiddlewareFunc {
 	return func(f oapi.StrictHandlerFunc, _ string) oapi.StrictHandlerFunc {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
-			ctx = context.WithValue(ctx, metaKey{}, approvals.Meta{IP: peer.From(ctx).IP, UserAgent: httpx.UserAgent(r)})
+			ctx = approvals.WithMeta(ctx, approvals.Meta{IP: peer.From(ctx).IP, UserAgent: httpx.UserAgent(r)})
 			resp, err := f(ctx, w, r, req)
 			if err != nil && errors.Is(err, auth.ErrSessionInvalid) {
 				http.SetCookie(w, clearCookie)
@@ -85,10 +82,7 @@ func requestMeta(clearCookie *http.Cookie) oapi.StrictMiddlewareFunc {
 }
 
 // metaFrom — IP и User-Agent запроса для аудита решений.
-func metaFrom(ctx context.Context) approvals.Meta {
-	m, _ := ctx.Value(metaKey{}).(approvals.Meta)
-	return m
-}
+func metaFrom(ctx context.Context) approvals.Meta { return approvals.MetaFrom(ctx) }
 
 // Операции платформы (тег platform): подтверждения вдвоём (спека §4.8) и журнал действий (§5.3). Тонкие:
 // запрос → approvals.Service / audit.List → ответ контракта. Ошибки — через staffadmin.Problem (единственный

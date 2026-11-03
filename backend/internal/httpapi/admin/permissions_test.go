@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -11,9 +12,17 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"wf/backend/internal/geo"
+	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
+	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/platform/testkit/dbtest"
@@ -22,8 +31,9 @@ import (
 // Тест прав по всем операциям контракта admin (спека сотрудников §11, Task 10b): каждая операция × субъекты
 // «владелец, админ, модератор своего города, модератор чужого, поддержка, без сессии, mfa_pending, setup,
 // Reauth». Ожидания для ключей каталога выводятся из perm.Matrix, для handler — ручная таблица, сверенная с
-// матрицей. Хендлеры нулевые (тест конвейера, без сценариев): прошедший права запрос отвечает 501 заглушки
-// (журнал — 200: он читает базу без сценариев), отказ конвейера — 401/403 со своим кодом.
+// матрицей. Хендлер staff нулевой (прошедший права запрос отвечает 501 заглушки); журнал, версии, флаги и все
+// операции geo — настоящие (liveOps, liveGeo; план B Task 15–16): проход — не 401/403 и не 5xx, а модератор чужого
+// города на handler-операции (updateGeoCity) получает 403 от сценария. Отказ конвейера — 401/403 со своим кодом.
 
 // opRequest — запрос операции по схеме контракта (валидатор стоит до прав: тело обязано быть годным).
 type opRequest struct{ method, path, body string }
@@ -111,8 +121,9 @@ type cityRow struct{ own, foreign outcome }
 var cityRows = map[string]cityRow{
 	"getGeoCity":       {own: pass, foreign: forbidden}, // geo.cities.read — scoped
 	"listGeoDistricts": {own: pass, foreign: forbidden}, // geo.cities.read — scoped
-	// handler: конвейер город пути не сверяет — чужой город отсекает сценарий (Decide по полю, R10, Review Focus 1)
-	"updateGeoCity":     {own: pass, foreign: pass},
+	// handler: конвейер город пути не сверяет — чужой город отсекает сценарий (Decide по полю, R10, Review Focus 1):
+	// тест идёт на настоящем хендлере geo (Task 16, m6 плана A — раньше свой и чужой были неразличимы)
+	"updateGeoCity":     {own: pass, foreign: forbidden},
 	"linkGeoCity":       {own: forbidden, foreign: forbidden}, // geo.cities.manage — у модератора deny
 	"createGeoDistrict": {own: pass, foreign: forbidden},      // geo.districts.manage — scoped
 	"updateGeoDistrict": {own: pass, foreign: forbidden},      // geo.districts.manage — scoped
@@ -234,8 +245,28 @@ func expected(t *testing.T, op *openapi3.Operation, path string, s subject) outc
 	return pass
 }
 
+// liveGeo — настоящий хендлер geo на пуле теста: клиент River (импорт) и действия подтверждения geo в своём реестре
+// с подменёнными хуками staff (учёток тестовых субъектов в базе нет).
+func liveGeo(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *geoadmin.Handler {
+	t.Helper()
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh := geoadmin.New(geo.New(pool), geoadmin.Deps{Pool: pool, Clock: clk, River: rc})
+	reg := approvals.NewRegistry()
+	gh.RegisterApprovals(reg, approvals.New(pool, clk, reg))
+	reg.SetInitiatorCheck(func(context.Context, pgx.Tx, approvals.Approval) error { return nil })
+	reg.SetActorLock(func(context.Context, pgx.Tx, approvals.Approval, *auth.Staff) error { return nil })
+	if err := reg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return gh
+}
+
 // liveOps — операции платформы с настоящими хендлерами в сборке теста (Task 15): журнал проверяется выше по 200,
-// версии и флаги пишут базу — проход до хендлера по отсутствию отказа конвейера.
+// версии и флаги пишут базу — проход до хендлера по отсутствию отказа конвейера. Операции тега geo — тоже
+// настоящие (liveGeo, Task 16): «проход» — не 401 и не 403 конвейера или сценария, исход — забота сценария.
 var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "listFeatureFlags": {}, "updateFeatureFlag": {}}
 
 func TestPermissionsAllOperations(t *testing.T) {
@@ -254,6 +285,7 @@ func TestPermissionsAllOperations(t *testing.T) {
 	o := testOptions(t)
 	o.DB = pools.As // журнал читается под ролью admin
 	o.Sessions = &fakeSessions{staff: sessions}
+	o.Geo = liveGeo(t, pools.As, o.Clock)
 	h := newHandler(t, o)
 
 	for _, v := range cityRowViolations(spec, cityRows) {
@@ -277,6 +309,7 @@ func TestPermissionsAllOperations(t *testing.T) {
 				passStatus = http.StatusOK
 			}
 			_, live := liveOps[opID(op)]
+			live = live || slices.Contains(op.Tags, "geo")
 			row, cityOp := cityRows[opID(op)]
 			for _, s := range subjects {
 				want := expected(t, op, path, s)
