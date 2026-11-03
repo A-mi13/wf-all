@@ -9,8 +9,15 @@ import (
 )
 
 type Querier interface {
+	// Строка платформы под замком записи: «было» для аудита и сравнение «ничего не меняется».
+	AppVersionsForUpdate(ctx context.Context, platform string) (AppVersion, error)
 	// Версии приложения платформы; 0 строк — версии не заведены (публичная ручка отдаёт null-поля).
 	GetAppVersions(ctx context.Context, platform string) (AppVersion, error)
+	// Заведённые платформы для админки (план B, Task 15), по имени; незаведённую ручка отдаёт null-полями.
+	ListAppVersions(ctx context.Context) ([]AppVersion, error)
+	// Запись версий: новая строка — version 1 и updated_at из часов записывающего; правка — version + 1, updated_at
+	// ставит триггер set_updated_at (время базы; порядок правок — version).
+	UpsertAppVersions(ctx context.Context, arg UpsertAppVersionsParams) (AppVersion, error)
 }
 
 var _ Querier = (*Queries)(nil)

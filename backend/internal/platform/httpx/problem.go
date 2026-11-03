@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -83,6 +84,12 @@ func NewError(status int, code string) *Error {
 func NewFieldError(field, code string) *Error {
 	return &Error{p: Problem{Status: http.StatusBadRequest, Code: CodeValidationFailed,
 		Errors: []FieldError{{Field: field, Code: code}}}}
+}
+
+// NewFieldErrors — 400 validation.failed со всеми нарушенными полями сразу (правила записи сверх схемы, например
+// appversion.Validate: админка подсвечивает каждое поле). Пустой список — тоже 400 без полей.
+func NewFieldErrors(errs []FieldError) *Error {
+	return &Error{p: Problem{Status: http.StatusBadRequest, Code: CodeValidationFailed, Errors: slices.Clone(errs)}}
 }
 
 // WithAttemptsLeft — та же ошибка с attempts_left = n (неверный код или пароль): новая *Error,

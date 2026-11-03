@@ -7,7 +7,30 @@ package appversiondb
 
 import (
 	"context"
+	"time"
 )
+
+const appVersionsForUpdate = `-- name: AppVersionsForUpdate :one
+SELECT platform, min_version, recommended_version, store_url, version, updated_at
+FROM app_versions
+WHERE platform = $1
+FOR UPDATE
+`
+
+// Строка платформы под замком записи: «было» для аудита и сравнение «ничего не меняется».
+func (q *Queries) AppVersionsForUpdate(ctx context.Context, platform string) (AppVersion, error) {
+	row := q.db.QueryRow(ctx, appVersionsForUpdate, platform)
+	var i AppVersion
+	err := row.Scan(
+		&i.Platform,
+		&i.MinVersion,
+		&i.RecommendedVersion,
+		&i.StoreUrl,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
 
 const getAppVersions = `-- name: GetAppVersions :one
 SELECT platform, min_version, recommended_version, store_url, version, updated_at
@@ -18,6 +41,79 @@ WHERE platform = $1
 // Версии приложения платформы; 0 строк — версии не заведены (публичная ручка отдаёт null-поля).
 func (q *Queries) GetAppVersions(ctx context.Context, platform string) (AppVersion, error) {
 	row := q.db.QueryRow(ctx, getAppVersions, platform)
+	var i AppVersion
+	err := row.Scan(
+		&i.Platform,
+		&i.MinVersion,
+		&i.RecommendedVersion,
+		&i.StoreUrl,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listAppVersions = `-- name: ListAppVersions :many
+SELECT platform, min_version, recommended_version, store_url, version, updated_at
+FROM app_versions
+ORDER BY platform
+`
+
+// Заведённые платформы для админки (план B, Task 15), по имени; незаведённую ручка отдаёт null-полями.
+func (q *Queries) ListAppVersions(ctx context.Context) ([]AppVersion, error) {
+	rows, err := q.db.Query(ctx, listAppVersions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppVersion
+	for rows.Next() {
+		var i AppVersion
+		if err := rows.Scan(
+			&i.Platform,
+			&i.MinVersion,
+			&i.RecommendedVersion,
+			&i.StoreUrl,
+			&i.Version,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const upsertAppVersions = `-- name: UpsertAppVersions :one
+INSERT INTO app_versions (platform, min_version, recommended_version, store_url, updated_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (platform) DO UPDATE
+SET min_version = EXCLUDED.min_version, recommended_version = EXCLUDED.recommended_version,
+    store_url = EXCLUDED.store_url, version = app_versions.version + 1
+RETURNING platform, min_version, recommended_version, store_url, version, updated_at
+`
+
+type UpsertAppVersionsParams struct {
+	Platform           string
+	MinVersion         string
+	RecommendedVersion string
+	StoreUrl           string
+	UpdatedAt          time.Time
+}
+
+// Запись версий: новая строка — version 1 и updated_at из часов записывающего; правка — version + 1, updated_at
+// ставит триггер set_updated_at (время базы; порядок правок — version).
+func (q *Queries) UpsertAppVersions(ctx context.Context, arg UpsertAppVersionsParams) (AppVersion, error) {
+	row := q.db.QueryRow(ctx, upsertAppVersions,
+		arg.Platform,
+		arg.MinVersion,
+		arg.RecommendedVersion,
+		arg.StoreUrl,
+		arg.UpdatedAt,
+	)
 	var i AppVersion
 	err := row.Scan(
 		&i.Platform,

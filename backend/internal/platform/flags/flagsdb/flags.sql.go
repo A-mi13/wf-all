@@ -7,9 +7,39 @@ package flagsdb
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const flagByKey = `-- name: FlagByKey :one
+SELECT key, description, enabled_globally, enabled_city_ids, version, updated_at
+FROM feature_flags WHERE key = $1
+`
+
+type FlagByKeyRow struct {
+	Key             string
+	Description     string
+	EnabledGlobally bool
+	EnabledCityIds  []uuid.UUID
+	Version         int64
+	UpdatedAt       time.Time
+}
+
+// Строка флага до правки (без замка): «было» и сверка версии; гонку правок решает UpdateFlag (WHERE version).
+func (q *Queries) FlagByKey(ctx context.Context, key string) (FlagByKeyRow, error) {
+	row := q.db.QueryRow(ctx, flagByKey, key)
+	var i FlagByKeyRow
+	err := row.Scan(
+		&i.Key,
+		&i.Description,
+		&i.EnabledGlobally,
+		&i.EnabledCityIds,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
 
 const getFlag = `-- name: GetFlag :one
 SELECT key, enabled_globally FROM feature_flags WHERE key = $1
@@ -43,4 +73,91 @@ func (q *Queries) IsEnabled(ctx context.Context, arg IsEnabledParams) (bool, err
 	var enabled bool
 	err := row.Scan(&enabled)
 	return enabled, err
+}
+
+const listFlags = `-- name: ListFlags :many
+SELECT key, description, enabled_globally, enabled_city_ids, version, updated_at
+FROM feature_flags ORDER BY key
+`
+
+type ListFlagsRow struct {
+	Key             string
+	Description     string
+	EnabledGlobally bool
+	EnabledCityIds  []uuid.UUID
+	Version         int64
+	UpdatedAt       time.Time
+}
+
+// Флаги для админки (план B, Task 15): все, по ключу.
+func (q *Queries) ListFlags(ctx context.Context) ([]ListFlagsRow, error) {
+	rows, err := q.db.Query(ctx, listFlags)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFlagsRow
+	for rows.Next() {
+		var i ListFlagsRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.Description,
+			&i.EnabledGlobally,
+			&i.EnabledCityIds,
+			&i.Version,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateFlag = `-- name: UpdateFlag :one
+UPDATE feature_flags
+SET enabled_globally = $1, enabled_city_ids = $2::uuid[], version = version + 1
+WHERE key = $3 AND version = $4
+RETURNING key, description, enabled_globally, enabled_city_ids, version, updated_at
+`
+
+type UpdateFlagParams struct {
+	EnabledGlobally bool
+	EnabledCityIds  []uuid.UUID
+	Key             string
+	Version         int64
+}
+
+type UpdateFlagRow struct {
+	Key             string
+	Description     string
+	EnabledGlobally bool
+	EnabledCityIds  []uuid.UUID
+	Version         int64
+	UpdatedAt       time.Time
+}
+
+// Правка флага с оптимистичной версией: параллельная правка той же версии ждёт замок строки, после коммита первой
+// условие version уже ложно — 0 строк (409 platform.flag_stale). updated_at ставит триггер set_updated_at (время
+// базы); источник порядка — version.
+func (q *Queries) UpdateFlag(ctx context.Context, arg UpdateFlagParams) (UpdateFlagRow, error) {
+	row := q.db.QueryRow(ctx, updateFlag,
+		arg.EnabledGlobally,
+		arg.EnabledCityIds,
+		arg.Key,
+		arg.Version,
+	)
+	var i UpdateFlagRow
+	err := row.Scan(
+		&i.Key,
+		&i.Description,
+		&i.EnabledGlobally,
+		&i.EnabledCityIds,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

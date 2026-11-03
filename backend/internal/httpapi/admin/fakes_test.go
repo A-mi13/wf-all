@@ -66,7 +66,7 @@ func newHandler(t *testing.T, o admin.Options) http.Handler {
 func staffOf(role perm.Role, stage string, reauth bool, cities ...uuid.UUID) *auth.Staff {
 	return &auth.Staff{
 		StaffID: uuid.New(), SessionID: uuid.New(), Role: string(role), CityIDs: cities,
-		Stage: stage, Reauth: reauth, Grants: perm.Grants(role),
+		Stage: stage, Reauth: reauth, Grants: perm.Grants(role), Label: "Сотрудник " + string(role),
 	}
 }
 

@@ -101,7 +101,9 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   остальное — `staffadmin.Problem`; `auth.ErrSessionReplaced` (подпись решившего или `checkActor` под замком
   исполнителя) — 401 **без** стирания cookie, запрос `pending` (стражи `TestDecisionReplacedSessionKeepsCookie`,
   `TestApproveSessionReplacedUnderLockKeepsCookie`). Журнал: скоуп модератора по `GrantScoped` (не-nil копия `CityIDs` + `OwnStaffID`), `from ≥ to`
-  — 400 `query.from` `range`; `action_prefix` — по сегментам (`backend-platform.md`).
+  — 400 `query.from` `range`; `action_prefix` — по сегментам (`backend-platform.md`). Версии приложения и флаги
+  (`versions.go`, `flags.go`, план B Task 15): одна `db.InTx` под ключом — запись, событие, аудит сотрудника
+  (`st.Label` сессии); без изменений — 200 без события и аудита; несуществующий город флага — 422 до транзакции.
 - Тесты: cookie в запросе ставится руками (`net/http/cookiejar` не шлёт Secure-cookie по http, P24); проход конвейера
   — 501 нулевых хендлеров (журнал — 200); `{cityId}` — на подменённом контракте (`admin.Permissions` в
   `export_test.go`); в тесте всех операций модератор своего и чужого города — по ручной таблице `cityRows` (операция с

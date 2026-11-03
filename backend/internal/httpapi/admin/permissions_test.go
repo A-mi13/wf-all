@@ -234,6 +234,10 @@ func expected(t *testing.T, op *openapi3.Operation, path string, s subject) outc
 	return pass
 }
 
+// liveOps — операции платформы с настоящими хендлерами в сборке теста (Task 15): журнал проверяется выше по 200,
+// версии и флаги пишут базу — проход до хендлера по отсутствию отказа конвейера.
+var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "listFeatureFlags": {}, "updateFeatureFlag": {}}
+
 func TestPermissionsAllOperations(t *testing.T) {
 	spec, err := oapi.GetSpec()
 	if err != nil {
@@ -272,6 +276,7 @@ func TestPermissionsAllOperations(t *testing.T) {
 			if opID(op) == "listAudit" {
 				passStatus = http.StatusOK
 			}
+			_, live := liveOps[opID(op)]
 			row, cityOp := cityRows[opID(op)]
 			for _, s := range subjects {
 				want := expected(t, op, path, s)
@@ -283,6 +288,14 @@ func TestPermissionsAllOperations(t *testing.T) {
 				}
 				rec := serve(h, call(req.method, req.path, s.token, req.body))
 				checked++
+				if want.pass && live {
+					// настоящий хендлер платформы: дошёл — не отказ конвейера (401, 403); исход — забота хендлера
+					// (повтор правки флага той же version — 409 platform.flag_stale)
+					if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden || rec.Code >= 500 {
+						t.Errorf("%s × %s: %d %s — ждали проход до хендлера", opID(op), s.name, rec.Code, rec.Body.String())
+					}
+					continue
+				}
 				if want.pass {
 					if rec.Code != passStatus {
 						t.Errorf("%s × %s: %d %s — ждали проход до хендлера (%d)", opID(op), s.name, rec.Code, rec.Body.String(), passStatus)

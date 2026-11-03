@@ -111,7 +111,15 @@ paths:
   `appversion.Validate` (формат, `min ≤ recommended`, `https://` в нижнем регистре без пробельных и управляющих
   символов в любом месте — в том числе U+00A0, U+0085, C1, — и точный хост стора платформы; CHECK `0021` — защита в
   глубину); нарушения —
-  `ValidationError` с полями контракта, ручка переводит их в 400 `validation.failed`.
+  `ValidationError` с полями контракта, ручка переводит их в 400 `validation.failed` (все сразу —
+  `httpx.NewFieldErrors`). Запись из админки — `appversion.Put(ctx, tx, v, now)` в транзакции вызывающего (строка
+  под `FOR UPDATE` — «было», те же значения — без записи, иначе upsert с `version + 1`), список — `appversion.List`;
+  событие — `appversion.ChangedEvent` (агрегат `app_versions`, `id.Named`), его и аудит пишет ручка в той же tx.
+- Флаги функций — `flags.Store`: чтение модулями `Enabled`/`Require`; админка — `List` и `Update(ctx, tx, key,
+  version, globally, cities)` (оптимистичная `version`: не та — `ErrStale`, и при неизменных значениях; параллельная
+  правка той же версии — 0 строк `UPDATE … WHERE version` → `ErrStale`; города — множество `flags.CitySet`; ничего не
+  меняется — без записи); событие — `flags.ChangedEvent` (агрегат `feature_flag`, `flags.FlagID`). Города флага
+  проверяет `httpapi/admin` через `geo.Service.ExistingCityIDs` (R19): `platform` модули не импортирует.
 - `*auth.Principal` из `auth.From(ctx)` — общий для всех запросов сессии (кэш отдаёт один указатель): срезы
   `Roles` и `Restrictions` не изменять (append, sort, запись по индексу).
 - Сотрудник admin-api — `*auth.Staff` из `auth.StaffFrom(ctx)` (`Grants`, `CityIDs` только читать). Право —

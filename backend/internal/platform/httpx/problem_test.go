@@ -188,3 +188,16 @@ func TestErrorWithJobID(t *testing.T) {
 		t.Fatal("job_id у ошибки без задачи — WithJobID изменил исходную")
 	}
 }
+
+// Все нарушения сразу — 400 validation.failed со списком полей в исходном порядке.
+func TestNewFieldErrors(t *testing.T) {
+	errs := []httpx.FieldError{{Field: "body.recommended_version", Code: "minimum"}, {Field: "body.store_url", Code: "host"}}
+	rec := httptest.NewRecorder()
+	httpx.WriteError(slog.New(slog.DiscardHandler), rec, httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/x", nil),
+		httpx.NewFieldErrors(errs))
+	var p httpx.Problem
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || rec.Code != http.StatusBadRequest ||
+		p.Code != httpx.CodeValidationFailed || !reflect.DeepEqual(p.Errors, errs) {
+		t.Fatalf("%d %s %v", rec.Code, rec.Body.String(), err)
+	}
+}

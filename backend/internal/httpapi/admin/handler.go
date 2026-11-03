@@ -13,12 +13,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wf/backend/internal/geo"
 	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/apidocs"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/clock"
+	"wf/backend/internal/platform/flags"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/idempotency"
 	"wf/backend/internal/platform/peer"
@@ -153,7 +155,8 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	// ошибок staff.Problem, стирание cookie при погашенной сессии, 501 у несобранного хендлера;
 	// requestMeta — последним, то есть внешним (strict-сервер оборачивает по порядку): IP и UA для
 	// операций платформы и стирание cookie при погашенной сессии в подписи решившего
-	srv := Server{staffHandler: o.Staff, geoHandler: o.Geo, approvals: o.Approvals, audit: o.DB}
+	srv := Server{staffHandler: o.Staff, geoHandler: o.Geo, approvals: o.Approvals, audit: o.DB, clock: o.Clock,
+		flags: flags.NewStore(o.DB), cities: geo.New(o.DB).ExistingCityIDs}
 	if o.Approvals != nil {
 		srv.label = o.Staff.Label
 	}

@@ -17,6 +17,8 @@ import (
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/audit"
 	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/clock"
+	"wf/backend/internal/platform/flags"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/peer"
 	"wf/backend/internal/staff"
@@ -35,7 +37,11 @@ type Server struct {
 	// операции платформы; нулевые (Server{} в тестах конвейера) — 501 http.not_implemented
 	approvals ApprovalService                                    // подтверждения вдвоём
 	label     func(context.Context, *auth.Staff) (string, error) // подпись решившего (Staff.Label)
-	audit     *pgxpool.Pool                                      // журнал действий (роль admin)
+	audit     *pgxpool.Pool                                      // журнал действий, версии приложения (роль admin)
+	clock     clock.Clock                                        // время записи версий приложения
+	flags     *flags.Store                                       // флаги функций
+	// cities — какие из id есть в справочнике geo (geo.Service.ExistingCityIDs, R19): города флага
+	cities func(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 }
 
 // Псевдонимы — имена встроенных полей: хендлеры модулей называются одинаково (Handler), а имя
@@ -387,27 +393,4 @@ func optText(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// Операции платформы плана B — версии приложения и флаги функций (спека §6.1): контракт объявил их раньше
-// хендлеров (Task 7, R17) — 501 http.not_implemented, строки pendingOps в nostub_test.go. Task 15 заменяет.
-
-// ListAppVersions — заглушка до Task 15.
-func (s Server) ListAppVersions(context.Context, oapi.ListAppVersionsRequestObject) (oapi.ListAppVersionsResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// PutAppVersions — заглушка до Task 15.
-func (s Server) PutAppVersions(context.Context, oapi.PutAppVersionsRequestObject) (oapi.PutAppVersionsResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// ListFeatureFlags — заглушка до Task 15.
-func (s Server) ListFeatureFlags(context.Context, oapi.ListFeatureFlagsRequestObject) (oapi.ListFeatureFlagsResponseObject, error) {
-	return nil, errNotImplemented
-}
-
-// UpdateFeatureFlag — заглушка до Task 15.
-func (s Server) UpdateFeatureFlag(context.Context, oapi.UpdateFeatureFlagRequestObject) (oapi.UpdateFeatureFlagResponseObject, error) {
-	return nil, errNotImplemented
 }
