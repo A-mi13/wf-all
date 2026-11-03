@@ -394,14 +394,20 @@ func newImportRaceEnv(t *testing.T, mikhSlug string, more func(e env, ural uuid.
 // done закрыт раньше. Срок — 60 с (иначе тест повис бы на ошибке логики).
 func waitLockOrDone(t *testing.T, owner *pgxpool.Pool, done <-chan struct{}) bool {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	return waitLockOrDoneWithin(t, owner, done, 60*time.Second)
+}
+
+// waitLockOrDoneWithin — waitLockOrDone со сроком d (ревью G6 m5: барьер не висит до -timeout пакета).
+func waitLockOrDoneWithin(t *testing.T, owner *pgxpool.Pool, done <-chan struct{}, d time.Duration) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
 	for {
 		select {
 		case <-done:
 			return false
 		case <-ctx.Done():
-			t.Errorf("ни замка, ни завершения за 60 с")
+			t.Errorf("ни замка, ни завершения за %s", d)
 			return false
 		default:
 		}

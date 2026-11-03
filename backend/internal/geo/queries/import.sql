@@ -181,11 +181,17 @@ WHERE r.id = sqlc.arg(id)::uuid
                     AND r2.geoname_admin1_code = sqlc.arg(admin1_code)::text);
 
 -- name: ImportRegionNamesFromAdmin1 :execrows
+-- Недостающие переводы региона из admin1 — только если у региона именно этот код (ревью G6 I1): код
+-- выставлен этой транзакцией (ImportLinkRegion) или уже совпадал. Другой код или код, отданный другому
+-- региону, — 0 строк.
 INSERT INTO region_names (region_id, locale, name)
-SELECT sqlc.arg(region_id)::uuid, an.locale, an.name
-FROM geonames_admin1_names an
-WHERE an.country_code = sqlc.arg(country_code)
-  AND an.admin1_code = sqlc.arg(admin1_code)::text
+SELECT r.id, an.locale, an.name
+FROM regions r
+JOIN countries co ON co.id = r.country_id
+JOIN geonames_admin1_names an ON an.country_code = co.code AND an.admin1_code = r.geoname_admin1_code
+WHERE r.id = sqlc.arg(region_id)::uuid
+  AND co.code = sqlc.arg(country_code)
+  AND r.geoname_admin1_code = sqlc.arg(admin1_code)::text
   AND an.locale <> sqlc.arg(country_locale)::text
   AND btrim(an.name) <> ''
 ON CONFLICT DO NOTHING;

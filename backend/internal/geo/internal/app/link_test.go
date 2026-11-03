@@ -5,11 +5,13 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"wf/backend/internal/geo"
 	"wf/backend/internal/geo/internal/app"
+	"wf/backend/internal/geo/internal/store/geodb"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/perm"
 )
@@ -212,5 +214,123 @@ func TestLinkCityRegionRaceWithActivation(t *testing.T) {
 	}
 	if n := e.count(t, `SELECT count(*) FROM regions WHERE id = $1 AND geoname_admin1_code IS NULL`, ural); n != 1 {
 		t.Fatal("код региона")
+	}
+	// ревью G6 I1: код 71 отдан новому региону активации — переводы admin1 71 «Уралу» не пишутся
+	if n := e.count(t, `SELECT count(*) FROM region_names WHERE region_id = $1 AND locale <> 'ru'`, ural); n != 0 {
+		t.Fatalf("переводы чужого admin1 у региона: %d", n)
+	}
+}
+
+// Ревью G6 I1: код admin1 и переводы региона — только своего admin1.
+//   - место с admin1 «00» («неизвестен» в GeoNames) — региону код не ставится (как planRegion активации, R13), и
+//     сверка не находит кандидатами тёзок с неизвестным admin1 по всей стране;
+//   - у региона уже другой код — переводы admin1 места ему не пишутся.
+func TestLinkCityRegionCodeOnlyOwnAdmin1(t *testing.T) {
+	t.Run("admin1 00", func(t *testing.T) {
+		e := newActEnv(t)
+		ural := e.region(t, "Урал")
+		cid := e.unlinked(t, "zar", &ural, map[string]string{"ru": "Заречный"})
+		if c, err := link(e.admin(), cid, 700001); err != nil || c.GeonameID == nil || *c.GeonameID != 700001 {
+			t.Fatalf("%+v %v", c, err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM regions WHERE id = $1 AND geoname_admin1_code IS NULL`, ural); n != 1 {
+			t.Fatal("регион получил код «00»")
+		}
+		if n := e.count(t, `SELECT count(*) FROM regions WHERE geoname_admin1_code = '00'`); n != 0 {
+			t.Fatalf("регионов с кодом «00»: %d", n)
+		}
+		// тёзка 700002 (admin1 «00») не кандидат города «Урала» с тем же именем
+		other := e.unlinked(t, "zar-2", &ural, map[string]string{"ru": "Zarechnyy"})
+		cands, err := geodb.New(e.owner).ImportCityCandidates(context.Background(),
+			geodb.ImportCityCandidatesParams{CityID: other, CountryCode: "RU"})
+		if err != nil || len(cands) != 0 {
+			t.Fatalf("кандидаты сверки: %+v %v", cands, err)
+		}
+	})
+	t.Run("регион с другим кодом", func(t *testing.T) {
+		e := newActEnv(t)
+		var tyumen uuid.UUID
+		if err := e.owner.QueryRow(context.Background(), `INSERT INTO regions (country_id, name, geoname_admin1_code)
+			SELECT id, 'Тюменская область', '72' FROM countries WHERE code = 'RU' RETURNING id`).Scan(&tyumen); err != nil {
+			t.Fatal(err)
+		}
+		e.exec(t, `INSERT INTO region_names (region_id, locale, name) VALUES ($1, 'ru', 'Тюменская область')`, tyumen)
+		cid := e.unlinked(t, "mikh", &tyumen, map[string]string{"ru": "Михайловск"})
+		if _, err := link(e.admin(), cid, 526815); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM regions WHERE id = $1 AND geoname_admin1_code = '72'`, tyumen); n != 1 {
+			t.Fatal("код региона изменён")
+		}
+		if n := e.count(t, `SELECT count(*) FROM region_names WHERE region_id = $1`, tyumen); n != 1 {
+			t.Fatalf("переводы admin1 71 у региона 72: %d строк названий", n)
+		}
+	})
+}
+
+// Ревью G6 I2: активация и ручная привязка ОДНОГО места 526815 (admin1 71, региона 71 нет). Активация завела регион
+// (RU, 71) и стоит перед вставкой города (хук «insert»); привязка города «Урала» без кода к тому же месту ждёт её.
+// Порядок индексов у обоих — регион (regions_country_admin1_key), затем место (cities_geoname_id_key): без цикла,
+// активация успешна, привязка — 409 geo.city_already_active, не 40P01. При встречном порядке (место привязки раньше
+// кода региона) привязка держала бы geoname_id = 526815 и ждала регион, активация — её geoname_id (40P01 → 500).
+func TestLinkCitySamePlaceRaceWithActivation(t *testing.T) {
+	e := newActEnv(t)
+	ural := e.region(t, "Урал")
+	cid := e.unlinked(t, "mikh", &ural, map[string]string{"ru": "Михайловск"})
+
+	at, release, actDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	adm := e.admin()
+	adm.SetStageHook(func(_ context.Context, stage string) {
+		if stage == "insert" {
+			once.Do(func() { close(at); <-release })
+		}
+	})
+	var actErr error
+	go func() {
+		defer close(actDone)
+		_, actErr = activate(e, adm, app.Activation{GeonameID: 526815})
+	}()
+	if !recvWithin(t, at, 15*time.Second) {
+		close(release)
+		t.Fatalf("активация не дошла до вставки города: %v", actErr)
+	}
+	linkDone := make(chan struct{})
+	var linkErr error
+	go func() {
+		defer close(linkDone)
+		_, linkErr = link(e.admin(), cid, 526815)
+	}()
+	waited := waitLockOrDoneWithin(t, e.owner, linkDone, 15*time.Second)
+	close(release)
+	if !recvWithin(t, actDone, 30*time.Second) || !recvWithin(t, linkDone, 30*time.Second) {
+		t.Fatal("активация или привязка не завершились")
+	}
+	if isDeadlock(actErr) || isDeadlock(linkErr) {
+		t.Fatalf("взаимная блокировка: активация %v, привязка %v", actErr, linkErr)
+	}
+	if !waited || actErr != nil || !errors.Is(linkErr, geo.ErrCityAlreadyActive) {
+		t.Fatalf("ждала %v, активация: %v, привязка: %v", waited, actErr, linkErr)
+	}
+	if n := e.count(t, `SELECT count(*) FROM cities WHERE id = $1 AND geoname_id IS NULL AND version = 1`, cid); n != 1 {
+		t.Fatal("город привязки изменён")
+	}
+	if n := e.count(t, `SELECT count(*) FROM cities WHERE geoname_id = 526815`); n != 1 {
+		t.Fatalf("городов на месте: %d", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM regions WHERE id = $1 AND geoname_admin1_code IS NULL`, ural); n != 1 {
+		t.Fatal("код региона")
+	}
+}
+
+// recvWithin — ждать закрытия ch не дольше d (ревью G6 m5: барьер не висит до -timeout пакета).
+func recvWithin(t *testing.T, ch <-chan struct{}, d time.Duration) bool {
+	t.Helper()
+	select {
+	case <-ch:
+		return true
+	case <-time.After(d):
+		t.Errorf("канал не закрыт за %s", d)
+		return false
 	}
 }

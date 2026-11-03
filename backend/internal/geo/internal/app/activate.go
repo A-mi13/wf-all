@@ -252,7 +252,7 @@ func (a *Admin) planRegion(ctx context.Context, q *geodb.Queries, requested *uui
 		}
 		return regionPlan{id: &r.ID, ascii: r.AsciiName}, nil
 	}
-	if overridden || place.Admin1Code == admin1Missing || place.Admin1Code == admin1Unknown {
+	if overridden || !admin1Known(place.Admin1Code) {
 		return regionPlan{}, nil
 	}
 	a1, err := q.ActivateAdmin1(ctx, geodb.ActivateAdmin1Params{Locale: country.DefaultLocale, CountryCode: code,
@@ -267,6 +267,13 @@ func (a *Admin) planRegion(ctx context.Context, q *geodb.Queries, requested *uui
 		return regionPlan{}, err
 	}
 	return regionPlan{admin1: &a1, ascii: a1.AsciiName}, nil
+}
+
+// admin1Known — код admin1 места годится региону (R13): пустой (NULL в источнике) и «00» («неизвестен» в GeoNames,
+// строки admin1 у него нет) — не код региона, город с таким местом остаётся без региона. Одно правило для
+// активации (planRegion), привязки (linkCity — ручной и сверки) и проверки admin1 импорта (R34).
+func admin1Known(code string) bool {
+	return code != admin1Missing && code != admin1Unknown
 }
 
 // ensureRegion — регион страны с кодом admin1: существующий или новый с названиями по §3.4 (строка языка

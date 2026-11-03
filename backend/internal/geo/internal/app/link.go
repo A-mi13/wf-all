@@ -41,10 +41,27 @@ type linkInput struct {
 // linkCity — привязка в транзакции tx (события — через ctx той же транзакции). Возвращает версию города после
 // привязки. Ошибки ImportLinkCity — как есть: pgx.ErrNoRows — город уже привязан (geoname_id не NULL), 23505
 // cities_geoname_id_key — место у другого города; что с ними делать, решает вызывающий (сверка — conflict, ручная
-// привязка — коды контракта). Замки: город, затем регион — вызывающий держит advisory-замок страны (эксклюзивный у
-// сверки, разделяемый у ручной привязки), поэтому со сверкой цикла нет.
+// привязка — коды контракта).
+//
+// Регион (ревью G6 I1): код admin1 — только годный (admin1Known: не пустой и не «00», как у активации); переводы
+// admin1 — только региону, у которого в итоге именно этот код (ImportRegionNamesFromAdmin1 сверяет код в той же
+// инструкции): регион с другим кодом или код, отданный параллельной активации, переводов чужого admin1 не получает.
+//
+// Порядок записей (ревью G6 I2): код региона (regions_country_admin1_key) — до geoname_id города
+// (cities_geoname_id_key), как у активации (ensureRegion, затем вставка города). Активация и ручная привязка держат
+// один разделяемый замок страны и идут параллельно: при встречном порядке привязка держала бы место и ждала регион
+// активации, а активация — место привязки (40P01). С общим порядком привязка ждёт регион до записи места, затем
+// 23505 cities_geoname_id_key → geo.ErrCityAlreadyActive. Замки строк: город (FOR UPDATE у вызывающего), регион
+// (NO KEY UPDATE: индекс кода частичный — не ключ для FK, вставки городов с этим регионом не ждут). Сверка держит
+// замок страны эксклюзивно — ей порядок безразличен.
 func linkCity(ctx context.Context, tx pgx.Tx, in linkInput) (int64, error) {
 	q := geodb.New(tx)
+	region := in.RegionID != nil && in.Admin1 != nil && admin1Known(*in.Admin1)
+	if region {
+		if err := linkRegionCode(ctx, tx, *in.RegionID, *in.Admin1); err != nil {
+			return 0, err
+		}
+	}
 	version, err := q.ImportLinkCity(ctx, geodb.ImportLinkCityParams{ID: in.CityID, GeonameID: in.GeonameID})
 	if err != nil {
 		return 0, err
@@ -53,10 +70,7 @@ func linkCity(ctx context.Context, tx pgx.Tx, in linkInput) (int64, error) {
 		CityID: in.CityID, GeonameID: in.GeonameID, CountryLocale: in.CountryLocale}); err != nil {
 		return 0, fmt.Errorf("geo: переводы города: %w", err)
 	}
-	if in.RegionID != nil && in.Admin1 != nil {
-		if err := linkRegionCode(ctx, tx, *in.RegionID, *in.Admin1); err != nil {
-			return 0, err
-		}
+	if region {
 		if _, err := q.ImportRegionNamesFromAdmin1(ctx, geodb.ImportRegionNamesFromAdmin1Params{
 			RegionID: *in.RegionID, CountryCode: in.Country, Admin1Code: *in.Admin1, CountryLocale: in.CountryLocale}); err != nil {
 			return 0, fmt.Errorf("geo: переводы региона: %w", err)
@@ -143,9 +157,7 @@ func (a *Admin) LinkCity(ctx context.Context, s *auth.Staff, id uuid.UUID, geona
 		a.at(ctx, "link")
 		in := linkInput{CityID: id, RegionID: row.RegionID, GeonameID: geonameID, Country: row.CountryCode,
 			CountryLocale: row.DefaultLocale}
-		if place.Admin1Code != admin1Missing {
-			in.Admin1 = &place.Admin1Code
-		}
+		in.Admin1 = &place.Admin1Code // пустой и «00» отсекает linkCity (admin1Known)
 		if _, err := linkCity(ctx, tx, in); err != nil {
 			return linkProblem(err)
 		}

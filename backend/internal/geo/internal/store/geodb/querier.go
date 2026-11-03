@@ -159,6 +159,9 @@ type Querier interface {
 	// Сверка страны исключает активации городов этой страны (ревью G5 I1-r1): эксклюзивный advisory-замок транзакции
 	// (класс, страна) — ключ app.countryLockKey; активация берёт тот же ключ разделяемым (ActivateCountryLock).
 	ImportReconcileLock(ctx context.Context, arg ImportReconcileLockParams) error
+	// Недостающие переводы региона из admin1 — только если у региона именно этот код (ревью G6 I1): код
+	// выставлен этой транзакцией (ImportLinkRegion) или уже совпадал. Другой код или код, отданный другому
+	// региону, — 0 строк.
 	ImportRegionNamesFromAdmin1(ctx context.Context, arg ImportRegionNamesFromAdmin1Params) (int64, error)
 	ImportRestart(ctx context.Context, arg ImportRestartParams) error
 	ImportStart(ctx context.Context, arg ImportStartParams) error

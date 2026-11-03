@@ -433,10 +433,13 @@ func (q *Queries) ImportReconcileLock(ctx context.Context, arg ImportReconcileLo
 
 const importRegionNamesFromAdmin1 = `-- name: ImportRegionNamesFromAdmin1 :execrows
 INSERT INTO region_names (region_id, locale, name)
-SELECT $1::uuid, an.locale, an.name
-FROM geonames_admin1_names an
-WHERE an.country_code = $2
-  AND an.admin1_code = $3::text
+SELECT r.id, an.locale, an.name
+FROM regions r
+JOIN countries co ON co.id = r.country_id
+JOIN geonames_admin1_names an ON an.country_code = co.code AND an.admin1_code = r.geoname_admin1_code
+WHERE r.id = $1::uuid
+  AND co.code = $2
+  AND r.geoname_admin1_code = $3::text
   AND an.locale <> $4::text
   AND btrim(an.name) <> ''
 ON CONFLICT DO NOTHING
@@ -449,6 +452,9 @@ type ImportRegionNamesFromAdmin1Params struct {
 	CountryLocale string
 }
 
+// Недостающие переводы региона из admin1 — только если у региона именно этот код (ревью G6 I1): код
+// выставлен этой транзакцией (ImportLinkRegion) или уже совпадал. Другой код или код, отданный другому
+// региону, — 0 строк.
 func (q *Queries) ImportRegionNamesFromAdmin1(ctx context.Context, arg ImportRegionNamesFromAdmin1Params) (int64, error) {
 	result, err := q.db.Exec(ctx, importRegionNamesFromAdmin1,
 		arg.RegionID,

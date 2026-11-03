@@ -433,7 +433,7 @@ func checkAdmin1Refs(set prepared) error {
 	}
 	gaps := map[string]bool{}
 	for _, p := range set.places {
-		if p.Admin1Code != "" && p.Admin1Code != admin1Unknown && !known[p.Admin1Code] {
+		if admin1Known(p.Admin1Code) && !known[p.Admin1Code] {
 			gaps[p.Admin1Code] = true
 		}
 	}
