@@ -1,6 +1,8 @@
 package queue_test
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"regexp"
 	"slices"
@@ -112,4 +114,131 @@ func TestRiverMigrationUncovered(t *testing.T) {
 	if !slices.Equal(missing, []int{4}) || !slices.Equal(unknown, []int{5}) {
 		t.Fatalf("пропущены %v, неизвестны %v; ждали [4] и [5]", missing, unknown)
 	}
+}
+
+// Хвост У1 — дрейф текста: исполняемый SQL нашего 00NN_river_vK.sql совпадает с миграцией vK линии riverpgxv5
+// текущей версии River (rivermigrate.AllVersions — тот же SQL, что печатает `river migrate-get --version K
+// --up|--down`; шаблон схемы — пустой, как у migrate-get без --schema). Сравниваются строки без строк-комментариев и
+// пустых: комментарии River правит и в выпущенных версиях (v0.50: «PostgreSQL» → «Postgres» в v7), а слитую миграцию
+// goose ради комментария не правят. River поправил SQL выпущенной версии (или файл правили руками) — красный: базам с
+// прежним текстом нужна новая миграция goose; файл ещё не слит в main — сгенерировать заново той же командой.
+func TestRiverMigrationTextMatchesRiver(t *testing.T) {
+	t.Parallel()
+	m, err := rivermigrate.New(riverpgxv5.New(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := map[int]rivermigrate.Migration{}
+	for _, v := range m.AllVersions() {
+		line[v.Version] = v
+	}
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, e := range entries {
+		g := riverFile.FindStringSubmatch(e.Name())
+		if g == nil {
+			continue
+		}
+		v, _ := strconv.Atoi(g[1])
+		river, ok := line[v]
+		if !ok {
+			continue // версия вне линии — забота TestRiverMigrationLineCovered
+		}
+		raw, err := fs.ReadFile(migrations.FS, e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, down, err := gooseRiverSections(strings.ReplaceAll(string(raw), "\r\n", "\n"))
+		if err != nil {
+			t.Errorf("%s: %v", e.Name(), err)
+			continue
+		}
+		for _, c := range []struct{ dir, ours, sql string }{{"up", up, river.SQLUp}, {"down", down, river.SQLDown}} {
+			want, err := migrateGetText(v, c.dir, c.sql)
+			if err != nil {
+				t.Errorf("%s %s: %v", e.Name(), c.dir, err)
+				continue
+			}
+			if sqlLines(c.ours) != sqlLines(want) {
+				t.Errorf("%s [%s] расходится с River v%d: перегенерировать (river migrate-get --version %d --%s)\nнаш:\n%s\nRiver:\n%s",
+					e.Name(), c.dir, v, v, c.dir, c.ours, want)
+			}
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("ни одного 00NN_river_vK.sql не сверено — страж вхолостую")
+	}
+}
+
+// Сам страж не вхолостую: изменённая строка SQL и строка, которой у нас нет, — расхождение; шаблон схемы снимается,
+// другой комментарий и пустые строки — не расхождение.
+func TestRiverMigrationTextCatchesDrift(t *testing.T) {
+	t.Parallel()
+	file := "-- шапка\n\n-- +goose Up\n-- +goose StatementBegin\n-- River main migration 002 [up]\nCREATE TABLE river_job ();\n" +
+		"-- +goose StatementEnd\n\n-- +goose Down\n-- +goose StatementBegin\n-- River main migration 002 [down]\nDROP TABLE river_job;\n-- +goose StatementEnd\n"
+	up, down, err := gooseRiverSections(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := migrateGetText(2, "up", "\n-- другой комментарий\n\nCREATE TABLE /* TEMPLATE: schema */river_job ();\n"); sqlLines(up) != sqlLines(want) {
+		t.Fatalf("up расходится (комментарий и шаблон — не дрейф): %q против %q", up, want)
+	}
+	if want, _ := migrateGetText(2, "down", "DROP TABLE river_job CASCADE;"); sqlLines(down) == sqlLines(want) {
+		t.Fatal("изменённая строка down не замечена")
+	}
+	if want, _ := migrateGetText(2, "up", "CREATE TABLE river_job ();\nSELECT 1;"); sqlLines(up) == sqlLines(want) {
+		t.Fatal("строка, которой у нас нет, не замечена")
+	}
+	if _, err := migrateGetText(2, "up", "/* TEMPLATE_BEGIN: x */"); err == nil {
+		t.Fatal("незнакомый шаблон River пропущен молча")
+	}
+}
+
+// sqlLines — исполняемые строки SQL: без пустых и строк-комментариев, без пробелов справа.
+func sqlLines(sql string) string {
+	var out []string
+	for line := range strings.Lines(sql) {
+		l := strings.TrimRight(line, " \t\r\n")
+		if s := strings.TrimSpace(l); s == "" || strings.HasPrefix(s, "--") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}
+
+// gooseRiverSections — тексты между StatementBegin и StatementEnd секций Up и Down нашего файла River.
+func gooseRiverSections(file string) (up, down string, err error) {
+	section := func(rest, marker string) (string, string, error) {
+		i := strings.Index(rest, marker+"\n-- +goose StatementBegin\n")
+		if i < 0 {
+			return "", "", errors.New("нет «" + marker + "» со StatementBegin")
+		}
+		rest = rest[i+len(marker+"\n-- +goose StatementBegin\n"):]
+		j := strings.Index(rest, "\n-- +goose StatementEnd")
+		if j < 0 {
+			return "", "", errors.New("нет StatementEnd после «" + marker + "»")
+		}
+		return rest[:j], rest[j:], nil
+	}
+	up, rest, err := section(file, "-- +goose Up")
+	if err != nil {
+		return "", "", err
+	}
+	down, _, err = section(rest, "-- +goose Down")
+	return up, down, err
+}
+
+// migrateGetText — текст `river migrate-get --version v --<dir>` без --schema: комментарий версии и SQL River без
+// пробелов по краям, шаблон схемы — пустой. Иной шаблон River — ошибка (рендер migrate-get пришлось бы повторить).
+func migrateGetText(v int, dir, sql string) (string, error) {
+	sql = strings.ReplaceAll(sql, "/* TEMPLATE: schema */", "")
+	if strings.Contains(sql, "/* TEMPLATE") {
+		return "", errors.New("в SQL River незнакомый шаблон — сверить с рендером river migrate-get")
+	}
+	return fmt.Sprintf("-- River main migration %03d [%s]\n%s", v, dir, strings.TrimSpace(sql)), nil
 }

@@ -43,15 +43,17 @@ tasks:
     # -parallel 1: весь набор упирается в CREATE/DROP DATABASE, а не в ядра — параллельность выигрыша не даёт
     # (S1, 03.11, одиночные прогоны: -parallel 1 — 359 с, 2 — 398 с, 8 — 686 с); t.Parallel() ускоряет прогон одного пакета
     # (умолчание dbtest.DefaultParallel), а здесь выключен явным флагом.
+    # -timeout 20m: пакет httpapi/admin идёт 522–573 с при пределе go test по умолчанию 10 мин (запаса нет); предел — на
+    # пакет, job CI (.github/workflows/backend.yml) выше него.
     cmds:
-      - go test ./... -count=1 -p 4 -parallel 1
+      - go test ./... -count=1 -p 4 -parallel 1 -timeout 20m
 
   test:watch:
     desc: Цикл TDD — перезапуск тестов бэкенда при изменении Go, SQL и go.mod
     watch: true
     sources: ['**/*.go', 'migrations/*.sql', 'sqlc.yaml', 'go.mod', 'go.sum']
     cmds:
-      - go test ./... -count=1 -p 4 -parallel 1 # как test
+      - go test ./... -count=1 -p 4 -parallel 1 -timeout 20m # как test
 
   ci:
     desc: Всё, что проверяет CI для бэкенда

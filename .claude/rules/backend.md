@@ -33,7 +33,7 @@ paths:
   объявляет `func TestMain(m *testing.M) { os.Exit(dbtest.Main(m)) }`. Страж — `archtest.TestDBTestsAreParallel`.
   Сколько разом: `dbtest.Main` ставит `-parallel` = `dbtest.DefaultParallel` (4), если флаг не задан явно (умолчание
   go — GOMAXPROCS = 24: клоны и DROP DATABASE душат Postgres, пакет вдвое медленнее последовательного);
-  `./task backend:test` и `test:watch` — явно `-p 4 -parallel 1`: весь набор упирается в CREATE/DROP DATABASE
+  `./task backend:test` и `test:watch` — явно `-p 4 -parallel 1 -timeout 20m` (предел пакета: `httpapi/admin` идёт ~10 мин; job CI — 30 мин): весь набор упирается в CREATE/DROP DATABASE
   (запись клона ~21 МБ, checkpoint и барьер каждого DROP) — параллельность полному набору выигрыша не даёт (S1,
   03.11, одиночные прогоны: 359 с у `-parallel 1` против 686 с у `-parallel 8`). Несколько пакетов одной командой
   (`go test ./...`, IDE, список пакетов) — только с `-p 4`: без него GOMAXPROCS (24) пакетов × 4 = до 96 тестов разом
