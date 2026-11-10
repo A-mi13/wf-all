@@ -12,3 +12,22 @@
   gap: var(--wf-space-4);
   max-inline-size: 28rem;
 }
+
+/* узкая колонка — проверка переноса длинного текста */
+.narrow {
+  max-inline-size: 12rem;
+}
+
+/* область под таблицу или каркас: таблица заполняет высоту родителя */
+.frame {
+  display: flex;
+  flex-direction: column;
+  block-size: 32rem;
+}
+
+/* сетка карточек */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--wf-space-4);
+}
