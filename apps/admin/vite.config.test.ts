@@ -102,6 +102,37 @@ describe('плагин wf-shots', () => {
   });
 });
 
+// Спека UI-фундамента §2.1 (I2, n1): без явной цели Lightning CSS (минификатор Vite 8, по умолчанию
+// baseline-widely-available) заменил бы light-dark() полифилом --lightningcss-* — в dev родная функция,
+// в проде полифил. ios16.4 и ниже снова дают полифил. Прод-CSS сверяет scripts/check-admin-dist.mjs.
+describe('цели CSS сборки', () => {
+  const TARGETS = ['chrome123', 'firefox125', 'safari17.5', 'ios17.5'];
+  const resolve = async (
+    load: () => Promise<{ default: unknown }>,
+    mode: string,
+    command: 'serve' | 'build',
+  ) => {
+    const c = (await load()).default;
+    return (typeof c === 'function' ? await c({ mode, command }) : c) as UserConfig;
+  };
+
+  it('цели CSS сборки — минимальные браузеры админки', async () => {
+    for (const [mode, command] of [
+      ['production', 'build'],
+      ['development', 'serve'],
+      ['shots', 'serve'],
+    ] as const)
+      expect(
+        (await resolve(() => import('./vite.config'), mode, command)).build?.cssTarget,
+      ).toEqual(TARGETS);
+  });
+
+  it('конфиг e2e (mergeConfig) — те же цели CSS', async () => {
+    const e2e = await resolve(() => import('./e2e/vite.config'), 'production', 'build');
+    expect(e2e.build?.cssTarget).toEqual(TARGETS);
+  });
+});
+
 describe('Vitest не берёт сценарии Playwright', () => {
   const include = (): string[] => {
     const resolved = (

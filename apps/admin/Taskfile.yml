@@ -28,3 +28,5 @@ tasks:
       - task: lint
       - task: test
       - task: build
+      # прод-CSS = dev-CSS (light-dark() без полифила) и нет моков MSW в сборке — сразу после build (UF1b.4)
+      - node "{{.TASKFILE_DIR}}/../../scripts/check-admin-dist.mjs"
