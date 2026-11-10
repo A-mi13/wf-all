@@ -1,33 +1,45 @@
 /* Сгенерировано из contracts/tokens/tokens.json — не править руками. */
 :root {
   color-scheme: dark;
-  --wf-color-bg: #0B0F0D;
-  --wf-color-bg-elevated: #141A17;
-  --wf-color-pitch: #16241C;
-  --wf-color-border: #253329;
-  --wf-color-border-strong: #3B5241;
-  --wf-color-text: #EAF2EC;
-  --wf-color-text-secondary: #C3D0C7;
-  --wf-color-text-muted: #93A399;
-  --wf-color-text-subtle: #7E8C83;
-  --wf-color-text-disabled: #5E7266;
+  --wf-color-bg: light-dark(#F3F6F3, #0B0F0D);
+  --wf-color-bg-elevated: light-dark(#FFFFFF, #141A17);
+  --wf-color-pitch: light-dark(#DDE9DF, #16241C);
+  --wf-color-border: light-dark(#D2DCD4, #253329);
+  --wf-color-border-strong: light-dark(#7F9384, #3B5241);
+  --wf-color-border-control: light-dark(#6B7F70, #647A6B);
+  --wf-color-text: light-dark(#0F1712, #EAF2EC);
+  --wf-color-text-secondary: light-dark(#2C3A31, #C3D0C7);
+  --wf-color-text-muted: light-dark(#455749, #93A399);
+  --wf-color-text-subtle: light-dark(#536558, #7E8C83);
+  --wf-color-text-disabled: light-dark(#8D9B91, #5E7266);
   --wf-color-text-inverse: #0B0F0D;
   --wf-color-accent: #C6F24E;
-  --wf-color-accent-hover: #D9FA85;
-  --wf-color-success: #4ADE80;
-  --wf-color-warning: #E8B858;
-  --wf-color-danger: #F97066;
-  --wf-color-slot-empty: #1B241F;
-  --wf-color-slot-filled: #2A3B2E;
-  --wf-color-surface-sunken: #0E130F;
-  --wf-color-chip-bg: #1F2A23;
-  --wf-color-chip-accent-bg: #2C4434;
-  --wf-color-success-bg: #1E2A17;
-  --wf-color-warning-bg: #2A2113;
-  --wf-color-danger-bg: #2A1614;
-  --wf-color-danger-border: #5A3733;
-  --wf-color-text-faint: #6E7B73;
-  --wf-color-text-ghost: #4F5C55;
+  --wf-color-accent-hover: light-dark(#B5E236, #D9FA85);
+  --wf-color-accent-ink: light-dark(#3B6600, #C6F24E);
+  --wf-color-accent-detail: light-dark(#253F09, #8EAE3A);
+  --wf-color-selected-border: light-dark(#3B6600, #2C4434);
+  --wf-color-focus: light-dark(#3B6600, #C6F24E);
+  --wf-color-success: light-dark(#1C7338, #4ADE80);
+  --wf-color-warning: light-dark(#875400, #E8B858);
+  --wf-color-danger: light-dark(#B42318, #F97066);
+  --wf-color-danger-fill: light-dark(#B42318, #F97066);
+  --wf-color-text-on-danger: light-dark(#FFFFFF, #0B0F0D);
+  --wf-color-slot-empty: light-dark(#E3EAE5, #1B241F);
+  --wf-color-slot-filled: light-dark(#CBDACE, #2A3B2E);
+  --wf-color-surface-sunken: light-dark(#E8EEE9, #0E130F);
+  --wf-color-chip-bg: light-dark(#E3EAE5, #1F2A23);
+  --wf-color-chip-accent-bg: light-dark(#DDF0B4, #2C4434);
+  --wf-color-success-bg: light-dark(#E2F3E6, #1E2A17);
+  --wf-color-warning-bg: light-dark(#FBEFD6, #2A2113);
+  --wf-color-danger-bg: light-dark(#FCE8E5, #2A1614);
+  --wf-color-danger-border: light-dark(#E19A92, #5A3733);
+  --wf-color-text-faint: light-dark(#738478, #6E7B73);
+  --wf-color-text-ghost: light-dark(#AAB6AD, #4F5C55);
+  --wf-color-scrim: light-dark(#0F171266, #0B0F0DBD);
+  --wf-color-qr-ink: #0B0F0D;
+  --wf-color-qr-paper: #FFFFFF;
+  --wf-shadow-overlay: 0 24px 64px light-dark(#0F171229, #0B0F0DCC);
+  --wf-shadow-toast: 0 16px 40px light-dark(#0F171229, #0B0F0DCC);
   --wf-font-display: 'Oswald', sans-serif;
   --wf-font-body: 'Manrope', system-ui, sans-serif;
   --wf-text-3xl: 32px;
@@ -67,9 +79,38 @@
   --wf-size-avatar-lg: 96px;
   --wf-size-slot: 56px;
   --wf-size-bar: 8px;
+  --wf-size-sidebar: 236px;
+  --wf-size-rail: 64px;
+  --wf-size-palette: 640px;
+  --wf-size-tabbar: 65px;
+  --wf-size-table-header: 32px;
+  --wf-size-toast: 70px;
   --wf-breakpoint-mobile: 768px;
+  --wf-breakpoint-compact: 1024px;
+  --wf-container-narrow: 480px;
+  --wf-container-wide: 720px;
+  --wf-density-compact-row: 36px;
+  --wf-density-normal-row: 48px;
   --wf-duration-fast: 120ms;
   --wf-duration-base: 200ms;
   --wf-duration-slow: 400ms;
   --wf-ease: cubic-bezier(0.2, 0, 0, 1);
+  --wf-ease-exit: cubic-bezier(0.3, 0, 1, 1);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='system'] {
+  color-scheme: light dark;
+}
+
+/* переходы на токенах выключаются сами; прочее движение гасит свой @media компонента */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --wf-duration-fast: 0ms;
+    --wf-duration-base: 0ms;
+    --wf-duration-slow: 0ms;
+  }
 }
