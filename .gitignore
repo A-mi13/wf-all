@@ -12,8 +12,14 @@ node_modules/
 # сборки фронтов
 .next/
 dist/
-# витрина Ladle (`ladle build`, apps/admin/.ladle/config.mjs)
+# витрина Ladle (`ladle build`, apps/admin/.ladle/config.mjs) и админка режима shots (`vite build --mode shots`)
 dist-stories/
+dist-shots/
+# визуальные тесты (apps/admin/visual): эталон из артефакта, снимки прогона, отчёты — не в репозитории
+apps/admin/visual/.baseline/
+apps/admin/visual/.out/
+apps/admin/visual/report/
+apps/admin/visual/results.json
 coverage/
 playwright-report/
 test-results/

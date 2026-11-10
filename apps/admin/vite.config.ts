@@ -35,6 +35,8 @@ export default defineConfig(({ mode }) => {
       // Сборку сверяет scripts/check-admin-dist.mjs в admin:ci.
       cssTarget: [...CSS_TARGETS],
       assetsInlineLimit,
+      // сборка shots (экраны визуальных тестов CI) — не в dist: его отдаёт прод-проект e2e, моков там нет
+      outDir: shots ? 'dist-shots' : undefined,
     },
     server: {
       host: '127.0.0.1',

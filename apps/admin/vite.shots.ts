@@ -10,7 +10,9 @@ import type { Plugin } from 'vite';
 //     не ловит, поэтому сравнивается разрешённый абсолютный путь (Windows: `\` → `/`, регистр диска);
 // (2) configureServer: /mockServiceWorker.js — из пакета msw (allowBuilds: msw: false — postinstall
 //     воркер не копирует), а не из public/: оттуда admin-api отдал бы его в проде;
-// (3) transformIndexHtml: тот же index.html, точка входа /src/main.tsx → /src/shots/main.tsx.
+// (3) transformIndexHtml: тот же index.html, точка входа /src/main.tsx → /src/shots/main.tsx;
+// (4) generateBundle: при `vite build --mode shots` (экраны визуальных тестов CI) воркер — файлом в выход
+//     (dist-shots — vite.config.ts; не dist: его отдаёт прод-проект e2e и проверяет check-admin-dist.mjs).
 
 const WORKER = '/mockServiceWorker.js';
 const ENTRY = '/src/main.tsx';
@@ -42,7 +44,8 @@ export function wfShots(root: string = import.meta.dirname): Plugin {
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!resolved) return null;
       const hit = swap.find(([from]) => samePath(resolved.id, from));
-      return hit ? hit[1] : null;
+      // прямые слэши — как id самого Vite: иначе на Windows сборка видит два модуля одного файла (два воркера)
+      return hit ? hit[1].replaceAll('\\', '/') : null;
     },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
@@ -55,11 +58,24 @@ export function wfShots(root: string = import.meta.dirname): Plugin {
         res.end(readFileSync(worker, 'utf8'));
       });
     },
-    transformIndexHtml(html) {
-      if (!html.includes(`src="${ENTRY}"`)) {
-        throw new Error(`wf-shots: в index.html нет точки входа ${ENTRY}`);
-      }
-      return html.replace(`src="${ENTRY}"`, `src="${SHOTS_ENTRY}"`);
+    // сборка режима shots (экраны визуальных тестов CI, UF3.6): воркер — в выход dist-shots, как его отдаёт dev
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: WORKER.slice(1),
+        source: readFileSync(worker, 'utf8'),
+      });
+    },
+    // order 'pre': при сборке хук без порядка зовётся и после бандла — по HTML, где точка входа уже заменена
+    // собранным файлом (и падал бы на «нет точки входа»)
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        if (!html.includes(`src="${ENTRY}"`)) {
+          throw new Error(`wf-shots: в index.html нет точки входа ${ENTRY}`);
+        }
+        return html.replace(`src="${ENTRY}"`, `src="${SHOTS_ENTRY}"`);
+      },
     },
   };
 }

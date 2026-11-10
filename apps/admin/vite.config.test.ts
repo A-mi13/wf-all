@@ -58,6 +58,13 @@ describe('режим shots (снимки для ревьюера, спека §5
     expect(dev.cacheDir).toBeUndefined();
     expect(dev.server?.port).toBe(5173);
   });
+
+  // Визуальные тесты CI (план UF3.6, m4): экраны — сборка режима shots в dist-shots, не в dist: dist отдаёт
+  // прод-проект e2e и проверяет check-admin-dist.mjs (моков MSW в нём быть не должно).
+  it('сборка shots — в dist-shots; обычная сборка — каталог по умолчанию (dist)', () => {
+    expect(resolve('shots', 'build').build?.outDir).toBe('dist-shots');
+    expect(resolve('production', 'build').build?.outDir).toBeUndefined();
+  });
 });
 
 describe('плагин wf-shots', () => {
@@ -87,18 +94,39 @@ describe('плагин wf-shots', () => {
   it('относительный импорт src/test/server и base → модули src/shots; прочие server — нет', async () => {
     const at = (p: string) => path.join(import.meta.dirname, p);
     const fwd = (p: string) => at(p).replaceAll('\\', '/');
-    expect(await resolveId('./server', fwd('src/test/server.ts'))).toBe(at('src/shots/server.ts'));
-    expect(await resolveId('../test/base', at('src/test/base.ts'))).toBe(at('src/shots/base.ts'));
+    // id — прямыми слэшами, как у самого Vite: иначе на Windows сборка (vite build --mode shots) видит два
+    // модуля src/shots/server.ts (свой id и id прямого импорта из src/shots/main.tsx) — два воркера MSW, и
+    // половина моков в незапущенном (нашёл прогон visual, UF3.6)
+    expect(await resolveId('./server', fwd('src/test/server.ts'))).toBe(fwd('src/shots/server.ts'));
+    expect(await resolveId('../test/base', at('src/test/base.ts'))).toBe(fwd('src/shots/base.ts'));
     expect(await resolveId('./server', at('src/features/geo/server.ts'))).toBeNull();
     expect(await resolveId('react', '/node_modules/react/index.js')).toBeNull();
   });
 
   it('index.html: точка входа подменяется; нет её — ошибка, а не тихо обычная админка', () => {
-    const transform = plugin.transformIndexHtml as (html: string) => string;
+    // хук с порядком pre: при сборке хук без порядка зовётся и после бандла (точка входа уже заменена)
+    const hook = plugin.transformIndexHtml as unknown as {
+      order: string;
+      handler: (html: string) => string;
+    };
+    expect(hook.order).toBe('pre');
+    const transform = hook.handler;
     expect(transform('<script type="module" src="/src/main.tsx"></script>')).toBe(
       '<script type="module" src="/src/shots/main.tsx"></script>',
     );
     expect(() => transform('<script src="/src/other.tsx"></script>')).toThrow(/точки входа/);
+  });
+
+  it('сборка: mockServiceWorker.js из пакета msw кладётся в выход (dev отдаёт его middleware)', () => {
+    const emitted: { type: string; fileName?: string; source?: unknown }[] = [];
+    const generateBundle = plugin.generateBundle as unknown as (this: {
+      emitFile: (f: { type: string; fileName?: string; source?: unknown }) => string;
+    }) => void;
+    generateBundle.call({ emitFile: (f) => (emitted.push(f), 'id') });
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]?.type).toBe('asset');
+    expect(emitted[0]?.fileName).toBe('mockServiceWorker.js');
+    expect(String(emitted[0]?.source)).toContain('Mock Service Worker');
   });
 });
 

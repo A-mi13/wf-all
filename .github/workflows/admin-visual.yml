@@ -1,0 +1,112 @@
+# Визуальное сравнение админки (спека UI-фундамента §5.3, план UF3.5–UF3.6). Эталоны в репозитории не хранятся:
+# эталон — артефакт visual-baseline-<sha> последнего подходящего зелёного push-прогона main. Без paths: коммиты main
+# по docs/ и т. п. тоже снимают эталон (иначе для базы PR его почти никогда не было бы); фильтр визуальных путей —
+# шагом (scripts/visual-baseline.mjs). Проверка не обязательна в защите main (решение контроллера 28.10).
+name: admin-visual
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # labeled/unlabeled: метка visual-change действует без нового пуша
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+# Отмена — только между сравнивающими прогонами (m-g): группа берётся до if job, поэтому прогон от посторонней
+# метки (docs…) получает уникальную группу (+run_id) и идущее сравнение не отменяет.
+concurrency:
+  group: admin-visual-${{ github.event.pull_request.number || github.sha }}${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'visual-change' && format('-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+jobs:
+  # База, фильтр путей, поиск эталона, срок артефакта — на раннере: там есть git и gh (m-d).
+  baseline:
+    if: (github.event.action != 'labeled' && github.event.action != 'unlabeled') || github.event.label.name == 'visual-change'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.find.outputs.base }}
+      changed: ${{ steps.find.outputs.changed }}
+      run-id: ${{ steps.find.outputs.run-id }}
+      artifact: ${{ steps.find.outputs.artifact }}
+      pr: ${{ steps.find.outputs.pr }}
+      pr-visual-change: ${{ steps.find.outputs.pr-visual-change }}
+      image: ${{ steps.find.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: find
+        run: node scripts/visual-baseline.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Снимки в закреплённом образе Playwright (шрифты, растеризатор, Chromium), сравнение с эталоном, отчёт; на main —
+  # артефакт нового эталона. История git этому job не нужна.
+  snapshots:
+    needs: baseline
+    if: needs.baseline.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: ${{ needs.baseline.outputs.image }}
+      options: --ipc=host
+    env:
+      CI: 'true'
+      VISUAL_IMAGE: ${{ needs.baseline.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - run: pnpm install --frozen-lockfile
+      # витрина (dist-stories + stories.json) и админка режима shots с моками MSW (dist-shots)
+      # node — из pnpm (devEngines, Node 26 снимает типы с src/showcase/storyList.ts); Node образа может быть старше
+      - run: pnpm exec ladle build && pnpm exec node .ladle/stories-json.mjs dist-stories
+        working-directory: apps/admin
+      - run: pnpm exec vite build --mode shots
+        working-directory: apps/admin
+      - if: needs.baseline.outputs.run-id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.baseline.outputs.artifact }}
+          run-id: ${{ needs.baseline.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: apps/admin/visual/.baseline
+      # Сравнение только информативно (отличие — в отчёт, без падения): на main, с меткой visual-change, при другом
+      # образе Playwright у эталона. Эталона нет — сравнение пропускается (предупреждение — в сводке). Дымовой
+      # прогон (история не отрисовалась, ошибка консоли) падает всегда.
+      - id: mode
+        working-directory: apps/admin
+        run: node ../../scripts/visual-baseline.mjs mode
+        env:
+          EVENT: ${{ github.event_name }}
+          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'visual-change') }}
+      - working-directory: apps/admin
+        run: pnpm exec playwright test -c visual/playwright.visual.config.ts
+        env:
+          VISUAL_COMPARE: ${{ steps.mode.outputs.compare }}
+          VISUAL_INFORMATIVE: ${{ steps.mode.outputs.informative }}
+      - if: always()
+        working-directory: apps/admin
+        run: node ../../scripts/visual-baseline.mjs summary
+        env:
+          EVENT: ${{ github.event_name }}
+          PR: ${{ needs.baseline.outputs.pr }}
+          PR_VISUAL_CHANGE: ${{ needs.baseline.outputs.pr-visual-change }}
+          COMPARE: ${{ steps.mode.outputs.compare }}
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-report-${{ github.run_id }}
+          path: |
+            apps/admin/visual/report
+            apps/admin/visual/test-results
+          if-no-files-found: ignore
+          retention-days: 14
+      # новый эталон: все снимки этого прогона main + версия образа
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-baseline-${{ github.sha }}
+          path: apps/admin/visual/.out
+          if-no-files-found: error
+          retention-days: 90
