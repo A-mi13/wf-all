@@ -12,6 +12,8 @@ node_modules/
 # сборки фронтов
 .next/
 dist/
+# витрина Ladle (`ladle build`, apps/admin/.ladle/config.mjs)
+dist-stories/
 coverage/
 playwright-report/
 test-results/

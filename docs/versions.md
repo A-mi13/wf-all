@@ -23,6 +23,7 @@
 | react-hook-form | 7.91.0 | `apps/admin/package.json` |
 | uqr | 0.1.3 | `apps/admin/package.json` (QR секрета 2FA — SVG на клиенте, без сети и зависимостей; R11) |
 | @fontsource/oswald / @fontsource/manrope | 5.3.0 / 5.3.0 | `apps/admin/package.json` (шрифты админки без внешних запросов, `src/app/fonts.ts`) |
+| Ladle (витрина компонентов) | 5.1.1 (внутри — свой Vite 6.4.5, @vitejs/plugin-react-swc) | `apps/admin/package.json` (devDependencies), конфиг — `apps/admin/.ladle/`; в сборку админки не входит; исключение ниже |
 | GitHub Actions: checkout / setup-go / pnpm action-setup | 7.0.1 / 7.0.0 / 6.1.0 | полный SHA в `.github/workflows/*.yml`; плавающий тег `pnpm/action-setup@v6` указывал на 6.0.10 без поддержки pnpm 12 |
 | Flutter / Dart | фиксируется в wf-native | в репо wf-native проекта Flutter пока нет — версии появятся с мобильной спекой |
 | chi / pgx | 5.5.0 / 5.11.0 | `backend/go.mod` |
@@ -52,6 +53,7 @@
 | TypeScript (приложения) | 6.0.3 | 7.0.2 | typescript-eslint 8.72 поддерживает TS < 6.1 (проверено 27.10.2026); у 7.x нет классического JS API | когда typescript-eslint и eslint-config-next объявят поддержку TS 7 |
 | TypeScript (генератор) | 5.9.3 | 7.0.2 | openapi-typescript 7.13 требует `typescript ^5.x` | когда openapi-typescript поднимет peer |
 | ESLint | 9.39.5 | 10.13.0 | eslint-config-next 16.4.3 тянет eslint-plugin-react 7.37.5 (peer ESLint ≤ 9.7; проверено 27.10.2026) | когда eslint-config-next перейдёт на ESLint 10 |
+| Vite внутри Ladle | 6.4.5 | 8.3.5 | Ladle 5.1.1 — последний выпуск (`latest`, проверено 10.11.2026); поддержка Vite 8 влита в main (tajo/ladle#635, #636, #639), но не выпущена. Только витрина: свой `.ladle/vite.config.ts`, свой кэш `node_modules/.vite-ladle` | с выходом Ladle 5.2/6.0 на Vite 8 |
 
 ## Ловушки
 

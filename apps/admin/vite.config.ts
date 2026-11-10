@@ -3,7 +3,8 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
 import { wfShots } from './vite.shots.ts';
 
-const CSS_TARGETS = ['chrome123', 'firefox125', 'safari17.5', 'ios17.5'] as const;
+// Экспорт — для витрины (.ladle/vite.config.ts): её сборка проверяется в тех же браузерах.
+export const CSS_TARGETS = ['chrome123', 'firefox125', 'safari17.5', 'ios17.5'] as const;
 
 // Шрифты — всегда файлами: мелкий woff/woff2 (< 4 КБ, подмножества @fontsource) Vite встроил бы в CSS как
 // data:font/…, а staticCSP admin-api — font-src 'self' (нашёл прод-проект e2e, UF1b.7). Прочее — по умолчанию.

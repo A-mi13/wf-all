@@ -1,0 +1,14 @@
+/* Раскладка историй витрины (не компонентов): ряд и столбец образцов с отступами из токенов. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+  max-inline-size: 28rem;
+}

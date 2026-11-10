@@ -31,6 +31,7 @@
     "use-intl": "4.14.9"
   },
   "devDependencies": {
+    "@ladle/react": "5.1.1",
     "@playwright/test": "1.64.1",
     "@testing-library/dom": "10.4.2",
     "@testing-library/jest-dom": "7.0.1",

@@ -2,7 +2,7 @@ import { ICONS, type IconName, iconGroup } from '@wf/icons';
 import type { Story, StoryMeta } from '../../showcase/csf';
 import { Icon } from './Icon';
 import { Illustration } from './Illustration';
-import styles from './Icon.stories.module.css';
+import styles from './IconSheet.module.css';
 
 // Иконки @wf/icons в админке (план UF1a.3): лист всех иконок на 16/20/24 по группам (артборд, меню,
 // дорисованные *) и иллюстрации на 48/64 — вырезы и детали должны различаться в обеих темах.

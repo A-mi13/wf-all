@@ -33,3 +33,6 @@ allowBuilds:
   '@parcel/watcher': false
   '@swc/core': false
   unrs-resolver: false
+  # esbuild — только у Vite 6 внутри Ladle (наш Vite 8 на rolldown); postinstall лишь сверяет бинарник,
+  # сам бинарник ставится пакетом @esbuild/<платформа> из optionalDependencies.
+  esbuild: false
