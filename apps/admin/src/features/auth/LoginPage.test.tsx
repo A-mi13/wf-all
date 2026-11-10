@@ -344,3 +344,24 @@ describe('шаг 2', () => {
     expect(app.at()).toBe('/login?return=%2Faudit');
   });
 });
+
+// Тема до входа (спека §4.12): тема — свойство браузера, не сотрудника, поэтому переключатель есть и на
+// экранах входа (AuthLayout — в углу, над брендом), вне карточки формы.
+describe('тема на экране входа', () => {
+  afterEach(() => {
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+  });
+
+  test('переключатель темы в углу страницы, вне формы; выбор применяется до входа', async () => {
+    renderApp('/login');
+    await page('Вход администратора');
+    const theme = screen.getByRole('group', { name: 'Тема' });
+    const heading = screen.getByRole('heading', { level: 1 });
+    expect(theme.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(theme.closest('form')).toBeNull();
+    await userEvent.setup().click(within(theme).getByRole('button', { name: 'Светлая' }));
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(localStorage.getItem('wf.theme')).toBe('light');
+  });
+});

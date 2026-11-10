@@ -129,6 +129,21 @@ describe('десктоп: сайдбар', () => {
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
+  // Карточка (спека §4.12, ревью V1 m3): язык и тема — каждый своей строкой, «Выйти» — последней строкой во
+  // всю ширину (с темой ряд «язык · Выйти» не помещается в колонку сайдбара).
+  test('карточка: язык, тема, «Выйти» — по порядку, «Выйти» — последняя и во всю ширину', async () => {
+    mount('/audit', meOwner);
+    await screen.findByRole('heading', { name: 'Страница журнала' });
+    const aside = screen.getByRole('complementary');
+    const locale = within(aside).getByText('Переключатель языка');
+    const theme = within(aside).getByRole('group', { name: 'Тема' });
+    const logout = within(aside).getByRole('button', { name: 'Выйти' });
+    expect(locale.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(theme.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(logout.parentElement?.lastElementChild).toBe(logout);
+    expect(logout.className).toMatch(/block/);
+  });
+
   test('карточка: почта сотрудника — полной строкой в подсказке (длинная обрезается многоточием)', async () => {
     mount('/audit', meOwner);
     await screen.findByRole('heading', { name: 'Страница журнала' });
@@ -193,6 +208,7 @@ describe('телефон (< breakpoint-mobile): таббар и «Ещё»', () 
     expect(within(sheet).getByText('Ольга В.')).toBeInTheDocument();
     expect(within(sheet).getByText(LONG_EMAIL)).toHaveAttribute('title', LONG_EMAIL);
     expect(within(sheet).getByText('Переключатель языка')).toBeInTheDocument();
+    expect(within(sheet).getByRole('group', { name: 'Тема' })).toBeInTheDocument();
     expect(within(sheet).getByRole('link', { name: 'Мой доступ' })).toBeInTheDocument();
     await user.click(within(sheet).getByRole('link', { name: 'Роли и доступ' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

@@ -10,6 +10,7 @@ import { Icon } from '../icon';
 import { useIsMobile } from '../media';
 import { Sheet } from '../overlay';
 import { DesktopOnlyState, ForbiddenState, OfflineBanner } from '../states';
+import { ThemeSwitch } from '../theme/ThemeSwitch';
 import styles from './AppShell.module.css';
 import { BackLink, BackMemoryProvider } from './BackLink';
 import { filterNav, findNavItem, type NavGroup, type NavItem } from './types';
@@ -30,9 +31,9 @@ const TABBAR_ITEMS = 4;
 
 // Каркас админки (спека §9.2–9.4, макеты 07 и 08).
 // - Десктоп: сайдбар — бренд, группы меню со счётчиками, карточка сотрудника (имя, почта, «роль ·
-//   города»; ниже в строку — меню профиля и кнопка «Выйти» с иконкой).
+//   города»; ниже строками — меню профиля (язык), тема и «Выйти» с иконкой во всю ширину).
 // - Уже breakpoint-mobile (useIsMobile): нижний таббар — первые разделы, открытые на телефоне, и
-//   «Ещё» (шторка: карточка, все разрешённые разделы, меню профиля, «Выйти»).
+//   «Ещё» (шторка: карточка, все разрешённые разделы, меню профиля, тема, «Выйти»).
 // - Меню — по правам (D23): пункта без права нет; прямой адрес такого раздела — ForbiddenState.
 //   desktopOnly на телефоне — DesktopOnlyState (D22). Решает всегда сервер.
 // - Над страницей — баннер «нет сети».
@@ -100,7 +101,8 @@ function Sidebar({ menu, current, counts, account, profileMenu, onLogout, loggin
         <AccountText account={account} />
         <div className={styles.accountActions}>
           {profileMenu && <div className={styles.profileMenu}>{profileMenu}</div>}
-          <LogoutButton loading={loggingOut} onClick={onLogout} />
+          <ThemeSwitch />
+          <LogoutButton block loading={loggingOut} onClick={onLogout} />
         </div>
       </div>
     </aside>
@@ -296,7 +298,10 @@ function TabBar({ menu, current, counts, account, profileMenu, onLogout, logging
         <nav aria-label={t('nav.label')} className={styles.nav}>
           <Groups menu={menu} current={current} counts={counts} onNavigate={() => setOpen(false)} />
         </nav>
-        {profileMenu && <div className={styles.sheetProfileMenu}>{profileMenu}</div>}
+        <div className={styles.sheetSettings}>
+          {profileMenu}
+          <ThemeSwitch />
+        </div>
         <LogoutButton block loading={loggingOut} onClick={onLogout} />
       </Sheet>
     </>

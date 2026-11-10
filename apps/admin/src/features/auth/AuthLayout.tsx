@@ -1,12 +1,14 @@
 import type { ReactNode, Ref } from 'react';
 import { useTranslations } from 'use-intl';
+import { ThemeSwitch } from '../../ui';
 import { cx } from '../../ui/cx';
 import styles from './Auth.module.css';
 
 // Страница экранов входа вне каркаса (макеты 07 и 08 «Вход»): бренд, заголовок (единственный h1),
 // пояснение, карточка с формой и подпись под ней. wide — настройка 2FA (QR рядом с секретом);
 // below — действие под карточкой («Выйти» на настройке 2FA). titleRef — заголовок принимает фокус
-// программно (tabIndex -1): кнопка шага исчезла, фокус — сюда, а не на body.
+// программно (tabIndex -1): кнопка шага исчезла, фокус — сюда, а не на body. Над заголовком справа от
+// бренда — переключатель темы (спека UI-фундамента §4.12): тема — свойство браузера, есть и до входа.
 export function AuthLayout({
   title,
   lead,
@@ -28,7 +30,10 @@ export function AuthLayout({
   return (
     <main className={styles.page}>
       <div className={cx(styles.column, wide && styles.wide)}>
-        <p className={styles.brand}>{t('brand')}</p>
+        <div className={styles.top}>
+          <p className={styles.brand}>{t('brand')}</p>
+          <ThemeSwitch />
+        </div>
         <h1 ref={titleRef} tabIndex={titleRef ? -1 : undefined} className={styles.title}>
           {title}
         </h1>

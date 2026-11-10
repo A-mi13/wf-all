@@ -187,6 +187,12 @@
       "region": "Notifications",
       "close": "Dismiss notification"
     },
+    "theme": {
+      "label": "Theme",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
     "field_errors": {
       "invalid": "Check this value",
       "required": "This field is required",

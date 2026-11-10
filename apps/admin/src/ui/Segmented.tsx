@@ -1,13 +1,25 @@
+import type { IconName } from '@wf/icons';
 import { cx } from './cx';
+import { Icon } from './icon';
 import styles from './Segmented.module.css';
 
-export type SegmentOption<V extends string = string> = {
+type SegmentBase<V extends string> = {
   value: V;
-  text: string; // видимый текст сегмента (короткий: «RU»)
-  name?: string; // доступное имя, если видимого мало («RU — Русский»); начинаться должно с text
   title?: string; // подсказка при наведении
   lang?: string; // язык подписи сегмента
 };
+
+// Сегмент — видимый текст («RU») или значок (тема: монитор, солнце, луна). У значка видимого текста нет:
+// имя для читалки обязательно, и title — для мыши (WCAG 2.5.3 к значкам без текста не применяется).
+export type SegmentOption<V extends string = string> = SegmentBase<V> &
+  (
+    | {
+        text: string; // видимый текст сегмента (короткий: «RU»)
+        name?: string; // доступное имя, если видимого мало («RU — Русский»); начинаться должно с text
+        icon?: never;
+      }
+    | { icon: IconName; name: string; text?: never }
+  );
 
 export type SegmentedProps<V extends string = string> = {
   label: string; // имя группы для читалки
@@ -51,7 +63,7 @@ export function Segmented<V extends string>({
             aria-disabled={busy || undefined}
             onClick={() => !busy && !selected && onChange(o.value)}
           >
-            {o.text}
+            {o.icon ? <Icon name={o.icon} size={16} /> : o.text}
           </button>
         );
       })}

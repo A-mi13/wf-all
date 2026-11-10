@@ -24,6 +24,14 @@
   max-width: 600px;
 }
 
+/* бренд и переключатель темы — одной строкой над заголовком, переключатель в правом углу колонки */
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+}
+
 .brand {
   margin: 0;
   color: var(--wf-color-accent-ink);

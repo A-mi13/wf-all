@@ -82,15 +82,18 @@ test('сегменты: равные колонки фиксированной �
   );
 });
 
-test('карточка сотрудника: язык — своя колонка по содержимому, «Выйти» — в остатке строки и не переносит её', () => {
-  const row = rule('ui/shell/AppShell.module.css', '.accountActions');
-  expect(row).toMatch(/display:\s*grid/);
-  expect(row).toMatch(/grid-template-columns:\s*max-content\s+minmax\(0,\s*1fr\)/);
-  // «Выйти» — во второй колонке первой строки, справа, без переноса подписи
+test('карточка сотрудника: язык и тема — строками по содержимому, «Выйти» — своя строка во всю ширину', () => {
+  const rows = rule('ui/shell/AppShell.module.css', '.accountActions');
+  expect(rows).toMatch(/display:\s*grid/);
+  // одна колонка во всю ширину карточки: строки не делят ширину и не переносятся
+  expect(rows).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/);
+  expect(rows).toMatch(/justify-items:\s*start/);
+  expect(rows).not.toMatch(/flex-wrap/);
+  // «Выйти» растянута на всю строку, подпись (Sign out) не переносится
   const logout = rule('ui/shell/AppShell.module.css', '.accountActions .logout');
-  expect(logout).toMatch(/grid-column:\s*2/);
+  expect(logout).toMatch(/justify-self:\s*stretch/);
   expect(logout).toMatch(/white-space:\s*nowrap/);
-  expect(row).not.toMatch(/flex-wrap/);
+  expect(logout).not.toMatch(/grid-column:\s*2/);
 });
 
 test('вкладки: выбранная отличается цветом и подчёркиванием, не жирностью (соседи не сдвигаются)', () => {
