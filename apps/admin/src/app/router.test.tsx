@@ -11,6 +11,7 @@ import { AppProviders } from './providers';
 import { createQueryClient } from './query';
 import { reauthBus } from './reauth';
 import { AppRouter } from './router';
+import { stubMedia } from '../test/media';
 import { sectionsServer } from '../test/sections';
 
 // стартовая и возврат приводят в разделы каркаса — их первые запросы описаны (src/test/sections.ts)
@@ -192,8 +193,8 @@ describe('права разделов', () => {
   });
 });
 
-// «Справочники» (план B, Task 17): пять разделов, каждый со своим правом чтения и только с компьютера;
-// страница города — вложенный адрес раздела «Города и запуск» (его право и desktopOnly).
+// «Справочники» (план B, Task 17): пять разделов, каждый со своим правом чтения; страница города —
+// вложенный адрес раздела «Города и запуск» (его право).
 describe('«Справочники»', () => {
   const meModeratorGeo: Me = {
     ...meModerator,
@@ -245,18 +246,24 @@ describe('«Справочники»', () => {
     expect(app.at()).toBe(path);
   });
 
-  test('телефон: раздел «Справочников» — «только с компьютера»', async () => {
-    vi.stubGlobal(
-      'matchMedia',
-      vi.fn((query: string) => ({
-        matches: true,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      })),
-    );
-    mount('/geo/cities', meAllDirectories);
-    await page('Только с компьютера');
+  // Спека UI-фундамента §3.1: все разделы открыты на любой ширине и устройстве (тест G8
+  // «телефон — DesktopOnlyState» переписан): «только с компьютера» — действия, а не разделы.
+  test.each([
+    ['/audit', 'Журнал действий'],
+    ['/staff', 'Роли и доступ'],
+    ['/approvals', 'Подтверждения'],
+    ['/me', 'Мой доступ'],
+    ['/geo/cities', 'Города и запуск'],
+    ['/geo/countries', 'Страны'],
+    ['/geo/imports', 'Импорт GeoNames'],
+    ['/app/versions', 'Версии приложения'],
+    ['/flags', 'Флаги функций'],
+  ])('телефон (390 + палец): %s — раздел открыт', async (path, title) => {
+    stubMedia({ width: 390, pointer: 'coarse' });
+    const app = mount(path, meAllDirectories);
+    await page(title);
+    expect(app.at()).toBe(path);
+    expect(screen.queryByText('Только с компьютера')).toBeNull();
   });
 
   test('стартовая страница не изменилась — журнал', async () => {
@@ -451,20 +458,16 @@ describe('каркас AppShell', () => {
     expect(screen.queryByText('Войдите в аккаунт заново')).not.toBeInTheDocument();
   });
 
-  test('телефон: desktopOnly-раздел — «только с компьютера», таббар с «Ещё»', async () => {
-    vi.stubGlobal(
-      'matchMedia',
-      vi.fn((query: string) => ({
-        matches: true,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      })),
-    );
+  test('телефон: «Мой доступ» открыт; таббар — первые 4 разрешённых раздела и «Ещё»', async () => {
+    stubMedia({ width: 390, pointer: 'coarse' });
     mount('/me', meOwner);
-    await page('Только с компьютера');
+    await page('Мой доступ');
     const tabbar = screen.getByRole('navigation', { name: 'Разделы' });
+    expect(
+      within(tabbar)
+        .getAllByRole('link')
+        .map((l) => l.textContent),
+    ).toEqual(['Журнал действий', 'Роли и доступ', 'Подтверждения', 'Мой доступ']);
     expect(within(tabbar).getByRole('button', { name: 'Ещё' })).toBeInTheDocument();
-    expect(within(tabbar).queryByRole('link', { name: 'Мой доступ' })).not.toBeInTheDocument();
   });
 });

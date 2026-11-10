@@ -14,6 +14,7 @@ import {
   OLGA,
 } from '../../test/approvals';
 import { renderApp } from '../../test/app';
+import { stubMedia } from '../../test/media';
 import { CITY_OTHER, CITY_OWN, meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
@@ -44,16 +45,9 @@ const rows = (t: HTMLElement) => within(t).getAllByRole('row').slice(1);
 const listCalls = (seen: { lists: URLSearchParams[]; background: (string | null)[] }) =>
   seen.lists.filter((_, i) => seen.background[i] === null);
 
+// Телефон — узкий экран и палец (спека UI-фундамента §3.2).
 function phone() {
-  vi.stubGlobal(
-    'matchMedia',
-    vi.fn((query: string) => ({
-      matches: query.includes('max-width'),
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    })),
-  );
+  stubMedia({ width: 390, pointer: 'coarse' });
 }
 
 describe('вкладки', () => {
@@ -831,8 +825,12 @@ describe('отменить — ошибки', () => {
   });
 });
 
+// «Только с компьютера» — по устройству, а не ширине (спека UI-фундамента §3.2): 390 + палец —
+// пометка вместо решений по staff.*; 640 + мышь (масштаб на ноутбуке) — решения есть.
+const DESKTOP_ONLY = 'Выдача и снятие прав — только с компьютера';
+
 describe('телефон', () => {
-  test('решения по staff.* скрыты — «Выдача прав — только с компьютера», чтение есть', async () => {
+  test('решения по staff.* скрыты — пометка «только с компьютера», чтение есть', async () => {
     phone();
     directory();
     approvalsServer();
@@ -842,20 +840,53 @@ describe('телефон', () => {
     expect(row).toHaveTextContent('Иван П.');
     expect(within(row!).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
     expect(within(row!).queryByRole('button', { name: 'Отклонить' })).toBeNull();
-    expect(row).toHaveTextContent('Выдача прав — только с компьютера');
+    expect(row).toHaveTextContent(DESKTOP_ONLY);
+  });
+
+  test('незнакомое будущее staff.future_action — тоже пометка (закрыто по умолчанию)', async () => {
+    phone();
+    directory();
+    approvalsServer({
+      // открытый enum: сервер новее клиента — действия нет в типе
+      incoming: [
+        approval({
+          ...INCOMING,
+          action: 'staff.future_action' as Approval['action'],
+          payload: { v: 1 },
+        }),
+      ],
+    });
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    expect(within(row!).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
+    expect(row).toHaveTextContent(DESKTOP_ONLY);
+  });
+
+  test('640 px + мышь (масштаб на ноутбуке) — решения staff.* есть', async () => {
+    stubMedia({ width: 640, pointer: 'fine' });
+    directory();
+    approvalsServer();
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    expect(within(row!).getByRole('button', { name: 'Подтвердить' })).toBeInTheDocument();
+    expect(within(row!).getByRole('button', { name: 'Отклонить' })).toBeInTheDocument();
+    expect(row).not.toHaveTextContent(DESKTOP_ONLY);
   });
 
   // План B, Task 17: ограничение «только с компьютера» — для выдачи прав (staff.*); правила страны
   // (geo.*) на телефоне решаются (спека §9.4).
-  test('решения по geo.* на телефоне доступны', async () => {
-    phone();
+  test.each([
+    ['390 + палец', { width: 390, pointer: 'coarse' }],
+    ['640 + мышь', { width: 640, pointer: 'fine' }],
+  ] as const)('решения по geo.* доступны: %s', async (_, device) => {
+    stubMedia(device);
     directory();
     approvalsServer({ incoming: [GEO_RULES] });
     renderApp('/approvals', { me: meOwner });
     const [row] = rows(await table('Входящие запросы'));
     expect(within(row!).getByRole('button', { name: 'Подтвердить' })).toBeInTheDocument();
     expect(within(row!).getByRole('button', { name: 'Отклонить' })).toBeInTheDocument();
-    expect(row).not.toHaveTextContent('Выдача прав — только с компьютера');
+    expect(row).not.toHaveTextContent(DESKTOP_ONLY);
   });
 });
 

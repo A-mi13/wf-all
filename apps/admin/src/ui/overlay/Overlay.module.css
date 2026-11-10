@@ -133,10 +133,12 @@
   stroke-linecap: round;
 }
 
+/* Тело панели — контейнер: формы и сетки внутри раскладываются по ширине панели (спека UI-фундамента §3.4) */
 .body {
   flex-grow: 1;
   min-height: 0;
   overflow-y: auto;
+  container-type: inline-size;
   padding: var(--wf-space-3) var(--wf-space-6) var(--wf-space-6);
 }
 

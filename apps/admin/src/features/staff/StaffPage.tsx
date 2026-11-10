@@ -3,17 +3,17 @@ import { useId, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { can } from '../../app/permissions';
 import { useSession } from '../../app/session';
-import { Button, PageHeader } from '../../ui';
+import { ActionGate, Button, PageHeader } from '../../ui';
 import { InviteDrawer } from './InviteDrawer';
 import { RolesMatrix, TwoHandsNote } from './RolesMatrix';
-import { grantableRoles, type StaffAccount } from './roles';
+import { grantableRoles, INVITE_PERMISSIONS, type StaffAccount } from './roles';
 import { parseStaffSearch } from './search';
 import { StaffDrawer } from './StaffDrawer';
 import { StaffList } from './StaffList';
 import styles from './staff.module.css';
 
-// «Роли и доступ» (спека §9.4 п. 5, §9.3; макет 07; право staff.roles.read — проверяет каркас;
-// только с компьютера — desktopOnly в NAV): матрица прав и «Правило двух рук» — из
+// «Роли и доступ» (спека §9.4 п. 5, §9.3; макет 07; право staff.roles.read — проверяет каркас; на
+// телефоне — просмотр: выдача и снятие прав за ActionGate, спека UI-фундамента §3.1–§3.2): матрица прав и «Правило двух рук» — из
 // GET /v1/staff/roles; «Кто имеет доступ» — только с staff.accounts.read; «Пригласить» — если
 // сотрудник может выдать хоть одну роль; строка сотрудника — панель действий.
 export function StaffPage() {
@@ -33,7 +33,11 @@ export function StaffPage() {
         title={t('nav.staff')}
         subtitle={t('staff.subtitle')}
         actions={
-          canInvite && <Button onClick={() => setInviting(true)}>{t('staff.invite.open')}</Button>
+          canInvite && (
+            <ActionGate permission={INVITE_PERMISSIONS} compact>
+              <Button onClick={() => setInviting(true)}>{t('staff.invite.open')}</Button>
+            </ActionGate>
+          )
         }
       />
       <div className={styles.top}>

@@ -6,7 +6,7 @@ import { AUTH_PATHS, paths } from './paths';
 import type { Me } from './permissions';
 
 // Меню «Справочников» (спека §9.4, план B Task 17): пять разделов после «Безопасности», каждый — со
-// своим правом чтения и только с компьютера. Права ролей — docs/05-ролевая-модель.md: поддержка видит
+// своим правом чтения. Права ролей — docs/05-ролевая-модель.md: поддержка видит
 // все пять (geo.imports.read у неё allow), модератор — без «Импорта».
 
 const DIRECTORIES = [paths.cities, paths.countries, paths.imports, paths.versions, paths.flags];
@@ -55,14 +55,14 @@ describe('«Справочники»', () => {
     expect(menu).not.toContain(paths.imports);
   });
 
-  test('каждый пункт — с правом чтения своего раздела и только с компьютера', () => {
+  test('каждый пункт — с правом чтения своего раздела', () => {
     const items = NAV.find((g) => g.labelKey === 'nav.groups.directories')?.items ?? [];
-    expect(items.map((i) => [i.path, i.permission, i.desktopOnly])).toEqual([
-      [paths.cities, 'geo.cities.read', true],
-      [paths.countries, 'geo.countries.read', true],
-      [paths.imports, 'geo.imports.read', true],
-      [paths.versions, 'platform.versions.read', true],
-      [paths.flags, 'platform.flags.read', true],
+    expect(items.map((i) => [i.path, i.permission])).toEqual([
+      [paths.cities, 'geo.cities.read'],
+      [paths.countries, 'geo.countries.read'],
+      [paths.imports, 'geo.imports.read'],
+      [paths.versions, 'platform.versions.read'],
+      [paths.flags, 'platform.flags.read'],
     ]);
     for (const i of items) expect(i.icon).toBeDefined();
   });
@@ -106,4 +106,12 @@ test('каждый вложенный путь каркаса — внутри �
     expect(parent, p).toBeDefined();
     expect(parent?.path, p).not.toBe(p);
   }
+});
+
+// Все разделы открыты на любой ширине и устройстве (спека UI-фундамента §3.1): «только с компьютера» —
+// действия (ActionGate), а не разделы. Флаг остаётся в типе на будущее; каркас его сейчас не читает —
+// вернуть закрытие раздела можно только вместе с поддержкой в AppShell и тестом.
+test('ни один пункт меню не desktopOnly', () => {
+  const flagged = NAV.flatMap((g) => g.items).filter((i) => 'desktopOnly' in i);
+  expect(flagged.map((i) => i.path)).toEqual([]);
 });

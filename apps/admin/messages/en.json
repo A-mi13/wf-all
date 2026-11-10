@@ -24,7 +24,9 @@
     "countries": "Countries",
     "imports": "GeoNames import",
     "versions": "App versions",
-    "flags": "Feature flags"
+    "flags": "Feature flags",
+    "account": "Profile and settings",
+    "account_open": "Profile and settings: {name}"
   },
   "pages": {
     "login": {
@@ -140,8 +142,8 @@
       "text": "No network. Decisions will not be sent; showing the last loaded data."
     },
     "desktop_only": {
-      "title": "Desktop only",
-      "text": "This section opens only on a computer: it changes access and settings that cannot be undone from a phone on the go."
+      "notice": "Granting and revoking access — desktop only",
+      "hint": "You can view it here; to change it, open the admin panel on a computer."
     },
     "rate_limited": {
       "title": "Too many requests",
@@ -216,6 +218,13 @@
       "mismatch": "Does not match",
       "range": "Invalid period",
       "host": "Not this platform's store link"
+    },
+    "term": {
+      "more": "What does this mean?"
+    },
+    "copy": {
+      "done": "Copied",
+      "manual": "Copy it manually"
     }
   },
   "permissions": {
@@ -379,7 +388,6 @@
     "approve": "Approve",
     "reject": "Reject",
     "cancel": "Cancel",
-    "desktop_only": "Granting access — desktop only",
     "done": {
       "executed": "Approved and carried out.",
       "rejected": "Request rejected.",
@@ -1049,5 +1057,14 @@
       "submit": "Link",
       "linked": "City linked to GeoNames"
     }
+  },
+  "glossary": {
+    "dual_approval": "The action runs only after a second staff member with the same permission approves it: one person cannot do it alone.",
+    "scoped": "The permission applies only to the cities assigned to the staff member: a moderator sees and changes their own cities.",
+    "city_status": "“Waitlist” — no games in the city yet, players are invited to become a captain; “pilot” and “live” — cities with games.",
+    "geonames": "An open gazetteer of places worldwide: a city is created from its data — name, coordinates, population, time zone.",
+    "slug": "The part of the city page link on the website: lowercase Latin letters, digits and hyphens only.",
+    "recovery_codes": "One-time sign-in codes for when the authenticator app is not at hand: each works once.",
+    "feature_flag": "A switch that turns a feature on everywhere or in selected cities without releasing a new app version."
   }
 }

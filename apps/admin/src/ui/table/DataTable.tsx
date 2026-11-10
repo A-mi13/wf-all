@@ -20,7 +20,7 @@ import { type DataTableProps, SEARCH_DEBOUNCE_MS } from './model';
 // скелетон, пусто, ошибка с кодом и «Повторить». Таблица управляемая: значения фильтров и
 // сортировки держит экран (обычно в search-параметрах маршрута), данные — его запрос;
 // infiniteTableProps(query) переводит useInfiniteQuery в пропсы таблицы. На телефоне строки
-// становятся карточками с подписями столбцов.
+// становятся карточками с подписями столбцов (layout 'table' — нет: своя горизонтальная прокрутка).
 
 export function DataTable<T>(props: DataTableProps<T>) {
   const t = useTranslations('table');
@@ -212,12 +212,14 @@ function Rows<T>({
   onSortChange,
   onRowClick,
   activeRowKey,
+  layout = 'auto',
   hasMore,
   loadingMore,
   loadMoreError,
   onLoadMore,
 }: DataTableProps<T> & { rows: T[] }) {
-  const stacked = useIsMobile();
+  const narrow = useIsMobile();
+  const stacked = layout === 'auto' && narrow;
   const toggle = (column: string) =>
     onSortChange?.({
       column,
@@ -226,13 +228,17 @@ function Rows<T>({
 
   return (
     <>
-      <div className={styles.scroll}>
+      <div className={styles.scroll} data-table-scroll="">
         {/* Роли — явно: на телефоне строки и ячейки становятся блоками (display: block), и часть
             браузеров иначе снимает с них семантику таблицы. */}
         <table
           role="table"
           aria-label={label}
-          className={cx(styles.table, stacked && styles.stacked)}
+          className={cx(
+            styles.table,
+            stacked && styles.stacked,
+            layout === 'table' && styles.scrolls,
+          )}
         >
           <thead role="rowgroup">
             <tr role="row">

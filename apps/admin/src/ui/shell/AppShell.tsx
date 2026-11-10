@@ -7,9 +7,10 @@ import { Button } from '../Button';
 import { CountBadge } from '../CountBadge';
 import { cx } from '../cx';
 import { Icon } from '../icon';
-import { useIsMobile } from '../media';
+import { Tooltip } from '../hint/Tooltip';
+import { useIsCompact, useIsMobile } from '../media';
 import { Sheet } from '../overlay';
-import { DesktopOnlyState, ForbiddenState, OfflineBanner } from '../states';
+import { ForbiddenState, OfflineBanner } from '../states';
 import { ThemeSwitch } from '../theme/ThemeSwitch';
 import styles from './AppShell.module.css';
 import { BackLink, BackMemoryProvider } from './BackLink';
@@ -32,10 +33,14 @@ const TABBAR_ITEMS = 4;
 // Каркас админки (спека §9.2–9.4, макеты 07 и 08).
 // - Десктоп: сайдбар — бренд, группы меню со счётчиками, карточка сотрудника (имя, почта, «роль ·
 //   города»; ниже строками — меню профиля (язык), тема и «Выйти» с иконкой во всю ширину).
-// - Уже breakpoint-mobile (useIsMobile): нижний таббар — первые разделы, открытые на телефоне, и
+// - breakpoint-mobile…breakpoint-compact (useIsCompact, 768–1023): узкая полоса size.rail — значки разделов
+//   (имя — aria-label, название — подсказкой Tooltip), счётчик — точкой (число слышно в имени ссылки);
+//   карточка сотрудника — аватар, по нажатию шторка (карточка, язык, тема, «Выйти»). Спека UI-фундамента §3.4.
+// - Уже breakpoint-mobile (useIsMobile): нижний таббар — первые 4 разрешённых раздела (U10) и
 //   «Ещё» (шторка: карточка, все разрешённые разделы, меню профиля, тема, «Выйти»).
 // - Меню — по правам (D23): пункта без права нет; прямой адрес такого раздела — ForbiddenState.
-//   desktopOnly на телефоне — DesktopOnlyState (D22). Решает всегда сервер.
+//   Разделы открыты на любой ширине и устройстве (спека UI-фундамента §3.1): «только с компьютера» —
+//   действия (ActionGate). Решает всегда сервер.
 // - Над страницей — баннер «нет сети».
 // - Вложенный экран раздела (адрес внутри раздела меню: /geo/cities/$cityId) — над страницей
 //   BackLink «← раздел» на последний адрес раздела с его фильтрами (BackMemoryProvider). Один на все
@@ -45,6 +50,7 @@ export function AppShell(props: AppShellProps) {
   const t = useTranslations();
   const can = usePermissionCheck();
   const mobile = useIsMobile();
+  const compact = useIsCompact();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const menu = useMemo(() => filterNav(groups, can), [groups, can]);
   const current = findNavItem(groups, pathname);
@@ -52,8 +58,6 @@ export function AppShell(props: AppShellProps) {
   let content = children;
   if (current && current.permission !== null && !can(current.permission)) {
     content = <ForbiddenState />;
-  } else if (mobile && current?.desktopOnly) {
-    content = <DesktopOnlyState />;
   } else if (current && pathname !== current.path) {
     content = (
       <>
@@ -76,6 +80,11 @@ export function AppShell(props: AppShellProps) {
         <div className={cx(styles.shell, styles.mobile)}>
           {page}
           <TabBar {...props} menu={menu} current={current} />
+        </div>
+      ) : compact ? (
+        <div className={styles.shell}>
+          <Rail {...props} menu={menu} current={current} />
+          {page}
         </div>
       ) : (
         <div className={styles.shell}>
@@ -255,13 +264,82 @@ function NavLink({
   );
 }
 
+// Полоса 768–1023: значки разделов по группам, внизу — аватар сотрудника (шторка с настройками).
+function Rail({ menu, current, counts, account, profileMenu, onLogout, loggingOut }: Layout) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <aside className={styles.rail}>
+        <nav aria-label={t('nav.label')} className={styles.railNav}>
+          {menu.map((g) => (
+            <div
+              key={g.labelKey}
+              role="group"
+              aria-label={t(g.labelKey)}
+              className={styles.railGroup}
+            >
+              <ul className={styles.railItems}>
+                {g.items.map((item) => (
+                  <li key={item.path}>
+                    <RailLink item={item} active={item === current} count={counts?.[item.path]} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+        <button
+          type="button"
+          className={styles.railAccount}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={t('nav.account_open', { name: account.name })}
+          onClick={() => setOpen(true)}
+        >
+          <Avatar name={account.name} size="sm" />
+        </button>
+      </aside>
+      <Sheet open={open} onClose={() => setOpen(false)} title={t('nav.account')}>
+        <div className={styles.moreAccount}>
+          <Avatar name={account.name} size="md" />
+          <AccountText account={account} />
+        </div>
+        <div className={styles.sheetSettings}>
+          {profileMenu}
+          <ThemeSwitch />
+        </div>
+        <LogoutButton block loading={loggingOut} onClick={onLogout} />
+      </Sheet>
+    </>
+  );
+}
+
+// Значок раздела: имя ссылки — название (и число счётчика для читалки), подсказка — название; счётчик
+// виден точкой на значке.
+function RailLink({ item, active, count }: { item: NavItem; active: boolean; count?: number }) {
+  const t = useTranslations();
+  const name = t(item.labelKey);
+  const label = count && item.countLabelKey ? `${name} ${t(item.countLabelKey, { count })}` : name;
+  return (
+    <Tooltip content={name} placement="right" describe={false}>
+      <Link
+        to={item.path}
+        activeOptions={{ includeSearch: false }}
+        aria-label={label}
+        className={cx(styles.railLink, active && styles.active)}
+      >
+        <Icon name={item.icon ?? 'list'} size={20} />
+        {count ? <span className={styles.railDot} aria-hidden="true" /> : null}
+      </Link>
+    </Tooltip>
+  );
+}
+
 function TabBar({ menu, current, counts, account, profileMenu, onLogout, loggingOut }: Layout) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const tabs = menu
-    .flatMap((g) => g.items)
-    .filter((i) => !i.desktopOnly)
-    .slice(0, TABBAR_ITEMS);
+  const tabs = menu.flatMap((g) => g.items).slice(0, TABBAR_ITEMS);
   const inMore = current !== undefined && !tabs.includes(current);
 
   return (

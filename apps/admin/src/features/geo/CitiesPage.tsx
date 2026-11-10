@@ -8,8 +8,8 @@ import { CityCards } from './CityCards';
 import styles from './geo.module.css';
 import { parseCitiesSearch } from './search';
 
-// «Города и запуск» (спека §9.4 п. 8, макет 07; право geo.cities.read — проверяет каркас; только
-// с компьютера — desktopOnly в NAV): карточки городов с фильтрами, «Активировать город» — с
+// «Города и запуск» (спека §9.4 п. 8, макет 07; право geo.cities.read — проверяет каркас; открыт и
+// на телефоне, включая активацию — спека UI-фундамента §3.1): карточки городов с фильтрами, «Активировать город» — с
 // geo.cities.activate (решает сервер).
 export function CitiesPage() {
   const t = useTranslations();

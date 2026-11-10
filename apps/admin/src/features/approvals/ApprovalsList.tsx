@@ -5,17 +5,19 @@ import { type ApiError, isUnknownOutcome, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
+import { isDesktopOnlyDecision } from '../../app/desktopOnly';
 import { can, type Me } from '../../app/permissions';
 import { useDateTime } from '../../i18n/format';
 import {
   Button,
   type Column,
   DataTable,
+  DesktopOnlyNotice,
   EmptyState,
   infiniteTableProps,
   StatusChip,
   useErrorText,
-  useIsMobile,
+  useIsHandheld,
   useToast,
 } from '../../ui';
 import { cityLabel, useCityNames } from '../staff/cities';
@@ -51,12 +53,13 @@ const DECIDE_KEY = ['approvals', 'decide'] as const;
 // - Исход решения неизвестен (isUnknownOutcome: 5xx, обрыв, 408/499, 2xx без тела, 409
 //   idempotency.replay_unavailable) — решение не повторяется: запрос перечитывается (useFindApproval:
 //   подтвердить и отклонить — «Входящие», отменить — «Мои»), тост и строка — по его итогу.
-// - На телефоне решения по staff.* скрыты (D22, ограничение интерфейса — решает сервер); geo.* (правила
-//   и создание страны) решаются и с телефона (спека §9.4).
+// - На карманном устройстве (палец и экран уже compact, а не ширина окна — спека UI-фундамента §3.2)
+//   решения по любому staff.*, включая незнакомое будущее, — пометка «только с компьютера» (ограничение
+//   интерфейса — решает сервер); geo.* (правила и создание страны) решаются и с телефона (спека §9.4).
 export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
   const t = useTranslations('approvals');
   const api = useApi();
-  const mobile = useIsMobile();
+  const handheld = useIsHandheld();
   const list = useInfiniteQuery({
     queryKey: approvalsListKey(box),
     queryFn: ({ pageParam }) =>
@@ -116,8 +119,7 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
           {t('cancel')}
         </Button>
       );
-    if (mobile && a.action.startsWith('staff.'))
-      return <p className={styles.note}>{t('desktop_only')}</p>;
+    if (handheld && isDesktopOnlyDecision(a.action)) return <DesktopOnlyNotice compact />;
     const other = decisions.busy && decisions.pendingId !== a.id;
     return (
       <div className={styles.actions}>

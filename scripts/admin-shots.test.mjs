@@ -22,8 +22,23 @@ test('умолчания: роль admin, три ширины, обе темы, 
     widths: [1440, 768, 390],
     themes: ['dark', 'light'],
     locale: 'ru',
+    touch: false,
     paths: ['/audit', '/staff'],
   });
+});
+
+// Устройство с пальцем (спека UI-фундамента §3.2): «только с компьютера» решает pointer: coarse, а не ширина —
+// без --touch снимок 390 — это узкое окно с мышью (кнопки на месте); с --touch — телефон (пометки). Суффикс
+// -touch не даёт снимкам перезаписать друг друга.
+test('--touch — без значения, снимки с суффиксом -touch', () => {
+  const o = parseArgs(['--out', 'o', '--touch', '--widths', '390', '--themes', 'dark', '/staff']);
+  assert.equal(o.touch, true);
+  assert.deepEqual(o.paths, ['/staff']);
+  assert.deepEqual(
+    planShots(o).map((s) => s.file),
+    [join('o', 'staff-390-dark-touch.png')],
+  );
+  assert.throws(() => parseArgs(['--out', 'o', '--touch=yes', '/staff']), /--touch/);
 });
 
 test('флаги в любом месте и через =', () => {

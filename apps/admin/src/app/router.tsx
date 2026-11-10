@@ -40,8 +40,8 @@ import { LoadingStub, NotFoundStub } from './stubs';
 
 // Роутер админки (спека §9.1, §9.3–9.4): TanStack Router, маршруты кодом, пути — paths.ts.
 // Стадия сессии решает, куда пускать (guard.ts, beforeLoad корня); разделы — внутри AppShell: он
-// строит меню по правам и сам показывает ForbiddenState на прямой адрес без права (D23) и
-// DesktopOnlyState на телефоне (D22). Экраны входа — features/auth (Task 13), «Мой доступ» и «Роли
+// строит меню по правам и сам показывает ForbiddenState на прямой адрес без права (D23); разделы
+// открыты на любом устройстве — «только с компьютера» решают действия (ActionGate). Экраны входа — features/auth (Task 13), «Мой доступ» и «Роли
 // и доступ» — features/me и features/staff (Task 14), «Подтверждения» и «Журнал действий» —
 // features/approvals и features/audit (Task 15). Окно разблокировки (ReauthModal) стоит поверх
 // любой страницы.
@@ -119,7 +119,7 @@ function ActiveShell({ me }: { me: Me }) {
 
 // Разделы «Справочников», экраны которых строят следующие задачи плана B (Task 20–22): пока — только
 // шапка раздела. Маршрут нужен уже сейчас: без него прямой адрес дал бы «не найдено» вместо
-// ForbiddenState / DesktopOnlyState каркаса. Задача экрана заменяет component своим.
+// ForbiddenState каркаса. Задача экрана заменяет component своим.
 function pendingSection(titleKey: string) {
   return function PendingSection() {
     const t = useTranslations();

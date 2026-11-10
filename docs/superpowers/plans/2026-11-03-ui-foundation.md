@@ -2150,7 +2150,9 @@ Ctrl/Alt/Meta (кроме своих); при `hasModalOverlay()` — ничег
 - **U24. Один глобальный CSS админки** — `src/ui/global.css` (импорт в `src/app/styles.ts` — общем модуле стилей
   `main.tsx` и режима `shots`, m3): `html { scrollbar-gutter: stable }` (m-k) и `::view-transition-group(*)` при
   reduced motion (§4.15) — правилам корня и псевдоэлементам документа нет места в CSS Modules. Цветов и токенов в нём
-  нет; строка в `admin.md`.
+  нет; строка в `admin.md`. **Поправка 10.11 (ревью UF2a/I, m9):** исключение — `body { margin: 0; background:
+  var(--wf-color-bg) }`: спека §2.1 и §4.12 требуют вычисленный фон именно `body` (прод-e2e сверяет его), иных цветов
+  и токенов в `global.css` нет.
 - **U25. Роли слоёв иконок и вырезы** (I4). Модель `object | detail | accent | accent-detail | knockout` (+ `opacity`)
   выражает все цвета артборда 14; незнакомый цвет — ошибка выгрузки, а не молча `object` (пакет общий с вебом, страж
   «выгрузка = файл» закрепил бы порчу). Вырез (`knockout`) рисуется цветом поверхности (`bg-elevated` по умолчанию —

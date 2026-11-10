@@ -3,6 +3,7 @@
 export { Avatar } from './Avatar';
 export { Button, type ButtonProps, type ButtonVariant } from './Button';
 export { Card, type CardProps, type CardStat } from './Card';
+export { CopyButton } from './CopyButton';
 export { CountBadge } from './CountBadge';
 export { useCountdown } from './countdown';
 export { useErrorText } from './errorText';
@@ -20,10 +21,20 @@ export {
   TextField,
   useFieldErrorText,
 } from './form';
+export { ActionGate } from './gate/ActionGate';
+export { GLOSSARY_KEYS, type GlossaryKey } from './hint/glossary';
+export { TermHint } from './hint/TermHint';
+export { Tooltip } from './hint/Tooltip';
 export { Icon, Illustration } from './icon';
-export { useIsMobile } from './media';
+export { useIsCompact, useIsHandheld, useIsMobile } from './media';
 export { useOnline } from './online';
 export { OtpInput, type OtpInputHandle, type OtpInputProps } from './OtpInput';
+export {
+  Popover,
+  type PopoverCloseReason,
+  type PopoverKind,
+  type PopoverProps,
+} from './popover/Popover';
 export {
   ConfirmDialog,
   type ConfirmDialogProps,
@@ -43,7 +54,7 @@ export {
 } from './shell';
 export {
   ConnectionErrorState,
-  DesktopOnlyState,
+  DesktopOnlyNotice,
   EmptyState,
   ErrorState,
   ForbiddenState,

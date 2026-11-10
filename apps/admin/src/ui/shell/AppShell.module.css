@@ -15,10 +15,13 @@
   flex-direction: column;
 }
 
+/* Область страницы — контейнер: таблицы, сетки карточек и формы раскладываются по её ширине, а не окна
+   (спека UI-фундамента §3.4, принцип 6) — сайдбар, полоса и панель справа их не ломают. */
 .main {
   flex-grow: 1;
   min-width: 0;
   padding: var(--wf-space-5) var(--wf-space-6);
+  container-type: inline-size;
 }
 
 /* ---------- сайдбар ---------- */
@@ -314,4 +317,96 @@
 
 .moreAccount + .nav {
   margin: var(--wf-space-2) 0 var(--wf-space-3);
+}
+
+/* ---------- полоса 768–1023 (спека UI-фундамента §3.4) ---------- */
+
+.rail {
+  position: sticky;
+  top: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: var(--wf-size-rail);
+  height: 100dvh;
+  padding: var(--wf-space-4) 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--wf-color-slot-empty);
+  background: var(--wf-color-surface-sunken);
+}
+
+.railNav {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+}
+
+.railItems {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--wf-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.railGroup + .railGroup {
+  padding-top: var(--wf-space-3);
+  border-top: 1px solid var(--wf-color-slot-empty);
+}
+
+.railLink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-touch-min);
+  height: var(--wf-size-touch-min);
+  border-radius: var(--wf-radius-sm);
+  color: var(--wf-color-text-muted);
+}
+
+.railLink:hover {
+  color: var(--wf-color-text);
+}
+
+.railLink.active {
+  background: var(--wf-color-pitch);
+  color: var(--wf-color-text);
+}
+
+.railLink:focus-visible,
+.railAccount:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}
+
+/* счётчик — точкой на значке; число — в имени ссылки для читалки */
+.railDot {
+  position: absolute;
+  top: var(--wf-space-2);
+  right: var(--wf-space-2);
+  width: var(--wf-space-2);
+  height: var(--wf-space-2);
+  border: 2px solid var(--wf-color-surface-sunken);
+  border-radius: var(--wf-radius-full);
+  background: var(--wf-color-accent);
+}
+
+.railAccount {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-touch-min);
+  height: var(--wf-size-touch-min);
+  margin-top: var(--wf-space-4);
+  padding: 0;
+  border: 0;
+  border-radius: var(--wf-radius-full);
+  background: none;
+  cursor: pointer;
 }

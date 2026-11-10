@@ -69,12 +69,3 @@
   justify-content: flex-end;
   gap: var(--wf-space-2);
 }
-
-/* На телефоне вместо решений по выдаче прав */
-.note {
-  margin: 0;
-  color: var(--wf-color-warning);
-  font-size: var(--wf-text-xs);
-  line-height: var(--wf-text-xs-line);
-  font-weight: 700;
-}

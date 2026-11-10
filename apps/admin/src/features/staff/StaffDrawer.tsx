@@ -9,6 +9,7 @@ import type { components } from '../../api/gen/admin';
 import { can, type Decision, decide, type Me } from '../../app/permissions';
 import { useDateTime } from '../../i18n/format';
 import {
+  ActionGate,
   Button,
   ConfirmDialog,
   Drawer,
@@ -28,7 +29,15 @@ import { useInvalidateApprovals } from '../approvals/queries';
 import { cityLabel, useCityNames } from './cities';
 import { CityField } from './CityField';
 import { ACCOUNTS_KEY, accountKey, accountSessionsKey, useRoleLabel } from './queries';
-import { ROLES, roleChangePermission, type StaffAccount, staffActions } from './roles';
+import {
+  DISABLE_PERMISSIONS,
+  RESET_PERMISSIONS,
+  ROLE_CHANGE_PERMISSIONS,
+  ROLES,
+  roleChangePermission,
+  type StaffAccount,
+  staffActions,
+} from './roles';
 import { useStaffStatus } from './status';
 import styles from './staff.module.css';
 
@@ -267,16 +276,19 @@ function ResendBlock({ target }: { target: StaffAccount }) {
   return (
     <Block title={t('title')}>
       <p className={styles.text}>{t('text')}</p>
-      <div className={styles.row}>
-        <Button
-          variant="secondary"
-          loading={resend.isPending}
-          disabled={limited}
-          onClick={() => resend.mutate()}
-        >
-          {limited ? t('wait', { seconds: wait.left }) : t('button')}
-        </Button>
-      </div>
+      {/* прав не выдаёт и не снимает — доступно и на телефоне (спека UI-фундамента §3.1) */}
+      <ActionGate permission="staff.invites.resend">
+        <div className={styles.row}>
+          <Button
+            variant="secondary"
+            loading={resend.isPending}
+            disabled={limited}
+            onClick={() => resend.mutate()}
+          >
+            {limited ? t('wait', { seconds: wait.left }) : t('button')}
+          </Button>
+        </div>
+      </ActionGate>
     </Block>
   );
 }
@@ -331,51 +343,55 @@ function RoleBlock({
     },
   );
 
+  // Смена роли и городов выдаёт или снимает права — на карманном устройстве пометка вместо формы
+  // (спека UI-фундамента §3.2); текущая роль и города видны выше, в сведениях панели.
   return (
     <Block title={t('title')}>
-      <Form
-        form={form}
-        onSubmit={(v) => (permission && decision !== 'deny' ? change.mutateAsync(v) : undefined)}
-        onError={(e) => {
-          if (toasted(e)) return true; // текст — общим тостом
-          if (e.code !== 'staff.city_not_found') return false;
-          form.setError(
-            'city_ids',
-            { type: 'server', message: errorText(e) },
-            { shouldFocus: true },
-          );
-          return true;
-        }}
-      >
-        <SelectField
-          name="role"
-          label={t('role')}
-          options={options.map((r) => ({ value: r, label: roleLabel(r) }))}
-        />
-        {role === 'moderator' && (
-          <CityField
-            name="city_ids"
-            label={t('cities')}
-            rules={{
-              validate: {
-                min_items: (v: unknown) =>
-                  form.getValues('role') !== 'moderator' || (Array.isArray(v) && v.length > 0),
-              },
-            }}
+      <ActionGate permission={ROLE_CHANGE_PERMISSIONS} compact>
+        <Form
+          form={form}
+          onSubmit={(v) => (permission && decision !== 'deny' ? change.mutateAsync(v) : undefined)}
+          onError={(e) => {
+            if (toasted(e)) return true; // текст — общим тостом
+            if (e.code !== 'staff.city_not_found') return false;
+            form.setError(
+              'city_ids',
+              { type: 'server', message: errorText(e) },
+              { shouldFocus: true },
+            );
+            return true;
+          }}
+        >
+          <SelectField
+            name="role"
+            label={t('role')}
+            options={options.map((r) => ({ value: r, label: roleLabel(r) }))}
           />
-        )}
-        {permission && decision === 'deny' && <p className={styles.text}>{t('denied')}</p>}
-        <div className={styles.row}>
-          <Button
-            type="submit"
-            variant={decision === 'needs_approval' ? 'secondary' : 'primary'}
-            loading={change.isPending}
-            disabled={!permission || decision === 'deny'}
-          >
-            {decision === 'needs_approval' ? t('request') : t('save')}
-          </Button>
-        </div>
-      </Form>
+          {role === 'moderator' && (
+            <CityField
+              name="city_ids"
+              label={t('cities')}
+              rules={{
+                validate: {
+                  min_items: (v: unknown) =>
+                    form.getValues('role') !== 'moderator' || (Array.isArray(v) && v.length > 0),
+                },
+              }}
+            />
+          )}
+          {permission && decision === 'deny' && <p className={styles.text}>{t('denied')}</p>}
+          <div className={styles.row}>
+            <Button
+              type="submit"
+              variant={decision === 'needs_approval' ? 'secondary' : 'primary'}
+              loading={change.isPending}
+              disabled={!permission || decision === 'deny'}
+            >
+              {decision === 'needs_approval' ? t('request') : t('save')}
+            </Button>
+          </div>
+        </Form>
+      </ActionGate>
     </Block>
   );
 }
@@ -444,18 +460,22 @@ function SessionsBlock({ target }: { target: StaffAccount }) {
   return (
     <Block title={t('title')}>
       {body}
-      <div className={styles.row}>
-        <Button
-          variant="danger-outline"
-          disabled={!sessions.data || sessions.data.items.length === 0}
-          onClick={() => {
-            revokeAll.reset();
-            setConfirming(true);
-          }}
-        >
-          {t('revoke_all')}
-        </Button>
-      </div>
+      {/* защитное действие, прав не снимает: на телефоне доступно, в том числе у цели-админа (право
+          самого действия — staff.sessions.revoke, а не grant_elevated блока; спека UI-фундамента §3.2, m5) */}
+      <ActionGate permission="staff.sessions.revoke">
+        <div className={styles.row}>
+          <Button
+            variant="danger-outline"
+            disabled={!sessions.data || sessions.data.items.length === 0}
+            onClick={() => {
+              revokeAll.reset();
+              setConfirming(true);
+            }}
+          >
+            {t('revoke_all')}
+          </Button>
+        </div>
+      </ActionGate>
       <ConfirmDialog
         open={confirming}
         onClose={() => setConfirming(false)}
@@ -496,11 +516,14 @@ function DestructiveBlock({
   return (
     <Block title={t('title')}>
       <p className={styles.text}>{t('text')}</p>
-      <div className={styles.row}>
-        <Button variant="danger-outline" onClick={() => setOpen(true)}>
-          {label}
-        </Button>
-      </div>
+      {/* снимает права — на карманном устройстве пометка (спека UI-фундамента §3.2) */}
+      <ActionGate permission={kind === 'reset' ? RESET_PERMISSIONS : DISABLE_PERMISSIONS} compact>
+        <div className={styles.row}>
+          <Button variant="danger-outline" onClick={() => setOpen(true)}>
+            {label}
+          </Button>
+        </div>
+      </ActionGate>
       {open && (
         <DestructiveDialog
           kind={kind}

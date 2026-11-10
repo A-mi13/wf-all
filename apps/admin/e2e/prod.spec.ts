@@ -11,9 +11,8 @@ import { acceptAndSetup, bootstrap, newStaff, receiveInvite } from './ui';
 // (1) тема до первого кадра — public/theme-init.js при явном выборе ПРОТИВ системной темы (I3: умолчание
 //     эмуляции совпало бы с ожиданием, и подсадка «без скрипта» осталась бы немой);
 // (2) обход всех разделов меню и панели приглашения без единого securitypolicyviolation;
-// (3) фон страницы = tokens.color.bg[тема] на собранном CSS для обеих тем (dev ↔ прод, I2).
-// Фон — у первого блока #root (каркас и экраны входа красят его bg): у <body> своего фона пока нет
-// (глобальный CSS — UF2a.2).
+// (3) фон body = tokens.color.bg[тема] на собранном CSS для обеих тем (dev ↔ прод, I2): body красит
+// глобальный CSS (src/ui/global.css, UF2a.2), до него проверялся первый блок #root.
 
 type Theme = 'light' | 'dark';
 type Pref = Theme | 'system';
@@ -29,11 +28,7 @@ function rgb(hex: string): string {
 }
 const bg = (theme: Theme) => rgb(tokens.color.bg[theme]);
 
-const ground = (page: Page) =>
-  page.evaluate(() => {
-    const el = document.querySelector('#root > *');
-    return el ? getComputedStyle(el).backgroundColor : '';
-  });
+const ground = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
 // До скриптов документа (addInitScript): выбор темы в storage, атрибут data-theme в момент, когда разбор
 // HTML закончен, а модульные скрипты приложения ещё не исполнились (readyState interactive), и нарушения CSP.
@@ -76,9 +71,9 @@ test.describe('тема до первого кадра: явный выбор п
       });
       await probe(context, c.pref);
       const page = await context.newPage();
-      const console: string[] = [];
+      const cspConsole: string[] = [];
       page.on('console', (m) => {
-        if (/Content Security Policy/i.test(m.text())) console.push(m.text());
+        if (/Content Security Policy/i.test(m.text())) cspConsole.push(m.text());
       });
       await page.goto('/login');
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
@@ -90,7 +85,7 @@ test.describe('тема до первого кадра: явный выбор п
       // атрибут поставил theme-init.js, а не приложение: он уже был до модульных скриптов
       expect(p.firstTheme).toBe(c.pref);
       expect(p.csp).toEqual([]);
-      expect(console).toEqual([]);
+      expect(cspConsole).toEqual([]);
       await context.close();
     });
   }

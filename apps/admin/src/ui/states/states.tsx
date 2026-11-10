@@ -2,7 +2,9 @@ import type { ReactNode } from 'react';
 import { useTranslations } from 'use-intl';
 import { isApiError } from '../../api/client';
 import { Button } from '../Button';
+import { cx } from '../cx';
 import { useErrorText } from '../errorText';
+import { Icon } from '../icon';
 import { useOnline } from '../online';
 import { StateBlock } from './StateBlock';
 import styles from './States.module.css';
@@ -106,10 +108,25 @@ export function ForbiddenState() {
   return <StateBlock page tone="muted" title={t('title')} text={t('text')} />;
 }
 
-// Раздел на телефоне закрыт (D22, макет 08): выдача прав и настройки — только с компьютера.
-export function DesktopOnlyState() {
+// Пометка вместо действия на карманном устройстве (спека UI-фундамента §3.2; ставит ActionGate):
+// выдача и снятие прав — только с компьютера. Текст, не кнопка и не disabled-кнопка: недоступное
+// действие не попадает в Tab-порядок и не притворяется нажимаемым. compact — одна строка с иконкой
+// (в панели, в шапке, в строке таблицы), иначе — блок с пояснением.
+export function DesktopOnlyNotice({ compact }: { compact?: boolean }) {
   const t = useTranslations('states.desktop_only');
-  return <StateBlock page tone="warning" title={t('title')} text={t('text')} />;
+  if (compact)
+    return (
+      <p className={styles.desktopOnly} data-desktop-only="compact">
+        <Icon name="monitor" size={16} />
+        <span>{t('notice')}</span>
+      </p>
+    );
+  return (
+    <div className={cx(styles.block, styles.toneMuted)} data-desktop-only="block">
+      <p className={styles.title}>{t('notice')}</p>
+      <p className={styles.text}>{t('hint')}</p>
+    </div>
+  );
 }
 
 // Стадия error сессии: admin-api не ответил на GET /v1/staff/me (сеть, 5xx) — «нет связи». Ответил

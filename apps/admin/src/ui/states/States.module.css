@@ -175,3 +175,16 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* «Только с компьютера» одной строкой (ActionGate compact): значок и текст, не кнопка */
+.desktopOnly {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+  margin: 0;
+  color: var(--wf-color-text-muted);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+}

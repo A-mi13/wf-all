@@ -5,6 +5,7 @@ import en from '../../messages/en.json';
 import ru from '../../messages/ru.json';
 import { NAV } from '../app/nav';
 import { SECTIONS } from '../features/audit/search';
+import { GLOSSARY_KEYS } from '../ui/hint/glossary';
 
 // D21 (спека сотрудников §9.5): подписи прав, действий подтверждений и флагов функций — только в
 // локалях, ru и en (en — перевод: в админке нет отката на ru). Новое право в каталоге, новое действие
@@ -68,4 +69,12 @@ const planB = [
 test('подписи «Справочников» и журнала плана B — в ru и en', () => {
   expect(missingKeys(ru, planB)).toEqual([]);
   expect(missingKeys(en, planB)).toEqual([]);
+});
+
+// Глоссарий терминов (спека UI-фундамента §4.8): каждый GlossaryKey — текст подсказки TermHint в ru и en.
+test('каждый GlossaryKey есть в ru и en', () => {
+  expect(GLOSSARY_KEYS).toHaveLength(7);
+  const keys = GLOSSARY_KEYS.map((k) => `glossary.${k}`);
+  expect(missingKeys(ru, keys)).toEqual([]);
+  expect(missingKeys(en, keys)).toEqual([]);
 });

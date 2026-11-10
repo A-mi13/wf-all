@@ -1,0 +1,20 @@
+/* Раскладка историй Popover (не компонента): якорь у правого края, столбец строк-якорей, содержимое
+   пузыря-образца. Имя без «.stories.» — Ладл дописывает HMR-код во все модули с ним (отчёт UF3.1). */
+.edge {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-6);
+  max-inline-size: 20rem;
+}
+
+.content {
+  margin: 0;
+  padding: var(--wf-space-2) var(--wf-space-3);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}

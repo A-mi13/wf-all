@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom';
 import { useTranslations } from 'use-intl';
 import { cx } from '../cx';
 import styles from './Overlay.module.css';
-import { focusables, isTopOverlay, pushOverlay, trapTab } from './stack';
+import { focusables, isTopModal, isTopOverlay, pushOverlay, trapTab } from './stack';
 
 export type OverlayProps = {
   open: boolean;
@@ -35,7 +35,8 @@ const PLACEMENT: Record<Placement, string | undefined> = {
 };
 
 // Общая основа Modal, Drawer и Sheet: портал в body, role="dialog" + aria-modal, фокус внутрь при
-// открытии и обратно на открыватель при закрытии, фокус-ловушка, Esc, блок прокрутки фона.
+// открытии и обратно на открыватель при закрытии, фокус-ловушка, Esc, блок прокрутки фона. Запись
+// стека — модальная (stack.ts): её открытие закрывает все открытые Popover.
 // Закрытый оверлей не рендерится: состояние содержимого при новом открытии чистое.
 export function Overlay(
   props: OverlayProps & { placement: Placement; tone?: 'default' | 'danger' },
@@ -69,12 +70,14 @@ function Panel({
   const dismiss = () => {
     if (dismissible) onClose();
   };
+  // Esc — только если оверлей верхний из всех записей стека (открытый поверх список закрывается
+  // первым); Tab — если он верхний модальный (немодальная запись сверху ловушку не снимает).
   const onKeyDown = useEffectEvent((e: KeyboardEvent, id: symbol) => {
-    if (e.defaultPrevented || !isTopOverlay(id)) return;
-    if (e.key === 'Escape') {
+    if (e.defaultPrevented) return;
+    if (e.key === 'Escape' && isTopOverlay(id)) {
       e.preventDefault();
       dismiss();
-    } else if (e.key === 'Tab') {
+    } else if (e.key === 'Tab' && isTopModal(id)) {
       trapTab(e, panel.current);
     }
   });
@@ -101,6 +104,7 @@ function Panel({
 
   useEffect(() => {
     const id = Symbol('overlay');
+    // модальная запись: открытые Popover закрываются (onModalOpen)
     const release = pushOverlay(id, panel.current);
     const listener = (e: KeyboardEvent) => onKeyDown(e, id);
     document.addEventListener('keydown', listener);

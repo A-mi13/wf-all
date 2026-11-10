@@ -1,7 +1,7 @@
 export { RateLimitedState } from './RateLimitedState';
 export {
   ConnectionErrorState,
-  DesktopOnlyState,
+  DesktopOnlyNotice,
   EmptyState,
   ErrorState,
   ForbiddenState,

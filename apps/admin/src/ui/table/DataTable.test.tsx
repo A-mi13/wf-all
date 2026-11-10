@@ -6,6 +6,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { components } from '../../api/gen/admin';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
+import { stubMedia } from '../../test/media';
 import { problem } from '../../test/problem';
 import { renderWithProviders } from '../../test/render';
 import { http, server } from '../../test/server';
@@ -491,4 +492,31 @@ test('card — список карточек вместо таблицы, «По
   expect(screen.getByText('Показано 2')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Показать ещё' }));
   expect(onLoadMore).toHaveBeenCalledOnce();
+});
+
+// Матрица прав на телефоне (спека UI-фундамента §3.1, §3.5; I6): layout 'table' — таблица на любой
+// ширине со своей горизонтальной прокруткой; 'auto' (по умолчанию) — карточки на узком экране.
+test.each([
+  ['auto', true],
+  ['table', false],
+] as const)('layout %s на узком экране — карточки: %s', (layout, stacked) => {
+  stubMedia({ width: 390, pointer: 'coarse' });
+  renderWithProviders(
+    <DataTable
+      label="Сотрудники"
+      layout={layout}
+      columns={columns}
+      rowKey={(a) => a.id}
+      rows={[account(1), account(2)]}
+      onRetry={() => {}}
+      summary={false}
+    />,
+  );
+  const matrix = table();
+  expect(within(matrix).getAllByRole('columnheader')).toHaveLength(columns.length);
+  expect(within(matrix).getAllByRole('row')).toHaveLength(3);
+  // карточка повторяет подпись столбца в ячейке; строка таблицы — нет
+  const labels = within(bodyRows()[0]!).queryAllByText(columns[1]!.header as string);
+  expect(labels.length > 0).toBe(stacked);
+  expect(matrix.closest('[data-table-scroll]')).not.toBeNull();
 });

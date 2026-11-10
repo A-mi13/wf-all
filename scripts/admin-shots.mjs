@@ -1,6 +1,8 @@
 // Снимки экранов админки для ревьюера (спека §5.4, план UF1a.1):
 //   node scripts/admin-shots.mjs --out <каталог> [--role admin] [--widths 1440,768,390]
-//     [--themes dark,light] [--locale ru|en] <путь>…
+//     [--themes dark,light] [--locale ru|en] [--touch] <путь>…
+// --touch — устройство с пальцем (hasTouch: pointer: coarse): «только с компьютера» решает устройство, а не
+// ширина (спека UI-фундамента §3.2) — снимок 390 без него — узкое окно с мышью.
 // (./task admin:shots -- … передаёт аргументы). Поднимает Vite админки в режиме shots (моки MSW в
 // браузере на фикстурах тестов, порт 5176), Chromium Playwright снимает каждый путь × ширину × тему
 // во всю страницу в <out>/<слаг-пути>-<ширина>-<тема>[-en].png. Код выхода ≠ 0 — неописанные
@@ -20,7 +22,7 @@ const HEIGHT = { 1440: 900, 768: 1024, 390: 844 };
 
 const USAGE =
   'использование: node scripts/admin-shots.mjs --out <каталог> [--role admin] [--widths 1440,768,390] ' +
-  '[--themes dark,light] [--locale ru|en] <путь>…';
+  '[--themes dark,light] [--locale ru|en] [--touch] <путь>…';
 
 const list = (v) =>
   v
@@ -35,6 +37,7 @@ export function parseArgs(argv) {
     widths: [1440, 768, 390],
     themes: [...THEMES],
     locale: 'ru',
+    touch: false,
     paths: [],
   };
   const flags = new Set(['--out', '--role', '--widths', '--themes', '--locale']);
@@ -49,6 +52,10 @@ export function parseArgs(argv) {
         );
       }
       o.paths.push(arg.startsWith('/') ? arg : `/${arg}`);
+      continue;
+    }
+    if (arg === '--touch') {
+      o.touch = true;
       continue;
     }
     const eq = arg.indexOf('=');
@@ -102,7 +109,7 @@ export function planShots(o) {
       throw new Error(`пути ${seen.get(s)} и ${p} дают одно имя файла «${s}»`);
     seen.set(s, p);
   }
-  const suffix = o.locale === 'ru' ? '' : `-${o.locale}`;
+  const suffix = `${o.locale === 'ru' ? '' : `-${o.locale}`}${o.touch ? '-touch' : ''}`;
   return [...seen.entries()].flatMap(([s, path]) =>
     o.widths.flatMap((width) =>
       o.themes.map((theme) => ({
@@ -207,6 +214,7 @@ async function main(argv) {
       const context = await browser.newContext({
         viewport: { width: shot.width, height: HEIGHT[shot.width] ?? 900 },
         colorScheme: shot.theme,
+        hasTouch: o.touch,
         reducedMotion: 'reduce',
         locale: o.locale === 'en' ? 'en-US' : 'ru-RU',
         timezoneId: 'UTC',
@@ -234,9 +242,16 @@ async function main(argv) {
         await page.waitForLoadState('networkidle');
         const unhandled = await page.evaluate(() => window.__wfShots?.unhandled ?? -1);
         if (unhandled !== 0) problems.push(`${where}: неописанных запросов к API — ${unhandled}`);
+        // fullPage в Chromium на время съёмки снимает эмуляцию касания (pointer: coarse → fine, событие
+        // change, обратного события нет) — страница перерисовалась бы как на компьютере. С --touch окно
+        // растягивается на всю высоту страницы и снимается без fullPage.
+        if (o.touch) {
+          const height = await page.evaluate(() => document.documentElement.scrollHeight);
+          await page.setViewportSize({ width: shot.width, height });
+        }
         await page.screenshot({
           path: shot.file,
-          fullPage: true,
+          fullPage: !o.touch,
           animations: 'disabled',
           caret: 'hide',
         });

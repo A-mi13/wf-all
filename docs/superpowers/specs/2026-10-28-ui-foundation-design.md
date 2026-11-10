@@ -652,7 +652,7 @@ BulkOutcome = 'executed' | 'pending_approval'            // 200 / 202 (подт�
   **последний** в дереве — все пузыри журнала встали бы к последней строке. Неявный якорь от вызывателя
   (`popovertarget`, `showPopover({ source })`) уникален, но не Baseline (Safari и Firefox — недавно или нет) — к нему
   вернуться, когда станет Baseline. Сейчас: при открытии и пока открыт (прокрутка любого предка — слушатель
-  `scroll` с `capture`, `resize`, `ResizeObserver` якоря; один `requestAnimationFrame` на кадр) `Popover` берёт
+  `scroll` с `capture`, `resize`, `ResizeObserver` якоря и самого пузыря — содержимое может вырасти после открытия; один `requestAnimationFrame` на кадр) `Popover` берёт
   `anchor.getBoundingClientRect()`, выбирает сторону (`placement`, переворот, если не помещается в окно) и пишет на
   **свой** элемент только числа `--wf-pop-x`/`--wf-pop-y`/`--wf-pop-max-h` через помощник `setCssPx` (исключение стража
   CSP для `src/ui/popover/*`, §4.5). Переменные живут на самом пузыре — у каждого свои, по построению уникальны. Якорь

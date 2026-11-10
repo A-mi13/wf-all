@@ -10,24 +10,19 @@ import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { Me } from '../../app/permissions';
+import { stubMedia } from '../../test/media';
 import { meModerator, meOwner } from '../../test/me';
 import { renderWithProviders } from '../../test/render';
 import { AppShell } from './AppShell';
 import type { NavGroup } from './types';
 
-// Меню-образец: как в app/nav.ts, плюс раздел, закрытый на телефоне, со своим правом.
+// Меню-образец: как в app/nav.ts — пять разделов, пятый на телефоне уходит в «Ещё».
 const NAV: NavGroup[] = [
   {
     labelKey: 'nav.groups.security',
     items: [
       { path: '/audit', labelKey: 'nav.audit', permission: 'audit.log.read', icon: 'log' },
-      {
-        path: '/staff',
-        labelKey: 'nav.staff',
-        permission: 'staff.roles.read',
-        desktopOnly: true,
-        icon: 'key',
-      },
+      { path: '/staff', labelKey: 'nav.staff', permission: 'staff.roles.read', icon: 'key' },
       {
         path: '/approvals',
         labelKey: 'nav.approvals',
@@ -35,7 +30,13 @@ const NAV: NavGroup[] = [
         icon: 'shield',
         countLabelKey: 'nav.counts.approvals',
       },
-      { path: '/me', labelKey: 'nav.me', permission: null, desktopOnly: true, icon: 'user' },
+      { path: '/me', labelKey: 'nav.me', permission: null, icon: 'user' },
+    ],
+  },
+  {
+    labelKey: 'nav.groups.directories',
+    items: [
+      { path: '/geo/cities', labelKey: 'nav.cities', permission: 'geo.cities.read', icon: 'city' },
     ],
   },
 ];
@@ -73,6 +74,7 @@ function mount(path: string, me: Me, opts: { counts?: Record<string, number> } =
       page('/staff', 'Страница ролей'),
       page('/approvals', 'Страница подтверждений'),
       page('/me', 'Страница доступа'),
+      page('/geo/cities', 'Страница городов'),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
   });
@@ -80,17 +82,9 @@ function mount(path: string, me: Me, opts: { counts?: Record<string, number> } =
   return { onLogout, router };
 }
 
-// Узкий экран: matchMedia отвечает «да» на запрос ширины меньше breakpoint-mobile.
+// Телефон: узкий экран и палец (спека UI-фундамента §3.2; раскладку решает ширина).
 function phone() {
-  vi.stubGlobal(
-    'matchMedia',
-    vi.fn((query: string) => ({
-      matches: query.includes('max-width'),
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    })),
-  );
+  stubMedia({ width: 390, pointer: 'coarse' });
 }
 
 afterEach(() => {
@@ -178,27 +172,31 @@ describe('десктоп: сайдбар', () => {
     expect(screen.getByRole('link', { name: 'Журнал действий' })).toBeInTheDocument();
   });
 
-  test('desktopOnly на компьютере открывается', async () => {
-    mount('/me', meOwner);
-    expect(await screen.findByRole('heading', { name: 'Страница доступа' })).toBeInTheDocument();
+  test('все разделы открыты на компьютере, «Справочники» — своей группой', async () => {
+    mount('/geo/cities', meOwner);
+    expect(await screen.findByRole('heading', { name: 'Страница городов' })).toBeInTheDocument();
   });
 });
 
 describe('телефон (< breakpoint-mobile): таббар и «Ещё»', () => {
-  test('таббар — разделы, открытые на телефоне, и «Ещё»; сайдбара нет', async () => {
+  test('таббар — первые 4 разрешённых раздела (U10) и «Ещё»; сайдбара нет', async () => {
     phone();
     mount('/audit', meOwner, { counts: { '/approvals': 2 } });
     await screen.findByRole('heading', { name: 'Страница журнала' });
     const tabbar = screen.getByRole('navigation', { name: 'Разделы' });
     const links = within(tabbar).getAllByRole('link');
-    expect(links).toHaveLength(2);
-    expect(links[0]).toHaveAccessibleName('Журнал действий');
-    expect(links[1]).toHaveAccessibleName('Подтверждения 2 запроса ждут решения');
+    expect(links.map((l) => l.getAttribute('href'))).toEqual([
+      '/audit',
+      '/staff',
+      '/approvals',
+      '/me',
+    ]);
+    expect(links[2]).toHaveAccessibleName('Подтверждения 2 запроса ждут решения');
     expect(within(tabbar).getByRole('button', { name: 'Ещё' })).toBeInTheDocument();
     expect(screen.queryByText('Ольга В.')).not.toBeInTheDocument();
   });
 
-  test('«Ещё»: все разрешённые разделы, карточка, язык и «Выйти»; desktopOnly → DesktopOnlyState', async () => {
+  test('«Ещё»: все разрешённые разделы, карточка, язык и «Выйти»; раздел открывается', async () => {
     phone();
     const user = userEvent.setup();
     const { onLogout } = mount('/audit', meOwner);
@@ -210,24 +208,20 @@ describe('телефон (< breakpoint-mobile): таббар и «Ещё»', () 
     expect(within(sheet).getByText('Переключатель языка')).toBeInTheDocument();
     expect(within(sheet).getByRole('group', { name: 'Тема' })).toBeInTheDocument();
     expect(within(sheet).getByRole('link', { name: 'Мой доступ' })).toBeInTheDocument();
-    await user.click(within(sheet).getByRole('link', { name: 'Роли и доступ' }));
+    await user.click(within(sheet).getByRole('link', { name: 'Города и запуск' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Только с компьютера' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Страница ролей')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Страница городов' })).toBeInTheDocument();
+    expect(screen.queryByText('Только с компьютера')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Ещё' }));
     await user.click(screen.getByRole('button', { name: 'Выйти' }));
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
-  test('прямой адрес desktopOnly на телефоне — DesktopOnlyState, «Ещё» отмечена текущей', async () => {
+  test('прямой адрес раздела вне таббара — страница, «Ещё» отмечена текущей', async () => {
     phone();
-    mount('/me', meOwner);
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Только с компьютера' }),
-    ).toBeInTheDocument();
+    mount('/geo/cities', meOwner);
+    expect(await screen.findByRole('heading', { name: 'Страница городов' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ещё' })).toHaveAttribute('data-current', 'true');
   });
 
@@ -251,5 +245,82 @@ describe('телефон (< breakpoint-mobile): таббар и «Ещё»', () 
     act(() => listeners.forEach((fn) => fn()));
     expect(screen.queryByText('Ольга В.')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ещё' })).toBeInTheDocument();
+  });
+});
+
+// Три ширины каркаса (спека UI-фундамента §3.4): ≥ 1024 — сайдбар с подписями, 768–1023 — полоса
+// иконок (size.rail) с подсказкой-названием, < 768 — таббар. Решает ширина окна (useIsMobile,
+// useIsCompact), не устройство.
+describe('узкая полоса 768–1023', () => {
+  test('900 + мышь: ссылки полосы с именами разделов, счётчик слышен; сайдбара и таббара нет', async () => {
+    stubMedia({ width: 900, pointer: 'fine' });
+    mount('/audit', meOwner, { counts: { '/approvals': 2 } });
+    await screen.findByRole('heading', { name: 'Страница журнала' });
+    const nav = screen.getByRole('navigation', { name: 'Разделы' });
+    const links = within(nav).getAllByRole('link');
+    expect(links.map((l) => l.getAttribute('href'))).toEqual([
+      '/audit',
+      '/staff',
+      '/approvals',
+      '/me',
+      '/geo/cities',
+    ]);
+    expect(within(nav).getByRole('link', { name: 'Журнал действий' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(
+      within(nav).getByRole('link', { name: 'Подтверждения 2 запроса ждут решения' }),
+    ).toBeInTheDocument();
+    expect(within(nav).getByRole('group', { name: 'Справочники' })).toBeInTheDocument();
+    // подсказка-название не описывает ссылку повторно (имя и так «Журнал действий», ревью m2)
+    for (const link of links) expect(link).not.toHaveAttribute('aria-describedby');
+    // подписи не видны — только значки; карточки сотрудника и «Ещё» таббара нет
+    expect(screen.queryByText('Ольга В.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Ещё' })).not.toBeInTheDocument();
+  });
+
+  test('900: фокус на значке — подсказка с названием раздела', async () => {
+    stubMedia({ width: 900, pointer: 'fine' });
+    mount('/audit', meOwner);
+    await screen.findByRole('heading', { name: 'Страница журнала' });
+    await userEvent.setup().tab();
+    const first = screen.getByRole('link', { name: 'Журнал действий' });
+    expect(first).toHaveFocus();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Журнал действий');
+  });
+
+  test('900: аватар → шторка с карточкой, языком, темой и «Выйти»', async () => {
+    stubMedia({ width: 900, pointer: 'fine' });
+    const user = userEvent.setup();
+    const { onLogout } = mount('/audit', meOwner);
+    await screen.findByRole('heading', { name: 'Страница журнала' });
+    const avatar = screen.getByRole('button', { name: 'Профиль и настройки: Ольга В.' });
+    expect(avatar).toHaveAttribute('aria-expanded', 'false');
+    await user.click(avatar);
+    const sheet = screen.getByRole('dialog', { name: 'Профиль и настройки' });
+    expect(within(sheet).getByText('Ольга В.')).toBeInTheDocument();
+    expect(within(sheet).getByText(LONG_EMAIL)).toHaveAttribute('title', LONG_EMAIL);
+    expect(within(sheet).getByText('Переключатель языка')).toBeInTheDocument();
+    expect(within(sheet).getByRole('group', { name: 'Тема' })).toBeInTheDocument();
+    await user.click(within(sheet).getByRole('button', { name: 'Выйти' }));
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  test('1280 — сайдбар с подписями; 390 — таббар', async () => {
+    const media = stubMedia({ width: 1280, pointer: 'fine' });
+    mount('/audit', meOwner);
+    await screen.findByRole('heading', { name: 'Страница журнала' });
+    expect(screen.getByText('Ольга В.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Журнал действий' })).toHaveTextContent(
+      'Журнал действий',
+    );
+    act(() => media.set({ width: 390, pointer: 'coarse' }));
+    expect(screen.getByRole('button', { name: 'Ещё' })).toBeInTheDocument();
+    expect(screen.queryByText('Ольга В.')).not.toBeInTheDocument();
+    act(() => media.set({ width: 900, pointer: 'coarse' }));
+    expect(
+      screen.getByRole('button', { name: 'Профиль и настройки: Ольга В.' }),
+    ).toBeInTheDocument();
   });
 });

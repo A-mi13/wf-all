@@ -33,7 +33,8 @@ export function RolesMatrix() {
 
   const roles = q.data?.roles ?? [];
   const columns: Column<RolePermission>[] = [
-    { id: 'permission', header: t('permission'), cell: (p) => permissionLabel(p.key) },
+    // столбец права не уже lg: на телефоне таблица прокручивается вбок, а не сжимает подпись в столбик
+    { id: 'permission', header: t('permission'), width: 'lg', cell: (p) => permissionLabel(p.key) },
     ...roles.map((r): Column<RolePermission> => ({
       id: r,
       header: roleLabel(r),
@@ -53,6 +54,8 @@ export function RolesMatrix() {
   return (
     <DataTable
       label={t('label')}
+      // на телефоне — таблица с горизонтальной прокруткой, а не карточки (спека UI-фундамента §3.5)
+      layout="table"
       columns={columns}
       rowKey={(p) => p.key}
       summary={false}

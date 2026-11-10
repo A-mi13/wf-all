@@ -91,3 +91,15 @@
   flex-shrink: 0;
   margin-left: auto;
 }
+
+/* Узкий контейнер: действие карточки — своей строкой во всю ширину (цель касания), заметка над ним */
+@container (max-width: 479.98px) {
+  .foot {
+    flex-wrap: wrap;
+  }
+
+  .action {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 import { reauthBus } from '../../app/reauth';
 import { renderApp } from '../../test/app';
+import { stubMedia } from '../../test/media';
 import { meAdmin, meModerator, meOwner } from '../../test/me';
 import { account, rolesMatrix, staffServer, TEAM } from '../../test/staff';
 import { SEARCH_DEBOUNCE_MS } from '../../ui';
@@ -225,4 +226,22 @@ describe('кто имеет доступ', () => {
     expect(await within(table).findByText('Олег Б.')).toBeInTheDocument();
     expect(seen.list.at(-1)?.get('cursor')).toBe('4');
   });
+});
+
+// Матрица прав на телефоне (спека UI-фундамента §3.1, §3.5): раздел открыт, матрица остаётся
+// таблицей (строки — права, столбцы — роли) с горизонтальной прокруткой, а не карточками.
+test('телефон (390 + палец): матрица — таблица со строками прав и столбцами ролей', async () => {
+  stubMedia({ width: 390, pointer: 'coarse' });
+  staffServer({ accounts: TEAM });
+  renderApp('/staff', { me: meOwner });
+  await page();
+  const matrix = await screen.findByRole('table', { name: 'Матрица прав' });
+  expect(
+    within(matrix)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent),
+  ).toEqual(['Право', 'владелец', 'админ', 'модератор', 'поддержка']);
+  const grant = rowOf(matrix, 'Выдать роль владельца или админа');
+  // строка таблицы, не карточка: в ячейке нет повторённой подписи столбца
+  expect(within(grant).getAllByRole('cell')[1]).toHaveTextContent(/^вдвоём$/);
 });

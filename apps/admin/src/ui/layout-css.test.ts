@@ -3,6 +3,7 @@
 // прокси, а jsdom не считает раскладку — поэтому визуальные правила V1 проверяются по исходнику CSS.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tokens } from '@wf/tokens';
 import { expect, test } from 'vitest';
 
 const dir = join(import.meta.dirname, '..');
@@ -141,4 +142,73 @@ test('список выбора таблицы прокручивается са
   expect(rule('features/geo/geo.module.css', '.fillPanel')).toMatch(/height:\s*100%/);
   expect(rule('features/geo/geo.module.css', '.searchStep')).toMatch(/min-height:\s*0/);
   expect(rule('ui/overlay/Overlay.module.css', '.footer')).toMatch(/flex-shrink:\s*0/);
+});
+
+// Пороги ширины (принцип 1, спека UI-фундамента §2.8, §3.4): @media — только по tokens.breakpoint,
+// @container — по tokens.container или tokens.breakpoint; max-width — порог минус 0.02 (граница
+// принадлежит следующему диапазону, как useIsMobile/useIsCompact). Случайное «500px» — мимо токенов.
+const widthsIn = (prelude: string) =>
+  [...prelude.matchAll(/\((min|max)-width:\s*([\d.]+)px\)/g)].map(
+    (m) => [m[1] as 'min' | 'max', Number(m[2])] as const,
+  );
+function preludes(at: '@media' | '@container') {
+  return styles.flatMap((f) =>
+    [
+      ...read(f)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .matchAll(new RegExp(`${at}([^{]*)\{`, 'g')),
+    ].map((m) => ({ f, prelude: (m[1] ?? '').trim() })),
+  );
+}
+const allowed = (kind: 'min' | 'max', px: number, thresholds: number[]) =>
+  thresholds.some((t) => (kind === 'max' ? px === t - 0.02 : px === t));
+
+test('ширины в @media — только из tokens.breakpoint', () => {
+  const bp = Object.values(tokens.breakpoint);
+  const bad = preludes('@media').flatMap(({ f, prelude }) => {
+    const widths = widthsIn(prelude);
+    // любая другая запись ширины (диапазон «width < 500px», rem, device-width) минует разбор — тоже ошибка
+    // (ревью UF2a/I, m6)
+    if ((prelude.match(/width/g) ?? []).length !== widths.length)
+      return [`${f}: @media — ширина не в форме (min|max)-width: Npx — ${prelude}`];
+    return widths
+      .filter(([k, px]) => !allowed(k, px, bp))
+      .map(([k, px]) => `${f}: @media ${k}-width ${px}px`);
+  });
+  expect(bad).toEqual([]);
+});
+
+test('ширины в @container — из tokens.container или tokens.breakpoint; запросы есть', () => {
+  const thresholds = [...Object.values(tokens.container), ...Object.values(tokens.breakpoint)];
+  const all = preludes('@container');
+  expect(all.length).toBeGreaterThan(0);
+  const bad = all.flatMap(({ f, prelude }) => {
+    const widths = widthsIn(prelude);
+    if (widths.length === 0 || (prelude.match(/width/g) ?? []).length !== widths.length)
+      return [`${f}: @container — ширина не в форме (min|max)-width: Npx — ${prelude}`];
+    return widths
+      .filter(([k, px]) => !allowed(k, px, thresholds))
+      .map(([k, px]) => `${f}: @container ${k}-width ${px}px`);
+  });
+  expect(bad).toEqual([]);
+});
+
+// Раскладка внутри страниц — по ширине своего контейнера (§3.4, принцип 6): область страницы каркаса
+// и тело панели — контейнеры; Card-сетка, карточка и формы перестраиваются @container.
+test('область страницы и тело панели — container-type: inline-size; сетка, карточка и формы — @container', () => {
+  expect(rule('ui/shell/AppShell.module.css', '.main')).toMatch(/container-type:\s*inline-size/);
+  expect(rule('ui/overlay/Overlay.module.css', '.body')).toMatch(/container-type:\s*inline-size/);
+  const files = new Set(preludes('@container').map(({ f }) => f));
+  for (const f of [
+    'ui/table/DataTable.module.css',
+    'ui/Card.module.css',
+    'ui/form/Field.module.css',
+  ])
+    expect(files, f).toContain(f);
+});
+
+// Ревью UF2a/I, m10: отступ body по умолчанию (8 px) + каркас высотой 100dvh давали прокрутку на 16 px на
+// каждой странице. Сброс — в глобальном CSS, вместе с фоном документа.
+test('body без отступа браузера', () => {
+  expect(rule('ui/global.css', 'body')).toMatch(/margin:\s*0\s*;/);
 });
