@@ -53,6 +53,44 @@ func (q *Queries) GetAppVersions(ctx context.Context, platform string) (AppVersi
 	return i, err
 }
 
+const insertAppVersions = `-- name: InsertAppVersions :one
+INSERT INTO app_versions (platform, min_version, recommended_version, store_url, updated_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (platform) DO NOTHING
+RETURNING platform, min_version, recommended_version, store_url, version, updated_at
+`
+
+type InsertAppVersionsParams struct {
+	Platform           string
+	MinVersion         string
+	RecommendedVersion string
+	StoreUrl           string
+	UpdatedAt          time.Time
+}
+
+// Заведение платформы: новая строка — version 1 и updated_at из часов записывающего. Строку параллельно завела другая
+// транзакция — ни одной строки (ждёт её коммита, ON CONFLICT DO NOTHING): вызывающий перечитывает её под FOR UPDATE как
+// «было» (ревью G7 m2) — иначе вторая правка шла бы как создание с before = null.
+func (q *Queries) InsertAppVersions(ctx context.Context, arg InsertAppVersionsParams) (AppVersion, error) {
+	row := q.db.QueryRow(ctx, insertAppVersions,
+		arg.Platform,
+		arg.MinVersion,
+		arg.RecommendedVersion,
+		arg.StoreUrl,
+		arg.UpdatedAt,
+	)
+	var i AppVersion
+	err := row.Scan(
+		&i.Platform,
+		&i.MinVersion,
+		&i.RecommendedVersion,
+		&i.StoreUrl,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listAppVersions = `-- name: ListAppVersions :many
 SELECT platform, min_version, recommended_version, store_url, version, updated_at
 FROM app_versions
@@ -87,32 +125,29 @@ func (q *Queries) ListAppVersions(ctx context.Context) ([]AppVersion, error) {
 	return items, nil
 }
 
-const upsertAppVersions = `-- name: UpsertAppVersions :one
-INSERT INTO app_versions (platform, min_version, recommended_version, store_url, updated_at)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (platform) DO UPDATE
-SET min_version = EXCLUDED.min_version, recommended_version = EXCLUDED.recommended_version,
-    store_url = EXCLUDED.store_url, version = app_versions.version + 1
+const updateAppVersions = `-- name: UpdateAppVersions :one
+UPDATE app_versions
+SET min_version = $1, recommended_version = $2, store_url = $3,
+    version = version + 1
+WHERE platform = $4
 RETURNING platform, min_version, recommended_version, store_url, version, updated_at
 `
 
-type UpsertAppVersionsParams struct {
-	Platform           string
+type UpdateAppVersionsParams struct {
 	MinVersion         string
 	RecommendedVersion string
 	StoreUrl           string
-	UpdatedAt          time.Time
+	Platform           string
 }
 
-// Запись версий: новая строка — version 1 и updated_at из часов записывающего; правка — version + 1, updated_at
-// ставит триггер set_updated_at (время базы; порядок правок — version).
-func (q *Queries) UpsertAppVersions(ctx context.Context, arg UpsertAppVersionsParams) (AppVersion, error) {
-	row := q.db.QueryRow(ctx, upsertAppVersions,
-		arg.Platform,
+// Правка заведённой платформы (строка под FOR UPDATE): version + 1, updated_at ставит триггер set_updated_at (время
+// базы; порядок правок — version).
+func (q *Queries) UpdateAppVersions(ctx context.Context, arg UpdateAppVersionsParams) (AppVersion, error) {
+	row := q.db.QueryRow(ctx, updateAppVersions,
 		arg.MinVersion,
 		arg.RecommendedVersion,
 		arg.StoreUrl,
-		arg.UpdatedAt,
+		arg.Platform,
 	)
 	var i AppVersion
 	err := row.Scan(

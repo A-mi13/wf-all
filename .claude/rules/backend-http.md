@@ -90,8 +90,8 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
 - **Сборка geo** (`cmd/admin-api`, `assemble`, Task 16 плана B): `geoadmin.New(geo.New(pool), geoadmin.Deps{Pool, Clock,
   River, Log})` — `River` тот же клиент вставки, что `staff.Deps.River`; `geoH.RegisterApprovals(reg, svc)` — в тот же
   реестр и сервис, что staff, до `reg.Validate()` (действия geo — `LockActors`: без хука staff отказ старта). Стражи на
-  настоящей сборке — `TestAssembleRegistersGeoActions`, `TestAssembleActorLockRequired`, `TestStartupWiring`
-  (`cmd/admin-api`). Тест прав по всем операциям идёт на настоящем хендлере geo (`liveGeo`): модератор чужого города
+  настоящей сборке — `TestAssembleRegistersGeoActions` (без хука staff `assemble` вернул бы ошибку `Validate`), `TestStartupWiring`
+  (`cmd/admin-api`); инвариант «`LockActors` без хука — отказ `Validate`» — `approvals/actor_lock_test.go`. Тест прав по всем операциям идёт на настоящем хендлере geo (`liveGeo`): модератор чужого города
   на `updateGeoCity` — 403 сценария.
 - **Операции платформы** (`server.go`, Task 10b): `Options.Approvals` (`ApprovalService` — `*approvals.Service`)
   задаётся ровно вместе с собранным `Options.Staff` (иначе отказ старта, `TestNewHandlerApprovalsWiring`); подпись

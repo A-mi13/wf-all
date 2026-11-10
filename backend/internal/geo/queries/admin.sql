@@ -332,6 +332,12 @@ SELECT co.code::text AS country_code
 FROM cities c JOIN countries co ON co.id = c.country_id
 WHERE c.id = sqlc.arg(id)::uuid;
 
+-- Смены адреса на один slug сериализуются (ревью G6 m4): эксклюзивный advisory-замок транзакции (класс, hashtext(slug))
+-- до проверки SlugOwner — иначе проверка, прошедшая до коммита чужой смены на тот же slug, и третья смена, унёсшая
+-- его в историю, дают текущий slug одного города в истории другого. Совпадение хэшей двух slug — только ожидание.
+-- name: SlugLock :exec
+SELECT pg_advisory_xact_lock(sqlc.arg(class)::int, hashtext(sqlc.arg(slug)::text));
+
 -- Чей адрес: текущий slug города (history = false) или строка истории (history = true); нет — ни одной строки.
 -- name: SlugOwner :one
 SELECT id AS city_id, false AS history FROM cities WHERE slug = sqlc.arg(slug)::text

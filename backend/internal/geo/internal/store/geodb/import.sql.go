@@ -125,6 +125,18 @@ func (q *Queries) ImportCountry(ctx context.Context, code string) (ImportCountry
 	return i, err
 }
 
+const importDBNow = `-- name: ImportDBNow :one
+SELECT now()::timestamptz AS now
+`
+
+// Время базы (now() транзакции) — опора часов команды оператора (app.OperatorClock, ревью G7 m9).
+func (q *Queries) ImportDBNow(ctx context.Context) (time.Time, error) {
+	row := q.db.QueryRow(ctx, importDBNow)
+	var now time.Time
+	err := row.Scan(&now)
+	return now, err
+}
+
 const importDeleteAdmin1Names = `-- name: ImportDeleteAdmin1Names :exec
 DELETE FROM geonames_admin1_names WHERE country_code = $1
 `
@@ -353,14 +365,21 @@ func (q *Queries) ImportLastSucceededPlaces(ctx context.Context, countryCode str
 
 const importLatestByJob = `-- name: ImportLatestByJob :one
 SELECT id FROM geonames_imports
-WHERE river_job_id = $1::bigint
+WHERE river_job_id = $1::bigint AND started_at >= $2::timestamptz
 ORDER BY started_at DESC, id DESC
 LIMIT 1
 `
 
-// Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id.
-func (q *Queries) ImportLatestByJob(ctx context.Context, riverJobID int64) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, importLatestByJob, riverJobID)
+type ImportLatestByJobParams struct {
+	RiverJobID int64
+	NotBefore  time.Time
+}
+
+// Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id,
+// начатые не раньше not_before (created_at задачи − допуск часов, ревью G7 m5): после сброса последовательности River
+// id повторяется, и строка прежней задачи с тем же id карточке новой не достаётся.
+func (q *Queries) ImportLatestByJob(ctx context.Context, arg ImportLatestByJobParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, importLatestByJob, arg.RiverJobID, arg.NotBefore)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err

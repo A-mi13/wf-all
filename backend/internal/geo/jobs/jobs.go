@@ -70,6 +70,12 @@ func NewImportWorker(pool *pgxpool.Pool, clk clock.Clock, cfg Config, log *slog.
 	}, log), clk: clk, log: log}
 }
 
+// OperatorClock — часы команды оператора по времени базы (app.OperatorClock, ревью G7 m9): base + (now() базы −
+// base.Now()). Команда geo import идёт с машины оператора — её часы не источник времени журнала.
+func OperatorClock(ctx context.Context, pool *pgxpool.Pool, base clock.Clock) (clock.Clock, error) {
+	return app.OperatorClock(ctx, pool, base)
+}
+
 // Timeout — 30 минут; строку журнала, пережившую его на 10 минут, следующий запуск считает
 // прерванной (app.StaleAfter).
 func (*ImportWorker) Timeout(*river.Job[ImportArgs]) time.Duration { return app.ImportTimeout }

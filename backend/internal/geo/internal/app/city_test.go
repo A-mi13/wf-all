@@ -284,6 +284,12 @@ func TestUpdateCityModeratorForeignCity(t *testing.T) {
 	// поддержка — без права на любое поле
 	_, err = update(e.admin(), staffAs(perm.Support), stav, app.CityPatch{Names: map[string]*string{"en": strp("Hacked")}})
 	wantForbidden(t, err)
+	// ревью G6 m3: пустой names ({"names":{}}) — тоже правка названий: права решаются до формы, 403, а не 400
+	_, err = update(e.admin(), staffAs(perm.Moderator, mih), stav, app.CityPatch{Names: map[string]*string{}})
+	wantForbidden(t, err)
+	// у модератора своего города тот же запрос — 400 body minProperties (форма после прав)
+	_, err = update(e.admin(), staffAs(perm.Moderator, stav), stav, app.CityPatch{Names: map[string]*string{}})
+	wantField(t, err, "body", "minProperties")
 }
 
 // NeedsApproval у права правки города (матрица изменилась без сценария) — ошибка без кода (500), ничего не записано.
@@ -340,31 +346,145 @@ func TestUpdateCityEventsVersions(t *testing.T) {
 	}
 }
 
-// Два города одновременно на один свободный slug (барьер: оба прошли проверку занятости): один успех, другой —
-// 409 geo.slug_taken (23505 cities_slug_key → код, не 500).
+// Два города одновременно на один свободный slug: B прошёл проверку и стоит до записи (держит замок адреса), A ждёт
+// замок (ревью G6 m4), видит итог B и получает 409 geo.slug_taken; у проигравшего нет строки истории. Сроки ожидания
+// у каждого барьера (ревью G6 m5): регрессия не висит до -timeout пакета.
 func TestUpdateCityConcurrentSlug(t *testing.T) {
 	t.Parallel()
 	e := newActEnv(t)
 	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
-	at, done := make(chan struct{}), make(chan struct{})
+	at, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	second := e.admin()
 	second.SetStageHook(func(_ context.Context, s string) {
 		if s == "slug" {
-			once.Do(func() { close(at); <-done })
+			once.Do(func() { close(at); <-release })
 		}
 	})
-	var errB error
-	var wg sync.WaitGroup
-	wg.Go(func() { _, errB = update(second, staffAs(perm.Admin), mih, app.CityPatch{Slug: strp("kavkaz")}) })
-	<-at
-	_, errA := update(e.admin(), staffAs(perm.Admin), stav, app.CityPatch{Slug: strp("kavkaz")})
-	close(done)
-	wg.Wait()
-	if errA != nil || !errors.Is(errB, geo.ErrSlugTaken) {
-		t.Fatalf("a: %v, b: %v", errA, errB)
+	bDone, aDone := make(chan struct{}), make(chan struct{})
+	var errA, errB error
+	go func() {
+		defer close(bDone)
+		_, errB = update(second, staffAs(perm.Admin), mih, app.CityPatch{Slug: strp("kavkaz")})
+	}()
+	if !recvWithin(t, at, 15*time.Second) {
+		close(release)
+		t.Fatalf("B не дошёл до точки slug: %v", errB)
 	}
-	if n := e.count(t, `SELECT count(*) FROM city_slug_history WHERE city_id = $1`, mih); n != 0 {
+	go func() {
+		defer close(aDone)
+		_, errA = update(e.admin(), staffAs(perm.Admin), stav, app.CityPatch{Slug: strp("kavkaz")})
+	}()
+	waited := waitLockOrDoneWithin(t, e.owner, aDone, 15*time.Second)
+	close(release)
+	if !recvWithin(t, bDone, 30*time.Second) || !recvWithin(t, aDone, 30*time.Second) {
+		t.Fatal("правки не завершились")
+	}
+	if !waited || errB != nil || !errors.Is(errA, geo.ErrSlugTaken) {
+		t.Fatalf("A ждал замок: %v, a: %v, b: %v", waited, errA, errB)
+	}
+	if n := e.count(t, `SELECT count(*) FROM city_slug_history WHERE city_id = $1`, stav); n != 0 {
 		t.Fatal("история проигравшего записана")
+	}
+}
+
+// Ревью уборки I1: писатель адреса без замка SlugLock (сегодня — активация города) занял адрес между проверкой и
+// записью правки. Правка mihaylovsk → kavkaz стоит в точке slug (проверка прошла, замок адреса у неё); владелец
+// базы пишет kavkaz городу stavropol и коммитит; правка продолжает — 23505 cities_slug_key переводится в
+// geo.slug_taken (slugConflict), не 500; у mihaylovsk ни нового адреса, ни строки истории.
+func TestUpdateCitySlugConflictLocklessWriter(t *testing.T) {
+	t.Parallel()
+	e := newActEnv(t)
+	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
+	at, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	adm := e.admin()
+	adm.SetStageHook(func(_ context.Context, s string) {
+		if s == "slug" {
+			once.Do(func() { close(at); <-release })
+		}
+	})
+	var err error
+	go func() {
+		defer close(done)
+		_, err = update(adm, staffAs(perm.Admin), mih, app.CityPatch{Slug: strp("kavkaz")})
+	}()
+	if !recvWithin(t, at, 15*time.Second) {
+		close(release)
+		t.Fatalf("правка не дошла до точки slug: %v", err)
+	}
+	e.exec(t, `UPDATE cities SET slug = 'kavkaz' WHERE id = $1`, stav)
+	close(release)
+	if !recvWithin(t, done, 30*time.Second) {
+		t.Fatal("правка не завершилась")
+	}
+	if !errors.Is(err, geo.ErrSlugTaken) {
+		t.Fatalf("ждали geo.ErrSlugTaken, получили: %v", err)
+	}
+	if n := e.count(t, `SELECT (SELECT count(*) FROM cities WHERE id = $1 AND slug = 'mihaylovsk')
+		- (SELECT count(*) FROM city_slug_history WHERE city_id = $1)`, mih); n != 1 {
+		t.Fatal("адрес или история mihaylovsk записаны")
+	}
+}
+
+// Ревью G6 m4 — три смены адреса: T0 «stavropol → kavkaz» записал адрес и не закоммичен; T2 «mihaylovsk → kavkaz»
+// идёт следом; T0 коммитит, T1 «kavkaz → kavkaz-2» уносит адрес в историю stavropol; T2 продолжает. Без замка адреса
+// T2 проверял занятость до коммита T0 (свободно) и после T1 записывал kavkaz себе — старые ссылки stavropol вели бы на
+// mihaylovsk. С замком T2 ждёт T0 и получает 409; ни один текущий адрес не совпадает с историей другого города.
+func TestUpdateCitySlugThreeWay(t *testing.T) {
+	t.Parallel()
+	e := newActEnv(t)
+	stav, mih := e.cityID(t, "stavropol"), e.cityID(t, "mihaylovsk")
+	hookAt := func(stage string) (*app.Admin, chan struct{}, chan struct{}) {
+		at, release := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		a := e.admin()
+		a.SetStageHook(func(_ context.Context, s string) {
+			if s == stage {
+				once.Do(func() { close(at); <-release })
+			}
+		})
+		return a, at, release
+	}
+	adm0, at0, release0 := hookAt("updated")
+	adm2, at2, release2 := hookAt("slug")
+	var err0, err2 error
+	done0, done2 := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done0)
+		_, err0 = update(adm0, staffAs(perm.Admin), stav, app.CityPatch{Slug: strp("kavkaz")})
+	}()
+	if !recvWithin(t, at0, 15*time.Second) {
+		close(release0)
+		close(release2)
+		t.Fatalf("T0 не дошёл до записи: %v", err0)
+	}
+	go func() {
+		defer close(done2)
+		_, err2 = update(adm2, staffAs(perm.Admin), mih, app.CityPatch{Slug: strp("kavkaz")})
+	}()
+	// T2 либо ждёт замок адреса (исправлено), либо прошёл проверку и стоит в точке slug (дефект m4)
+	waited := waitLockOrDoneWithin(t, e.owner, at2, 15*time.Second)
+	close(release0)
+	if !recvWithin(t, done0, 30*time.Second) || err0 != nil {
+		close(release2)
+		t.Fatalf("T0: %v", err0)
+	}
+	if _, err := update(e.admin(), staffAs(perm.Admin), stav, app.CityPatch{Slug: strp("kavkaz-2")}); err != nil {
+		close(release2)
+		t.Fatalf("T1: %v", err)
+	}
+	close(release2)
+	if !recvWithin(t, done2, 30*time.Second) {
+		t.Fatal("T2 не завершился")
+	}
+	if !waited || !errors.Is(err2, geo.ErrSlugTaken) {
+		t.Fatalf("T2 ждал замок: %v, итог: %v", waited, err2)
+	}
+	if n := e.count(t, `SELECT count(*) FROM cities c JOIN city_slug_history h ON h.slug = c.slug AND h.city_id <> c.id`); n != 0 {
+		t.Fatalf("текущий адрес города в истории другого: %d", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM cities WHERE id = $1 AND slug = 'mihaylovsk'`, mih); n != 1 {
+		t.Fatal("адрес T2 записан")
 	}
 }

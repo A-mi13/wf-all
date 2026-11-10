@@ -38,6 +38,10 @@ const (
 	slugHistoryKey = "city_slug_history_pkey"
 )
 
+// slugLockClass — класс advisory-замка смены адреса города (SlugLock): «geos» в ASCII; своё пространство
+// двухаргументной формы, не пересекается с countryLockClass («geor») и importJobLockClass («geoj»).
+const slugLockClass int32 = 0x67656f73
+
 // errForbidden — 403 auth.forbidden: право сотрудника на поле или действие — Deny.
 var errForbidden = httpx.NewError(http.StatusForbidden, httpx.CodeForbidden)
 
@@ -145,7 +149,9 @@ func (a *Admin) UpdateCity(ctx context.Context, s *auth.Staff, id uuid.UUID, p C
 	if p.Status != nil || p.Slug != nil {
 		perms = append(perms, permCitiesManage)
 	}
-	if len(p.Names) > 0 {
+	// пустой names ({"names":{}}) — тоже правка названий: права решаются до формы, у чужого города — 403, а не 400
+	// minProperties (ревью G6 m3)
+	if p.Names != nil {
 		perms = append(perms, permCitiesRename)
 	}
 	if err := a.authorize(ctx, s, id, perms...); err != nil {
@@ -175,6 +181,7 @@ func (a *Admin) UpdateCity(ctx context.Context, s *auth.Staff, id uuid.UUID, p C
 				return err
 			}
 		}
+		a.at(ctx, "updated")
 		card, err = cityCard(ctx, q, id, locale)
 		return err
 	})
@@ -266,8 +273,12 @@ func (a *Admin) applyCityEdit(ctx context.Context, q *geodb.Queries, row geodb.C
 }
 
 // takeSlug — новый адрес свободен для города: текущий slug или история другого города — geo.ErrSlugTaken; свой
-// прежний из истории — строка истории удаляется (адрес снова текущий).
+// прежний из истории — строка истории удаляется (адрес снова текущий). Проверка — под замком slug (SlugLock, ревью
+// G6 m4): смена на тот же адрес ждёт коммита предыдущей и видит её итог.
 func takeSlug(ctx context.Context, q *geodb.Queries, cityID uuid.UUID, slug string) error {
+	if err := q.SlugLock(ctx, geodb.SlugLockParams{Class: slugLockClass, Slug: slug}); err != nil {
+		return fmt.Errorf("geo: замок адреса: %w", err)
+	}
 	owner, err := q.SlugOwner(ctx, slug)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):

@@ -727,3 +727,28 @@ func writeAudit(ctx context.Context, run importRun, after map[string]any) error 
 	return audit.Write(ctx, audit.Entry{ActorRole: role, ActorLabel: role, Action: auditAction,
 		ObjectType: geo.AggregateGeonamesImport, ObjectID: run.id, After: after})
 }
+
+// OperatorClock — часы команды оператора по базе (ревью G7 m9, m1 ревью G5): base + (now() базы − base.Now()),
+// смещение замеряется один раз при старте команды. Оператор запускает импорт со своей машины, её часы могут
+// расходиться со стендом на минуты: started_at его строки и сверка «зависшей» строки в begin (StaleAfter) иначе
+// шли бы по ноутбуку — отставание больше ~10 мин делало живой импорт зависшим для admin-api (второй импорт страны),
+// спешка — закрывала чужую живую строку. По часам базы журнал оператора согласован со строками воркера и
+// записями аудита (тоже время стенда). Погрешность — время одного запроса; импорт короче ImportTimeout, дрейф
+// за это время пренебрежим.
+// Ограничение (принято, ревью уборки m3): сдвиг замерен один раз и прибавляется к стенным часам процесса — скачок
+// часов посреди импорта (сон ноутбука, шаг NTP) сдвигает finished_at и missing_since на величину скачка.
+func OperatorClock(ctx context.Context, pool *pgxpool.Pool, base clock.Clock) (clock.Clock, error) {
+	dbNow, err := geodb.New(pool).ImportDBNow(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("geo: время базы: %w", err)
+	}
+	return offsetClock{base: base, d: dbNow.Sub(base.Now())}, nil
+}
+
+// offsetClock — base со сдвигом d.
+type offsetClock struct {
+	base clock.Clock
+	d    time.Duration
+}
+
+func (c offsetClock) Now() time.Time { return c.base.Now().Add(c.d).UTC() }

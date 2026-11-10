@@ -22,6 +22,7 @@ import (
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/id"
+	"wf/backend/internal/platform/testkit/clocktest"
 	"wf/backend/internal/platform/testkit/dbtest"
 )
 
@@ -273,16 +274,16 @@ func TestPrintGeoSummary(t *testing.T) {
 }
 
 // Команда оператора импортирует синхронно в своём процессе: задачу River не ставит, почта не
-// нужна, журнал — без сотрудника и без задачи, аудит — от operator.
+// нужна, журнал — без сотрудника и без задачи, аудит — от operator. Часы машины оператора отстают на час —
+// started_at строки всё равно по времени базы (ревью G7 m9, geojobs.OperatorClock).
 func TestGeoImportCommandRunsSynchronously(t *testing.T) {
 	t.Parallel()
 	url := dbtest.NewURL(t)
 	srv := geonamesTLS(t)
-	geoHTTPClient = srv.Client()
-	t.Cleanup(func() { geoHTTPClient = nil })
+	h := host{clock: clocktest.New(time.Now().Add(-time.Hour)), httpClient: srv.Client()}
 	var out bytes.Buffer
 	env := []string{"WORKER_DATABASE_URL=" + url, "WORKER_GEONAMES_BASE_URL=" + srv.URL}
-	if err := run(context.Background(), []string{"geo", "import", "--country", "ru"}, env, &out, io.Discard); err != nil {
+	if err := runOn(context.Background(), h, []string{"geo", "import", "--country", "ru"}, env, &out, io.Discard); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	if !strings.Contains(out.String(), "мест: 3") || !strings.Contains(out.String(), "пропущено (таймзона): 0") ||
@@ -296,6 +297,7 @@ func TestGeoImportCommandRunsSynchronously(t *testing.T) {
 	defer pool.Close()
 	var places, jobs int
 	var status, role string
+	var skew time.Duration
 	var startedBy *uuid.UUID
 	var riverJob *int64
 	if err := pool.QueryRow(context.Background(), `SELECT
@@ -304,9 +306,13 @@ func TestGeoImportCommandRunsSynchronously(t *testing.T) {
 		(SELECT status FROM geonames_imports),
 		(SELECT started_by FROM geonames_imports),
 		(SELECT river_job_id FROM geonames_imports),
-		(SELECT actor_role FROM audit_log WHERE action = 'geo.import')`).
-		Scan(&places, &jobs, &status, &startedBy, &riverJob, &role); err != nil {
+		(SELECT actor_role FROM audit_log WHERE action = 'geo.import'),
+		(SELECT now() - started_at FROM geonames_imports)`).
+		Scan(&places, &jobs, &status, &startedBy, &riverJob, &role, &skew); err != nil {
 		t.Fatal(err)
+	}
+	if skew < 0 || skew > time.Minute {
+		t.Errorf("started_at строки оператора отстоит от времени базы на %s — часы машины оператора", skew)
 	}
 	if places != 3 || jobs != 0 || status != "succeeded" || startedBy != nil || riverJob != nil || role != "operator" {
 		t.Fatalf("мест %d, задач %d, журнал %s %v %v, аудит %q", places, jobs, status, startedBy, riverJob, role)

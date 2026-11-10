@@ -45,12 +45,22 @@ func main() {
 	}
 }
 
-// geoHTTPClient — HTTP-клиент загрузки GeoNames; nil — клиент по умолчанию. Тест команды
-// подставляет клиент TLS-сервера httptest (его сертификат системе не известен).
-var geoHTTPClient *http.Client
+// host — что процесс берёт у машины, где запущен: часы (команда geo import — машина оператора; журнал идёт по ним со
+// сдвигом к времени базы, geojobs.OperatorClock) и HTTP-клиент загрузки GeoNames (nil — по умолчанию). Параметром, а
+// не переменными пакета: тест команды подставляет отстающие часы и клиент TLS-сервера httptest, а параллельные тесты
+// пакета читали бы ту же переменную (ревью уборки m4, гонка данных).
+type host struct {
+	clock      clock.Clock
+	httpClient *http.Client
+}
 
-// run без аргументов — воркер; с аргументами — разовая команда (command).
+// run без аргументов — воркер; с аргументами — разовая команда (command). Часы и клиент — настоящие.
 func run(ctx context.Context, args, environ []string, out, logOut io.Writer) error {
+	return runOn(ctx, host{clock: clock.System}, args, environ, out, logOut)
+}
+
+// runOn — run на машине h.
+func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.Writer) error {
 	cfg, err := config.Load[config.Worker]("WORKER_", environ)
 	if err != nil {
 		return err
@@ -84,9 +94,9 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		return err
 	}
 	geo := geojobs.Config{BaseURL: cfg.GeoNames.BaseURL, MaxCompressed: cfg.GeoNames.MaxCompressed,
-		MaxUncompressed: cfg.GeoNames.MaxUncompressed, HTTPClient: geoHTTPClient}
+		MaxUncompressed: cfg.GeoNames.MaxUncompressed, HTTPClient: h.httpClient}
 	if len(args) > 0 {
-		return command(ctx, args, pool, reg, geo, out, log)
+		return command(ctx, args, pool, reg, geo, h.clock, out, log)
 	}
 	workers := allWorkers(pool, reg, geo, log, sender)
 	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig(cfg.Queues, workers, log))
@@ -131,12 +141,12 @@ func exitCode(err error) int {
 // command — разовые команды воркера: реестр подписчиков знает только воркер, импорт GeoNames
 // оператор запускает со своей машины под ролью worker.
 func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config,
-	out io.Writer, log *slog.Logger) error {
+	clk clock.Clock, out io.Writer, log *slog.Logger) error {
 	switch {
 	case len(args) >= 2 && args[0] == "events" && args[1] == "replay":
 		return replay(ctx, args[2:], pool, reg, out, log)
 	case len(args) >= 2 && args[0] == "geo" && args[1] == "import":
-		return geoImport(ctx, args[2:], pool, geo, out, log)
+		return geoImport(ctx, args[2:], pool, geo, clk, out, log)
 	}
 	return usageError(fmt.Sprintf("неизвестная команда %q", strings.Join(args, " ")))
 }
@@ -175,7 +185,8 @@ func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.
 
 // geoImport — импорт GeoNames оператором (спека geo §5.4): синхронно в этом процессе, под ролью
 // worker (WORKER_DATABASE_URL); задачу River не ставит. Журнал — started_by = NULL, аудит — operator.
-func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojobs.Config, out io.Writer, log *slog.Logger) error {
+func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojobs.Config, base clock.Clock, out io.Writer,
+	log *slog.Logger) error {
 	fs := flag.NewFlagSet("geo import", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	country := fs.String("country", "", "страна, ISO 3166-1 alpha-2")
@@ -189,7 +200,12 @@ func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojo
 		return usageError("geo import: нужен --country")
 	}
 	cc := strings.ToUpper(*country)
-	s, err := geojobs.NewImportWorker(pool, clock.System, geo, log).RunNow(ctx, cc)
+	// время журнала — по базе, а не по часам машины оператора (ревью G7 m9)
+	clk, err := geojobs.OperatorClock(ctx, pool, base)
+	if err != nil {
+		return err
+	}
+	s, err := geojobs.NewImportWorker(pool, clk, geo, log).RunNow(ctx, cc)
 	if err != nil {
 		if s.ImportID != uuid.Nil {
 			fmt.Fprintf(out, "импорт %s не удался, журнал geonames_imports %s\n", cc, s.ImportID)

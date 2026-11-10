@@ -333,6 +333,60 @@ func TestLinkCitySamePlaceRaceWithActivation(t *testing.T) {
 	}
 }
 
+// Ревью G6 n1 — обратный порядок гонки I2: привязка «mikh» к месту 526815 записала код 71 региону «Урал» и
+// geoname_id городу и стоит до коммита (точка linked); активация того же места ждёт её (ON CONFLICT региона), затем
+// упирается в cities_geoname_id_key: привязка 200, активация 409 geo.city_already_active, без 40P01.
+func TestLinkCityFirstThenActivationSamePlace(t *testing.T) {
+	t.Parallel()
+	e := newActEnv(t)
+	ural := e.region(t, "Урал")
+	cid := e.unlinked(t, "mikh", &ural, map[string]string{"ru": "Михайловск"})
+
+	at, release, linkDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	adm := e.admin()
+	adm.SetStageHook(func(_ context.Context, stage string) {
+		if stage == "linked" {
+			once.Do(func() { close(at); <-release })
+		}
+	})
+	var linkErr error
+	go func() {
+		defer close(linkDone)
+		_, linkErr = link(adm, cid, 526815)
+	}()
+	if !recvWithin(t, at, 15*time.Second) {
+		close(release)
+		t.Fatalf("привязка не дошла до точки linked: %v", linkErr)
+	}
+	actDone := make(chan struct{})
+	var actErr error
+	go func() {
+		defer close(actDone)
+		_, actErr = activate(e, e.admin(), app.Activation{GeonameID: 526815})
+	}()
+	waited := waitLockOrDoneWithin(t, e.owner, actDone, 15*time.Second)
+	close(release)
+	if !recvWithin(t, linkDone, 30*time.Second) || !recvWithin(t, actDone, 30*time.Second) {
+		t.Fatal("привязка или активация не завершились")
+	}
+	if isDeadlock(actErr) || isDeadlock(linkErr) {
+		t.Fatalf("взаимная блокировка: активация %v, привязка %v", actErr, linkErr)
+	}
+	if !waited || linkErr != nil || !errors.Is(actErr, geo.ErrCityAlreadyActive) {
+		t.Fatalf("ждала %v, привязка: %v, активация: %v", waited, linkErr, actErr)
+	}
+	if n := e.count(t, `SELECT count(*) FROM cities WHERE geoname_id = 526815 AND id = $1`, cid); n != 1 {
+		t.Fatal("место не у города привязки")
+	}
+	if n := e.count(t, `SELECT count(*) FROM regions WHERE geoname_admin1_code = '71'`); n != 1 {
+		t.Fatalf("регионов с admin1 71: %d", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM regions WHERE id = $1 AND geoname_admin1_code = '71'`, ural); n != 1 {
+		t.Fatal("код 71 не у «Урала»")
+	}
+}
+
 // recvWithin — ждать закрытия ch не дольше d (ревью G6 m5: барьер не висит до -timeout пакета).
 func recvWithin(t *testing.T, ch <-chan struct{}, d time.Duration) bool {
 	t.Helper()

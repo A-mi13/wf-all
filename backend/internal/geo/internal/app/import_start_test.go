@@ -45,11 +45,12 @@ type jobEnv struct {
 func newJobEnv(t *testing.T) jobEnv {
 	t.Helper()
 	p := dbtest.NewPoolsAs(t, "admin")
-	rc, err := river.NewClient(riverpgxv5.New(p.As), &river.Config{})
+	clk := clocktest.New(tAct)
+	rc, err := river.NewClient(riverpgxv5.New(p.As), &river.Config{Test: river.TestConfig{Time: riverTime{clk}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := jobEnv{owner: p.Owner, as: p.As, clk: clocktest.New(tAct), rc: rc}
+	e := jobEnv{owner: p.Owner, as: p.As, clk: clk, rc: rc}
 	e.exec(t, `INSERT INTO countries (code, name, currency, default_locale, phone_prefix, week_starts_on, min_signup_age,
 	                                  age_of_majority, is_enabled)
 	           VALUES ('XA', 'Тестовия', 'XXX', 'ru', '+999', 1, 14, 18, false)`)
@@ -598,4 +599,131 @@ func TestStartImportStaleRunningRow(t *testing.T) {
 			}
 		})
 	}
+}
+
+// riverTime — часы теста для River (TestConfig.Time): created_at задачи — по тем же часам, что started_at строк
+// журнала у импорта с часами теста (в проде оба — время одного стенда).
+type riverTime struct{ clk *clocktest.Fake }
+
+func (r riverTime) Now() time.Time { return r.clk.Now() }
+
+func (r riverTime) NowOrNil() *time.Time {
+	now := r.clk.Now().UTC()
+	return &now
+}
+
+// m5 ревью G7: import_id карточки задачи — только строки, начатые не раньше created_at задачи − labelClockSkew.
+// После сброса последовательности River (пересоздание схемы) id задачи повторяется: старая строка журнала с тем же
+// river_job_id — чужой импорт, карточке новой задачи она не достаётся. Граница ровно created_at − 1 мин — своя.
+func TestImportJobIgnoresRowsBeforeJob(t *testing.T) {
+	t.Parallel()
+	e := newJobEnv(t)
+	s := staffAs(perm.Support)
+	job, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "RU", importMeta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := uuid.New()
+	e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at, finished_at, river_job_id)
+	           VALUES ($1, 'RU', 'succeeded', $2, $2, $3)`, old, tAct.Add(-72*time.Hour), job)
+	if got, err := e.admin().ImportJob(context.Background(), s, job); err != nil || got.ImportID != nil {
+		t.Fatalf("строка прежней задачи с тем же id: %+v %v", got, err)
+	}
+	edge := uuid.New()
+	e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at, river_job_id)
+	           VALUES ($1, 'RU', 'running', $2, $3)`, edge, tAct.Add(-time.Minute), job)
+	if got, err := e.admin().ImportJob(context.Background(), s, job); err != nil || got.ImportID == nil || *got.ImportID != edge {
+		t.Fatalf("строка на границе допуска: %+v %v", got, err)
+	}
+}
+
+// m6 ревью G7: импорт оператора идёт (свежая строка running без задачи), а задача админки на ту же страну уже стоит
+// (ждёт оператора в JobSnooze) — повторная постановка отдаёт 409 с job_id этой задачи: сотрудник видит и может её
+// отменить. Новая задача не появилась, аудита второй постановки нет.
+func TestStartImportOperatorRunningJobQueued(t *testing.T) {
+	t.Parallel()
+	e := newJobEnv(t)
+	job, err := e.admin().StartImport(context.Background(), staffAs(perm.Admin), "RU", importMeta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at) VALUES ($1, 'RU', 'running', $2)`, uuid.New(), tAct)
+	_, err = e.admin().StartImport(context.Background(), staffAs(perm.Owner), "RU", importMeta)
+	if jid := inProgress(t, err); jid == nil || *jid != job {
+		t.Fatalf("job_id %v, ждали %d", jid, job)
+	}
+	if n := e.count(t, `SELECT count(*) FROM river_job`); n != 1 {
+		t.Fatalf("задач %d", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'geo.import_requested'`); n != 1 {
+		t.Fatalf("аудитов постановки %d", n)
+	}
+}
+
+// m9 ревью G7 (+ m1 ревью G5): команда оператора идёт с ноутбука — его часы не источник времени журнала.
+// OperatorClock сдвигает часы процесса к now() базы: started_at строки оператора и сверка «зависшей» строки в его
+// begin — по часам базы. Отстают на 15 мин: через 26 мин импорта admin-api (часы стенда) строку зависшей не считает
+// — 409, второй импорт страны не встаёт. Спешат на 25 мин: живую строку задачи (20 мин) оператор не закрывает
+// как зависшую — «импорт страны уже идёт».
+func TestOperatorImportUsesDatabaseClock(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dbNow := func(t *testing.T, e jobEnv) time.Time {
+		t.Helper()
+		var now time.Time
+		if err := e.owner.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+			t.Fatal(err)
+		}
+		return now
+	}
+	t.Run("часы процесса отстают", func(t *testing.T) {
+		t.Parallel()
+		e := newJobEnv(t)
+		now := dbNow(t, e)
+		clk, err := app.OperatorClock(ctx, e.owner, clocktest.New(now.Add(-15*time.Minute)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		later := app.NewAdmin(app.AdminDeps{Pool: e.as, Clock: clocktest.New(now.Add(26 * time.Minute)), River: e.rc,
+			Log: slog.New(slog.DiscardHandler)})
+		var startErr error
+		raw := fixture(t)
+		im := app.NewImporter(e.owner, clk, source.FetchConfig{}, slog.New(slog.DiscardHandler))
+		im.SetFetch(func(context.Context, source.FetchConfig, string) (source.Raw, error) {
+			// строка оператора записана (begin закоммичен); 26 минут спустя по часам стенда сотрудник ставит импорт
+			_, startErr = later.StartImport(ctx, staffAs(perm.Admin), "RU", importMeta)
+			return raw, nil
+		})
+		if _, err := im.Import(ctx, "RU", nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if ipe, ok := errors.AsType[*geo.ImportInProgressError](startErr); !ok || ipe.JobID != nil {
+			t.Fatalf("постановка во время импорта оператора: %v — живая строка сочтена зависшей", startErr)
+		}
+		if n := e.count(t, `SELECT count(*) FROM geonames_imports WHERE started_at BETWEEN $1::timestamptz - interval '5 seconds'
+			AND $1::timestamptz + interval '5 seconds'`, now); n != 1 {
+			t.Fatal("started_at строки оператора не по часам базы")
+		}
+	})
+	t.Run("часы процесса спешат", func(t *testing.T) {
+		t.Parallel()
+		e := newJobEnv(t)
+		now := dbNow(t, e)
+		live := uuid.New()
+		e.exec(t, `INSERT INTO geonames_imports (id, country_code, status, started_at, river_job_id) VALUES ($1, 'RU', 'running', $2, 555)`,
+			live, now.Add(-20*time.Minute))
+		clk, err := app.OperatorClock(ctx, e.owner, clocktest.New(now.Add(25*time.Minute)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := fixture(t)
+		im := app.NewImporter(e.owner, clk, source.FetchConfig{}, slog.New(slog.DiscardHandler))
+		im.SetFetch(func(context.Context, source.FetchConfig, string) (source.Raw, error) { return raw, nil })
+		if _, err := im.Import(ctx, "RU", nil, nil); !errors.Is(err, app.ErrImportInProgress) {
+			t.Fatalf("оператор при живой строке задачи: %v", err)
+		}
+		if j := journalRow(t, e.owner, live); j.Status != "running" {
+			t.Fatalf("живая строка закрыта как зависшая: %+v", j)
+		}
+	})
 }

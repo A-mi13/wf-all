@@ -457,7 +457,8 @@ func reportOf(ctx context.Context, q *geodb.Queries, rep report, locale string) 
 	return out, nil
 }
 
-// labelClockSkew — допуск расхождения часов в сопоставлении подписи (m1 ревью G5): created_at записи постановки —
+// labelClockSkew — допуск расхождения часов в сопоставлении подписи (m1 ревью G5) и строки журнала с задачей River
+// (ImportLatestByJob, ревью G7 m5: created_at задачи — время базы): created_at записи постановки —
 // время базы (now() транзакции admin-api, как у всех записей журнала), started_at строки — часы воркера (правило
 // clock.Clock, другой хост). Схему и источник времени журнала не меняем: сравниваются два источника, поэтому с
 // допуском; настоящий повтор river_job.id (сброс последовательности River) отстоит на дни, а не на минуту.

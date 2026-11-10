@@ -9,13 +9,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"wf/backend/internal/geo"
-	geoadmin "wf/backend/internal/geo/admin"
-	"wf/backend/internal/platform/approvals"
-	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/i18n"
 	"wf/backend/locales"
@@ -59,25 +54,6 @@ func TestAssembleRegistersGeoActions(t *testing.T) {
 	}
 	if a.geo == nil || a.geoDeps.River == nil || any(a.geoDeps.River) != any(a.deps.River) || a.geoDeps.Pool != a.deps.Pool {
 		t.Fatal("geo собран без клиента вставки staff")
-	}
-}
-
-// Действия geo держат инициатора под замком (LockActors): без хука SetActorLock от staff реестр не проходит Validate —
-// сборка без staff отказывает при старте, а не исполняет правила страны без перепроверки учёток.
-func TestAssembleActorLockRequired(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t)
-	pool, err := pgxpool.New(context.Background(), e.dbURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	reg := approvals.NewRegistry()
-	svc := approvals.New(pool, clock.System, reg)
-	geoadmin.New(geo.New(pool), geoadmin.Deps{Pool: pool, Clock: clock.System}).RegisterApprovals(reg, svc)
-	reg.SetInitiatorCheck(func(context.Context, pgx.Tx, approvals.Approval) error { return nil })
-	if err := reg.Validate(); err == nil {
-		t.Fatal("реестр с действиями geo без замка акторов прошёл Validate")
 	}
 }
 

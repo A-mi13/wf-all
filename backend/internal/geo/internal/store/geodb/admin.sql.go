@@ -1543,6 +1543,23 @@ func (q *Queries) InsertSlugHistory(ctx context.Context, arg InsertSlugHistoryPa
 	return err
 }
 
+const slugLock = `-- name: SlugLock :exec
+SELECT pg_advisory_xact_lock($1::int, hashtext($2::text))
+`
+
+type SlugLockParams struct {
+	Class int32
+	Slug  string
+}
+
+// Смены адреса на один slug сериализуются (ревью G6 m4): эксклюзивный advisory-замок транзакции (класс, hashtext(slug))
+// до проверки SlugOwner — иначе проверка, прошедшая до коммита чужой смены на тот же slug, и третья смена, унёсшая
+// его в историю, дают текущий slug одного города в истории другого. Совпадение хэшей двух slug — только ожидание.
+func (q *Queries) SlugLock(ctx context.Context, arg SlugLockParams) error {
+	_, err := q.db.Exec(ctx, slugLock, arg.Class, arg.Slug)
+	return err
+}
+
 const slugOwner = `-- name: SlugOwner :one
 SELECT id AS city_id, false AS history FROM cities WHERE slug = $1::text
 UNION ALL

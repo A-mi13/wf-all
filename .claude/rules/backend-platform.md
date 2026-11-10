@@ -21,7 +21,7 @@ paths:
   `409 idempotency.replay_unavailable`; `Cache-Control: no-store` ставит хендлер.
 - События — только id и непрофильные значения, без персональных данных; у агрегата `version`, подписчик в режиме `LatestState` отбрасывает устаревшие версии (§6.5).
 - Подписчик события — `events.Subscription` с явным `Delivery` (`EveryEvent` | `LatestState`), регистрируется в `subscriptions()` в `cmd/worker/main.go`; обработчик идемпотентен по `event_inbox` сам собой, пишет только в своей транзакции `tx`. Доставка на подписку, которой нет в реестре этого воркера (воркер другого релиза при выкатке), — обычная ошибка с повтором, а затем «мёртвая» задача (видна, переигрывается), не отмена; отменяется только задача на событие, уже удалённое чисткой. Переигровка — `worker events replay --type T --subscriber S --since RFC3339`.
-  Импорт городов оператором — `worker geo import --country RU`: синхронно в процессе, без задачи River, под ролью `worker`; задача `geo.import` ставится только через `jobs.NewImportArgs`.
+  Импорт городов оператором — `worker geo import --country RU`: синхронно в процессе, без задачи River, под ролью `worker`; время журнала — часы машины оператора со сдвигом к `now()` базы (`geojobs.OperatorClock`), не `clock.System` ноутбука; задача `geo.import` ставится только через `jobs.NewImportArgs`.
 - Задача River объявляет очередь из `platform/queue` (`events`, `lifecycle`, `notify`, `mail`, `stats`, `media`, `maintenance`) в `InsertOpts`; очереди `default` нет. Аргументы — с полем версии `V`, без ПД, уникальность — `UniqueOpts`. River в воркере работает на неотменяемом ctx: по SIGTERM сначала останавливается relay, затем `queue.Stop` — мягкая остановка (25 с) и, не уложившись, `StopAndCancel` (5 с): сумма укладывается в 30 с между SIGTERM и SIGKILL. `WORKER_RELAY_BATCH` ≥ 1 и `WORKER_RELAY_POLL` > 0 проверяются на старте воркера.
 - Периодика платформы — только `platform/periodic.Jobs()` (новый срез и новые задачи на вызов): её подключают и воркер, и
   admin-api — лидер River один на схему и ставит периодику по своему списку (P27), исполняет воркер (River не проверяет
@@ -40,7 +40,7 @@ paths:
   changelog (`JobSnooze`, `UniqueOpts`, рескьюер, `AddWorkerArgs`) и линия миграций `riverpgxv5`; разошедшееся умолчание
   красит `TestMaintenanceMatchesRiverDefaults`, миграцию схемы линии без нашего `00NN_river_vK.sql` —
   `TestRiverMigrationLineCovered` (`queue`; через `rivermigrate.AllVersions`; v1 — таблица версий River `river_migration`, у нас её нет: версии ведёт goose;
-  пустая для Postgres версия — `SELECT 1;`, как v8, — файла не требует).
+  пустая для Postgres версия — `SELECT 1;`, как v8, — файла не требует); исполняемый SQL наших файлов (без строк-комментариев) равен SQL линии текущего River — `TestRiverMigrationTextMatchesRiver` (River поправил SQL выпущенной версии — новая миграция goose, слитый файл не править).
 - HTTP-бинарник с фоном — `server.RunService(ctx, name, cfg, logOut, build)`: `build(log, pool)` → `Service{Handler,
   Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
   фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены
@@ -113,7 +113,7 @@ paths:
   глубину); нарушения —
   `ValidationError` с полями контракта, ручка переводит их в 400 `validation.failed` (все сразу —
   `httpx.NewFieldErrors`). Запись из админки — `appversion.Put(ctx, tx, v, now)` в транзакции вызывающего (строка
-  под `FOR UPDATE` — «было», те же значения — без записи, иначе upsert с `version + 1`), список — `appversion.List`;
+  под `FOR UPDATE` — «было», те же значения — без записи, иначе правка с `version + 1`; не заведена — вставка `ON CONFLICT DO NOTHING`, опередила параллельная — перечитать под `FOR UPDATE` и править с её «было»), список — `appversion.List`;
   событие — `appversion.ChangedEvent` (агрегат `app_versions`, `id.Named`), его и аудит пишет ручка в той же tx.
 - Флаги функций — `flags.Store`: чтение модулями `Enabled`/`Require`; админка — `List` и `Update(ctx, tx, key,
   version, globally, cities)` (оптимистичная `version`: не та — `ErrStale`, и при неизменных значениях; параллельная

@@ -228,11 +228,17 @@ WHERE country_code = sqlc.arg(country_code)::text AND status = 'running'
   AND started_at >= sqlc.arg(stale_before)::timestamptz;
 
 -- name: ImportLatestByJob :one
--- Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id.
+-- Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id,
+-- начатые не раньше not_before (created_at задачи − допуск часов, ревью G7 m5): после сброса последовательности River
+-- id повторяется, и строка прежней задачи с тем же id карточке новой не достаётся.
 SELECT id FROM geonames_imports
-WHERE river_job_id = sqlc.arg(river_job_id)::bigint
+WHERE river_job_id = sqlc.arg(river_job_id)::bigint AND started_at >= sqlc.arg(not_before)::timestamptz
 ORDER BY started_at DESC, id DESC
 LIMIT 1;
+
+-- name: ImportDBNow :one
+-- Время базы (now() транзакции) — опора часов команды оператора (app.OperatorClock, ревью G7 m9).
+SELECT now()::timestamptz AS now;
 
 -- name: ImportJobCancelLock :exec
 -- Отмены одной задачи импорта сериализуются (K6): эксклюзивный advisory-замок транзакции (класс, id задачи по

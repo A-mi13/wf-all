@@ -6,6 +6,7 @@ package geodb
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -136,6 +137,8 @@ type Querier interface {
 	// Импорт GeoNames (спека geo §5.4): журнал geonames_imports, источник geonames_*, сверка
 	// заведённых городов. Исполняет воркер (роль worker, grants.sql §3.8).
 	ImportCountry(ctx context.Context, code string) (ImportCountryRow, error)
+	// Время базы (now() транзакции) — опора часов команды оператора (app.OperatorClock, ревью G7 m9).
+	ImportDBNow(ctx context.Context) (time.Time, error)
 	ImportDeleteAdmin1Names(ctx context.Context, countryCode string) error
 	ImportDeleteGone(ctx context.Context, arg ImportDeleteGoneParams) (int64, error)
 	ImportDeletePlaceNames(ctx context.Context, geonameID []int64) error
@@ -153,8 +156,10 @@ type Querier interface {
 	ImportJobCancelLock(ctx context.Context, arg ImportJobCancelLockParams) error
 	// Мест в прошлом успешном импорте страны — база порога 90 % (шаг 4).
 	ImportLastSucceededPlaces(ctx context.Context, countryCode string) (int32, error)
-	// Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id.
-	ImportLatestByJob(ctx context.Context, riverJobID int64) (uuid.UUID, error)
+	// Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id,
+	// начатые не раньше not_before (created_at задачи − допуск часов, ревью G7 m5): после сброса последовательности River
+	// id повторяется, и строка прежней задачи с тем же id карточке новой не достаётся.
+	ImportLatestByJob(ctx context.Context, arg ImportLatestByJobParams) (uuid.UUID, error)
 	ImportLinkCity(ctx context.Context, arg ImportLinkCityParams) (int64, error)
 	// Региону, найденному по названию, — код admin1 (если пуст и не занят другим регионом страны:
 	// уникальность regions_country_admin1_key).
@@ -215,6 +220,10 @@ type Querier interface {
 	// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity. Ветка истории
 	// намеренно первой: без ORDER BY s.prio выиграла бы она — это ловит TestResolveCitySlugPrefersCurrent.
 	ResolveCitySlug(ctx context.Context, slug string) (uuid.UUID, error)
+	// Смены адреса на один slug сериализуются (ревью G6 m4): эксклюзивный advisory-замок транзакции (класс, hashtext(slug))
+	// до проверки SlugOwner — иначе проверка, прошедшая до коммита чужой смены на тот же slug, и третья смена, унёсшая
+	// его в историю, дают текущий slug одного города в истории другого. Совпадение хэшей двух slug — только ожидание.
+	SlugLock(ctx context.Context, arg SlugLockParams) error
 	// Чей адрес: текущий slug города (history = false) или строка истории (history = true); нет — ни одной строки.
 	SlugOwner(ctx context.Context, slug string) (SlugOwnerRow, error)
 	// Адрес занят: текущий slug города или прежний адрес из истории.

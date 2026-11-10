@@ -229,13 +229,26 @@ func TestDistrictConcurrentSameName(t *testing.T) {
 			once.Do(func() { close(at); <-done })
 		}
 	})
-	var errB error
-	var wg sync.WaitGroup
-	wg.Go(func() { _, errB = createDistrict(second, stav, "Центр") })
-	<-at
-	_, errA := createDistrict(e.admin(), stav, "ЦЕНТР")
+	var errA, errB error
+	bDone, aDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(bDone)
+		_, errB = createDistrict(second, stav, "Центр")
+	}()
+	// сроки у каждого барьера (ревью G6 m5): регрессия не висит до -timeout пакета
+	if !recvWithin(t, at, 15*time.Second) {
+		close(done)
+		t.Fatalf("B не дошёл до точки district: %v", errB)
+	}
+	go func() {
+		defer close(aDone)
+		_, errA = createDistrict(e.admin(), stav, "ЦЕНТР")
+	}()
+	finished := recvWithin(t, aDone, 15*time.Second)
 	close(done)
-	wg.Wait()
+	if !finished || !recvWithin(t, bDone, 30*time.Second) || !recvWithin(t, aDone, 30*time.Second) {
+		t.Fatal("создания не завершились")
+	}
 	if errA != nil || !errors.Is(errB, geo.ErrDistrictNameTaken) {
 		t.Fatalf("a: %v, b: %v", errA, errB)
 	}

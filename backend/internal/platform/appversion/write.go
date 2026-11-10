@@ -33,26 +33,42 @@ func List(ctx context.Context, q appversiondb.DBTX) ([]Versions, error) {
 
 // Put — запись версий платформы в транзакции tx (после Validate): строка под FOR UPDATE — «было» (nil — платформа не
 // заведена); те же значения — before == after без записи (version не растёт, события и аудита у вызывающего нет);
-// иначе upsert: новая — version 1 и updated_at = now (часы записывающего), правка — version + 1 (updated_at — триггер).
+// иначе правка — version + 1 (updated_at — триггер). Не заведена — вставка: version 1 и updated_at = now (часы
+// записывающего). Вставку опередила параллельная транзакция (её строка закоммичена, вставка — ни одной строки) —
+// строка перечитывается под FOR UPDATE и запись идёт как правка с её «было» (ревью G7 m2: иначе аудит и событие
+// второй выглядели бы созданием с before = null).
 func Put(ctx context.Context, tx pgx.Tx, v Versions, now time.Time) (before *Versions, after Versions, err error) {
 	q := appversiondb.New(tx)
-	cur, err := q.AppVersionsForUpdate(ctx, string(v.Platform))
-	switch {
-	case err == nil:
-		b := versionsOf(cur)
-		before = &b
-		if b.Min == v.Min && b.Recommended == v.Recommended && b.StoreURL == v.StoreURL {
-			return before, b, nil
+	for attempt := 0; ; attempt++ {
+		cur, err := q.AppVersionsForUpdate(ctx, string(v.Platform))
+		switch {
+		case err == nil:
+			b := versionsOf(cur)
+			if b.Min == v.Min && b.Recommended == v.Recommended && b.StoreURL == v.StoreURL {
+				return &b, b, nil
+			}
+			row, err := q.UpdateAppVersions(ctx, appversiondb.UpdateAppVersionsParams{Platform: string(v.Platform),
+				MinVersion: v.Min, RecommendedVersion: v.Recommended, StoreUrl: v.StoreURL})
+			if err != nil {
+				return nil, Versions{}, fmt.Errorf("appversion: запись %s: %w", v.Platform, err)
+			}
+			return &b, versionsOf(row), nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return nil, Versions{}, fmt.Errorf("appversion: %w", err)
+		case attempt > 0:
+			// строку только что завела другая транзакция, а под FOR UPDATE её нет — удалить строку версий нельзя
+			return nil, Versions{}, fmt.Errorf("appversion: строка %s пропала после параллельного заведения", v.Platform)
 		}
-	case !errors.Is(err, pgx.ErrNoRows):
-		return nil, Versions{}, fmt.Errorf("appversion: %w", err)
+		row, err := q.InsertAppVersions(ctx, appversiondb.InsertAppVersionsParams{Platform: string(v.Platform),
+			MinVersion: v.Min, RecommendedVersion: v.Recommended, StoreUrl: v.StoreURL, UpdatedAt: now})
+		switch {
+		case err == nil:
+			return nil, versionsOf(row), nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return nil, Versions{}, fmt.Errorf("appversion: запись %s: %w", v.Platform, err)
+		}
+		// ON CONFLICT DO NOTHING: строку завела параллельная транзакция — перечитать её как «было»
 	}
-	row, err := q.UpsertAppVersions(ctx, appversiondb.UpsertAppVersionsParams{Platform: string(v.Platform), MinVersion: v.Min,
-		RecommendedVersion: v.Recommended, StoreUrl: v.StoreURL, UpdatedAt: now})
-	if err != nil {
-		return nil, Versions{}, fmt.Errorf("appversion: запись %s: %w", v.Platform, err)
-	}
-	return before, versionsOf(row), nil
 }
 
 func versionsOf(r appversiondb.AppVersion) Versions {

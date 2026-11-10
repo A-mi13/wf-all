@@ -69,11 +69,13 @@ func TestGeoCountriesHTTP(t *testing.T) {
 	// второй ждущий запрос на тот же код — допустим (исполнится вторым и не пройдёт)
 	ap2 := e.accepted(e.send(http.MethodPost, "/v1/geo/countries", adm.token, uuid.NewString(), kzBody))
 
-	// TestApprovalsIncomingGeo: во «Входящих» второго владельца и админа — есть, у поддержки — нет
+	// TestApprovalsIncomingGeo: во «Входящих» второго владельца и админа — есть, у поддержки и модератора — нет (у
+	// модератора право geo.countries.rules — deny, его город запросу страны не помогает; ревью G6 m8)
+	mod := e.firstLoginModerator("moderator@wf.example", e.city("vremensk"))
 	for _, c := range []struct {
 		m    member
 		want bool
-	}{{b, true}, {a, true}, {sup, false}} {
+	}{{b, true}, {a, true}, {sup, false}, {mod, false}} {
 		rec := e.get("/v1/approvals?box=incoming", c.m.token)
 		if got := rec.Code == http.StatusOK && strings.Contains(rec.Body.String(), ap.String()); got != c.want {
 			t.Errorf("входящие %s: %v (%d %s)", c.m.email, got, rec.Code, rec.Body.String())

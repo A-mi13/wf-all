@@ -3,8 +3,8 @@ package flags_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
-	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -177,18 +177,9 @@ func TestUpdateFlagConcurrent(t *testing.T) {
 	go func() {
 		done <- inTx(t, pools.As, func(tx pgx.Tx) error { _, _, err := s.Update(ctx, tx, "ads", 1, &on, nil); return err })
 	}()
-	wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	for {
-		var n int
-		if err := pools.Owner.QueryRow(wctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-			WHERE NOT l.granted AND a.datname = current_database()`).Scan(&n); err != nil {
-			t.Fatalf("второе не встало на замке: %v", err)
-		}
-		if n > 0 {
-			break
-		}
-		runtime.Gosched()
+	// ожидание замка — опрос тикером со сроком (ревью G7 m8: без горячего цикла с запросом на каждой итерации)
+	if err := waitLockWithin(ctx, pools.Owner, done, 10*time.Second); err != nil {
+		t.Fatal(err)
 	}
 	if err := tx1.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -199,6 +190,32 @@ func TestUpdateFlagConcurrent(t *testing.T) {
 	var v int64
 	if err := pools.Owner.QueryRow(ctx, `SELECT version FROM feature_flags WHERE key = 'ads'`).Scan(&v); err != nil || v != 2 {
 		t.Fatalf("версия %d %v", v, err)
+	}
+}
+
+// waitLockWithin — ждать незахваченный замок в базе теста (второе встало за первым) не дольше d, опрос раз в 10 мс;
+// второе завершилось раньше (done) — ошибка с его итогом.
+func waitLockWithin(ctx context.Context, owner *pgxpool.Pool, done <-chan error, d time.Duration) error {
+	wctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var n int
+		if err := owner.QueryRow(wctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+			WHERE NOT l.granted AND a.datname = current_database()`).Scan(&n); err != nil {
+			return fmt.Errorf("второе не встало на замке: %w", err)
+		}
+		if n > 0 {
+			return nil
+		}
+		select {
+		case err := <-done:
+			return fmt.Errorf("второе завершилось, не встав на замок: %v", err)
+		case <-wctx.Done():
+			return fmt.Errorf("второе не встало на замке за %s", d)
+		case <-tick.C:
+		}
 	}
 }
 

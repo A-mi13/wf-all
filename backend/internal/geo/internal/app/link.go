@@ -168,6 +168,7 @@ func (a *Admin) LinkCity(ctx context.Context, s *auth.Staff, id uuid.UUID, geona
 		if _, err := linkCity(ctx, tx, in); err != nil {
 			return linkProblem(err)
 		}
+		a.at(ctx, "linked")
 		if err := audit.Write(ctx, audit.Entry{
 			ActorStaffID: s.StaffID, ActorRole: s.Role, ActorLabel: s.Label, Action: actionCityLinked,
 			ObjectType: objectCity, ObjectID: id, ScopeCityID: id, After: map[string]any{"geoname_id": geonameID},

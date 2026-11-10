@@ -13,11 +13,15 @@ type Querier interface {
 	AppVersionsForUpdate(ctx context.Context, platform string) (AppVersion, error)
 	// Версии приложения платформы; 0 строк — версии не заведены (публичная ручка отдаёт null-поля).
 	GetAppVersions(ctx context.Context, platform string) (AppVersion, error)
+	// Заведение платформы: новая строка — version 1 и updated_at из часов записывающего. Строку параллельно завела другая
+	// транзакция — ни одной строки (ждёт её коммита, ON CONFLICT DO NOTHING): вызывающий перечитывает её под FOR UPDATE как
+	// «было» (ревью G7 m2) — иначе вторая правка шла бы как создание с before = null.
+	InsertAppVersions(ctx context.Context, arg InsertAppVersionsParams) (AppVersion, error)
 	// Заведённые платформы для админки (план B, Task 15), по имени; незаведённую ручка отдаёт null-полями.
 	ListAppVersions(ctx context.Context) ([]AppVersion, error)
-	// Запись версий: новая строка — version 1 и updated_at из часов записывающего; правка — version + 1, updated_at
-	// ставит триггер set_updated_at (время базы; порядок правок — version).
-	UpsertAppVersions(ctx context.Context, arg UpsertAppVersionsParams) (AppVersion, error)
+	// Правка заведённой платформы (строка под FOR UPDATE): version + 1, updated_at ставит триггер set_updated_at (время
+	// базы; порядок правок — version).
+	UpdateAppVersions(ctx context.Context, arg UpdateAppVersionsParams) (AppVersion, error)
 }
 
 var _ Querier = (*Queries)(nil)

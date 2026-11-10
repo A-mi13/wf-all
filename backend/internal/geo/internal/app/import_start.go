@@ -76,9 +76,11 @@ func (ImportArgs) InsertOpts() river.InsertOpts {
 // StartImport — POST /v1/geo/imports одной транзакцией под Idempotency-Key вызывающего:
 //  1. право geo.imports.run (конвейер проверил; здесь — защита в глубину), код страны ^[A-Z]{2}$;
 //  2. страна есть (выключенная — можно, спека geo §4.1), иначе geo.ErrCountryNotFound;
-//  3. свежая строка running страны (не старше StaleAfter, ревью G7 I1) — *geo.ImportInProgressError (JobID —
-//     river_job_id строки; у оператора — nil); зависшая не мешает — её закроет begin воркера;
-//  4. InsertTx задачи: дубль уникальности River — откат и *geo.ImportInProgressError с id существующей задачи (R26);
+//  3. InsertTx задачи: дубль уникальности River — откат и *geo.ImportInProgressError с id существующей задачи (R26);
+//     раньше строки running (ревью G7 m6): ждущая задача видна и при импорте оператора;
+//  4. свежая строка running страны (не старше StaleAfter, ревью G7 I1) — откат вставленной задачи и
+//     *geo.ImportInProgressError (JobID — river_job_id строки; у оператора — nil); зависшая не мешает — её закроет
+//     begin воркера;
 //  5. аудит geo.import_requested от сотрудника (объект geonames_import_job, id.Named; after {country_code, job_id};
 //     без города) — в той же транзакции, что задача.
 func (a *Admin) StartImport(ctx context.Context, s *auth.Staff, country string, m approvals.Meta) (int64, error) {
@@ -99,6 +101,17 @@ func (a *Admin) StartImport(ctx context.Context, s *auth.Staff, country string, 
 		} else if err != nil {
 			return err
 		}
+		// сначала уникальность River (ревью G7 m6): ждущая задача страны — 409 с её job_id, даже если идёт импорт
+		// оператора (сотрудник видит свою задачу и может её отменить); вставленная здесь задача откатится с 409 ниже
+		by := s.StaffID
+		res, err := a.d.River.InsertTx(ctx, tx, NewImportArgs(country, &by), nil)
+		if err != nil {
+			return fmt.Errorf("geo: постановка импорта %s: %w", country, err)
+		}
+		if res.UniqueSkippedAsDuplicate {
+			id := res.Job.ID
+			return &geo.ImportInProgressError{JobID: &id}
+		}
 		// зависшая строка (старше StaleAfter по часам admin-api) не блокирует: её закроет begin воркера; если часы
 		// воркера отстают и он строку зависшей ещё не считает — задача уйдёт в JobSnooze до её закрытия
 		running, err := q.ImportRunningJob(ctx, geodb.ImportRunningJobParams{CountryCode: country,
@@ -108,15 +121,6 @@ func (a *Admin) StartImport(ctx context.Context, s *auth.Staff, country string, 
 			return &geo.ImportInProgressError{JobID: running}
 		case !errors.Is(err, pgx.ErrNoRows):
 			return err
-		}
-		by := s.StaffID
-		res, err := a.d.River.InsertTx(ctx, tx, NewImportArgs(country, &by), nil)
-		if err != nil {
-			return fmt.Errorf("geo: постановка импорта %s: %w", country, err)
-		}
-		if res.UniqueSkippedAsDuplicate {
-			id := res.Job.ID
-			return &geo.ImportInProgressError{JobID: &id}
 		}
 		jobID = res.Job.ID
 		a.at(ctx, "import_inserted")
@@ -223,7 +227,8 @@ func (a *Admin) CancelImportJob(ctx context.Context, s *auth.Staff, jobID int64,
 func importJobOf(ctx context.Context, q *geodb.Queries, row *rivertype.JobRow) (geo.ImportJob, error) {
 	job := geo.ImportJob{JobID: row.ID, State: jobState(row.State), Attempt: row.Attempt, MaxAttempts: row.MaxAttempts,
 		CreatedAt: row.CreatedAt}
-	id, err := q.ImportLatestByJob(ctx, row.ID)
+	id, err := q.ImportLatestByJob(ctx, geodb.ImportLatestByJobParams{RiverJobID: row.ID,
+		NotBefore: row.CreatedAt.Add(-labelClockSkew)})
 	switch {
 	case err == nil:
 		job.ImportID = &id
