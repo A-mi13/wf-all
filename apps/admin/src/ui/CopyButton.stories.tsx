@@ -4,7 +4,7 @@ import stories from '../showcase/Stories.module.css';
 import { CopyButton } from './CopyButton';
 
 // Копирование в один клик (спека UI-фундамента §4.8): значок рядом со значением и кнопка с подписью.
-// Успех и отказ — нажатием или пропом preview (истории «Скопировано», «Отказ»).
+// Успех и отказ — нажатием или пропом preview (истории Copied, Manual copy fallback).
 export default { title: 'UI/CopyButton', visual: true } satisfies StoryMeta;
 
 export const Icon: Story = () => {

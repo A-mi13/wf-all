@@ -25,6 +25,8 @@
 | @fontsource/oswald / @fontsource/manrope | 5.3.0 / 5.3.0 | `apps/admin/package.json` (шрифты админки без внешних запросов, `src/app/fonts.ts`) |
 | Ladle (витрина компонентов) | 5.1.1 (внутри — свой Vite 6.4.5, @vitejs/plugin-react-swc) | `apps/admin/package.json` (devDependencies), конфиг — `apps/admin/.ladle/`; в сборку админки не входит; исключение ниже |
 | GitHub Actions: checkout / setup-go / pnpm action-setup | 7.0.1 / 7.0.0 / 6.1.0 | полный SHA в `.github/workflows/*.yml`; плавающий тег `pnpm/action-setup@v6` указывал на 6.0.10 без поддержки pnpm 12 |
+| GitHub Actions: upload-artifact / download-artifact | 7.0.2 / 8.0.2 | полный SHA в `.github/workflows/admin-visual.yml` (эталон и отчёт визуального сравнения); у upload-artifact v8 не выпущен (проверено 10.11.2026) |
+| Образ Playwright в CI | `mcr.microsoft.com/playwright:v1.64.1-noble` | тег — из версии `@playwright/test` админки (`scripts/visual-baseline.mjs`, job `snapshots` в `admin-visual.yml`); меняется вместе с Playwright |
 | Flutter / Dart | фиксируется в wf-native | в репо wf-native проекта Flutter пока нет — версии появятся с мобильной спекой |
 | chi / pgx | 5.5.0 / 5.11.0 | `backend/go.mod` |
 | oapi-codegen / sqlc | 2.8.1 / 1.31.1 | `backend/tools/go.mod` |
