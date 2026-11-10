@@ -1,8 +1,13 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="system">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- цвет панели браузера по системной теме; явный выбор переписывает content обеих (ThemeProvider) -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0B0F0D" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F6F3" />
+    <!-- тема до первого кадра: файл, а не инлайн (CSP script-src 'self'); до стилей -->
+    <script src="/theme-init.js"></script>
     <!-- заголовок вкладки ставит DocumentTitle из messages (app.title) -->
   </head>
   <body>

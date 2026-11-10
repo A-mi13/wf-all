@@ -65,4 +65,13 @@ export {
   SEARCH_DEBOUNCE_MS,
   type SortState,
 } from './table';
+export {
+  type ColorName,
+  THEME_STORAGE_KEY,
+  ThemeProvider,
+  type ThemePref,
+  ThemeSwitch,
+  useTheme,
+  useThemeColors,
+} from './theme';
 export { TOAST_HIDE_MS, type ToastApi, ToastProvider, useToast } from './toast';

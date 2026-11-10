@@ -211,7 +211,7 @@ async function main(argv) {
         locale: o.locale === 'en' ? 'en-US' : 'ru-RU',
         timezoneId: 'UTC',
       });
-      // выбор темы — как у сотрудника (wf.theme, спека §2.5); до UF1b админка тёмная всегда
+      // выбор темы — как у сотрудника (wf.theme, спека §4.12): его читает public/theme-init.js до первого кадра
       await context.addInitScript((theme) => {
         try {
           localStorage.setItem('wf.theme', theme);

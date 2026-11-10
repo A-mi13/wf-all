@@ -107,6 +107,36 @@ func TestStaticServesAdminApp(t *testing.T) {
 	wantProblem(t, serve(h, r), http.StatusMethodNotAllowed, httpx.CodeMethodNotAllowed)
 }
 
+// public/theme-init.js — тема до первого кадра (спека UI-фундамента §4.12): обычный файл верхнего уровня
+// без хэша в имени — no-cache (сверка на каждой загрузке: старая версия из кэша не применит тему) и тот же
+// CSP, что у index.html; файл — скрипт, а не index.html маршрута SPA.
+func TestStaticThemeInit(t *testing.T) {
+	t.Parallel()
+	o := testOptions(t)
+	o.StaticDir = staticDir(t)
+	const themeInit = `window.__wfTheme = { parse: function () { return "system"; } };`
+	if err := os.WriteFile(filepath.Join(o.StaticDir, "theme-init.js"), []byte(themeInit), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := newHandler(t, o)
+
+	rec := get(h, "/theme-init.js")
+	if rec.Code != http.StatusOK || rec.Body.String() != themeInit {
+		t.Fatalf("theme-init.js: %d %q", rec.Code, rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("Cache-Control %q", cc)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Errorf("Content-Type %q", ct)
+	}
+	if csp, want := rec.Header().Get("Content-Security-Policy"), get(h, "/").Header().Get("Content-Security-Policy"); csp != want ||
+		!strings.Contains(csp, "script-src 'self';") || !strings.Contains(csp, "style-src 'self';") {
+		t.Errorf("CSP %q, у index.html %q", csp, want)
+	}
+	wantSecurityHeaders(t, rec)
+}
+
 // Выход за каталог статики невозможен: .., закодированные слэши, обратные слэши, абсолютные
 // пути и диски Windows — ни один запрос не отдаёт файл вне ADMIN_STATIC_DIR.
 func TestStaticNoEscape(t *testing.T) {
