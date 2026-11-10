@@ -30,7 +30,7 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  width: 236px;
+  width: var(--wf-size-sidebar);
   height: 100dvh;
   padding: var(--wf-space-5) var(--wf-space-3);
   overflow-y: auto;
@@ -44,7 +44,7 @@
 
 .brandName {
   margin: 0;
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
   font-family: var(--wf-font-display);
   font-size: var(--wf-text-xs);
   line-height: var(--wf-text-xs-line);
@@ -124,7 +124,7 @@
 }
 
 .active .mark {
-  background: var(--wf-color-accent);
+  background: var(--wf-color-accent-ink);
 }
 
 .linkLabel {
@@ -134,7 +134,7 @@
 
 .link:focus-visible,
 .tab:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 
@@ -268,7 +268,7 @@
 }
 
 .tab.active {
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 .tabIcon {

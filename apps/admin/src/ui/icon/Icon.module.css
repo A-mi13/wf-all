@@ -31,18 +31,19 @@
 }
 
 .accent.stroke {
-  stroke: var(--wf-color-accent);
+  stroke: var(--wf-color-accent-ink);
 }
 .accent.fill {
-  fill: var(--wf-color-accent);
+  fill: var(--wf-color-accent-ink);
 }
 
-/* тень акцента: акцент, смешанный с фоном (видна и поверх акцентной заливки — у прозрачности нет) */
+/* тень акцента: токен accent-detail — темнее акцента в обеих темах (видна и поверх акцентной заливки,
+   у прозрачности нет); смесь с bg в светлой теме дала бы блик светлее акцента (ревью UF1a) */
 .accentDetail.stroke {
-  stroke: color-mix(in srgb, var(--wf-color-accent) 70%, var(--wf-color-bg));
+  stroke: var(--wf-color-accent-detail);
 }
 .accentDetail.fill {
-  fill: color-mix(in srgb, var(--wf-color-accent) 70%, var(--wf-color-bg));
+  fill: var(--wf-color-accent-detail);
 }
 
 /* вырез по фону: цвет поверхности (карточки, меню, панели); поверх акцента — text-inverse */

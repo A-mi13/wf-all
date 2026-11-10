@@ -16,18 +16,19 @@
 }
 
 .switch:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
   border-radius: var(--wf-radius-sm);
 }
 
-/* Дорожка и бегунок (макет 07, матрица флагов): выключен — slot-empty, включён — accent */
+/* Дорожка и бегунок (макет 07, матрица флагов): выключен — slot-empty, включён — заливка accent и рамка accent-ink
+   (U8: в светлой теме лайм к белому 1.3:1, состояние узнаётся по рамке; в тёмной рамка сливается с заливкой) */
 .track {
   position: relative;
   flex-shrink: 0;
   width: 40px;
   height: 22px;
-  border: 1px solid var(--wf-color-border);
+  border: 1px solid var(--wf-color-border-control);
   border-radius: var(--wf-radius-full);
   background: var(--wf-color-slot-empty);
   transition:
@@ -47,7 +48,7 @@
 }
 
 .on {
-  border-color: var(--wf-color-accent);
+  border-color: var(--wf-color-accent-ink);
   background: var(--wf-color-accent);
 }
 

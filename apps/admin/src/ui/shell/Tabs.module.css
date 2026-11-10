@@ -38,15 +38,23 @@
 
 /* выбранная — цветом и подчёркиванием; жирность та же, иначе вкладка шире и соседи сдвигаются */
 .tab[aria-selected='true'] {
-  border-bottom-color: var(--wf-color-accent);
+  border-bottom-color: var(--wf-color-accent-ink);
   color: var(--wf-color-text);
 }
 
 .tab:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: -2px;
 }
 
 .panel {
   min-width: 0;
+}
+
+/* Высокая контрастность (forced-colors): браузер снимает box-shadow — базовая линия списка рамкой
+   системного цвета (ревью V1 m4) */
+@media (forced-colors: active) {
+  .list {
+    border-bottom: 1px solid CanvasText;
+  }
 }

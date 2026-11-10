@@ -99,6 +99,24 @@ test('вкладки: выбранная отличается цветом и п
   );
 });
 
+// Ревью V1 m4 (спека UI-фундамента §6.1): в режиме высокой контрастности (forced-colors) браузер
+// снимает box-shadow и цвета — базовая линия вкладок и выбранный сегмент пропадали. Системные цвета
+// (CanvasText, Highlight) — не hex, страж csp.test.ts не задет.
+test('forced-colors: у вкладок есть линия, у выбранного сегмента — рамка', () => {
+  const forced = (f: string) => {
+    const css = read(f).replace(/\/\*[\s\S]*?\*\//g, '');
+    const at = css.indexOf('@media (forced-colors: active)');
+    expect(at, `${f}: нет @media (forced-colors: active)`).toBeGreaterThanOrEqual(0);
+    return css.slice(at);
+  };
+  expect(forced('ui/shell/Tabs.module.css')).toMatch(
+    /\.list\s*\{[^}]*border-bottom:\s*1px solid CanvasText/,
+  );
+  expect(forced('ui/Segmented.module.css')).toMatch(
+    /\.segment\[aria-pressed='true'\]\s*\{[^}]*border-color:\s*Highlight/,
+  );
+});
+
 // V1 п. 9: в панели поиска места прокручивается только список, действие — в подвале окна.
 test('список выбора таблицы прокручивается сам и заполняет высоту родителя; подвал окна не сжимается', () => {
   expect(rule('ui/table/DataTable.module.css', '.options')).toMatch(/overflow-y:\s*auto/);

@@ -14,7 +14,7 @@
 .backdrop {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--wf-color-bg) 74%, transparent);
+  background: var(--wf-color-scrim);
 }
 
 .panel {
@@ -27,8 +27,7 @@
   background: var(--wf-color-bg-elevated);
   color: var(--wf-color-text);
   font-family: var(--wf-font-body);
-  box-shadow: 0 var(--wf-space-6) var(--wf-space-16)
-    color-mix(in srgb, var(--wf-color-bg) 80%, transparent);
+  box-shadow: var(--wf-shadow-overlay);
 }
 
 .panel:focus {
@@ -118,7 +117,7 @@
 }
 
 .close:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 
@@ -200,7 +199,7 @@
   width: 100%;
   min-height: var(--wf-size-control);
   padding: 0 var(--wf-space-4);
-  border: 1px solid var(--wf-color-border);
+  border: 1px solid var(--wf-color-border-control);
   border-radius: var(--wf-radius-md);
   background: var(--wf-color-surface-sunken);
   color: var(--wf-color-text);
@@ -211,7 +210,7 @@
 
 .word:focus {
   outline: none;
-  border-color: var(--wf-color-danger-border);
+  border-color: var(--wf-color-danger);
 }
 
 .actions {

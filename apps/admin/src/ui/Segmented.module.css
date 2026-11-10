@@ -1,5 +1,6 @@
-/* Сегментный переключатель: контур-«пилюля», выбранный сегмент — заливка pitch и текст accent
-   (как выбранный чип в DataTable), остальные — приглушённые. Колонки равные и фиксированной ширины,
+/* Сегментный переключатель: контур-«пилюля», выбранный сегмент — заливка pitch и текст accent-ink
+   (как выбранный чип в DataTable), рамка selected-border (в тёмной — рамка артборда 07, в светлой —
+   accent-ink: состояние видно не только цветом, U8), остальные — приглушённые. Колонки равные и фиксированной ширины,
    выбранный меняет только цвета (жирность и отступы те же): смена выбора и языка подписей не
    двигает ни сегменты, ни соседей (пользователь, 28.10). */
 .root {
@@ -45,9 +46,9 @@
 }
 
 .segment[aria-pressed='true'] {
-  border-color: var(--wf-color-chip-accent-bg);
+  border-color: var(--wf-color-selected-border);
   background: var(--wf-color-pitch);
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
   cursor: default;
 }
 
@@ -56,7 +57,7 @@
 }
 
 .segment:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 1px;
 }
 
@@ -68,5 +69,13 @@
 
   .segment {
     height: var(--wf-size-touch-min);
+  }
+}
+
+/* Высокая контрастность (forced-colors): заливка и цвет снимаются — выбранный сегмент узнаётся по рамке
+   системного цвета выделения (ревью V1 m4) */
+@media (forced-colors: active) {
+  .segment[aria-pressed='true'] {
+    border-color: Highlight;
   }
 }

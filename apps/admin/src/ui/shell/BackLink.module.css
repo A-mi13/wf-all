@@ -18,7 +18,7 @@
 }
 
 .back:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
   border-radius: var(--wf-radius-sm);
 }

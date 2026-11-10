@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./tokens.ts",
-    "./tokens.css": "./tokens.css"
+    "./tokens.css": "./tokens.css",
+    "./contrast": "./scripts/contrast.mjs"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

@@ -71,7 +71,7 @@
 }
 
 .toneAccent .title {
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 .toneDanger .title {
@@ -155,7 +155,7 @@
 }
 
 .notice .title {
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 .notice .text {

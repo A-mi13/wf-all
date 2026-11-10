@@ -20,8 +20,7 @@
   padding: var(--wf-space-3) var(--wf-space-4);
   border: 1px solid var(--wf-color-border);
   border-radius: var(--wf-radius-md);
-  box-shadow: 0 var(--wf-space-4) var(--wf-space-10)
-    color-mix(in srgb, var(--wf-color-bg) 80%, transparent);
+  box-shadow: var(--wf-shadow-toast);
   font-family: var(--wf-font-body);
   pointer-events: auto;
 }
@@ -29,7 +28,7 @@
 .success {
   border-color: var(--wf-color-chip-accent-bg);
   background: var(--wf-color-pitch);
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 .error {
@@ -92,7 +91,7 @@
 
 .action:focus-visible,
 .close:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 

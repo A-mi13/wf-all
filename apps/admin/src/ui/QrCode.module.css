@@ -9,9 +9,9 @@
 }
 
 .light {
-  fill: var(--wf-color-text);
+  fill: var(--wf-color-qr-paper);
 }
 
 .dark {
-  fill: var(--wf-color-bg);
+  fill: var(--wf-color-qr-ink);
 }

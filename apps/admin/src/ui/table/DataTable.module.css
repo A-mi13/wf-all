@@ -24,13 +24,13 @@
   gap: var(--wf-space-2);
   height: var(--wf-size-touch-min);
   padding: 0 var(--wf-space-3);
-  border: 1px solid var(--wf-color-border);
+  border: 1px solid var(--wf-color-border-control);
   border-radius: var(--wf-radius-md);
   background: var(--wf-color-bg-elevated);
 }
 
 .search:focus-within {
-  border-color: var(--wf-color-border-strong);
+  border-color: var(--wf-color-accent-ink);
 }
 
 .searchInput {
@@ -48,7 +48,7 @@
 }
 
 .searchInput::placeholder {
-  color: var(--wf-color-text-faint);
+  color: var(--wf-color-text-subtle);
 }
 
 /* своя кнопка очистки вместо встроенной у type=search */
@@ -114,7 +114,7 @@
 .moreButton[aria-expanded='true'] {
   border-color: var(--wf-color-chip-accent-bg);
   background: var(--wf-color-pitch);
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 /* «Ещё фильтры» — у правого края строки инструментов (V1 п. 6); перенеслась — справа и на новой строке */
@@ -134,7 +134,7 @@
 .clear:focus-visible,
 .sortButton:focus-visible,
 .row:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 
@@ -350,7 +350,7 @@
 }
 
 .options:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 

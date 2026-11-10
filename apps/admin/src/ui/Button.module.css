@@ -20,7 +20,7 @@
 }
 
 .button:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 
@@ -45,8 +45,8 @@
 }
 
 .danger {
-  background: var(--wf-color-danger);
-  color: var(--wf-color-text-inverse);
+  background: var(--wf-color-danger-fill);
+  color: var(--wf-color-text-on-danger);
 }
 
 .dangerOutline {
@@ -67,12 +67,13 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
   text-align: start;
 }
 
+/* наведение — подчёркиванием, а не цветом: accent-hover — заливка, текстом в светлой теме не читается */
 .link:hover:enabled:not([aria-disabled='true']) {
-  color: var(--wf-color-accent-hover);
+  text-decoration: underline;
 }
 
 /* Недоступная — как в макете подтверждения: фон slot-empty, текст ghost (только disabled; loading —
