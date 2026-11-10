@@ -482,7 +482,7 @@ func (q *Queries) ListStoredKeyIDs(ctx context.Context) ([]string, error) {
 
 const lockAccountByEmail = `-- name: LockAccountByEmail :one
 
-SELECT a.id, a.status::text AS status, a.display_name, a.version, r.role::text AS role
+SELECT a.id, a.status::text AS status, a.display_name, a.locale, a.version, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.email = $1::citext
@@ -493,6 +493,7 @@ type LockAccountByEmailRow struct {
 	ID          uuid.UUID
 	Status      string
 	DisplayName string
+	Locale      string
 	Version     int64
 	Role        string
 }
@@ -509,6 +510,7 @@ func (q *Queries) LockAccountByEmail(ctx context.Context, email string) (LockAcc
 		&i.ID,
 		&i.Status,
 		&i.DisplayName,
+		&i.Locale,
 		&i.Version,
 		&i.Role,
 	)

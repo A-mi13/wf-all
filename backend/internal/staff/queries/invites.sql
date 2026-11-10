@@ -5,7 +5,7 @@
 
 -- name: LockAccountByEmail :one
 -- Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор.
-SELECT a.id, a.status::text AS status, a.display_name, a.version, r.role::text AS role
+SELECT a.id, a.status::text AS status, a.display_name, a.locale, a.version, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.email = sqlc.arg(email)::citext

@@ -23,7 +23,7 @@ func TestAcceptInviteFailureAuditHourly(t *testing.T) {
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	fail := func() {
 		t.Helper()
-		if _, err := e.app.AcceptInvite(ctx, m.Email, otherCode(code), newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+		if _, err := e.app.AcceptInvite(ctx, m.Email, otherCode(code), newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 			t.Fatal(err)
 		}
 	}
@@ -74,13 +74,13 @@ func TestLimiterDownStillAudits(t *testing.T) {
 	ctx := context.Background()
 	a := e.limiterDownApp()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
-	if _, err := a.AcceptInvite(ctx, m.Email, otherCode(code), newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+	if _, err := a.AcceptInvite(ctx, m.Email, otherCode(code), newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 		t.Fatalf("принятие: %v", err)
 	}
 	if n := len(e.audits("staff.invite_accept_failed")); n != 1 {
 		t.Fatalf("записей неудачи принятия %d", n)
 	}
-	if _, err := a.AcceptInvite(ctx, m.Email, code, newPassword, "", metaWeb); err != nil {
+	if _, err := a.AcceptInvite(ctx, m.Email, code, newPassword, nil, "", metaWeb); err != nil {
 		t.Fatalf("верный код: %v", err)
 	}
 
@@ -136,7 +136,7 @@ func TestResendInviteSelfHealsUnreadableCode(t *testing.T) {
 	if s := logs.String(); strings.Contains(s, newCode) || strings.Contains(s, strings.ReplaceAll(newCode, "-", "")) {
 		t.Fatalf("код в журнале сервера:\n%s", s)
 	}
-	if _, err := a.AcceptInvite(ctx, m.Email, newCode, newPassword, "", metaWeb); err != nil {
+	if _, err := a.AcceptInvite(ctx, m.Email, newCode, newPassword, nil, "", metaWeb); err != nil {
 		t.Fatalf("принятие новым кодом: %v", err)
 	}
 }

@@ -349,9 +349,19 @@ func (a *App) lockForResend(ctx context.Context, q *staffdb.Queries, staffID uui
 // staff_mfa и резервные коды удалены; все сессии учётки и сессия oldToken (живая, чья угодно)
 // погашены replaced; новая сессия — setup на 8 ч (токен — в cookie); аудит staff.invite_accepted.
 // Приглашение не гасится до recovery-codes/ack — accept можно повторить.
-func (a *App) AcceptInvite(ctx context.Context, email, code, pw, oldToken string, m staff.Meta) (string, error) {
+//
+// locale — язык с экрана приглашения (решение пользователя 10.11): nil — язык учётки не меняется;
+// незнакомый — 400 по body.locale до кода (checkLocale, как SetLocale); иначе пишется в той же
+// транзакции после сверки кода под замком — при любой неудаче язык прежний; повтор перезаписывает.
+func (a *App) AcceptInvite(ctx context.Context, email, code, pw string, locale *string, oldToken string, m staff.Meta) (string, error) {
 	if err := password.Check(pw); err != nil {
 		return "", passwordPolicyError(fieldPassword, err)
+	}
+	// язык с экрана приглашения — те же правила, что SetLocale; до кода, без записи неудачи
+	if locale != nil {
+		if err := checkLocale(*locale); err != nil {
+			return "", err
+		}
 	}
 	hash, err := a.hasher.Hash(ctx, pw)
 	if err != nil {
@@ -419,11 +429,21 @@ func (a *App) AcceptInvite(ctx context.Context, email, code, pw, oldToken string
 		if err := q.DeleteRecoveryCodes(ctx, acct.ID); err != nil {
 			return err
 		}
+		// язык — в той же транзакции, только после сверки кода под замком; смена — было/стало в записи
+		// принятия (одно действие — одна запись), тот же язык или нет поля — без языка в журнале
+		var before map[string]any
+		after := map[string]any{"purpose": inv.Purpose}
+		if locale != nil && *locale != acct.Locale {
+			if err := q.SetLocale(ctx, staffdb.SetLocaleParams{Locale: *locale, ID: acct.ID}); err != nil {
+				return err
+			}
+			before, after["locale"] = map[string]any{"locale": acct.Locale}, *locale
+		}
 		return audit.Write(ctx, audit.Entry{
 			ActorStaffID: acct.ID, ActorRole: acct.Role, ActorLabel: label(acct.DisplayName),
 			Action: actionInviteAccepted, ObjectType: objectAccount, ObjectID: acct.ID,
-			After: map[string]any{"purpose": inv.Purpose},
-			IP:    m.IP, UserAgent: m.UserAgent,
+			Before: before, After: after,
+			IP: m.IP, UserAgent: m.UserAgent,
 		})
 	})
 	if err != nil {

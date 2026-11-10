@@ -65,7 +65,7 @@ func (h *Handler) StaffLogout(ctx context.Context, _ oapi.StaffLogoutRequestObje
 // setup, новый токен в cookie. Токен cookie запроса уходит сценарию (oldToken): её живая сессия —
 // чья угодно — гасится (D9).
 func (h *Handler) StaffAcceptInvite(ctx context.Context, req oapi.StaffAcceptInviteRequestObject) (oapi.StaffAcceptInviteResponseObject, error) {
-	tok, err := h.app.AcceptInvite(ctx, req.Body.Email, req.Body.Code, req.Body.Password, requestFrom(ctx).token, meta(ctx))
+	tok, err := h.app.AcceptInvite(ctx, req.Body.Email, req.Body.Code, req.Body.Password, (*string)(req.Body.Locale), requestFrom(ctx).token, meta(ctx))
 	if err != nil {
 		return nil, err
 	}

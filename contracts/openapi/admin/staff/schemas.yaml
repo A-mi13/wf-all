@@ -104,8 +104,16 @@ StaffCodeRequest:
       example: '492817'
 StaffAcceptInviteRequest:
   type: object
-  description: Принятие приглашения — почта из письма, код из письма и новый пароль
+  description: >-
+    Принятие приглашения — почта из письма, код из письма, новый пароль и необязательный locale —
+    язык админки и писем, на котором показан экран принятия (клиент админки шлёт его всегда); нет
+    поля — язык учётки не меняется
   required: [email, code, password]
+  example:
+    email: olga.v@wf.example
+    code: k7m2p-x4q6d
+    password: Жёлтая карточка на 90-й
+    locale: en
   additionalProperties: false
   properties:
     email:
@@ -129,6 +137,8 @@ StaffAcceptInviteRequest:
         Нарушение — 400 validation.failed по полю body.password с кодом too_short, too_long или
         common
       example: Жёлтая карточка на 90-й
+    locale:
+      $ref: '../root.yaml#/components/schemas/StaffLocale'
 StaffEmailRequest:
   type: object
   description: Почта сотрудника — для повторной отправки кода приглашения

@@ -225,12 +225,21 @@ func (a *App) verifyCurrent(ctx context.Context, pw string, hash *string) (bool,
 	return ok, err
 }
 
+// checkLocale — язык учётки из запроса (SetLocale, AcceptInvite): только i18n.Supported, как CHECK
+// staff_accounts_locale_check; иное (регистр, регион, пусто) — 400 validation.failed по body.locale.
+func checkLocale(locale string) error {
+	if !slices.Contains(i18n.Supported, locale) {
+		return httpx.NewFieldError(fieldLocale, ruleEnum)
+	}
+	return nil
+}
+
 // SetLocale — язык админки и писем сотруднику (ru | en — i18n.Supported, как CHECK
 // staff_accounts_locale_check). Иное — 400 validation.failed по body.locale. Тот же язык — без
 // изменений и без записи в аудит; смена — аудит staff.locale_changed (было/стало).
 func (a *App) SetLocale(ctx context.Context, s *auth.Staff, locale string, m staff.Meta) error {
-	if !slices.Contains(i18n.Supported, locale) {
-		return httpx.NewFieldError(fieldLocale, ruleEnum)
+	if err := checkLocale(locale); err != nil {
+		return err
 	}
 	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)

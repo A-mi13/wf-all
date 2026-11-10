@@ -302,3 +302,43 @@ test('7. журнал: bootstrap от оператора, запрос и реш
   expect(accepted).toHaveLength(1);
   expect(accepted[0]).toMatchObject({ action: 'staff.invite_accepted', object_id: adminId });
 });
+
+// Язык с экрана приглашения (решение пользователя 10.11): браузер на ru-RU, на /accept выбран EN — сервер
+// сохраняет его в учётку вместе с паролем, настройка 2FA (стадия setup, язык — me.locale) идёт на EN.
+test('8. принятие на EN: язык экрана приглашения уходит в учётку, 2FA на EN', async ({
+  browser,
+}) => {
+  const s = newStaff('owner-en');
+  const run = await bootstrap(pair, s);
+  expect(run.code, run.stderr).toBe(0);
+  await receiveInvite(s);
+  const ctx = await browser.newContext({
+    baseURL: origin(pair),
+    locale: 'ru-RU',
+    viewport: { width: 1280, height: 800 },
+  });
+  ctx.setDefaultTimeout(20_000);
+  ctx.setDefaultNavigationTimeout(30_000);
+  try {
+    const page = await ctx.newPage();
+    await page.goto('/accept');
+    await page
+      .getByRole('button', { name: new RegExp(`^${escape(t('locale.short.en'))}\\b`) })
+      .click();
+    const field = (key: Parameters<typeof t>[0]) => page.getByLabel(t(key, 'en'), { exact: true });
+    await field('auth.accept.email').fill(s.email);
+    await field('auth.accept.password').fill(s.password);
+    await field('auth.accept.passwordRepeat').fill(s.password);
+    await field('auth.accept.code').fill(s.inviteCode!);
+    await page.getByRole('button', { name: t('auth.accept.submit', 'en') }).click();
+    await page.waitForURL('**/setup-2fa');
+    await expect(
+      page.getByRole('group', { name: t('auth.setup.code', 'en'), exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    const me = await api<Me & { locale?: string }>(page, 'GET', '/v1/staff/me');
+    expect(me.body).toMatchObject({ stage: 'setup', email: s.email, locale: 'en' });
+  } finally {
+    await ctx.close();
+  }
+});

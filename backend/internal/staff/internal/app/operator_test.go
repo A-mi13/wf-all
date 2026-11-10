@@ -133,7 +133,7 @@ func TestOperatorInviteResend(t *testing.T) {
 		if c == c2 {
 			continue
 		}
-		if _, err := e.app.AcceptInvite(ctx, m.Email, c, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+		if _, err := e.app.AcceptInvite(ctx, m.Email, c, newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 			t.Fatalf("прежний код %s: %v", c, err)
 		}
 	}

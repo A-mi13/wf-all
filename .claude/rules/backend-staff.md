@@ -112,7 +112,13 @@ paths:
   `*staff.ResendTooSoonError` (429 с остатком) — от выпуска последнего приглашения (`GetLastInvite.created_at`),
   не от `last_sent_at`: самоотправки паузу админа не двигают (`TestResendInvitePauseFromIssue`); новое
   приглашение того же назначения на 24 ч. Принятие
-  (`AcceptInvite`): `password.Check` (`body.password`) и хэш — до транзакции; почта, статус, срок, нет кода
+  (`AcceptInvite`): `password.Check` (`body.password`), затем `locale` (необязательный, `*string`; `checkLocale` — общий с
+  `SetLocale`: не `ru`/`en` — `body.locale` `enum`, без записи неудачи) и хэш — до транзакции (порядок сценария; через
+  HTTP мусор в `locale` раньше отсекает валидатор контракта, у `password` в схеме длины нет — ответ только с
+  `body.locale`, `TestStaffAcceptLocale`); язык пишется в той же
+  транзакции после сверки кода под замком (`LockAccountByEmail` отдаёт `locale`), смена — было/стало в записи
+  `staff.invite_accepted`, тот же язык или nil — без записи языка (стражи `TestAcceptInviteLocale`,
+  `TestAcceptInviteLocaleRace`, порядок — `TestAcceptInviteReissuedWhileWaiting`); почта, статус, срок, нет кода
   и неверный код — один `staff.ErrInviteInvalid`. Сверка — по чтению без замков (`GetInviteCandidate` отдаёт
   шифротекст): ЛЮБОЙ исход «принять нечего» (кривая или чужая почта, не `invited`, нет приглашения, срок,
   неверный или нечитаемый код) — `a.acceptFailed`: одна запись `staff.invite_accept_failed` (`anonymous`,

@@ -14,7 +14,9 @@ import { http, server } from '../../test/server';
 afterEach(() => {
   reauthBus.reject();
   sessionStorage.clear();
+  localStorage.clear(); // wf.locale — выбор языка устройства
   vi.useRealTimers();
+  vi.restoreAllMocks(); // navigator.language
 });
 
 const page = (name: string) => screen.findByRole('heading', { level: 1, name });
@@ -101,6 +103,7 @@ test('staff.invite_invalid — общий текст; анонимный зап�
         email: 'olga.v@wf.example',
         code: 'k7m2p-x4q6d',
         password: 'Жёлтая карточка на 90-й',
+        locale: 'ru',
       },
       key: null,
     },
@@ -221,6 +224,91 @@ test('поле кода — текст формата xxxxx-xxxxx: не цифр
   await submit(user);
   await screen.findByRole('alert');
   expect(seen).toEqual([
-    { email: 'olga.v@wf.example', code: 'K7M2P x4q6d', password: 'Жёлтая карточка на 90-й' },
+    {
+      email: 'olga.v@wf.example',
+      code: 'K7M2P x4q6d',
+      password: 'Жёлтая карточка на 90-й',
+      locale: 'ru',
+    },
   ]);
+});
+
+// Язык с экрана приглашения (решение пользователя 10.11): выбор устройства до входа уходит в теле, сервер
+// сохраняет его в учётку — me стадии setup отвечает им же, и /setup-2fa открывается на выбранном языке.
+test('EN выбран до принятия → язык в теле → /setup-2fa на EN', async () => {
+  const app = renderApp('/accept');
+  const seen: unknown[] = [];
+  server.use(
+    http.post('/v1/staff/auth/invite/accept', async ({ request, response }) => {
+      const body = await request.json();
+      seen.push(body);
+      // как сервер: язык из тела — в учётку, нет поля — прежний (ru)
+      app.me.current = { ...meSetup, locale: body.locale ?? meSetup.locale };
+      return response(200).json({ stage: 'setup' });
+    }),
+    http.post('/v1/staff/me/mfa/setup', ({ response }) =>
+      response(200).json({
+        secret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+        otpauth_uri: 'otpauth://totp/WF:olga?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+      }),
+    ),
+  );
+  const user = userEvent.setup();
+  await page('Принятие приглашения');
+  await user.click(screen.getByRole('button', { name: 'EN — English' }));
+  await page('Accept invitation');
+  await user.type(screen.getByLabelText('Work email'), 'olga.v@wf.example');
+  await user.type(screen.getByLabelText('New password'), 'Жёлтая карточка на 90-й');
+  await user.type(screen.getByLabelText('Repeat password'), 'Жёлтая карточка на 90-й');
+  await user.type(screen.getByLabelText('Code from the email'), 'k7m2p-x4q6d');
+  await user.click(screen.getByRole('button', { name: 'Accept invitation' }));
+  await page('Two-factor setup');
+  expect(app.at()).toBe('/setup-2fa');
+  expect(seen).toEqual([expect.objectContaining({ locale: 'en' })]);
+  expect(document.documentElement.lang).toBe('en');
+  expect(screen.queryByText('Настройка двухфакторной защиты')).not.toBeInTheDocument();
+});
+
+// Раунд 2 IL: «что видишь, то и сохраняется» — уходит язык, на котором показан экран (выбор устройства или язык
+// браузера), всегда. Браузер EN, ничего не выбирал → экран на EN → в учётку en.
+test('браузер EN без выбора: экран на EN — в теле locale=en', async () => {
+  vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-GB');
+  renderApp('/accept');
+  const seen: unknown[] = [];
+  server.use(
+    http.post('/v1/staff/auth/invite/accept', async ({ request, response }) => {
+      seen.push(await request.json());
+      return response.untyped(problem(400, 'staff.invite_invalid'));
+    }),
+  );
+  const user = userEvent.setup();
+  await page('Accept invitation');
+  await user.type(screen.getByLabelText('Work email'), 'olga.v@wf.example');
+  await user.type(screen.getByLabelText('New password'), 'Жёлтая карточка на 90-й');
+  await user.type(screen.getByLabelText('Repeat password'), 'Жёлтая карточка на 90-й');
+  await user.type(screen.getByLabelText('Code from the email'), 'k7m2p-x4q6d');
+  await user.click(screen.getByRole('button', { name: 'Accept invitation' }));
+  await screen.findByRole('alert');
+  expect(seen).toEqual([expect.objectContaining({ locale: 'en' })]);
+});
+
+// Браузер EN, на экране выбран RU (например, сброс доступа — сотрудник выбирает язык сам) → уходит ru.
+test('браузер EN, клик RU на экране — уходит ru', async () => {
+  vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-GB');
+  renderApp('/accept');
+  const seen: unknown[] = [];
+  server.use(
+    http.post('/v1/staff/auth/invite/accept', async ({ request, response }) => {
+      seen.push(await request.json());
+      return response.untyped(problem(400, 'staff.invite_invalid'));
+    }),
+  );
+  const user = userEvent.setup();
+  await page('Accept invitation');
+  await user.click(screen.getByRole('button', { name: 'RU — Русский' }));
+  await page('Принятие приглашения');
+  await fill(user);
+  await submit(user);
+  await screen.findByRole('alert');
+  expect(seen).toEqual([expect.objectContaining({ locale: 'ru' })]);
 });

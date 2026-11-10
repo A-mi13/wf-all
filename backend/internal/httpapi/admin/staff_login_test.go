@@ -154,6 +154,31 @@ func TestStaffAcceptErrors(t *testing.T) {
 		http.StatusBadRequest, staff.CodeInviteInvalid)
 }
 
+// Язык с экрана приглашения (решение 10.11): незнакомый — validation.failed по body.locale, как у PATCH
+// me/locale, и ничего не меняется; en — сохранён в учётку, me сессии setup отвечает en.
+func TestStaffAcceptLocale(t *testing.T) {
+	t.Parallel()
+	e := newStaffEnv(t)
+	e.invite("new@wf.example", string(perm.Support))
+	body := func(locale string) string {
+		return `{"email":"new@wf.example","code":"` + inviteCode + `","password":"` + staffPassword + `","locale":` + locale + `}`
+	}
+	for _, bad := range []string{`"de"`, `""`, `"EN"`, `"en-US"`, `null`} {
+		wantField(t, e.anon(pathAccept, "", body(bad)), "body.locale", "enum")
+	}
+	// m1 раунда 1: форму тела проверяет валидатор контракта до сценария — мусор в языке отсекается раньше
+	// правил пароля (у password в схеме нет minLength), ответ только с body.locale
+	short := `{"email":"new@wf.example","code":"` + inviteCode + `","password":"короткий","locale":"de"}`
+	wantField(t, e.anon(pathAccept, "", short), "body.locale", "enum")
+	if n := e.count(`SELECT count(*) FROM staff_sessions`); n != 0 {
+		t.Fatalf("сессий %d после мусора в языке", n)
+	}
+	tok := newToken(t, wantOK(t, e.anon(pathAccept, "", body(`"en"`))))
+	if got := bodyOf(t, wantOK(t, e.get(pathMe, tok)))["locale"]; got != "en" {
+		t.Fatalf("locale %v", got)
+	}
+}
+
 // Гонка смены токена (⚠️ 6a, 9b): запрос со старым токеном после второго фактора и после unlock —
 // 401 без Set-Cookie: новая cookie в браузере не стирается.
 func TestStaffReplacedTokenKeepsCookie(t *testing.T) {

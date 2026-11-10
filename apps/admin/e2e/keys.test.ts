@@ -46,6 +46,12 @@ describe('ключи локалей e2e', () => {
     expect(t('roles.admin')).toBe(ru.roles.admin);
   });
 
+  it('t — текст en по ключу (сценарий принятия на EN)', () => {
+    expect(t('auth.accept.submit', 'en')).toBe(en.auth.accept.submit);
+    expect(t('auth.setup.code', 'en')).toBe(en.auth.setup.code);
+    expect(t('auth.accept.submit', 'en')).not.toBe(t('auth.accept.submit'));
+  });
+
   it('t — ключ не из списка — ошибка (e2e не ищет по тексту мимо стража)', () => {
     // @ts-expect-error — ключа нет в KEYS
     expect(() => t('auth.login.nope')).toThrow(/KEYS/);

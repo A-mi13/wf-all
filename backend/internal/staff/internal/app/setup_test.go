@@ -229,7 +229,7 @@ func TestRecoveryAck(t *testing.T) {
 	if _, err := e.app.RecoveryAck(ctx, active, metaWeb); !errors.Is(err, staff.ErrWrongStage) {
 		t.Fatalf("повтор ack: %v", err)
 	}
-	if _, err := e.app.AcceptInvite(ctx, m.Email, code, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+	if _, err := e.app.AcceptInvite(ctx, m.Email, code, newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 		t.Fatalf("приглашение после ack: %v", err)
 	}
 
