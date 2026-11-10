@@ -25,6 +25,15 @@
 
 -- +goose Up
 
+-- Замки (ревью N1 m5): все семь таблиц — одним оператором в начале, в порядке импорта GeoNames (geonames_* первыми:
+-- импорт пишет их одной долгой транзакцией, затем читает cities). Пока накат ждёт импорт, остальные таблицы им не
+-- заперты — публичные чтения городов и игроков идут. Ждать дольше lock_timeout накат не станет: 55P03, откат целиком
+-- (версия 22), деплой повторить после импорта (docs/deploy-dev.md). 5 с — с запасом длиннее обычной транзакции
+-- запроса (доли секунды), но короче импорта (минуты); очередь ACCESS EXCLUSIVE держит читателей таблицы не дольше
+-- этого срока. Срок действует на каждое ожидание замка отдельно.
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE geonames_places, geonames_place_names, cities, city_names, districts, users, teams IN ACCESS EXCLUSIVE MODE;
+
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION normalize_text(input text)
 RETURNS text
@@ -49,31 +58,34 @@ ALTER TABLE teams ALTER COLUMN name_normalized SET EXPRESSION AS (normalize_text
 ALTER TABLE geonames_places ALTER COLUMN ascii_name_normalized SET EXPRESSION AS (normalize_text(ascii_name));
 ALTER TABLE geonames_place_names ALTER COLUMN name_normalized SET EXPRESSION AS (normalize_text(name));
 
--- Хранимые нормализованные ники (исходного текста нет): новое значение — translate старого. Значения, совпавшие после
--- пересчёта, схлопываются в одно до UPDATE (иначе PK): зарезервированный — любой из совпавших, карантин — с поздним
--- сроком. После схлопывания UPDATE конфликтов не даёт: translate идемпотентен, и строка, уже хранящая чьё-то новое
--- значение, совпала бы с ней и была удалена.
-DELETE FROM reserved_nicknames r
- USING reserved_nicknames o
- WHERE translate(r.nickname_normalized, 'abcehkmoptxy', 'авсенкмортху')
-     = translate(o.nickname_normalized, 'abcehkmoptxy', 'авсенкмортху')
-   AND r.nickname_normalized > o.nickname_normalized;
+-- Хранимые нормализованные ники (исходного текста нет): новая форма — translate старой, добавляется рядом с прежней
+-- строкой (ревью N1 m1, m2). Прежние строки не удаляются и не меняются: новая функция их не достигает (безвредны,
+-- карантин истечёт сам), а откат точен — previous_user_id, released_at и reason каждой строки целы. Совпавшие формы
+-- дают одну новую строку: у зарезервированного — данные первой по значению, у карантина — брони с поздним сроком;
+-- уже существующая строка новой формы не меняется (ON CONFLICT DO NOTHING). Повторный накат ничего не добавляет.
+INSERT INTO reserved_nicknames (nickname_normalized, reason)
+SELECT DISTINCT ON (n) n, reason
+  FROM (SELECT translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху') AS n, nickname_normalized AS old, reason
+          FROM reserved_nicknames) AS s
+ WHERE n <> old
+ ORDER BY n, old
+ON CONFLICT (nickname_normalized) DO NOTHING;
 
-UPDATE reserved_nicknames
-   SET nickname_normalized = translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху')
- WHERE nickname_normalized <> translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху');
-
-DELETE FROM nickname_reservations r
- USING nickname_reservations o
- WHERE translate(r.nickname_normalized, 'abcehkmoptxy', 'авсенкмортху')
-     = translate(o.nickname_normalized, 'abcehkmoptxy', 'авсенкмортху')
-   AND (o.expires_at, o.nickname_normalized) > (r.expires_at, r.nickname_normalized);
-
-UPDATE nickname_reservations
-   SET nickname_normalized = translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху')
- WHERE nickname_normalized <> translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху');
+INSERT INTO nickname_reservations (nickname_normalized, previous_user_id, released_at, expires_at)
+SELECT DISTINCT ON (n) n, previous_user_id, released_at, expires_at
+  FROM (SELECT translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху') AS n, nickname_normalized AS old,
+               previous_user_id, released_at, expires_at
+          FROM nickname_reservations) AS s
+ WHERE n <> old
+ ORDER BY n, expires_at DESC, old
+ON CONFLICT (nickname_normalized) DO NOTHING;
 
 -- +goose Down
+
+-- Замки — как у наката и по той же причине (ревью уборки m1): откат во время импорта GeoNames ждёт geonames_*, не
+-- запирая остальные таблицы, и по lock_timeout падает 55P03 целиком, а не держит cities до конца импорта.
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE geonames_places, geonames_place_names, cities, city_names, districts, users, teams IN ACCESS EXCLUSIVE MODE;
 
 -- прежняя функция из 0001 дословно
 -- +goose StatementBegin
@@ -105,16 +117,5 @@ ALTER TABLE teams ALTER COLUMN name_normalized SET EXPRESSION AS (normalize_text
 ALTER TABLE geonames_places ALTER COLUMN ascii_name_normalized SET EXPRESSION AS (normalize_text(ascii_name));
 ALTER TABLE geonames_place_names ALTER COLUMN name_normalized SET EXPRESSION AS (normalize_text(name));
 
--- Хранимые ники обратно не переводятся: исходного текста нет, а translate необратим. Новые значения остаются (это
--- тоже ники в прежней форме — из заглавных двойников), зарезервированные ники сида 0010 возвращаются в прежней форме.
-INSERT INTO reserved_nicknames (nickname_normalized, reason)
-SELECT normalize_text(v), 'system'
-  FROM (VALUES
-    ('admin'), ('administrator'), ('root'), ('support'), ('help'),
-    ('moderator'), ('moder'), ('staff'), ('team'), ('official'),
-    ('system'), ('bot'), ('api'), ('null'), ('undefined'),
-    ('me'), ('you'), ('everyone'), ('all'),
-    ('админ'), ('администратор'), ('поддержка'), ('модератор'),
-    ('система'), ('бот'), ('все')
-  ) AS t(v)
-ON CONFLICT DO NOTHING;
+-- Хранимые ники откат не трогает: накат прежних строк не менял (они и есть прежняя форма), а добавленные им
+-- новые формы — тоже ники в прежней форме (из заглавных двойников) и неотличимы от прежних строк той же формы.

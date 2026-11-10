@@ -9,11 +9,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/pressly/goose/v3"
 
 	"wf/backend/internal/platform/testkit/dbtest"
+	"wf/backend/migrations"
 )
 
 // normalizeCaseVersion — версия миграции 0023_normalize_text_case.sql.
@@ -227,10 +230,16 @@ func seed0023(t *testing.T, db *sql.DB) {
 		// хранимые ники: старое 'ADMIN' рядом со старым 'admin' из сида 0010 — после пересчёта одно (клон собран на последней
 		// версии, и 'ADMIN' уже мог оставить откат 0023)
 		`INSERT INTO reserved_nicknames (nickname_normalized, reason) VALUES (normalize_text('ADMIN'), 'test') ON CONFLICT DO NOTHING`,
-		// карантин: 'Tim' и 'tiM' — разные старые значения, одно новое; остаётся поздний срок
+		// карантин: 'Tim' и 'tiM' — разные старые значения, одно новое; у обеих прежний владелец (ревью N1 m1: накат
+		// не теряет previous_user_id и released_at более ранней брони); новая форма берёт поздний срок
+		`INSERT INTO users (email, nickname, birth_date) VALUES ('tim1@example.com', 'tim_one', '2000-01-01'), ('tim2@example.com', 'tim_two', '2000-01-01')`,
+		`INSERT INTO nickname_reservations (nickname_normalized, previous_user_id, released_at, expires_at)
+		 SELECT normalize_text(v.nick), u.id, v.released::timestamptz, v.expires::timestamptz
+		   FROM (VALUES ('Tim', 'tim_one', '2026-10-01T12:00:00Z', '2026-12-30T12:00:00Z'),
+		                ('tiM', 'tim_two', '2026-10-02T12:00:00Z', '2026-12-31T12:00:00Z')) AS v(nick, owner, released, expires)
+		   JOIN users u ON u.nickname = v.owner`,
 		`INSERT INTO nickname_reservations (nickname_normalized, released_at, expires_at)
-		 VALUES (normalize_text('Tim'), '2026-10-01T12:00:00Z', '2026-12-30T12:00:00Z'), (normalize_text('tiM'), '2026-10-02T12:00:00Z', '2026-12-31T12:00:00Z'),
-		        (normalize_text('Mia'), '2026-10-03T12:00:00Z', '2027-01-01T12:00:00Z')`,
+		 VALUES (normalize_text('Mia'), '2026-10-03T12:00:00Z', '2027-01-01T12:00:00Z')`,
 	} {
 		mustExec(t, db, q)
 	}
@@ -276,6 +285,7 @@ func Test0023UpDown(t *testing.T) {
 	if !slices.Contains(reservedBefore, "аdmin") || !slices.Contains(reservedBefore, "аdмin") {
 		t.Fatalf("до 0023 нет старых 'аdmin' и 'аdмin': %q", reservedBefore)
 	}
+	nicksBefore := storedNicks(t, db)
 
 	if _, err := p.UpTo(ctx, normalizeCaseVersion); err != nil {
 		t.Fatalf("up 0023: %v", err)
@@ -316,8 +326,9 @@ func Test0023UpDown(t *testing.T) {
 		}
 	}
 
-	// хранимые ники: каждый старый — translate, совпавшие схлопнуты в один; карантин — с поздним сроком
-	var wantReserved []string
+	// хранимые ники (ревью N1 m1, m2): накат аддитивный — каждая прежняя строка цела байт в байт, к ней добавлена
+	// новая форма translate (совпавшие — одна строка, карантин — с поздним сроком и данными его брони)
+	wantReserved := slices.Clone(reservedBefore)
 	for _, v := range reservedBefore {
 		var n string
 		if err := db.QueryRowContext(ctx, `SELECT translate($1, $2, $3)`, v, homoglyphsFrom, homoglyphsTo).Scan(&n); err != nil {
@@ -331,6 +342,12 @@ func Test0023UpDown(t *testing.T) {
 	if got := queryStrings(t, db, `SELECT nickname_normalized FROM reserved_nicknames ORDER BY nickname_normalized COLLATE "C"`); !slices.Equal(got, wantReserved) {
 		t.Errorf("reserved_nicknames после up: %q, ждали %q", got, wantReserved)
 	}
+	nicksUp := storedNicks(t, db)
+	for _, row := range nicksBefore {
+		if !slices.Contains(nicksUp, row) {
+			t.Errorf("после up потеряна или изменена строка хранимых ников %q", row)
+		}
+	}
 	for _, nick := range []string{"admin", "ADMIN", "Admin", "moderator", "MODERATOR", "Админ"} {
 		var reserved bool
 		if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM reserved_nicknames WHERE nickname_normalized = normalize_text($1))`,
@@ -338,9 +355,12 @@ func Test0023UpDown(t *testing.T) {
 			t.Errorf("ник %q после up не зарезервирован (%v)", nick, err)
 		}
 	}
-	if got := queryStrings(t, db, `SELECT nickname_normalized || ' ' || to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
-		FROM nickname_reservations ORDER BY 1`); !slices.Equal(got, []string{"мiа 2027-01-01", "тiм 2026-12-31"}) {
-		t.Errorf("nickname_reservations после up: %q", got)
+	if got := queryStrings(t, db, `SELECT r.nickname_normalized || ' ' || to_char(r.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+		|| ' ' || coalesce(u.nickname, '-')
+		FROM nickname_reservations r LEFT JOIN users u ON u.id = r.previous_user_id
+		WHERE r.nickname_normalized = translate(r.nickname_normalized, $1, $2) ORDER BY 1`, homoglyphsFrom, homoglyphsTo); !slices.Equal(got,
+		[]string{"мiа 2027-01-01 -", "тiм 2026-12-31 tim_two"}) {
+		t.Errorf("nickname_reservations в новой форме после up: %q", got)
 	}
 
 	if _, err := p.DownTo(ctx, normalizeCaseVersion-1); err != nil {
@@ -355,16 +375,31 @@ func Test0023UpDown(t *testing.T) {
 	if after := normalizedValues(t, db, cols); !slices.Equal(after, before) {
 		t.Fatalf("down 0023 не вернул значения колонок:\nдо:    %q\nпосле: %q", before, after)
 	}
-	// хранимые ники обратно не переводятся (исходного текста нет): остаются новые и возвращаются старые сида 0010
-	reservedDown := queryStrings(t, db, `SELECT nickname_normalized FROM reserved_nicknames ORDER BY 1`)
-	for _, v := range append(slices.Clone(reservedBefore), wantReserved...) {
-		if !slices.Contains(reservedDown, v) {
-			t.Errorf("после down в reserved_nicknames нет %q", v)
-		}
+	// хранимые ники откат не трогает: прежние строки целы байт в байт с наката, добавленные формы — тоже ники в прежней
+	// форме (из заглавных двойников), отличить их от прежних строк той же формы нельзя — остаются
+	if got := storedNicks(t, db); !slices.Equal(got, nicksUp) {
+		t.Errorf("down 0023 изменил хранимые ники:\nпосле up:   %q\nпосле down: %q", nicksUp, got)
 	}
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatalf("повторный up после отката 0023: %v", err)
 	}
+	// повторный накат идемпотентен: новых строк нет, прежние не меняются
+	if got := storedNicks(t, db); !slices.Equal(got, nicksUp) {
+		t.Errorf("повторный up изменил хранимые ники:\nпосле up:   %q\nповторный: %q", nicksUp, got)
+	}
+}
+
+// storedNicks — все строки хранимых ников целиком (все колонки), по порядку.
+func storedNicks(t *testing.T, db *sql.DB) []string {
+	t.Helper()
+	return queryStrings(t, db, `SELECT s FROM (
+		SELECT 'reserved ' || nickname_normalized || ' ' || reason FROM reserved_nicknames
+		UNION ALL
+		SELECT 'quarantine ' || nickname_normalized || ' ' || coalesce(previous_user_id::text, '-') || ' '
+		       || to_char(released_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || ' '
+		       || to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US')
+		  FROM nickname_reservations) AS n(s)
+		 ORDER BY s COLLATE "C"`)
 }
 
 // Две строки, различавшиеся до 0023 только регистром (или диакритикой), после пересчёта совпадают: накат падает
@@ -426,7 +461,8 @@ func Test0023UniqueConflict(t *testing.T) {
 // conflictCheckSQL — проверка стенда до наката 0023, дословно из docs/deploy-dev.md («До мержа миграции в main»):
 // по каждому уникальному индексу на генерируемой *_normalized — число групп строк, которые после пересчёта совпадут
 // (новое значение = translate старого, поэтому запрос идёт на версии 22). Только числа, без данных строк.
-// Хранимые ники (PK reserved_nicknames, nickname_reservations) миграция схлопывает сама — их здесь нет.
+// Хранимые ники (PK reserved_nicknames, nickname_reservations) не конфликтуют: миграция добавляет новую форму рядом
+// с прежней (ON CONFLICT DO NOTHING) — их здесь нет.
 const conflictCheckSQL = `SELECT 'users_nickname_key' AS idx, count(*) AS groups FROM (
   SELECT 1 FROM users WHERE deleted_at IS NULL
    GROUP BY translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху') HAVING count(*) > 1) AS g
@@ -451,7 +487,45 @@ func Test0023ConflictCheckSQL(t *testing.T) {
 		t.Fatal("в docs/deploy-dev.md нет проверки конфликтов 0023 дословно (conflictCheckSQL)")
 	}
 	db := dbtest.New(t)
+	checkConflictSQL(t, db, newProvider(t, db))
+}
+
+// Ревью N1 m3: уникальный индекс на *_normalized из миграции после 0023 не валит страж 0023 (иначе он требовал бы
+// править слитую 0023) — перечень сверяется на версии 22, где более поздних индексов нет.
+func Test0023ConflictCheckSQLIgnoresLaterIndexes(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	later := goose.NewGoMigration(9999,
+		&goose.GoFunc{RunTx: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `CREATE TABLE later_names (
+				name text NOT NULL,
+				name_normalized text GENERATED ALWAYS AS (normalize_text(name)) STORED UNIQUE)`)
+			return err
+		}},
+		&goose.GoFunc{RunTx: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `DROP TABLE later_names`)
+			return err
+		}})
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS,
+		goose.WithDisableGlobalRegistry(true), goose.WithGoMigrations(later))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Up(context.Background()); err != nil {
+		t.Fatalf("up с миграцией 9999: %v", err)
+	}
+	checkConflictSQL(t, db, p)
+}
+
+// checkConflictSQL — тело стража conflictCheckSQL: перечень уникальных индексов на *_normalized на версии 22 и
+// счёт столкновений без них и с ними.
+func checkConflictSQL(t *testing.T, db *sql.DB, p *goose.Provider) {
+	t.Helper()
 	ctx := context.Background()
+	// на версии 22: индекс из миграции после 0023 — не забота 0023 (у неё свой страж на своей версии)
+	if _, err := p.DownTo(ctx, normalizeCaseVersion-1); err != nil {
+		t.Fatalf("down до %d: %v", normalizeCaseVersion-1, err)
+	}
 	unique := queryStrings(t, db, `
 		SELECT DISTINCT i.indexrelid::regclass::text
 		  FROM pg_index i
@@ -462,11 +536,7 @@ func Test0023ConflictCheckSQL(t *testing.T) {
 	wantUnique := []string{"districts_city_name_active_key", "nickname_reservations_pkey", "reserved_nicknames_pkey",
 		"teams_city_name_key", "users_nickname_key"}
 	if !slices.Equal(unique, wantUnique) {
-		t.Fatalf("уникальные индексы на *_normalized: %q, ждали %q — новый индекс нужен в conflictCheckSQL и 0023", unique, wantUnique)
-	}
-	p := newProvider(t, db)
-	if _, err := p.DownTo(ctx, normalizeCaseVersion-1); err != nil {
-		t.Fatalf("down до %d: %v", normalizeCaseVersion-1, err)
+		t.Fatalf("уникальные индексы на *_normalized: %q, ждали %q на версии 22 — новый индекс нужен в conflictCheckSQL и 0023", unique, wantUnique)
 	}
 	check := func() []string {
 		t.Helper()
@@ -491,5 +561,128 @@ func Test0023ConflictCheckSQL(t *testing.T) {
 	want = []string{"districts_city_name_active_key 1", "teams_city_name_key 1", "users_nickname_key 2"}
 	if got := check(); !slices.Equal(got, want) {
 		t.Fatalf("с конфликтами: %q, ждали %q", got, want)
+	}
+}
+
+// lockTimeoutWait — сколько тест ждёт отказа наката по lock_timeout 0023 (там 5 с): с запасом на медленную машину.
+const lockTimeoutWait = 30 * time.Second
+
+// Ревью N1 m5 (риск A) и ревью уборки m1: импорт GeoNames держит geonames_* (одна большая транзакция), деплой с 0023
+// (накат) или откат 0023 приходит в это время. Миграция первым берёт geonames_* — пока ждёт, cities, users и прочие
+// не заперты (публичные чтения идут); по lock_timeout падает 55P03 и откатывается целиком: версия и функция прежние.
+// После импорта — проходит.
+func Test0023WaitsForImportWithoutLockingOthers(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name     string
+		from, to int64
+		fn       string // normalize_text('mikh') на версии from
+	}{
+		{"накат", normalizeCaseVersion - 1, normalizeCaseVersion, "miкh"},
+		{"откат", normalizeCaseVersion, normalizeCaseVersion - 1, "мiкн"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			db := dbtest.New(t)
+			ctx := context.Background()
+			p := newProvider(t, db)
+			migrateTo := func(v int64) error {
+				var err error
+				if cur, gerr := p.GetDBVersion(ctx); gerr != nil {
+					return gerr
+				} else if v < cur {
+					_, err = p.DownTo(ctx, v)
+				} else {
+					_, err = p.UpTo(ctx, v)
+				}
+				return err
+			}
+			if err := migrateTo(c.from); err != nil {
+				t.Fatalf("до версии %d: %v", c.from, err)
+			}
+
+			// «импорт»: запись в geonames_places в открытой транзакции (ROW EXCLUSIVE, как upsert мест)
+			holder, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			released := false
+			release := func() {
+				if !released {
+					released = true
+					_ = holder.Rollback()
+				}
+			}
+			t.Cleanup(release)
+			if _, err := holder.ExecContext(ctx, `LOCK TABLE geonames_places IN ROW EXCLUSIVE MODE`); err != nil {
+				t.Fatal(err)
+			}
+
+			done := make(chan error, 1)
+			go func() { done <- migrateTo(c.to) }()
+
+			// миграция ждёт geonames_places и при этом не держит ни одной другой таблицы
+			if err := waitAccessExclusive(ctx, db, done, lockTimeoutWait); err != nil {
+				t.Fatal(err)
+			}
+			if held := queryStrings(t, db, `SELECT relation::regclass::text FROM pg_locks
+				WHERE granted AND mode = 'AccessExclusiveLock'
+				  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+				  AND relation IN ('cities'::regclass, 'city_names'::regclass, 'districts'::regclass, 'users'::regclass,
+				                   'teams'::regclass, 'geonames_place_names'::regclass)
+				ORDER BY 1`); len(held) != 0 {
+				t.Errorf("пока миграция ждёт импорт, заперты %q — чтения этих таблиц стоят до конца импорта", held)
+			}
+
+			var migErr error
+			select {
+			case migErr = <-done:
+			case <-time.After(lockTimeoutWait):
+				t.Fatal("миграция не отказала по lock_timeout за", lockTimeoutWait)
+			}
+			var pg *pgconn.PgError
+			if !errors.As(migErr, &pg) || pg.Code != "55P03" {
+				t.Fatalf("ждали отказ 55P03 lock_not_available, получили: %v", migErr)
+			}
+			if v, err := p.GetDBVersion(ctx); err != nil || v != c.from {
+				t.Fatalf("версия после отказа = %d (%v), ждали %d", v, err, c.from)
+			}
+			if got := normalize(t, db, "mikh"); got != c.fn {
+				t.Fatalf("после отказа normalize_text('mikh') = %q, ждали %q — частичная миграция", got, c.fn)
+			}
+
+			release()
+			if err := migrateTo(c.to); err != nil {
+				t.Fatalf("миграция после импорта: %v", err)
+			}
+		})
+	}
+}
+
+// waitAccessExclusive — ждать, пока в базе теста встанет в очередь ACCESS EXCLUSIVE на geonames_places (pg_locks —
+// по всему кластеру, а OID таблиц у клонов одного шаблона совпадают: только своя база); опрос тикером 10 мс, срок d;
+// миграция завершилась раньше (done) — ошибка с её итогом.
+func waitAccessExclusive(ctx context.Context, db *sql.DB, done <-chan error, d time.Duration) error {
+	wctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var n int
+		if err := db.QueryRowContext(wctx, `SELECT count(*) FROM pg_locks
+			WHERE NOT granted AND mode = 'AccessExclusiveLock' AND relation = 'geonames_places'::regclass
+			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&n); err != nil {
+			return fmt.Errorf("pg_locks: %w", err)
+		}
+		if n > 0 {
+			return nil
+		}
+		select {
+		case err := <-done:
+			return fmt.Errorf("миграция завершилась, не встав в очередь за импортом: %v", err)
+		case <-wctx.Done():
+			return fmt.Errorf("миграция не ждёт geonames_places за %s", d)
+		case <-tick.C:
+		}
 	}
 }
