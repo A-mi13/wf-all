@@ -345,12 +345,41 @@ describe('шаг 2', () => {
   });
 });
 
-// Тема до входа (спека §4.12): тема — свойство браузера, не сотрудника, поэтому переключатель есть и на
-// экранах входа (AuthLayout — в углу, над брендом), вне карточки формы.
-describe('тема на экране входа', () => {
+// Тема и язык до входа (спека §4.12, поправка 10.11): свойства устройства, не сотрудника, поэтому
+// переключатели есть и на экранах входа (AuthLayout — справа от бренда: язык, затем тема), вне карточки формы.
+describe('тема и язык на экране входа', () => {
   afterEach(() => {
     localStorage.clear();
     delete document.documentElement.dataset.theme;
+    document.documentElement.lang = '';
+    server.events.removeAllListeners('request:start');
+  });
+
+  test('язык до входа: переключение меняет тексты сразу, без запроса к серверу; выбор — на устройстве', async () => {
+    const seen: string[] = [];
+    server.events.on('request:start', ({ request }) =>
+      seen.push(`${request.method} ${request.url}`),
+    );
+    renderApp('/login');
+    await page('Вход администратора');
+    const locale = screen.getByRole('group', { name: 'Язык интерфейса' });
+    const theme = screen.getByRole('group', { name: 'Тема' });
+    // язык, затем тема; оба — до заголовка и вне формы
+    expect(locale.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(locale.closest('form')).toBeNull();
+    seen.length = 0;
+    await userEvent.setup().click(within(locale).getByRole('button', { name: /^EN/ }));
+    expect(await page('Admin sign-in')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Theme' })).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe('en');
+    expect(localStorage.getItem('wf.locale')).toBe('en');
+    expect(seen).toEqual([]); // PATCH /v1/staff/me/locale до входа нет (и ничего другого)
+  });
+
+  test('язык устройства переживает перезагрузку экрана входа', async () => {
+    localStorage.setItem('wf.locale', 'en');
+    renderApp('/login');
+    expect(await page('Admin sign-in')).toBeInTheDocument();
   });
 
   test('переключатель темы в углу страницы, вне формы; выбор применяется до входа', async () => {

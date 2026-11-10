@@ -86,7 +86,8 @@ test('каждая строка contrast выполняется в своих т
 });
 
 // Решение пользователя по U8 (раунд 1 UF1b/I): в тёмной у выбранного сегмента прежний вид — рамка
-// chip-accent-bg артборда 07, без лаймового кольца; в светлой — accent-ink, 3:1 к соседнему фону.
+// chip-accent-bg артборда 07, без лаймового кольца; в светлой — accent-ink, 3:1 к соседнему фону. Выбранный чип
+// таблицы (приёмка палитры, 10.11) — та же рамка, его внешний фон — bg.
 test('selected-border: тёмная — chip-accent-bg артборда, светлая — accent-ink с нормой 3', () => {
   assert.equal(colorOf(tokens, 'selected-border', 'dark'), '#2C4434');
   assert.equal(
@@ -95,7 +96,7 @@ test('selected-border: тёмная — chip-accent-bg артборда, све�
   );
   assert.equal(colorOf(tokens, 'selected-border', 'light'), colorOf(tokens, 'accent-ink', 'light'));
   const rows = tokens.contrast.filter(([fg]) => fg === 'selected-border');
-  assert.deepEqual(rows.map(([, bg]) => bg).sort(), ['pitch', 'surface-sunken']);
+  assert.deepEqual(rows.map(([, bg]) => bg).sort(), ['bg', 'pitch', 'surface-sunken']);
   for (const row of rows) assert.deepEqual(normsOf(row), [['light', 3]]);
 });
 

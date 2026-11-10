@@ -371,6 +371,26 @@ test('рамка выбранного сегмента — selected-border, вк
   expect(decl('ui/Switch.module.css', '.on', 'border-color')).toBe('var(--wf-color-accent-ink)');
 });
 
+// Приёмка палитры UF1b (решение пользователя 10.11): выбранный чип DataTable (и раскрытые «Ещё фильтры») в
+// светлой — заливка pitch к фону ~1.25:1, рамка chip-accent-bg ~1.22:1: выбор узнавался только по цвету текста.
+// Рамка — selected-border, как у сегмента; норма 3:1 в светлой — к внешнему фону строки инструментов (bg) и к
+// своей заливке (pitch); в тёмной selected-border = chip-accent-bg — вид не меняется.
+test('выбранный чип таблицы — рамка selected-border, строки contrast к bg и pitch (светлая, 3:1)', () => {
+  const decl = (s: string) =>
+    rules.find((r) => r.file === 'ui/table/DataTable.module.css' && r.selector === s)?.decls;
+  for (const s of [".chip[aria-pressed='true']", ".moreButton[aria-expanded='true']"])
+    expect(decl(s)?.get('border-color'), s).toBe('var(--wf-color-selected-border)');
+  const rows = tokens.contrast
+    .filter(([fg]) => fg === 'selected-border')
+    .map(([, bg, n]) => [bg, n]);
+  expect(rows).toEqual(
+    expect.arrayContaining([
+      ['bg', { light: 3 }],
+      ['pitch', { light: 3 }],
+    ]),
+  );
+});
+
 // Ревью UF1a ⚠️: деталь акцента иконки — тень, а не блик: в обеих темах темнее акцента иконки
 // (как рисует CSS: токен или смесь вычисляются).
 test('иконки: accent-detail темнее акцента в обеих темах', () => {

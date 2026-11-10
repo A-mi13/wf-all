@@ -12,7 +12,7 @@ import { ShotsRoot } from './ShotsRoot';
 // Точка входа режима shots (спека §5.4, план UF1a.1): та же админка, что src/main.tsx (стили —
 // app/styles.ts, App на browser history), но API отвечают моки MSW в браузере на фикстурах тестов.
 // Роль — ?shots-role=owner|admin|moderator|setup|anonymous (по умолчанию admin), язык —
-// ?shots-locale=ru|en (язык интерфейса — me.locale; у anonymous — язык по умолчанию). Когда первая
+// ?shots-locale=ru|en (язык интерфейса — me.locale; у anonymous — язык браузера, его задаёт --locale скрипта). Когда первая
 // отрисовка готова, шрифты загружены и запросов нет, на <html> встаёт data-shots-ready — его ждёт
 // scripts/admin-shots.mjs. В обычную сборку модуль не попадает (страж src/shots/shots.test.ts).
 // ?shots-story=<путь от src без .stories.tsx>:<экспорт> — снимок истории компонента вместо приложения.

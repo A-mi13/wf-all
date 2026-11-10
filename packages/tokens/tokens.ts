@@ -533,6 +533,13 @@ export const tokens = {
     ],
     [
       "selected-border",
+      "bg",
+      {
+        "light": 3
+      }
+    ],
+    [
+      "selected-border",
       "pitch",
       {
         "light": 3

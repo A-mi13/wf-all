@@ -7,7 +7,7 @@ const CSS_TARGETS = ['chrome123', 'firefox125', 'safari17.5', 'ios17.5'] as cons
 
 // Шрифты — всегда файлами: мелкий woff/woff2 (< 4 КБ, подмножества @fontsource) Vite встроил бы в CSS как
 // data:font/…, а staticCSP admin-api — font-src 'self' (нашёл прод-проект e2e, UF1b.7). Прочее — по умолчанию.
-const FONT = /.(woff2?|ttf|otf|eot)$/i;
+const FONT = /\.(woff2?|ttf|otf|eot)$/i;
 export const assetsInlineLimit = (file: string): false | undefined =>
   FONT.test(file) ? false : undefined;
 

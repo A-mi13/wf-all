@@ -110,9 +110,12 @@
   cursor: pointer;
 }
 
+/* Выбранный чип и раскрытые «Ещё фильтры»: заливка pitch, текст accent-ink, рамка selected-border — как у
+   выбранного сегмента (приёмка палитры UF1b, решение пользователя 10.11: в светлой заливка к фону ~1.25:1, выбор
+   был виден только цветом текста; рамка даёт 3:1). В тёмной selected-border = chip-accent-bg — вид прежний. */
 .chip[aria-pressed='true'],
 .moreButton[aria-expanded='true'] {
-  border-color: var(--wf-color-chip-accent-bg);
+  border-color: var(--wf-color-selected-border);
   background: var(--wf-color-pitch);
   color: var(--wf-color-accent-ink);
 }

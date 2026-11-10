@@ -150,6 +150,9 @@ describe('цели CSS сборки', () => {
         expect(inline(f, small), f).toBe(false);
       expect(inline('/x/icon.svg', small)).toBeUndefined();
       expect(inline('/x/photo.png', small)).toBeUndefined();
+      // расширение — с точкой (ревью UF1b/II m2): имя, лишь оканчивающееся на «ttf», не шрифт
+      expect(inline('/x/notattf', small)).toBeUndefined();
+      expect(inline('/x/font-woff2', small)).toBeUndefined();
     }
   });
 });

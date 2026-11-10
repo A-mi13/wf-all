@@ -53,7 +53,10 @@ function systemScheme(initialDark: boolean) {
   };
 }
 
+// Другая вкладка: сначала запись в общий storage, затем событие (как в браузере).
 function otherTab(key: string | null, newValue: string | null) {
+  if (key === null) localStorage.clear();
+  else if (newValue !== null) localStorage.setItem(key, newValue);
   act(() => {
     window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
   });
@@ -134,6 +137,34 @@ describe('ThemeProvider', () => {
     expect(html.dataset.theme).toBe('system');
   });
 
+  // Ревью UF1b/II m1: две вкладки переключили почти одновременно — A пишет light, B — dark. Событие несёт
+  // значение своей записи, а в storage уже последняя: вкладка берёт текущее значение storage, иначе A и B
+  // разошлись бы с сохранённым до следующего переключения.
+  test('событие storage: применяется текущее значение storage, а не устаревшее newValue', () => {
+    const { result } = mount();
+    localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: THEME_STORAGE_KEY,
+          newValue: 'light',
+          storageArea: localStorage,
+        }),
+      );
+    });
+    expect(result.current.theme).toBe('dark');
+  });
+
+  test('событие storage при недоступном storage — system, без ошибки', () => {
+    const { result } = mount();
+    act(() => result.current.setTheme('dark'));
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError');
+    });
+    expect(() => otherTab(THEME_STORAGE_KEY, 'light')).not.toThrow();
+    expect(result.current.theme).toBe('system');
+  });
+
   test('после размонтирования событие storage не применяется (подписка снята)', () => {
     const { unmount } = mount();
     unmount();
@@ -203,10 +234,14 @@ describe('theme-color', () => {
     return { dark, light };
   }
 
-  test('явный dark → обе метки тёмный bg; явный light → светлый; возврат к system → исходные content', () => {
+  // Ревью UF1b/II m6: system — bg темы своего media (как в index.html), а не «запомненное» из DOM: первый кадр
+  // явной темы красит уже theme-init.js, и исходным из DOM стал бы цвет явной темы.
+  const BY_MEDIA = [tokens.color.bg.dark, tokens.color.bg.light];
+
+  test('явный dark → обе метки тёмный bg; явный light → светлый; system → bg темы своего media', () => {
     const m = metas();
     const { result } = mount();
-    expect([m.dark.content, m.light.content]).toEqual(['#010101', '#FEFEFE']);
+    expect([m.dark.content, m.light.content]).toEqual(BY_MEDIA);
     act(() => result.current.setTheme('dark'));
     expect([m.dark.content, m.light.content]).toEqual([tokens.color.bg.dark, tokens.color.bg.dark]);
     act(() => result.current.setTheme('light'));
@@ -215,17 +250,19 @@ describe('theme-color', () => {
       tokens.color.bg.light,
     ]);
     act(() => result.current.setTheme('system'));
-    expect([m.dark.content, m.light.content]).toEqual(['#010101', '#FEFEFE']);
+    expect([m.dark.content, m.light.content]).toEqual(BY_MEDIA);
   });
 
-  test('исходные content переживают перемонтирование с явной темой', () => {
+  test('первый кадр с явной темой (метки уже покрасил theme-init.js) → возврат к system — bg своего media', () => {
     const m = metas();
-    const first = mount();
-    act(() => first.result.current.setTheme('dark'));
-    first.unmount();
-    const second = mount(); // атрибут — dark: провайдер сразу красит метки
-    expect(m.light.content).toBe(tokens.color.bg.dark);
-    act(() => second.result.current.setTheme('system'));
-    expect([m.dark.content, m.light.content]).toEqual(['#010101', '#FEFEFE']);
+    localStorage.setItem(THEME_STORAGE_KEY, 'light');
+    new Function(initScript)(); // атрибут light и обе метки — светлый bg до React
+    expect([m.dark.content, m.light.content]).toEqual([
+      tokens.color.bg.light,
+      tokens.color.bg.light,
+    ]);
+    const { result } = mount();
+    act(() => result.current.setTheme('system'));
+    expect([m.dark.content, m.light.content]).toEqual(BY_MEDIA);
   });
 });

@@ -76,13 +76,21 @@ test.describe('тема до первого кадра: явный выбор п
       });
       await probe(context, c.pref);
       const page = await context.newPage();
+      const console: string[] = [];
+      page.on('console', (m) => {
+        if (/Content Security Policy/i.test(m.text())) console.push(m.text());
+      });
       await page.goto('/login');
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+      // шрифтовые font-src приходят после загрузки шрифтов (ревью UF1b/II m3): ждём их, и вторая линия —
+      // консоль, как в сценарии (2)
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
       const p = await probed(page);
       expect(await ground(page)).toBe(bg(c.expected));
       // атрибут поставил theme-init.js, а не приложение: он уже был до модульных скриптов
       expect(p.firstTheme).toBe(c.pref);
       expect(p.csp).toEqual([]);
+      expect(console).toEqual([]);
       await context.close();
     });
   }

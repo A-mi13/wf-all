@@ -199,6 +199,19 @@ describe('окружение e2e', () => {
     expect(run).toBeGreaterThan(check);
   });
 
+  // Ревью UF1b/II: перед Playwright скрипт уходит в apps/admin — trap EXIT с относительным путём замка снимал
+  // бы apps/admin/.tools/e2e/run.lock, а настоящий замок оставался после каждого прогона.
+  it('замок прогона — абсолютный путь, заданный после перехода в корень репо', () => {
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'e2e-admin.sh'), 'utf8');
+    const root = sh.indexOf('cd "$(dirname "$0")/.."');
+    const lock = sh.search(/^LOCK="\$PWD\/\.tools\/e2e\/run\.lock"$/m);
+    expect(root).toBeGreaterThan(-1);
+    expect(lock).toBeGreaterThan(root);
+    expect(sh).not.toMatch(/^LOCK=\.tools/m);
+    // переход в apps/admin — после замка (иначе $PWD был бы не корень)
+    expect(sh.indexOf('\ncd apps/admin')).toBeGreaterThan(lock);
+  });
+
   it('обход прод-проекта — все разделы меню', () => {
     expect([...PROD_SECTIONS].sort()).toEqual(
       NAV.flatMap((g) => g.items.map((i) => i.path)).sort(),

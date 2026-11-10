@@ -82,6 +82,19 @@ test('сегменты: равные колонки фиксированной �
   );
 });
 
+// Экраны входа (поправка 10.11): справа от бренда — язык и тема. На 390 px в EN бренд + язык + тема (~348–368
+// px) не помещаются в колонку (326 px) — строка переносится: переключатели целиком уходят своей строкой (сами не
+// рвутся), без @media — по содержимому.
+test('экраны входа: бренд и переключатели переносятся, переключатели — одним блоком', () => {
+  const top = rule('features/auth/Auth.module.css', '.top');
+  expect(top).toMatch(/display:\s*flex/);
+  expect(top).toMatch(/flex-wrap:\s*wrap/);
+  const switches = rule('features/auth/Auth.module.css', '.switches');
+  expect(switches).toMatch(/display:\s*flex/);
+  expect(switches).toMatch(/flex-wrap:\s*nowrap/);
+  expect(switches).toMatch(/margin-left:\s*auto/);
+});
+
 test('карточка сотрудника: язык и тема — строками по содержимому, «Выйти» — своя строка во всю ширину', () => {
   const rows = rule('ui/shell/AppShell.module.css', '.accountActions');
   expect(rows).toMatch(/display:\s*grid/);

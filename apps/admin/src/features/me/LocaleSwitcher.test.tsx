@@ -1,11 +1,11 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, test } from 'vitest';
-import { meOwner } from '../../test/me';
+import { afterEach, describe, expect, test } from 'vitest';
+import { meMfaPending, meOwner, meSetup } from '../../test/me';
 import { problem } from '../../test/problem';
 import { renderWithProviders } from '../../test/render';
 import { http, server } from '../../test/server';
-import { LocaleSwitcher } from './LocaleSwitcher';
+import { DeviceLocaleSwitcher, LocaleSwitcher } from './LocaleSwitcher';
 
 test('выбор языка сохраняется через updateStaffMeLocale и меняет тексты без перезагрузки', async () => {
   const calls: { body: unknown; key: string | null; admin: string | null }[] = [];
@@ -123,4 +123,30 @@ test('текущий язык повторно не сохраняется', asy
     'aria-pressed',
     'true',
   );
+});
+
+// Язык до входа (поправка 10.11): переключатель экранов входа пишет выбор устройства (wf.locale), не сервер.
+// На setup и active главнее me.locale — там выбор устройства ничего бы не поменял (тупик), а PATCH до active
+// сервер не примет: переключатель не рисуется.
+describe('DeviceLocaleSwitcher', () => {
+  afterEach(() => localStorage.clear());
+
+  test('mfa_pending: выбор пишет wf.locale и меняет тексты, запроса нет', async () => {
+    renderWithProviders(<DeviceLocaleSwitcher />, { me: meMfaPending });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'EN — English' }));
+    expect(localStorage.getItem('wf.locale')).toBe('en');
+    expect(screen.getByRole('group', { name: 'Interface language' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'EN — English' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  test('setup и active — не рисуется', () => {
+    for (const me of [meSetup, meOwner]) {
+      const { container, unmount } = renderWithProviders(<DeviceLocaleSwitcher />, { me });
+      expect(container).toBeEmptyDOMElement();
+      unmount();
+    }
+  });
 });

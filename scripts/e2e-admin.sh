@@ -25,7 +25,7 @@
 # Адреса ролей migrator и admin — с того же хоста и порта, что WF_E2E_PG_SUPERUSER_URL (ревью Task 16, M6).
 # Проекты — WF_E2E_PROJECTS (по умолчанию chromium,webkit,prod — то же умолчание у apps/admin/e2e/env.ts,
 # страж env.test.ts; CI — chromium,prod). prod — admin-api отдаёт собранную админку с настоящим staticCSP.
-# Пары admin-api (Chromium, WebKit, prod) работают на одной базе и обе исполняют очередь staff (River):
+# Пары admin-api (Chromium, WebKit, prod) работают на одной базе и все исполняют очередь staff (River):
 # письмо приглашения может уйти из пары другого браузера, и ссылка в нём — на чужой origin. Сценарии
 # берут из письма только код, не ссылку (ревью Task 16, M5); сценарий по ссылке — только с одной парой
 # (WF_E2E_PROJECTS=chromium) или своей базой на пару.
@@ -60,7 +60,9 @@ command -v "$PSQL" >/dev/null || die "нет psql (локально — bash scr
 # второй прогон между mkdir и записью PID видел пустой замок, считал его брошенным и забирал. Держатель жив —
 # отказ; умер (брошенный замок после kill) — замок уводится в сторону переименованием (из двух забирающих
 # успевает один) и берётся заново. Снимается при любом выходе (trap), поэтому без exec ниже.
-LOCK=.tools/e2e/run.lock
+# Путь — абсолютный (ревью UF1b/II): перед Playwright скрипт переходит в apps/admin, и trap EXIT с относительным
+# путём искал бы apps/admin/.tools/e2e/run.lock — замок оставался после каждого прогона («брошен … забираю»).
+LOCK="$PWD/.tools/e2e/run.lock"
 mkdir -p .tools/e2e
 take_lock() {
   local fresh="$LOCK.new.$$"

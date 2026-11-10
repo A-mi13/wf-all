@@ -14,7 +14,7 @@ const root = join(import.meta.dirname, '../../..');
 const script = readFileSync(join(root, 'public/theme-init.js'), 'utf8');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 
-type WfTheme = { parse(raw: unknown): string };
+type WfTheme = { parse(raw: unknown): string; bg: Record<string, string> };
 const wfTheme = () => (window as unknown as { __wfTheme?: WfTheme }).__wfTheme;
 
 function run() {
@@ -53,6 +53,28 @@ describe('theme-init.js', () => {
     localStorage.setItem(THEME_STORAGE_KEY, 'light');
     run();
     expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  test('явный выбор красит обе метки theme-color до React; system их не трогает; BG = tokens.color.bg', () => {
+    const metas = (['dark', 'light'] as const).map((m) => {
+      const el = document.createElement('meta');
+      el.name = 'theme-color';
+      el.media = `(prefers-color-scheme: ${m})`;
+      el.content = tokens.color.bg[m];
+      document.head.append(el);
+      return el;
+    });
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, 'system');
+      run();
+      expect(metas.map((m) => m.content)).toEqual([tokens.color.bg.dark, tokens.color.bg.light]);
+      expect(wfTheme()?.bg).toEqual({ dark: tokens.color.bg.dark, light: tokens.color.bg.light });
+      localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+      run();
+      expect(metas.map((m) => m.content)).toEqual([tokens.color.bg.dark, tokens.color.bg.dark]);
+    } finally {
+      for (const m of metas) m.remove();
+    }
   });
 
   test('мусор в storage → system', () => {
