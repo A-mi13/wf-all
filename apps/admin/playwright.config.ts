@@ -3,6 +3,7 @@ import {
   ADMIN_API_BIN,
   adminApiEnv,
   apiOrigin,
+  browserOf,
   cleanEnv,
   enabledProjects,
   MAILPIT,
@@ -32,6 +33,8 @@ const projects = enabledProjects();
 // Каждый сервер — свой процесс без обёртки pnpm (она не передаёт сигнал остановки). Порядок —
 // Mailpit → admin-api → Vite: следующий стартует после готовности предыдущего (url). Уже занятый
 // порт — ошибка, а не чужой сервер (reuseExistingServer: false): у него была бы другая база и ключ.
+// prod — только admin-api: собранную админку (apps/admin/dist) отдаёт он сам; сборку делает
+// scripts/e2e-admin.sh до Playwright (webServer стартует раньше globalSetup).
 const servers: NonNullable<PlaywrightTestConfig['webServer']> = [
   {
     // без --database: база в памяти, исчезает с процессом — каждый прогон с пустым ящиком
@@ -45,29 +48,31 @@ const servers: NonNullable<PlaywrightTestConfig['webServer']> = [
 ];
 for (const name of projects) {
   const pair = PAIRS[name];
-  servers.push(
-    {
-      command: `"${ADMIN_API_BIN}"`,
-      url: `${apiOrigin(pair)}/readyz`,
-      env: adminApiEnv(pair) as Record<string, string>,
-      reuseExistingServer: false,
-      timeout: 60_000,
-      stdout: 'ignore',
-    },
-    {
+  servers.push({
+    command: `"${ADMIN_API_BIN}"`,
+    url: `${apiOrigin(pair)}/readyz`,
+    env: adminApiEnv(pair) as Record<string, string>,
+    reuseExistingServer: false,
+    timeout: 60_000,
+    stdout: 'ignore',
+  });
+  if ('vite' in pair) {
+    servers.push({
       command: `vite --config e2e/vite.config.ts --host 127.0.0.1 --port ${pair.vite} --strictPort`,
       url: origin(pair),
       env: viteEnv(pair) as Record<string, string>,
       reuseExistingServer: false,
       timeout: 120_000,
-    },
-  );
+    });
+  }
 }
 
-// Какие сценарии в каком браузере: полный сценарий §11 — Chromium; вход с протухшей cookie — в обоих.
+// Какие сценарии в каком проекте: полный сценарий §11 — Chromium; вход с протухшей cookie — в обоих
+// браузерах; собранная админка под настоящей CSP (тема до первого кадра, обход разделов) — prod.
 const specs: Record<ProjectName, string[]> = {
   chromium: ['staff.spec.ts', 'stale-cookie.spec.ts'],
   webkit: ['stale-cookie.spec.ts'],
+  prod: ['prod.spec.ts'],
 };
 
 export default defineConfig({
@@ -96,7 +101,7 @@ export default defineConfig({
   projects: projects.map((name) => ({
     name,
     testMatch: specs[name],
-    use: { browserName: name, baseURL: origin(PAIRS[name]) },
+    use: { browserName: browserOf(name), baseURL: origin(PAIRS[name]) },
   })),
   webServer: servers,
 });

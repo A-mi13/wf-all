@@ -131,6 +131,27 @@ describe('цели CSS сборки', () => {
     const e2e = await resolve(() => import('./e2e/vite.config'), 'production', 'build');
     expect(e2e.build?.cssTarget).toEqual(TARGETS);
   });
+
+  // Прод-проект e2e (UF1b.7) нашёл: Vite встраивал мелкие woff/woff2 @fontsource (< 4 КБ) в CSS как
+  // data:font/…, а staticCSP admin-api — font-src 'self': браузер их отвергал (securitypolicyviolation).
+  // Шрифты — всегда файлами; прочее — по умолчанию Vite (undefined).
+  it('шрифты не встраиваются в CSS как data: (CSP font-src self); прочее — по умолчанию Vite', async () => {
+    for (const load of [() => import('./vite.config'), () => import('./e2e/vite.config')]) {
+      const inline = (await resolve(load, 'production', 'build')).build?.assetsInlineLimit;
+      expect(inline).toBeTypeOf('function');
+      if (typeof inline !== 'function') return;
+      const small = Buffer.alloc(100);
+      for (const f of [
+        '/x/@fontsource/manrope/files/manrope-cyrillic-ext-400-normal.woff2',
+        '/x/manrope-latin-400-normal.woff',
+        'C:\\x\\font.TTF',
+        '/x/font.otf',
+      ])
+        expect(inline(f, small), f).toBe(false);
+      expect(inline('/x/icon.svg', small)).toBeUndefined();
+      expect(inline('/x/photo.png', small)).toBeUndefined();
+    }
+  });
 });
 
 describe('Vitest не берёт сценарии Playwright', () => {

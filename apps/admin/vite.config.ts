@@ -5,6 +5,12 @@ import { wfShots } from './vite.shots.ts';
 
 const CSS_TARGETS = ['chrome123', 'firefox125', 'safari17.5', 'ios17.5'] as const;
 
+// Шрифты — всегда файлами: мелкий woff/woff2 (< 4 КБ, подмножества @fontsource) Vite встроил бы в CSS как
+// data:font/…, а staticCSP admin-api — font-src 'self' (нашёл прод-проект e2e, UF1b.7). Прочее — по умолчанию.
+const FONT = /.(woff2?|ttf|otf|eot)$/i;
+export const assetsInlineLimit = (file: string): false | undefined =>
+  FONT.test(file) ? false : undefined;
+
 // Куда dev-сервер проксирует /v1. Серверная переменная: без префикса VITE_ в сборку не попадает.
 export function adminApiOrigin(env: Record<string, string | undefined>): string {
   return env.WF_ADMIN_API_ORIGIN || 'http://127.0.0.1:8081';
@@ -27,6 +33,7 @@ export default defineConfig(({ mode }) => {
       // ниже Lightning CSS заменяет light-dark() полифилом --lightningcss-* (прод-CSS ≠ dev-CSS).
       // Сборку сверяет scripts/check-admin-dist.mjs в admin:ci.
       cssTarget: [...CSS_TARGETS],
+      assetsInlineLimit,
     },
     server: {
       host: '127.0.0.1',

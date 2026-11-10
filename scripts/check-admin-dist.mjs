@@ -2,6 +2,7 @@
 //   node scripts/check-admin-dist.mjs [<каталог>]   # по умолчанию apps/admin/dist — от расположения скрипта
 // Вызывается в admin:ci сразу после build (и в scripts/e2e-admin.sh после сборки прод-проекта, UF1b.7).
 // - прод-CSS = dev-CSS: в CSS есть light-dark( и нет полифила --lightningcss-* (build.cssTarget, I2);
+// - шрифты — файлами: data:font/… в CSS staticCSP (font-src 'self') отвергает (build.assetsInlineLimit, UF1b.7);
 // - моки не попали в обычную сборку (вторая линия после стража графа src/shots/shots.test.ts): в *.js, *.html,
 //   *.css нет меток mockServiceWorker, msw/browser, setupWorker, а файла mockServiceWorker.js нет вовсе.
 // Читаются только *.js, *.html, *.css: в двоичных woff2 (@fontsource) подстрока «msw» нашлась бы случайно.
@@ -47,6 +48,10 @@ export function checkDist(dir) {
           `${rel(f)}: полифил --lightningcss-* вместо light-dark() — проверьте build.cssTarget`,
         );
       if (body.includes('light-dark(')) lightDark = true;
+      if (body.includes('data:font/'))
+        bad.push(
+          `${rel(f)}: шрифт встроен как data:font/… — staticCSP (font-src 'self') его отвергнет; проверьте build.assetsInlineLimit`,
+        );
     }
   }
   if (css.length > 0 && !lightDark)
@@ -74,6 +79,6 @@ if (process.argv[1] && isMain()) {
     for (const b of bad) console.error(`  - ${b}`);
     process.exit(1);
   }
-  console.log(`check-admin-dist: light-dark() без полифила, моков MSW нет
+  console.log(`check-admin-dist: light-dark() без полифила, шрифты файлами, моков MSW нет
 каталог: ${dir}`);
 }

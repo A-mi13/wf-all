@@ -1,15 +1,24 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NAV } from '../src/app/nav';
 import {
   adminApiEnv,
+  apiOrigin,
+  browserOf,
   cleanEnv,
   cookieName,
+  DEFAULT_PROJECTS,
   enabledProjects,
   mailpitEnv,
+  origin,
   PAIRS,
   pairOf,
+  ROOT,
   viteEnv,
 } from './env';
+import { PROD_SECTIONS } from './sections';
 
 // Ключ прогона — как его выдаёт scripts/e2e-admin.sh: 32 байта в base64url.
 const KEY = Buffer.alloc(32, 7).toString('base64url');
@@ -141,11 +150,59 @@ describe('окружение e2e', () => {
     expect(api.ADMIN_STAFF_SECRET_KEYS).toBe(KEY);
   });
 
-  it('проекты: по умолчанию оба, список из WF_E2E_PROJECTS, незнакомый — ошибка', () => {
-    expect(enabledProjects({})).toEqual(['chromium', 'webkit']);
+  it('проекты: по умолчанию chromium, webkit и prod, список из WF_E2E_PROJECTS, незнакомый — ошибка', () => {
+    expect(enabledProjects({})).toEqual(['chromium', 'webkit', 'prod']);
+    expect(enabledProjects({ WF_E2E_PROJECTS: ' ' })).toEqual(['chromium', 'webkit', 'prod']);
+    expect(enabledProjects({ WF_E2E_PROJECTS: 'chromium,prod' })).toEqual(['chromium', 'prod']);
     expect(enabledProjects({ WF_E2E_PROJECTS: 'chromium' })).toEqual(['chromium']);
     expect(() => enabledProjects({ WF_E2E_PROJECTS: 'firefox' })).toThrow(/firefox/);
     expect(() => pairOf('edge')).toThrow(/edge/);
+  });
+
+  // Прод-проект (план UF1b.7, U9): собранная админка, отданная admin-api со staticCSP, без Vite — проверка
+  // того, что dev не видит (theme-init.js до первого кадра, CSP, прод-CSS).
+  it('проект prod: admin-api на 18183 отдаёт сборку (ADMIN_STATIC_DIR — только ему), origin — сам admin-api, Chromium', () => {
+    vi.stubEnv('WF_E2E_ADMIN_DATABASE_URL', DB_URL);
+    vi.stubEnv('WF_E2E_STAFF_SECRET_KEYS', KEY);
+    expect(PAIRS.prod.api).toBe(18183);
+    expect(origin(PAIRS.prod)).toBe('http://127.0.0.1:18183');
+    expect(origin(PAIRS.prod)).toBe(apiOrigin(PAIRS.prod));
+    expect(adminApiEnv(PAIRS.prod)).toMatchObject({
+      ADMIN_HTTP_ADDR: '127.0.0.1:18183',
+      ADMIN_ORIGIN: 'http://127.0.0.1:18183',
+      ADMIN_COOKIE_SECURE: 'true',
+      ADMIN_STATIC_DIR: path.join(ROOT, 'apps', 'admin', 'dist'),
+    });
+    expect(adminApiEnv(PAIRS.chromium).ADMIN_STATIC_DIR).toBe('');
+    expect(adminApiEnv(PAIRS.webkit).ADMIN_STATIC_DIR).toBe('');
+    expect(cookieName(PAIRS.prod)).toBe('__Host-wf_admin_session');
+    expect(browserOf('prod')).toBe('chromium');
+    expect(browserOf('webkit')).toBe('webkit');
+    // порты пар не пересекаются
+    const ports = Object.values(PAIRS).flatMap((p) => ('vite' in p ? [p.vite, p.api] : [p.api]));
+    expect(new Set(ports).size).toBe(ports.length);
+  });
+
+  // m20 (раунд 2 ревью плана): ./task admin:e2e идёт через scripts/e2e-admin.sh, который сам задаёт и
+  // экспортирует умолчание проектов — оно обязано совпасть с умолчанием env.ts, иначе prod локально не идёт.
+  it('умолчание проектов scripts/e2e-admin.sh = умолчание env.ts; порт 18183 — в проверке занятых портов', () => {
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'e2e-admin.sh'), 'utf8');
+    const m = sh.match(/^PROJECTS="\$\{WF_E2E_PROJECTS:-([^}]*)\}"$/m);
+    expect(m?.[1]).toBe(DEFAULT_PROJECTS.join(','));
+    expect(sh).toMatch(/\*,prod,\*\) ports="\$ports 18183"/);
+    // сборка — до Playwright, затем проверка dist (UF1b.4), только если prod в наборе
+    const build = sh.indexOf('node_modules/.bin/vite build');
+    const check = sh.indexOf('node scripts/check-admin-dist.mjs');
+    const run = sh.indexOf('pnpm exec playwright test');
+    expect(build).toBeGreaterThan(-1);
+    expect(check).toBeGreaterThan(build);
+    expect(run).toBeGreaterThan(check);
+  });
+
+  it('обход прод-проекта — все разделы меню', () => {
+    expect([...PROD_SECTIONS].sort()).toEqual(
+      NAV.flatMap((g) => g.items.map((i) => i.path)).sort(),
+    );
   });
 
   it('имя cookie — как httpapi/admin.CookieName: __Host- только с Secure', () => {

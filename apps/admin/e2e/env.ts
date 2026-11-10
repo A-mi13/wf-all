@@ -19,14 +19,31 @@ export const MAILPIT_URL = `http://127.0.0.1:${MAILPIT.ui}`;
 // Пара «Vite + admin-api» на проект браузера. Chromium — cookie как в проде (__Host- + Secure: R6,
 // Chromium принимает её на http://127.0.0.1). WebKit __Host- + Secure на http не принимает (R6) —
 // у него своя пара с ADMIN_COOKIE_SECURE=false (конфиг процесса admin-api) на той же базе и Mailpit.
-export type Pair = { vite: number; api: number; secure: boolean };
+// prod (план UF1b.7, U9) — без Vite: admin-api сам отдаёт собранную админку (ADMIN_STATIC_DIR) с настоящим
+// staticCSP; origin — адрес admin-api; браузер — Chromium. Сборку готовит scripts/e2e-admin.sh.
+export type Pair = { api: number; secure: boolean } & (
+  { vite: number; static?: never } | { static: true; vite?: never }
+);
 export const PAIRS = {
   chromium: { vite: 5174, api: 18181, secure: true },
   webkit: { vite: 5175, api: 18182, secure: false },
+  prod: { api: 18183, secure: true, static: true },
 } as const satisfies Record<string, Pair>;
 export type ProjectName = keyof typeof PAIRS;
 
-export const origin = (p: Pair) => `http://127.0.0.1:${p.vite}`;
+// Проекты по умолчанию (без WF_E2E_PROJECTS) — то же умолчание у scripts/e2e-admin.sh (страж env.test.ts):
+// иначе локальный ./task ci прод-проект не гоняет (m20).
+export const DEFAULT_PROJECTS: readonly ProjectName[] = ['chromium', 'webkit', 'prod'];
+
+// Браузер проекта: prod — Chromium (собранная админка, cookie __Host- как в проде).
+export const browserOf = (name: ProjectName): 'chromium' | 'webkit' =>
+  name === 'webkit' ? 'webkit' : 'chromium';
+
+// Собранная админка для prod — dist рядом с e2e (vite build из scripts/e2e-admin.sh)
+export const ADMIN_DIST = path.join(ROOT, 'apps', 'admin', 'dist');
+
+export const origin = (p: Pair) =>
+  p.static ? `http://127.0.0.1:${p.api}` : `http://127.0.0.1:${p.vite}`;
 export const apiOrigin = (p: Pair) => `http://127.0.0.1:${p.api}`;
 // Имя cookie сессии — как httpapi/admin.CookieName(secure)
 export const cookieName = (p: Pair) => (p.secure ? '__Host-wf_admin_session' : 'wf_admin_session');
@@ -36,11 +53,11 @@ export function pairOf(project: string): Pair {
   return PAIRS[project as ProjectName];
 }
 
-// Проекты прогона: WF_E2E_PROJECTS (через запятую), по умолчанию оба. CI — только chromium (браузер
-// WebKit на раннере требует системных библиотек через apt).
+// Проекты прогона: WF_E2E_PROJECTS (через запятую), по умолчанию DEFAULT_PROJECTS. CI — chromium,prod
+// (браузер WebKit на раннере требует системных библиотек через apt).
 export function enabledProjects(env: NodeJS.ProcessEnv = process.env): ProjectName[] {
   const raw = env.WF_E2E_PROJECTS?.trim();
-  if (!raw) return ['chromium', 'webkit'];
+  if (!raw) return [...DEFAULT_PROJECTS];
   const names = raw.split(',').map((s) => s.trim());
   for (const n of names) pairOf(n);
   return names as ProjectName[];
@@ -115,8 +132,8 @@ export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
     ADMIN_STAFF_SECRET_KEYS: runKey('WF_E2E_STAFF_SECRET_KEYS'),
     ADMIN_IP_ALLOWLIST: '',
     ADMIN_COOKIE_SECURE: String(p.secure),
-    // статику отдаёт Vite (dev-сервер e2e), не admin-api
-    ADMIN_STATIC_DIR: '',
+    // статику отдаёт Vite (dev-сервер e2e), а у prod — сам admin-api (собранная админка, staticCSP)
+    ADMIN_STATIC_DIR: p.static ? ADMIN_DIST : '',
     ADMIN_MAIL_SMTP_ADDR: `127.0.0.1:${MAILPIT.smtp}`,
     ADMIN_MAIL_FROM: 'WhereFootball e2e <noreply@wf-e2e.test>',
     ADMIN_MAIL_SMTP_TLS: 'none',
@@ -124,7 +141,7 @@ export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
 }
 
 // Окружение Vite пары: /v1 проксируется в admin-api этой пары; кэш зависимостей — свой (e2e/vite.config.ts).
-export function viteEnv(p: Pair): NodeJS.ProcessEnv {
+export function viteEnv(p: Pair & { vite: number }): NodeJS.ProcessEnv {
   return {
     ...cleanEnv(),
     ...RUN_SECRETS,

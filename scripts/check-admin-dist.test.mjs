@@ -78,6 +78,18 @@ test('метки msw в js, html, css и файл воркера — ошибк�
 });
 
 // План (n2): двоичные шрифты @fontsource не читаются — подстрока msw нашлась бы в них случайно.
+// Прод-проект e2e (UF1b.7): шрифт, встроенный в CSS как data:, staticCSP (font-src 'self') отвергает.
+test('шрифт data:font/… в CSS — ошибка; data: картинки — нет', () => {
+  const dir = clean({
+    'assets/fonts.css':
+      '@font-face{src:url(data:font/woff2;base64,d09GMgAB) format("woff2"),url(data:font/woff;base64,d09GRg) format("woff")}' +
+      '.q{background:url(data:image/svg+xml;base64,PHN2Zy8+)}',
+  });
+  const bad = checkDist(dir);
+  assert.equal(bad.length, 1);
+  assert.match(bad[0], /assets\/fonts\.css.*data:font\/.*font-src/);
+});
+
 test('woff2 с байтами msw и слово msw вне меток — чисто', () => {
   const dir = clean({
     'assets/manrope.woff2': Buffer.from([

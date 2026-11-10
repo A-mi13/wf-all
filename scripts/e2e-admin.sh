@@ -6,13 +6,16 @@
 #   0. замок прогона .tools/e2e/run.lock (ревью Task 16, M4): второй прогон, стартовавший одновременно,
 #      прошёл бы проверку портов и пересоздал бы базу и exe под первым; замок держится до конца прогона,
 #      брошенный (процесс с его PID умер) — забирается;
-#   1. порты e2e свободны (свои, чтобы не задеть ./task dev: Vite 5174/5175, admin-api 18181/18182,
+#   1. порты e2e свободны (свои, чтобы не задеть ./task dev: Vite 5174/5175, admin-api 18181/18182/18183,
 #      Mailpit 18026/11026);
 #   2. база wf_e2e на том же кластере пересоздана (DROP … WITH (FORCE)): чистка и истечение подтверждений
 #      идут по реальным часам — общие данные dev не трогаем;
 #   3. миграции и права ролей (cmd/migrate up → grants.sql);
 #   4. admin-api собран в .tools/e2e/;
-#   5. одноразовый ключ сотрудников ADMIN_STAFF_SECRET_KEYS (base64url, только в окружении прогона, не выводится).
+#   5. одноразовый ключ сотрудников ADMIN_STAFF_SECRET_KEYS (base64url, только в окружении прогона, не выводится);
+#   6. проект prod (план UI-фундамента UF1b.7) — собранная админка: vite build (без tsc; шаг стенда, не «сборка
+#      по просьбе») и проверка dist (scripts/check-admin-dist.mjs: light-dark( есть, полифила и MSW нет) —
+#      каждый прогон, чтобы прод-проект не проверял сборку старого дерева.
 # Dev-значения ADMIN_* (корневой Taskfile грузит backend/.env) из окружения убираются: admin-api получает
 # только окружение e2e (apps/admin/e2e/env.ts).
 #
@@ -20,8 +23,9 @@
 # сервис postgis/postgis:18-3.6 с ролями и расширениями из deploy/dev/initdb/20_wf.sql
 # (WF_E2E_PG_SUPERUSER_URL=postgres://postgres:postgres@localhost:15432/postgres).
 # Адреса ролей migrator и admin — с того же хоста и порта, что WF_E2E_PG_SUPERUSER_URL (ревью Task 16, M6).
-# Проекты браузеров — WF_E2E_PROJECTS (по умолчанию chromium,webkit; CI — chromium).
-# Две пары admin-api (Chromium и WebKit) работают на одной базе и обе исполняют очередь staff (River):
+# Проекты — WF_E2E_PROJECTS (по умолчанию chromium,webkit,prod — то же умолчание у apps/admin/e2e/env.ts,
+# страж env.test.ts; CI — chromium,prod). prod — admin-api отдаёт собранную админку с настоящим staticCSP.
+# Пары admin-api (Chromium, WebKit, prod) работают на одной базе и обе исполняют очередь staff (River):
 # письмо приглашения может уйти из пары другого браузера, и ссылка в нём — на чужой origin. Сценарии
 # берут из письма только код, не ссылку (ревью Task 16, M5); сценарий по ссылке — только с одной парой
 # (WF_E2E_PROJECTS=chromium) или своей базой на пару.
@@ -40,7 +44,7 @@ read -r PG_HOST PG_PORT < <(node -e '
 `);
 ' "$SUPER_URL") || die "WF_E2E_PG_SUPERUSER_URL — не адрес postgres://"
 DB=wf_e2e
-PROJECTS="${WF_E2E_PROJECTS:-chromium,webkit}"
+PROJECTS="${WF_E2E_PROJECTS:-chromium,webkit,prod}"
 
 exe=
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
@@ -92,6 +96,7 @@ trap 'exit 143' TERM
 ports="18026 11026"
 case ",$PROJECTS," in *,chromium,*) ports="$ports 5174 18181" ;; esac
 case ",$PROJECTS," in *,webkit,*) ports="$ports 5175 18182" ;; esac
+case ",$PROJECTS," in *,prod,*) ports="$ports 18183" ;; esac
 # shellcheck disable=SC2086
 node -e '
   const net = require("node:net");
@@ -137,6 +142,14 @@ export WF_E2E_STAFF_SECRET_KEYS
 export WF_E2E_ADMIN_DATABASE_URL="postgres://admin:admin@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
 export WF_E2E_PROJECTS="$PROJECTS"
 export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
+
+# 6. Прод-проект: свежая сборка админки и её проверка (dist — apps/admin/dist, ADMIN_STATIC_DIR пары prod)
+case ",$PROJECTS," in
+  *,prod,*)
+    (cd apps/admin && node_modules/.bin/vite build --logLevel warn) || die "сборка админки для проекта prod не прошла"
+    node scripts/check-admin-dist.mjs || die "сборка админки не прошла проверку dist"
+    ;;
+esac
 
 cd apps/admin
 # не exec: замок снимает trap EXIT этого процесса после конца прогона
