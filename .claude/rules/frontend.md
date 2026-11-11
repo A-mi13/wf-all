@@ -38,13 +38,13 @@ paths:
   (`drawn`, каждая — строкой «дорисовано *» в `design/README.md`). Своих SVG-контуров в приложениях нет; пакет —
   данные, рендер — у приложения (в админке `Icon`/`Illustration`), цвет — классами по роли слоя, не атрибутами.
 - Строки в компонентах — только через `useTranslations`; новый ключ — сразу в `ru.json` и `en.json`.
-- Числа, деньги, время (принцип 13) — хуками, не `Intl`/`toLocale*` в экранах: в админке `useNumber`, `useMoney`
-  (минорные единицы десятичной строкой — без float, точно и больше 2^53), `RelativeTime` (`src/i18n/format.ts`,
-  `src/ui/time`; lint по `src/features/**`); общий словарь действий — `actions.*` (страж `vocabulary.test.ts`).
+- Числа, деньги, время (принцип 13) — хуками, не `Intl`/`toLocale*` в экранах (в админке — `admin.md` «Даты и
+  числа»; деньги — минорные единицы десятичной строкой, без float, точно и больше 2^53); общий словарь действий —
+  `actions.*` (страж `vocabulary.test.ts`).
 - Раскладка внутри страниц — container queries по ширине области страницы или панели, каркас — по окну; пороги
   `@container` — литералы из `tokens.container` (или `breakpoint`), их сверяет страж (`layout-css.test.ts` админки).
 - Витрина (принцип 15) — Ladle, истории CSF рядом с компонентом; скриншоты сравниваются только в Linux-CI, эталон —
-  артефакт последнего зелёного `main`, метка `visual-change` (CLAUDE.md «Проверки», `admin.md` «Витрина»).
+  артефакт последнего зелёного `main`, метка `visual-change` (CLAUDE.md «Проверки», `admin-ui.md` «Витрина»).
 - Тест компонента — `renderWithProviders` (`src/test/render.tsx`) + MSW-моки из `src/test/server.ts`.
 - Async Server Components Next — через Playwright (`apps/web/e2e`), Vitest их не рендерит.
 - Экран по макету: исходник в `design/screens/NN-*.dc.html`, токены — `design/03-токены.md`.

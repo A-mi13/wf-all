@@ -39,10 +39,10 @@ paths:
   (D7): лимит по почте `ratelimit.EmailKey("staff_login", HMAC)` (10 за 15 мин, каждая попытка) и IP-лимит
   конвейера; закрытая учётка и несуществующая почта — `VerifyDummy` без `Verify` (страж
   `TestLoginTimingEqualized`, шов `passwordHasher`); аудит неудачи пароля — тоже на `detached`. Вход (`Login`):
-  argon2 `Verify` — до транзакции, под замком только сравнение: транзакция берёт замок учётки (затем `replaceSession` гасит
-  старую сессию — порядок учётка → сессия сохранён) и перепроверяет `stillUsable` — `active`, не закрыта, `password_hash`
-  тот же, что сверил `Verify`; пароль сменили, учётку выключили, закрыли или сбросили за это время — тот же
-  `ErrInvalidCredentials` с аудитом неудачи пароля, сессии нет (`errLoginStale`); время транзакции — после замка.
+  argon2 `Verify` — до транзакции, под замком только сравнение: транзакция берёт замок учётки (затем `replaceSession`
+  гасит старую сессию — порядок учётка → сессия сохранён) и перепроверяет `stillUsable` — `active`, не закрыта,
+  `password_hash` тот же, что сверил `Verify`; пароль сменили, учётку выключили, закрыли или сбросили за это время — тот
+  же `ErrInvalidCredentials` с аудитом неудачи пароля, сессии нет (`errLoginStale`); время транзакции — после замка.
 - **Смена токена (D9) — только `a.replaceSession`:** старая строка гасится как `replaced`, новая — с новым
   токеном (`token.NewRefresh`, в базе SHA-256), текущим IP и User-Agent. Старый токен минуту (`replacedGrace`)
   загрузчик отвечает `auth.ErrSessionReplaced` — конвейер не стирает cookie (гонка параллельного запроса), потом
@@ -51,12 +51,12 @@ paths:
 - **Секреты:** секрет TOTP — `sealTOTP`/`openTOTP` (`keys.Ring`, aad = id сотрудника); резервный код —
   `a.recoveryMAC(key_id строки, staffID, domain.NormalizeRecoveryCode)` (метка `staff-recovery`) — одна функция
   для выдачи и входа; сравнения — `hmac.Equal`/`subtle`. Ввод: почта — `domain.NormalizeEmail`, коды —
-  `domain.NormalizeCode` (TOTP)/`NormalizeRecoveryCode`/`NormalizeInviteCode`; своих `strings.ToLower` по почте не писать.
-  Резервный код на строке с ключом вне кольца (`keys.ErrUnknownKey` из `recoveryMAC` — ключ убран раньше времени) при
-  входе не роняет проверку в 500: строка пропускается, в журнал сервера — Warn с `staff_id` и `key_id`, без кода (одно
-  предупреждение на ключ за проверку; страж `TestRecoveryCodeSkipsUnknownKey`). Все строки на чужом ключе — код не
-  подойдёт, неудача засчитывается как обычная (`staff.mfa_invalid`, сервер не отличит верный код от неверного); выход —
-  `reset-access` оператором. Асимметрия с TOTP принята (m3 повторного ревью): секрет TOTP на ключе вне кольца —
+  `domain.NormalizeCode` (TOTP)/`NormalizeRecoveryCode`/`NormalizeInviteCode`; своих `strings.ToLower` по почте не
+  писать. Резервный код на строке с ключом вне кольца (`keys.ErrUnknownKey` из `recoveryMAC` — ключ убран раньше
+  времени) при входе не роняет проверку в 500: строка пропускается, в журнал сервера — Warn с `staff_id` и `key_id`, без
+  кода (одно предупреждение на ключ за проверку; страж `TestRecoveryCodeSkipsUnknownKey`). Все строки на чужом ключе —
+  код не подойдёт, неудача засчитывается как обычная (`staff.mfa_invalid`, сервер не отличит верный код от неверного);
+  выход — `reset-access` оператором. Асимметрия с TOTP принята (m3 повторного ревью): секрет TOTP на ключе вне кольца —
   `openTOTP` даёт ошибку, ответ 500 без записи неудачи (не `withFactor`-неудача), а резервный код — `mfa_invalid` со
   счётом; выход у обоих — тот же `reset-access`.
 - **Аудит:** действие сотрудника — `ActorStaffID`, роль учётки, `ActorLabel` = `display_name`; неудача пароля —
@@ -97,25 +97,25 @@ paths:
   rekey) — `readInviteCode` ok=false с записью в журнал сервера без кода (анонимное принятие — Debug, письмо —
   Warn): принятие — `staff.invite_invalid`, письмо — `mail.ErrSkip` (страж `TestInviteUnreadableCode`);
   самоотправка лечит его — `healInviteCode`: новый код текущим ключом в той же строке, срок прежний, Warn
-  (`TestResendInviteSelfHealsUnreadableCode`). Анонимные `ResendInviteSelf` и `AcceptInvite` сначала читают кандидата без
-  замков (`GetInviteCandidate`): делать нечего — ответ без замков (у принятия — одна запись неудачи, у
-  повторной отправки — ни одной; время не выдаёт существование почты, страж `TestInviteIneligibleTakesNoLocks`); подходящему — замок учётки, затем строки приглашения, и
-  проверка заново. Остальные сценарии с приглашением берут замок учётки, затем строку приглашения. `IssueInvite(ctx, tx, staffID, purpose)` — в транзакции вызывающего (учётка уже под замком):
-  гасит живое (код стирается), новое на 24 ч, `sends = 1`, письмо `staff.NewMailArgs(вид по назначению, id
-  приглашения, учётка)`. Повторная отправка самим (`ResendInviteSelf`) — всегда nil; ТОТ ЖЕ код
-  (`MarkInviteResent`: `sends + 1`, `last_sent_at`, строка не перешифровывается, срок прежний; составитель
-  расшифрует код сам) только при живом приглашении с кодом, паузе 60 с и `sends < 5` («сутки» = жизнь строки:
-  самостоятельная отправка срок не продлевает); аудит `anonymous`; страж ротации — `TestResendInviteSelfSameCode`. Различимость
-  по времени у самоотправки (подходящая почта — транзакция с замками, задача и аудит) принята; выравнивать не будем —
-  объём ограничивают IP-лимит, пауза 60 с и не больше 5 отправок. Админом
-  (`ResendInvite`) — `Decide(staff.invites.resend) == Allow`, не над собой, только `invited`, пауза —
-  `*staff.ResendTooSoonError` (429 с остатком) — от выпуска последнего приглашения (`GetLastInvite.created_at`),
-  не от `last_sent_at`: самоотправки паузу админа не двигают (`TestResendInvitePauseFromIssue`); новое
-  приглашение того же назначения на 24 ч. Принятие
-  (`AcceptInvite`): `password.Check` (`body.password`), затем `locale` (необязательный, `*string`; `checkLocale` — общий с
-  `SetLocale`: не `ru`/`en` — `body.locale` `enum`, без записи неудачи) и хэш — до транзакции (порядок сценария; через
-  HTTP мусор в `locale` раньше отсекает валидатор контракта, у `password` в схеме длины нет — ответ только с
-  `body.locale`, `TestStaffAcceptLocale`); язык пишется в той же
+  (`TestResendInviteSelfHealsUnreadableCode`). Анонимные `ResendInviteSelf` и `AcceptInvite` сначала читают кандидата
+  без замков (`GetInviteCandidate`): делать нечего — ответ без замков (у принятия — одна запись неудачи, у
+  повторной отправки — ни одной; время не выдаёт существование почты, страж `TestInviteIneligibleTakesNoLocks`);
+  подходящему — замок учётки, затем строки приглашения, и проверка заново. Остальные сценарии с приглашением берут замок
+  учётки, затем строку приглашения. `IssueInvite(ctx, tx, staffID, purpose)` — в транзакции вызывающего (учётка уже под
+  замком): гасит живое (код стирается), новое на 24 ч, `sends = 1`, письмо
+  `staff.NewMailArgs(вид по назначению, id приглашения, учётка)`. Повторная отправка самим (`ResendInviteSelf`) — всегда
+  nil; ТОТ ЖЕ код (`MarkInviteResent`: `sends + 1`, `last_sent_at`, строка не перешифровывается, срок прежний;
+  составитель расшифрует код сам) только при живом приглашении с кодом, паузе 60 с и `sends < 5` («сутки» = жизнь
+  строки: самостоятельная отправка срок не продлевает); аудит `anonymous`; страж ротации —
+  `TestResendInviteSelfSameCode`. Различимость по времени у самоотправки (подходящая почта — транзакция с замками,
+  задача и аудит) принята; выравнивать не будем — объём ограничивают IP-лимит, пауза 60 с и не больше 5 отправок.
+  Админом (`ResendInvite`) — `Decide(staff.invites.resend) == Allow`, не над собой, только `invited`, пауза —
+  `*staff.ResendTooSoonError` (429 с остатком) — от выпуска последнего приглашения (`GetLastInvite.created_at`), не от
+  `last_sent_at`: самоотправки паузу админа не двигают (`TestResendInvitePauseFromIssue`); новое приглашение того же
+  назначения на 24 ч. Принятие (`AcceptInvite`): `password.Check` (`body.password`), затем `locale` (необязательный,
+  `*string`; `checkLocale` — общий с `SetLocale`: не `ru`/`en` — `body.locale` `enum`, без записи неудачи) и хэш — до
+  транзакции (порядок сценария; через HTTP мусор в `locale` раньше отсекает валидатор контракта, у `password` в схеме
+  длины нет — ответ только с `body.locale`, `TestStaffAcceptLocale`); язык пишется в той же
   транзакции после сверки кода под замком (`LockAccountByEmail` отдаёт `locale`), смена — было/стало в записи
   `staff.invite_accepted`, тот же язык или nil — без записи языка (стражи `TestAcceptInviteLocale`,
   `TestAcceptInviteLocaleRace`, порядок — `TestAcceptInviteReissuedWhileWaiting`); почта, статус, срок, нет кода
@@ -123,16 +123,16 @@ paths:
   шифротекст): ЛЮБОЙ исход «принять нечего» (кривая или чужая почта, не `invited`, нет приглашения, срок,
   неверный или нечитаемый код) — `a.acceptFailed`: одна запись `staff.invite_accept_failed` (`anonymous`,
   `After = {email}`) в короткой транзакции БЕЗ замков на `detached`, не больше `inviteAuditPolicy` (всплеск 20,
-  затем одна в час — не больше 20 за час, `TestAcceptInviteFailureAuditHourly`) на почту по `ratelimit.EmailKey("staff_invite_audit", HMAC)`, сверх — без записи; верный код потолок не
-  трогает; хранилище лимитов недоступно — запись идёт (`TestLimiterDownStillAudits`, там же вход) (стражи `TestAcceptInviteFailureAuditedAlways`, `TestAcceptInviteFailureAuditCap`, `TestAcceptInviteWrongCodeKeepsCode`,
-  `TestAcceptInviteConcurrentWrong`, `TestAcceptInviteCanceledAfterHash`, путь «неверный код» в
-  `TestInviteIneligibleTakesNoLocks`); верный — замки учётки и строки, `lockAcceptable` и сверка с кодом
-  закрытой замком строки (перевыпуск во время ожидания — старый код неверен,
-  `TestAcceptInviteReissuedWhileWaiting`). Успех: пароль,
-  блокировка второго фактора снята, `staff_mfa` и коды удалены, все сессии учётки и сессия старой cookie
-  (чья угодно) — `replaced`, новая — `setup` на 8 ч; приглашение живо до ack. Учётка `invited` с ролью и
-  городами — `createInvited` (почта и имя — `validateInvitee`, занята — `ErrEmailTaken`); автор аудита —
-  `actor` (`staffActor(s)` или `operatorActor`).
+  затем одна в час — не больше 20 за час, `TestAcceptInviteFailureAuditHourly`) на почту по
+  `ratelimit.EmailKey("staff_invite_audit", HMAC)`, сверх — без записи; верный код потолок не трогает; хранилище лимитов
+  недоступно — запись идёт (`TestLimiterDownStillAudits`, там же вход) (стражи `TestAcceptInviteFailureAuditedAlways`,
+  `TestAcceptInviteFailureAuditCap`, `TestAcceptInviteWrongCodeKeepsCode`, `TestAcceptInviteConcurrentWrong`,
+  `TestAcceptInviteCanceledAfterHash`, путь «неверный код» в `TestInviteIneligibleTakesNoLocks`); верный — замки учётки
+  и строки, `lockAcceptable` и сверка с кодом закрытой замком строки (перевыпуск во время ожидания — старый код неверен,
+  `TestAcceptInviteReissuedWhileWaiting`). Успех: пароль, блокировка второго фактора снята, `staff_mfa` и коды удалены,
+  все сессии учётки и сессия старой cookie (чья угодно) — `replaced`, новая — `setup` на 8 ч; приглашение живо до ack.
+  Учётка `invited` с ролью и городами — `createInvited` (почта и имя — `validateInvitee`, занята — `ErrEmailTaken`);
+  автор аудита — `actor` (`staffActor(s)` или `operatorActor`).
 - **Настройка 2FA (§4.5; `internal/app/setup.go`):** стадия `setup` — `lockSetup` (учётка → сессия;
   `lockLiveSession` не подходит — он требует `active`): погашена — `ErrSessionInvalid`, заменена —
   `ErrSessionReplaced`, не та стадия — `staff.wrong_stage`. `MFASetup` заменяет неподтверждённый секрет
@@ -151,34 +151,35 @@ paths:
   (IL2) — `InviteInput.Locale` (`checkLocale`, nil — язык инициатора из `ManageShareAccount` под замком) всегда
   пишется в payload (`invitePayload.Locale`, `*string`: nil — запрос до IL2, исполняется без смены языка);
   `invitePayloadShaped` проверяет его `checkLocale` до `execLocks`; новая учётка — `createInvited` с `locale` прямо в
-  `InsertInvitedAccount` (`COALESCE(…, 'ru')` — дубль DEFAULT колонки), `after.locale` в `staff.invited`; выключенная — `SetLocale` и было/стало в `staff.invited` (`resetSpec.before`) (стражи
-  `TestInviteLocaleFromInitiator`, `TestExecInviteRejectsLocale`, `TestExecInviteLegacyPayloadWithoutLocale`,
-  `TestInviteDisabledLocale`). Ссылка писем приглашения — `ComposeInvite`: `/accept?lang=<mailLocale учётки>`
-  (`TestComposeInvite`, все три повторные отправки — `TestInviteResendKeepsLocale` по аргументам задачи `staff.mail`); смена роли —
-  таблица D16 (`rolePermission`; без изменений — `nil, nil`); выключение — право по роли цели (владелец — только
-  запрос `staff.revoke_owner`); сброс доступа — всегда запрос. Выключенная цель смены роли и сброса — 403 (вернуть
-  её — только приглашением). Над собой — `self_action`; `confirm` — `domain.NormalizeEmail` и сравнение с почтой
-  цели (`mismatch`); `reason` — `staff.Reasons`, комментарий ≤ 500 — только в `audit_log.reason`
-  («код: комментарий»), не в before/after. `display_name` приглашаемого (`validateInvitee`): 1–80 символов без крайних
-  пробелов и `domain.DisplayNameOK` — отказ управляющих (Cc), форматирующих (Cf: bidi U+202A–202E и U+2066–2069, LRM/RLM,
-  мягкий перенос, BOM, U+200B, теговые), Zl/Zp и невидимых «пустых» символов (`isInvisible`, как у домена почты) →
-  `400 validation.failed` по `body.display_name`, правило `format`; имя попадает в письма, подписи подтверждений и
-  журнал. Невидимые допустимы только внутри эмодзи (волна 2, m1): ZWJ — между пиктограммами `Extended_Pictographic`
-  (слева — с необязательными VS15/VS16 и модификатором тона, как GB11), VS15/VS16 — сразу после пиктограммы или
-  основы кейкапа `0–9 # *`; прочие селекторы варианта — отказ; хотя бы один видимый символ. Таблица свойства —
-  `domain/pictographic.go` (в stdlib её нет; Unicode 15.0, страж формы `TestPictographicTable`).
-  Исполнитель `staff.invite` повторяет `validateInvitee` после `execLocks` на обоих путях (новая учётка и `existing_id`):
-  запрос мог ждать, пока правила ужесточили, — отказ `ErrStale` (`failed`, 409 `platform.approval_stale`), не
-  `FieldError` (`TestApproveInviteInvalidPayloadFails`). Исполнитель `staff.role_change` до `execLocks` проверяет
-  форму payload тем же предикатом, что сценарии (`roleShape` = `validRole` + `normCities`): роль «стало» и её города
-  (в нормальной форме — по возрастанию, без повторов), роль «было» ∈ `perm.Roles`, города «было» — по возрастанию без
-  повторов (снимок `citiesOf`; иначе `rolePermission` видит изменение, которого нет); нарушение — `Fail(ErrStale)`, не
-  500 от enum/CHECK базы (`rolePayloadShaped`; стражи `TestExecRoleChangeRejectsUnknownRole`,
-  `TestExecRoleChangeRejectsCityShape`, `TestExecRoleChangeRejectsFromCityShape`, `TestExecRoleChangeShapeBeforeLocks`;
-  законное «было» из ≥ 2 городов — `TestExecRoleChangeFromTwoCities`). Под замком (после `lockedTarget`) «было» payload
-  сверяется с базой — роль цели и `citiesOf`: расхождение — `Fail(ErrStale)` (`TestExecRoleChangeRejectsFromMismatch`).
-  Исполнитель `staff.invite` — так же до `execLocks` (`invitePayloadShaped`: роль и города приглашения; стражи
-  `TestExecInviteRejectsUnknownRole`, `TestExecInviteRejectsCityShape`, `TestExecInviteShapeBeforeLocks`).
+  `InsertInvitedAccount` (`COALESCE(…, 'ru')` — дубль DEFAULT колонки), `after.locale` в `staff.invited`; выключенная —
+  `SetLocale` и было/стало в `staff.invited` (`resetSpec.before`) (стражи `TestInviteLocaleFromInitiator`,
+  `TestExecInviteRejectsLocale`, `TestExecInviteLegacyPayloadWithoutLocale`, `TestInviteDisabledLocale`). Ссылка писем
+  приглашения — `ComposeInvite`: `/accept?lang=<mailLocale учётки>` (`TestComposeInvite`, все три повторные отправки —
+  `TestInviteResendKeepsLocale` по аргументам задачи `staff.mail`); смена роли — таблица D16 (`rolePermission`; без
+  изменений — `nil, nil`); выключение — право по роли цели (владелец — только запрос `staff.revoke_owner`); сброс
+  доступа — всегда запрос. Выключенная цель смены роли и сброса — 403 (вернуть её — только приглашением). Над собой —
+  `self_action`; `confirm` — `domain.NormalizeEmail` и сравнение с почтой цели (`mismatch`); `reason` — `staff.Reasons`,
+  комментарий ≤ 500 — только в `audit_log.reason` («код: комментарий»), не в before/after. `display_name` приглашаемого
+  (`validateInvitee`): 1–80 символов без крайних пробелов и `domain.DisplayNameOK` — отказ управляющих (Cc),
+  форматирующих (Cf: bidi U+202A–202E и U+2066–2069, LRM/RLM, мягкий перенос, BOM, U+200B, теговые), Zl/Zp и невидимых
+  «пустых» символов (`isInvisible`, как у домена почты) → `400 validation.failed` по `body.display_name`, правило
+  `format`; имя попадает в письма, подписи подтверждений и журнал. Невидимые допустимы только внутри эмодзи (волна 2,
+  m1): ZWJ — между пиктограммами `Extended_Pictographic` (слева — с необязательными VS15/VS16 и модификатором тона, как
+  GB11), VS15/VS16 — сразу после пиктограммы или основы кейкапа `0–9 # *`; прочие селекторы варианта — отказ; хотя бы
+  один видимый символ. Таблица свойства — `domain/pictographic.go` (в stdlib её нет; Unicode 15.0, страж формы
+  `TestPictographicTable`). Исполнитель `staff.invite` повторяет `validateInvitee` после `execLocks` на обоих путях
+  (новая учётка и `existing_id`): запрос мог ждать, пока правила ужесточили, — отказ `ErrStale` (`failed`, 409
+  `platform.approval_stale`), не `FieldError` (`TestApproveInviteInvalidPayloadFails`). Исполнитель `staff.role_change`
+  до `execLocks` проверяет форму payload тем же предикатом, что сценарии (`roleShape` = `validRole` + `normCities`):
+  роль «стало» и её города (в нормальной форме — по возрастанию, без повторов), роль «было» ∈ `perm.Roles`, города
+  «было» — по возрастанию без повторов (снимок `citiesOf`; иначе `rolePermission` видит изменение, которого нет);
+  нарушение — `Fail(ErrStale)`, не 500 от enum/CHECK базы (`rolePayloadShaped`; стражи
+  `TestExecRoleChangeRejectsUnknownRole`, `TestExecRoleChangeRejectsCityShape`,
+  `TestExecRoleChangeRejectsFromCityShape`, `TestExecRoleChangeShapeBeforeLocks`; законное «было» из ≥ 2 городов —
+  `TestExecRoleChangeFromTwoCities`). Под замком (после `lockedTarget`) «было» payload сверяется с базой — роль цели и
+  `citiesOf`: расхождение — `Fail(ErrStale)` (`TestExecRoleChangeRejectsFromMismatch`). Исполнитель `staff.invite` — так
+  же до `execLocks` (`invitePayloadShaped`: роль и города приглашения; стражи `TestExecInviteRejectsUnknownRole`,
+  `TestExecInviteRejectsCityShape`, `TestExecInviteShapeBeforeLocks`).
   - **Порядок замков (m7, M-4):** `lockOwners` (`pg_advisory_xact_lock(ownersLockKey)` — только где возможен страж
     последнего владельца: выключение, сброс, смена роли, `OperatorDisable`; всегда первым) → `lockAccounts` — учётки
     по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`) → сессии → `staff_mfa` →
@@ -186,8 +187,8 @@ paths:
     или истекла — `auth.ErrSessionInvalid`, заменена (`revoked_reason = replaced`) — `auth.ErrSessionReplaced`
     (конвейер и `staffadmin.Problem`: 401 без стирания новой cookie; окно `replacedGrace` не проверяется), роль
     сменилась — 403 (стражи `TestManageActorRechecked`, `TestManageActorAccountState`, `TestManageActorSessionRevoked`,
-    `TestManageActorSessionReplaced`, `TestApproverRechecked`); тот же шаблон в `ResendInvite`. Встречные действия без 40P01 — `TestCounterRevokeSessionsQueued`,
-    `TestCounterRequestsQueuedOnOwnersLock`.
+    `TestManageActorSessionReplaced`, `TestApproverRechecked`); тот же шаблон в `ResendInvite`. Встречные действия без
+    40P01 — `TestCounterRevokeSessionsQueued`, `TestCounterRequestsQueuedOnOwnersLock`.
   - **Страж последнего владельца** — `ownerGuard` после `lockOwners`: при запросе (ранний отказ) и в исполнении,
     в `disable` (и `OperatorDisable`), понижении (`applyRole`), сбросе; кроме `OperatorResetAccess` (выход из тупика).
     В пути подтверждения он защита в глубину: инициатор и подтверждающий — активные владельцы под замком, поэтому
@@ -219,19 +220,20 @@ paths:
   - **Хендлеры (`staff/admin/accounts.go`, Task 10b):** 202 `{approval}` — `oapi.ApprovalOf` (ручной файл в
     `httpapi/admin/oapi`: общий для `staff/admin` и сборки); `ChangeRole`/`Disable` сразу (`nil, nil`) — 200 с
     перечитанной карточкой `Account` (`committedAccount`: ctx без отмены и свой срок 5 с — обрыв после коммита не даёт
-    500 при выполненном действии, страж `TestImmediateActionAnswersAfterCancel`). `RegisterApprovals(reg, svc)` — обёртка `app.RegisterApprovals` для сборки 10c;
-    `Label(ctx, s)` — подпись решившего для подтверждений (`App.Label`: учётка и сессия перечитываются без замка, как
-    `checkActor`: заменённая сессия — `ErrSessionReplaced`, погашенная или истёкшая — `ErrSessionInvalid`; approve повторяет под замком в исполнителе, reject и cancel — нет).
+    500 при выполненном действии, страж `TestImmediateActionAnswersAfterCancel`). `RegisterApprovals(reg, svc)` —
+    обёртка `app.RegisterApprovals` для сборки 10c; `Label(ctx, s)` — подпись решившего для подтверждений (`App.Label`:
+    учётка и сессия перечитываются без замка, как `checkActor`: заменённая сессия — `ErrSessionReplaced`, погашенная или
+    истёкшая — `ErrSessionInvalid`; approve повторяет под замком в исполнителе, reject и cancel — нет).
 - **Оператор (§4.2, §4.11; `internal/app/operator.go`):** аудит — `actor_role = operator`, метка `operator`.
   `OperatorBootstrap` — учётка `owner` (`invited`), приглашение, `staff.bootstrapped`, событие `staff.invited`,
   письмо `staff.bootstrapped` каждому активному владельцу; доступен всегда. `OperatorInviteResend` — без паузы и
   прав. `OperatorResetAccess` — сброс без стража последнего владельца (любой статус); `OperatorDisable` — под
-  стражем, письмо U1 о выключенном админе всем активным владельцам. `Rekey` — каждая строка (секрет TOTP, код приглашения) не на текущем ключе — своей транзакцией под
-  замком учётки; нечитаемая (ключ убран раньше времени) не роняет прогон — `UnreadableMFA`/`UnreadableInvites`
-  с id; резервные коды только считаются; после прогона — `MFAOnOldKeys`, `InvitesOnOldKeys`,
-  `RecoveryOnOldKeys`; итог (и частичный) — аудит `staff.rekeyed`. Ротация ключа — двухфазная, чтобы при
-  скользящем деплое ни один экземпляр не встретил шифротекст на незнакомом ключе: (1) выкатить новый ключ
-  ВТОРЫМ в `ADMIN_STAFF_SECRET_KEYS` во все экземпляры admin-api (все читают его, шифруют ещё старым);
+  стражем, письмо U1 о выключенном админе всем активным владельцам. `Rekey` — каждая строка (секрет TOTP, код
+  приглашения) не на текущем ключе — своей транзакцией под замком учётки; нечитаемая (ключ убран раньше времени) не
+  роняет прогон — `UnreadableMFA`/`UnreadableInvites` с id; резервные коды только считаются; после прогона —
+  `MFAOnOldKeys`, `InvitesOnOldKeys`, `RecoveryOnOldKeys`; итог (и частичный) — аудит `staff.rekeyed`. Ротация ключа —
+  двухфазная, чтобы при скользящем деплое ни один экземпляр не встретил шифротекст на незнакомом ключе: (1) выкатить
+  новый ключ ВТОРЫМ в `ADMIN_STAFF_SECRET_KEYS` во все экземпляры admin-api (все читают его, шифруют ещё старым);
   (2) выкатить новый ключ ПЕРВЫМ (старый — вторым) → `rekey`; (3) перед удалением старого ключа повторный
   `rekey` — убирать только при нулях во всех трёх счётчиках и пустых списках нечитаемых.
   Ключ убран раньше времени: письма приглашений за это окно отменяются (`mail.ErrSkip`, предупреждение в
@@ -246,42 +248,45 @@ paths:
   НЕИСПОЛЬЗОВАННЫЕ резервные коды, живые коды приглашений): ни одного известного — отказ до записи, код 1, с
   подсказкой про `--keys-lost` (`TestOperatorRefusesForeignKeys`); с флагом `--keys-lost` (только у этих трёх команд:
   единственный ключ потерян безвозвратно — по базе неотличимо от чужого кольца) — предупреждение и выполнение, кольцо
-  не меняется (`TestOperatorLostWholeKey`); часть чужих — предупреждение в stderr с числом, команда выполняется (выход при
-  потерянном ключе, `TestOperatorWarnsOnPartlyUnknownKeys`); после штатной ротации — чисто (`TestKeyCheckAfterRotation`).
-  Текст отказа предупреждает: с не тем кольцом `--keys-lost` выпустит код, который сервер не прочтёт (сверить кольцо с
-  переменной сервиса; `TestOperatorRefusesForeignKeys`). Запись аудита команды с `--keys-lost` (`staff.bootstrapped`,
-  `staff.invite_resent`, `staff.access_reset`) несёт `After["keys_lost"] = true`: флаг идёт через ctx
-  (`WithKeysLost`, ставит `execCommand` после `checkKeys`), `markKeysLost` кладёт пометку; без флага ключа в записи нет
-  (`TestOperatorKeysLostAudited`, `TestOperatorLostWholeKey`).
+  не меняется (`TestOperatorLostWholeKey`); часть чужих — предупреждение в stderr с числом, команда выполняется (выход
+  при потерянном ключе, `TestOperatorWarnsOnPartlyUnknownKeys`); после штатной ротации — чисто
+  (`TestKeyCheckAfterRotation`). Текст отказа предупреждает: с не тем кольцом `--keys-lost` выпустит код, который сервер
+  не прочтёт (сверить кольцо с переменной сервиса; `TestOperatorRefusesForeignKeys`). Запись аудита команды с
+  `--keys-lost` (`staff.bootstrapped`, `staff.invite_resent`, `staff.access_reset`) несёт `After["keys_lost"] = true`:
+  флаг идёт через ctx (`WithKeysLost`, ставит `execCommand` после `checkKeys`), `markKeysLost` кладёт пометку; без флага
+  ключа в записи нет (`TestOperatorKeysLostAudited`, `TestOperatorLostWholeKey`).
 - **Фон (§4.10, Task 10c; `staff/jobs`):** `MailWorker` (`AddWorkers(w, d, sender)` — исполняющий River-клиент
   admin-api на очереди `staff`): вид → составитель (`invite`/`access_reset` → `ComposeInvite(…, kind)`, `locked`,
-  `bootstrapped`, `admin_disabled`); `mail.ErrSkip` — `river.JobCancel` (без повторов) и строка журнала с видом и id, без
-  почты; неизвестный вид, `V != 1` и ошибка SMTP — обычная ошибка (повтор: при скользящем деплое письмо нового вида
+  `bootstrapped`, `admin_disabled`); `mail.ErrSkip` — `river.JobCancel` (без повторов) и строка журнала с видом и id,
+  без почты; неизвестный вид, `V != 1` и ошибка SMTP — обычная ошибка (повтор: при скользящем деплое письмо нового вида
   возьмёт экземпляр нового релиза); таймаут задачи — минута.
   `Deps.River` сценариев — отдельный клиент только для вставки (иначе цикл «исполнителю нужны Deps»). `Cleaner`:
   `Tick` = `App.Cleanup` (сессии, умершие — `LEAST(expires_at, revoked_at)` — больше `CleanupRetention` = 30 суток
   назад; приглашения, погашенные/отозванные/просроченные раньше границы, кроме последнего у сотрудника — по нему
   `GetLastInvite` берёт назначение; порции `FOR UPDATE SKIP LOCKED`, строку под замком сценария пропускают, страж
   `TestCleanupSkipsLockedRows`) + `ExpireDue` + `PurgeDecided(DecidedRetention)` + `idempotency.DeleteExpired(ctx,
-  d.Pool, idempotency.Staff)` (просроченные `staff_idempotency_keys`: прав у воркера на них нет; число — в строке журнала
-  `idempotency_keys=N`, `TestCleanerTickStaffIdempotencyKeys`) + `ratelimit.DeleteExpired(ctx, d.Pool, d.Clock, ratelimit.Staff)` (строки `staff_rate_limits` с `tat` в прошлом по часам сервиса, план B R2; `rate_limits=N`, `TestCleanerDeletesStaffRateLimits`); `Run` — проход сразу, затем раз
-  в час; шаги независимы (сбой одного не отменяет другие, ошибки вместе — `TestCleanupStepsIndependent`); ошибка
-  прохода — `log.Error`, тикер живёт; отмена ctx — не сбой.
+  d.Pool, idempotency.Staff)` (просроченные `staff_idempotency_keys`: прав у воркера на них нет; число — в строке
+  журнала `idempotency_keys=N`, `TestCleanerTickStaffIdempotencyKeys`) +
+  `ratelimit.DeleteExpired(ctx, d.Pool, d.Clock, ratelimit.Staff)` (строки `staff_rate_limits` с `tat` в прошлом по
+  часам сервиса, план B R2; `rate_limits=N`, `TestCleanerDeletesStaffRateLimits`); `Run` — проход сразу, затем раз в
+  час; шаги независимы (сбой одного не отменяет другие, ошибки вместе — `TestCleanupStepsIndependent`); ошибка прохода —
+  `log.Error`, тикер живёт; отмена ctx — не сбой.
 - **Хендлеры (`staff/admin`, Task 10a):** тонкие — запрос → сценарий `internal/app` → ответ контракта; логики
   сценариев в них нет. `New(staff.Deps, Cookie{Name, Secure})` (имя и `Secure` — от сборки:
-  `httpapi/admin.CookieName`; `CookieConfig()` — для сверки сборкой, рассогласование — отказ старта), `Sessions()` — загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware
-  (подключает `httpapi/admin`), только для операций тега staff (методы `*Handler` вида `(ctx, oapi.…RequestObject)` — `IsOperation`): нулевой `Handler` (тесты
-  конвейера; `cmd/admin-api` собирает `New`) — `501 http.not_implemented` без вызова метода; User-Agent и токен cookie — в ctx (`meta(ctx)`,
-  `requestFrom(ctx).token` → `oldToken` принятия); ошибки — **только** `staffadmin.Problem` (единственный перевод:
-  `ProblemError` как есть, `*MFAError` → `mfa_invalid`/`password_invalid` с `attempts_left` через
+  `httpapi/admin.CookieName`; `CookieConfig()` — для сверки сборкой, рассогласование — отказ старта), `Sessions()` —
+  загрузчик для `Options.Sessions`, `Middleware()` — strict-middleware (подключает `httpapi/admin`), только для операций
+  тега staff (методы `*Handler` вида `(ctx, oapi.…RequestObject)` — `IsOperation`): нулевой `Handler` (тесты конвейера;
+  `cmd/admin-api` собирает `New`) — `501 http.not_implemented` без вызова метода; User-Agent и токен cookie — в ctx
+  (`meta(ctx)`, `requestFrom(ctx).token` → `oldToken` принятия); ошибки — **только** `staffadmin.Problem` (единственный
+  перевод: `ProblemError` как есть, `*MFAError` → `mfa_invalid`/`password_invalid` с `attempts_left` через
   `httpx.(*Error).WithAttemptsLeft`, коды модуля — статусы `statusOf` (страж `TestProblemCoversStaffCodes`),
-  `auth.ErrSessionInvalid`/`ErrSessionReplaced` → 401). Cookie: `ErrSessionInvalid` (сессию погасили между
-  конвейером и замком) стирает её, как конвейер; `ErrSessionReplaced` — нет (в браузере уже новая). Новый токен
-  (вход, принятие, второй фактор, unlock, ack) и стирание у выхода — `cookieResponse` через `http.SetCookie`
-  (добавление): сгенерированный `Visit…` делает `Header().Set` и затёр бы стирание старой cookie от конвейера —
-  новая cookie идёт последней (`TestStaffLoginAfterInvalidCookie`). Ответы с секретом (setup, confirm,
-  перевыпуск кодов) заполняют `Headers.CacheControl = "no-store"`: пустое значение генератора стёрло бы
-  `no-store` конвейера. Код модуля наружу — только из `x-error-codes` операции: недостижимая ветка сценария —
-  внутренняя ошибка (500), не `staff.*` (`errPasswordNotActive`). D9 у входа — сценарий `Login` (сотрудник конвейера в ctx), отдельный `Logout` не звать:
-  под `Idempotency-Key` — ровно одна транзакция. Отзыв текущей сессии cookie не стирает. Сквозные тесты — в
+  `auth.ErrSessionInvalid`/`ErrSessionReplaced` → 401). Cookie: `ErrSessionInvalid` (сессию погасили между конвейером и
+  замком) стирает её, как конвейер; `ErrSessionReplaced` — нет (в браузере уже новая). Новый токен (вход, принятие,
+  второй фактор, unlock, ack) и стирание у выхода — `cookieResponse` через `http.SetCookie` (добавление):
+  сгенерированный `Visit…` делает `Header().Set` и затёр бы стирание старой cookie от конвейера — новая cookie идёт
+  последней (`TestStaffLoginAfterInvalidCookie`). Ответы с секретом (setup, confirm, перевыпуск кодов) заполняют
+  `Headers.CacheControl = "no-store"`: пустое значение генератора стёрло бы `no-store` конвейера. Код модуля наружу —
+  только из `x-error-codes` операции: недостижимая ветка сценария — внутренняя ошибка (500), не `staff.*`
+  (`errPasswordNotActive`). D9 у входа — сценарий `Login` (сотрудник конвейера в ctx), отдельный `Logout` не звать: под
+  `Idempotency-Key` — ровно одна транзакция. Отзыв текущей сессии cookie не стирает. Сквозные тесты — в
   `internal/httpapi/admin` (`staff_*_test.go`: `staff/admin` не импортирует `httpapi/admin` даже в тестах).
