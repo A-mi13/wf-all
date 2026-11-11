@@ -135,6 +135,12 @@
   padding: var(--wf-space-3) var(--wf-space-6) var(--wf-space-6);
 }
 
+/* Фокус не закрыт подвалом (WCAG 2.4.11, спека UI-фундамента §4.5): отступ прокрутки снизу = высота подвала
+   (кнопка size.control + отступы подвала); токен size.overlay-footer — UF2b.6 */
+.body:has(+ .footer) {
+  scroll-padding-block-end: calc(var(--wf-size-control) + var(--wf-space-4) + var(--wf-space-6));
+}
+
 .description {
   margin: 0 0 var(--wf-space-4);
   font-size: var(--wf-text-sm);

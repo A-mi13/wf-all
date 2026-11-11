@@ -207,6 +207,54 @@ test('область страницы и тело панели — container-typ
     expect(files, f).toContain(f);
 });
 
+// Фокус не закрыт (WCAG 2.4.11, спека UI-фундамента §4.5, I13): у каждой области прокрутки, над которой что-то
+// закреплено, — scroll-padding из токенов. Таблица — шапка и закреплённый столбец; тело панели — подвал; страница
+// на телефоне — таббар (и тост с «Отменить», пока корень с data-toast-open).
+test('таблица — своя область прокрутки по обеим осям, отступ прокрутки под шапку; закреплённый столбец — свой', () => {
+  const scroll = rule('ui/table/DataTable.module.css', '.scroll');
+  expect(scroll).toMatch(/overflow-x:\s*auto/);
+  expect(scroll).toMatch(/overflow-y:\s*auto/);
+  // шапка size.table-header (+ промежуток строк и кольцо фокуса)
+  expect(scroll).toMatch(/scroll-padding-block-start:\s*calc\(var\(--wf-size-table-header\)/);
+  expect(scroll).toMatch(/max-block-size:\s*calc\(100dvh/);
+  for (const w of ['sm', 'md', 'lg'])
+    expect(rule('ui/table/DataTable.module.css', `.pin-${w}`)).toMatch(
+      /scroll-padding-inline-start:/,
+    );
+  expect(rule('ui/table/DataTable.module.css', '.stickyHeader .th')).toMatch(/position:\s*sticky/);
+  expect(rule('ui/table/DataTable.module.css', '.pinned')).toMatch(/position:\s*sticky/);
+});
+
+// «Подробнее» в карточке телефона (ревью UF2b/I-Y, I1): атрибут hidden у ячейки не прячет её, если display: block
+// карточки (.stacked .td) специфичнее — jsdom каскад не считает, поэтому страж по исходнику.
+test('карточка телефона: скрытая ячейка «Подробнее» — display: none поверх display: block карточки', () => {
+  expect(rule('ui/table/DataTable.module.css', '.stacked .td[hidden]')).toMatch(/display:\s*none/);
+});
+
+test('тело панели с подвалом — scroll-padding-block-end под подвал', () => {
+  expect(rule('ui/overlay/Overlay.module.css', '.body:has(+ .footer)')).toMatch(
+    /scroll-padding-block-end:\s*calc\(var\(--wf-/,
+  );
+});
+
+test('страница на телефоне — scroll-padding-block-end = таббар, с тостом — таббар + тост', () => {
+  expect(rule('ui/shell/AppShell.module.css', ':global(:root)')).toMatch(
+    /scroll-padding-block-end:\s*var\(--wf-size-tabbar\)/,
+  );
+  expect(rule('ui/shell/AppShell.module.css', ':global(:root[data-toast-open])')).toMatch(
+    /scroll-padding-block-end:\s*calc\(var\(--wf-size-tabbar\)\s*\+\s*var\(--wf-size-toast\)\)/,
+  );
+  // scroll-padding не добавляет места прокрутки (ревью UF2b/I-Y, I2): с тостом нижний отступ страницы — не меньше
+  // таббара и тоста, иначе последняя строка при прокрутке до конца остаётся под тостом
+  expect(
+    rule('ui/shell/AppShell.module.css', ':global(:root[data-toast-open]) .mobile .main'),
+  ).toMatch(/padding-block-end:\s*calc\(var\(--wf-size-tabbar\)\s*\+\s*var\(--wf-size-toast\)/);
+  // только на телефоне: правило внутри @media по breakpoint.mobile
+  const css = read('ui/shell/AppShell.module.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const at = css.indexOf(':global(:root)');
+  expect(css.lastIndexOf('@media (max-width: 767.98px)', at)).toBeGreaterThanOrEqual(0);
+});
+
 // Ревью UF2a/I, m10: отступ body по умолчанию (8 px) + каркас высотой 100dvh давали прокрутку на 16 px на
 // каждой странице. Сброс — в глобальном CSS, вместе с фоном документа.
 test('body без отступа браузера', () => {

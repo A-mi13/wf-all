@@ -74,13 +74,25 @@ export { type SegmentedProps, type SegmentOption, Segmented } from './Segmented'
 export { type ChipTone, StatusChip } from './StatusChip';
 export { Switch, type SwitchProps } from './Switch';
 export {
+  BULK_CONCURRENCY,
+  BULK_RETRY_DEFAULT_MS,
+  type BulkOptions,
+  type BulkReport,
+  retryBulk,
+  runBulk,
+} from './table/bulk';
+export { BulkBar, type BulkBarProps } from './table/BulkBar';
+export type { BulkAction, BulkOutcome } from './table/model';
+export {
   type ChipOption,
   type Column,
   DataTable,
   type DataTableProps,
+  type Density,
   infiniteTableProps,
   SEARCH_DEBOUNCE_MS,
   type SortState,
+  useDensity,
 } from './table';
 export {
   type ColorName,
@@ -92,3 +104,10 @@ export {
   useThemeColors,
 } from './theme';
 export { TOAST_HIDE_MS, type ToastApi, ToastProvider, useToast } from './toast';
+export {
+  useVirtualRows,
+  VIRTUAL_OVERSCAN,
+  type VirtualItem,
+  VirtualList,
+  type VirtualRows,
+} from './virtual';

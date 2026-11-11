@@ -28,6 +28,7 @@ function store(query: string) {
 const mobile = store(MOBILE);
 const compact = store(COMPACT);
 const handheld = store(HANDHELD);
+const coarse = store('(pointer: coarse)');
 const server = () => false;
 
 const useMedia = (s: ReturnType<typeof store>) =>
@@ -47,4 +48,9 @@ export function useIsCompact(): boolean {
 // «только с компьютера» (src/app/desktopOnly.ts) заменены пометкой. Планшет на 1024+ — рабочее место.
 export function useIsHandheld(): boolean {
   return useMedia(handheld);
+}
+
+// Грубый указатель (палец) на любой ширине: плотность таблиц — всегда normal (спека §4.5).
+export function useIsCoarse(): boolean {
+  return useMedia(coarse);
 }

@@ -1,0 +1,49 @@
+/* Истории «фокус не закрыт» (FocusNotObscured.stories.tsx): область страницы-контейнер и тост-образец */
+
+/* как область страницы каркаса: @container таблицы срабатывают в истории */
+.page {
+  container-type: inline-size;
+  padding-block-end: var(--wf-space-4);
+}
+
+/* страница телефона с тостом: запас прокрутки под таббар и тост — как .main каркаса при data-toast-open */
+.toastPage {
+  padding-block-end: calc(var(--wf-size-tabbar) + var(--wf-size-toast) + var(--wf-space-4));
+}
+
+/* таббар-образец пустой — высота таббара каркаса */
+.tabbar {
+  box-sizing: border-box;
+  height: var(--wf-size-tabbar);
+}
+
+/* образец тоста с «Отменить» на телефоне — однострочный, над таббаром, высотой size.toast (тост — UF2b.6) */
+.toast {
+  position: fixed;
+  right: var(--wf-space-2);
+  bottom: var(--wf-size-tabbar);
+  left: var(--wf-space-2);
+  z-index: 101;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+  height: var(--wf-size-toast);
+  padding: 0 var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg-elevated);
+  color: var(--wf-color-text);
+  box-shadow: var(--wf-shadow-overlay);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-sm);
+  font-weight: 600;
+}
+
+.toastText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

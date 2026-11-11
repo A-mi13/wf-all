@@ -10,7 +10,15 @@ import { stubMedia } from '../../test/media';
 import { problem } from '../../test/problem';
 import { renderWithProviders } from '../../test/render';
 import { http, server } from '../../test/server';
-import { type Column, DataTable, infiniteTableProps, type SortState } from './index';
+import { Drawer } from '../overlay/Drawer';
+import styles from './DataTable.module.css';
+import {
+  type Column,
+  DataTable,
+  type DataTableProps,
+  infiniteTableProps,
+  type SortState,
+} from './index';
 
 type Account = components['schemas']['StaffAccount'];
 
@@ -578,5 +586,342 @@ describe('select — список выбора', () => {
     renderWithProviders(<Picker onLoadMore={onLoadMore} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Показать ещё' }));
     expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------- UF2b.2: закрепление шапки и первого столбца ----------
+
+const many = (n: number) => Array.from({ length: n }, (_, i) => account(i + 1));
+function Plain(props: Partial<DataTableProps<Account>>) {
+  return (
+    <DataTable
+      label="Сотрудники"
+      columns={columns}
+      rowKey={(a) => a.id}
+      rows={[account(1)]}
+      onRetry={() => {}}
+      {...props}
+    />
+  );
+}
+
+describe('закрепление', () => {
+  test('stickyHeader по умолчанию — при 21 строке, при 20 — нет; явный проп важнее', () => {
+    const { rerender } = renderWithProviders(<Plain rows={many(20)} />);
+    expect(table()).not.toHaveClass(styles.stickyHeader!);
+    rerender(<Plain rows={many(21)} />);
+    expect(table()).toHaveClass(styles.stickyHeader!);
+    rerender(<Plain rows={many(21)} stickyHeader={false} />);
+    expect(table()).not.toHaveClass(styles.stickyHeader!);
+    rerender(<Plain rows={many(2)} stickyHeader />);
+    expect(table()).toHaveClass(styles.stickyHeader!);
+  });
+
+  test('stickyFirstColumn — класс у первой ячейки шапки и строк, в том числе layout table на 390', () => {
+    stubMedia({ width: 390, pointer: 'coarse' });
+    renderWithProviders(<Plain layout="table" stickyFirstColumn rows={many(2)} />);
+    const [head, ...rest] = within(table()).getAllByRole('row');
+    const heads = within(head!).getAllByRole('columnheader');
+    expect(heads[0]).toHaveClass(styles.pinned!);
+    expect(heads[1]).not.toHaveClass(styles.pinned!);
+    for (const row of rest) {
+      const cells = within(row).getAllByRole('cell');
+      expect(cells[0]).toHaveClass(styles.pinned!);
+      expect(cells[1]).not.toHaveClass(styles.pinned!);
+    }
+  });
+
+  test('stickyFirstColumn в карточках телефона не закрепляет (строка — карточка)', () => {
+    stubMedia({ width: 390, pointer: 'coarse' });
+    renderWithProviders(<Plain stickyFirstColumn />);
+    expect(within(table()).getAllByRole('cell')[0]).not.toHaveClass(styles.pinned!);
+  });
+});
+
+// ---------- UF2b.3: выбор столбцов и плотность ----------
+
+const cols3: Column<Account>[] = [
+  { id: 'name', header: 'Сотрудник', cell: (a) => a.display_name },
+  { id: 'email', header: 'Почта', cell: (a) => a.email },
+  { id: 'role', header: 'Роль', cell: (a) => a.role, priority: 'low' },
+];
+function Pref(props: Partial<DataTableProps<Account>>) {
+  return <Plain tableId="staff" columns={cols3} {...props} />;
+}
+const headers = () =>
+  within(table())
+    .getAllByRole('columnheader')
+    .map((h) => h.textContent);
+const columnsButton = () => screen.getByRole('button', { name: 'Столбцы' });
+async function openColumns(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(columnsButton());
+  return screen.getByRole('menu', { name: 'Столбцы' });
+}
+const item = (name: string) => screen.getByRole('menuitemcheckbox', { name });
+
+describe('столбцы', () => {
+  afterEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  test('без tableId кнопки «Столбцы» нет; с tableId — есть', () => {
+    const { rerender } = renderWithProviders(<Plain columns={cols3} />);
+    expect(screen.queryByRole('button', { name: 'Столбцы' })).toBeNull();
+    rerender(<Pref />);
+    expect(columnsButton()).toHaveAttribute('aria-haspopup', 'menu');
+  });
+
+  test('скрыть столбец → нет в таблице и после перемонтирования', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    const user = userEvent.setup();
+    const { unmount } = renderWithProviders(<Pref />);
+    expect(headers()).toEqual(['Сотрудник', 'Почта', 'Роль']);
+    await openColumns(user);
+    expect(item('Почта')).toHaveAttribute('aria-checked', 'true');
+    await user.click(item('Почта'));
+    expect(item('Почта')).toHaveAttribute('aria-checked', 'false');
+    expect(headers()).toEqual(['Сотрудник', 'Роль']);
+    unmount();
+    renderWithProviders(<Pref />);
+    expect(headers()).toEqual(['Сотрудник', 'Роль']);
+  });
+
+  test('первый столбец по умолчанию не скрывается — и когда storage просит', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    localStorage.setItem('wf.admin.table.staff', JSON.stringify({ hidden: ['name'], shown: [] }));
+    const user = userEvent.setup();
+    renderWithProviders(<Pref />);
+    expect(headers()).toEqual(['Сотрудник', 'Почта', 'Роль']);
+    await openColumns(user);
+    expect(item('Сотрудник')).toHaveAttribute('aria-disabled', 'true');
+    await user.click(item('Сотрудник'));
+    expect(headers()).toEqual(['Сотрудник', 'Почта', 'Роль']);
+  });
+
+  test('скрыть последний видимый нельзя', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    const all = cols3.map((c) => ({ ...c, hideable: true }));
+    const user = userEvent.setup();
+    renderWithProviders(<Pref columns={all} />);
+    await openColumns(user);
+    await user.click(item('Сотрудник'));
+    await user.click(item('Почта'));
+    expect(headers()).toEqual(['Роль']);
+    expect(item('Роль')).toHaveAttribute('aria-disabled', 'true');
+    await user.click(item('Роль'));
+    expect(headers()).toEqual(['Роль']);
+    expect(item('Роль')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  test('столбец из старой версии в storage — отброшен, остальные на месте', () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    localStorage.setItem(
+      'wf.admin.table.staff',
+      JSON.stringify({ hidden: ['legacy', 'email'], shown: ['gone'] }),
+    );
+    renderWithProviders(<Pref />);
+    expect(headers()).toEqual(['Сотрудник', 'Роль']);
+  });
+
+  test('900 + fine: low скрыт, в меню — «скрыт по ширине», флажок снят; 1280 — виден', async () => {
+    const media = stubMedia({ width: 900, pointer: 'fine' });
+    const user = userEvent.setup();
+    renderWithProviders(<Pref />);
+    expect(headers()).toEqual(['Сотрудник', 'Почта']);
+    await openColumns(user);
+    expect(item('Роль')).toHaveAttribute('aria-checked', 'false');
+    expect(item('Роль')).toHaveAccessibleDescription('скрыт по ширине');
+    act(() => media.set({ width: 1280, pointer: 'fine' }));
+    expect(headers()).toEqual(['Сотрудник', 'Почта', 'Роль']);
+    expect(item('Роль')).toHaveAttribute('aria-checked', 'true');
+    expect(item('Роль')).not.toHaveAccessibleDescription('скрыт по ширине');
+  });
+
+  test('900 + явно включённый low → виден и после перемонтирования', async () => {
+    stubMedia({ width: 900, pointer: 'fine' });
+    const user = userEvent.setup();
+    const { unmount } = renderWithProviders(<Pref />);
+    await openColumns(user);
+    await user.click(item('Роль'));
+    expect(headers()).toEqual(['Сотрудник', 'Почта', 'Роль']);
+    expect(item('Роль')).toHaveAttribute('aria-checked', 'true');
+    unmount();
+    renderWithProviders(<Pref />);
+    expect(headers()).toEqual(['Сотрудник', 'Почта', 'Роль']);
+  });
+
+  test('ширина не прячет единственный оставшийся столбец', () => {
+    stubMedia({ width: 900, pointer: 'fine' });
+    const all = cols3.map((c) => ({ ...c, hideable: true }));
+    localStorage.setItem(
+      'wf.admin.table.staff',
+      JSON.stringify({ hidden: ['name', 'email'], shown: [] }),
+    );
+    renderWithProviders(<Pref columns={all} />);
+    expect(headers()).toEqual(['Роль']);
+  });
+
+  test('storage бросает — таблица работает, скрытие держится до перемонтирования', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError');
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('denied', 'SecurityError');
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<Pref />);
+    await openColumns(user);
+    await user.click(item('Почта'));
+    expect(headers()).toEqual(['Сотрудник', 'Роль']);
+  });
+
+  test('меню: стрелки по пунктам по кругу, Esc закрывает только меню (таблица в Drawer), фокус — на «Столбцы»', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderWithProviders(
+      <Drawer open onClose={onClose} title="Панель">
+        <Pref />
+      </Drawer>,
+    );
+    await openColumns(user);
+    expect(item('Сотрудник')).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(item('Почта')).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(screen.getByRole('menuitemradio', { name: 'Обычная' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(item('Сотрудник')).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('menuitemradio', { name: 'Обычная' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Панель' })).toBeInTheDocument();
+    expect(columnsButton()).toHaveFocus();
+  });
+
+  test('Tab из меню закрывает его и уходит дальше', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Pref />
+        <a href="#next">Дальше</a>
+      </>,
+    );
+    await openColumns(user);
+    await user.keyboard('{ArrowDown}');
+    await user.tab();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Дальше' })).toHaveFocus();
+  });
+
+  test('Shift+Tab из меню закрывает его, фокус — перед «Столбцы»', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <a href="#prev">Раньше</a>
+        <Pref />
+      </>,
+    );
+    await openColumns(user);
+    await user.tab({ shift: true });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Раньше' })).toHaveFocus();
+  });
+
+  test('Tab из меню в Drawer — меню закрыто, фокус на следующем элементе панели, панель открыта', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderWithProviders(
+      <Drawer open onClose={onClose} title="Панель">
+        <Pref />
+        <a href="#next">Дальше</a>
+      </Drawer>,
+    );
+    await openColumns(user);
+    await user.keyboard('{ArrowDown}');
+    await user.tab();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Дальше' })).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('смена tableId у смонтированной таблицы — выбор второй таблицы, запись — в её ключ', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    localStorage.setItem('wf.admin.table.staff', JSON.stringify({ hidden: ['email'], shown: [] }));
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(<Pref />);
+    expect(headers()).toEqual(['Сотрудник', 'Роль']);
+    rerender(<Pref tableId="audit" />);
+    expect(headers()).toEqual(['Сотрудник', 'Почта', 'Роль']);
+    await openColumns(user);
+    await user.click(item('Роль'));
+    expect(JSON.parse(localStorage.getItem('wf.admin.table.audit') ?? '')).toEqual({
+      hidden: ['role'],
+      shown: [],
+    });
+    expect(JSON.parse(localStorage.getItem('wf.admin.table.staff') ?? '')).toEqual({
+      hidden: ['email'],
+      shown: [],
+    });
+  });
+
+  test('столбец пришёл после монтирования (право) — его сохранённое скрытие применяется и не стирается записью', async () => {
+    stubMedia({ width: 1440, pointer: 'fine' });
+    localStorage.setItem('wf.admin.table.staff', JSON.stringify({ hidden: ['role'], shown: [] }));
+    const user = userEvent.setup();
+    const two = cols3.slice(0, 2);
+    const { rerender } = renderWithProviders(<Pref columns={two} />);
+    await openColumns(user);
+    await user.click(item('Почта'));
+    expect(headers()).toEqual(['Сотрудник']);
+    rerender(<Pref columns={cols3} />);
+    expect(headers()).toEqual(['Сотрудник']);
+  });
+
+  test('плотность: compact — у всех таблиц и после перемонтирования; на coarse — normal', async () => {
+    const media = stubMedia({ width: 1440, pointer: 'fine' });
+    const user = userEvent.setup();
+    const { unmount } = renderWithProviders(
+      <>
+        <Pref />
+        <Plain label="Другая" />
+      </>,
+    );
+    const other = () => screen.getByRole('table', { name: 'Другая' });
+    expect(table()).toHaveAttribute('data-density', 'normal');
+    await openColumns(user);
+    const compact = screen.getByRole('menuitemradio', { name: 'Компактная' });
+    expect(compact).toHaveAttribute('aria-checked', 'false');
+    await user.click(compact);
+    expect(compact).toHaveAttribute('aria-checked', 'true');
+    expect(table()).toHaveAttribute('data-density', 'compact');
+    expect(other()).toHaveAttribute('data-density', 'compact');
+    unmount();
+    renderWithProviders(<Pref />);
+    expect(table()).toHaveAttribute('data-density', 'compact');
+    act(() => media.set({ width: 1440, pointer: 'coarse' }));
+    expect(table()).toHaveAttribute('data-density', 'normal');
+  });
+
+  test('телефон: кнопки «Столбцы» нет, low — под «Подробнее»', async () => {
+    stubMedia({ width: 390, pointer: 'coarse' });
+    const user = userEvent.setup();
+    renderWithProviders(<Pref />);
+    expect(screen.queryByRole('button', { name: 'Столбцы' })).toBeNull();
+    const row = bodyRows()[0]!;
+    expect(within(row).queryByRole('cell', { name: /Роль/ })).toBeNull();
+    expect(within(row).getByText('moderator')).not.toBeVisible();
+    const more = within(row).getByRole('button', { name: 'Подробнее' });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    await user.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(within(row).getByText('moderator')).toBeVisible();
   });
 });

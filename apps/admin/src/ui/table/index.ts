@@ -7,3 +7,4 @@ export {
   SEARCH_DEBOUNCE_MS,
   type SortState,
 } from './model';
+export { type Density, useDensity } from './prefs';

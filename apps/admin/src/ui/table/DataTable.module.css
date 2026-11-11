@@ -163,10 +163,110 @@
   flex-grow: 1;
 }
 
-/* только горизонтальная прокрутка: overflow-y явно, иначе он стал бы auto (см. Tabs.module.css) */
+/* Своя область прокрутки по обеим осям (спека UI-фундамента §4.5): шапка липнет внутри неё, а не к странице —
+   горизонтальная прокрутка обёртки иначе ломала бы «липкость». Высота — до низа окна, только на ширине таблицы
+   строками (@container от container.narrow): в карточках телефона (.flow) и в узкой панели прокручивается страница или тело панели.
+   Фокус не закрыт (WCAG 2.4.11): отступ прокрутки сверху — под шапку, слева — под закреплённый столбец (.pin-*). */
 .scroll {
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
+  /* + промежуток строк (border-spacing 6px) и кольцо фокуса (2px + отступ 2px): видна и верхняя линия кольца */
+  scroll-padding-block-start: calc(var(--wf-size-table-header) + var(--wf-space-3));
+}
+
+@container (min-width: 480px) {
+  .scroll {
+    max-block-size: calc(100dvh - var(--wf-space-5) * 2);
+  }
+}
+
+/* карточки телефона (по окну) — прокручивается страница, своей высоты у области нет */
+.scroll.flow {
+  max-block-size: none;
+}
+
+.pin-sm {
+  scroll-padding-inline-start: 96px;
+}
+
+.pin-md {
+  scroll-padding-inline-start: 128px;
+}
+
+.pin-lg {
+  scroll-padding-inline-start: 200px;
+}
+
+/* Закреплённая шапка: фон страницы под подписями — строки уходят под неё */
+.stickyHeader .th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  height: var(--wf-size-table-header);
+  vertical-align: bottom;
+  background: var(--wf-color-bg);
+}
+
+/* Закреплённый первый столбец: ширина ровно по width — отступ прокрутки .pin-* совпадает с ним */
+.pinned {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  /* длинное неразрывное (почта) переносится, а не раздвигает столбец шире отступа .pin-* */
+  overflow-wrap: anywhere;
+}
+
+.th.pinned {
+  background: var(--wf-color-bg);
+}
+
+.stickyHeader .th.pinned {
+  z-index: 3;
+}
+
+.pinned.sm {
+  min-width: 96px;
+  max-width: 96px;
+}
+
+.pinned.md {
+  min-width: 128px;
+  max-width: 128px;
+}
+
+.pinned.lg {
+  min-width: 200px;
+  max-width: 200px;
+}
+
+/* Плотность (одна на все таблицы): высота строки — density.*.row (рамка и отступы — внутри; в карточках
+   телефона ячейка — блок по содержимому) */
+.td {
+  box-sizing: border-box;
+  height: var(--wf-density-normal-row);
+}
+
+.compact:not(.stacked) .td {
+  height: var(--wf-density-compact-row);
+  padding-block: var(--wf-space-1);
+}
+
+.td[hidden] {
+  display: none;
+}
+
+.detailsCell {
+  padding-block: var(--wf-space-1);
+}
+
+/* Кнопка «Столбцы» — у правого края строки инструментов; после «Ещё фильтры» — вплотную к ней */
+.menuSlot {
+  margin-inline-start: auto;
+}
+
+.menuSlot.afterFilters {
+  margin-inline-start: 0;
 }
 
 .table {
@@ -303,6 +403,7 @@
 .stacked .td:first-child,
 .stacked .td:last-child {
   width: auto;
+  height: auto;
   border: 0;
   border-inline: 1px solid var(--wf-color-border);
   border-radius: 0;
@@ -319,6 +420,11 @@
   border-bottom: 1px solid var(--wf-color-border);
   border-end-start-radius: var(--wf-radius-md);
   border-end-end-radius: var(--wf-radius-md);
+}
+
+/* «Подробнее» в карточке телефона: скрытая ячейка — без места; специфичнее display: block карточки (.stacked .td) */
+.stacked .td[hidden] {
+  display: none;
 }
 
 .cellLabel {

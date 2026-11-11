@@ -23,6 +23,7 @@
 | react-hook-form | 7.91.0 | `apps/admin/package.json` |
 | uqr | 0.1.3 | `apps/admin/package.json` (QR секрета 2FA — SVG на клиенте, без сети и зависимостей; R11) |
 | @fontsource/oswald / @fontsource/manrope | 5.3.0 / 5.3.0 | `apps/admin/package.json` (шрифты админки без внешних запросов, `src/app/fonts.ts`) |
+| @tanstack/react-virtual | 3.14.26 | `apps/admin/package.json`; обёртка — `src/ui/virtual` (`useVirtualRows`, `VirtualList`) |
 | Ladle (витрина компонентов) | 5.1.1 (внутри — свой Vite 6.4.5, @vitejs/plugin-react-swc) | `apps/admin/package.json` (devDependencies), конфиг — `apps/admin/.ladle/`; в сборку админки не входит; исключение ниже |
 | GitHub Actions: checkout / setup-go / pnpm action-setup | 7.0.1 / 7.0.0 / 6.1.0 | полный SHA в `.github/workflows/*.yml`; плавающий тег `pnpm/action-setup@v6` указывал на 6.0.10 без поддержки pnpm 12 |
 | GitHub Actions: upload-artifact / download-artifact | 7.0.2 / 8.0.2 | полный SHA в `.github/workflows/admin-visual.yml` (эталон и отчёт визуального сравнения); у upload-artifact v8 не выпущен (проверено 10.11.2026) |

@@ -531,7 +531,33 @@
     "more_filters": "More filters",
     "shown": "Showing {count}",
     "load_more_failed": "Could not load more. Try again",
-    "more_filters_active": "More filters, set: {count}"
+    "more_filters_active": "More filters, set: {count}",
+    "bulk": {
+      "region": "Bulk actions",
+      "selected": "{count} selected",
+      "clear": "Clear selection",
+      "skip_part": "{count} more without your permission for this action: they will be skipped.",
+      "progress": "In progress: {done} of {total}",
+      "executed": "Done {count}",
+      "pending": "sent for approval {count}",
+      "failed": "failed {count}",
+      "unknown": "outcome unknown {count}",
+      "skipped": "skipped {count}",
+      "cancelled": "not started {count}",
+      "row_failed": "{name}: {error}",
+      "row_unknown": "{name}: outcome unknown — retry sends the same request",
+      "retry_failed": "Retry unsuccessful"
+    },
+    "columns": {
+      "button": "Columns",
+      "hidden_by_width": "hidden at this width",
+      "details": "Details"
+    },
+    "density": {
+      "label": "Density",
+      "compact": "Compact",
+      "normal": "Comfortable"
+    }
   },
   "me": {
     "subtitle": "Second factor, recovery codes and active sessions",

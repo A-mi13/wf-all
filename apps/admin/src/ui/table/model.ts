@@ -10,6 +10,11 @@ export type Column<T> = {
   sortable?: boolean;
   align?: 'start' | 'end'; // числа и даты — end
   width?: 'sm' | 'md' | 'lg'; // без ширины столбец тянется
+  // Меню «Столбцы» (спека UI-фундамента §4.5): по умолчанию скрывается любой, кроме первого.
+  hideable?: boolean;
+  // 'low' — второстепенный: на 768–1023 (по окну) скрыт, пока не включён в «Столбцах» явно; в карточке
+  // телефона — под «Подробнее». От 1024 видны все.
+  priority?: 'high' | 'low';
 };
 
 export type SortState = { column: string; direction: 'asc' | 'desc' };
@@ -58,7 +63,41 @@ export type DataTableProps<T> = {
   };
   onRowClick?: (row: T) => void;
   activeRowKey?: string; // строка, открытая в панели справа
+  // Закрепление (спека UI-фундамента §4.5): шапка липнет внутри своей области прокрутки (по умолчанию — при
+  // строках > STICKY_HEADER_FROM), первый столбец — у широких таблиц (матрица прав, и при layout 'table' на
+  // телефоне). Ширина закреплённого столбца — его width (по умолчанию 'lg').
+  stickyHeader?: boolean;
+  stickyFirstColumn?: boolean;
+  // Меню «Столбцы» и плотность: без tableId кнопки нет; выбор — localStorage wf.admin.table.<tableId>.
+  tableId?: string;
 };
+
+// Шапка закрепляется по умолчанию, когда строк больше этого.
+export const STICKY_HEADER_FROM = 20;
+
+// Видимость столбцов: выбор пользователя важнее ширины. Скрытый в «Столбцах» (если скрываемый) не виден;
+// 'low' без явного включения (shown) скрыт по ширине окна (narrow — 768–1023); единственный оставшийся
+// ширина не прячет — таблица без столбцов была бы тупиком.
+export function columnVisibility<T>(
+  columns: Column<T>[],
+  prefs: { hidden: readonly string[]; shown: readonly string[] },
+  narrow: boolean,
+): { visible: Column<T>[]; byWidth: Set<string> } {
+  const picked = columns.filter((c, i) => !(isHideable(c, i) && prefs.hidden.includes(c.id)));
+  // storage скрыл все (правили руками, столбцы стали скрываемыми) — показать все
+  const chosen = picked.length > 0 ? picked : columns;
+  const byWidth = new Set(
+    narrow
+      ? chosen.filter((c) => c.priority === 'low' && !prefs.shown.includes(c.id)).map((c) => c.id)
+      : [],
+  );
+  const visible = chosen.filter((c) => !byWidth.has(c.id));
+  if (visible.length === 0) return { visible: chosen, byWidth: new Set() };
+  return { visible, byWidth };
+}
+
+// Скрываемый: явно заданное hideable, иначе — любой, кроме первого.
+export const isHideable = <T>(c: Column<T>, index: number) => c.hideable ?? index > 0;
 
 // Пауза набора в поиске, после которой уходит запрос.
 export const SEARCH_DEBOUNCE_MS = 300;
@@ -93,3 +132,24 @@ export function infiniteTableProps<T, P, E>(
     onLoadMore: () => void q.fetchNextPage(),
   };
 }
+
+// Массовые действия (спека UI-фундамента §4.5, план UF2b.5): серверных массовых ручек нет — исполнение по
+// одной строке (runBulk, bulk.ts), ключ идемпотентности — на строку на действие. Исход строки: выполнено
+// или отправлено на подтверждение (202 {approval}); отказ — исключение ApiError.
+export type BulkOutcome = 'executed' | 'pending_approval';
+// Ключ права — строка каталога (me.permissions; отдельного типа ключей у клиента нет), cityId — город строки.
+export type BulkPermission = { perm: string; cityId?: string };
+
+export type BulkAction<T> = {
+  id: string;
+  label: string; // подпись кнопки в панели — текст из локалей экрана
+  tone?: 'default' | 'danger';
+  // право САМОГО действия над этой строкой и её город: решение — decide(me, perm, cityId) по городу
+  // строки (scoped-право модератора на чужой город — deny: строка пропускается и называется второй
+  // частью подтверждения)
+  permission: (row: T) => BulkPermission;
+  // ConfirmDialog: заголовок с числом затрагиваемых строк; word — что ввести (по умолчанию — само число)
+  confirm: { title: (n: number) => string; word?: string };
+  run: (row: T, idempotencyKey: string) => Promise<BulkOutcome>;
+  concurrency?: number; // параллельно в полёте, по умолчанию BULK_CONCURRENCY (3)
+};

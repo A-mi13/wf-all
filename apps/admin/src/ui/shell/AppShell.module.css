@@ -236,6 +236,25 @@
   padding: var(--wf-space-4) var(--wf-space-4) calc(var(--wf-size-control) * 2);
 }
 
+/* Фокус не закрыт таббаром (WCAG 2.4.11, спека UI-фундамента §4.5): прокручивается документ — отступ прокрутки
+   корня = высота таббара, пока на экране тост с «Отменить» (корень с data-toast-open, ставит UF2b.6) — + тост.
+   Порог — breakpoint.mobile, как у useIsMobile (таббар). */
+@media (max-width: 767.98px) {
+  :global(:root) {
+    scroll-padding-block-end: var(--wf-size-tabbar);
+  }
+
+  :global(:root[data-toast-open]) {
+    scroll-padding-block-end: calc(var(--wf-size-tabbar) + var(--wf-size-toast));
+  }
+
+  /* scroll-padding не добавляет места прокрутки: последнюю строку поднять над тостом можно, только если под ней
+     есть запас — нижний отступ страницы не меньше таббара и тоста (без тоста — .mobile .main: 2 × size.control) */
+  :global(:root[data-toast-open]) .mobile .main {
+    padding-block-end: calc(var(--wf-size-tabbar) + var(--wf-size-toast) + var(--wf-space-4));
+  }
+}
+
 .tabbar {
   position: fixed;
   right: 0;

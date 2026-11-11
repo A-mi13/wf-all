@@ -150,6 +150,18 @@ export const Empty: Story = () => <Table rows={[]} dirty onReset={() => undefine
 export const Error: Story = () => (
   <Table rows={undefined} error={new ApiError({ status: 503, code: 'internal' })} />
 );
+// «Столбцы» и плотность (UF2b.3): «Последний вход» — второстепенный (на 768–1023 скрыт по ширине, на телефоне —
+// под «Подробнее»).
+export const Columns: Story = () => {
+  const columns = useColumns().map((c) =>
+    c.id === 'last_login' ? { ...c, priority: 'low' as const } : c,
+  );
+  return <Table tableId="showcase" columns={columns} />;
+};
+
+// Закреплённые шапка и первый столбец (UF2b.2): широкая таблица своей прокруткой и на телефоне.
+export const Pinned: Story = () => <Table layout="table" stickyHeader stickyFirstColumn />;
+
 export const LoadMoreError: Story = () => (
   <Table hasMore onLoadMore={() => undefined} loadMoreError={new TypeError('Failed to fetch')} />
 );

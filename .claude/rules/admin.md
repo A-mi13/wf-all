@@ -65,7 +65,7 @@ paths:
 - **CSP** admin-api (`style-src 'self'`): во всём `src` (кроме тестов и стенда `src/test/**` — прокладка Popover API
   вставляет тестовый `<style>`) нет атрибута `style`, `<style>`, `dangerouslySetInnerHTML` и записи в `element.style` —
   только CSS Modules; цвета — только `var(--wf-color-*)`. Исключение — `setCssPx(el, '--wf-…', число)` из
-  `src/ui/cssVar.ts` (единственный `setProperty`; вызыватели — только `src/ui/popover/*`, с UF2b — `src/ui/virtual/*`).
+  `src/ui/cssVar.ts` (единственный `setProperty`; вызыватели — только `src/ui/popover/*` и `src/ui/virtual/*`).
   Страж — `src/ui/csp.test.ts`.
 - **Раскладка** внутри страниц — `@container` (область страницы и тело панели — `container-type: inline-size`), пороги —
   числа из `tokens.container`/`breakpoint` (страж `layout-css.test.ts`); каркас — по окну. Глобальный CSS — только

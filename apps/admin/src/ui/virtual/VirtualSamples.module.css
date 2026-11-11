@@ -1,0 +1,7 @@
+/* Раскладка историй VirtualList (не компонента): строка-образец. Имя без «.stories.» — Ладл дописывает
+   HMR-код во все модули с ним (отчёт UF3.1). */
+.row {
+  box-sizing: border-box;
+  padding: var(--wf-space-2) var(--wf-space-3);
+  border-block-end: 1px solid var(--wf-color-border);
+}

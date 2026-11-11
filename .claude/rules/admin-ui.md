@@ -40,6 +40,25 @@ paths:
 телефоне строки-карточки, подпись столбца в ячейке видна и слышна. Скелетон — `LoadingRows` (только здесь; удалять —
 сперва перевести на `Skeleton.Table`).
 
+Виртуализация (§4.5, `src/ui/virtual`): `useVirtualRows({ count, estimate, scrollRef, overscan?, horizontal? })` —
+обёртка `@tanstack/react-virtual` (`items`, `totalSize`, `scrollToIndex`, `measure` — ref элемента с `data-index`,
+`place`/`placeTotal` — положение числами `--wf-virtual-start/-size/-total` через `setCssPx`, второй и последний
+разрешённый вызыватель; CSP-исключение — `admin.md`); `VirtualList({ items, estimate, renderItem, label, onReady? })` —
+список с `aria-setsize`/`aria-posinset`, окно прокрутки — высота родителя. Карточные списки — `content-visibility`.
+В jsdom размеров нет: `clientHeight` окна (`[data-virtual-viewport]`), `offsetHeight` строк, `scrollHeight` и
+`scrollTo` подменяет тест (`virtual.test.tsx`).
+
+Массовые действия (§4.5, `src/ui/table/{bulk.ts,BulkBar.tsx}`): `BulkAction<T>` (`permission(row) → { perm, cityId? }` —
+право по городу строки, `confirm.title(n)`, `run(row, key) → 'executed' | 'pending_approval'`, `concurrency` — по
+умолчанию 3). `runBulk(rows, action, { decide(perm, cityId), signal, onProgress, onForbidden })` — по строке, ключ на
+строку из `newIdempotencyKey` (`src/api/idempotency.ts`); итог `executed/pending/failed/unknown/skipped/cancelled`;
+`retryBulk(report, …)` — `failed` новым ключом, `unknown` прежним (без права остаётся `unknown`), `202` никогда; 429 —
+общая пауза пачки (`Retry-After`, иначе `BULK_RETRY_DEFAULT_MS`); 403 и 401 `auth.unauthenticated` — пауза до
+`onForbidden` (перечитать me), оставшиеся перепроверяются. `BulkBar({ rows, rowLabel, actions, onClear, onPending,
+onSettled? })` — «Выбрано N», `ConfirmDialog` с числом и второй частью «ещё N без права — пропустим», итог в живой
+области, «Повторить неудавшиеся»; размонтирование отменяет пачку (итог — тостом); `onPending` — экран передаёт
+`useInvalidateApprovals()`, `onSettled` — перечитать список один раз. Флажки и «выбрать видимые» — в `DataTable`.
+
 ## Состояния
 `EmptyState` (`illustration` — таблица «экран → иллюстрация» в `design/README.md`), `ErrorState` (код для поддержки +
 «Повторить»), `NoNetworkState`, `OfflineBanner`, `ForbiddenState`, `DesktopOnlyNotice` (пометка `ActionGate`),

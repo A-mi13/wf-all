@@ -531,7 +531,33 @@
     "more_filters": "Ещё фильтры",
     "shown": "Показано {count}",
     "load_more_failed": "Не удалось загрузить ещё. Попробуйте снова",
-    "more_filters_active": "Ещё фильтры, задано: {count}"
+    "more_filters_active": "Ещё фильтры, задано: {count}",
+    "bulk": {
+      "region": "Массовые действия",
+      "selected": "Выбрано {count}",
+      "clear": "Снять выбор",
+      "skip_part": "Ещё {count} — без вашего права на это действие: пропустим.",
+      "progress": "Выполняется: {done} из {total}",
+      "executed": "Выполнено {count}",
+      "pending": "отправлено на подтверждение {count}",
+      "failed": "ошибка {count}",
+      "unknown": "исход неизвестен {count}",
+      "skipped": "пропущено {count}",
+      "cancelled": "не начато {count}",
+      "row_failed": "{name}: {error}",
+      "row_unknown": "{name}: исход неизвестен — повтор отправит тот же запрос",
+      "retry_failed": "Повторить неудавшиеся"
+    },
+    "columns": {
+      "button": "Столбцы",
+      "hidden_by_width": "скрыт по ширине",
+      "details": "Подробнее"
+    },
+    "density": {
+      "label": "Плотность",
+      "compact": "Компактная",
+      "normal": "Обычная"
+    }
   },
   "me": {
     "subtitle": "Второй фактор, резервные коды и активные сеансы",

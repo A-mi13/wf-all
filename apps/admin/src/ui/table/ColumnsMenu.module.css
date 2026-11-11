@@ -1,0 +1,108 @@
+/* Меню «Столбцы» (спека UI-фундамента §4.5): кнопка — как «Ещё фильтры», пункты — как опции Select */
+
+.button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: var(--wf-size-touch-min);
+  padding: 0 var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg-elevated);
+  color: var(--wf-color-text-muted);
+  font-family: inherit;
+  font-size: var(--wf-text-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.button[aria-expanded='true'] {
+  border-color: var(--wf-color-selected-border);
+  background: var(--wf-color-pitch);
+  color: var(--wf-color-accent-ink);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}
+
+.popover {
+  min-inline-size: 220px;
+  max-inline-size: calc(100vw - var(--wf-space-4));
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  padding: var(--wf-space-1);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+  min-height: var(--wf-size-touch-min);
+  padding: 0 var(--wf-space-3) 0 var(--wf-space-2);
+  border-radius: var(--wf-radius-sm);
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.item:hover,
+.item:focus {
+  background: var(--wf-color-surface-sunken);
+  color: var(--wf-color-text);
+  outline: 0;
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: -2px;
+}
+
+.item[aria-disabled='true'] {
+  color: var(--wf-color-text-ghost);
+  cursor: not-allowed;
+}
+
+.mark {
+  flex-shrink: 0;
+  display: inline-flex;
+  width: 16px;
+  color: var(--wf-color-accent-ink);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hint {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--wf-space-1);
+  padding-top: var(--wf-space-1);
+  border-top: 1px solid var(--wf-color-border);
+}
+
+.groupLabel {
+  padding: var(--wf-space-1) var(--wf-space-3);
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  text-transform: uppercase;
+}

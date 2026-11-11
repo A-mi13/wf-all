@@ -1,0 +1,24 @@
+/* Виртуальный список (useVirtualRows): окно прокрутки, полоса полной длины и элементы на своих
+   местах. Числа положения пишет только setCssPx (--wf-virtual-*), всё остальное — здесь. */
+.viewport {
+  font-family: var(--wf-font-body);
+  block-size: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.list {
+  position: relative;
+  block-size: var(--wf-virtual-total, 0);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  transform: translateY(var(--wf-virtual-start, 0));
+}

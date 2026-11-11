@@ -10,10 +10,19 @@ import { useTranslations } from 'use-intl';
 import { Button } from '../Button';
 import { CountBadge } from '../CountBadge';
 import { cx } from '../cx';
-import { useIsMobile } from '../media';
+import { useIsCoarse, useIsCompact, useIsMobile } from '../media';
 import { EmptyState, ErrorState, LoadingRows } from '../states';
 import styles from './DataTable.module.css';
-import { type DataTableProps, SEARCH_DEBOUNCE_MS } from './model';
+import { ColumnsMenu } from './ColumnsMenu';
+import {
+  type Column,
+  columnVisibility,
+  type DataTableProps,
+  isHideable,
+  SEARCH_DEBOUNCE_MS,
+  STICKY_HEADER_FROM,
+} from './model';
+import { type ColumnPrefs, type Density, readColumns, useDensity, writeColumns } from './prefs';
 
 // Таблица списков админки (спека §9.2, макет 07): поиск, чипы-фильтры, раскрывающийся фильтр,
 // сортировка, курсорная пагинация «Показать ещё», «Показано N», «Сбросить фильтры»; состояния —
@@ -25,7 +34,58 @@ import { type DataTableProps, SEARCH_DEBOUNCE_MS } from './model';
 export function DataTable<T>(props: DataTableProps<T>) {
   const t = useTranslations('table');
   const ta = useTranslations('actions');
-  const { rows, error, dirty, onReset } = props;
+  const { rows, error, dirty, onReset, columns, tableId } = props;
+  const mobile = useIsMobile();
+  const compact = useIsCompact();
+  const [density, setDensity] = useDensity();
+  const coarse = useIsCoarse();
+  // Предпочтения столбцов: из storage при монтировании и заново при смене tableId или набора столбцов
+  // (вкладки экрана на одном DataTable, столбец пришёл с правом) — иначе выбор одной таблицы ушёл бы в ключ другой.
+  const ids = columns.map((c) => c.id);
+  const source = `${tableId ?? ''}\n${ids.join('\n')}`;
+  const load = (): ColumnPrefs => (tableId ? readColumns(tableId, ids) : { hidden: [], shown: [] });
+  const [prefs, setPrefs] = useState<ColumnPrefs>(load);
+  const [loaded, setLoaded] = useState(source);
+  if (loaded !== source) {
+    setLoaded(source);
+    setPrefs(load());
+  }
+  const stacked = (props.layout ?? 'auto') === 'auto' && mobile;
+  // 768–1023 по окну (не по контейнеру: открытый сайдбар или панель решение не меняют — спека §3.4, N1)
+  const vis = columnVisibility(columns, prefs, compact && !mobile);
+  const toggle = (id: string) => {
+    const col = columns.find((c) => c.id === id);
+    if (!col || !tableId) return;
+    const without = (ids: string[]) => ids.filter((x) => x !== id);
+    const next: ColumnPrefs = vis.visible.some((c) => c.id === id)
+      ? { hidden: [...without(prefs.hidden), id], shown: without(prefs.shown) }
+      : {
+          hidden: without(prefs.hidden),
+          // включённый явно 'low' ширина больше не прячет
+          shown: col.priority === 'low' ? [...without(prefs.shown), id] : prefs.shown,
+        };
+    setPrefs(next);
+    writeColumns(tableId, next, ids);
+  };
+  const menu =
+    tableId && !stacked && !props.select && !props.card ? (
+      <ColumnsMenu
+        items={columns.map((c, i) => {
+          const checked = vis.visible.some((v) => v.id === c.id);
+          return {
+            id: c.id,
+            header: c.header,
+            checked,
+            byWidth: vis.byWidth.has(c.id),
+            disabled: !isHideable(c, i) || (checked && vis.visible.length === 1),
+          };
+        })}
+        onToggle={toggle}
+        density={density}
+        onDensity={setDensity}
+        showDensity={!coarse}
+      />
+    ) : undefined;
   const reset = dirty && onReset && (
     <Button variant="link" onClick={onReset}>
       {ta('resetFilters')}
@@ -47,13 +107,21 @@ export function DataTable<T>(props: DataTableProps<T>) {
     ) : props.card ? (
       <Cards {...props} rows={rows} card={props.card} />
     ) : (
-      <Rows {...props} rows={rows} />
+      <Rows
+        {...props}
+        rows={rows}
+        stacked={stacked}
+        density={density}
+        // телефон (карточки): выбор столбцов не действует, 'low' — под «Подробнее»
+        shown={stacked ? columns.filter((c) => c.priority !== 'low') : vis.visible}
+        details={stacked ? columns.filter((c) => c.priority === 'low') : []}
+      />
     );
   }
 
   return (
     <div className={cx(styles.root, props.select && styles.fill)}>
-      <Toolbar {...props} />
+      <Toolbar {...props} menu={menu} />
       {rows !== undefined && (props.summary !== false || reset) && (
         <div className={styles.summary}>
           {props.summary !== false && (
@@ -67,11 +135,11 @@ export function DataTable<T>(props: DataTableProps<T>) {
   );
 }
 
-function Toolbar<T>({ search, chips, filters }: DataTableProps<T>) {
+function Toolbar<T>({ search, chips, filters, menu }: DataTableProps<T> & { menu?: ReactNode }) {
   const t = useTranslations('table');
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  if (!search && !chips && !filters) return null;
+  if (!search && !chips && !filters && !menu) return null;
   return (
     <>
       <div className={styles.toolbar}>
@@ -116,6 +184,7 @@ function Toolbar<T>({ search, chips, filters }: DataTableProps<T>) {
             <CountBadge count={filters.active} active />
           </button>
         )}
+        {menu && <div className={cx(styles.menuSlot, filters && styles.afterFilters)}>{menu}</div>}
       </div>
       {filters && (
         <div id={panelId} hidden={!open} className={styles.panel}>
@@ -206,7 +275,6 @@ function SearchBox({
 
 function Rows<T>({
   label,
-  columns,
   rowKey,
   rows,
   sort,
@@ -218,33 +286,64 @@ function Rows<T>({
   loadingMore,
   loadMoreError,
   onLoadMore,
-}: DataTableProps<T> & { rows: T[] }) {
-  const narrow = useIsMobile();
-  const stacked = layout === 'auto' && narrow;
+  stickyHeader,
+  stickyFirstColumn,
+  stacked,
+  density,
+  shown,
+  details,
+}: DataTableProps<T> & {
+  rows: T[];
+  stacked: boolean;
+  density: Density;
+  shown: Column<T>[];
+  details: Column<T>[];
+}) {
+  const t = useTranslations('table');
+  const base = useId();
+  // карточки телефона, раскрытые «Подробнее»
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const sticky = stickyHeader ?? rows.length > STICKY_HEADER_FROM;
+  // в карточках телефона закреплять нечего: строка — блок
+  const pin = !!stickyFirstColumn && !stacked;
+  const pinWidth = shown[0]?.width ?? 'lg';
   const toggle = (column: string) =>
     onSortChange?.({
       column,
       direction: sort?.column === column && sort.direction === 'asc' ? 'desc' : 'asc',
     });
+  const toggleDetails = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   return (
     <>
-      <div className={styles.scroll} data-table-scroll="">
+      <div
+        className={cx(styles.scroll, stacked && styles.flow, pin && styles[`pin-${pinWidth}`])}
+        data-table-scroll=""
+      >
         {/* Роли — явно: на телефоне строки и ячейки становятся блоками (display: block), и часть
             браузеров иначе снимает с них семантику таблицы. */}
         <table
           role="table"
           aria-label={label}
+          data-density={density}
           className={cx(
             styles.table,
             stacked && styles.stacked,
             layout === 'table' && styles.scrolls,
+            sticky && styles.stickyHeader,
+            density === 'compact' && styles.compact,
           )}
         >
           <thead role="rowgroup">
             <tr role="row">
-              {columns.map((c) => {
+              {shown.map((c, i) => {
                 const sorted = sort?.column === c.id ? sort.direction : undefined;
+                const width = c.width ?? (pin && i === 0 ? pinWidth : undefined);
                 return (
                   <th
                     role="columnheader"
@@ -256,7 +355,8 @@ function Rows<T>({
                     className={cx(
                       styles.th,
                       c.align === 'end' && styles.end,
-                      c.width && styles[c.width],
+                      width && styles[width],
+                      pin && i === 0 && styles.pinned,
                     )}
                   >
                     {c.sortable && onSortChange ? (
@@ -291,6 +391,8 @@ function Rows<T>({
           <tbody role="rowgroup">
             {rows.map((row) => {
               const key = rowKey(row);
+              const expanded = open.has(key);
+              const detailId = (c: Column<T>) => `${base}-${key}-${c.id}`;
               return (
                 <tr
                   key={key}
@@ -315,11 +417,17 @@ function Rows<T>({
                     })
                   }
                 >
-                  {columns.map((c) => (
+                  {shown.map((c, i) => (
                     <td
                       key={c.id}
                       role="cell"
-                      className={cx(styles.td, c.align === 'end' && styles.end)}
+                      className={cx(
+                        styles.td,
+                        c.align === 'end' && styles.end,
+                        // закреплённый — ширина и у ячеек: переносом длинного она не растёт сверх .pin-*
+                        pin && i === 0 && styles.pinned,
+                        pin && i === 0 && styles[pinWidth],
+                      )}
                     >
                       {stacked && (
                         // шапка на телефоне скрыта — подпись столбца в ячейке и видна, и слышна
@@ -328,6 +436,34 @@ function Rows<T>({
                       {c.cell(row)}
                     </td>
                   ))}
+                  {details.map((c) => (
+                    <td
+                      key={c.id}
+                      id={detailId(c)}
+                      role="cell"
+                      hidden={!expanded}
+                      className={styles.td}
+                    >
+                      <span className={styles.cellLabel}>{c.header}</span>
+                      {c.cell(row)}
+                    </td>
+                  ))}
+                  {details.length > 0 && (
+                    <td role="cell" className={cx(styles.td, styles.detailsCell)}>
+                      <Button
+                        variant="link"
+                        aria-expanded={expanded}
+                        aria-controls={details.map(detailId).join(' ')}
+                        onClick={(e) => {
+                          // строка с onRowClick не открывается от «Подробнее»
+                          e.stopPropagation();
+                          toggleDetails(key);
+                        }}
+                      >
+                        {t('columns.details')}
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
