@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test';
 import {
   check,
   collectErrors,
+  planShot,
   HEIGHT,
   LINUX,
   SHOT,
@@ -35,6 +36,8 @@ for (const s of stories) {
     : [{ theme: 'light' as const, width: 1440 }];
   for (const { theme, width } of plan) {
     test(`${s.id} ${theme} ${width}`, async ({ page }, info) => {
+      // снимок — только у ключевых (visual); остальные — дымовая проверка без снимка
+      const shot = s.visual ? planShot(info, `stories/${s.id}-${theme}-${width}.png`) : '';
       const errors = collectErrors(page);
       await page.setViewportSize({ width, height: HEIGHT[width] ?? 900 });
       await page.goto(`${base}/?story=${s.id}&mode=preview&theme=${theme}`);
@@ -57,7 +60,7 @@ for (const s of stories) {
       const png = portal
         ? await page.screenshot(SHOT)
         : await page.locator('[data-showcase-root]').screenshot(SHOT);
-      check(info, `stories/${s.id}-${theme}-${width}.png`, png);
+      check(info, shot, png);
     });
   }
 }

@@ -597,7 +597,7 @@ async function runPlant(p, ctx) {
     } catch {
       // манифест уже снят
     }
-  }, HEARTBEAT_MS);
+  }, ctx.heartbeatMs ?? HEARTBEAT_MS);
   beat.unref();
   try {
     return await plantLocked(p, ctx, {
@@ -832,6 +832,8 @@ export async function main(argv, io = {}) {
             plantWrite: io.plantWrite,
             restoreWrite: io.restoreWrite,
             changedWrite: io.changedWrite,
+            // тест пульса: короткий интервал вместо HEARTBEAT_MS
+            heartbeatMs: io.heartbeatMs,
           });
         } catch (e) {
           r = {

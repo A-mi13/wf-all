@@ -23,7 +23,7 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json',
 };
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
   const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
   let file = normalize(join(root, path));
   // с разделителем: иначе прошёл бы соседний каталог «<корень>-x»
@@ -43,4 +43,9 @@ createServer((req, res) => {
   if (file.endsWith('mockServiceWorker.js')) headers['Service-Worker-Allowed'] = '/';
   res.writeHead(200, headers);
   createReadStream(file).pipe(res);
-}).listen(Number(portArg), '127.0.0.1');
+});
+// порт 0 — свободный от ОС (тест); фактический адрес — строкой в stdout
+server.listen(Number(portArg), '127.0.0.1', () => {
+  const addr = server.address();
+  console.log(`serve: http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : portArg}/`);
+});

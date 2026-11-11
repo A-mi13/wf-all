@@ -156,10 +156,16 @@ export function collectResults(report) {
   const diffs = [];
   const missing = [];
   let failed = 0;
+  const unshot = new Set();
   const walk = (suite) => {
     for (const spec of suite.specs ?? []) {
       for (const t of spec.tests ?? []) {
-        if (t.status === 'unexpected') failed++;
+        if (t.status === 'unexpected') {
+          failed++;
+          // имя снимка объявлено до дымовой проверки (params.ts planShot): упал — снимка в .out нет
+          const all = [t.annotations ?? [], ...(t.results ?? []).map((r) => r.annotations ?? [])];
+          for (const a of all.flat()) if (a.type === 'visual-shot') unshot.add(a.description);
+        }
         for (const a of t.annotations ?? []) {
           if (a.type === 'visual-diff') diffs.push(a.description);
           if (a.type === 'visual-new') missing.push(a.description);
@@ -169,7 +175,7 @@ export function collectResults(report) {
     for (const s of suite.suites ?? []) walk(s);
   };
   for (const s of report.suites ?? []) walk(s);
-  return { diffs, missing, failed };
+  return { diffs, missing, failed, unshot: [...unshot].sort() };
 }
 
 // Снимки эталона, которых нет в этом прогоне (история или экран переименованы, удалены): без счёта они пропадали бы
@@ -183,13 +189,20 @@ export function goneShots(baselineDir, outDir) {
 }
 
 export function summarize({ results, mode, event, pr, prVisualChange }) {
-  const gone = results.gone ?? [];
+  // Нет в прогоне: тест упал до снимка (ревью UF3 r1-m1) — «не снят», иначе эталон «пропал» (переименование).
+  const unshot = new Set(results.unshot ?? []);
+  const notShot = (results.gone ?? []).filter((f) => unshot.has(f));
+  const gone = (results.gone ?? []).filter((f) => !unshot.has(f));
   const lines = ['### Визуальное сравнение — снимки', ''];
   if (mode.note) lines.push(mode.note, '');
   lines.push(
     `Упавших тестов (дымовой прогон или отличие без метки): ${results.failed}.`,
-    `Отличий от эталона: ${results.diffs.length}; снимков без эталона: ${results.missing.length}; пропало снимков эталона: ${gone.length}.`,
+    `Отличий от эталона: ${results.diffs.length}; снимков без эталона: ${results.missing.length}; пропало снимков эталона: ${gone.length}; не снято (тест упал до снимка): ${notShot.length}.`,
   );
+  if (notShot.length > 0) {
+    lines.push('', ...notShot.slice(0, 50).map((f) => `- ${f}`));
+    if (notShot.length > 50) lines.push(`- … и ещё ${notShot.length - 50}`);
+  }
   if (results.diffs.length > 0) {
     lines.push('', ...results.diffs.slice(0, 50).map((d) => `- ${d}`));
     if (results.diffs.length > 50) lines.push(`- … и ещё ${results.diffs.length - 50}`);
@@ -286,7 +299,7 @@ function summaryCmd(env = process.env) {
   const mode = modeOf(env);
   const report = readJson(join(VISUAL_DIR, 'results.json'));
   const results = {
-    ...(report ? collectResults(report) : { diffs: [], missing: [], failed: 0 }),
+    ...(report ? collectResults(report) : { diffs: [], missing: [], failed: 0, unshot: [] }),
     gone: mode.compare ? goneShots(join(VISUAL_DIR, '.baseline'), join(VISUAL_DIR, '.out')) : [],
   };
   const { markdown, warnings } = summarize({

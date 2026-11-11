@@ -3,6 +3,7 @@ import { CITY_OWN } from '../src/test/me';
 import {
   check,
   collectErrors,
+  planShot,
   HEIGHT,
   LINUX,
   SCREENS_PORT,
@@ -29,6 +30,7 @@ for (const sc of SCREENS) {
   for (const theme of THEMES) {
     for (const width of WIDTHS) {
       test(`${sc.name} ${theme} ${width}`, async ({ page }, info) => {
+        const shot = planShot(info, `screens/${sc.name}-${theme}-${width}.png`);
         const errors = collectErrors(page);
         await page.setViewportSize({ width, height: HEIGHT[width] ?? 900 });
         // тема — выбор сотрудника (wf.theme): его читает public/theme-init.js до первого кадра
@@ -42,11 +44,7 @@ for (const sc of SCREENS) {
         );
         expect(unhandled, 'неописанных запросов к API').toBe(0);
         expect(errors).toEqual([]);
-        check(
-          info,
-          `screens/${sc.name}-${theme}-${width}.png`,
-          await page.screenshot({ ...SHOT, fullPage: true }),
-        );
+        check(info, shot, await page.screenshot({ ...SHOT, fullPage: true }));
       });
     }
   }

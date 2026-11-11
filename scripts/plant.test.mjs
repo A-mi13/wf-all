@@ -9,7 +9,6 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -937,36 +936,21 @@ test(
   async () => {
     const s = sandbox('beat.txt', 'v = 1\n');
     const manifest = join(s.plantDir, `${lockKey(s.file)}.json`);
-    let firstMtime = 0;
-    let lastMtime = 0;
-    // Команда спит 6 с — дольше интервала пульса (5 с).
-    const cmd = [NODE, '-e', 'setTimeout(()=>process.exit(1),6000)'];
-    const watcher = setInterval(() => {
-      try {
-        const m = statSync(manifest).mtimeMs;
-        if (!firstMtime) firstMtime = m;
-        lastMtime = m;
-      } catch {
-        // манифеста ещё/уже нет
-      }
-    }, 200);
-    try {
-      const r = await inProcess(s.plantDir, [
-        '--file',
-        s.file,
-        '--find',
-        '1',
-        '--replace',
-        '2',
-        '--no-baseline',
-        '--',
-        ...cmd,
-      ]);
-      assert.equal(r.code, 0, r.out);
-    } finally {
-      clearInterval(watcher);
-    }
-    assert.ok(lastMtime - firstMtime >= 4000, `пульса не было: ${firstMtime} → ${lastMtime}`);
+    // Без настоящего времени: пульс — 100 мс, команда сама следит за mtime манифеста и падает (подсадка
+    // «убита», код 0) на втором его изменении — после последней записи манифеста до запуска команды его
+    // меняет только пульс. Пульса нет — через 20 с выходит с 0 (SURVIVED, код 1). Прежний тест сравнивал
+    // mtime с порогом 4 с при пульсе 5 с: под нагрузкой задержка между записями манифеста съедала запас.
+    const watch =
+      `const fs=require('fs'),m=${JSON.stringify(manifest)};let base=fs.statSync(m).mtimeMs,seen=0;` +
+      `setInterval(()=>{let x;try{x=fs.statSync(m).mtimeMs}catch{return}` +
+      `if(x!==base){base=x;if(++seen>=2)process.exit(1)}},20);setTimeout(()=>process.exit(0),20000)`;
+    const r = await inProcess(
+      s.plantDir,
+      ['--file', s.file, '--find', '1', '--replace', '2', '--no-baseline', '--', NODE, '-e', watch],
+      { heartbeatMs: 100 },
+    );
+    assert.equal(r.code, 0, `пульса нет — команда не увидела смены mtime: ${r.out}`);
+    assert.match(r.out, /KILLED/);
   },
 );
 

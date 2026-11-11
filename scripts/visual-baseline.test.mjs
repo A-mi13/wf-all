@@ -343,12 +343,28 @@ const report = {
             {
               status: 'expected',
               annotations: [
+                { type: 'visual-shot', description: 'stories/ui--button--default-light-1440.png' },
                 { type: 'visual-diff', description: 'stories/ui--button--default-light-1440.png' },
               ],
             },
           ],
         },
-        { tests: [{ status: 'unexpected', annotations: [] }] },
+        // упал на дымовой проверке до снимка: имя снимка — аннотация visual-shot (у попытки)
+        {
+          tests: [
+            {
+              status: 'unexpected',
+              annotations: [],
+              results: [
+                {
+                  annotations: [
+                    { type: 'visual-shot', description: 'screens/broken-dark-390.png' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
       ],
       suites: [
         {
@@ -373,6 +389,7 @@ test('отчёт Playwright: отличия, новые снимки и упав
     diffs: ['stories/ui--button--default-light-1440.png'],
     missing: ['screens/login-dark-390.png'],
     failed: 1,
+    unshot: ['screens/broken-dark-390.png'],
   });
 });
 
@@ -438,6 +455,38 @@ test('снимки эталона, которых нет в прогоне, — 
   assert.match(s.markdown, /пропало снимков эталона: 1/);
 });
 
+// Ревью UF3 r1-m1: тест упал на дымовой проверке до снимка — его снимка нет в .out, но эталон не «пропал»:
+// отдельный счёт без предупреждения о переименовании (job и так красный).
+test('снимок упавшего до снимка теста — «не снят», а не «пропал из эталона»', () => {
+  const mode = { compare: true, informative: false, note: '' };
+  const results = {
+    diffs: [],
+    missing: [],
+    failed: 1,
+    unshot: ['screens/broken-dark-390.png'],
+    gone: ['screens/broken-dark-390.png', 'stories/old-light-390.png'],
+  };
+  const s = summarize({ results, mode, event: 'pull_request', pr: '', prVisualChange: false });
+  assert.deepEqual(s.warnings, [
+    [
+      'Снимки эталона пропали',
+      '1 снимков эталона нет в прогоне (история или экран переименованы?)',
+    ],
+  ]);
+  assert.match(s.markdown, /пропало снимков эталона: 1;/);
+  assert.match(s.markdown, /не снято \(тест упал до снимка\): 1\./);
+  assert.match(s.markdown, /- screens\/broken-dark-390\.png/);
+  // только упавшие до снимка — предупреждения о пропаже нет
+  const only = summarize({
+    results: { ...results, gone: ['screens/broken-dark-390.png'] },
+    mode,
+    event: 'pull_request',
+    pr: '',
+    prVisualChange: false,
+  });
+  assert.deepEqual(only.warnings, []);
+});
+
 // m4: статика visual/serve.mjs не отдаёт соседний каталог с тем же префиксом имени.
 test('serve.mjs: соседний каталог «<корень>-x» — 403', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'wf-visual-serve-'));
@@ -445,12 +494,22 @@ test('serve.mjs: соседний каталог «<корень>-x» — 403', 
   mkdirSync(join(dir, 'site-x'));
   writeFileSync(join(dir, 'site/index.html'), 'index');
   writeFileSync(join(dir, 'site-x/secret.txt'), 'secret');
-  const port = 61190 + Math.floor(Math.random() * 9);
+  // порт 0 — свободный от ОС (ревью UF3 r1-m2: случайный из девяти мог быть занят), фактический — из stdout
   const srv = spawn(process.execPath, [
     join(ROOT, 'apps/admin/visual/serve.mjs'),
     join(dir, 'site'),
-    String(port),
+    '0',
   ]);
+  let port = 0;
+  const listening = new Promise((resolve, reject) => {
+    let out = '';
+    srv.stdout.on('data', (c) => {
+      out += c;
+      const m = /^serve: http:\/\/127\.0\.0\.1:(\d+)\//m.exec(out);
+      if (m) resolve(Number(m[1]));
+    });
+    srv.on('exit', (code) => reject(new Error(`serve.mjs вышел (${code}) до адреса: ${out}`)));
+  });
   const get = (path) =>
     new Promise((resolve, reject) => {
       request({ host: '127.0.0.1', port, path }, (res) => {
@@ -462,11 +521,9 @@ test('serve.mjs: соседний каталог «<корень>-x» — 403', 
         .end();
     });
   try {
-    let first = null;
-    for (let i = 0; i < 50 && !first; i++) {
-      first = await get('/').catch(() => new Promise((r) => setTimeout(() => r(null), 100)));
-    }
-    assert.equal(first?.body, 'index');
+    port = await listening;
+    // адрес печатается после listen — сервер уже принимает, повторы не нужны
+    assert.equal((await get('/')).body, 'index');
     const r = await get('/..%2Fsite-x%2Fsecret.txt');
     assert.notEqual(r.body, 'secret');
     assert.equal(r.status, 403);

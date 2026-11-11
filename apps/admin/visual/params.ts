@@ -24,6 +24,13 @@ const informative = process.env.VISUAL_INFORMATIVE === 'true';
 
 export const SHOT = { animations: 'disabled', caret: 'hide' } as const;
 
+// Имя будущего снимка — аннотацией visual-shot в начале теста, до дымовой проверки: упавший до снимка тест сводка
+// (scripts/visual-baseline.mjs) считает «не снят», а не «пропал из эталона» (ревью UF3 r1-m1).
+export function planShot(info: TestInfo, name: string): string {
+  info.annotations.push({ type: 'visual-shot', description: name });
+  return name;
+}
+
 // Снимок name (`stories/<id>-<тема>-<ширина>.png`): в .out всегда; сравнение — если эталон скачан и в нём такой
 // снимок есть (нет — новый, аннотация visual-new).
 export function check(info: TestInfo, name: string, png: Buffer) {
