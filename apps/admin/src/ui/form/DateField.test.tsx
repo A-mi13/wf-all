@@ -150,6 +150,36 @@ describe('DateField: значение', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  // Раунд 1 ревью IL2-фронта: лишняя цифра года. Набор в конец (курсор в конце, добавлен один знак) — лишнее
+  // отбрасывается, как раньше; цифра в середину года или вставка с лишним — ошибка формата, а не молча 2012.
+  test('маска: лишняя цифра в середине года — ошибка формата, набор в конец — отброшен', async () => {
+    const onSubmit = vi.fn();
+    const { user } = renderWithIntl(<Filters onSubmit={onSubmit} />);
+    await user.type(input(), '01.10.2026');
+    await user.type(input(), '7');
+    expect(input()).toHaveValue('01.10.2026');
+    await user.type(input(), '1', { initialSelectionStart: 8, initialSelectionEnd: 8 });
+    expect(input()).toHaveValue('01.10.20126');
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+    await waitFor(() => expect(input()).toHaveAccessibleDescription('Неверный формат'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    // вставка целиком с лишней цифрой в пустое поле — тоже ошибка, не обрезка
+    await user.clear(input());
+    await user.paste('01.10.20126');
+    expect(input()).toHaveValue('01.10.20126');
+    // Раунд 1 ревью хвостов UI, I1: год уже переполнен, затем цифра в конец — отбрасывается только она, прежнее
+    // переполнение остаётся ошибкой формата (а не молча 01.10.2012).
+    await user.type(input(), '7');
+    expect(input()).toHaveValue('01.10.20126');
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+    expect(input()).toHaveAccessibleDescription('Неверный формат');
+    expect(onSubmit).not.toHaveBeenCalled();
+    // функция маски без сведений о наборе лишнее не отбрасывает
+    expect(dateFormat('ru').mask('01.10.20126')).toBe('01.10.20126');
+    expect(dateFormat('ru').mask('01.10.20267', { typedAtEnd: true })).toBe('01.10.2026');
+    expect(dateFormat('ru').mask('01.10.201267', { typedAtEnd: true })).toBe('01.10.20126');
+  });
+
   test('8 цифр подряд разбираются и без маски (вставка в поле)', () => {
     expect(dateFormat('ru').parse('01102026')).toEqual({ y: 2026, m: 10, d: 1 });
     expect(dateFormat('en').parse('10012026')).toEqual({ y: 2026, m: 10, d: 1 });

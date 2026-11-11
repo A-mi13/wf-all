@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { renderApp } from '../../test/app';
 import { cityEditServer, meGeoModerator } from '../../test/geo';
 import { CITY_OWN } from '../../test/me';
+import { http, server } from '../../test/server';
 
 // Названия города по языкам (*; geo.cities.rename — модератор своего): строка на язык (ru, en);
 // язык страны помечен «основное», удалить нельзя; удаление перевода — ConfirmDialog, тело
@@ -144,6 +145,53 @@ describe('названия', () => {
     state.details = { ...state.details, names: { ...state.details.names, en: 'Stavropol Krai' } };
     await act(() => app.queryClient.invalidateQueries({ queryKey: ['geo', 'cities', 'card'] }));
     await waitFor(() => expect(en).toHaveValue('Stavropol Krai'));
+  });
+
+  // Ревью UF2a/III-G, раунд 1, minor 1: сброс к ответу — только отправленные поля; ввод в другом языке,
+  // набранный, пока запрос в полёте, не стирается.
+  test('ввод в другом языке, пока сохранение в полёте, переживает ответ', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { card, user, sent } = await open();
+    server.use(
+      http.patch('/v1/geo/cities/{cityId}', async () => {
+        await gate;
+        return undefined;
+      }),
+    );
+    const en = within(card).getByRole('textbox', { name: /English/ });
+    const ru = within(card).getByRole('textbox', { name: /Русский/ });
+    await user.clear(en);
+    await user.type(en, 'Stavropol City');
+    await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await user.type(ru, ' 2');
+    release();
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(await screen.findByText('Названия сохранены')).toBeInTheDocument();
+    expect(sent[0]?.body).toEqual({ names: { en: 'Stavropol City' } });
+    expect(ru).toHaveValue('Ставрополь 2');
+    expect(en).toHaveValue('Stavropol City');
+  });
+
+  test('правка отправленного языка, пока сохранение в полёте, переживает ответ', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { card, user, sent } = await open();
+    server.use(
+      http.patch('/v1/geo/cities/{cityId}', async () => {
+        await gate;
+        return undefined;
+      }),
+    );
+    const en = within(card).getByRole('textbox', { name: /English/ });
+    await user.clear(en);
+    await user.type(en, 'Stavropol City');
+    await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await user.type(en, ' Center');
+    release();
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(await screen.findByText('Названия сохранены')).toBeInTheDocument();
+    expect(en).toHaveValue('Stavropol City Center');
   });
 
   test('сохранение — только изменённые языки, пробелы по краям сервер обрежет', async () => {

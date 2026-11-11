@@ -122,8 +122,13 @@ export function DateField({
           disabled={disabled}
           value={text}
           onChange={(e) => {
-            // разделители языка подставляет маска (цифровая клавиатура iOS их не даёт)
-            const next = fmt.mask(e.target.value);
+            // разделители языка подставляет маска (цифровая клавиатура iOS их не даёт). Набор в конец — новый текст
+            // = прежний + один знак: только тогда лишняя цифра года отбрасывается (isoDate.ts). Сверка по тексту
+            // строже позиции курсора: цифра в середину года даёт другой префикс, вставка — больше одного знака;
+            // а та же цифра перед такой же («2026» → «20266») — та же строка, отбросить её — ничего не потерять.
+            const entered = e.target.value;
+            const typedAtEnd = entered.length === text.length + 1 && entered.startsWith(text);
+            const next = fmt.mask(entered, { typedAtEnd });
             setText(next);
             const d = fmt.parse(next);
             onChange(next.trim() === '' ? '' : d ? toIso(d) : next.trim());

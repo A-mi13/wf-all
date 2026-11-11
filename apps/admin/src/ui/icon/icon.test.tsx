@@ -66,6 +66,16 @@ test('иконка артборда на 20 px — толщина слоя × 1.
   expect(at(16)).toHaveAttribute('stroke-width', String(Math.round(2.4 * OPTICAL[16] * 100) / 100));
 });
 
+// 12 px — ниже «лесенки» артборда (её нижняя ступень — 16): линия держит толщину 16 px в пикселях, а не тоньше
+// (крестик чипа MultiSelectField; раунд 1 ревью хвостов UI, m2).
+test('на 12 px — линия той же толщины в пикселях, что на 16', () => {
+  const { container } = render(<Icon name="close" size={12} />);
+  expect(container.querySelector('svg')).toHaveAttribute('width', '12');
+  const at16 = 2.4 * OPTICAL[16] * (16 / 48); // px
+  const w = Number(paths(container)[0]!.getAttribute('stroke-width'));
+  expect(w * (12 / 48)).toBeCloseTo(at16, 1);
+});
+
 test('цвет — классами ролей: knockout — поверхность, на акценте — text-inverse; opacity и cap — атрибутами', () => {
   const { container } = render(<Icon name="filter" />);
   const els = paths(container);

@@ -23,16 +23,20 @@ export function CitiesPage() {
   const activator = canActivate && canSearch;
   const [activating, setActivating] = useState(false);
   const list = useGeoCities(toCitiesQuery(search));
-  const empty = Object.keys(search).length === 0 && list.data?.pages[0]?.items.length === 0;
   const open = activator && (
     <Button onClick={() => setActivating(true)}>{t('geo.activate.open')}</Button>
   );
+  const unfiltered = Object.keys(search).length === 0;
+  const empty = unfiltered && list.data?.pages[0]?.items.length === 0;
+  // без фильтров кнопка шапки ждёт ответа: пустой список увёл бы её в пустое состояние — шапка не мигает
+  // (ревью UF2a/III-G, раунд 1, minor 2)
+  const headerAction = empty || (unfiltered && list.isPending) ? undefined : open;
   return (
     <div className={styles.page}>
       <PageHeader
         title={t('nav.cities')}
         subtitle={t('geo.cities.subtitle')}
-        actions={empty ? undefined : open}
+        actions={headerAction}
       />
       <CityCards search={search} emptyAction={open || undefined} />
       {activator && <ActivateDrawer open={activating} onClose={() => setActivating(false)} />}

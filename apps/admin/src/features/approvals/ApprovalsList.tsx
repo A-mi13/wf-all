@@ -176,6 +176,7 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
         empty={
           <EmptyState
             tone={box === 'incoming' ? 'accent' : 'neutral'}
+            illustration="whistle"
             title={t(`empty.${box}_title`)}
             text={t(`empty.${box}_text`)}
           />

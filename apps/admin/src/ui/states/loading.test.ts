@@ -21,6 +21,12 @@ test('стражу есть что читать', () => {
   expect(sources.some((f) => f.endsWith('.test.tsx'))).toBe(false);
 });
 
+// LoadingRows — деталь DataTable: из набора (ui/index.ts) экранам он не выдаётся.
+test('LoadingRows не экспортируется из ui/index.ts', () => {
+  const index = readFileSync(join(import.meta.dirname, '../index.ts'), 'utf8');
+  expect(index).not.toMatch(/\bLoadingRows\b/);
+});
+
 test('экраны не рисуют загрузку сами — только DataState / DataTable', () => {
   // исключений нет: все экраны переведены в UF2a.10 (список ожидающих снят, ревью UF2a/III-S m5)
   expect(offenders).toEqual([]);

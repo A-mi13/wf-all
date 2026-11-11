@@ -232,6 +232,26 @@ describe('состояния', () => {
     expect(await screen.findByRole('dialog', { name: 'Активировать город' })).toBeInTheDocument();
   });
 
+  // Ревью UF2a/III-G, раунд 1, minor 2: пока список без фильтров грузится, кнопки в шапке нет — иначе на пустом
+  // списке она мелькала бы и уезжала в пустое состояние.
+  test('пока список грузится, «Активировать город» в шапке не мелькает', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    geoServer({ cities: [] });
+    server.use(
+      http.get('/v1/geo/cities', async () => {
+        await gate;
+        return undefined;
+      }),
+    );
+    renderApp('/geo/cities', { me: meActivator });
+    await page();
+    expect(screen.queryByRole('button', { name: 'Активировать город' })).toBeNull();
+    release();
+    await screen.findByText('Городов пока нет');
+    expect(screen.getAllByRole('button', { name: 'Активировать город' })).toHaveLength(1);
+  });
+
   test('ошибка — код и «Повторить», повтор загружает', async () => {
     geoServer();
     let fail = true;
@@ -265,7 +285,8 @@ describe('права', () => {
     geoServer();
     renderApp('/geo/cities', { me: meActivator });
     await page();
-    expect(screen.getByRole('button', { name: 'Активировать город' })).toBeInTheDocument();
+    // кнопка шапки — после ответа списка (без фильтров пустой список увёл бы её в пустое состояние)
+    expect(await screen.findByRole('button', { name: 'Активировать город' })).toBeInTheDocument();
   });
 
   // Ревью G8, m13: активация начинается с поиска места — без geo.places.search панель упёрлась бы в отказ.

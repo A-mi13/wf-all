@@ -237,15 +237,7 @@ export function MultiSelectField({
                   aria-label={t('remove', { label: text })}
                   onClick={() => toggle(v)}
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="12"
-                    height="12"
-                    aria-hidden="true"
-                    className={styles.icon}
-                  >
-                    <path d="M6 6 L18 18 M18 6 L6 18" />
-                  </svg>
+                  <Icon name="close" size={12} />
                 </button>
               </li>
             );

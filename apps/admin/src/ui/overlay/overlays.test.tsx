@@ -1,4 +1,5 @@
 import { screen, within } from '@testing-library/react';
+import { ICONS } from '@wf/icons';
 import { type ComponentType, type ReactNode, StrictMode, useRef, useState } from 'react';
 import { describe, expect, test, vi } from 'vitest';
 import { renderWithIntl } from '../../test/render';
@@ -86,7 +87,10 @@ describe.each(overlays)('%s', (_, Overlay) => {
 
   test('кнопка «Закрыть» закрывает и возвращает фокус', async () => {
     const { user, dialog } = await open();
-    await user.click(within(dialog).getByRole('button', { name: 'Закрыть' }));
+    const close = within(dialog).getByRole('button', { name: 'Закрыть' });
+    // значок — close из @wf/icons, не свой контур (принцип 7)
+    expect(close.querySelector('path')).toHaveAttribute('d', ICONS.close.layers[0]?.d);
+    await user.click(close);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Открыть' })).toHaveFocus();
   });

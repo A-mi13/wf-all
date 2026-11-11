@@ -1,4 +1,5 @@
 import { fireEvent, screen, within } from '@testing-library/react';
+import { ICONS } from '@wf/icons';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { describe, expect, test, vi } from 'vitest';
@@ -60,6 +61,17 @@ describe('MultiSelectField', () => {
     expect(onValue).toHaveBeenLastCalledWith(['c1']);
     expect(combo()).toHaveTextContent('Выбрано: 1');
     expect(combo()).toHaveFocus();
+  });
+
+  // Крестик чипа — значок close из @wf/icons, не свой контур (принцип 7; ревью UF2a/II-A, m7).
+  test('крестик чипа «Убрать» — значок close набора', async () => {
+    const { user } = renderWithIntl(<Cities />);
+    await user.click(combo());
+    await user.click(screen.getByRole('option', { name: 'Ставрополь' }));
+    const remove = screen.getByRole('button', { name: 'Убрать «Ставрополь»' });
+    expect(remove.querySelector('path')).toHaveAttribute('d', ICONS.close.layers[0]?.d);
+    // прежний размер крестика чипа — 12 px (раунд 1 ревью хвостов UI, m2)
+    expect(remove.querySelector('svg')).toHaveAttribute('width', '12');
   });
 
   test('клавиатура: ↓ открывает, Space отмечает активную, Esc закрывает, фокус на кнопке', async () => {

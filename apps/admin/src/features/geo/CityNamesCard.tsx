@@ -87,13 +87,17 @@ function NamesForm({ city, readOnly }: { city: GeoCityDetails; readOnly?: boolea
       }),
     );
     if (Object.keys(changed).length === 0) return;
+    // что стояло в полях в момент отправки: отправленное и возвращённое к сохранённому
+    const submitted = (l: Locale) => (cleared.includes(l) ? (city.names[l] ?? '') : v.names[l]);
     const updated = await save.mutateAsync({ names: changed });
-    // форма — к ответу сервера: сохранённое больше не «грязное» и не перекрывает будущие данные (раунд 1, I1)
-    form.reset(
-      { names: Object.fromEntries(LOCALES.map((l) => [l, updated.names[l] ?? ''])) },
-      // resetOptions формы (keepDirtyValues) здесь не нужны: сохранённое — уже не ввод
-      { keepDirtyValues: false },
-    );
+    // К ответу сервера — только поля, которые не правили, пока запрос был в полёте: сохранённое больше не
+    // «грязное» и не перекрывает будущие данные (раунд 1, I1), а ввод, набранный во время запроса (в другом языке
+    // или поверх отправленного), остаётся (ревью UF2a/III-G, раунд 1, minor 1). Неотправленное нетронутое поле
+    // и так равно сохранённому — его сброс ничего не меняет.
+    for (const l of LOCALES) {
+      if (form.getValues(`names.${l}`) !== submitted(l)) continue;
+      form.resetField(`names.${l}`, { defaultValue: updated.names[l] ?? '' });
+    }
     toast.success(t('saved'));
   };
 

@@ -60,7 +60,6 @@ export {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  LoadingRows,
   NoNetworkState,
   OfflineBanner,
   PendingApprovalNotice,

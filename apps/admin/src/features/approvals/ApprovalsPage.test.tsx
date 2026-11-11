@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ICONS } from '@wf/icons';
 import { HttpResponse } from 'msw';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { components } from '../../api/gen/admin';
@@ -91,6 +92,19 @@ describe('вкладки', () => {
     approvalsServer({ incoming: [] });
     renderApp('/approvals', { me: meOwner });
     expect(await screen.findByText('Входящих нет')).toBeInTheDocument();
+  });
+
+  // Пустая очередь — иллюстрация «свисток» (спека UI-фундамента §4.4, таблица «экран → иллюстрация»
+  // в design/README.md): у обеих вкладок экрана.
+  test.each([
+    ['/approvals', 'Входящих нет'],
+    ['/approvals?box=mine', 'Вы ничего не отправляли'],
+  ])('пусто (%s) — иллюстрация whistle', async (path, title) => {
+    approvalsServer({ incoming: [], mine: [] });
+    renderApp(path, { me: meOwner });
+    const block = (await screen.findByText(title)).parentElement!.parentElement!;
+    const svg = block.querySelector('svg[width="64"]');
+    expect(svg?.querySelector('path')).toHaveAttribute('d', ICONS.whistle.layers[0]?.d);
   });
 
   test('«Показать ещё» — следующая страница по курсору', async () => {

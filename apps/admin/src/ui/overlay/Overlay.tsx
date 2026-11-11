@@ -10,6 +10,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'use-intl';
 import { cx } from '../cx';
+import { Icon } from '../icon';
 import styles from './Overlay.module.css';
 import { focusables, isTopModal, isTopOverlay, pushOverlay, trapTab } from './stack';
 
@@ -141,15 +142,7 @@ function Panel({
             onClick={onClose}
             disabled={!dismissible}
           >
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              aria-hidden="true"
-              className={styles.icon}
-            >
-              <path d="M6 6 L18 18 M18 6 L6 18" />
-            </svg>
+            <Icon name="close" size={16} />
           </button>
         </div>
         <div ref={body} className={styles.body}>

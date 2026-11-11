@@ -184,6 +184,17 @@
         }
       ]
     },
+    "close": {
+      "viewBox": "0 0 48 48",
+      "layers": [
+        {
+          "d": "M13 13 L35 35 M35 13 L13 35",
+          "role": "object",
+          "paint": "stroke",
+          "width": 2.4
+        }
+      ]
+    },
     "columns": {
       "viewBox": "0 0 48 48",
       "layers": [

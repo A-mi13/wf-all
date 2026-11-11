@@ -69,7 +69,7 @@ node design/tools/extract-export.mjs "design/_export/<файл>.html" design/scr
 | --- | --- | --- |
 | «Города и запуск» — городов нет | `pitch` (поле) + «Активировать город» | `features/geo/CityCards.tsx` |
 | Поиск места GeoNames — до ввода | `ball` (мяч) | `features/geo/PlaceSearch.tsx` |
-| Подтверждения — очередь пуста | `whistle` (свисток) | по спеке, в экран ещё не внесено |
+| Подтверждения — очередь пуста (обе вкладки) | `whistle` (свисток) | `features/approvals/ApprovalsList.tsx` |
 | Флаги функций | `corner` (флажок углового) | G9, Task 22 |
 | Импорт GeoNames | `time` (секундомер) | G9, Task 20 |
 
@@ -101,6 +101,7 @@ node design/tools/extract-export.mjs "design/_export/<файл>.html" design/scr
 | `undo` | стрелка назад с возвратом — дорисовано * | «Отменить» в тосте |
 | `calendar` | календарь с выбранной датой — дорисовано * | `DateField` |
 | `chevron-down` | стрелка списка — дорисовано * | `Select` |
+| `close` | крестик «×» — дорисовано * | «Закрыть» оверлея, «Убрать» у чипа `MultiSelectField` |
 
 Лупа отдельно не дорисована: контур «поиск» артборда годится и на 24.
 

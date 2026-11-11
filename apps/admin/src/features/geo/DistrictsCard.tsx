@@ -36,15 +36,15 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
   const [renaming, setRenaming] = useState<GeoDistrict | null>(null);
   // Архив и возврат меняют порядок строк (архивные — внизу): React переставляет строку в DOM, и в
   // браузере фокус с её кнопки слетает на body (ревью G8, m4). После ответа — на кнопку этой строки;
-  // переименование, меняющее порядок, — на «Переименовать» этой строки (n3). Цель одноразовая: как только
+  // переименование, меняющее порядок (n3), — возврат фокуса Overlay на тот же узел-открыватель «Переименовать»
+  // (строка переезжает до закрытия окна: мутация ждёт перечитывания районов). Цель одноразовая: как только
   // строка на месте, фокус ставится (если он на body) и цель гаснет — и в начале нового действия; иначе
   // следующее обновление списка увело бы фокус на давно обработанную строку (n2, раунд 1 minor 1).
   const root = useRef<HTMLDivElement>(null);
-  const [refocus, setRefocus] = useState<{ id: string; kind: 'state' | 'rename' } | null>(null);
+  const [refocus, setRefocus] = useState<string | null>(null);
   useEffect(() => {
     if (!refocus) return;
-    const attr = refocus.kind === 'rename' ? 'data-district-rename' : 'data-district-action';
-    const target = root.current?.querySelector<HTMLElement>(`[${attr}="${refocus.id}"]`);
+    const target = root.current?.querySelector<HTMLElement>(`[data-district-action="${refocus}"]`);
     if (!target) return;
     const active = document.activeElement;
     if (!active || active === document.body) target.focus();
@@ -59,7 +59,7 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
       {
         onSuccess: () => {
           toast.success(t(archived ? 'archived_toast' : 'restored_toast', { name: d.name }));
-          setRefocus({ id: d.id, kind: 'state' });
+          setRefocus(d.id);
         },
         onError: (e) => toast.error(errorText(e)),
         onSettled: () => setPendingId(null),
@@ -94,7 +94,6 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
             <Button
               variant="secondary"
               aria-label={t('rename_label', { name: d.name })}
-              data-district-rename={d.id}
               disabled={busy}
               onClick={() => {
                 setRefocus(null);
@@ -146,12 +145,7 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
         empty={<EmptyState title={t('empty_title')} text={t('empty_text')} />}
       />
       {canEdit && (
-        <RenameDistrict
-          cityId={cityId}
-          district={renaming}
-          onClose={() => setRenaming(null)}
-          onRenamed={(id) => setRefocus({ id, kind: 'rename' })}
-        />
+        <RenameDistrict cityId={cityId} district={renaming} onClose={() => setRenaming(null)} />
       )}
     </div>
   );
@@ -198,12 +192,10 @@ function RenameDistrict({
   cityId,
   district,
   onClose,
-  onRenamed,
 }: {
   cityId: string;
   district: GeoDistrict | null;
   onClose: () => void;
-  onRenamed: (id: string) => void;
 }) {
   const t = useTranslations('geo.districts');
   const update = useUpdateDistrict(cityId);
@@ -214,9 +206,7 @@ function RenameDistrict({
       title={t('rename_title')}
       dismissible={!update.isPending}
     >
-      {district && (
-        <RenameForm district={district} update={update} onClose={onClose} onRenamed={onRenamed} />
-      )}
+      {district && <RenameForm district={district} update={update} onClose={onClose} />}
     </Modal>
   );
 }
@@ -225,12 +215,10 @@ function RenameForm({
   district,
   update,
   onClose,
-  onRenamed,
 }: {
   district: GeoDistrict;
   update: ReturnType<typeof useUpdateDistrict>;
   onClose: () => void;
-  onRenamed: (id: string) => void;
 }) {
   const t = useTranslations('geo.districts');
   const ta = useTranslations('actions');
@@ -241,7 +229,6 @@ function RenameForm({
     if (name === district.name) return onClose();
     await update.mutateAsync({ id: district.id, patch: { name } });
     toast.success(t('renamed'));
-    onRenamed(district.id);
     onClose();
   };
   return (

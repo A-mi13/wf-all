@@ -6,8 +6,11 @@ import styles from './Icon.module.css';
 // не получает фокус), с label — role="img" и имя. Толщина контура — атрибутом stroke-width (данные, не
 // стиль — CSP): у иконок артборда и дорисованных — ширина слоя × OPTICAL[size] (оптическая коррекция
 // «лесенки» артборда 14), у иконок меню (nav) — абсолютная ширина слоя, вид меню прежний (m1). Цвет —
-// классами ролей (Icon.module.css): предмет — currentColor.
-export type IconSize = 16 | 20 | 24;
+// классами ролей (Icon.module.css): предмет — currentColor. 12 — ниже нижней ступени «лесенки» (16): линия держит
+// толщину 16 px в пикселях (OPTICAL[16] × 16/12), а не истончается (крестик чипа MultiSelectField).
+export type IconSize = 12 | 16 | 20 | 24;
+
+const optical = (size: IconSize) => (size === 12 ? OPTICAL[16] * (16 / 12) : OPTICAL[size]);
 
 const ROLE_CLASS: Record<IconLayer['role'], string | undefined> = {
   object: styles.object,
@@ -80,7 +83,7 @@ export function Icon({
   label?: string;
   className?: string;
 }) {
-  const scale = iconGroup(name) === 'nav' ? 1 : OPTICAL[size];
+  const scale = iconGroup(name) === 'nav' ? 1 : optical(size);
   return (
     <IconGraphic
       name={name}
