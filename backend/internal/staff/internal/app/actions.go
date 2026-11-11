@@ -56,6 +56,9 @@ type invitePayload struct {
 	CityIDs         []uuid.UUID `json:"city_ids"`
 	ExistingID      *uuid.UUID  `json:"existing_id,omitempty"`
 	ExistingVersion int64       `json:"existing_version,omitempty"`
+	// Locale — язык учётки и писем (IL2): выбранный приглашающим или его язык на момент запроса. nil — запрос
+	// подан до IL2 (поля нет): новая учётка — язык по умолчанию базы, выключенная — язык прежний.
+	Locale *string `json:"locale,omitempty"`
 }
 
 // rolePayload — staff.role_change: цель и её версия, было (право запроса по D16 считается из пары) и
@@ -320,7 +323,7 @@ func (a *App) execInvite(ctx context.Context, tx pgx.Tx, raw json.RawMessage, ap
 		return business(a.reinvite(ctx, tx, q, t, p, by, after))
 	}
 	now := a.clock.Now()
-	c, err := a.createInvited(ctx, q, newAccount{email: p.Email, name: p.DisplayName, role: p.Role, cities: cities, by: by.staffID}, now)
+	c, err := a.createInvited(ctx, q, newAccount{email: p.Email, name: p.DisplayName, role: p.Role, cities: cities, by: by.staffID, locale: p.Locale}, now)
 	if err != nil {
 		return business(err)
 	}
@@ -334,10 +337,10 @@ func (a *App) execInvite(ctx context.Context, tx pgx.Tx, raw json.RawMessage, ap
 }
 
 // invitePayloadShaped — роль приглашения из perm.Roles и её города проходят roleShape и уже в его нормальной форме
-// (по возрастанию, без повторов — так их пишет Invite).
+// (по возрастанию, без повторов — так их пишет Invite); язык, если есть, — ru | en (checkLocale, как сценарий).
 func invitePayloadShaped(p invitePayload) bool {
 	cities, err := roleShape(p.Role, p.CityIDs)
-	return err == nil && slices.Equal(cities, p.CityIDs)
+	return err == nil && slices.Equal(cities, p.CityIDs) && (p.Locale == nil || checkLocale(*p.Locale) == nil)
 }
 
 // reinvite — почта выключенной учётки t приглашена снова (§2.6): роль и города из запроса, затем сброс
@@ -356,9 +359,17 @@ func (a *App) reinvite(ctx context.Context, tx pgx.Tx, q *staffdb.Queries, t acc
 		}
 	}
 	after["reinvited"] = true
+	// язык — выбранный приглашающим (IL2); сменился — было/стало в записи staff.invited
+	var before map[string]any
+	if p.Locale != nil && *p.Locale != t.locale {
+		if err := q.SetLocale(ctx, staffdb.SetLocaleParams{Locale: *p.Locale, ID: t.id}); err != nil {
+			return err
+		}
+		before, after["locale"] = map[string]any{"locale": t.locale}, *p.Locale
+	}
 	name := p.DisplayName
 	_, err := a.resetAccess(ctx, tx, q, t, resetSpec{
-		by: by, action: actionInvited, after: after, purpose: purposeInvite, name: &name,
+		by: by, action: actionInvited, before: before, after: after, purpose: purposeInvite, name: &name,
 		event: func(v int64) events.Event { return staff.InvitedEvent(t.id, v, p.Role) },
 	})
 	return err

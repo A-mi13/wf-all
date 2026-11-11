@@ -20,7 +20,7 @@ WHERE a.status = 'active' AND r.role = 'owner' AND a.id <> sqlc.arg(staff_id)::u
 -- name: ManageLockAccount :one
 -- Цель управления под замком (выключение, сброс, роль, сессии, приглашение).
 SELECT a.id, a.status::text AS status, a.display_name, a.email::text AS email, a.locked_until, a.version,
-       r.role::text AS role
+       a.locale, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.id = sqlc.arg(id)::uuid
@@ -30,7 +30,7 @@ FOR UPDATE OF a;
 -- Автор, инициатор или подтверждающий под разделяемым замком: пока действие идёт, его нельзя
 -- выключить, сбросить или сменить ему роль (M-4, m4).
 SELECT a.id, a.status::text AS status, a.display_name, a.email::text AS email, a.locked_until, a.version,
-       r.role::text AS role
+       a.locale, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.id = sqlc.arg(id)::uuid

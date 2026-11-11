@@ -551,6 +551,7 @@ type newAccount struct {
 	email, name, role string
 	cities            []uuid.UUID
 	by                uuid.UUID
+	locale            *string // язык учётки; nil — по умолчанию базы
 }
 
 // created — созданная учётка: id, версия агрегата (для события staff.invited) и нормализованная почта
@@ -587,7 +588,8 @@ func validateInvitee(email, name string) (string, string, error) {
 // подтверждения staff.invite в 8b): почта и имя — validateInvitee; почта занята (любой статус) —
 // staff.ErrEmailTaken. Несуществующий город — ошибка внешнего ключа (вызывающий переводит в
 // staff.city_not_found), модератор без городов — отложенный триггер на коммите. Автор by — created_by
-// и granted_by (uuid.Nil — оператор, NULL). Приглашение, аудит и событие — у вызывающего.
+// и granted_by (uuid.Nil — оператор, NULL); язык — na.locale (nil — по умолчанию базы). Приглашение, аудит и
+// событие — у вызывающего.
 func (a *App) createInvited(ctx context.Context, q *staffdb.Queries, na newAccount, now time.Time) (created, error) {
 	email, name, err := validateInvitee(na.email, na.name)
 	if err != nil {
@@ -606,6 +608,11 @@ func (a *App) createInvited(ctx context.Context, q *staffdb.Queries, na newAccou
 	}
 	if err != nil {
 		return created{}, err
+	}
+	if na.locale != nil {
+		if err := q.SetLocale(ctx, staffdb.SetLocaleParams{Locale: *na.locale, ID: c.id}); err != nil {
+			return created{}, err
+		}
 	}
 	if err := q.InsertRole(ctx, staffdb.InsertRoleParams{StaffID: c.id, Role: na.role, GrantedBy: by, Now: now}); err != nil {
 		return created{}, err

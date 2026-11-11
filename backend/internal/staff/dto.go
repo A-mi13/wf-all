@@ -78,10 +78,11 @@ type MFAView struct {
 }
 
 // InviteInput — приглашение нового сотрудника (схема StaffInviteRequest): почта как ввели (её
-// нормализует сценарий), имя, роль и города модератора.
+// нормализует сценарий), имя, роль, города модератора и язык учётки и писем (nil — язык приглашающего).
 type InviteInput struct {
 	Email       string
 	DisplayName string
 	Role        string
 	CityIDs     []uuid.UUID
+	Locale      *string
 }

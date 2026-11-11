@@ -147,7 +147,14 @@ paths:
 - **Управление (§2.5–2.6, §4.9, D16, D17, P13; `internal/app/{manage,actions,accounts}.go`):** сценарий решает
   по `Decide`: `Allow` — сразу, `NeedsApproval` — запрос `a.request` (202), `Deny` — 403 `errForbidden`.
   Приглашение — всегда запрос (почта active/invited — `email_taken`, выключенной — `existing_id` + её версия,
-  исполнение возвращает ту же учётку сбросом доступа с новой ролью, именем и приглашением `invite`); смена роли —
+  исполнение возвращает ту же учётку сбросом доступа с новой ролью, именем, языком и приглашением `invite`). Язык
+  (IL2) — `InviteInput.Locale` (`checkLocale`, nil — язык инициатора из `ManageShareAccount` под замком) всегда
+  пишется в payload (`invitePayload.Locale`, `*string`: nil — запрос до IL2, исполняется без смены языка);
+  `invitePayloadShaped` проверяет его `checkLocale` до `execLocks`; новая учётка — `createInvited` с `locale`,
+  выключенная — `SetLocale` и было/стало в `staff.invited` (`resetSpec.before`) (стражи
+  `TestInviteLocaleFromInitiator`, `TestExecInviteRejectsLocale`, `TestExecInviteLegacyPayloadWithoutLocale`,
+  `TestInviteDisabledLocale`). Ссылка писем приглашения — `ComposeInvite`: `/accept?lang=<mailLocale учётки>`
+  (`TestComposeInvite`, все три повторные отправки — `TestInviteResendKeepsLocale`); смена роли —
   таблица D16 (`rolePermission`; без изменений — `nil, nil`); выключение — право по роли цели (владелец — только
   запрос `staff.revoke_owner`); сброс доступа — всегда запрос. Выключенная цель смены роли и сброса — 403 (вернуть
   её — только приглашением). Над собой — `self_action`; `confirm` — `domain.NormalizeEmail` и сравнение с почтой

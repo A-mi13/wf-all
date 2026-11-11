@@ -330,7 +330,7 @@ func (q *Queries) ManageLiveInvites(ctx context.Context, ids []uuid.UUID) ([]Man
 
 const manageLockAccount = `-- name: ManageLockAccount :one
 SELECT a.id, a.status::text AS status, a.display_name, a.email::text AS email, a.locked_until, a.version,
-       r.role::text AS role
+       a.locale, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.id = $1::uuid
@@ -344,6 +344,7 @@ type ManageLockAccountRow struct {
 	Email       string
 	LockedUntil *time.Time
 	Version     int64
+	Locale      string
 	Role        string
 }
 
@@ -358,6 +359,7 @@ func (q *Queries) ManageLockAccount(ctx context.Context, id uuid.UUID) (ManageLo
 		&i.Email,
 		&i.LockedUntil,
 		&i.Version,
+		&i.Locale,
 		&i.Role,
 	)
 	return i, err
@@ -459,7 +461,7 @@ func (q *Queries) ManageSetRole(ctx context.Context, arg ManageSetRoleParams) er
 
 const manageShareAccount = `-- name: ManageShareAccount :one
 SELECT a.id, a.status::text AS status, a.display_name, a.email::text AS email, a.locked_until, a.version,
-       r.role::text AS role
+       a.locale, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.id = $1::uuid
@@ -473,6 +475,7 @@ type ManageShareAccountRow struct {
 	Email       string
 	LockedUntil *time.Time
 	Version     int64
+	Locale      string
 	Role        string
 }
 
@@ -488,6 +491,7 @@ func (q *Queries) ManageShareAccount(ctx context.Context, id uuid.UUID) (ManageS
 		&i.Email,
 		&i.LockedUntil,
 		&i.Version,
+		&i.Locale,
 		&i.Role,
 	)
 	return i, err

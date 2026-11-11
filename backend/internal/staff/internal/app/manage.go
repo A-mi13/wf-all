@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -78,6 +79,7 @@ var errNoApprovals = errors.New("staff: подтверждения не заре
 type acct struct {
 	id                        uuid.UUID
 	status, role, name, email string
+	locale                    string // язык учётки (приглашение: язык новичка по умолчанию, было/стало сброса)
 	version                   int64
 	lockedUntil               *time.Time
 }
@@ -101,11 +103,11 @@ func lockAccounts(ctx context.Context, q *staffdb.Queries, target uuid.UUID, sha
 		if u == target {
 			var r staffdb.ManageLockAccountRow
 			r, err = q.ManageLockAccount(ctx, u)
-			a = acct{id: r.ID, status: r.Status, role: r.Role, name: r.DisplayName, email: r.Email, version: r.Version, lockedUntil: r.LockedUntil}
+			a = acct{id: r.ID, status: r.Status, role: r.Role, name: r.DisplayName, email: r.Email, locale: r.Locale, version: r.Version, lockedUntil: r.LockedUntil}
 		} else {
 			var r staffdb.ManageShareAccountRow
 			r, err = q.ManageShareAccount(ctx, u)
-			a = acct{id: r.ID, status: r.Status, role: r.Role, name: r.DisplayName, email: r.Email, version: r.Version, lockedUntil: r.LockedUntil}
+			a = acct{id: r.ID, status: r.Status, role: r.Role, name: r.DisplayName, email: r.Email, locale: r.Locale, version: r.Version, lockedUntil: r.LockedUntil}
 		}
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -350,7 +352,8 @@ func (a *App) cancelRequests(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) 
 // bootstrap (validateInvitee), роль — из списка, города — только у модератора (1–100, существуют —
 // иначе 422). Право — grant_elevated для owner/admin, иначе grant (Deny — 403 до обращения к базе).
 // Почта действующей или приглашённой учётки — staff.email_taken; выключенной — запрос с existing_id и её
-// версией (исполнение вернёт ту же учётку сбросом доступа, §2.6).
+// версией (исполнение вернёт ту же учётку сбросом доступа, §2.6). Язык учётки и писем (IL2) — in.Locale
+// (не ru/en — 400 по body.locale, enum), нет — язык инициатора под замком на момент запроса; снимок — в payload.
 func (a *App) Invite(ctx context.Context, s *auth.Staff, in staff.InviteInput, m staff.Meta) (approvals.Approval, error) {
 	email, name, err := validateInvitee(in.Email, in.DisplayName)
 	if err != nil {
@@ -359,6 +362,11 @@ func (a *App) Invite(ctx context.Context, s *auth.Staff, in staff.InviteInput, m
 	cities, err := roleShape(in.Role, in.CityIDs)
 	if err != nil {
 		return approvals.Approval{}, err
+	}
+	if in.Locale != nil {
+		if err := checkLocale(*in.Locale); err != nil {
+			return approvals.Approval{}, err
+		}
 	}
 	if s.Decide(invitePermission(in.Role), uuid.Nil) == auth.Deny {
 		return approvals.Approval{}, errForbidden
@@ -374,7 +382,11 @@ func (a *App) Invite(ctx context.Context, s *auth.Staff, in staff.InviteInput, m
 		if err != nil {
 			return err
 		}
-		p := invitePayload{payloadBase: base(by), Email: email, DisplayName: name, Role: in.Role, CityIDs: cities}
+		locale := by.locale
+		if in.Locale != nil {
+			locale = *in.Locale
+		}
+		p := invitePayload{payloadBase: base(by), Email: email, DisplayName: name, Role: in.Role, CityIDs: cities, Locale: &locale}
 		ex, err := q.ManageFindByEmail(ctx, email)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -734,7 +746,9 @@ func (a *App) resetAccess(ctx context.Context, tx pgx.Tx, q *staffdb.Queries, t 
 	if err != nil {
 		return "", err
 	}
-	e := r.by.entry(r.action, t.id, map[string]any{"status": t.status, "role": t.role}, r.after, r.m)
+	before := map[string]any{"status": t.status, "role": t.role}
+	maps.Copy(before, r.before)
+	e := r.by.entry(r.action, t.id, before, r.after, r.m)
 	e.Reason = r.reason
 	if err := audit.Write(ctx, e); err != nil {
 		return "", err
@@ -750,6 +764,7 @@ type resetSpec struct {
 	by      actor
 	action  string // staff.access_reset | staff.invited (выключенная — снова)
 	reason  string
+	before  map[string]any // дополнительно к статусу и роли «было» (язык повторного приглашения)
 	after   map[string]any
 	purpose string
 	name    *string // новое имя (повторное приглашение); nil — прежнее

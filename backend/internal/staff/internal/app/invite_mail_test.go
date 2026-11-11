@@ -37,15 +37,17 @@ func TestComposeInvite(t *testing.T) {
 	for _, c := range []struct {
 		msg        mail.Message
 		code, name string
-		lang       string
-	}{{inv, ruCode, "Иван П.", "Приглашение"}, {reset, enCode, "Nina K.", "access reset"}} {
+		lang, loc  string
+	}{{inv, ruCode, "Иван П.", "Приглашение", "ru"}, {reset, enCode, "Nina K.", "access reset", "en"}} {
 		txt := c.msg.Subject + "\n" + c.msg.Text
-		for _, want := range []string{c.code, c.name, testOrigin + "/accept", "2026-10-14 12:00 UTC", c.lang} {
+		// IL2: ссылка открывает /accept на языке учётки (?lang=), почты в адресе нет
+		link := testOrigin + "/accept?lang=" + c.loc + ","
+		for _, want := range []string{c.code, c.name, link, "2026-10-14 12:00 UTC", c.lang} {
 			if !strings.Contains(txt, want) {
 				t.Errorf("в письме нет %q:\n%s", want, txt)
 			}
 		}
-		if strings.Contains(txt, "/accept?") || strings.Contains(txt, "accept/") {
+		if strings.Count(txt, "/accept") != 1 || strings.Contains(txt, "accept/") || strings.Contains(txt, "email=") {
 			t.Errorf("в ссылке лишнее:\n%s", txt)
 		}
 	}

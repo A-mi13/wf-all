@@ -60,8 +60,8 @@ func (a *App) ComposeLocked(ctx context.Context, ref, recipient uuid.UUID) (mail
 }
 
 // ComposeInvite — письмо staff.invite или staff.access_reset (§4.3, §4.12) о приглашении ref
-// получателю recipient: имя, код, ссылка ADMIN_ORIGIN/accept (почты в адресе нет — её вводят на
-// странице) и срок кода. Язык — staff_accounts.locale учётки. Письмо больше не нужно — mail.ErrSkip:
+// получателю recipient: имя, код, ссылка ADMIN_ORIGIN/accept?lang=<язык учётки> (почты в адресе нет — её
+// вводят на странице) и срок кода. Язык — staff_accounts.locale учётки. Письмо больше не нужно — mail.ErrSkip:
 // приглашения нет, получатель — не его учётка или учётка уже не invited, вид письма не соответствует
 // назначению, приглашение погашено или принято-и-закрыто, срок истёк; код нечитаем (ключ убран из
 // кольца раньше rekey) — тоже mail.ErrSkip с предупреждением: повторы задачи этого не исправят.
@@ -88,13 +88,15 @@ func (a *App) ComposeInvite(ctx context.Context, ref, recipient uuid.UUID, kind 
 	if !ok {
 		return mail.Message{}, mail.ErrSkip
 	}
+	// ссылка открывает /accept на языке письма (IL2, §4.3): lang — ru | en (mailLocale), почты в адресе нет
+	to := mailTo{email: row.Email, locale: mailLocale(row.Locale)}
 	args := map[string]any{
 		"name":    row.DisplayName,
 		"code":    code,
-		"link":    strings.TrimSuffix(a.origin, "/") + "/accept",
+		"link":    strings.TrimSuffix(a.origin, "/") + "/accept?lang=" + to.locale,
 		"expires": row.ExpiresAt.UTC().Format(mailTime),
 	}
-	return a.compose(mailTo{email: row.Email, locale: mailLocale(row.Locale)}, kind, args)
+	return a.compose(to, kind, args)
 }
 
 // ComposeBootstrapped — письмо staff.bootstrapped (U2) получателю recipient: кого добавил оператор
