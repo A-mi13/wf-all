@@ -53,7 +53,9 @@ const ROLE: Record<PopoverKind, string | undefined> = {
 //   открытии, при прокрутке любого предка (scroll с capture), resize и ResizeObserver якоря и пузыря — один кадр
 //   на пересчёт. Якорь ушёл из видимой области — подсказка закрывается ('scroll'), меню прижато к краю.
 //   Якорь пропал из документа или подменён — закрыть ('focusout').
-// - Модальный (календарь): фокус внутрь при открытии, обратно на якорь при закрытии; щелчок (click) вне
+// - Модальный (календарь): фокус внутрь при открытии — на помеченное data-autofocus (выбранный день), иначе на
+//   первое фокусируемое (ревью UF2a/II, r3: при каждом показе, и во втором запуске StrictMode — эффект содержимого
+//   фокус уже не вернёт), обратно на якорь при закрытии; щелчок (click) вне
 //   якоря и пузыря закрывает ('outside', как APG Date Picker Dialog).
 export function Popover({
   anchor,
@@ -180,7 +182,10 @@ export function Popover({
       document.addEventListener('pointerdown', onPointerDown, true);
     } else {
       document.addEventListener('click', onOutsideClick, true);
-      if (!el.contains(document.activeElement)) (focusables(el)[0] ?? el).focus();
+      if (!el.contains(document.activeElement)) {
+        const preferred = el.querySelector<HTMLElement>('[data-autofocus]');
+        (preferred ?? focusables(el)[0] ?? el).focus();
+      }
     }
 
     return () => {

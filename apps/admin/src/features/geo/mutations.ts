@@ -4,7 +4,7 @@ import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
 import { useLocale } from '../../i18n/locale';
-import { CITIES_KEY, geoKeys } from './queries';
+import { CITIES_KEY, GEO_PLACES_KEY, geoKeys } from './queries';
 
 type GeoCityDetails = components['schemas']['GeoCityDetails'];
 type GeoCityPatch = components['schemas']['GeoCityPatch'];
@@ -55,7 +55,8 @@ export function useUpdateCity(cityId: string, mutationKey: readonly unknown[]) {
 
 // linkGeoCity: ручная привязка к месту GeoNames. 409 geo.city_already_linked — город уже привязан
 // (например, сверкой импорта, пока окно было открыто): карточка перечитывается, иначе страница так и
-// показывала бы «не привязан» и «Привязать» до перезагрузки (ревью G8, m2).
+// показывала бы «не привязан» и «Привязать» до перезагрузки (ревью G8, m2). Успех и 409
+// geo.city_already_active — места GeoNames устарели (метка «уже заведён», ревью G8, m3).
 export function useLinkCity(cityId: string) {
   const api = useApi();
   const locale = useLocale();
@@ -74,10 +75,17 @@ export function useLinkCity(cityId: string) {
       ),
     {
       mutationKey: ['geo', 'link', cityId],
-      onSuccess: onResult,
+      onSuccess: async (city) => {
+        await Promise.all([
+          onResult(city),
+          queryClient.invalidateQueries({ queryKey: GEO_PLACES_KEY }),
+        ]);
+      },
       onError: (e) => {
         if (isApiError(e, 'geo.city_already_linked'))
           void queryClient.invalidateQueries({ queryKey: [...CITIES_KEY, 'card', cityId] });
+        if (isApiError(e, 'geo.city_already_active'))
+          void queryClient.invalidateQueries({ queryKey: GEO_PLACES_KEY });
       },
     },
   );

@@ -82,7 +82,9 @@ type Querier interface {
 	// Учётка и абсолютный срок текущей сессии для GET /v1/staff/me.
 	GetMe(ctx context.Context, arg GetMeParams) (GetMeRow, error)
 	InsertInvite(ctx context.Context, arg InsertInviteParams) error
-	// Новая учётка в статусе invited; почта занята (любой статус) — нет строки.
+	// Новая учётка в статусе invited; почта занята (любой статус) — нет строки. Язык — выбранный приглашающим (IL2);
+	// NULL (запрос до IL2, оператор) — 'ru', то же значение, что DEFAULT колонки (0020_staff.sql): DEFAULT в COALESCE
+	// не пишется.
 	InsertInvitedAccount(ctx context.Context, arg InsertInvitedAccountParams) (int64, error)
 	// Поколение резервных кодов: HMAC нормализованного кода ключом key_id (один ключ на поколение).
 	InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) error

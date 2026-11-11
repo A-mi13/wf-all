@@ -2,7 +2,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useState } from 'react';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { components } from '../../api/gen/admin';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
@@ -519,4 +519,64 @@ test.each([
   const labels = within(bodyRows()[0]!).queryAllByText(columns[1]!.header as string);
   expect(labels.length > 0).toBe(stacked);
   expect(matrix.closest('[data-table-scroll]')).not.toBeNull();
+});
+
+// Режим select (список выбора, ревью V1 m6): общий компонент проверен сам, а не только через экран поиска места.
+describe('select — список выбора', () => {
+  function Picker({
+    onActivate,
+    onLoadMore,
+  }: {
+    onActivate?: (a: Account) => void;
+    onLoadMore?: () => void;
+  }) {
+    const [value, setValue] = useState<string | null>(account(2).id);
+    return (
+      <DataTable
+        label="Места"
+        columns={[]}
+        rowKey={(a) => a.id}
+        rows={[account(1), account(2), account(3)]}
+        onRetry={() => {}}
+        hasMore={onLoadMore !== undefined}
+        onLoadMore={onLoadMore}
+        select={{
+          value,
+          onChange: (a) => setValue(a.id),
+          onActivate,
+          option: (a) => a.display_name,
+        }}
+      />
+    );
+  }
+  const selected = () =>
+    within(screen.getByRole('listbox', { name: 'Места' }))
+      .getAllByRole('option')
+      .filter((o) => o.getAttribute('aria-selected') === 'true')
+      .map((o) => o.textContent);
+
+  test('↑ выбирает предыдущую строку, на первой — остаётся', async () => {
+    renderWithProviders(<Picker />);
+    const user = userEvent.setup();
+    screen.getByRole('listbox', { name: 'Места' }).focus();
+    await user.keyboard('{ArrowUp}');
+    expect(selected()).toEqual(['Сотрудник 1']);
+    await user.keyboard('{ArrowUp}');
+    expect(selected()).toEqual(['Сотрудник 1']);
+  });
+
+  test('двойной клик — onActivate этой строки', async () => {
+    const onActivate = vi.fn();
+    renderWithProviders(<Picker onActivate={onActivate} />);
+    await userEvent.setup().dblClick(screen.getByRole('option', { name: 'Сотрудник 3' }));
+    expect(onActivate).toHaveBeenCalledExactlyOnceWith(account(3));
+    expect(selected()).toEqual(['Сотрудник 3']);
+  });
+
+  test('«Показать ещё» под списком выбора', async () => {
+    const onLoadMore = vi.fn();
+    renderWithProviders(<Picker onLoadMore={onLoadMore} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Показать ещё' }));
+    expect(onLoadMore).toHaveBeenCalledOnce();
+  });
 });

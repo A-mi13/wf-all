@@ -15,19 +15,25 @@ const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 // Адрес города в вебе (*; geo.cities.manage): поле с форматом (проверка до запроса) и подсказкой
 // «старый адрес продолжит работать», история прежних адресов (из карточки); 409 geo.slug_taken —
-// у поля. Тот же адрес — запроса нет.
-export function CitySlugCard({ city }: { city: GeoCityDetails }) {
+// у поля. Тот же адрес — запроса нет. readOnly — карточка перечитывается на новом языке: ввод остаётся
+// (keepDirtyValues), отправка недоступна (ревью G8, m18).
+export function CitySlugCard({ city, readOnly }: { city: GeoCityDetails; readOnly?: boolean }) {
   const t = useTranslations('geo.city.slug');
   const ta = useTranslations('actions');
   const toast = useToast();
   const errorText = useErrorText();
   const dateTime = useDateTime();
-  const form = useForm<{ slug: string }>({ values: { slug: city.slug } });
+  const form = useForm<{ slug: string }>({
+    values: { slug: city.slug },
+    resetOptions: { keepDirtyValues: true },
+  });
   const update = useUpdateCity(city.id, ['geo', 'city', city.id, 'slug']);
 
   const submit = async ({ slug }: { slug: string }) => {
-    if (slug === city.slug) return;
-    await update.mutateAsync({ slug });
+    if (readOnly || slug === city.slug) return;
+    const updated = await update.mutateAsync({ slug });
+    // форма — к ответу: сохранённое поле не «залипает» поверх будущих данных (раунд 1, I1)
+    form.reset({ slug: updated.slug }, { keepDirtyValues: false });
     toast.success(t('saved'));
   };
   const onError = (e: ApiError) => {
@@ -49,7 +55,7 @@ export function CitySlugCard({ city }: { city: GeoCityDetails }) {
           rules={{ required: true, maxLength: 100, pattern: SLUG }}
         />
         <div className={styles.row}>
-          <Button type="submit" loading={update.isPending}>
+          <Button type="submit" loading={update.isPending} disabled={readOnly}>
             {ta('save')}
           </Button>
         </div>

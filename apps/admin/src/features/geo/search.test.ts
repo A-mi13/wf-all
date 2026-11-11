@@ -29,6 +29,12 @@ describe('parseCitiesSearch', () => {
     expect(parseCitiesSearch({ country: 'RUS', status: {} })).toEqual({});
   });
 
+  // Ревью G8, m10: регион без страны — фильтр «Регион» не виден (он только при стране), сбросить его нечем.
+  test('region_id без country отброшен', () => {
+    expect(parseCitiesSearch({ region_id: REGION })).toEqual({});
+    expect(parseCitiesSearch({ region_id: REGION, country: 'ru' })).toEqual({});
+  });
+
   test('повторы статуса схлопнуты, порядок сохранён', () => {
     expect(parseCitiesSearch({ status: ['live', 'live', 'pilot'] })).toEqual({
       status: ['live', 'pilot'],

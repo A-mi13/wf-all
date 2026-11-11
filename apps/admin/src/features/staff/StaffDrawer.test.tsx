@@ -562,3 +562,32 @@ describe('одна ошибка — одно сообщение', () => {
     expect(screen.getAllByText(GONE)).toHaveLength(1);
   });
 });
+
+// План UF2a.10: почта — CopyButton «Копировать: почта» (как хранится, A-форма xn--…); сеансы — RelativeTime.
+describe('копирование и время в панели', () => {
+  test('«Копировать: почта» кладёт в буфер почту этой учётки', async () => {
+    staffServer({ accounts: [...TEAM.slice(0, 1), IDN] });
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const panel = await manage(user, 'Иван П.');
+    await user.click(within(panel).getByRole('button', { name: 'Копировать: почта' }));
+    expect(await navigator.clipboard.readText()).toBe('ivan@xn--d1acufc.xn--p1ai');
+  });
+
+  test('сеансы сотрудника — <time dateTime> входа и активности', async () => {
+    staffServer({ accounts: [...TEAM.slice(0, 1), IDN] });
+    server.use(
+      http.get('/v1/staff/accounts/{staffId}/sessions', ({ response }) =>
+        response(200).json({ items: [session()] }),
+      ),
+    );
+    renderApp('/staff', { me: meOwner });
+    const panel = await manage(userEvent.setup(), 'Иван П.');
+    const list = await within(panel).findByRole('list', { name: 'Сеансы сотрудника' });
+    const times = list.querySelectorAll('time[datetime]');
+    expect([...times].map((t) => t.getAttribute('datetime'))).toEqual([
+      session().created_at,
+      session().last_seen_at,
+    ]);
+  });
+});

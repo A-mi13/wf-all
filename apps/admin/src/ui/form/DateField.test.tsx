@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { stubMedia } from '../../test/media';
@@ -119,6 +119,37 @@ describe('DateField: значение', () => {
     expect(input()).toHaveValue('1.1.2026');
   });
 
+  // Ревью UF2a/II раунд 1, r1: цифра, вставленная в середину заполненной даты, не перетекает в следующие части —
+  // иначе «051.10.2026» стало бы годной, но чужой датой 05.01.1020. Перенос — только у набора подряд (цифры до конца
+  // текста) и у вставки сплошных цифр, которых хватает на следующую часть.
+  test('маска: цифра в середину заполненной даты — ошибка формата, а не чужая дата', async () => {
+    const ru = dateFormat('ru');
+    expect(ru.parse(ru.mask('051.10.2026'))).toBeNull();
+    expect(ru.parse(ru.mask('01.105.2026'))).toBeNull();
+    expect(dateFormat('en').parse(dateFormat('en').mask('10/015/2026'))).toBeNull();
+    // Раунд 1 ревью IL2-фронта: вставка любой длины в середину — не только одной цифры. Части после неё уже
+    // отделены своими разделителями: цифры не переезжают через них (иначе «0112.10.2026» → 01.12.1020 без ошибки);
+    // текст виден как введён, ошибка — у поля.
+    for (const text of ['0112.10.2026', '01123.10.2026', '01.1012.2026'])
+      expect(ru.parse(ru.mask(text)), text).toBeNull();
+    expect(ru.mask('0112.10.2026')).toBe('0112.10.2026');
+    expect(dateFormat('en').parse(dateFormat('en').mask('101/01/2026'))).toBeNull();
+    // набор подряд и вставка без разделителей (или с частью разделителей) — по-прежнему с переносом
+    expect(ru.mask('011')).toBe('01.1');
+    expect(ru.mask('01102026')).toBe('01.10.2026');
+    expect(ru.mask('0110.2026')).toBe('01.10.2026');
+    expect(ru.mask('01.102026')).toBe('01.10.2026');
+
+    const onSubmit = vi.fn();
+    const { user } = renderWithIntl(<Filters onSubmit={onSubmit} />);
+    await user.type(input(), '01.10.2026');
+    await user.type(input(), '5', { initialSelectionStart: 1, initialSelectionEnd: 1 });
+    expect(input()).toHaveValue('051.10.2026');
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+    expect(input()).toHaveAttribute('aria-invalid', 'true');
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   test('8 цифр подряд разбираются и без маски (вставка в поле)', () => {
     expect(dateFormat('ru').parse('01102026')).toEqual({ y: 2026, m: 10, d: 1 });
     expect(dateFormat('en').parse('10012026')).toEqual({ y: 2026, m: 10, d: 1 });
@@ -227,6 +258,33 @@ describe('DateField: клавиатура (Date Picker Dialog)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(opener()).toHaveFocus();
     expect(input()).toHaveValue('18.10.2026');
+  });
+
+  // Ревью UF2a/II раунд 1, r3: открыт с первого кадра под StrictMode (история DateField:Open) — фокус на выбранном
+  // дне, а не на «‹» (двойной эффект: уборка пузыря вернула фокус на якорь, второй запуск поставил его на первую кнопку).
+  test('StrictMode: открыт сразу — фокус на выбранном дне', async () => {
+    function Open() {
+      const form = useForm({ defaultValues: { from: '2026-10-15' } });
+      return (
+        <Form form={form} onSubmit={() => undefined}>
+          <DateField name="from" label="С" defaultOpen />
+        </Form>
+      );
+    }
+    renderWithIntl(
+      <StrictMode>
+        <Open />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(cell('15 октября 2026 г.')).toHaveFocus());
+    // в браузере фокус при показе пузыря ставит Popover по метке (jsdom порядок показа не воспроизводит) —
+    // метка только у выбранного дня
+    expect(cell('15 октября 2026 г.')).toHaveAttribute('data-autofocus');
+    expect(
+      within(dialog())
+        .getAllByRole('gridcell')
+        .filter((c) => c.dataset.autofocus),
+    ).toHaveLength(1);
   });
 
   test('31-е и PageDown — последний день короткого месяца', async () => {

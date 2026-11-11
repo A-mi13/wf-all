@@ -28,6 +28,30 @@ test('staff.invite: имя, почта как есть (xn-- не декодир
   });
 });
 
+// IL2 (G8 I1 — подтверждающий видит всё): язык новичка из payload приглашения. Незнакомая строка — как есть
+// (сервер такой запрос отклонит, но подтверждающий видит, что в нём); нет поля (запрос до IL2) — строки нет.
+describe('staff.invite: язык', () => {
+  const invite = (locale?: unknown) => ({
+    v: 1,
+    email: 'ivan@wf.example',
+    display_name: 'Иван П.',
+    role: 'support',
+    ...(locale === undefined ? {} : { locale }),
+  });
+
+  test('ru и en — в сводке', () => {
+    expect(summarizePayload(invite('en'), 'staff.invite').locale).toBe('en');
+    expect(summarizePayload(invite('ru'), 'staff.invite').locale).toBe('ru');
+  });
+
+  test('незнакомая строка — как есть; не строка, пусто и нет поля — нет', () => {
+    expect(summarizePayload(invite('de'), 'staff.invite').locale).toBe('de');
+    expect(summarizePayload(invite(7), 'staff.invite')).not.toHaveProperty('locale');
+    expect(summarizePayload(invite(''), 'staff.invite')).not.toHaveProperty('locale');
+    expect(summarizePayload(invite(), 'staff.invite')).not.toHaveProperty('locale');
+  });
+});
+
 test('staff.role_change: было → стало', () => {
   expect(
     summarizePayload({
@@ -163,6 +187,25 @@ describe('geo.country_rules', () => {
     );
     expect(s.country?.others).toEqual(['currency', 'timezone', 'vat']);
     expect(text(s)).toBe('RU: возраст регистрации 14 → 16; и ещё 3 поля: currency, timezone, vat');
+  });
+
+  // G8 n4 (план UF2a.11): ключ patch, которого нет ни в from, ни в to, исполнится — в others, не молча мимо;
+  // patch не объект — мимо.
+  test('patch: ключи вне from/to — в others', () => {
+    const s = summarizePayload(
+      {
+        ...payload({ currency: 'RUB' }, { currency: 'KZT' }),
+        patch: { currency: 'KZT', timezone: 'Asia/Almaty', vat: 20 },
+      },
+      'geo.country_rules',
+    );
+    expect(s.country?.others).toEqual(['timezone', 'vat']);
+    expect(text(s)).toBe('RU: валюта RUB → KZT; и ещё 2 поля: timezone, vat');
+    const odd = summarizePayload(
+      { ...payload({ currency: 'RUB' }, { currency: 'KZT' }), patch: ['vat'] },
+      'geo.country_rules',
+    );
+    expect(odd.country?.others).toEqual([]);
   });
 
   test('мусор: нет кода, from/to не объекты — ничего про страну', () => {

@@ -107,6 +107,7 @@ describe('форма приглашения', () => {
         display_name: 'Иван П.',
         role: 'moderator',
         city_ids: [CITY_OTHER],
+        locale: 'ru',
       },
     ]);
   });
@@ -126,7 +127,12 @@ describe('форма приглашения', () => {
     // не модератор — поля городов в запросе нет
     expect(sent).toEqual([
       {
-        body: { email: 'ivan.p@wf.example', display_name: 'Иван П.', role: 'support' },
+        body: {
+          email: 'ivan.p@wf.example',
+          display_name: 'Иван П.',
+          role: 'support',
+          locale: 'ru',
+        },
         key: expect.any(String),
       },
     ]);
@@ -134,6 +140,62 @@ describe('форма приглашения', () => {
     // «Пригласить ещё» — пустая форма
     await user.click(within(dialog).getByRole('button', { name: 'Пригласить ещё' }));
     expect(within(dialog).getByLabelText('Рабочая почта')).toHaveValue('');
+  });
+
+  // IL2 (решение пользователя 10.11, спека §4.3): язык новичка задаёт приглашающий — по умолчанию язык его
+  // админки, показан явно и уходит всегда (без поля сервер подставил бы язык инициатора молча).
+  test('язык сотрудника: умолчание — язык админки приглашающего; выбранный — в теле', async () => {
+    staffServer({ accounts: TEAM });
+    const sent = inviteServer();
+    renderApp('/staff', { me: { ...meOwner, locale: 'en' } });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Invite staff member' }));
+    const dialog = screen.getByRole('dialog', { name: 'Invite a staff member' });
+    expect(selectedText(within(dialog).getByLabelText('Staff member language'))).toBe('English');
+    await user.type(within(dialog).getByLabelText('Work email'), 'ivan.p@wf.example');
+    await user.type(within(dialog).getByLabelText('Name'), 'Ivan P.');
+    await pick(user, within(dialog).getByLabelText('Role'), 'support');
+    await user.click(within(dialog).getByRole('button', { name: 'Send for confirmation' }));
+    await within(dialog).findByText('Sent for approval');
+    expect(sent.map((s) => s.body)).toMatchObject([{ locale: 'en' }]);
+
+    await user.click(within(dialog).getByRole('button', { name: 'Invite another' }));
+    // «Пригласить ещё» — язык снова умолчание, а не пусто
+    expect(selectedText(within(dialog).getByLabelText('Staff member language'))).toBe('English');
+    await user.type(within(dialog).getByLabelText('Work email'), 'olga@wf.example');
+    await user.type(within(dialog).getByLabelText('Name'), 'Olga');
+    await pick(user, within(dialog).getByLabelText('Role'), 'support');
+    await pick(user, within(dialog).getByLabelText('Staff member language'), 'ru');
+    await user.click(within(dialog).getByRole('button', { name: 'Send for confirmation' }));
+    await within(dialog).findByText('Sent for approval');
+    expect(sent.map((s) => s.body)).toMatchObject([{ locale: 'en' }, { locale: 'ru' }]);
+  });
+
+  test('язык в черновике: выбранный вернулся после перезагрузки, мусор — умолчание', async () => {
+    staffServer({ accounts: TEAM });
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const dialog = await openInvite(user);
+    expect(selectedText(within(dialog).getByLabelText('Язык сотрудника'))).toBe('Русский');
+    await pick(user, within(dialog).getByLabelText('Язык сотрудника'), 'en');
+    cleanup();
+
+    staffServer({ accounts: TEAM });
+    renderApp('/staff', { me: meOwner });
+    const again = await openInvite(userEvent.setup());
+    expect(selectedText(within(again).getByLabelText('Язык сотрудника'))).toBe('English');
+    cleanup();
+
+    // черновик с незнакомым языком (старая вкладка, ручная правка) — не подставляется
+    const key = Object.keys(sessionStorage).find((k) => k.includes(':invite'));
+    expect(key).toBeDefined();
+    const raw = sessionStorage.getItem(key!) ?? '';
+    expect(raw).toContain('"locale":"en"');
+    sessionStorage.setItem(key!, raw.replace('"locale":"en"', '"locale":"de"'));
+    staffServer({ accounts: TEAM });
+    renderApp('/staff', { me: meOwner });
+    const third = await openInvite(userEvent.setup());
+    expect(selectedText(within(third).getByLabelText('Язык сотрудника'))).toBe('Русский');
   });
 
   test('409 staff.email_taken — на поле почты; 422 city_not_found — на поле городов', async () => {

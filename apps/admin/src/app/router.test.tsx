@@ -13,6 +13,7 @@ import { reauthBus } from './reauth';
 import { AppRouter } from './router';
 import { stubMedia } from '../test/media';
 import { sectionsServer } from '../test/sections';
+import { renderApp } from '../test/app';
 
 // стартовая и возврат приводят в разделы каркаса — их первые запросы описаны (src/test/sections.ts)
 beforeEach(() => sectionsServer());
@@ -469,5 +470,35 @@ describe('каркас AppShell', () => {
         .map((l) => l.textContent),
     ).toEqual(['Журнал действий', 'Роли и доступ', 'Подтверждения', 'Мой доступ']);
     expect(within(tabbar).getByRole('button', { name: 'Ещё' })).toBeInTheDocument();
+  });
+});
+
+// BackLink каркаса (ревью V1 m6): только на вложенном адресе раздела; память «Назад» — сотрудника этой вкладки.
+describe('«Назад» каркаса', () => {
+  const back = () => screen.queryByRole('link', { name: /^Назад/ });
+
+  test('на странице раздела (/audit) ссылки «Назад» нет', async () => {
+    renderApp('/audit', { me: meOwner });
+    await page('Журнал действий');
+    expect(back()).toBeNull();
+  });
+
+  test('память «Назад» не переходит к другому сотруднику (провайдер под key={me.id})', async () => {
+    const app = renderApp('/geo/cities?country=RU', { me: meOwner });
+    await page('Города и запуск');
+    const city = async () => {
+      act(() => void app.history.push(`/geo/cities/${CITY_OWN}`));
+      return screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    };
+    // свой фильтр — свой «Назад»
+    expect(await city()).toHaveAttribute('href', '/geo/cities?country=RU');
+    act(() => void app.history.push('/audit'));
+    await page('Журнал действий');
+
+    // в другой вкладке вошёл другой сотрудник (вкладка — в журнале): его «Назад» — без фильтров прежнего
+    app.me.current = { ...meOwner, id: '0192f1c4-2222-7b21-9c5d-0000000000b2' };
+    await app.refetchMe();
+    await page('Журнал действий');
+    expect(await city()).toHaveAttribute('href', '/geo/cities');
   });
 });

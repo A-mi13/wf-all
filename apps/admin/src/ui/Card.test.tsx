@@ -39,6 +39,34 @@ describe('Card', () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
+  // Ревью G8, m11: переход — ссылка (открывается и в новой вкладке), обычный клик — навигацией приложения;
+  // имя «Открыть: <город>» начинается с видимого текста (WCAG 2.5.3).
+  test('действие-ссылка: href, имя по name, обычный клик — onNavigate, Ctrl+клик — браузеру', async () => {
+    const onNavigate = vi.fn();
+    const { user } = renderWithIntl(
+      <Card
+        title="Ставрополь"
+        action={{
+          label: 'Открыть',
+          name: 'Открыть: Ставрополь',
+          href: '/geo/cities/1',
+          onNavigate,
+        }}
+      />,
+    );
+    const link = screen.getByRole('link', { name: 'Открыть: Ставрополь' });
+    expect(link).toHaveAttribute('href', '/geo/cities/1');
+    expect(link).toHaveTextContent('Открыть');
+    expect(screen.queryByRole('button')).toBeNull();
+    await user.click(link);
+    expect(onNavigate).toHaveBeenCalledOnce();
+    // jsdom навигацию по ссылке не исполняет; модификатор — onNavigate не зовётся
+    await user.keyboard('{Control>}');
+    await user.click(link);
+    await user.keyboard('{/Control}');
+    expect(onNavigate).toHaveBeenCalledOnce();
+  });
+
   test('без чипа, показателей, примечания и действия — пустых блоков нет', () => {
     renderWithIntl(<Card title="Астрахань" />);
     const card = screen.getByRole('article', { name: 'Астрахань' });

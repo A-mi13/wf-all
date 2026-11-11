@@ -132,3 +132,10 @@
   display: flex;
   justify-content: flex-end;
 }
+
+/* короткий id и кнопка копирования полного — одной строкой */
+.idCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wf-space-1);
+}

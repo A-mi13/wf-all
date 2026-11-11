@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
-import { type ApiError, isApiError, unwrap } from '../../api/client';
+import { type ApiError, isApiError, isUnknownOutcome, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
@@ -12,8 +12,8 @@ import { useLocale } from '../../i18n/locale';
 import { Button, Drawer, Form, type Option, SelectField, useErrorText, useToast } from '../../ui';
 import styles from './geo.module.css';
 import { invalidateCityLists } from './mutations';
-import { PlaceAction, PlaceSearch } from './PlaceSearch';
-import { geoKeys, useGeoCountries, useGeoRegions } from './queries';
+import { PlaceAction, type PlaceFilter, PlaceSearch } from './PlaceSearch';
+import { GEO_PLACES_KEY, geoKeys, useGeoCountries, useGeoPlaces, useGeoRegions } from './queries';
 
 type GeoPlace = components['schemas']['GeoPlace'];
 type CityStatus = components['schemas']['CityStatus'];
@@ -31,27 +31,55 @@ export function ActivateDrawer({ open, onClose }: { open: boolean; onClose: () =
   return open ? <ActivateFlow onClose={onClose} /> : null;
 }
 
+// Исход активации неизвестен (обрыв, 5xx) и панель закрыли — город мог появиться: списки городов
+// перечитываются (ревью G8, m14). Поиск и страна мест — здесь: «Другое место» возвращает к прежним
+// результатам, выбор снят, фокус — на список (ревью V1, m1, m2).
 function ActivateFlow({ onClose }: { onClose: () => void }) {
   const t = useTranslations('geo.activate');
+  const queryClient = useQueryClient();
   const busy = useIsMutating({ mutationKey: ACTIVATE_KEY }) > 0;
   const formId = useId();
+  const [filter, setFilter] = useState<PlaceFilter>({ q: '', country: '' });
   const [selected, setSelected] = useState<GeoPlace | null>(null);
   const [place, setPlace] = useState<GeoPlace | null>(null);
+  const [returned, setReturned] = useState(false);
+  const unknown = useRef(false);
+  const close = () => {
+    if (unknown.current) void invalidateCityLists(queryClient);
+    onClose();
+  };
   const footer = place ? (
     <Button type="submit" form={formId} loading={busy}>
       {t('submit')}
     </Button>
   ) : (
-    <PlaceAction selected={selected} onChoose={setPlace} onClose={onClose} />
+    <PlaceAction selected={selected} onChoose={setPlace} onClose={close} />
   );
   return (
-    <Drawer open onClose={onClose} title={t('title')} dismissible={!busy} footer={footer}>
+    <Drawer open onClose={close} title={t('title')} dismissible={!busy} footer={footer}>
       <div className={place ? styles.panel : styles.fillPanel}>
         <p className={styles.text}>{t('text')}</p>
         {place ? (
-          <ActivateForm id={formId} place={place} onBack={() => setPlace(null)} onClose={onClose} />
+          <ActivateForm
+            id={formId}
+            place={place}
+            onBack={() => {
+              setSelected(null);
+              setPlace(null);
+              setReturned(true);
+            }}
+            onClose={close}
+            onUnknown={() => (unknown.current = true)}
+          />
         ) : (
-          <PlaceSearch selected={selected} onSelect={setSelected} onChoose={setPlace} />
+          <PlaceSearch
+            selected={selected}
+            onSelect={setSelected}
+            onChoose={setPlace}
+            filter={filter}
+            onFilterChange={setFilter}
+            focusList={returned}
+          />
         )}
       </div>
     </Drawer>
@@ -65,17 +93,21 @@ type Values = { country_code: string; region_id: string; status: CityStatus };
 // country_code уходит, только если страну переопределили (иначе сервер снял бы регион по умолчанию),
 // region_id — только выбранный. 409 geo.city_already_active — текст и поиск города в списке;
 // 422 geo.country_not_enabled / geo.region_not_found — у поля. Повтор отправки после обрыва —
-// тот же ключ (useAdminMutation: те же значения, исход неизвестен).
+// тот же ключ (useAdminMutation: те же значения, исход неизвестен). 409 и успех — места GeoNames
+// устарели (метка «уже заведён»); при 409 место перечитывается, и есть city_id — «Открыть город» ведёт
+// на него (ревью G8, m3). Шаг открылся — фокус на «Страна города» (V1, m2).
 function ActivateForm({
   id,
   place,
   onBack,
   onClose,
+  onUnknown,
 }: {
   id: string; // форма — по id: кнопка «Активировать» в подвале панели (form={id})
   place: GeoPlace;
   onBack: () => void;
   onClose: () => void;
+  onUnknown: () => void; // исход неизвестен — при закрытии панели списки перечитаются
 }) {
   const t = useTranslations('geo.activate');
   const ts = useTranslations('geo.status');
@@ -89,6 +121,7 @@ function ActivateForm({
     defaultValues: { country_code: place.country.code, region_id: '', status: 'waitlist' },
   });
   const country = useWatch({ control: form.control, name: 'country_code' });
+  useEffect(() => form.setFocus('country_code'), [form]);
   // Ответ пришёл, когда сотрудник уже ушёл со страницы (меню), — кэш и тост, но без перехода: не
   // уводить его из раздела, где он теперь. StrictMode: эффект ставит флаг заново при повторном монтировании.
   const alive = useRef(true);
@@ -120,7 +153,15 @@ function ActivateForm({
           onClose();
           void navigate({ to: paths.city, params: { cityId: city.id } });
         }
-        await invalidateCityLists(queryClient);
+        await Promise.all([
+          invalidateCityLists(queryClient),
+          queryClient.invalidateQueries({ queryKey: GEO_PLACES_KEY }),
+        ]);
+      },
+      onError: (e) => {
+        if (isUnknownOutcome(e)) onUnknown();
+        if (isApiError(e, 'geo.city_already_active'))
+          void queryClient.invalidateQueries({ queryKey: GEO_PLACES_KEY });
       },
     },
   );
@@ -159,6 +200,11 @@ function ActivateForm({
       ? t('region_default', { region: place.region_name })
       : t('region_default_unknown');
   const conflict = isApiError(activate.error, 'geo.city_already_active');
+  // место перечитано после 409: город на нём — по city_id
+  const fresh = useGeoPlaces({ q: place.name, country: place.country.code }, conflict);
+  const existing = fresh.data?.pages
+    .flatMap((p) => p.items)
+    .find((p) => p.geoname_id === place.geoname_id)?.city_id;
 
   return (
     <>
@@ -204,9 +250,23 @@ function ActivateForm({
           label={t('status')}
           options={STATUSES.map((s) => ({ value: s, label: ts(s) }))}
         />
-        {conflict && (
+        {conflict && existing && (
           <Button
             variant="link"
+            aria-label={t('open_city_label', { name: place.name })}
+            onClick={() => {
+              onClose();
+              void navigate({ to: paths.city, params: { cityId: existing } });
+            }}
+          >
+            {t('open_city')}
+          </Button>
+        )}
+        {conflict && !existing && (
+          <Button
+            variant="link"
+            // пока место перечитывается — занята: быстрый клик не уведёт в список вместо города (раунд 1)
+            loading={fresh.isPending}
             onClick={() => {
               onClose();
               void navigate({ to: paths.cities, search: { q: place.name } });

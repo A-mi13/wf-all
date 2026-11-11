@@ -7,7 +7,8 @@
 // из from/to; geo.country_create — правила новой страны. Поля geo читаются только у своего действия.
 // У правил страны подтверждающий видит ВСЁ, что исполнится (ревью G8, I1): запрос несёт весь patch,
 // включая поля «сразу», а аудит запишет автором подтверждающего. Знакомые поля — «было → стало»,
-// незнакомые ключи и значения неверного типа — списком others («и ещё N полей»), не молча мимо.
+// незнакомые ключи и значения неверного типа — списком others («и ещё N полей»), не молча мимо; ключи patch вне
+// from ∪ to — тоже в others (G8 n4). Приглашение (IL2) — и язык новичка locale (G8 I1: подтверждающий видит всё).
 export type CountryChange =
   | { field: 'currency' | 'phone_prefix'; from: string; to: string }
   | { field: 'week_starts_on' | 'min_signup_age' | 'age_of_majority'; from: number; to: number }
@@ -34,6 +35,7 @@ export type ApprovalSummary = {
   cityIds?: string[];
   reason?: string;
   comment?: string;
+  locale?: string; // язык новичка приглашения (IL2): ru | en, незнакомое — как есть
   country?: { code: string; changes: CountryChange[]; others: string[] };
   newCountry?: NewCountry;
 };
@@ -83,10 +85,16 @@ function nameChanges(from: unknown, to: unknown): CountryChange[] | undefined {
   }));
 }
 
-function countryChanges(from: Record<string, unknown>, to: Record<string, unknown>) {
+function countryChanges(
+  from: Record<string, unknown>,
+  to: Record<string, unknown>,
+  patch: Record<string, unknown>,
+) {
   const changes: CountryChange[] = [];
   const bad = new Set<string>();
   const keys = new Set([...Object.keys(from), ...Object.keys(to)]);
+  // ключ patch вне from ∪ to тоже исполнится (G8 n4) — в others, «было → стало» по нему нет
+  for (const k of Object.keys(patch)) if (!keys.has(k)) bad.add(k);
   for (const field of STRING_FIELDS) {
     if (!keys.has(field)) continue;
     const [f, t] = [text(from[field]), text(to[field])];
@@ -114,7 +122,9 @@ function countryChanges(from: Record<string, unknown>, to: Record<string, unknow
     if (names) changes.push(...names);
     else bad.add('names');
   }
-  const others = [...keys].filter((k) => !KNOWN.includes(k) || bad.has(k)).sort();
+  const others = [...new Set([...keys, ...bad])]
+    .filter((k) => !KNOWN.includes(k) || bad.has(k))
+    .sort();
   return { changes, others };
 }
 
@@ -143,7 +153,10 @@ export function summarizePayload(
     const code = text(payload.code);
     if (!code) return out;
     if (action === 'geo.country_rules')
-      out.country = { code, ...countryChanges(record(payload.from), record(payload.to)) };
+      out.country = {
+        code,
+        ...countryChanges(record(payload.from), record(payload.to), record(payload.patch)),
+      };
     else out.newCountry = newCountry(payload, code);
     return out;
   }
@@ -163,5 +176,7 @@ export function summarizePayload(
   if (reason) out.reason = reason;
   const comment = text(payload.comment);
   if (comment) out.comment = comment;
+  const locale = text(payload.locale);
+  if (locale) out.locale = locale;
   return out;
 }

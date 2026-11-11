@@ -19,6 +19,14 @@
   min-width: 0;
 }
 
+/* действие и кнопка копирования id запроса — одной строкой */
+.idRow {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-1);
+  min-width: 0;
+}
+
 .action,
 .name {
   color: var(--wf-color-text);

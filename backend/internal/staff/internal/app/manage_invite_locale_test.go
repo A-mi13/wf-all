@@ -28,6 +28,20 @@ func payloadLocale(t *testing.T, raw []byte) string {
 	return s
 }
 
+// invitedAfterLocale — after.locale записи staff.invited учётки (нет ключа — "").
+func (e *env) invitedAfterLocale(staffID uuid.UUID) string {
+	e.t.Helper()
+	var l *string
+	if err := e.owner.QueryRow(context.Background(), `SELECT after->>'locale' FROM audit_log
+		WHERE action = 'staff.invited' AND object_id = $1`, staffID).Scan(&l); err != nil {
+		e.t.Fatal(err)
+	}
+	if l == nil {
+		return ""
+	}
+	return *l
+}
+
 // Язык новичка задаёт приглашающий (IL2, §4.3): нет поля — язык инициатора на момент запроса (снимок в payload:
 // смена языка инициатора до подтверждения его не меняет); явный язык — он, а не язык инициатора.
 func TestInviteLocaleFromInitiator(t *testing.T) {
@@ -49,6 +63,10 @@ func TestInviteLocaleFromInitiator(t *testing.T) {
 		if got := e.localeOf(e.accountID("new@wf.example")); got != "en" {
 			t.Fatalf("язык учётки %q", got)
 		}
+		// m1 ревью IL2: выбор языка — и в записи staff.invited (след после PurgeDecided)
+		if got := e.invitedAfterLocale(e.accountID("new@wf.example")); got != "en" {
+			t.Fatalf("after.locale staff.invited %q", got)
+		}
 	})
 	t.Run("явный язык", func(t *testing.T) {
 		t.Parallel()
@@ -62,6 +80,9 @@ func TestInviteLocaleFromInitiator(t *testing.T) {
 		e.mustApprove(b, ap.ID)
 		if got := e.localeOf(e.accountID("new@wf.example")); got != "en" {
 			t.Fatalf("язык учётки %q", got)
+		}
+		if got := e.invitedAfterLocale(e.accountID("new@wf.example")); got != "en" {
+			t.Fatalf("after.locale staff.invited %q", got)
 		}
 	})
 }
@@ -114,6 +135,9 @@ func TestExecInviteLegacyPayloadWithoutLocale(t *testing.T) {
 	e.mustApprove(b, back.ID)
 	if got := e.localeOf(e.accountID("new@wf.example")); got != "ru" {
 		t.Fatalf("новая учётка: язык %q", got)
+	}
+	if got := e.invitedAfterLocale(e.accountID("new@wf.example")); got != "" {
+		t.Fatalf("новая учётка без языка в payload: after.locale %q", got)
 	}
 	if got := e.localeOf(x.ID); got != "en" {
 		t.Fatalf("выключенная: язык %q", got)
@@ -185,11 +209,18 @@ func TestInviteResendKeepsLocale(t *testing.T) {
 			if err := c.resend(e, m); err != nil {
 				t.Fatal(err)
 			}
-			inv := e.liveInvite(m.ID)
-			if inv.Sends != 2 && len(e.invites(m.ID)) != 2 {
-				t.Fatalf("отправки не было: %+v", e.invites(m.ID))
+			// m2 ревью IL2: письмо — из аргументов поставленной задачи staff.mail (как его соберёт MailWorker),
+			// а не из живого приглашения с заданным видом
+			if n := e.count(`SELECT count(*) FROM river_job WHERE kind = 'staff.mail'
+				AND (args->>'recipient')::uuid = $1`, m.ID); n != 2 {
+				t.Fatalf("задач staff.mail учётки %d, ждали 2 (приглашение и повторная отправка)", n)
 			}
-			msg, err := e.app.ComposeInvite(context.Background(), inv.ID, m.ID, staff.MailInvite)
+			var args staff.MailArgs
+			if err := e.owner.QueryRow(context.Background(), `SELECT args FROM river_job WHERE kind = 'staff.mail'
+				AND (args->>'recipient')::uuid = $1 ORDER BY id DESC LIMIT 1`, m.ID).Scan(&args); err != nil {
+				t.Fatal(err)
+			}
+			msg, err := e.app.ComposeInvite(context.Background(), args.Ref, args.Recipient, args.Mail)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -66,6 +66,21 @@ describe('CopyButton', () => {
     expect(live()).toHaveTextContent('');
   });
 
+  // UF2a.10: резервные коды — по строке на код; однострочное поле съело бы переводы строк, и коды вручную
+  // скопировались бы слитно.
+  test('отказ на многострочном значении — многострочное поле, строки целы', async () => {
+    renderWithIntl(<CopyButton value={'aaaaa-11111\nbbbbb-22222'} label="Копировать: коды" />);
+    clipboard(() => Promise.reject(new DOMException('denied', 'NotAllowedError')));
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Копировать: коды' })),
+    );
+    const field = await screen.findByRole('textbox', { name: 'Копировать: коды' });
+    expect(field.tagName).toBe('TEXTAREA');
+    expect(field).toHaveValue('aaaaa-11111\nbbbbb-22222');
+    expect(field).toHaveAttribute('readonly');
+    expect(field).toHaveFocus();
+  });
+
   // Ревью UF2a/I, m8: тост-ошибку закрывают только руками — повторные отказы не копят стопку тостов,
   // поле уже на экране: значение выделяется снова.
   test('повторный отказ — второго тоста нет, значение снова выделено', async () => {

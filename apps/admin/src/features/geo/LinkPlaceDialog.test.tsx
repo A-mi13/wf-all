@@ -16,12 +16,12 @@ afterEach(() => sessionStorage.clear());
 
 async function open(opts: Parameters<typeof cityEditServer>[0] = {}) {
   const srv = cityEditServer({ details: cityDetails({ geoname_id: null }), ...opts });
-  renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+  const app = renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
   await screen.findByRole('heading', { level: 1, name: 'Ставрополь' });
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: 'Привязать к GeoNames' }));
   const dialog = await screen.findByRole('dialog', { name: 'Привязать к GeoNames' });
-  return { ...srv, dialog, user };
+  return { ...srv, app, dialog, user };
 }
 
 async function choose(dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) {
@@ -89,6 +89,28 @@ describe('привязка', () => {
     const facts = screen.getByRole('list', { name: 'Сведения о городе' });
     await waitFor(() => expect(facts).toHaveTextContent('487846'));
     expect(facts).not.toHaveTextContent('не привязан');
+  });
+
+  // Ревью G8, m3: привязанное место стало «уже заведён» — кэш поиска мест устарел.
+  test('успешная привязка — места GeoNames помечены устаревшими', async () => {
+    const { app, dialog, user } = await open();
+    await choose(dialog, user);
+    await user.click(within(dialog).getByRole('button', { name: 'Привязать' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    const places = app.queryClient.getQueryCache().findAll({ queryKey: ['geo', 'places'] });
+    expect(places.length).toBeGreaterThan(0);
+    expect(places.every((q) => q.state.isInvalidated)).toBe(true);
+  });
+
+  // V1 m2: шаг сменился с клавиатуры — фокус не на body.
+  test('↓, Enter — шаг 2, фокус на «Привязать»', async () => {
+    const { dialog, user } = await open();
+    await user.type(within(dialog).getByRole('searchbox', { name: 'Поиск' }), 'м');
+    const list = await within(dialog).findByRole('listbox', { name: 'Места GeoNames' });
+    list.focus();
+    await user.keyboard('{End}{Enter}');
+    const submit = await within(dialog).findByRole('button', { name: 'Привязать' });
+    await waitFor(() => expect(submit).toHaveFocus());
   });
 
   test('«Другое место» — снова поиск', async () => {

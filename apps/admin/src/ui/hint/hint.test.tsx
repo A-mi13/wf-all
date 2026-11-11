@@ -126,6 +126,21 @@ describe('TermHint', () => {
     expect(live).toHaveTextContent('');
   });
 
+  // Ревью UF2a/III-S m1: термин — заголовок рядом; кнопка описана им (describedBy), своей обёртки термина нет.
+  test('describedBy — только кнопка «i», описанная внешним термином', async () => {
+    const { user } = renderWithIntl(
+      <div>
+        <h2 id="term-h">Правило двух рук</h2>
+        <TermHint term="dual_approval" describedBy="term-h" />
+      </div>,
+    );
+    const info = screen.getByRole('button', { name: 'Что это значит?' });
+    expect(info).toHaveAccessibleDescription('Правило двух рук');
+    await user.click(info);
+    expect(screen.getByRole('tooltip')).toHaveTextContent(GLOSSARY_DUAL);
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Правило двух рук');
+  });
+
   test('Esc закрывает подсказку термина', async () => {
     const { user } = renderWithIntl(<TermHint term="slug">адрес</TermHint>);
     await user.click(screen.getByRole('button', { name: 'Что это значит?' }));

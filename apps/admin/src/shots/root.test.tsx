@@ -4,8 +4,10 @@ import { useTranslations } from 'use-intl';
 import { createApi } from '../api/client';
 import { createQueryClient } from '../app/query';
 import { meGeoModerator } from '../test/geo';
+import { SHOWCASE_NOW } from '../showcase/params';
 import { meAdmin } from '../test/me';
 import { http, server, TEST_API } from '../test/server';
+import { useNow } from '../ui/time';
 import { shotsMe } from './params';
 import { ShotsRoot } from './ShotsRoot';
 
@@ -47,5 +49,16 @@ describe('ShotsRoot', () => {
       <ShotsRoot api={createApi(TEST_API)} queryClient={createQueryClient()} Story={Translated} />,
     );
     expect(await screen.findByText('Выйти')).toBeInTheDocument();
+  });
+
+  // План UF2a.9 / бриф UF2a/III-S п. 1: «5 мин назад» в снимках не плывёт — «сейчас» зафиксирован SHOWCASE_NOW
+  // и для экранов, и для историй.
+  test('«сейчас» — SHOWCASE_NOW, а не часы машины', async () => {
+    function Now() {
+      return <p>{useNow('minute').toISOString()}</p>;
+    }
+    server.use(http.get('/v1/staff/me', ({ response }) => response(200).json(meAdmin)));
+    render(<ShotsRoot api={createApi(TEST_API)} queryClient={createQueryClient()} Story={Now} />);
+    expect(await screen.findByText(SHOWCASE_NOW.toISOString())).toBeInTheDocument();
   });
 });

@@ -319,4 +319,169 @@ describe('отправка', () => {
   });
 });
 
+// Уборка ревью V1 и G8 (план UF2a.11).
+describe('уборка V1 и G8', () => {
+  // V1 m1: выбор держится, только пока его строка в результатах — иначе «Выбрать» ушла бы с местом,
+  // которого на экране уже нет.
+  test('V1 m1: выбрали место → страна мест KZ — выбор снят, «Выбрать» недоступна', async () => {
+    geoServer();
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), 'м');
+    await user.click(await within(drawer).findByRole('option', { name: /^Михайловск/ }));
+    expect(within(drawer).getByRole('button', { name: 'Выбрать Михайловск' })).toBeEnabled();
+    await pick(user, within(drawer).getByRole('combobox', { name: 'Страна места' }), 'KZ');
+    await waitFor(() =>
+      expect(within(drawer).getByRole('button', { name: 'Выбрать' })).toBeDisabled(),
+    );
+  });
+
+  test('V1 m1: выбрали место → другой поиск без этой строки — выбор снят', async () => {
+    geoServer();
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    const search = within(drawer).getByRole('searchbox', { name: 'Поиск' });
+    await user.type(search, 'м');
+    await user.click(await within(drawer).findByRole('option', { name: /^Михайловск/ }));
+    await user.clear(search);
+    await user.type(search, 'ст');
+    await within(drawer).findByRole('option', { name: /^Ставрополь/ });
+    await waitFor(() =>
+      expect(within(drawer).getByRole('button', { name: 'Выбрать' })).toBeDisabled(),
+    );
+  });
+
+  test('V1 m1, m2: «Другое место» — выбор снят, поиск прежний, фокус на списке', async () => {
+    geoServer();
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await choose(user, drawer, 'м');
+    await user.click(within(drawer).getByRole('button', { name: 'Другое место' }));
+    const list = await within(drawer).findByRole('listbox', { name: 'Места GeoNames' });
+    expect(within(drawer).getByRole('searchbox', { name: 'Поиск' })).toHaveValue('м');
+    expect(within(drawer).getByRole('button', { name: 'Выбрать' })).toBeDisabled();
+    await waitFor(() => expect(list).toHaveFocus());
+  });
+
+  // V1 m2: шаг сменился — фокус на первое поле шага 2, а не на body (список шага 1 размонтирован).
+  test('V1 m2: ↓, Enter — фокус на «Страна города», не на body', async () => {
+    geoServer();
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), 'м');
+    const list = await within(drawer).findByRole('listbox', { name: 'Места GeoNames' });
+    list.focus();
+    await user.keyboard('{End}{Enter}');
+    const country = await within(drawer).findByRole('combobox', { name: 'Страна города' });
+    await waitFor(() => expect(country).toHaveFocus());
+  });
+
+  // G8 m5: контракт listGeoPlaces — q не длиннее 100.
+  test('G8 m5: поиск длиннее 100 — в запрос уходят первые 100', async () => {
+    const { seen } = geoServer();
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await user.click(within(drawer).getByRole('searchbox', { name: 'Поиск' }));
+    await user.paste('м'.repeat(150));
+    await waitFor(() => expect(seen.places.at(-1)?.get('q')).toHaveLength(100));
+    expect(seen.places.every((q) => (q.get('q') ?? '').length <= 100)).toBe(true);
+  });
+
+  // G8 m3: город на этом месте уже есть — места перечитаны (метка «уже заведён»), переход — на город
+  // по city_id перечитанного места.
+  test('G8 m3: 409 city_already_active — места перечитаны, «Открыть город» по city_id', async () => {
+    const { state } = geoServer();
+    activateServer(() => {
+      state.places = state.places.map((p) =>
+        p.geoname_id === 526815 ? { ...p, city_id: NEW_CITY } : p,
+      );
+      return problem(409, 'geo.city_already_active');
+    });
+    const app = renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await choose(user, drawer, 'м');
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    const open = await within(drawer).findByRole('button', { name: 'Открыть город Михайловск' });
+    await user.click(open);
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${NEW_CITY}`));
+  });
+
+  // Раунд 1, minor 3: пока место перечитывается после 409, «Найти город в списке» занята — быстрый клик не
+  // уводит в список, когда сейчас появится «Открыть город».
+  test('G8 m3: после 409, пока место перечитывается, «Найти город в списке» занята', async () => {
+    geoServer();
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/v1/geo/places', async ({ request }) => {
+        if (new URL(request.url).searchParams.get('q') === 'Михайловск') await gate;
+        return undefined;
+      }),
+    );
+    activateServer(() => problem(409, 'geo.city_already_active'));
+    const app = renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await choose(user, drawer, 'м');
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    const find = await within(drawer).findByRole('button', { name: 'Найти город в списке' });
+    expect(find).toHaveAttribute('aria-busy', 'true');
+    await user.click(find);
+    expect(app.at()).toBe('/geo/cities');
+    release();
+    await waitFor(() => expect(find).not.toHaveAttribute('aria-busy'));
+  });
+
+  test('G8 m3: после 409 «Другое место» — место с меткой «уже заведён»', async () => {
+    const { state } = geoServer();
+    activateServer(() => {
+      state.places = state.places.map((p) =>
+        p.geoname_id === 526815 ? { ...p, city_id: NEW_CITY } : p,
+      );
+      return problem(409, 'geo.city_already_active');
+    });
+    const app = renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await choose(user, drawer, 'м');
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    await within(drawer).findByText('На этом месте уже есть город');
+    // результаты шага 1 устарели (без этого их показал бы кэш до перечитывания при возврате)
+    const step1 = app.queryClient
+      .getQueryCache()
+      .find({ queryKey: ['geo', 'places', 'ru', { q: 'м' }], exact: true });
+    expect(step1).toBeDefined();
+    await waitFor(() => expect(step1?.state.isInvalidated).toBe(true));
+    await user.click(within(drawer).getByRole('button', { name: 'Другое место' }));
+    const row = await within(drawer).findByRole('option', { name: /^Михайловск/ });
+    await waitFor(() => expect(row).toHaveTextContent('уже заведён'));
+  });
+
+  test('G8 m3: успешная активация — места GeoNames помечены устаревшими', async () => {
+    geoServer();
+    activateServer();
+    const app = renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await choose(user, drawer, 'м');
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${NEW_CITY}`));
+    const places = app.queryClient.getQueryCache().findAll({ queryKey: ['geo', 'places'] });
+    expect(places.length).toBeGreaterThan(0);
+    expect(places.every((q) => q.state.isInvalidated)).toBe(true);
+  });
+
+  // G8 m14: исход неизвестен (обрыв), панель закрыли — город мог появиться: списки перечитаны.
+  test('G8 m14: исход неизвестен, панель закрыта — списки городов перечитаны', async () => {
+    const { seen } = geoServer();
+    activateServer(() => HttpResponse.error());
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await choose(user, drawer, 'м');
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    await within(drawer).findByRole('alert');
+    const before = seen.cities.length;
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(seen.cities.length).toBeGreaterThan(before));
+  });
+});
+
 const searchQ = (at: string) => new URLSearchParams(at.split('?')[1] ?? '').get('q');

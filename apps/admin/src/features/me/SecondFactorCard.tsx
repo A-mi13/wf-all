@@ -1,7 +1,7 @@
-import { type ReactNode, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { useDateTime } from '../../i18n/format';
-import { Button, ErrorState, LoadingRows, StatusChip } from '../../ui';
+import { Button, DataState, Skeleton, StatusChip } from '../../ui';
 import styles from './me.module.css';
 import { useMyMfa } from './queries';
 import { RegenerateCodesModal } from './RegenerateCodesModal';
@@ -22,45 +22,41 @@ export function SecondFactorCard() {
   const [lost, setLost] = useState(false);
   const [regenerate, setRegenerate] = useState(false);
 
-  let body: ReactNode;
-  if (mfa.isPending) body = <LoadingRows rows={3} />;
-  else if (mfa.isError)
-    body = (
-      <ErrorState error={mfa.error} onRetry={() => void mfa.refetch()} retrying={mfa.isFetching} />
-    );
-  else {
-    const { confirmed_at: since, recovery_codes_left: left } = mfa.data;
-    body = (
-      <>
-        <p className={styles.headline}>{since ? t('mfa.on') : t('mfa.off')}</p>
-        {since && <p className={styles.text}>{t('mfa.since', { date: dateTime(since) })}</p>}
-        <div className={styles.row}>
-          {since && <Button onClick={() => setRegenerate(true)}>{t('mfa.regenerate')}</Button>}
-          <Button
-            variant="secondary"
-            aria-expanded={lost}
-            aria-controls={lostId}
-            onClick={() => setLost((v) => !v)}
-          >
-            {t('mfa.lost')}
-          </Button>
-        </div>
-        <div id={lostId} hidden={!lost} className={styles.lost}>
-          <p className={styles.lostTitle}>{t('mfa.lost_title')}</p>
-          <p className={styles.text}>{t('mfa.lost_text')}</p>
-        </div>
+  // загрузка, ошибка, 403, нет сети — DataState (скелетон по форме карточки)
+  const body = (
+    <DataState query={mfa} scope="block" skeleton={<Skeleton.Text lines={4} width="long" />}>
+      {({ confirmed_at: since, recovery_codes_left: left }) => (
+        <>
+          <p className={styles.headline}>{since ? t('mfa.on') : t('mfa.off')}</p>
+          {since && <p className={styles.text}>{t('mfa.since', { date: dateTime(since) })}</p>}
+          <div className={styles.row}>
+            {since && <Button onClick={() => setRegenerate(true)}>{t('mfa.regenerate')}</Button>}
+            <Button
+              variant="secondary"
+              aria-expanded={lost}
+              aria-controls={lostId}
+              onClick={() => setLost((v) => !v)}
+            >
+              {t('mfa.lost')}
+            </Button>
+          </div>
+          <div id={lostId} hidden={!lost} className={styles.lost}>
+            <p className={styles.lostTitle}>{t('mfa.lost_title')}</p>
+            <p className={styles.text}>{t('mfa.lost_text')}</p>
+          </div>
 
-        <div className={styles.spread}>
-          <h3 className={styles.cardTitle}>{t('codes.title')}</h3>
-          <StatusChip tone={left <= LOW_CODES ? 'warning' : 'neutral'}>
-            {t('codes.left', { count: Math.min(left, TOTAL_CODES) })}
-          </StatusChip>
-        </div>
-        {since && left <= LOW_CODES && <p className={styles.warning}>{t('codes.low')}</p>}
-        <p className={styles.note}>{t('codes.text')}</p>
-      </>
-    );
-  }
+          <div className={styles.spread}>
+            <h3 className={styles.cardTitle}>{t('codes.title')}</h3>
+            <StatusChip tone={left <= LOW_CODES ? 'warning' : 'neutral'}>
+              {t('codes.left', { count: Math.min(left, TOTAL_CODES) })}
+            </StatusChip>
+          </div>
+          {since && left <= LOW_CODES && <p className={styles.warning}>{t('codes.low')}</p>}
+          <p className={styles.note}>{t('codes.text')}</p>
+        </>
+      )}
+    </DataState>
+  );
 
   return (
     <section aria-labelledby={titleId} className={styles.card}>

@@ -16,7 +16,7 @@ export type CitiesSearch = {
 
 export const CITY_STATUSES: readonly CityStatus[] = ['live', 'pilot', 'waitlist'];
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const COUNTRY = /^[A-Z]{2}$/;
 const Q_MAX = 100;
 
@@ -32,7 +32,9 @@ export function parseCitiesSearch(s: Record<string, unknown>): CitiesSearch {
   const status = [...new Set(raw.filter(isStatus))];
   if (status.length > 0) out.status = status;
   if (typeof s.country === 'string' && COUNTRY.test(s.country)) out.country = s.country;
-  if (typeof s.region_id === 'string' && UUID.test(s.region_id)) out.region_id = s.region_id;
+  // регион — только при стране: без неё поле «Регион» не показано, и сбросить фильтр было бы нечем (G8 m10)
+  if (out.country && typeof s.region_id === 'string' && UUID.test(s.region_id))
+    out.region_id = s.region_id;
   return out;
 }
 

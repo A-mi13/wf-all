@@ -12,12 +12,14 @@ import {
   ActionGate,
   Button,
   ConfirmDialog,
+  CopyButton,
+  DataState,
   Drawer,
   ErrorState,
   Form,
-  LoadingRows,
   PendingApprovalNotice,
   SelectField,
+  Skeleton,
   StatusChip,
   TextField,
   useCountdown,
@@ -140,7 +142,10 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
       <dl className={styles.facts}>
         <dt>{t('drawer.email')}</dt>
         {/* почта как хранится (A-форма xn--…) — её же вводят в подтверждении */}
-        <dd>{a.email}</dd>
+        <dd className={styles.copyable}>
+          {a.email}
+          <CopyButton value={a.email} label={t('drawer.copy_email')} />
+        </dd>
         <dt>{t('drawer.status')}</dt>
         <dd>
           <StatusChip tone={status.tone}>{status.text}</StatusChip>
@@ -431,32 +436,31 @@ function SessionsBlock({ target }: { target: StaffAccount }) {
     },
   );
 
-  let body: ReactNode;
-  if (sessions.isPending) body = <LoadingRows rows={2} />;
-  else if (sessions.isError)
-    body = (
-      <ErrorState
-        error={sessions.error}
-        onRetry={() => void sessions.refetch()}
-        retrying={sessions.isFetching}
-      />
-    );
-  else if (sessions.data.items.length === 0) body = <p className={styles.text}>{t('empty')}</p>;
-  else
-    body = (
-      // role="list": Safari снимает семантику списка с list-style: none
-      <ul role="list" aria-label={t('label')} className={styles.sessions}>
-        {sessions.data.items.map((s) => {
-          const l = label(s);
-          return (
-            <li key={s.id} className={styles.session}>
-              <strong className={styles.sessionDevice}>{l.device}</strong>
-              {l.details}
-            </li>
-          );
-        })}
-      </ul>
-    );
+  // загрузка, ошибка, 403, нет сети — DataState блока панели (скелетон по форме списка)
+  const body = (
+    <DataState
+      query={sessions}
+      scope="block"
+      skeleton={<Skeleton.Table columns={1} rows={2} head={false} />}
+      isEmpty={(d) => d.items.length === 0}
+      empty={<p className={styles.text}>{t('empty')}</p>}
+    >
+      {(data) => (
+        // role="list": Safari снимает семантику списка с list-style: none
+        <ul role="list" aria-label={t('label')} className={styles.sessions}>
+          {data.items.map((s) => {
+            const l = label(s);
+            return (
+              <li key={s.id} className={styles.session}>
+                <strong className={styles.sessionDevice}>{l.device}</strong>
+                {l.details}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </DataState>
+  );
 
   return (
     <Block title={t('title')}>

@@ -304,6 +304,8 @@ export function Select({
                 type="search"
                 className={fieldStyles.control}
                 aria-label={t('search')}
+                // видимая подсказка, а не пустая рамка (WCAG 3.3.2; ревью UF2a/II, r2)
+                placeholder={t('search')}
                 aria-controls={listId}
                 aria-activedescendant={enabled(active) ? optionId(active) : undefined}
                 value={query}

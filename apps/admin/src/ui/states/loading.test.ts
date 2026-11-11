@@ -13,16 +13,6 @@ const sources = (readdirSync(dir, { recursive: true }) as string[])
 
 const SELF_LOADING = /\bLoadingRows\b|states\.loading|['"]loading['"]|Загрузка…/;
 
-// Экраны, ещё не переведённые на DataState: перевод — UF2a.10 (применение к экранам, спека §6.1). Список
-// только сокращается: переведённый экран обязан уйти отсюда (иначе страж молча пропустит возврат).
-const PENDING_UF2A10 = [
-  'auth/SetupMfaPage.tsx',
-  'geo/CityPage.tsx',
-  'me/MySessionsCard.tsx',
-  'me/SecondFactorCard.tsx',
-  'staff/StaffDrawer.tsx',
-];
-
 const offenders = sources.filter((f) => SELF_LOADING.test(readFileSync(join(dir, f), 'utf8')));
 
 test('стражу есть что читать', () => {
@@ -32,14 +22,6 @@ test('стражу есть что читать', () => {
 });
 
 test('экраны не рисуют загрузку сами — только DataState / DataTable', () => {
-  expect(offenders.filter((f) => !PENDING_UF2A10.includes(f))).toEqual([]);
-});
-
-// Список не растёт молча: на момент UF2a.8 — 5 экранов (ревью m6); новый экран идёт через DataState.
-test('список ожидающих UF2a.10 только сокращается', () => {
-  expect(PENDING_UF2A10.length).toBeLessThanOrEqual(5);
-});
-
-test('список ожидающих UF2a.10 не устарел', () => {
-  expect(PENDING_UF2A10.filter((f) => !offenders.includes(f))).toEqual([]);
+  // исключений нет: все экраны переведены в UF2a.10 (список ожидающих снят, ревью UF2a/III-S m5)
+  expect(offenders).toEqual([]);
 });

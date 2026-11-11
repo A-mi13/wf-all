@@ -147,6 +147,8 @@ export function Calendar({ value, min, max, onSelect }: CalendarProps) {
                     role="gridcell"
                     data-date={toIso(day)}
                     tabIndex={compare(day, focused) === 0 ? 0 : -1}
+                    // фокус при показе пузыря — сюда, а не на «‹» (Popover modal, ревью UF2a/II r3)
+                    data-autofocus={compare(day, focused) === 0 || undefined}
                     aria-selected={value ? compare(day, value) === 0 : false}
                     aria-disabled={disabled(day) ? 'true' : undefined}
                     aria-current={compare(day, now) === 0 ? 'date' : undefined}

@@ -1,17 +1,21 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from 'react';
 import { useFormatter, useTranslations } from 'use-intl';
 import { isApiError } from '../../api/client';
 import type { components } from '../../api/gen/admin';
 import { useCan } from '../../app/session';
-import { Button, ErrorState, ForbiddenState, LoadingRows, PageHeader, StatusChip } from '../../ui';
+import { useLocale } from '../../i18n/locale';
+import { Button, CopyButton, DataState, PageHeader, StatusChip } from '../../ui';
 import { CityNamesCard } from './CityNamesCard';
+import { CityPageSkeleton } from './CityPageSkeleton';
 import { CitySlugCard } from './CitySlugCard';
 import { CityStatusCard } from './CityStatusCard';
 import { DistrictsCard } from './DistrictsCard';
 import styles from './geo.module.css';
 import { LinkPlaceDialog } from './LinkPlaceDialog';
-import { useGeoCity } from './queries';
+import { geoKeys, useGeoCity } from './queries';
+import { UUID } from './search';
 import { useCityStatus } from './status';
 
 type GeoCityDetails = components['schemas']['GeoCityDetails'];
@@ -22,16 +26,23 @@ type GeoCityDetails = components['schemas']['GeoCityDetails'];
 // адрес — geo.cities.manage, названия — geo.cities.rename (модератор своего), районы —
 // geo.districts.manage; без права — только чтение. Привязка к GeoNames — у непривязанного города
 // с geo.cities.manage. Чужой город модератора: сервер отвечает 403 — «нет доступа», 404 — «не найден».
+//
+// Загрузка — DataState со скелетоном по форме страницы (UF2a.10); cityId не uuid — «Город не найден» без
+// запроса (сервер ответил бы 400 по path.cityId; ревью G8, m1). Пока карточка перечитывается на новом
+// языке, видна прежняя карточка этого города, а отправка форм недоступна (stale; ревью G8, m18).
 export function CityPage() {
   const params = useParams({ strict: false });
   const cityId = typeof params.cityId === 'string' ? params.cityId : '';
-  const city = useGeoCity(cityId);
-  if (city.data) return <CityView city={city.data} />;
-  if (!city.error) return <LoadingRows />;
-  if (isApiError(city.error) && city.error.status === 403) return <ForbiddenState />;
-  if (isApiError(city.error, 'geo.city_not_found')) return <NotFound />;
+  const valid = UUID.test(cityId);
+  const city = useGeoCity(cityId, valid);
+  if (!valid) return <NotFound />;
+  if (city.data === undefined && isApiError(city.error, 'geo.city_not_found')) return <NotFound />;
   return (
-    <ErrorState error={city.error} onRetry={() => void city.refetch()} retrying={city.isFetching} />
+    <DataState query={city} skeleton={<CityPageSkeleton />}>
+      {(c) => (
+        <CityView key={c.id} city={c} stale={city.isPlaceholderData} fetching={city.isFetching} />
+      )}
+    </DataState>
   );
 }
 
@@ -40,25 +51,55 @@ function NotFound() {
   return <PageHeader title={t('not_found_title')} subtitle={t('not_found_text')} />;
 }
 
-function CityView({ city }: { city: GeoCityDetails }) {
+function CityView({
+  city,
+  stale,
+  fetching,
+}: {
+  city: GeoCityDetails;
+  stale: boolean;
+  fetching: boolean;
+}) {
   const t = useTranslations('geo.city');
   const td = useTranslations('geo.districts');
   const statusOf = useCityStatus();
   const canManage = useCan('geo.cities.manage', city.id);
   const canRename = useCan('geo.cities.rename', city.id);
   const canDistricts = useCan('geo.districts.manage', city.id);
+  // привязка начинается с поиска места: без geo.places.search окно упёрлось бы в отказ (ревью G8, m13)
+  const canSearch = useCan('geo.places.search');
+  const canLink = canManage && canSearch;
   const [linking, setLinking] = useState(false);
   // Привязка удалась — кнопки «Привязать» (открывателя окна) больше нет, и фокус упал бы на body
   // (ревью G8, m4): ставим его на сведения о городе, где видна привязка. Окно закрывается и кнопка
   // исчезает в разных отрисовках (ответ в кэше — отдельным уведомлением), порядок любой: эффект ждёт
-  // и закрытия (linked), и привязки в карточке.
+  // и закрытия (linked), и привязки в карточке. Закрытие окна без привязки считается так же: 409
+  // city_already_linked перечитал карточку, «Привязать» исчезла, пока окно было открыто, — Esc вернул бы
+  // фокус на пропавший открыватель (ревью G8, n1). Цель одноразовая: применена, не понадобилась (фокус не
+  // на body) или карточка перечитана без привязки — гаснет, опоздавшая не уводит фокус (раунд 1, minor 1).
+  const queryClient = useQueryClient();
+  const locale = useLocale();
   const facts = useRef<HTMLUListElement>(null);
-  const [linked, setLinked] = useState(0);
+  const linkTarget = useRef(false);
+  const [closedAt, setClosedAt] = useState(0);
+  const afterLink = () => {
+    linkTarget.current = true;
+    setClosedAt((n) => n + 1);
+  };
   useEffect(() => {
-    if (linked === 0 || city.geoname_id === null) return;
+    if (!linkTarget.current) return;
+    if (city.geoname_id === null) {
+      // ждать есть чего, только если привязка уже в кэше (отрисовка впереди) или карточка перечитывается
+      const key = geoKeys.city(city.id, locale);
+      const cached = queryClient.getQueryData<GeoCityDetails>(key)?.geoname_id ?? null;
+      const loading = queryClient.getQueryState(key)?.fetchStatus === 'fetching';
+      if (cached === null && !loading) linkTarget.current = false;
+      return;
+    }
     const active = document.activeElement;
     if (!active || active === document.body) facts.current?.focus();
-  }, [linked, city.geoname_id]);
+    linkTarget.current = false;
+  }, [closedAt, city.geoname_id, city.id, fetching, locale, queryClient]);
   const status = statusOf(city.status);
   return (
     <div className={styles.page}>
@@ -66,35 +107,40 @@ function CityView({ city }: { city: GeoCityDetails }) {
         title={city.name}
         subtitle={<StatusChip tone={status.tone}>{status.text}</StatusChip>}
         actions={
-          canManage &&
+          canLink &&
           city.geoname_id === null && (
-            <Button onClick={() => setLinking(true)}>{t('link_open')}</Button>
+            <Button disabled={stale} onClick={() => setLinking(true)}>
+              {t('link_open')}
+            </Button>
           )
         }
       />
       <CityFacts city={city} ref={facts} />
       {canManage && (
         <Section title={t('status.title')}>
-          <CityStatusCard city={city} />
+          <CityStatusCard city={city} readOnly={stale} />
         </Section>
       )}
       {canManage && (
         <Section title={t('slug.title')}>
-          <CitySlugCard city={city} />
+          <CitySlugCard city={city} readOnly={stale} />
         </Section>
       )}
       <Section title={t('names.title')}>
-        <CityNamesCard city={city} canEdit={canRename} />
+        <CityNamesCard city={city} canEdit={canRename} readOnly={stale} />
       </Section>
       <Section title={td('title')}>
         <DistrictsCard cityId={city.id} canEdit={canDistricts} />
       </Section>
-      {canManage && (
+      {canLink && (
         <LinkPlaceDialog
           city={city}
           open={linking}
-          onClose={() => setLinking(false)}
-          onLinked={() => setLinked((n) => n + 1)}
+          onClose={() => {
+            setLinking(false);
+            afterLink();
+          }}
+          onLinked={afterLink}
         />
       )}
     </div>
@@ -127,9 +173,25 @@ function CityFacts({ city, ref }: { city: GeoCityDetails; ref?: Ref<HTMLUListEle
     ],
     [t('region'), city.region?.name ?? t('no_region')],
     [t('population'), format.number(city.population)],
-    [t('geoname'), city.geoname_id === null ? t('not_linked') : String(city.geoname_id)],
+    [
+      t('geoname'),
+      city.geoname_id === null ? (
+        t('not_linked')
+      ) : (
+        <span key="geoname" className={styles.note}>
+          {city.geoname_id}
+          <CopyButton value={String(city.geoname_id)} label={t('copy_geoname')} />
+        </span>
+      ),
+    ],
     [t('timezone'), city.timezone],
-    [t('slug'), city.slug],
+    [
+      t('slug'),
+      <span key="slug" className={styles.note}>
+        {city.slug}
+        <CopyButton value={city.slug} label={t('copy_slug')} />
+      </span>,
+    ],
   ];
   return (
     <ul ref={ref} tabIndex={-1} aria-label={t('label')} className={styles.facts}>

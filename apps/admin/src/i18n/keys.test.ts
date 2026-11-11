@@ -1,21 +1,15 @@
 /// <reference types="node" />
-import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import ru from '../../messages/ru.json';
+import { adminSources, scanKeys } from '../test/i18nKeys';
 
-// Страж «ключ из кода есть в ru.json» (ревью UF2a/II-B, I4): сообщения use-intl не типизированы — удалённый или
-// переименованный ключ tsc не видит, а экран или история рисуют сырой ключ с MISSING_MESSAGE. Страж читает
-// исходники как текст: `const X = useTranslations('ns')` (или без пространства), затем вызовы `X('литерал'`
-// — ключ `ns.литерал` обязан быть строкой в ru.json. Пространство вызова — ближайшее объявление X выше по файлу
-// (у разных компонентов файла бывают разные `t`). Ключи шаблоном (`${…}`) — динамические, не проверяются.
+// Страж «ключ из кода есть в ru.json» (ревью UF2a/II-B, I4; m-r2 — t.rich/t.markup и двойные кавычки): сообщения
+// use-intl не типизированы — удалённый или переименованный ключ tsc не видит, а экран или история рисуют сырой
+// ключ с MISSING_MESSAGE. Разбор исходников — src/test/i18nKeys.ts. Ключи шаблоном — динамические, не
+// проверяются; t.has(…) — проверка наличия, её ключа может и не быть.
 
-const SRC = join(import.meta.dirname, '..');
-const files = (readdirSync(SRC, { recursive: true }) as string[])
-  .map((f) => f.replaceAll('\\', '/'))
-  .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && !f.startsWith('api/gen/'));
-
-const DECL = /const\s+(\w+)\s*=\s*useTranslations\(([^)]*)\)/g;
+const files = adminSources(join(import.meta.dirname, '..'));
 
 function has(key: string): boolean {
   const v = key
@@ -29,34 +23,28 @@ function has(key: string): boolean {
 }
 
 function missing(file: string, source: string): string[] {
-  const decls = [...source.matchAll(DECL)].map((m) => ({
-    name: m[1]!,
-    // '' — корень; литерал — пространство; шаблон или переменная — динамическое (null: вызовы не проверяются)
-    ns: m[2]!.trim() === '' ? '' : (/^'([^']*)'$/.exec(m[2]!.trim())?.[1] ?? null),
-    at: m.index,
-  }));
-  const out: string[] = [];
-  for (const name of new Set(decls.map((d) => d.name))) {
-    const call = new RegExp(`(?<![\\w.])${name}\\(\\s*'([^'\`$]+)'`, 'g');
-    for (const m of source.matchAll(call)) {
-      const decl = decls.filter((d) => d.name === name && d.at < m.index).at(-1);
-      if (!decl || decl.ns === null) continue;
-      const key = decl.ns ? `${decl.ns}.${m[1]}` : m[1]!;
-      if (!has(key)) out.push(`${file}: ${key}`);
-    }
-  }
-  return out;
+  return scanKeys(file, source)
+    .refs.filter((r) => !r.has && !has(r.key))
+    .map((r) => `${r.file}: ${r.key}`);
 }
 
 test('стражу есть что читать', () => {
   const sample =
     "const t = useTranslations('actions');\nconst x = t('save');\nconst y = t('nope');";
   expect(missing('x.tsx', sample)).toEqual(['x.tsx: actions.nope']);
-  expect(files).toContain('ui/toast/Toast.stories.tsx');
-  expect(files).toContain('features/staff/StaffDrawer.tsx');
+  // ревью UF2a/II-B m-r2: t.rich / t.markup и двойные кавычки — тоже вызовы
+  const rich =
+    'const t = useTranslations("actions");\nt.rich(\'rich_nope\', {});\nt.markup("markup_nope", {});\nt("dq_nope");';
+  expect(missing('y.tsx', rich)).toEqual([
+    'y.tsx: actions.rich_nope',
+    'y.tsx: actions.markup_nope',
+    'y.tsx: actions.dq_nope',
+  ]);
+  expect(files.map((f) => f.file)).toContain('ui/toast/Toast.stories.tsx');
+  expect(files.map((f) => f.file)).toContain('features/staff/StaffDrawer.tsx');
 });
 
 test('ключи переводов в коде есть в ru.json', () => {
-  const found = files.flatMap((f) => missing(f, readFileSync(join(SRC, f), 'utf8')));
+  const found = files.flatMap((f) => missing(f.file, f.source));
   expect(found).toEqual([]);
 });

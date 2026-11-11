@@ -601,18 +601,13 @@ func (a *App) createInvited(ctx context.Context, q *staffdb.Queries, na newAccou
 	}
 	c := created{id: id.New(), email: email}
 	c.version, err = q.InsertInvitedAccount(ctx, staffdb.InsertInvitedAccountParams{
-		ID: c.id, Email: email, DisplayName: name, Now: now, CreatedBy: by,
+		ID: c.id, Email: email, DisplayName: name, Now: now, CreatedBy: by, Locale: na.locale,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return created{}, staff.ErrEmailTaken
 	}
 	if err != nil {
 		return created{}, err
-	}
-	if na.locale != nil {
-		if err := q.SetLocale(ctx, staffdb.SetLocaleParams{Locale: *na.locale, ID: c.id}); err != nil {
-			return created{}, err
-		}
 	}
 	if err := q.InsertRole(ctx, staffdb.InsertRoleParams{StaffID: c.id, Role: na.role, GrantedBy: by, Now: now}); err != nil {
 		return created{}, err

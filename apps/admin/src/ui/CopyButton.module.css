@@ -4,6 +4,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--wf-space-2);
+  flex-wrap: wrap;
   min-width: 0;
   vertical-align: middle;
 }
@@ -59,6 +60,14 @@
   color: var(--wf-color-text);
   font-family: var(--wf-font-body);
   font-size: var(--wf-text-xs);
+}
+
+/* многострочное значение — своей строкой под кнопкой, высота по числу строк */
+.multiline {
+  flex-basis: 100%;
+  block-size: auto;
+  padding-block: var(--wf-space-1);
+  resize: none;
 }
 
 .srOnly {

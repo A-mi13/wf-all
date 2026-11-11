@@ -18,6 +18,13 @@
   max-inline-size: 12rem;
 }
 
+/* узкий контейнер запросов (как область страницы телефона): @container компонентов срабатывают в истории */
+.phone {
+  container-type: inline-size;
+  inline-size: 22rem;
+  max-inline-size: 100%;
+}
+
 /* область под таблицу или каркас: таблица заполняет высоту родителя */
 .frame {
   display: flex;

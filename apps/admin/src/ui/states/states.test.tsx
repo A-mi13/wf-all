@@ -135,6 +135,12 @@ test('ForbiddenState — заголовок страницы', () => {
   expect(screen.getByRole('heading', { level: 1, name: 'Нет доступа к разделу' })).toBeVisible();
 });
 
+test('ForbiddenState scope="block" — в карточке: без заголовка, «к этим данным»', () => {
+  renderWithIntl(<ForbiddenState scope="block" />);
+  expect(screen.getByText('Нет доступа к этим данным')).toBeVisible();
+  expect(screen.queryByRole('heading')).toBeNull();
+});
+
 // Пометка вместо действия на карманном устройстве (спека UI-фундамента §3.2): текст, не кнопка;
 // блок — заголовок и пояснение, compact — одна строка с иконкой.
 test('DesktopOnlyNotice — блок и одна строка, без кнопок и заголовков страницы', () => {

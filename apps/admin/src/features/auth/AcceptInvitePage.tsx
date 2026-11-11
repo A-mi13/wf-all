@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRouterState } from '@tanstack/react-router';
+import { useLayoutEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import { type ApiError, unwrap } from '../../api/client';
@@ -7,6 +8,7 @@ import { useAdminMutation } from '../../api/mutation';
 import { useDraft } from '../../app/draft';
 import { paths } from '../../app/paths';
 import { useSession } from '../../app/session';
+import { linkLocale, setLinkLocale } from '../../i18n/deviceLocale';
 import { useLocale } from '../../i18n/locale';
 import type { Locale } from '../../i18n/messages';
 import { Button, Form, FormError, PasswordField, TextField, useCountdown } from '../../ui';
@@ -29,8 +31,10 @@ type AcceptDraft = { email: string };
 // браузера), уходит в теле всегда — «что видишь, то и сохраняется» (locale; решение пользователя 10.11, раунд 2
 // IL): сервер пишет его в учётку вместе с паролем, me.locale стадии setup совпадает — /setup-2fa на том же
 // языке, без мигания. Сброс доступа сотруднику с en на устройстве ru: экран на RU с переключателем рядом —
-// что выбрано на экране в момент принятия, то и пишется (принято осознанно).
+// что выбрано на экране в момент принятия, то и пишется (принято осознанно). Ссылка письма — /accept?lang=<язык
+// учётки> (IL2): без явного выбора на устройстве экран на этом языке (useLinkLocale), переключатель главнее.
 export function AcceptInvitePage() {
+  useLinkLocale();
   const t = useTranslations('auth.accept');
   const tp = useTranslations('pages');
   const api = useApi();
@@ -161,4 +165,15 @@ export function AcceptInvitePage() {
       </Form>
     </AuthLayout>
   );
+}
+
+// Язык ссылки письма (?lang, IL2) — пока экран открыт: до первой отрисовки (useLayoutEffect — без мигания языка
+// браузера), уход с экрана его снимает (вход, /setup-2fa — там уже me.locale). StrictMode: снят и поставлен снова.
+function useLinkLocale() {
+  const search = useRouterState({ select: (s) => s.location.searchStr });
+  const lang = linkLocale(search);
+  useLayoutEffect(() => {
+    setLinkLocale(lang);
+    return () => setLinkLocale(null);
+  }, [lang]);
 }

@@ -1,7 +1,7 @@
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 import { origin, PAIRS } from './env';
 import { t } from './keys';
-import { expectMailCountStable, mailIds, mailList } from './mailpit';
+import { expectMailCountStable, INVITE_CODE, mailIds, mailList, waitForMail } from './mailpit';
 import {
   acceptAndSetup,
   api,
@@ -134,6 +134,11 @@ test('4. A приглашает админа (202) → B подтверждае�
   await drawer.getByRole('option', { name: t('roles.admin'), exact: true }).click();
   await expect(role).toHaveText(t('roles.admin'));
   await expect(drawer.getByRole('listbox')).toHaveCount(0);
+  // язык новичка (IL2): по умолчанию — язык админки A (RU), выбран EN — на нём письмо и ссылка /accept?lang=en
+  const locale = drawer.getByRole('combobox', { name: t('staff.invite.locale'), exact: true });
+  await locale.click();
+  await drawer.getByRole('option', { name: t('locale.en'), exact: true }).click();
+  await expect(locale).toHaveText(t('locale.en'));
   const created = pageA.waitForResponse(
     (r) => r.request().method() === 'POST' && r.url().endsWith('/v1/staff/invites'),
   );
@@ -141,7 +146,11 @@ test('4. A приглашает админа (202) → B подтверждае�
   const res = await created;
   expect(res.status()).toBe(202);
   const approval = ((await res.json()) as { approval: Approval }).approval;
-  expect(approval).toMatchObject({ status: 'pending', action: 'staff.invite' });
+  expect(approval).toMatchObject({
+    status: 'pending',
+    action: 'staff.invite',
+    payload: expect.objectContaining({ locale: 'en' }),
+  });
   approvalId = approval.id;
   // до подтверждения писем приглашённому нет; сразу после 202 это ещё ничего не доказывает (фон River мог
   // не успеть) — доказывает «письмо одно» после принятия ниже (ревью Task 16, M1)
@@ -180,6 +189,17 @@ test('4. A приглашает админа (202) → B подтверждае�
 });
 
 test('5. админ принимает приглашение, настраивает 2FA и видит свой раздел', async () => {
+  // ссылка письма — /accept?lang=en (язык, выбранный приглашающим): экран открывается на EN без выбора на
+  // устройстве. Origin ссылки может быть чужой пары (обе исполняют очередь staff) — берётся путь с параметрами.
+  const mail = await waitForMail(admin.email, { match: INVITE_CODE });
+  const link = /\/accept\?lang=[^\s,]+/.exec(mail.text)?.[0];
+  expect(link).toBe('/accept?lang=en');
+  await pageAdmin.goto(link!);
+  await expect(
+    pageAdmin.getByRole('heading', { level: 1, name: t('pages.accept.title', 'en') }),
+  ).toBeVisible();
+  await expect(pageAdmin.locator('html')).toHaveAttribute('lang', 'en');
+  // дальше — без ссылки: /accept на языке браузера (RU), принятие пишет его в учётку
   await acceptAndSetup(pageAdmin, admin);
   const me = await api<Me>(pageAdmin, 'GET', '/v1/staff/me');
   expect(me.body).toMatchObject({ stage: 'active', role: 'admin', email: admin.email });

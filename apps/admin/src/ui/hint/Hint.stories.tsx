@@ -60,3 +60,15 @@ export const Term: Story = () => {
   );
 };
 Term.storyName = 'Term with info';
+
+// Термин — заголовок рядом: кнопка «i» соседом, не внутри h2 (имя заголовка — только термин).
+export const TermBesideHeading: Story = () => {
+  const t = useTranslations();
+  return (
+    <div className={stories.row}>
+      <h2 id="story-term-heading">{t('staff.two_hands.title')}</h2>
+      <TermHint term="dual_approval" describedBy="story-term-heading" />
+    </div>
+  );
+};
+TermBesideHeading.storyName = 'Term beside heading';

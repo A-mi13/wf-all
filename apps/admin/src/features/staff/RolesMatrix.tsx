@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { useTranslations } from 'use-intl';
 import type { components } from '../../api/gen/admin';
-import { type Column, DataTable } from '../../ui';
+import { type Column, DataTable, TermHint } from '../../ui';
 import { usePermissionLabel, useRoleLabel, useStaffRoles } from './queries';
 import { twoHandsRules } from './roles';
 import styles from './staff.module.css';
@@ -79,9 +79,14 @@ export function TwoHandsNote() {
   const rules = twoHandsRules(q.data);
   return (
     <section aria-labelledby={titleId} className={styles.twoHands}>
-      <h2 id={titleId} className={styles.twoHandsTitle}>
-        {t('title')}
-      </h2>
+      {/* термин с подсказкой (спека UI-фундамента §4.8): кнопка «i» — соседом заголовка, не внутри: имя h2,
+          секции и списка — только «Правило двух рук» (ревью m1) */}
+      <div className={styles.twoHandsHead}>
+        <h2 id={titleId} className={styles.twoHandsTitle}>
+          {t('title')}
+        </h2>
+        <TermHint term="dual_approval" describedBy={titleId} />
+      </div>
       <p className={styles.twoHandsText}>{rules.length > 0 ? t('text') : t('none')}</p>
       {rules.length > 0 && (
         <ul aria-labelledby={titleId} className={styles.rules}>

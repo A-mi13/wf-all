@@ -12,6 +12,7 @@ function City(props: {
   status: 'live' | 'pilot';
   districts: number;
   selected?: boolean;
+  link?: boolean;
 }) {
   const t = useTranslations('geo');
   const format = useFormatter();
@@ -28,7 +29,16 @@ function City(props: {
         { value: props.districts, label: t('cities.districts', { count: props.districts }) },
       ]}
       note={t('cities.no_region')}
-      action={{ label: t('cities.open'), onClick: () => undefined }}
+      action={
+        props.link
+          ? {
+              label: t('cities.open'),
+              name: t('cities.open_label', { name: props.name }),
+              href: '#city',
+              onNavigate: () => undefined,
+            }
+          : { label: t('cities.open'), onClick: () => undefined }
+      }
       selected={props.selected}
     />
   );
@@ -45,5 +55,16 @@ export const Default: Story = () => (
 export const LongText: Story = () => (
   <div className={styles.grid}>
     <City name="Санкт-Петербург и Ленинградская агломерация" status="pilot" districts={18} />
+  </div>
+);
+
+// Действие-ссылка («Открыть: <город>», G8 m11) — как на экране; узкий контейнер: ссылка во всю ширину карточки
+// и не выходит за её рамку (раунд 1, I2).
+export const LinkAction: Story = () => (
+  <div className={styles.grid}>
+    <City name="Ставрополь" status="live" districts={4} selected link />
+    <div className={styles.phone}>
+      <City name="Пятигорск" status="pilot" districts={0} link />
+    </div>
   </div>
 );

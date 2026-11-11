@@ -108,16 +108,13 @@
       "lead": "Scan the QR code in Google Authenticator, 1Password or any other authenticator app and enter the six digits. Until the second factor is set up, the admin opens only this screen.",
       "qr": "QR code for the authenticator app",
       "secret": "Can't scan? Enter the secret manually",
-      "copy": "Copy",
-      "copy_secret": "Copy the secret",
-      "copied": "Copied",
-      "copy_failed": "Couldn't copy — select the text and copy it manually",
+      "copy_secret": "Copy: secret",
       "code": "Authenticator app code",
       "confirm": "Confirm",
       "invalid": "The code didn't work. Make sure the time on your phone is set automatically and enter a new code.",
       "codes_title": "Recovery codes",
       "codes_text": "Each code works once instead of the app code. We show them exactly once — later you can only regenerate them in My access, and the old ones stop working at once.",
-      "copy_codes": "Copy codes",
+      "copy_codes": "Copy: recovery codes",
       "download": "Download .txt",
       "file_name": "admin-recovery-codes.txt",
       "file_header": "Admin recovery codes. Each code works once.",
@@ -141,7 +138,9 @@
     },
     "forbidden": {
       "title": "No access to this section",
-      "text": "This section needs a permission your role doesn't have. An owner or admin can grant access."
+      "text": "This section needs a permission your role doesn't have. An owner or admin can grant access.",
+      "block_title": "No access to this data",
+      "block_text": "Seeing it needs a permission your role doesn't have. An owner or admin can grant access."
     },
     "not_found": {
       "title": "Page not found"
@@ -349,9 +348,11 @@
         "decision": "Decision"
       }
     },
-    "requested": "{name} · {time}",
-    "expires": "until {time}",
-    "decided": "{name} · {time}",
+    "requested": "{name} · <time></time>",
+    "expires": "expires <time></time>",
+    "expired": "expired <time></time>",
+    "decided": "{name} · <time></time>",
+    "copy_id": "Copy: request id",
     "system": "system",
     "comment": "Comment: {text}",
     "failure_reason": "Reason: {text}",
@@ -376,6 +377,7 @@
       "comment": "Comment",
       "target": "staff member {id}",
       "none": "—",
+      "locale": "Language",
       "country": "Country",
       "geo": {
         "rules": "{code}: {changes}",
@@ -559,7 +561,6 @@
       "submit": "Issue codes",
       "wait": "Wait {seconds} s",
       "done": "Done",
-      "issued": "Recovery codes reissued. The old ones no longer work.",
       "unknown": "No response arrived — the codes may have been reissued. If the counter below shows “10 of 10”, the old codes no longer work: issue new ones again and save them."
     },
     "sessions": {
@@ -571,7 +572,7 @@
       "revoke_others": "End all other sessions",
       "device": "{browser} · {os}",
       "unknown_device": "Unknown device",
-      "details": "Network {ip} · signed in {created} · active {seen}",
+      "details": "Network {ip} · signed in <created></created> · active <seen></seen>",
       "revoked": "Session ended. That device will need to sign in again.",
       "revoked_others": "{count, plural, =0 {There were no other sessions} one {# session ended} other {# sessions ended}}",
       "empty": "No active sessions",
@@ -677,11 +678,14 @@
       "cities": "Moderator cities",
       "cities_search": "Find a city",
       "cities_hint": "A moderator needs at least one city.",
+      "locale": "Staff member language",
+      "locale_hint": "The invitation email and the interface use it; the staff member can change it later.",
       "again": "Invite another"
     },
     "drawer": {
       "title": "Staff member",
       "email": "Email",
+      "copy_email": "Copy: email",
       "role": "Role",
       "status": "Status",
       "cities": "Cities",
@@ -764,6 +768,7 @@
     },
     "table": {
       "label": "Log records",
+      "copy_id": "Copy: record id",
       "columns": {
         "time": "Time",
         "who": "Who",
@@ -948,6 +953,7 @@
       "country_disabled": "country disabled",
       "no_region": "no region",
       "open": "Open",
+      "open_label": "Open: {name}",
       "empty_title": "No cities yet",
       "empty_text": "Activate the first city from the GeoNames directory."
     },
@@ -961,13 +967,6 @@
       "place_country_all": "All countries",
       "prompt": "Type a place name",
       "prompt_text": "Search matches the start of the name in Russian, English or Latin script.",
-      "columns": {
-        "place": "Place",
-        "region": "Region",
-        "country": "Country",
-        "population": "Population",
-        "action": "Action"
-      },
       "choose": "Choose",
       "choose_label": "Choose {name}",
       "already": "already added",
@@ -1005,13 +1004,16 @@
         "geoname": "GeoNames",
         "not_linked": "not linked",
         "timezone": "Time zone",
-        "slug": "Address"
+        "slug": "Address",
+        "copy_slug": "Copy: address",
+        "copy_geoname": "Copy: GeoNames ID"
       },
       "link_open": "Link to GeoNames",
       "status": {
         "title": "Status",
         "label": "City status",
-        "saved": "Status saved"
+        "saved": "Status saved",
+        "unknown_error": "This admin version does not know the status — choose one from the list"
       },
       "slug": {
         "title": "Web address",
@@ -1033,6 +1035,7 @@
         "confirm_text": "Apps in this language will show the name in the country language.",
         "confirm_word": "DELETE",
         "deleted": "Translation deleted",
+        "delete_hint": "An empty name is not saved. To delete the translation, use “Delete translation”.",
         "locales": {
           "ru": "Русский",
           "en": "English"

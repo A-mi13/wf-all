@@ -9,7 +9,7 @@ import { HttpResponse } from 'msw';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
-import { createQueryClient } from '../../app/query';
+import { createQueryClient, ME_KEY } from '../../app/query';
 import { providers, renderWithIntl, renderWithProviders } from '../../test/render';
 import { http, server } from '../../test/server';
 import { problem } from '../../test/problem';
@@ -72,14 +72,20 @@ function Probe() {
   return <div data-testid="skeleton" />;
 }
 
-function Sessions({ isEmpty }: { isEmpty?: (d: Sessions) => boolean }) {
+function Sessions({
+  isEmpty,
+  scope,
+}: {
+  isEmpty?: (d: Sessions) => boolean;
+  scope?: 'page' | 'block';
+}) {
   const api = useApi();
   const query = useQuery({
     queryKey: ['test', 'sessions'],
     queryFn: () => unwrap(api.GET('/v1/staff/me/sessions')),
   });
   return (
-    <DataState query={query} skeleton={<Probe />} isEmpty={isEmpty}>
+    <DataState query={query} skeleton={<Probe />} isEmpty={isEmpty} scope={scope}>
       {(d) => <p>сеансов: {d.items.length}</p>}
     </DataState>
   );
@@ -164,6 +170,21 @@ test('isEmpty → empty (по умолчанию — EmptyState)', async () => {
   expect(screen.queryByText(/сеансов/)).toBeNull();
 });
 
+test('pending — данные есть, но устарели: скелетон вместо них (секрет 2FA после «Начать заново»)', async () => {
+  const stale = {
+    data: 'старый секрет',
+    isError: false,
+    error: null,
+  } as unknown as UseQueryResult<string>;
+  renderWithProviders(
+    <DataState query={stale} skeleton={<Probe />} pending>
+      {(d) => <p>{d}</p>}
+    </DataState>,
+  );
+  expect(await screen.findByTestId('skeleton')).toBeInTheDocument();
+  expect(screen.queryByText('старый секрет')).toBeNull();
+});
+
 describe('ошибки', () => {
   test('403 — ForbiddenState', async () => {
     serve(() => problem(403, 'staff.forbidden'));
@@ -171,6 +192,14 @@ describe('ошибки', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Нет доступа к разделу' }),
     ).toBeInTheDocument();
+  });
+
+  // Ревью UF2a/II-B m5: внутри карточки или панели — не второй h1 «к разделу», а блок «к этим данным».
+  test('403 в карточке (scope="block") — без заголовка страницы', async () => {
+    serve(() => problem(403, 'staff.forbidden'));
+    renderWithProviders(<Sessions scope="block" />);
+    expect(await screen.findByText('Нет доступа к этим данным')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
   });
 
   test('429 — RateLimitedState, повтор — тот же запрос', async () => {
@@ -219,6 +248,38 @@ describe('ошибки', () => {
     expect(alert).toHaveTextContent('Код ошибки: 401 · auth.unauthenticated');
     fireEvent.click(screen.getByRole('button', { name: 'Повторить' }));
     expect(await screen.findByText('сеансов: 1')).toBeInTheDocument();
+  });
+
+  // Ревью UF2a/II-B m-r1: сессия кончилась — me ответил 401; увод на вход идёт эффектами позже, а кадр между
+  // ними не должен показать ErrorState role="alert" «· 401» (читалка объявила бы его).
+  test('401, и me ответил 401 — скелетон до ухода на вход, без кадра ошибки', async () => {
+    const me = gate();
+    server.use(
+      http.get('/v1/staff/me', async () => {
+        me.reach();
+        await me.opened;
+        return problem(401, 'auth.unauthenticated') as never;
+      }),
+    );
+    serve(() => problem(401, 'auth.unauthenticated'));
+    const alerts: string[] = [];
+    const watch = new globalThis.MutationObserver(() => {
+      for (const a of document.querySelectorAll('[role="alert"]')) alerts.push(a.textContent ?? '');
+    });
+    watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+    try {
+      const { queryClient } = renderWithProviders(<Sessions />, { me: null });
+      await me.reached;
+      await vi.waitFor(() => expect(screen.getByTestId('skeleton')).toBeInTheDocument());
+      me.open();
+      // me ответил 401 — сессия кончилась; несколько отрисовок после ответа — ни одного alert «401»
+      await vi.waitFor(() => expect(queryClient.getQueryState(ME_KEY)?.status).toBe('error'));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(alerts.filter((a) => a.includes('401'))).toEqual([]);
+      expect(screen.getByTestId('skeleton')).toBeInTheDocument();
+    } finally {
+      watch.disconnect();
+    }
   });
 });
 

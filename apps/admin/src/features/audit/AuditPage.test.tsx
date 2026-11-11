@@ -326,3 +326,16 @@ describe('было и стало', () => {
     expect(within(details).getByRole('group', { name: 'Было' })).toHaveTextContent('—');
   });
 });
+
+// План UF2a.10: время записи — RelativeTime (<time dateTime>), id — CopyButton «Копировать: id записи» (полный id).
+test('строка журнала: <time dateTime> и копирование полного id', async () => {
+  auditServer();
+  renderApp('/audit', { me: meOwner });
+  const [row] = rows(await table());
+  const record = LOG[0]!;
+  expect(row!.querySelector('time[datetime]')?.getAttribute('datetime')).toBe(record.created_at);
+  await userEvent
+    .setup()
+    .click(within(row!).getByRole('button', { name: 'Копировать: id записи' }));
+  expect(await navigator.clipboard.readText()).toBe(record.id);
+});

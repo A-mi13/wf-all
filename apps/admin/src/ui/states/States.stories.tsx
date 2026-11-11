@@ -61,6 +61,10 @@ export const Offline: Story = () => {
 
 export const Forbidden: Story = () => <ForbiddenState />;
 
+// 403 внутри карточки или панели (DataState scope="block"): без h1, «к этим данным».
+export const ForbiddenBlock: Story = () => <ForbiddenState scope="block" />;
+ForbiddenBlock.storyName = 'Forbidden block';
+
 export const Connection: Story = () => (
   <div className={styles.column}>
     <ConnectionErrorState onRetry={noop} />

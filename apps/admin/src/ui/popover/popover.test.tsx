@@ -361,6 +361,25 @@ describe('Popover', () => {
 
   // Календарь DateField рендерит сетку только открытым: закрытие снимает день с фокусом тем же рендером,
   // фокус уходит на body раньше уборки Popover — модальный всё равно возвращает его на якорь.
+  // Ревью UF2a/II раунд 1, r3: модальный ставит фокус на помеченное data-autofocus (выбранный день календаря), а не на
+  // первую кнопку («‹») — и при каждом показе, в том числе втором запуске эффекта StrictMode (история DateField:Open):
+  // эффект содержимого к тому моменту уже отработал и фокус сам не вернёт.
+  test('модальный: фокус на data-autofocus, не на первую кнопку (и под StrictMode)', () => {
+    for (const strict of [false, true]) {
+      const tree = (
+        <Harness kind="modal" initiallyOpen>
+          <button type="button">‹</button>
+          <button type="button" data-autofocus>
+            15
+          </button>
+        </Harness>
+      );
+      const { unmount } = render(strict ? <StrictMode>{tree}</StrictMode> : tree);
+      expect(screen.getByRole('button', { name: '15' })).toHaveFocus();
+      unmount();
+    }
+  });
+
   test('модальный: содержимое снято вместе с закрытием — фокус на якорь, не на body', async () => {
     function Lazy() {
       const anchor = useRef<HTMLButtonElement>(null);

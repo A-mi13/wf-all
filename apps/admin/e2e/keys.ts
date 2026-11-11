@@ -29,6 +29,7 @@ export const KEYS = [
   'staff.invite.email',
   'staff.invite.name',
   'staff.invite.role',
+  'staff.invite.locale', // язык новичка (IL2)
   'actions.submitForApproval', // «Отправить на подтверждение» — общее действие (словарь actions.*)
   'roles.owner',
   'roles.admin',
@@ -50,6 +51,8 @@ export const KEYS = [
   'audit.actions.platform.approval_executed',
   // переключатель языка до входа (код языка — начало имени кнопки «EN — English»)
   'locale.short.en',
+  'locale.en', // «English» — опция языка в приглашении
+  'pages.accept.title', // заголовок /accept: ссылка письма ?lang=en открывает экран на EN (IL2)
 ] as const;
 
 export type Key = (typeof KEYS)[number];

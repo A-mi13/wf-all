@@ -330,6 +330,17 @@ describe('Select на телефоне — шторка', () => {
       ][i] ?? '',
   }));
 
+  // Ревью UF2a/II раунд 1, r2 (WCAG 3.3.2): у поиска шторки видимая подсказка, а не пустая рамка с aria-label.
+  test('поиск шторки — с видимым плейсхолдером', async () => {
+    stubMedia({ width: 390, pointer: 'coarse' });
+    const { user } = renderWithIntl(<Harness options={TWELVE} />);
+    await user.click(combo());
+    const search = within(screen.getByRole('dialog', { name: 'Регион' })).getByRole('searchbox', {
+      name: 'Поиск по списку',
+    });
+    expect(search).toHaveAttribute('placeholder', 'Поиск по списку');
+  });
+
   test('шторка с подписью поля, > 10 опций — поиск; выбор закрывает, фокус на combobox', async () => {
     stubMedia({ width: 390, pointer: 'coarse' });
     const onChange = vi.fn();

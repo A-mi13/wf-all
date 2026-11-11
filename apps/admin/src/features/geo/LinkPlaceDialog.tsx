@@ -1,11 +1,11 @@
 import { useIsMutating } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import type { components } from '../../api/gen/admin';
 import { Button, FormError, Modal, useToast } from '../../ui';
 import styles from './geo.module.css';
 import { useLinkCity } from './mutations';
-import { PlaceAction, PlaceSearch } from './PlaceSearch';
+import { PlaceAction, type PlaceFilter, PlaceSearch } from './PlaceSearch';
 
 type GeoCityDetails = components['schemas']['GeoCityDetails'];
 type GeoPlace = components['schemas']['GeoPlace'];
@@ -15,7 +15,8 @@ type GeoPlace = components['schemas']['GeoPlace'];
 // {geoname_id}. 409 geo.city_already_linked / geo.city_already_active, 404 geo.place_not_found —
 // текст в окне, окно открыто (можно выбрать другое место). Пока запрос идёт, окно не закрывается.
 // Действие шага («Выбрать», «Привязать») — в закреплённом подвале окна (V1 п. 9); закрытое окно не
-// рендерится — выбор при новом открытии чистый.
+// рендерится — выбор при новом открытии чистый. Шаг 2 открылся — фокус на «Привязать»; «Другое место» —
+// прежние результаты, выбор снят, фокус на списке (ревью V1, m1, m2).
 export function LinkPlaceDialog({
   city,
   open,
@@ -44,8 +45,14 @@ function LinkFlow({
   const toast = useToast();
   const link = useLinkCity(city.id);
   const busy = useIsMutating({ mutationKey: ['geo', 'link', city.id] }) > 0;
+  const [filter, setFilter] = useState<PlaceFilter>({ q: '', country: city.country.code });
   const [selected, setSelected] = useState<GeoPlace | null>(null);
   const [place, setPlace] = useState<GeoPlace | null>(null);
+  const [returned, setReturned] = useState(false);
+  const submitRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (place) submitRef.current?.focus();
+  }, [place]);
 
   const submit = () => {
     if (!place) return;
@@ -59,7 +66,7 @@ function LinkFlow({
   };
 
   const footer = place ? (
-    <Button loading={link.isPending} onClick={submit}>
+    <Button ref={submitRef} loading={link.isPending} onClick={submit}>
       {t('submit')}
     </Button>
   ) : (
@@ -93,7 +100,9 @@ function LinkFlow({
                 disabled={link.isPending}
                 onClick={() => {
                   link.reset();
+                  setSelected(null);
                   setPlace(null);
+                  setReturned(true);
                 }}
               >
                 {ta('change_place')}
@@ -106,7 +115,9 @@ function LinkFlow({
             selected={selected}
             onSelect={setSelected}
             onChoose={setPlace}
-            defaultCountry={city.country.code}
+            filter={filter}
+            onFilterChange={setFilter}
+            focusList={returned}
             bounded
           />
         )}

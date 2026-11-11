@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 import type { Me } from '../../app/permissions';
@@ -7,7 +7,7 @@ import { cityDetails, cityEditServer, geoServer, meGeoAdmin, meGeoModerator } fr
 import { CITY_OTHER, CITY_OWN, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
-import { pick } from '../../test/pick';
+import { pick, selectedText } from '../../test/pick';
 
 // Страница города (*; спека §9.4 п. 8; план B Task 19): шапка (название, статус, страна с пометкой
 // «выключена», регион, население, geoname_id или «не привязан»), карточки по правам в городе: статус
@@ -132,6 +132,192 @@ describe('права по карточкам', () => {
   });
 });
 
+// UF2a.10: загрузка — DataState со скелетоном по форме страницы; адрес и geoname_id — CopyButton.
+describe('загрузка и копирование', () => {
+  test('медленный ответ — скелетон страницы города (шапка, сведения, карточки), затем город', async () => {
+    cityEditServer();
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/v1/geo/cities/{cityId}', async ({ response }) => {
+        await gate;
+        return response(200).json(cityDetails());
+      }),
+    );
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await waitFor(() => expect(document.querySelector('[data-city-skeleton]')).not.toBeNull());
+    const skeleton = document.querySelector('[data-city-skeleton]')!;
+    expect(skeleton.closest('[aria-busy="true"]')).not.toBeNull();
+    expect(skeleton.querySelectorAll('[data-skeleton="card"]').length).toBeGreaterThan(0);
+    expect(skeleton.querySelector('[data-skeleton="text"]')).not.toBeNull();
+    release();
+    await title();
+    expect(document.querySelector('[data-city-skeleton]')).toBeNull();
+  });
+
+  test('адрес и GeoNames — «Копировать: …» копирует своё значение', async () => {
+    cityEditServer();
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    const user = userEvent.setup();
+    const facts = screen.getByRole('list', { name: 'Сведения о городе' });
+    await user.click(within(facts).getByRole('button', { name: 'Копировать: адрес' }));
+    expect(await navigator.clipboard.readText()).toBe(cityDetails().slug);
+    await user.click(within(facts).getByRole('button', { name: 'Копировать: GeoNames ID' }));
+    expect(await navigator.clipboard.readText()).toBe('487846');
+  });
+
+  test('не привязан — копировать GeoNames нечего', async () => {
+    cityEditServer({ details: cityDetails({ geoname_id: null }) });
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    expect(screen.queryByRole('button', { name: 'Копировать: GeoNames ID' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Копировать: адрес' })).toBeInTheDocument();
+  });
+});
+
+// Уборка ревью G8 (план UF2a.11).
+describe('уборка G8', () => {
+  test('m1: cityId не uuid — «Город не найден» без запроса карточки', async () => {
+    cityEditServer();
+    const asked: string[] = [];
+    server.use(
+      http.get('/v1/geo/cities/{cityId}', ({ params, response }) => {
+        asked.push(params.cityId);
+        return response.untyped(problem(400, 'validation.failed'));
+      }),
+      http.get('/v1/geo/cities/{cityId}/districts', ({ params, response }) => {
+        asked.push(params.cityId);
+        return response.untyped(problem(400, 'validation.failed'));
+      }),
+    );
+    renderApp('/geo/cities/not-a-uuid', { me: meGeoAdmin });
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Город не найден' }),
+    ).toBeInTheDocument();
+    expect(asked).toEqual([]);
+  });
+
+  test('m13: без geo.places.search — «Привязать к GeoNames» нет (поиск места был бы отказом)', async () => {
+    cityEditServer({ details: cityDetails({ geoname_id: null }) });
+    const permissions = Object.fromEntries(
+      Object.entries(meGeoAdmin.permissions).filter(([k]) => k !== 'geo.places.search'),
+    );
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: { ...meGeoAdmin, permissions } });
+    await title();
+    expect(screen.getByRole('region', { name: 'Статус' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Привязать к GeoNames' })).toBeNull();
+  });
+
+  test('n1: 409 city_already_linked, окно закрыли Esc — фокус на «Сведения о городе»', async () => {
+    const srv = cityEditServer({
+      details: cityDetails({ geoname_id: null }),
+      answer: () => problem(409, 'geo.city_already_linked'),
+    });
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Привязать к GeoNames' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязать к GeoNames' });
+    // сверка импорта привязала город, пока окно было открыто
+    srv.state.details = { ...srv.state.details, geoname_id: 526815 };
+    await user.type(within(dialog).getByRole('searchbox', { name: 'Поиск' }), 'м');
+    await user.click(await within(dialog).findByRole('option', { name: /^Михайловск/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Выбрать Михайловск' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Привязать' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Город уже привязан к месту GeoNames',
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Привязать к GeoNames' })).toBeNull(),
+    );
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() =>
+      expect(screen.getByRole('list', { name: 'Сведения о городе' })).toHaveFocus(),
+    );
+  });
+  // Раунд 1, minor 1: Esc без привязки — цели фокуса нет; позже город привязал импорт, карточка перечитана
+  // при фокусе на body — фокус не уходит на «Сведения о городе».
+  test('окно закрыли без привязки — позднее перечитывание фокус не трогает', async () => {
+    const srv = cityEditServer({ details: cityDetails({ geoname_id: null }) });
+    const app = renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Привязать к GeoNames' }));
+    await screen.findByRole('dialog', { name: 'Привязать к GeoNames' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    srv.state.details = { ...srv.state.details, geoname_id: 526815 };
+    await act(() => app.queryClient.invalidateQueries({ queryKey: ['geo', 'cities', 'card'] }));
+    const facts = screen.getByRole('list', { name: 'Сведения о городе' });
+    await waitFor(() => expect(facts).toHaveTextContent('526815'));
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+// Непредусмотренный отказ №1 ревью G8 (m18): язык — в ключе карточки; смена языка не должна размонтировать
+// формы и стирать ввод, а «Сохранить» не должна уйти со значениями прежнего ответа.
+describe('смена языка и города', () => {
+  test('смена языка — ввод на месте, «Сохранить» недоступна до ответа', async () => {
+    cityEditServer();
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/v1/geo/cities/{cityId}', async ({ request, response }) => {
+        if (request.headers.get('Accept-Language') !== 'en')
+          return response(200).json(cityDetails());
+        await gate;
+        // пока перечитывали, адрес сменили в другой вкладке: введённое не затирается ответом
+        return response(200).json(cityDetails({ slug: 'stavropol-city' }));
+      }),
+    );
+    const app = renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    const user = userEvent.setup();
+    const slug = within(section('Адрес в вебе')).getByRole('textbox', { name: 'Адрес (slug)' });
+    await user.clear(slug);
+    await user.type(slug, 'stavropol-new');
+    app.me.current = { ...meGeoAdmin, locale: 'en' };
+    await app.refetchMe();
+    await screen.findByRole('region', { name: 'Web address' });
+    const field = screen.getByRole('textbox', { name: 'Address (slug)' });
+    expect(field).toHaveValue('stavropol-new');
+    for (const save of screen.getAllByRole('button', { name: 'Save' })) expect(save).toBeDisabled();
+    release();
+    await waitFor(() => {
+      for (const save of screen.getAllByRole('button', { name: 'Save' }))
+        expect(save).toBeEnabled();
+    });
+    expect(screen.getByRole('textbox', { name: 'Address (slug)' })).toHaveValue('stavropol-new');
+  });
+
+  test('город A → город B — данных A нет: скелетон, затем B', async () => {
+    const other = cityDetails({ id: CITY_OTHER, name: 'Пятигорск', slug: 'pyatigorsk' });
+    geoServer({ details: [cityDetails(), other], districts: { [CITY_OWN]: [], [CITY_OTHER]: [] } });
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/v1/geo/cities/{cityId}', async ({ params, response }) => {
+        if (params.cityId === CITY_OTHER) {
+          await gate;
+          return response(200).json(other);
+        }
+        return response(200).json(cityDetails());
+      }),
+    );
+    const app = renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    await act(() => app.history.push(`/geo/cities/${CITY_OTHER}`));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OTHER}`));
+    expect(screen.queryByRole('heading', { level: 1, name: 'Ставрополь' })).toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-city-skeleton]')).not.toBeNull());
+    release();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Пятигорск' })).toBeInTheDocument();
+  });
+});
+
 describe('статус', () => {
   test('выбор и «Сохранить» — {status}, шапка из ответа', async () => {
     const { sent } = cityEditServer();
@@ -147,6 +333,69 @@ describe('статус', () => {
     expect(await screen.findByText('Статус сохранён')).toBeInTheDocument();
     const header = screen.getByRole('heading', { level: 1 }).closest('header');
     expect(within(header!).getByText('пилот')).toBeInTheDocument();
+  });
+
+  // Ревью G8, m12: список статусов в контракте открытый — незнакомый показан «—» и не выбирается;
+  // «Сохранить» с ним — ошибка поля, а не молчание.
+  test('незнакомый статус — опция «—» недоступна, «Сохранить» — ошибка поля без запроса', async () => {
+    const { sent } = cityEditServer({
+      details: cityDetails({ status: 'paused' as 'live' }),
+    });
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    const card = section('Статус');
+    const user = userEvent.setup();
+    const control = within(card).getByRole('combobox', { name: 'Статус города' });
+    expect(selectedText(control)).toBe('—');
+    await user.click(control);
+    expect(await screen.findByRole('option', { name: '—' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await user.keyboard('{Escape}');
+    await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() =>
+      expect(control).toHaveAccessibleDescription(/Статус неизвестен этой версии админки/),
+    );
+    expect(sent).toEqual([]);
+  });
+
+  // Раунд 1, I1: после сохранения поле не «залипает» — правка другой вкладки, пришедшая с перечитыванием,
+  // видна в поле, и следующее «Сохранить» её не откатывает.
+  test('сохранили статус, другая вкладка сменила — поле за сервером', async () => {
+    const { state } = cityEditServer();
+    const app = renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    const card = section('Статус');
+    const user = userEvent.setup();
+    const control = within(card).getByRole('combobox', { name: 'Статус города' });
+    await pick(user, control, 'pilot');
+    await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    expect(await screen.findByText('Статус сохранён')).toBeInTheDocument();
+    state.details = { ...state.details, status: 'waitlist', version: state.details.version + 1 };
+    await act(() => app.queryClient.invalidateQueries({ queryKey: ['geo', 'cities', 'card'] }));
+    await waitFor(() => expect(selectedText(control)).toBe('ожидание'));
+  });
+
+  test('сохранили адрес, другая вкладка сменила — поле за сервером', async () => {
+    const { state } = cityEditServer();
+    const app = renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+    await title();
+    const user = userEvent.setup();
+    const slug = within(section('Адрес в вебе')).getByRole('textbox', { name: 'Адрес (slug)' });
+    await user.clear(slug);
+    await user.type(slug, 'stavropol-new');
+    await user.click(within(section('Адрес в вебе')).getByRole('button', { name: 'Сохранить' }));
+    expect(await screen.findByText('Адрес сохранён')).toBeInTheDocument();
+    state.details = {
+      ...state.details,
+      slug: 'stavropol-city',
+      version: state.details.version + 1,
+    };
+    await act(() => app.queryClient.invalidateQueries({ queryKey: ['geo', 'cities', 'card'] }));
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Адрес (slug)' })).toHaveValue('stavropol-city'),
+    );
   });
 
   test('сервер отказал 403 — текст ошибки, страница цела', async () => {

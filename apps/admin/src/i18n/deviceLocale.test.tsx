@@ -7,8 +7,10 @@ import { meMfaPending, meOwner, meSetup } from '../test/me';
 import {
   browserLocale,
   DEVICE_LOCALE_KEY,
+  linkLocale,
   readDeviceLocale,
   setDeviceLocale,
+  setLinkLocale,
   useDeviceLocale,
 } from './deviceLocale';
 import { useLocale } from './locale';
@@ -19,6 +21,7 @@ import { useLocale } from './locale';
 // сотрудника wf.locale не стирают; на сервер выбор устройства не уходит.
 
 afterEach(() => {
+  setLinkLocale(null);
   vi.restoreAllMocks();
   localStorage.clear();
   document.documentElement.lang = '';
@@ -117,5 +120,43 @@ describe('useLocale по стадиям', () => {
       window.dispatchEvent(new StorageEvent('storage', { key: DEVICE_LOCALE_KEY, newValue: 'en' }));
     });
     expect(result.current).toBe('en');
+  });
+});
+
+// IL2 (спека §4.3, §9.1): ссылка письма /accept?lang=<язык учётки>. Разбор терпимый — автолинковщик захватывает
+// запятую после ссылки («?lang=ru,»), регистр и регион не мешают; незнакомое — как будто параметра нет.
+describe('язык из ссылки письма', () => {
+  test.each([
+    ['?lang=en', 'en'],
+    ['?lang=ru', 'ru'],
+    ['?lang=ru,', 'ru'],
+    ['?lang=EN', 'en'],
+    ['?lang=en-US', 'en'],
+    ['?lang=%20en.', 'en'],
+    ['?lang=en&lang=ru', 'en'],
+    ['?lang=de', null],
+    ['?lang=eng', null],
+    ['?lang=', null],
+    ['?lang', null],
+    ['', null],
+    ['?language=en', null],
+  ])('%s → %s', (search, want) => {
+    expect(linkLocale(search)).toBe(want);
+  });
+
+  test('язык ссылки — только без явного выбора устройства; снят — снова язык браузера', () => {
+    stubLanguage('ru-RU');
+    const { result } = renderHook(() => useDeviceLocale());
+    expect(result.current).toBe('ru');
+    act(() => setLinkLocale('en'));
+    expect(result.current).toBe('en');
+    act(() => setDeviceLocale('ru')); // явный выбор на экране главнее ссылки
+    expect(result.current).toBe('ru');
+    localStorage.clear();
+    act(() => setLinkLocale(null));
+    expect(result.current).toBe('ru');
+    // ссылка в storage не пишется: это не выбор устройства
+    act(() => setLinkLocale('en'));
+    expect(localStorage.getItem(DEVICE_LOCALE_KEY)).toBeNull();
   });
 });

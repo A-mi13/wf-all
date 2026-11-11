@@ -246,3 +246,22 @@ test('телефон (390 + палец): матрица — таблица со 
   // строка таблицы, не карточка: в ячейке нет повторённой подписи столбца
   expect(within(grant).getAllByRole('cell')[1]).toHaveTextContent(/^вдвоём$/);
 });
+
+// План UF2a.10: «Правило двух рук» — термин с подсказкой (TermHint dual_approval); имя секции — сам заголовок.
+test('«Правило двух рук» — подсказка термина из глоссария', async () => {
+  staffServer({ accounts: TEAM });
+  renderApp('/staff', { me: meOwner });
+  const section = await screen.findByRole('region', { name: 'Правило двух рук' });
+  // ревью m1: кнопка, пузырь и живая область — не внутри заголовка: имя h2 — только термин, и после открытия
+  const heading = () =>
+    within(section).getByRole('heading', { level: 2, name: 'Правило двух рук' });
+  expect(within(heading()).queryByRole('button')).toBeNull();
+  const more = within(section).getByRole('button', { name: 'Что это значит?' });
+  expect(more).toHaveAccessibleDescription('Правило двух рук');
+  await userEvent.setup().click(more);
+  expect(more).toHaveAttribute('aria-expanded', 'true');
+  expect(heading().textContent).toBe('Правило двух рук');
+  expect(
+    (await screen.findAllByText(/подтвердит второй сотрудник с тем же правом/)).length,
+  ).toBeGreaterThan(0);
+});

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 import { server } from './server';
 
@@ -7,6 +7,10 @@ import { server } from './server';
 // браузера (src/i18n/deviceLocale.ts), а тексты экранов в тестах — ru. Геттер (а не значение): тест языка
 // подменяет его через vi.spyOn(navigator, 'language', 'get').
 Object.defineProperty(navigator, 'language', { get: () => 'ru-RU', configurable: true });
+
+// Первый тест файла под нагрузкой пула (холодный старт приложения, ICU, роутер) дольше секунды по умолчанию —
+// флак router.test (ревью V1 m7): ожидания findBy*/waitFor — до 3 с.
+configure({ asyncUtilTimeout: 3000 });
 
 // Прокладка Popover API (спека UI-фундамента §4.8, n3, m-b): jsdom 30 его не знает (showPopover —
 // undefined). Показ и скрытие ставят и снимают атрибут-состояние data-popover-open и шлют toggle, как

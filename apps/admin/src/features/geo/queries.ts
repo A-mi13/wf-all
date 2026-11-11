@@ -27,6 +27,7 @@ export const GEO_KEY = ['geo'] as const;
 export const CITIES_KEY = ['geo', 'cities'] as const;
 export const COUNTRIES_KEY = ['geo', 'countries'] as const;
 export const IMPORTS_KEY = ['geo', 'imports'] as const;
+export const GEO_PLACES_KEY = ['geo', 'places'] as const;
 export const VERSIONS_KEY = ['platform', 'versions'] as const;
 export const FLAGS_KEY = ['platform', 'flags'] as const;
 
@@ -36,7 +37,7 @@ export const geoKeys = {
   districts: (cityId: string) => [...CITIES_KEY, 'districts', cityId] as const,
   countries: (locale: string) => [...COUNTRIES_KEY, 'list', locale] as const,
   regions: (code: string, locale: string) => [...COUNTRIES_KEY, 'regions', code, locale] as const,
-  places: (locale: string, q: PlacesQuery) => ['geo', 'places', locale, q] as const,
+  places: (locale: string, q: PlacesQuery) => [...GEO_PLACES_KEY, locale, q] as const,
   imports: (q: ImportsQuery) => [...IMPORTS_KEY, 'list', q] as const,
   importReport: (id: string, locale: string) => [...IMPORTS_KEY, 'report', id, locale] as const,
   importJob: (jobId: number) => [...IMPORTS_KEY, 'job', jobId] as const,
@@ -61,12 +62,17 @@ export function useGeoCities(q: CitiesQuery) {
   });
 }
 
-// Карточка города (getGeoCity): названия по всем языкам, история адресов, страна, регион.
-export function useGeoCity(cityId: string) {
+// Карточка города (getGeoCity): названия по всем языкам, история адресов, страна, регион. Язык — в
+// ключе: пока карточка перечитывается на новом языке, видна прежняя ТОГО ЖЕ города (placeholderData —
+// функция со сверкой cityId прежнего ключа): формы не размонтируются и ввод не стирается (ревью G8, m18);
+// другой город — без подмены, скелетон. enabled — экран не спрашивает заведомо негодный id.
+export function useGeoCity(cityId: string, enabled = true) {
   const api = useApi();
   const locale = useLocale();
   return useQuery({
     queryKey: geoKeys.city(cityId, locale),
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[3] === cityId ? prev : undefined),
+    enabled,
     queryFn: () =>
       unwrap(
         api.GET('/v1/geo/cities/{cityId}', {

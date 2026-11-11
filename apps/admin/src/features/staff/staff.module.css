@@ -48,6 +48,13 @@
   font-family: var(--wf-font-body);
 }
 
+/* заголовок и кнопка подсказки термина рядом */
+.twoHandsHead {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-1);
+}
+
 .twoHandsTitle {
   margin: 0;
   color: var(--wf-color-warning);
@@ -159,6 +166,14 @@
 .facts dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* значение с кнопкой копирования рядом (почта) */
+.facts .copyable {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-1);
+  min-width: 0;
 }
 
 .block {

@@ -42,6 +42,11 @@ function directory() {
 const page = () => screen.findByRole('heading', { level: 1, name: 'Подтверждения' });
 const table = (name: string) => screen.findByRole('table', { name });
 const rows = (t: HTMLElement) => within(t).getAllByRole('row').slice(1);
+// кнопки решения строки: «Копировать: id запроса» есть у любой строки (UF2a.10) — не решение
+const decisionButtons = (row: HTMLElement) =>
+  within(row)
+    .queryAllByRole('button')
+    .filter((b) => b.getAttribute('aria-label') !== 'Копировать: id запроса');
 const listCalls = (seen: { lists: URLSearchParams[]; background: (string | null)[] }) =>
   seen.lists.filter((_, i) => seen.background[i] === null);
 
@@ -124,7 +129,8 @@ describe('карточка запроса', () => {
     expect(row).toHaveTextContent('модератор');
     expect(await within(row!).findByText(/Ставрополь/)).toBeInTheDocument();
     expect(row).toHaveTextContent('ждёт решения');
-    expect(row).toHaveTextContent(/до /);
+    // срок — RelativeTime (UF2a.10); срок фикстуры уже прошёл (сервер ещё не погасил) — «истёк …» (ревью m2)
+    expect(row).toHaveTextContent(/истёк /);
   });
 
   test('смена роли: цель по id (карточка сотрудника), было → стало', async () => {
@@ -207,7 +213,7 @@ describe('карточка запроса', () => {
     expect(system).toHaveTextContent('система');
     expect(system).toHaveTextContent('Причина: Инициатор изменился после запроса');
     // решённые — без кнопок
-    expect(within(failed!).queryByRole('button')).toBeNull();
+    expect(decisionButtons(failed!)).toEqual([]);
   });
 
   test('неизвестный код неудачи — общий текст, не сырой код и не пусто', async () => {
@@ -238,7 +244,7 @@ describe('подтвердить', () => {
     const [after] = rows(await table('Входящие запросы'));
     expect(after).toHaveTextContent('Иван П.');
     expect(after).toHaveTextContent('исполнен');
-    expect(within(after!).queryByRole('button')).toBeNull();
+    expect(decisionButtons(after!)).toEqual([]);
   });
 
   test('executed — учётки перечитаны (карточка цели)', async () => {
@@ -753,7 +759,7 @@ describe('отменить', () => {
     await userEvent.setup().click(within(rows(t)[0]!).getByRole('button', { name: 'Отменить' }));
     await screen.findByText('Запрос отменён.');
     await waitFor(() => expect(rows(t)[0]).toHaveTextContent('отменён'));
-    expect(within(rows(t)[0]!).queryByRole('button')).toBeNull();
+    expect(decisionButtons(rows(t)[0]!)).toEqual([]);
     release();
   });
 });
@@ -1091,4 +1097,32 @@ describe('фокус после решения', () => {
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
   });
+});
+
+// План UF2a.10: id запроса — CopyButton «Копировать: id запроса»; запрошено и срок — RelativeTime (<time dateTime>).
+test('строка запроса: копирование id и время — <time dateTime>', async () => {
+  const a = approval({ id: '0192f1c4-aaaa-7b21-9c5d-0000000000a1', action: 'staff.invite' });
+  approvalsServer({ incoming: [a] });
+  renderApp('/approvals', { me: meOwner });
+  const [row] = rows(await table('Входящие запросы'));
+  await userEvent
+    .setup()
+    .click(within(row!).getByRole('button', { name: 'Копировать: id запроса' }));
+  expect(await navigator.clipboard.readText()).toBe(a.id);
+  expect(
+    [...row!.querySelectorAll('time[datetime]')].map((t) => t.getAttribute('datetime')),
+  ).toEqual([a.requested_at, a.expires_at]);
+});
+
+// Ревью UF2a/III-S m2: срок в будущем — «истекает через …»; прошёл, а запрос ещё pending (ExpireDue не дошёл,
+// вкладка открыта дольше срока) — «истёк …», а не «истекает 5 мин назад».
+test.each([
+  ['впереди', 2.5, /истекает через 2 дня/],
+  ['прошёл', -2.5, /истёк 2 дня назад/],
+] as const)('срок %s — %s', async (_, days, text) => {
+  const expires = new Date(Date.now() + days * 86_400_000).toISOString();
+  approvalsServer({ incoming: [approval({ expires_at: expires })] });
+  renderApp('/approvals', { me: meOwner });
+  const [row] = rows(await table('Входящие запросы'));
+  expect(row).toHaveTextContent(text);
 });

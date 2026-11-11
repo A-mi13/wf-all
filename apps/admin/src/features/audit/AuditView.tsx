@@ -4,8 +4,15 @@ import { useTimeZone, useTranslations } from 'use-intl';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
-import { useDateTime } from '../../i18n/format';
-import { Button, type Column, DataTable, infiniteTableProps, StatusChip } from '../../ui';
+import {
+  Button,
+  type Column,
+  CopyButton,
+  DataTable,
+  infiniteTableProps,
+  RelativeTime,
+  StatusChip,
+} from '../../ui';
 import { AuditFilters } from './AuditFilters';
 import { sectionOf, tagTone, useAuditLabels } from './labels';
 import { type AuditSearch, toAuditQuery } from './search';
@@ -34,7 +41,6 @@ export function AuditView({
   const t = useTranslations('audit');
   const api = useApi();
   const timeZone = useTimeZone() ?? 'UTC';
-  const dateTime = useDateTime();
   const labels = useAuditLabels();
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const query = toAuditQuery(search, timeZone);
@@ -58,7 +64,12 @@ export function AuditView({
       id: 'time',
       header: t('table.columns.time'),
       width: 'md',
-      cell: (r) => <span className={styles.time}>{dateTime(r.created_at)}</span>,
+      // относительное («5 мин назад»), точное — скрытым текстом и подсказкой по наведению и фокусу строки
+      cell: (r) => (
+        <span className={styles.time}>
+          <RelativeTime value={r.created_at} />
+        </span>
+      ),
     },
     {
       id: 'who',
@@ -96,7 +107,13 @@ export function AuditView({
       id: 'id',
       header: t('table.columns.id'),
       width: 'sm',
-      cell: (r) => <span className={styles.code}>{r.id.slice(0, 8)}</span>,
+      // короткий id на виду, копируется полный (поддержке и подтверждениям; план UF2a.10)
+      cell: (r) => (
+        <span className={styles.idCell}>
+          <span className={styles.code}>{r.id.slice(0, 8)}</span>
+          <CopyButton value={r.id} label={t('table.copy_id')} />
+        </span>
+      ),
     },
   ];
 

@@ -137,9 +137,12 @@ export function OfflineBanner() {
   );
 }
 
-// Прямой адрес раздела без права (D23): в меню такого раздела нет.
-export function ForbiddenState() {
+// Прямой адрес раздела без права (D23): в меню такого раздела нет. scope 'block' — 403 внутри карточки или
+// панели (DataState scope="block"): без h1 (у страницы он один) и «к этим данным», а не «к разделу».
+export function ForbiddenState({ scope = 'page' }: { scope?: 'page' | 'block' }) {
   const t = useTranslations('states.forbidden');
+  if (scope === 'block')
+    return <StateBlock tone="muted" title={t('block_title')} text={t('block_text')} />;
   return <StateBlock page tone="muted" title={t('title')} text={t('text')} />;
 }
 

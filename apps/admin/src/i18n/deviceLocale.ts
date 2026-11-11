@@ -26,12 +26,31 @@ export function readDeviceLocale(): Locale {
   return stored() ?? browserLocale();
 }
 
+// Язык из ссылки письма-приглашения (IL2, спека сотрудников §4.3, §9.1): /accept?lang=<язык учётки> открывает экран
+// на нём, если на устройстве нет явного выбора (wf.locale, в том числе выбора в памяти вкладки). Не выбор устройства:
+// в storage не пишется и живёт, пока открыт /accept (ставит и снимает AcceptInvitePage), — переключатель на экране
+// главнее, уход с экрана возвращает язык браузера. Разбор терпимый: регистр, пробелы, регион и хвостовой знак
+// («?lang=ru,» — запятую после ссылки захватывает автолинковщик) не мешают; незнакомое — как будто параметра нет.
+const LINK_LANG = /^\s*([a-z]{2})(?![a-z])/i;
+
+export function linkLocale(search: string): Locale | null {
+  const m = LINK_LANG.exec(new URLSearchParams(search).get('lang') ?? '');
+  return parse(m?.[1]?.toLowerCase());
+}
+
+let link: Locale | null = null;
+const listeners = new Set<() => void>();
+
+export function setLinkLocale(locale: Locale | null): void {
+  if (link === locale) return;
+  link = locale;
+  for (const l of listeners) l();
+}
+
 // Выбор, который не удалось записать (приватный режим, переполнение), живёт в памяти вкладки до перезагрузки
 // или до события storage — иначе переключатель ничего бы не делал. Удачная запись память снимает.
 let memory: Locale | null = null;
-const snapshot = (): Locale => memory ?? readDeviceLocale();
-
-const listeners = new Set<() => void>();
+const snapshot = (): Locale => memory ?? stored() ?? link ?? browserLocale();
 
 export function setDeviceLocale(locale: Locale): void {
   try {

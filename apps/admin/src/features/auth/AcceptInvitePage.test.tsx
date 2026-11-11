@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { reauthBus } from '../../app/reauth';
@@ -311,4 +311,73 @@ test('браузер EN, клик RU на экране — уходит ru', asy
   await submit(user);
   await screen.findByRole('alert');
   expect(seen).toEqual([expect.objectContaining({ locale: 'ru' })]);
+});
+
+// IL2 (спека §4.3, §9.1): ссылка письма — /accept?lang=<язык учётки>. Экран открывается на нём, если на
+// устройстве нет явного выбора (wf.locale); переключатель остаётся и главнее ссылки; принятие пишет язык экрана.
+function acceptSpy() {
+  const seen: unknown[] = [];
+  server.use(
+    http.post('/v1/staff/auth/invite/accept', async ({ request, response }) => {
+      seen.push(await request.json());
+      return response.untyped(problem(400, 'staff.invite_invalid'));
+    }),
+  );
+  return seen;
+}
+
+async function fillEn(user: UserEvent) {
+  await user.type(screen.getByLabelText('Work email'), 'olga.v@wf.example');
+  await user.type(screen.getByLabelText('New password'), 'Жёлтая карточка на 90-й');
+  await user.type(screen.getByLabelText('Repeat password'), 'Жёлтая карточка на 90-й');
+  await user.type(screen.getByLabelText('Code from the email'), 'k7m2p-x4q6d');
+  await user.click(screen.getByRole('button', { name: 'Accept invitation' }));
+}
+
+test('?lang=en без выбора на устройстве — экран на EN (StrictMode), в теле locale=en, storage не тронут', async () => {
+  renderApp('/accept?lang=en', { strict: true });
+  const seen = acceptSpy();
+  const user = userEvent.setup();
+  await page('Accept invitation');
+  expect(document.documentElement.lang).toBe('en');
+  await fillEn(user);
+  await screen.findByRole('alert');
+  expect(seen).toEqual([expect.objectContaining({ locale: 'en' })]);
+  expect(localStorage.getItem('wf.locale')).toBeNull();
+});
+
+test('терпимый разбор: ?lang=ru, при браузере EN — экран на RU; мусор — язык браузера', async () => {
+  vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-GB');
+  renderApp('/accept?lang=ru,');
+  await page('Принятие приглашения');
+  cleanup();
+  renderApp('/accept?lang=de');
+  await page('Accept invitation');
+});
+
+test('выбор устройства главнее ?lang: wf.locale=ru и ?lang=en — экран на RU', async () => {
+  localStorage.setItem('wf.locale', 'ru');
+  renderApp('/accept?lang=en');
+  await page('Принятие приглашения');
+});
+
+test('переключатель остаётся: ?lang=en, клик RU — экран на RU, в теле ru', async () => {
+  renderApp('/accept?lang=en');
+  const seen = acceptSpy();
+  const user = userEvent.setup();
+  await page('Accept invitation');
+  await user.click(screen.getByRole('button', { name: 'RU — Русский' }));
+  await page('Принятие приглашения');
+  await fill(user);
+  await submit(user);
+  await screen.findByRole('alert');
+  expect(seen).toEqual([expect.objectContaining({ locale: 'ru' })]);
+});
+
+test('уход с /accept снимает язык ссылки: /login — на языке браузера', async () => {
+  const app = renderApp('/accept?lang=en');
+  await page('Accept invitation');
+  // тот же ?lang и на /login: язык ссылки действует только на /accept
+  await act(() => app.history.push('/login?lang=en'));
+  await page('Вход администратора');
 });

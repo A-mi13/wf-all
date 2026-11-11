@@ -7,14 +7,16 @@ import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
 import { isDesktopOnlyDecision } from '../../app/desktopOnly';
 import { can, type Me } from '../../app/permissions';
-import { useDateTime } from '../../i18n/format';
 import {
   Button,
   type Column,
+  CopyButton,
   DataTable,
   DesktopOnlyNotice,
   EmptyState,
   infiniteTableProps,
+  RelativeTime,
+  useNow,
   StatusChip,
   useErrorText,
   useIsHandheld,
@@ -289,15 +291,22 @@ function useDecisions(onDone: (result?: Approval) => Promise<void>) {
   };
 }
 
+// Запрос: действие, кто и когда (RelativeTime — точное по наведению и фокусу строки), id — CopyButton
+// (поддержке и журналу; план UF2a.10).
 function RequestCell({ approval: a }: { approval: Approval }) {
   const t = useTranslations('approvals');
   const actionLabel = useApprovalAction();
-  const dateTime = useDateTime();
   return (
     <div className={styles.stack}>
-      <span className={styles.action}>{actionLabel(a.action)}</span>
+      <span className={styles.idRow}>
+        <span className={styles.action}>{actionLabel(a.action)}</span>
+        <CopyButton value={a.id} label={t('copy_id')} />
+      </span>
       <span className={styles.muted}>
-        {t('requested', { name: a.requested_by.label, time: dateTime(a.requested_at) })}
+        {t.rich('requested', {
+          name: a.requested_by.label,
+          time: () => <RelativeTime value={a.requested_at} />,
+        })}
       </span>
     </div>
   );
@@ -307,23 +316,29 @@ function RequestCell({ approval: a }: { approval: Approval }) {
 // причина неудачи (failed, системная отмена).
 function StateCell({ approval: a }: { approval: Approval }) {
   const t = useTranslations('approvals');
-  const dateTime = useDateTime();
   const statusOf = useApprovalStatus();
   const failureText = useApprovalFailureText();
   const status = statusOf(a.status);
+  const decidedAt = a.decided_at;
+  const now = useNow('minute');
   return (
     <div className={styles.stack}>
       <span>
         <StatusChip tone={status.tone}>{status.text}</StatusChip>
       </span>
       {a.status === 'pending' ? (
-        <span className={styles.muted}>{t('expires', { time: dateTime(a.expires_at) })}</span>
+        <span className={styles.muted}>
+          {/* срок прошёл, а запрос ещё pending (сервер гасит просрочку не сразу) — «истёк …» (ревью m2) */}
+          {t.rich(new Date(a.expires_at) <= now ? 'expired' : 'expires', {
+            time: () => <RelativeTime value={a.expires_at} />,
+          })}
+        </span>
       ) : (
-        a.decided_at && (
+        decidedAt && (
           <span className={styles.muted}>
-            {t('decided', {
+            {t.rich('decided', {
               name: a.decided_by?.label ?? t('system'),
-              time: dateTime(a.decided_at),
+              time: () => <RelativeTime value={decidedAt} />,
             })}
           </span>
         )
@@ -343,6 +358,7 @@ function StateCell({ approval: a }: { approval: Approval }) {
 function Subject({ approval: a, me }: { approval: Approval; me: Me }) {
   const t = useTranslations('approvals.summary');
   const tr = useTranslations('reasons');
+  const tl = useTranslations('locale');
   const roleLabel = useRoleLabel();
   const countryText = useCountrySummary();
   const s = summarizePayload(a.payload, a.action);
@@ -383,6 +399,13 @@ function Subject({ approval: a, me }: { approval: Approval; me: Me }) {
         </>
       )}
       <Cities from={s.fromCityIds} to={s.cityIds} me={me} />
+      {s.locale && (
+        <>
+          <dt>{t('locale')}</dt>
+          {/* язык новичка приглашения (IL2); незнакомое значение — как есть */}
+          <dd>{s.locale === 'ru' || s.locale === 'en' ? tl(s.locale) : s.locale}</dd>
+        </>
+      )}
       {reason && (
         <>
           <dt>{t('reason')}</dt>

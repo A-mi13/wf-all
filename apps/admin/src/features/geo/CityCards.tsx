@@ -1,4 +1,5 @@
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useRouter } from '@tanstack/react-router';
+import type { ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { useFormatter, useTranslations } from 'use-intl';
 import type { components } from '../../api/gen/admin';
@@ -24,10 +25,19 @@ type GeoCity = components['schemas']['GeoCity'];
 // регион, «страна выключена»; «Открыть» — страница города. Метрики макета (игроки, капитаны, матчи)
 // появятся с модулями. Фильтры — search-параметры /geo/cities (replace: «Назад» не листает каждую
 // букву поиска): поиск (q), чипы статуса (один статус; массив из адреса — как есть), страна и регион
-// в «Ещё фильтры». Модератор видит только свои города — сужает сервер.
-export function CityCards({ search }: { search: CitiesSearch }) {
+// в «Ещё фильтры». Модератор видит только свои города — сужает сервер. «Открыть: <город>» — ссылка
+// (ревью G8, m11); пустой список — иллюстрация «поле» и следующий шаг emptyAction (экран: «Активировать
+// город» при праве).
+export function CityCards({
+  search,
+  emptyAction,
+}: {
+  search: CitiesSearch;
+  emptyAction?: ReactNode;
+}) {
   const t = useTranslations('geo.cities');
   const navigate = useNavigate();
+  const router = useRouter();
   const format = useFormatter();
   const statusOf = useCityStatus();
   const list = useGeoCities(toCitiesQuery(search));
@@ -38,7 +48,11 @@ export function CityCards({ search }: { search: CitiesSearch }) {
     void navigate({ to: paths.cities, search: next, replace: true });
   const update = (patch: Partial<CitiesSearch>) => {
     const next: CitiesSearch = { ...search, ...patch };
-    for (const k of ['q', 'status', 'country', 'region_id'] as const) if (!next[k]) delete next[k];
+    // пустой массив статусов — не значение: «Все» убирает status из адреса (ревью G8, m9)
+    for (const k of ['q', 'status', 'country', 'region_id'] as const) {
+      const v = next[k];
+      if (!v || (Array.isArray(v) && v.length === 0)) delete next[k];
+    }
     setSearch(next);
   };
 
@@ -70,7 +84,9 @@ export function CityCards({ search }: { search: CitiesSearch }) {
         }
         action={{
           label: t('open'),
-          onClick: () => void navigate({ to: paths.city, params: { cityId: c.id } }),
+          name: t('open_label', { name: c.name }),
+          href: router.buildLocation({ to: paths.city, params: { cityId: c.id } }).href,
+          onNavigate: () => void navigate({ to: paths.city, params: { cityId: c.id } }),
         }}
       />
     );
@@ -139,7 +155,14 @@ export function CityCards({ search }: { search: CitiesSearch }) {
       }}
       dirty={dirty}
       onReset={() => setSearch({})}
-      empty={<EmptyState title={t('empty_title')} text={t('empty_text')} />}
+      empty={
+        <EmptyState
+          illustration="pitch"
+          title={t('empty_title')}
+          text={t('empty_text')}
+          action={emptyAction}
+        />
+      }
     />
   );
 }

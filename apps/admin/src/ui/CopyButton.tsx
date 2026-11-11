@@ -31,13 +31,16 @@ export function CopyButton({
   const [copied, setCopied] = useState(preview === 'copied');
   const [manual, setManual] = useState(preview === 'manual');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const field = useRef<HTMLInputElement>(null);
+  // поле отказа — input или textarea (многострочное); у обоих есть focus() и select()
+  const input = useRef<HTMLInputElement>(null);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const field = () => area.current ?? input.current;
   useEffect(() => () => clearTimeout(timer.current), []);
   // отказ: поле появилось — выделить значение и поставить фокус
   useEffect(() => {
     if (!manual) return;
-    field.current?.focus();
-    field.current?.select();
+    field()?.focus();
+    field()?.select();
   }, [manual]);
 
   const copy = async () => {
@@ -48,8 +51,8 @@ export function CopyButton({
     } catch {
       setCopied(false);
       if (manual) {
-        field.current?.focus();
-        field.current?.select();
+        field()?.focus();
+        field()?.select();
         return;
       }
       setManual(true);
@@ -74,16 +77,28 @@ export function CopyButton({
         </span>
         {display === 'text' && <span>{label}</span>}
       </button>
-      {manual && (
-        <input
-          ref={field}
-          className={styles.field}
-          readOnly
-          value={value}
-          aria-label={label}
-          onFocus={(e) => e.currentTarget.select()}
-        />
-      )}
+      {/* многострочное значение (резервные коды) — textarea: input съел бы переводы строк */}
+      {manual &&
+        (value.includes('\n') ? (
+          <textarea
+            ref={area}
+            className={cx(styles.field, styles.multiline)}
+            readOnly
+            rows={value.split('\n').length}
+            value={value}
+            aria-label={label}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+        ) : (
+          <input
+            ref={input}
+            className={styles.field}
+            readOnly
+            value={value}
+            aria-label={label}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+        ))}
       <span aria-live="polite" className={styles.srOnly} data-copy-live="">
         {copied ? t('done') : ''}
       </span>

@@ -330,6 +330,11 @@ func (a *App) execInvite(ctx context.Context, tx pgx.Tx, raw json.RawMessage, ap
 	if _, err := a.IssueInvite(ctx, tx, c.id, purposeInvite); err != nil {
 		return err
 	}
+	// язык новой учётки — в записи (m1 ревью IL2): после PurgeDecided payload запроса удалён, след выбора — здесь;
+	// запрос до IL2 (nil) — без ключа
+	if p.Locale != nil {
+		after["locale"] = *p.Locale
+	}
 	if err := audit.Write(ctx, by.entry(actionInvited, c.id, nil, after, staff.Meta{})); err != nil {
 		return err
 	}

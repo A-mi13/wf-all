@@ -81,12 +81,29 @@ export function dateFormat(locale: string) {
       let out = '';
       let part = 0;
       let count = 0;
-      for (const ch of text) {
+      const chars = [...text];
+      for (const [i, ch] of chars.entries()) {
         const type = order[part];
         if (!type) break;
         if (ch >= '0' && ch <= '9') {
-          if (count === WIDTH[type]) {
+          if (count >= WIDTH[type]) {
             if (part === last) break;
+            // Вставка в середину заполненной даты — любой длины (ревью UF2a/II r1, раунд 1 IL2-фронта): если после
+            // этих цифр текст сам отделяет разделителями все следующие части («0112.10.2026», «051.10.2026»), перенос
+            // сдвинул бы цифры через разделители в годную, но чужую дату (01.12.1020). Часть остаётся переполненной —
+            // текст виден как введён, parse его отвергнет (ошибка формата у поля), ввод не теряется. Набор подряд
+            // (цифры до конца текста) и вставка, где разделителей на следующие части не хватает («0110.2026»,
+            // «01102026»), переносятся, как раньше.
+            let groups = 0; // разделитель → цифра после текущих цифр: сколько следующих частей текст отделил сам
+            for (let j = i + 1; j < chars.length; j++) {
+              const digit = /\d/.test(chars[j] ?? '');
+              if (digit && !/\d/.test(chars[j - 1] ?? '')) groups += 1;
+            }
+            if (groups >= last - part) {
+              out += ch;
+              count += 1;
+              continue;
+            }
             out += seps[part] ?? '';
             part += 1;
             count = 0;

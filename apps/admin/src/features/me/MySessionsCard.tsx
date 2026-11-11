@@ -1,14 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { type ReactNode, useId } from 'react';
+import { useId } from 'react';
 import { useTranslations } from 'use-intl';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import {
   Button,
+  DataState,
   EmptyState,
-  ErrorState,
-  LoadingRows,
+  Skeleton,
   StatusChip,
   useErrorText,
   useToast,
@@ -57,51 +57,50 @@ export function MySessionsCard() {
     },
   );
 
-  let body: ReactNode;
-  if (sessions.isPending) body = <LoadingRows rows={3} />;
-  else if (sessions.isError)
-    body = (
-      <ErrorState
-        error={sessions.error}
-        onRetry={() => void sessions.refetch()}
-        retrying={sessions.isFetching}
-      />
-    );
-  else if (sessions.data.items.length === 0) body = <EmptyState title={t('empty')} text="" />;
-  else
-    body = (
-      // role="list": Safari снимает семантику списка с list-style: none
-      <ul role="list" aria-label={t('label')} className={styles.sessions}>
-        {sessions.data.items.map((s) => {
-          const d = describe(s);
-          return (
-            <li
-              key={s.id}
-              className={s.current ? `${styles.session} ${styles.current}` : styles.session}
-            >
-              <p className={styles.device}>{d.device}</p>
-              <p className={styles.details}>{d.details}</p>
-              <div className={styles.sessionAction}>
-                {s.current ? (
-                  <StatusChip tone="success">{t('current')}</StatusChip>
-                ) : (
-                  <Button
-                    variant="danger-outline"
-                    aria-label={t('revoke_label', { device: d.device, created: d.created })}
-                    loading={revoke.isPending && revoke.variables === s.id}
-                    // у нажатой — только loading (aria-disabled): disabled уронил бы фокус на body
-                    disabled={revoke.isPending && revoke.variables !== s.id}
-                    onClick={() => revoke.mutate(s.id)}
-                  >
-                    {t('revoke')}
-                  </Button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    );
+  // загрузка, ошибка, 403, нет сети — DataState (скелетон по форме списка сеансов, спека UI-фундамента §4.3)
+  const body = (
+    <DataState
+      query={sessions}
+      scope="block"
+      skeleton={<Skeleton.Table columns={1} rows={3} head={false} />}
+      isEmpty={(d) => d.items.length === 0}
+      empty={<EmptyState title={t('empty')} text="" />}
+    >
+      {(data) => (
+        // role="list": Safari снимает семантику списка с list-style: none
+        <ul role="list" aria-label={t('label')} className={styles.sessions}>
+          {data.items.map((s) => {
+            const d = describe(s);
+            return (
+              <li
+                key={s.id}
+                className={s.current ? `${styles.session} ${styles.current}` : styles.session}
+              >
+                <p className={styles.device}>{d.device}</p>
+                <p className={styles.details}>{d.details}</p>
+                <div className={styles.sessionAction}>
+                  {s.current ? (
+                    <StatusChip tone="success">{t('current')}</StatusChip>
+                  ) : (
+                    <Button
+                      variant="danger-outline"
+                      aria-label={t('revoke_label', { device: d.device, created: d.created })}
+                      loading={revoke.isPending && revoke.variables === s.id}
+                      // у нажатой — только loading (aria-disabled): disabled уронил бы фокус на body
+                      disabled={revoke.isPending && revoke.variables !== s.id}
+                      onClick={() => revoke.mutate(s.id)}
+                    >
+                      {t('revoke')}
+                    </Button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </DataState>
+  );
 
   const others = sessions.data?.items.some((s) => !s.current) ?? false;
   return (
