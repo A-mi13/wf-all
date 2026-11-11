@@ -1,0 +1,118 @@
+/* Свой выпадающий список по макету 13 («Выпадающий список»): кнопка — вид поля (.control из
+   Field.module.css), список — пузырь Popover (широкий экран) или строки шторки (телефон). */
+
+.root {
+  min-width: 0;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+  text-align: start;
+  cursor: pointer;
+}
+
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeholder {
+  color: var(--wf-color-text-subtle);
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--wf-color-text-muted);
+}
+
+/* Пузырь не уже поля: ширину якоря пишет Popover (--wf-pop-anchor-w) */
+.menu {
+  min-inline-size: var(--wf-pop-anchor-w, auto);
+  max-inline-size: calc(100vw - var(--wf-space-4));
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  padding: var(--wf-space-1);
+}
+
+.list:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+  min-height: var(--wf-size-control);
+  padding: 0 var(--wf-space-3);
+  border-radius: var(--wf-radius-sm);
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Активная (клавиатура, наведение) — заливка поля; выбранная — галочкой, метрики шрифта не меняются */
+.option[data-active] {
+  background: var(--wf-color-surface-sunken);
+  color: var(--wf-color-text);
+}
+
+.option[aria-disabled='true'] {
+  color: var(--wf-color-text-ghost);
+  cursor: not-allowed;
+}
+
+.optionText {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.check {
+  flex-shrink: 0;
+  color: var(--wf-color-accent-ink);
+}
+
+.empty {
+  margin: 0;
+  padding: var(--wf-space-3);
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+/* Шторка телефона: строки не ниже touch-min */
+.sheetList {
+  padding: var(--wf-space-1) 0;
+}
+
+.sheetOption {
+  min-height: var(--wf-size-touch-min);
+}
+
+/* Поиск шторки закреплён сверху её тела (прокручивается тело Overlay): прокрутка к выбранной из ~250 не
+   уносит его из виду; фон — как у панели, строки уходят под него */
+.sheetSearch {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: var(--wf-space-2);
+  background: var(--wf-color-bg-elevated);
+  /* верхний отступ тела панели (sticky держится под ним) — тоже фоном, строки в нём не просвечивают */
+  box-shadow: 0 calc(-1 * var(--wf-space-3)) 0 var(--wf-color-bg-elevated);
+}
+
+/* scrollIntoView активной не прячет её под закреплённым поиском */
+.sheetSearch ~ .list .option {
+  scroll-margin-top: calc(var(--wf-size-control) + var(--wf-space-2));
+}

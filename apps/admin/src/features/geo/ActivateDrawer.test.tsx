@@ -18,6 +18,7 @@ import { meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { sectionsServer } from '../../test/sections';
 import { http, server } from '../../test/server';
+import { openOptions, pick, selectedText } from '../../test/pick';
 
 // «Активировать город» (*; спека §9.4 п. 8, geo §5.3): поиск места GeoNames (q ≥ 1 символ, фильтр
 // страны) → выбор (заведённое место не выбирается — ссылка на город) → страна (по умолчанию — места),
@@ -160,7 +161,7 @@ describe('поиск места', () => {
     const { seen } = geoServer();
     renderApp('/geo/cities', { me: meActivator });
     const { user, drawer } = await openDrawer();
-    await user.selectOptions(within(drawer).getByRole('combobox', { name: 'Страна места' }), 'RU');
+    await pick(user, within(drawer).getByRole('combobox', { name: 'Страна места' }), 'RU');
     await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), 'м');
     await waitFor(() => expect(seen.places.at(-1)?.get('country')).toBe('RU'));
   });
@@ -173,9 +174,14 @@ describe('отправка', () => {
     const app = renderApp('/geo/cities', { me: meActivator });
     const { user, drawer } = await openDrawer();
     await choose(user, drawer, 'м');
-    expect(within(drawer).getByRole('combobox', { name: 'Страна города' })).toHaveValue('RU');
-    expect(within(drawer).getByRole('combobox', { name: 'Регион' })).toHaveValue('');
-    expect(within(drawer).getByRole('combobox', { name: 'Статус' })).toHaveValue('waitlist');
+    expect(selectedText(within(drawer).getByRole('combobox', { name: 'Страна города' }))).toBe(
+      'Россия',
+    );
+    // пустое значение региона — опция «по данным GeoNames»
+    expect(selectedText(within(drawer).getByRole('combobox', { name: 'Регион' }))).toMatch(
+      /^По данным GeoNames/,
+    );
+    expect(selectedText(within(drawer).getByRole('combobox', { name: 'Статус' }))).toBe('ожидание');
     await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
     await waitFor(() => expect(app.at()).toBe(`/geo/cities/${NEW_CITY}`));
     expect(sent).toHaveLength(1);
@@ -191,13 +197,13 @@ describe('отправка', () => {
     const { user, drawer } = await openDrawer();
     await choose(user, drawer, 'м');
     const region = within(drawer).getByRole('combobox', { name: 'Регион' });
-    await waitFor(() =>
-      expect(
-        within(region).getByRole('option', { name: 'Свердловская область' }),
-      ).toBeInTheDocument(),
+    await waitFor(async () =>
+      expect((await openOptions(user, region)).map((o) => o.label)).toContain(
+        'Свердловская область',
+      ),
     );
-    await user.selectOptions(region, REGION_SVERD);
-    await user.selectOptions(within(drawer).getByRole('combobox', { name: 'Статус' }), 'pilot');
+    await pick(user, region, REGION_SVERD);
+    await pick(user, within(drawer).getByRole('combobox', { name: 'Статус' }), 'pilot');
     await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({ geoname_id: 526815, status: 'pilot', region_id: REGION_SVERD });
@@ -215,12 +221,17 @@ describe('отправка', () => {
     const { user, drawer } = await openDrawer();
     await choose(user, drawer, 'м');
     const region = within(drawer).getByRole('combobox', { name: 'Регион' });
-    await within(region).findByRole('option', { name: 'Свердловская область' });
-    await user.selectOptions(region, REGION_SVERD);
-    expect(region).toHaveValue(REGION_SVERD);
-    await user.selectOptions(within(drawer).getByRole('combobox', { name: 'Страна города' }), 'KZ');
-    expect(region).toHaveValue('');
-    expect(within(region).getByRole('option', { name: 'Без региона' })).toBeInTheDocument();
+    await waitFor(async () =>
+      expect((await openOptions(user, region)).map((o) => o.label)).toContain(
+        'Свердловская область',
+      ),
+    );
+    await pick(user, region, REGION_SVERD);
+    expect(selectedText(region)).toBe('Свердловская область');
+    await pick(user, within(drawer).getByRole('combobox', { name: 'Страна города' }), 'KZ');
+    expect(selectedText(region)).toBe('Без региона');
+    expect((await openOptions(user, region)).map((o) => o.label)).toContain('Без региона');
+    await user.keyboard('{Escape}');
     expect(within(drawer).getByText(/Страна изменена/)).toBeInTheDocument();
     await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
     await waitFor(() => expect(sent).toHaveLength(1));
@@ -232,9 +243,9 @@ describe('отправка', () => {
     renderApp('/geo/cities', { me: meActivator });
     const { user, drawer } = await openDrawer();
     await choose(user, drawer, 'м');
-    const options = within(within(drawer).getByRole('combobox', { name: 'Страна города' }))
-      .getAllByRole('option')
-      .map((o) => o.getAttribute('value'));
+    const options = (
+      await openOptions(user, within(drawer).getByRole('combobox', { name: 'Страна города' }))
+    ).map((o) => o.value);
     expect(options).toEqual(['RU']);
   });
 

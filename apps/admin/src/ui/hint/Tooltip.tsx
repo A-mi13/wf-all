@@ -32,12 +32,14 @@ export function Tooltip({
   placement = 'bottom-start',
   open: controlled,
   describe = true,
+  onEscape,
 }: {
   content: ReactNode;
   children: ReactElement<{ 'aria-describedby'?: string }>;
   placement?: Placement;
   open?: boolean;
   describe?: boolean;
+  onEscape?: () => void; // Esc скрыл подсказку — управляемый режим (open) снимает её сам
 }) {
   const id = useId();
   const anchor = useRef<HTMLSpanElement>(null);
@@ -59,7 +61,10 @@ export function Tooltip({
     hide.current = setTimeout(() => setHovered(false), TOOLTIP_HIDE_MS);
   };
   const onClose = (reason: PopoverCloseReason) => {
-    if (reason === 'escape') return setDismissed(true);
+    if (reason === 'escape') {
+      onEscape?.();
+      return setDismissed(true);
+    }
     clearTimeout(hide.current);
     setHovered(false);
     setFocused(false);

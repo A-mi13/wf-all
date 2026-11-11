@@ -1,6 +1,6 @@
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
-import { Button, Form, SelectField, TextField } from '../../ui';
+import { Button, DateField, Form, SelectField, TextField } from '../../ui';
 import { useAuditLabels } from './labels';
 import { AUDIT_SECTIONS, type AuditSearch, isUuid } from './search';
 import styles from './audit.module.css';
@@ -13,6 +13,8 @@ type Values = {
   from: string;
   to: string;
 };
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const fromSearch = (s: AuditSearch): Values => ({
   action: s.action ?? '',
@@ -44,6 +46,8 @@ export function AuditFilters({
   const objects = [...labels.knownObjects];
   if (search.object_type && !objects.includes(search.object_type)) objects.push(search.object_type);
   const uuid = (v: string) => v.trim() === '' || isUuid(v.trim());
+  // «по» не раньше «с»: дни до «с» в календаре «по» недоступны
+  const from = useWatch({ control: form.control, name: 'from' });
 
   return (
     <Form
@@ -92,16 +96,19 @@ export function AuditFilters({
           spellCheck={false}
           rules={{ validate: { format: uuid } }}
         />
-        <TextField name="from" type="date" label={t('from')} />
-        <TextField
+        <DateField name="from" label={t('from')} />
+        <DateField
           name="to"
-          type="date"
           label={t('to')}
+          min={from || undefined}
           hint={t('period_hint')}
           rules={{
             validate: {
-              // ISO-даты сравниваются строкой
-              range: (v: string) => !v || !form.getValues('from') || v >= form.getValues('from'),
+              // ISO-даты сравниваются строкой; негодный текст «с» — его ошибка формата, не периода
+              range: (v: string) => {
+                const start = form.getValues('from');
+                return !v || !ISO_DATE.test(start) || v >= start;
+              },
             },
           }}
         />

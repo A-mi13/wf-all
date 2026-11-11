@@ -3,6 +3,7 @@ import { type ComponentType, type ReactNode, StrictMode, useRef, useState } from
 import { describe, expect, test, vi } from 'vitest';
 import { renderWithIntl } from '../../test/render';
 import { Button } from '../Button';
+import { Select } from '../form/Select';
 import { Popover } from '../popover/Popover';
 import { useToast } from '../toast';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -265,6 +266,43 @@ describe('Popover в стеке оверлеев', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(screen.getByRole('dialog', { name: 'Сотрудник' })).toBeInTheDocument();
     expect(anchor).toHaveFocus();
+  });
+
+  test('Select в Drawer: Esc закрывает только список, фокус на combobox; второй Esc — панель', async () => {
+    function Panel() {
+      const [open, setOpen] = useState(true);
+      const [value, setValue] = useState('support');
+      return (
+        <Drawer open={open} onClose={() => setOpen(false)} title="Сотрудник">
+          <span id="role-label">Роль</span>
+          <Select
+            id="role"
+            name="role"
+            value={value}
+            onChange={setValue}
+            onBlur={() => undefined}
+            labelledBy="role-label"
+            label="Роль"
+            options={[
+              { value: 'moderator', label: 'Модератор' },
+              { value: 'support', label: 'Поддержка' },
+            ]}
+          />
+        </Drawer>
+      );
+    }
+    const { user } = renderWithIntl(<Panel />);
+    const combo = screen.getByRole('combobox', { name: 'Роль' });
+    await user.click(combo);
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('listbox', { name: 'Роль' })).toBeVisible();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Сотрудник' })).toBeInTheDocument();
+    expect(combo).toHaveFocus();
+    expect(combo).toHaveTextContent('Поддержка');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   test('второй Esc закрывает панель', async () => {

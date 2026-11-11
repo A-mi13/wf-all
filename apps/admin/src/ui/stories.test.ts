@@ -24,8 +24,6 @@ const read = (f: string) => readFileSync(join(UI, f), 'utf8');
 const EXCEPTIONS: Record<string, string> = {
   ThemeProvider: 'провайдер: обёртка витрины (ShowcaseProvider) ставит его сама',
   ToastProvider: 'провайдер: обёртка витрины ставит его сама; тосты — toast/Toast.stories.tsx',
-  SelectField: 'UF2a.6 заменяет нативный <select> своим списком — истории с новой реализацией',
-  MultiSelectField: 'UF2a.6 переделывает вместе с SelectField — истории с новой реализацией',
   DesktopOnlyNotice: 'пометка ActionGate — показана в gate/ActionGate.stories.tsx (UF2a.1)',
 };
 

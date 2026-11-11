@@ -3,6 +3,24 @@
     "title": "Administration",
     "brand": "WHEREFOOTBALL"
   },
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "back": "Back",
+    "retry": "Retry",
+    "archive": "Archive",
+    "restore": "Restore",
+    "delete": "Delete",
+    "undo": "Undo",
+    "copy": "Copy",
+    "showMore": "Show more",
+    "resetFilters": "Reset filters",
+    "submitForApproval": "Send for confirmation"
+  },
+  "time": {
+    "just_now": "just now"
+  },
   "nav": {
     "groups": {
       "security": "Security",
@@ -119,7 +137,6 @@
     "connection": {
       "title": "No connection to the server",
       "refused_title": "The server refused access to the admin panel",
-      "retry": "Retry",
       "text": "The admin panel got no response from the server. Check your connection and retry."
     },
     "forbidden": {
@@ -135,8 +152,11 @@
     },
     "error": {
       "title": "Could not load",
-      "code": "Error code: {status} · {code}",
-      "retry": "Retry"
+      "code": "Error code: {status} · {code}"
+    },
+    "no_network": {
+      "title": "No connection",
+      "text": "We will show it as soon as it is back."
     },
     "offline": {
       "text": "No network. Decisions will not be sent; showing the last loaded data."
@@ -149,8 +169,7 @@
       "title": "Too many requests",
       "text": "The server slowed requests down to protect data. You can retry in {seconds} s.",
       "ready": "You can retry now.",
-      "wait": "Wait {seconds} s",
-      "retry": "Retry"
+      "wait": "Wait {seconds} s"
     },
     "pending_approval": {
       "title": "Sent for approval",
@@ -168,7 +187,6 @@
     "option": "{code} — {name}"
   },
   "ui": {
-    "close": "Close",
     "password": {
       "show": "Show password",
       "hide": "Hide password"
@@ -179,11 +197,23 @@
     "multiselect": {
       "search": "{label}: search",
       "remove": "Remove “{label}”",
+      "empty": "Nothing found",
+      "choose": "Choose",
+      "selected": "Selected: {count}"
+    },
+    "select": {
+      "search": "Search the list",
       "empty": "Nothing found"
     },
+    "date": {
+      "open": "{label}: open calendar",
+      "dialog": "{label}: pick a date",
+      "prev_month": "Previous month",
+      "next_month": "Next month",
+      "format": "MM/DD/YYYY"
+    },
     "confirm": {
-      "prompt": "Type “{word}” to confirm",
-      "cancel": "Cancel"
+      "prompt": "Type “{word}” to confirm"
     },
     "toast": {
       "region": "Notifications",
@@ -387,7 +417,6 @@
     },
     "approve": "Approve",
     "reject": "Reject",
-    "cancel": "Cancel",
     "done": {
       "executed": "Approved and carried out.",
       "rejected": "Request rejected.",
@@ -499,8 +528,6 @@
     "clear_search": "Clear search",
     "more_filters": "More filters",
     "shown": "Showing {count}",
-    "reset": "Reset filters",
-    "load_more": "Show more",
     "load_more_failed": "Could not load more. Try again",
     "more_filters_active": "More filters, set: {count}"
   },
@@ -650,9 +677,7 @@
       "cities": "Moderator cities",
       "cities_search": "Find a city",
       "cities_hint": "A moderator needs at least one city.",
-      "submit": "Send for confirmation",
-      "again": "Invite another",
-      "close": "Close"
+      "again": "Invite another"
     },
     "drawer": {
       "title": "Staff member",
@@ -680,8 +705,6 @@
         "title": "Role and cities",
         "role": "Role",
         "cities": "Moderator cities",
-        "save": "Save",
-        "request": "Send for confirmation",
         "saved": "Role and cities saved.",
         "denied": "You cannot make this change."
       },
@@ -704,8 +727,7 @@
           "secrets": "Password, second factor and recovery codes stop working",
           "sessions": "All the staff member’s sessions end",
           "invite": "A new invitation is sent to the work email"
-        },
-        "confirm": "Send for confirmation"
+        }
       },
       "disable": {
         "title": "Disable account",
@@ -719,7 +741,6 @@
           "history": "History and the audit log are kept"
         },
         "confirm_now": "Disable",
-        "confirm_request": "Send for confirmation",
         "done": "Account disabled."
       }
     }
@@ -990,14 +1011,12 @@
       "status": {
         "title": "Status",
         "label": "City status",
-        "save": "Save",
         "saved": "Status saved"
       },
       "slug": {
         "title": "Web address",
         "label": "Address (slug)",
         "hint": "Lowercase Latin letters, digits, hyphens between parts, up to 100 characters. The old address keeps working.",
-        "save": "Save",
         "saved": "Address saved",
         "history": "Previous addresses",
         "replaced": "replaced {when}",
@@ -1007,14 +1026,12 @@
         "title": "Names",
         "canonical": "primary",
         "empty": "no translation",
-        "save": "Save",
         "saved": "Names saved",
         "delete": "Delete translation",
         "delete_label": "Delete translation: {locale}",
         "confirm_title": "Delete the translation “{name}”?",
         "confirm_text": "Apps in this language will show the name in the country language.",
         "confirm_word": "DELETE",
-        "confirm_label": "Delete",
         "deleted": "Translation deleted",
         "locales": {
           "ru": "Русский",
@@ -1039,11 +1056,8 @@
       "rename_label": "Rename: {name}",
       "rename_title": "Rename district",
       "rename_name": "Name",
-      "rename_save": "Save",
       "renamed": "District renamed",
-      "archive": "Archive",
       "archive_label": "Archive: {name}",
-      "restore": "Restore",
       "restore_label": "Restore: {name}",
       "archived_toast": "District “{name}” archived",
       "restored_toast": "District “{name}” restored",

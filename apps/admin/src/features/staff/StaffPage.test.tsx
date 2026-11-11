@@ -7,6 +7,7 @@ import { stubMedia } from '../../test/media';
 import { meAdmin, meModerator, meOwner } from '../../test/me';
 import { account, rolesMatrix, staffServer, TEAM } from '../../test/staff';
 import { SEARCH_DEBOUNCE_MS } from '../../ui';
+import { pick, selectedText } from '../../test/pick';
 
 // «Роли и доступ» (спека §9.4 п. 5, §9.3; макет 07): матрица прав из API (подписи — локали),
 // «Правило двух рук» — по матрице, «Кто имеет доступ» — только с staff.accounts.read, фильтры —
@@ -188,13 +189,13 @@ describe('кто имеет доступ', () => {
     expect(app.at()).toContain('status=invited');
 
     await user.click(screen.getByRole('button', { name: 'Ещё фильтры' }));
-    await user.selectOptions(screen.getByLabelText('Роль'), 'support');
+    await pick(user, screen.getByLabelText('Роль'), 'support');
     await waitFor(() => expect(seen.list.at(-1)?.get('role')).toBe('support'));
     expect(app.at()).toContain('role=support');
 
     await user.click(screen.getAllByRole('button', { name: 'Сбросить фильтры' })[0]!);
     await waitFor(() => expect(app.at()).toBe('/staff'));
-    expect(screen.getByLabelText('Роль')).toHaveValue('');
+    expect(selectedText(screen.getByLabelText('Роль'))).toBe('Все роли');
   });
 
   test('фильтры из адреса применяются сразу (перезагрузка, «Назад»)', async () => {

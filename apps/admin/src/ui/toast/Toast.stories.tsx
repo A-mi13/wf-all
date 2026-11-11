@@ -21,7 +21,7 @@ export const Default: Story = () => {
   const toast = useToast();
   useOnce(() => {
     toast.success(t('staff.drawer.disable.done'), {
-      action: { label: t('states.error.retry'), onClick: () => undefined },
+      action: { label: t('actions.retry'), onClick: () => undefined },
     });
     toast.info(t('me.sessions.revoked'));
   });
@@ -35,7 +35,7 @@ export const Error: Story = () => {
   const toast = useToast();
   useOnce(() => {
     toast.error(t('errors.staff.last_owner'), {
-      action: { label: t('states.error.retry'), onClick: () => undefined },
+      action: { label: t('actions.retry'), onClick: () => undefined },
     });
   });
   return null;

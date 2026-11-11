@@ -21,6 +21,9 @@ function retryQuery(failures: number, error: unknown): boolean {
 }
 
 // QueryClient админки:
+// - запросы — networkMode 'online' (явно, спека UI-фундамента §4.3): без сети запрос не уходит и не падает, а
+//   встаёт на паузу (fetchStatus 'paused' → DataState рисует «нет сети») и продолжается сам, когда сеть
+//   вернулась; данные, что уже есть, остаются на экране;
 // - мутации — networkMode 'always': без сети не копятся в очереди, а сразу падают (баннер «нет
 //   сети», P20);
 // - 401 auth.unauthenticated от любого запроса перечитывает me — сессия становится anonymous, и
@@ -43,7 +46,7 @@ export function createQueryClient(opts: { retry?: boolean } = {}): QueryClient {
     }),
     mutationCache: new MutationCache({ onError: (error) => onError(error, false) }),
     defaultOptions: {
-      queries: { retry: opts.retry === false ? false : retryQuery },
+      queries: { retry: opts.retry === false ? false : retryQuery, networkMode: 'online' },
       mutations: { networkMode: 'always', retry: false },
     },
   });

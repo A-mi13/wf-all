@@ -36,6 +36,7 @@ export function CityNamesCard({ city, canEdit }: { city: GeoCityDetails; canEdit
 
 function NamesForm({ city }: { city: GeoCityDetails }) {
   const t = useTranslations('geo.city.names');
+  const ta = useTranslations('actions');
   const toast = useToast();
   const values: Values = {
     names: Object.fromEntries(LOCALES.map((l) => [l, city.names[l] ?? ''])),
@@ -118,7 +119,7 @@ function NamesForm({ city }: { city: GeoCityDetails }) {
         })}
         <div className={styles.row}>
           <Button type="submit" loading={save.isPending}>
-            {t('save')}
+            {ta('save')}
           </Button>
         </div>
       </Form>
@@ -129,7 +130,7 @@ function NamesForm({ city }: { city: GeoCityDetails }) {
         title={t('confirm_title', { name: (deleting && city.names[deleting]) ?? '' })}
         text={t('confirm_text')}
         confirmWord={t('confirm_word')}
-        confirmLabel={t('confirm_label')}
+        confirmLabel={ta('delete')}
         loading={remove.isPending}
         error={remove.error}
       />

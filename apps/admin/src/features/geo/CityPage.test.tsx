@@ -7,6 +7,7 @@ import { cityDetails, cityEditServer, geoServer, meGeoAdmin, meGeoModerator } fr
 import { CITY_OTHER, CITY_OWN, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
+import { pick } from '../../test/pick';
 
 // Страница города (*; спека §9.4 п. 8; план B Task 19): шапка (название, статус, страна с пометкой
 // «выключена», регион, население, geoname_id или «не привязан»), карточки по правам в городе: статус
@@ -138,10 +139,7 @@ describe('статус', () => {
     await title();
     const card = section('Статус');
     const user = userEvent.setup();
-    await user.selectOptions(
-      within(card).getByRole('combobox', { name: 'Статус города' }),
-      'pilot',
-    );
+    await pick(user, within(card).getByRole('combobox', { name: 'Статус города' }), 'pilot');
     await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({ status: 'pilot' });
@@ -157,10 +155,7 @@ describe('статус', () => {
     await title();
     const card = section('Статус');
     const user = userEvent.setup();
-    await user.selectOptions(
-      within(card).getByRole('combobox', { name: 'Статус города' }),
-      'pilot',
-    );
+    await pick(user, within(card).getByRole('combobox', { name: 'Статус города' }), 'pilot');
     await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
     expect(await within(card).findByRole('alert')).toHaveTextContent(
       'Недостаточно прав для этого действия',

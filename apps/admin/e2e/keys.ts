@@ -29,9 +29,10 @@ export const KEYS = [
   'staff.invite.email',
   'staff.invite.name',
   'staff.invite.role',
-  'staff.invite.submit',
+  'actions.submitForApproval', // «Отправить на подтверждение» — общее действие (словарь actions.*)
   'roles.owner',
   'roles.admin',
+  'roles.moderator',
   'roles.support',
   // «Подтверждения»
   'approvals.tabs.incoming',

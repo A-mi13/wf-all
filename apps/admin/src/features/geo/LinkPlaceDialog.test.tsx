@@ -5,6 +5,7 @@ import { renderApp } from '../../test/app';
 import { cityDetails, cityEditServer, meGeoAdmin } from '../../test/geo';
 import { CITY_OWN } from '../../test/me';
 import { problem } from '../../test/problem';
+import { selectedText } from '../../test/pick';
 
 // Ручная привязка города к GeoNames (*; geo.cities.manage): у непривязанного города — «Привязать к
 // GeoNames»: поиск места (как при активации, фильтр — страна города), выбор, linkGeoCity
@@ -33,7 +34,9 @@ async function choose(dialog: HTMLElement, user: ReturnType<typeof userEvent.set
 describe('привязка', () => {
   test('поиск — по стране города; выбор → {geoname_id}; шапка из ответа', async () => {
     const { dialog, user, sent } = await open();
-    expect(within(dialog).getByRole('combobox', { name: 'Страна места' })).toHaveValue('RU');
+    expect(selectedText(within(dialog).getByRole('combobox', { name: 'Страна места' }))).toBe(
+      'Россия',
+    );
     await choose(dialog, user);
     await user.click(within(dialog).getByRole('button', { name: 'Привязать' }));
     await waitFor(() => expect(sent).toHaveLength(1));

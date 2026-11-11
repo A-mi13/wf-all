@@ -27,6 +27,7 @@ type GeoDistrict = components['schemas']['GeoDistrict'];
 // поля нет). Пока действие над строкой идёт, кнопки строк заняты. Без права — только чтение.
 export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: boolean }) {
   const t = useTranslations('geo.districts');
+  const ta = useTranslations('actions');
   const toast = useToast();
   const errorText = useErrorText();
   const list = useGeoDistricts(cityId);
@@ -100,7 +101,7 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
                 disabled={busy && pendingId !== d.id}
                 onClick={() => setArchived(d, true)}
               >
-                {t('archive')}
+                {ta('archive')}
               </Button>
             ) : (
               <Button
@@ -111,7 +112,7 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
                 disabled={busy && pendingId !== d.id}
                 onClick={() => setArchived(d, false)}
               >
-                {t('restore')}
+                {ta('restore')}
               </Button>
             )}
           </span>
@@ -210,6 +211,7 @@ function RenameForm({
   onClose: () => void;
 }) {
   const t = useTranslations('geo.districts');
+  const ta = useTranslations('actions');
   const toast = useToast();
   const form = useForm<{ name: string }>({ defaultValues: { name: district.name } });
   const onError = useNameTaken()(form);
@@ -229,7 +231,7 @@ function RenameForm({
       />
       <div className={styles.row}>
         <Button type="submit" loading={update.isPending}>
-          {t('rename_save')}
+          {ta('save')}
         </Button>
       </div>
     </Form>

@@ -16,6 +16,7 @@ const STATUSES: readonly CityStatus[] = ['waitlist', 'pilot', 'live'];
 export function CityStatusCard({ city }: { city: GeoCityDetails }) {
   const t = useTranslations('geo.city.status');
   const ts = useTranslations('geo.status');
+  const ta = useTranslations('actions');
   const toast = useToast();
   const form = useForm<{ status: string }>({ values: { status: city.status } });
   const update = useUpdateCity(city.id, ['geo', 'city', city.id, 'status']);
@@ -36,7 +37,7 @@ export function CityStatusCard({ city }: { city: GeoCityDetails }) {
       />
       <div className={styles.row}>
         <Button type="submit" loading={update.isPending}>
-          {t('save')}
+          {ta('save')}
         </Button>
       </div>
     </Form>

@@ -121,6 +121,18 @@ test('под сотрудником: разделы меню и панель п�
   await page.goto('/staff');
   await page.getByRole('button', { name: t('staff.invite.open') }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  // первый пузырь под настоящей CSP: список роли — Popover, положение пишет setCssPx (CSSOM, не атрибут
+  // style); CSP, режущая его, дала бы securitypolicyviolation и список в углу окна
+  const role = page.getByRole('combobox', { name: t('staff.invite.role'), exact: true });
+  await role.click();
+  const list = page.getByRole('listbox');
+  await expect(list).toBeVisible();
+  // пузырь выровнен по началу своего поля (панель справа — x поля далеко от 0)
+  const [box, anchor] = await Promise.all([list.boundingBox(), role.boundingBox()]);
+  expect(anchor?.x ?? 0).toBeGreaterThan(100);
+  expect(Math.abs((box?.x ?? 0) - (anchor?.x ?? 0))).toBeLessThan(4);
+  await page.keyboard.press('Escape');
+  await expect(list).toHaveCount(0);
   await collect();
 
   // (3) фон собранного CSS — значение токена своей темы; системная — противоположная выбору

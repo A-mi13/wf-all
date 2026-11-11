@@ -8,6 +8,7 @@ import { CITY_OWN, meModerator, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
 import { city } from '../../test/staff';
+import { pick, selectedText } from '../../test/pick';
 
 // «Города и запуск» (спека §9.4 п. 8, макет 07): карточки городов — название, чип статуса, регион,
 // население, районы, «страна выключена»; фильтры — search-параметры (q, status[], country,
@@ -168,8 +169,8 @@ describe('фильтры', () => {
     const user = userEvent.setup();
     await user.click(more);
     const country = screen.getByRole('combobox', { name: 'Страна' });
-    expect(country).toHaveValue('RU');
-    await user.selectOptions(country, 'KZ');
+    expect(selectedText(country)).toBe('Россия');
+    await pick(user, country, 'KZ');
     await waitFor(() => expect(seen.cities.at(-1)?.get('country')).toBe('KZ'));
     expect(searchOf(app.at()).get('country')).toBe('KZ');
     await user.click(screen.getAllByRole('button', { name: 'Сбросить фильтры' })[0]!);

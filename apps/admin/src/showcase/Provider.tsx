@@ -3,13 +3,14 @@ import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { IntlProvider } from 'use-intl';
 import { type Locale, messagesFor } from '../i18n/messages';
 import { ThemeProvider, type ThemePref } from '../ui/theme';
+import { NowProvider } from '../ui/time';
 import { ToastProvider } from '../ui/toast';
 import { SHOWCASE_NOW } from './params';
 import styles from './Provider.module.css';
 
 // Обёртка историй витрины (спека UI-фундамента §5.2, план UF3.2): язык, тосты, кэш запросов без сети, тема и
 // холст с фоном, цветом и шрифтом админки (их задают контейнеры приложения — AppShell, AuthLayout, — а не
-// body). «Сейчас» и пояс зафиксированы: относительное время и даты на снимках не плывут. Ладл подключает её
+// body). «Сейчас» (use-intl и useNow) и пояс зафиксированы: относительное время и даты на снимках не плывут. Ладл подключает её
 // из .ladle/components.tsx.
 
 // Истории src/ui без API: запрос, если компонент его сделает, не уходит в сеть и не повторяется.
@@ -62,7 +63,9 @@ export function ShowcaseProvider(props: { theme: ThemePref; locale: Locale; chil
         <div ref={root} className={styles.canvas} data-showcase-root="">
           {applied === theme && (
             <ThemeProvider>
-              <ToastProvider>{children}</ToastProvider>
+              <NowProvider now={SHOWCASE_NOW}>
+                <ToastProvider>{children}</ToastProvider>
+              </NowProvider>
             </ThemeProvider>
           )}
         </div>

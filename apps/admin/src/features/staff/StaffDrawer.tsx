@@ -307,6 +307,7 @@ function RoleBlock({
   onApproval: () => void;
 }) {
   const t = useTranslations('staff.drawer.role_change');
+  const ta = useTranslations('actions');
   const api = useApi();
   const toast = useToast();
   const errorText = useErrorText();
@@ -387,7 +388,7 @@ function RoleBlock({
               loading={change.isPending}
               disabled={!permission || decision === 'deny'}
             >
-              {decision === 'needs_approval' ? t('request') : t('save')}
+              {decision === 'needs_approval' ? ta('submitForApproval') : ta('save')}
             </Button>
           </div>
         </Form>
@@ -553,6 +554,7 @@ function DestructiveDialog({
   const t = useTranslations(`staff.drawer.${kind}`);
   const tc = useTranslations('staff.drawer');
   const tr = useTranslations('reasons');
+  const ta = useTranslations('actions');
   const api = useApi();
   const toast = useToast();
   const form = useForm<DestructiveValues>({ defaultValues: { reason: '', comment: '' } });
@@ -591,10 +593,10 @@ function DestructiveDialog({
       : [t('consequences.role'), t('consequences.sessions'), t('consequences.history')];
   const confirmLabel =
     kind === 'reset'
-      ? t('confirm')
+      ? ta('submitForApproval')
       : decision === 'allow'
         ? t('confirm_now')
-        : t('confirm_request');
+        : ta('submitForApproval');
 
   return (
     <ConfirmDialog

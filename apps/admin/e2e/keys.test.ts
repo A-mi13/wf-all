@@ -33,7 +33,7 @@ describe('ключи локалей e2e', () => {
         'staff.invite.email',
         'staff.invite.name',
         'staff.invite.role',
-        'staff.invite.submit',
+        'actions.submitForApproval',
         'roles.admin',
         'approvals.tabs.incoming',
         'approvals.approve',

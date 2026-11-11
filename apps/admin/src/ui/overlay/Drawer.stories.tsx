@@ -25,7 +25,7 @@ function Sample({ busy }: { busy?: boolean }) {
         footer={
           <>
             <Button variant="secondary" disabled={busy} onClick={() => setOpen(false)}>
-              {t('ui.confirm.cancel')}
+              {t('actions.cancel')}
             </Button>
             <Button variant="danger" loading={busy}>
               {t('staff.drawer.disable.button')}

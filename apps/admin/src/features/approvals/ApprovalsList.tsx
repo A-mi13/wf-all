@@ -58,6 +58,7 @@ const DECIDE_KEY = ['approvals', 'decide'] as const;
 //   интерфейса — решает сервер); geo.* (правила и создание страны) решаются и с телефона (спека §9.4).
 export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
   const t = useTranslations('approvals');
+  const ta = useTranslations('actions');
   const api = useApi();
   const handheld = useIsHandheld();
   const list = useInfiniteQuery({
@@ -116,7 +117,7 @@ export function ApprovalsList({ box, me }: { box: ApprovalBox; me: Me }) {
           disabled={decisions.busy && decisions.pendingId !== a.id}
           onClick={() => decisions.cancel(a)}
         >
-          {t('cancel')}
+          {ta('cancel')}
         </Button>
       );
     if (handheld && isDesktopOnlyDecision(a.action)) return <DesktopOnlyNotice compact />;

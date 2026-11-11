@@ -21,7 +21,7 @@ export function FieldShell({
 }) {
   return (
     <div className={cx(styles.field, field.invalid && styles.invalid)}>
-      <label htmlFor={field.id} className={styles.label}>
+      <label id={field.labelId} htmlFor={field.id} className={styles.label}>
         {label}
       </label>
       {children}

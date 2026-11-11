@@ -74,6 +74,7 @@
 
 .hint {
   margin: 0;
+  font-family: var(--wf-font-body);
   font-size: var(--wf-text-xs);
   line-height: var(--wf-text-xs-line);
   font-weight: 500;
@@ -100,9 +101,8 @@
   font-weight: 600;
 }
 
-/* Поле с кнопкой внутри (пароль) и со стрелкой (select) */
-.withAction,
-.withChevron {
+/* Поле с кнопкой внутри (пароль); выпадающий список — Select.module.css */
+.withAction {
   position: relative;
 }
 
@@ -142,25 +142,6 @@
   fill: none;
   stroke: currentcolor;
   stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.withChevron > .control {
-  appearance: none;
-  padding-right: calc(var(--wf-space-4) * 2 + var(--wf-space-2));
-  cursor: pointer;
-}
-
-.chevron {
-  position: absolute;
-  top: 50%;
-  right: var(--wf-space-4);
-  translate: 0 -50%;
-  pointer-events: none;
-  fill: none;
-  stroke: var(--wf-color-text-muted);
-  stroke-width: 2.6;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -257,6 +238,7 @@
   border-radius: var(--wf-radius-sm);
   background: var(--wf-color-slot-empty);
   color: var(--wf-color-text-secondary);
+  font-family: var(--wf-font-body);
   font-size: var(--wf-text-xs);
   line-height: var(--wf-text-xs-line);
   font-weight: 700;

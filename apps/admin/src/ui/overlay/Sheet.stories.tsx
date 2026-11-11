@@ -23,7 +23,7 @@ export const Default: Story = () => {
         footer={
           <>
             <Button variant="secondary" onClick={() => setOpen(false)}>
-              {t('ui.confirm.cancel')}
+              {t('actions.cancel')}
             </Button>
             <Button variant="danger">{t('approvals.reject_dialog.submit')}</Button>
           </>

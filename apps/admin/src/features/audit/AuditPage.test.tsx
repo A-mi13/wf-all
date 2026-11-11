@@ -6,6 +6,7 @@ import { auditRecord, auditServer, LOG, MARIA_ID } from '../../test/audit';
 import { renderApp } from '../../test/app';
 import { meModerator, meOwner } from '../../test/me';
 import { http, server } from '../../test/server';
+import { pick, selectedText } from '../../test/pick';
 
 // «Журнал действий» (спека §9.4 п. 7, §5.3; макет 07): вкладки по разделам → action_prefix, фильтры
 // (кто, действие, объект, период) — в адресе, период — местные даты → UTC, строка «время · кто · тег ·
@@ -165,11 +166,12 @@ describe('фильтры', () => {
     const user = userEvent.setup();
     expect(screen.getByRole('button', { name: 'Ещё фильтры, задано: 5' })).toBeInTheDocument();
     await openFilters(user);
-    expect(screen.getByLabelText('Вид объекта')).toHaveValue('staff_account');
+    expect(selectedText(screen.getByLabelText('Вид объекта'))).toBe('сотрудник');
     expect(screen.getByLabelText('Id объекта')).toHaveValue(MARIA_ID);
     expect(screen.getByLabelText('Id сотрудника')).toHaveValue(OLGA_ID);
-    expect(screen.getByLabelText('С')).toHaveValue('2026-10-01');
-    expect(screen.getByLabelText('По')).toHaveValue('2026-10-13');
+    // DateField: текст — в формате языка интерфейса (значение формы — по-прежнему YYYY-MM-DD)
+    expect(screen.getByLabelText('С')).toHaveValue('01.10.2026');
+    expect(screen.getByLabelText('По')).toHaveValue('13.10.2026');
   });
 
   test.each([
@@ -182,12 +184,56 @@ describe('фильтры', () => {
     await table();
     const user = userEvent.setup();
     await openFilters(user);
-    await user.type(screen.getByLabelText('С'), '2026-10-01');
-    await user.type(screen.getByLabelText('По'), '2026-10-13');
+    // ISO — вставкой (из адреса, журнала): набор по символам идёт через маску языка (ревью UF2a/II-A, I3)
+    await user.click(screen.getByLabelText('С'));
+    await user.paste('2026-10-01');
+    await user.click(screen.getByLabelText('По'));
+    await user.paste('2026-10-13');
     await user.click(screen.getByRole('button', { name: 'Применить' }));
     await waitFor(() => expect(last(seen).from).toBe(from));
     expect(last(seen).to).toBe(to);
     expect(app.at()).toBe('/audit?from=2026-10-01&to=2026-10-13');
+  });
+
+  test('период через DateField: текст в формате языка и выбор в календаре — те же from/to', async () => {
+    process.env.TZ = 'Europe/Moscow';
+    const seen = auditServer();
+    const app = renderApp('/audit', { me: meOwner });
+    await table();
+    const user = userEvent.setup();
+    await openFilters(user);
+    await user.type(screen.getByLabelText('С'), '01.10.2026');
+    await user.type(screen.getByLabelText('По'), '12.10.2026');
+    // календарь «по» открыт на введённом дне; день вперёд и Enter — 13 октября
+    await user.click(screen.getByRole('button', { name: 'По: открыть календарь' }));
+    const calendar = screen.getByRole('dialog', { name: 'По: выбор даты' });
+    await waitFor(() =>
+      expect(within(calendar).getByRole('gridcell', { name: '12 октября 2026 г.' })).toHaveFocus(),
+    );
+    // «по» не раньше «с»: дни до 1 октября недоступны
+    await user.keyboard('{ArrowRight}{Enter}');
+    expect(screen.getByLabelText('По')).toHaveValue('13.10.2026');
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+    await waitFor(() => expect(last(seen).from).toBe('2026-09-30T21:00:00.000Z'));
+    expect(last(seen).to).toBe('2026-10-13T21:00:00.000Z');
+    expect(app.at()).toBe('/audit?from=2026-10-01&to=2026-10-13');
+  });
+
+  test('«по» — календарь не даёт дни раньше «с»', async () => {
+    auditServer();
+    renderApp('/audit?from=2026-10-10&to=2026-10-12', { me: meOwner });
+    await table();
+    const user = userEvent.setup();
+    await openFilters(user);
+    await user.click(screen.getByRole('button', { name: 'По: открыть календарь' }));
+    const calendar = screen.getByRole('dialog', { name: 'По: выбор даты' });
+    expect(within(calendar).getByRole('gridcell', { name: '9 октября 2026 г.' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(
+      within(calendar).getByRole('gridcell', { name: '10 октября 2026 г.' }),
+    ).not.toHaveAttribute('aria-disabled');
   });
 
   test('негодный id и «по» раньше «с» — ошибки полей, запрос не уходит', async () => {
@@ -197,8 +243,8 @@ describe('фильтры', () => {
     const user = userEvent.setup();
     await openFilters(user);
     await user.type(screen.getByLabelText('Id объекта'), 'не-uuid');
-    await user.type(screen.getByLabelText('С'), '2026-10-13');
-    await user.type(screen.getByLabelText('По'), '2026-10-01');
+    await user.type(screen.getByLabelText('С'), '13.10.2026');
+    await user.type(screen.getByLabelText('По'), '01.10.2026');
     const before = seen.length;
     await user.click(screen.getByRole('button', { name: 'Применить' }));
     expect(await screen.findByText('Неверный формат')).toBeInTheDocument();
@@ -213,7 +259,7 @@ describe('фильтры', () => {
     await table();
     const user = userEvent.setup();
     await openFilters(user);
-    await user.selectOptions(screen.getByLabelText('Действие'), 'staff.role_changed');
+    await pick(user, screen.getByLabelText('Действие'), 'staff.role_changed');
     await user.click(screen.getByRole('button', { name: 'Применить' }));
     await waitFor(() => expect(last(seen).action_prefix).toBe('staff.role_changed'));
   });

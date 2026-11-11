@@ -7,6 +7,7 @@ import { CITY_OTHER, CITY_OWN, meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
 import { account, approval, session, staffServer, TEAM } from '../../test/staff';
+import { pick, selectedText } from '../../test/pick';
 
 // Строка сотрудника (*; спека §9.4 п. 5, §2.5–2.6, §4.9): переотправка (429 — отсчёт), роль и
 // города (200 — сразу, 202 — на подтверждение), сеансы цели, сброс доступа (202), выключение
@@ -81,14 +82,14 @@ describe('роль и города', () => {
     const user = userEvent.setup();
     const panel = await manage(user, 'Мария К.');
     const block = region(panel, 'Роль и города');
-    await user.selectOptions(within(block).getByLabelText('Роль'), 'support');
+    await pick(user, within(block).getByLabelText('Роль'), 'support');
     await user.click(within(block).getByRole('button', { name: 'Отправить на подтверждение' }));
     expect(await within(panel).findByRole('status')).toHaveTextContent(
       'Отправлено на подтверждение',
     );
     expect(sent).toEqual([{ role: 'support', city_ids: [] }]);
     // роль пока прежняя — и в форме
-    expect(within(block).getByLabelText('Роль')).toHaveValue('moderator');
+    expect(selectedText(within(block).getByLabelText('Роль'))).toBe('модератор');
   });
 
   test('без изменений — отправить нечего', async () => {
@@ -153,7 +154,7 @@ describe('выключение и сброс доступа', () => {
     expect(await within(dialog).findByText('Заполните поле')).toBeInTheDocument();
     expect(sent).toHaveLength(0);
 
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'left_team');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'left_team');
     await user.type(within(dialog).getByLabelText('Комментарий'), 'Перешёл в другой проект');
     await user.click(confirm);
     expect(await screen.findByText('Учётка выключена.')).toBeInTheDocument();
@@ -184,7 +185,7 @@ describe('выключение и сброс доступа', () => {
       within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'other');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'other');
     await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
     await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
     expect(await within(dialog).findByText('Заполните поле')).toBeInTheDocument();
@@ -201,7 +202,7 @@ describe('выключение и сброс доступа', () => {
       within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'security');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'security');
     const input = within(dialog).getByLabelText(/Введите/);
     await user.type(input, 'ivan@xn--d1acufc.xn--p1ai');
     await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
@@ -209,7 +210,9 @@ describe('выключение и сброс доступа', () => {
       'Недостаточно прав для этого действия',
     );
     expect(input).toHaveValue('ivan@xn--d1acufc.xn--p1ai');
-    expect(within(dialog).getByLabelText('Причина')).toHaveValue('security');
+    expect(selectedText(within(dialog).getByLabelText('Причина'))).toBe(
+      'Безопасность (утечка, потерянное устройство)',
+    );
     expect(sent).toHaveLength(1);
   });
 
@@ -232,7 +235,7 @@ describe('выключение и сброс доступа', () => {
       within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'security');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'security');
     await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
     await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
     act(() => {
@@ -268,7 +271,7 @@ describe('выключение и сброс доступа', () => {
       within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'security');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'security');
     await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
     await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
     expect(
@@ -289,7 +292,7 @@ describe('выключение и сброс доступа', () => {
       within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'security');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'security');
     await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
     await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
     await screen.findByText('Сотрудник не найден');
@@ -309,7 +312,7 @@ describe('выключение и сброс доступа', () => {
       within(region(panel, 'Выключить учётку')).getByRole('button', { name: 'Выключить' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Выключить — Иван П.?' });
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'other');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'other');
     await user.click(within(dialog).getByLabelText('Комментарий'));
     await user.paste('я'.repeat(501));
     await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
@@ -331,7 +334,7 @@ describe('выключение и сброс доступа', () => {
     );
     const dialog = screen.getByRole('dialog', { name: 'Сбросить доступ — Иван П.?' });
     const confirm = within(dialog).getByRole('button', { name: 'Отправить на подтверждение' });
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'security');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'security');
     expect(confirm).toBeDisabled();
     await user.type(within(dialog).getByLabelText(/Введите/), 'ivan@xn--d1acufc.xn--p1ai');
     await user.click(confirm);
@@ -366,7 +369,7 @@ describe('выключение и сброс доступа', () => {
       }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Выключить — Алексей М.?' });
-    await user.selectOptions(within(dialog).getByLabelText('Причина'), 'role_change');
+    await pick(user, within(dialog).getByLabelText('Причина'), 'role_change');
     await user.type(within(dialog).getByLabelText(/Введите/), 'am@wf.example');
     await user.click(within(dialog).getByRole('button', { name: 'Отправить на подтверждение' }));
     expect(await within(panel).findByRole('status')).toHaveTextContent(

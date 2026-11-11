@@ -122,13 +122,22 @@ test('4. A приглашает админа (202) → B подтверждае�
   const drawer = pageA.getByRole('dialog');
   await drawer.getByLabel(t('staff.invite.email'), { exact: true }).fill(admin.email);
   await drawer.getByLabel(t('staff.invite.name'), { exact: true }).fill(admin.name);
-  await drawer
-    .getByLabel(t('staff.invite.role'), { exact: true })
-    .selectOption({ label: t('roles.admin') });
+  // роль — свой список (combobox + option, спека UI-фундамента §4.16). Мышью сначала значение не по
+  // умолчанию (модератор), затем нужное (админ): браузерный страж R4-1 — mousedown по опции не уводит
+  // фокус и не закрывает список до click (jsdom выбор мышью по координатам не проверяет).
+  const role = drawer.getByRole('combobox', { name: t('staff.invite.role'), exact: true });
+  await role.click();
+  await drawer.getByRole('option', { name: t('roles.moderator'), exact: true }).click();
+  await expect(role).toHaveText(t('roles.moderator'));
+  await expect(role).toBeFocused();
+  await role.click();
+  await drawer.getByRole('option', { name: t('roles.admin'), exact: true }).click();
+  await expect(role).toHaveText(t('roles.admin'));
+  await expect(drawer.getByRole('listbox')).toHaveCount(0);
   const created = pageA.waitForResponse(
     (r) => r.request().method() === 'POST' && r.url().endsWith('/v1/staff/invites'),
   );
-  await drawer.getByRole('button', { name: t('staff.invite.submit') }).click();
+  await drawer.getByRole('button', { name: t('actions.submitForApproval') }).click();
   const res = await created;
   expect(res.status()).toBe(202);
   const approval = ((await res.json()) as { approval: Approval }).approval;
@@ -184,14 +193,15 @@ test('5. админ принимает приглашение, настраив�
   // права админа: выдаёт только модератора и поддержку — владельца и админа в списке нет
   await pageAdmin.goto('/staff');
   await pageAdmin.getByRole('button', { name: t('staff.invite.open') }).click();
-  const options = await pageAdmin
-    .getByRole('dialog')
-    .getByLabel(t('staff.invite.role'), { exact: true })
-    .locator('option')
-    .allTextContents();
+  const adminDrawer = pageAdmin.getByRole('dialog');
+  await adminDrawer.getByRole('combobox', { name: t('staff.invite.role'), exact: true }).click();
+  const options = await adminDrawer.getByRole('option').allTextContents();
   expect(options).toContain(t('roles.support'));
   expect(options).not.toContain(t('roles.admin'));
   expect(options).not.toContain(t('roles.owner'));
+  // первый Esc закрывает список, второй — панель
+  await pageAdmin.keyboard.press('Escape');
+  await expect(adminDrawer.getByRole('listbox')).toHaveCount(0);
   await pageAdmin.keyboard.press('Escape');
   await expect(pageAdmin.getByRole('dialog')).toHaveCount(0);
 

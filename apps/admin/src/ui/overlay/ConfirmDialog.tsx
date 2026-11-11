@@ -30,7 +30,7 @@ export type ConfirmDialogProps = {
 };
 
 // Подтверждение тяжёлого действия вводом слова или почты (спека §9.2, макеты 07 и 08): кнопка
-// неактивна, пока введённое не совпало точно. Esc и «Отмена» — закрыть без действия; при новом
+// неактивна, пока введённое не совпало точно. Esc и «Отменить» — закрыть без действия; при новом
 // открытии поле снова пустое.
 export function ConfirmDialog({ variant, ...props }: ConfirmDialogProps) {
   const mobile = useIsMobile();
@@ -61,6 +61,7 @@ function ConfirmBody({
   error,
 }: Omit<ConfirmDialogProps, 'variant'>) {
   const t = useTranslations('ui.confirm');
+  const ta = useTranslations('actions');
   const id = useId();
   const [value, setValue] = useState('');
   // пробелы по краям (вставка почты из письма) не мешают; регистр — строго, как задумано для слова
@@ -97,7 +98,7 @@ function ConfirmBody({
       <FormError error={error ?? null} />
       <div className={styles.actions}>
         <Button variant="secondary" onClick={onClose} disabled={loading}>
-          {t('cancel')}
+          {ta('cancel')}
         </Button>
         <Button type="submit" variant="danger" disabled={!matches} loading={loading}>
           {confirmLabel}

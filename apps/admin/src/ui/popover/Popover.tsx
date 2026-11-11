@@ -20,7 +20,7 @@ import styles from './Popover.module.css';
 import { type AnchorRect, type Placement, place } from './position';
 
 export type PopoverKind = 'hint' | 'menu' | 'modal';
-export type PopoverCloseReason = 'escape' | 'focusout' | 'overlay' | 'scroll';
+export type PopoverCloseReason = 'escape' | 'focusout' | 'outside' | 'overlay' | 'scroll';
 
 export type PopoverProps = {
   anchor: RefObject<HTMLElement | null>;
@@ -46,14 +46,15 @@ const ROLE: Record<PopoverKind, string | undefined> = {
 // - Стек оверлеев (stack.ts): hint и menu — немодальная запись (только Esc верхней из всех), modal —
 //   модальная (своя ловушка Tab, блок прокрутки). Открытие любого Overlay закрывает пузырь ('overlay').
 // - Немодальный закрывается по focusout, когда фокус покинул И якорь, И пузырь (relatedTarget null —
-//   щелчок по нефокусируемому — тоже уход): слушатель Overlay гасит Tab раньше нас, keydown с
+//   щелчок по нефокусируемому — тоже уход), и по pointerdown вне якоря и пузыря (Safari, m4): слушатель Overlay гасит Tab раньше нас, keydown с
 //   defaultPrevented не годится (m-j). mousedown внутри немодального пузыря отменён (фокус остаётся на
 //   вызывателе, выбор мышью не теряется, R4-1), кроме полей ввода; pointerdown не отменяется (m-n).
 // - Положение — JS от СВОЕГО якоря числами --wf-pop-x/-y/-max-h на самом пузыре (setCssPx, N3): при
 //   открытии, при прокрутке любого предка (scroll с capture), resize и ResizeObserver якоря и пузыря — один кадр
 //   на пересчёт. Якорь ушёл из видимой области — подсказка закрывается ('scroll'), меню прижато к краю.
 //   Якорь пропал из документа или подменён — закрыть ('focusout').
-// - Модальный (календарь): фокус внутрь при открытии, обратно на якорь при закрытии.
+// - Модальный (календарь): фокус внутрь при открытии, обратно на якорь при закрытии; щелчок (click) вне
+//   якоря и пузыря закрывает ('outside', как APG Date Picker Dialog).
 export function Popover({
   anchor,
   open,
@@ -112,6 +113,8 @@ export function Popover({
       setCssPx(el, '--wf-pop-x', p.x);
       setCssPx(el, '--wf-pop-y', p.y);
       setCssPx(el, '--wf-pop-max-h', p.maxHeight);
+      // ширина якоря — список Select не уже своего поля
+      setCssPx(el, '--wf-pop-anchor-w', rect.width);
       el.dataset.side = p.side;
     };
     let frame = 0;
@@ -155,11 +158,29 @@ export function Popover({
       if (next && (target?.contains(next) || el.contains(next))) return;
       closeOnce('focusout');
     };
+    // немодальный: нажатие вне якоря и пузыря (ревью UF2a/I, m4) — в Safari щелчок по кнопке фокус ей
+    // не даёт, focusout не случается, и пузырь не закрывался бы тапом снаружи. Слушатель на document с
+    // capture: остановка всплытия у цели его не глушит; pointerdown не отменяется (m-n).
+    const onPointerDown = (e: PointerEvent) => {
+      const at = e.target instanceof Node ? e.target : null;
+      if (at && (target?.contains(at) || el.contains(at))) return;
+      closeOnce('outside');
+    };
+    // модальный (календарь): щелчок вне якоря и пузыря закрывает — как в APG Date Picker Dialog (ревью
+    // UF2a/II-A, m8). По click, а не pointerdown: фокус к этому моменту уже там, куда щёлкнули, — поле его
+    // сохранит, а пустое место (фокус на body) вернёт его на якорь при уборке. Якорь сам переключает.
+    const onOutsideClick = (e: Event) => {
+      const at = e.target instanceof Node ? e.target : null;
+      if (at && (target?.contains(at) || el.contains(at))) return;
+      closeOnce('outside');
+    };
     if (!modal) {
       target?.addEventListener('focusout', onFocusOut);
       el.addEventListener('focusout', onFocusOut);
-    } else if (!el.contains(document.activeElement)) {
-      (focusables(el)[0] ?? el).focus();
+      document.addEventListener('pointerdown', onPointerDown, true);
+    } else {
+      document.addEventListener('click', onOutsideClick, true);
+      if (!el.contains(document.activeElement)) (focusables(el)[0] ?? el).focus();
     }
 
     return () => {
@@ -172,10 +193,16 @@ export function Popover({
       document.removeEventListener('keydown', onKey);
       target?.removeEventListener('focusout', onFocusOut);
       el.removeEventListener('focusout', onFocusOut);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('click', onOutsideClick, true);
       offModal();
       release();
-      // модальный вернул фокус на якорь — до скрытия (скрытый пузырь фокус теряет)
-      if (modal && el.contains(document.activeElement) && target?.isConnected) target.focus();
+      // модальный вернул фокус на якорь — до скрытия (скрытый пузырь фокус теряет); содержимое, снятое тем
+      // же рендером (календарь только открытым), уже унесло фокус на body — его тоже вернуть
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (modal && (lost || el.contains(document.activeElement)) && target?.isConnected) {
+        target.focus();
+      }
       if (el.isConnected && el.matches(':popover-open')) {
         try {
           el.hidePopover();

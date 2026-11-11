@@ -1,5 +1,6 @@
 export { applyFieldErrors } from './apiErrors';
 export { CheckboxField, type CheckboxFieldProps } from './CheckboxField';
+export { DateField, type DateFieldProps } from './DateField';
 export { useFieldErrorText } from './field';
 export { FieldError } from './FieldError';
 export { Form, type FormProps } from './Form';

@@ -40,7 +40,7 @@ function Sample({ failed }: { failed?: boolean }) {
         )}
       />
       <FieldError name="code" id={codeError} />
-      <Button type="submit">{t('staff.invite.submit')}</Button>
+      <Button type="submit">{t('actions.submitForApproval')}</Button>
     </Form>
   );
 }

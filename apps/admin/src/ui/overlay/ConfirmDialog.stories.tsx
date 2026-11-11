@@ -19,6 +19,7 @@ const NAME = 'Мария К.';
 
 function Sample({ busy, error }: { busy?: boolean; error?: ApiError }) {
   const t = useTranslations('staff.drawer');
+  const ta = useTranslations('actions');
   const [open, setOpen] = useState(true);
   return (
     <>
@@ -37,7 +38,7 @@ function Sample({ busy, error }: { busy?: boolean; error?: ApiError }) {
           t('reset.consequences.invite'),
         ]}
         confirmWord={EMAIL}
-        confirmLabel={t('reset.confirm')}
+        confirmLabel={ta('submitForApproval')}
         note={t('journal')}
         loading={busy}
         error={error}

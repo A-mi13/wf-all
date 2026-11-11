@@ -1,7 +1,7 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ReactNode, StrictMode, useRef, useState } from 'react';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, onTestFinished, test, vi } from 'vitest';
 import { renderWithIntl } from '../../test/render';
 import { Drawer } from '../overlay/Drawer';
 import { isOverlayStackEmpty } from '../overlay/stack';
@@ -144,6 +144,53 @@ describe('Popover', () => {
     expect(onInput.defaultPrevented).toBe(false);
   });
 
+  // Ревью UF2a/I, m4: в Safari щелчок по кнопке фокус ей не даёт — focusout не случается, пузырь
+  // закрывается нажатием вне якоря и пузыря.
+  test('pointerdown вне якоря и пузыря закрывает немодальный; на якоре и в пузыре — нет; модальный — нет', async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <>
+        <Harness onClose={onClose} />
+        <p>Снаружи</p>
+      </>,
+    );
+    const anchor = screen.getByRole('button', { name: 'Роль' });
+    await user.click(anchor);
+    fireEvent.pointerDown(screen.getByRole('option', { name: 'Модератор' }));
+    fireEvent.pointerDown(anchor);
+    expect(onClose).not.toHaveBeenCalled();
+    const outside = createEvent.pointerDown(screen.getByText('Снаружи'));
+    fireEvent(screen.getByText('Снаружи'), outside);
+    expect(outside.defaultPrevented).toBe(false);
+    expect(onClose).toHaveBeenCalledWith('outside');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  // Как APG Date Picker Dialog (ревью UF2a/II-A, m8): щелчок вне модального пузыря закрывает его — по
+  // click, когда фокус уже ушёл туда, куда щёлкнули: по пустому месту — фокус на якорь, по полю — в поле.
+  test('модальный пузырь: щелчок снаружи закрывает (outside), фокус на якорь; щелчок внутри — нет', async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <>
+        <Harness kind="modal" onClose={onClose}>
+          <button type="button">День</button>
+        </Harness>
+        <p>Снаружи</p>
+      </>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Роль' }));
+    await user.click(screen.getByRole('button', { name: 'День' }));
+    fireEvent.pointerDown(screen.getByText('Снаружи'));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeVisible();
+    await user.click(screen.getByText('Снаружи'));
+    expect(onClose).toHaveBeenCalledWith('outside');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Роль' })).toHaveFocus();
+  });
+
   test('focusout якоря на нефокусируемое (relatedTarget = null) — закрыт', async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
@@ -227,6 +274,10 @@ describe('Popover', () => {
   // рос бы вниз от старого y и накрывал свой якорь.
   test('пузырь вырос у нижнего края — пересчёт: перевёрнут наверх и не накрывает якорь', async () => {
     stubRects();
+    // упади ожидание раньше конца — подмена не переживёт тест (ревью UF2a/I, n2)
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
     const observed: Element[] = [];
     const callbacks: (() => void)[] = [];
     vi.stubGlobal(
@@ -259,7 +310,6 @@ describe('Popover', () => {
       expect(bubble.style.getPropertyValue('--wf-pop-y')).toBe(`${700 - GAP - 300}px`),
     );
     expect(bubble.dataset.side).toBe('top');
-    vi.unstubAllGlobals();
   });
 
   test('закрытие снимает слушатели прокрутки, размера и клавиш', async () => {
@@ -307,6 +357,42 @@ describe('Popover', () => {
       screen.getByRole('listbox'),
     );
     act(() => {});
+  });
+
+  // Календарь DateField рендерит сетку только открытым: закрытие снимает день с фокусом тем же рендером,
+  // фокус уходит на body раньше уборки Popover — модальный всё равно возвращает его на якорь.
+  test('модальный: содержимое снято вместе с закрытием — фокус на якорь, не на body', async () => {
+    function Lazy() {
+      const anchor = useRef<HTMLButtonElement>(null);
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button ref={anchor} type="button" onClick={() => setOpen(true)}>
+            Календарь
+          </button>
+          <Popover
+            anchor={anchor}
+            open={open}
+            kind="modal"
+            label="Дата"
+            onClose={() => setOpen(false)}
+          >
+            {open && (
+              <button type="button" onClick={() => setOpen(false)}>
+                15
+              </button>
+            )}
+          </Popover>
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Lazy />);
+    await user.click(screen.getByRole('button', { name: 'Календарь' }));
+    expect(screen.getByRole('button', { name: '15' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Календарь' })).toHaveFocus();
   });
 
   test('kind: роли — hint → tooltip, modal → dialog + aria-modal, menu — роль у содержимого', () => {

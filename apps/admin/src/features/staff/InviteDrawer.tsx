@@ -61,6 +61,7 @@ export function InviteDrawer({
 
 function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
   const t = useTranslations('staff.invite');
+  const ta = useTranslations('actions');
   const api = useApi();
   const errorText = useErrorText();
   const roleLabel = useRoleLabel();
@@ -144,7 +145,7 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
           >
             {t('again')}
           </Button>
-          <Button onClick={onClose}>{t('close')}</Button>
+          <Button onClick={onClose}>{ta('close')}</Button>
         </div>
       </div>
     );
@@ -193,7 +194,7 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
           />
         )}
         <Button type="submit" loading={invite.isPending}>
-          {t('submit')}
+          {ta('submitForApproval')}
         </Button>
       </Form>
     </div>

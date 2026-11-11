@@ -18,6 +18,7 @@ const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 // у поля. Тот же адрес — запроса нет.
 export function CitySlugCard({ city }: { city: GeoCityDetails }) {
   const t = useTranslations('geo.city.slug');
+  const ta = useTranslations('actions');
   const toast = useToast();
   const errorText = useErrorText();
   const dateTime = useDateTime();
@@ -49,7 +50,7 @@ export function CitySlugCard({ city }: { city: GeoCityDetails }) {
         />
         <div className={styles.row}>
           <Button type="submit" loading={update.isPending}>
-            {t('save')}
+            {ta('save')}
           </Button>
         </div>
       </Form>

@@ -24,10 +24,10 @@ function Sample({ tone }: { tone?: 'danger' }) {
         footer={
           <>
             <Button variant="secondary" onClick={() => setOpen(false)}>
-              {t('ui.confirm.cancel')}
+              {t('actions.cancel')}
             </Button>
             <Button variant={tone === 'danger' ? 'danger' : 'primary'}>
-              {t('staff.invite.submit')}
+              {t('actions.submitForApproval')}
             </Button>
           </>
         }

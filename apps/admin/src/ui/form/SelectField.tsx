@@ -1,25 +1,27 @@
-import type { ReactNode, SelectHTMLAttributes } from 'react';
-import { type RegisterOptions, useFormContext } from 'react-hook-form';
+import type { ReactNode } from 'react';
+import { type RegisterOptions, useController, useFormContext } from 'react-hook-form';
 import { useField } from './field';
-import styles from './Field.module.css';
 import { FieldShell } from './FieldShell';
+import { Select } from './Select';
 
 export type Option = { value: string; label: string; disabled?: boolean };
 
-export type SelectFieldProps = Omit<
-  SelectHTMLAttributes<HTMLSelectElement>,
-  'name' | 'children' | 'value' | 'defaultValue' | 'onChange' | 'onBlur' | 'multiple'
-> & {
+export type SelectFieldProps = {
   name: string;
   label: ReactNode;
   options: Option[];
-  placeholder?: string; // пустой выбор (значение ''), сам не выбирается
+  // Пустое значение ('') — текст кнопки; у необязательного поля — ещё и опция «не выбрано»
+  // (обязательное пустым не выбирается).
+  placeholder?: string;
   hint?: ReactNode;
-  rules?: RegisterOptions;
+  rules?: RegisterOptions; // rules.onChange получает событие с e.target.value, как у нативного поля
+  disabled?: boolean;
 };
 
-// Выпадающий список (макет 13): нативный select — клавиатура, читалка экрана и телефон «из
-// коробки»; вид — по макету, стрелка — своя.
+// Выпадающий список формы (макет 13; спека UI-фундамента §4.16): свой Select (кнопка combobox, список
+// на Popover или в шторке телефона) под Controller react-hook-form. API прежний: экраны не меняются,
+// rules.onChange вызывается с { target: { value } } (react-hook-form сам оборачивает значение), setValue
+// экрана меняет кнопку. Имя combobox — только подпись поля.
 export function SelectField({
   name,
   label,
@@ -27,42 +29,37 @@ export function SelectField({
   placeholder,
   hint,
   rules,
-  ...rest
+  disabled,
 }: SelectFieldProps) {
-  const { register } = useFormContext();
+  const { control } = useFormContext();
+  const { field: ctl } = useController({
+    name,
+    control,
+    rules: rules as Parameters<typeof useController>[0]['rules'],
+  });
   const field = useField(name, Boolean(hint));
+  const optional = placeholder !== undefined && !rules?.required;
+  const list =
+    optional && !options.some((o) => o.value === '')
+      ? [{ value: '', label: placeholder }, ...options]
+      : options;
   return (
     <FieldShell name={name} field={field} label={label} hint={hint}>
-      <div className={styles.withChevron}>
-        <select
-          {...rest}
-          id={field.id}
-          className={styles.control}
-          aria-invalid={field.invalid || undefined}
-          aria-describedby={field.describedBy}
-          {...register(name, rules)}
-        >
-          {placeholder !== undefined && (
-            <option value="" disabled>
-              {placeholder}
-            </option>
-          )}
-          {options.map((o) => (
-            <option key={o.value} value={o.value} disabled={o.disabled}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <svg
-          viewBox="0 0 24 24"
-          width="16"
-          height="16"
-          aria-hidden="true"
-          className={styles.chevron}
-        >
-          <path d="M4.5 9 L12 15.8 L19.5 9" />
-        </svg>
-      </div>
+      <Select
+        id={field.id}
+        name={name}
+        value={typeof ctl.value === 'string' ? ctl.value : ''}
+        onChange={ctl.onChange}
+        onBlur={ctl.onBlur}
+        buttonRef={ctl.ref}
+        options={list}
+        placeholder={placeholder}
+        disabled={disabled ?? ctl.disabled}
+        invalid={field.invalid}
+        describedBy={field.describedBy}
+        labelledBy={field.labelId}
+        label={label}
+      />
     </FieldShell>
   );
 }

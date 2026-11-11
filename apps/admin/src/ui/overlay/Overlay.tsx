@@ -56,7 +56,7 @@ function Panel({
   initialFocus,
   dismissible = true,
 }: OverlayProps & { placement: Placement; tone?: 'default' | 'danger' }) {
-  const t = useTranslations('ui');
+  const t = useTranslations('actions');
   const titleId = useId();
   const descriptionId = useId();
   const panel = useRef<HTMLDivElement>(null);

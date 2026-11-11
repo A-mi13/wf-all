@@ -25,3 +25,22 @@ test('экраны не рисуют нативные контролы — то�
   const bad = screens.filter((f) => native.test(readFileSync(join(root, f), 'utf8')));
   expect(bad).toEqual([]);
 });
+
+// Нативный <select> — нигде в src, и в src/ui тоже (спека UI-фундамента §4.16): раскрытый список рисует
+// браузер (системное колесо, чужой вид, светлый список в тёмной теме). Выпадающий список — свой Select.
+const allSources = (readdirSync(root, { recursive: true }) as string[])
+  .map((f) => f.replaceAll('\\', '/'))
+  .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f));
+
+test('нативного <select> нет нигде в src — только свой Select', () => {
+  expect(allSources).toContain('ui/form/SelectField.tsx');
+  const bad = allSources.filter((f) => /<select[\s>/]/.test(readFileSync(join(root, f), 'utf8')));
+  expect(bad).toEqual([]);
+});
+
+// Дата — только свой DateField (спека UI-фундамента §4.17): браузерный календарь type="date" — чужой вид и
+// неделя по настройке ОС, а не языка интерфейса.
+test('экраны не рисуют type="date" — только DateField', () => {
+  const bad = screens.filter((f) => /type=["']date["']/.test(readFileSync(join(root, f), 'utf8')));
+  expect(bad).toEqual([]);
+});

@@ -86,40 +86,6 @@
   color: var(--wf-color-text-muted);
 }
 
-/* Скелетон строк: высота таблицы не прыгает, когда приедут данные */
-.skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wf-space-2);
-}
-
-.skeletonRow {
-  height: var(--wf-size-touch-min);
-  border-radius: var(--wf-radius-md);
-  background: var(--wf-color-slot-empty);
-  animation: pulse calc(var(--wf-duration-slow) * 4) var(--wf-ease) infinite alternate;
-}
-
-.skeletonRow:nth-child(3n + 2) {
-  width: 92%;
-}
-
-.skeletonRow:nth-child(3n) {
-  width: 84%;
-}
-
-@keyframes pulse {
-  to {
-    opacity: 0.55;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .skeletonRow {
-    animation: none;
-  }
-}
-
 /* Баннер «нет сети» — над содержимым, во всю ширину */
 .banner {
   display: flex;

@@ -4,8 +4,10 @@ import { isApiError } from '../../api/client';
 import { Button } from '../Button';
 import { cx } from '../cx';
 import { useErrorText } from '../errorText';
-import { Icon } from '../icon';
+import type { IconName } from '@wf/icons';
+import { Icon, Illustration } from '../icon';
 import { useOnline } from '../online';
+import { Skeleton } from './Skeleton';
 import { StateBlock } from './StateBlock';
 import styles from './States.module.css';
 
@@ -14,23 +16,27 @@ import styles from './States.module.css';
 // нашлось» — хорошая новость, а не пустота).
 
 // Пусто: по умолчанию — «Ничего не нашлось… Это не ошибка — просто пусто»; action — обычно
-// «Сбросить фильтры». tone="accent" — пустая очередь как хорошая новость.
+// «Сбросить фильтры». tone="accent" — пустая очередь как хорошая новость. illustration — рисунок набора
+// (спека UI-фундамента §4.4: 48–64, декоративный — смысл в заголовке; экран → рисунок — design/README.md).
 export function EmptyState({
   title,
   text,
   action,
   tone = 'neutral',
+  illustration,
 }: {
   title?: ReactNode;
   text?: ReactNode;
   action?: ReactNode;
   tone?: 'neutral' | 'accent';
+  illustration?: IconName;
 }) {
   const t = useTranslations('states.empty');
   return (
     <StateBlock
       dashed={tone === 'neutral'}
       tone={tone}
+      illustration={illustration && <Illustration name={illustration} size={64} />}
       title={title ?? t('title')}
       text={text ?? t('text')}
       action={action}
@@ -51,6 +57,7 @@ export function ErrorState({
   retrying?: boolean;
 }) {
   const t = useTranslations('states.error');
+  const ta = useTranslations('actions');
   const errorText = useErrorText();
   const api = isApiError(error) ? error : null;
   return (
@@ -64,24 +71,52 @@ export function ErrorState({
       }
       action={
         <Button variant="secondary" loading={retrying} onClick={onRetry}>
-          {t('retry')}
+          {ta('retry')}
         </Button>
       }
     />
   );
 }
 
-// Скелетон строк вместо крутилки: высота списка не прыгает, когда данные приедут. Для читалки —
-// «Загрузка…» (role="status").
+// Скелетон строк вместо крутилки (обёртка над Skeleton.Table без шапки): высота списка не прыгает, когда
+// данные приедут. Для читалки — «Загрузка…» (role="status"). Экраны его не рисуют — только DataTable;
+// экран идёт через DataState (страж loading.test.ts).
 export function LoadingRows({ rows = 5 }: { rows?: number }) {
   const t = useTranslations('states');
   return (
-    <div role="status" className={styles.skeleton}>
+    <div role="status">
       <span className={styles.srOnly}>{t('loading')}</span>
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className={styles.skeletonRow} aria-hidden="true" data-skeleton-row="" />
-      ))}
+      <Skeleton.Table columns={1} rows={rows} head={false} />
     </div>
+  );
+}
+
+// Нет сети (спека §4.3): данных нет, запрос на паузе (networkMode 'online' — без сети TanStack Query ставит
+// паузу и сам продолжит при возврате сети) или оборвался сетевым сбоем при «онлайн» браузере — тогда onRetry:
+// событие online может не прийти (сеть «есть», сервера нет).
+export function NoNetworkState({
+  onRetry,
+  retrying,
+}: {
+  onRetry?: () => void;
+  retrying?: boolean;
+}) {
+  const t = useTranslations('states.no_network');
+  const ta = useTranslations('actions');
+  return (
+    <StateBlock
+      role="status"
+      tone="warning"
+      title={t('title')}
+      text={t('text')}
+      action={
+        onRetry && (
+          <Button variant="secondary" loading={retrying} onClick={onRetry}>
+            {ta('retry')}
+          </Button>
+        )
+      }
+    />
   );
 }
 
@@ -135,6 +170,7 @@ export function DesktopOnlyNotice({ compact }: { compact?: boolean }) {
 export function ConnectionErrorState({ error, onRetry }: { error?: unknown; onRetry: () => void }) {
   const t = useTranslations('states.connection');
   const te = useTranslations('states.error');
+  const ta = useTranslations('actions');
   const errorText = useErrorText();
   if (isApiError(error) && error.status >= 400 && error.status < 500)
     return (
@@ -147,7 +183,7 @@ export function ConnectionErrorState({ error, onRetry }: { error?: unknown; onRe
         extra={
           <p className={styles.code}>{te('code', { status: error.status, code: error.code })}</p>
         }
-        action={<Button onClick={onRetry}>{t('retry')}</Button>}
+        action={<Button onClick={onRetry}>{ta('retry')}</Button>}
       />
     );
   return (
@@ -157,7 +193,7 @@ export function ConnectionErrorState({ error, onRetry }: { error?: unknown; onRe
       tone="warning"
       title={t('title')}
       text={t('text')}
-      action={<Button onClick={onRetry}>{t('retry')}</Button>}
+      action={<Button onClick={onRetry}>{ta('retry')}</Button>}
     />
   );
 }

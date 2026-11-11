@@ -5,6 +5,7 @@ import { IntlProvider } from 'use-intl';
 import { describe, expect, test, vi } from 'vitest';
 import { ApiError } from '../../api/client';
 import { messagesFor } from '../../i18n/messages';
+import { openOptions, pick, pickMany, selectedText } from '../../test/pick';
 import { renderWithIntl } from '../../test/render';
 import { Button } from '../Button';
 import { useErrorText } from '../errorText';
@@ -74,9 +75,8 @@ describe('Form: поля и отправка', () => {
     await user.type(screen.getByLabelText('Почта'), 'maria.k@example.com');
     await user.type(screen.getByLabelText('Имя'), 'Мария К.');
     await user.type(screen.getByLabelText('Пароль'), 'secret-pass');
-    await user.selectOptions(screen.getByLabelText('Роль'), 'moderator');
-    await user.click(screen.getByRole('checkbox', { name: 'Михайловск' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Ставрополь' }));
+    await pick(user, screen.getByLabelText('Роль'), 'moderator');
+    await pickMany(user, 'Города: поиск', ['Михайловск', 'Ставрополь']);
     await user.click(screen.getByRole('checkbox', { name: 'Я сохранил коды' }));
     await user.click(screen.getByRole('button', { name: 'Отправить' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -118,17 +118,125 @@ describe('Form: поля и отправка', () => {
   test('MultiSelectField: поиск сужает список, выбранное — чипами с кнопкой «убрать»', async () => {
     const onSubmit = vi.fn();
     const { user } = renderWithIntl(<Invite onSubmit={onSubmit} />);
-    await user.type(screen.getByRole('searchbox', { name: 'Города: поиск' }), 'нев');
-    expect(screen.queryByRole('checkbox', { name: 'Ставрополь' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox', { name: 'Невинномысск' }));
-    await user.clear(screen.getByRole('searchbox', { name: 'Города: поиск' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Ставрополь' }));
+    // MultiSelectField на Popover (§4.16): поиск — в якоре, флажки — опции списка с aria-selected
+    const search = screen.getByRole('combobox', { name: 'Города: поиск' });
+    await user.type(search, 'нев');
+    // список открыт и сужен — иначе отрицательная проверка прошла бы и при закрытом (ревью UF2a/II-A, m5)
+    expect(search).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('option', { name: 'Невинномысск' })).toBeVisible();
+    expect(screen.queryByRole('option', { name: 'Ставрополь' })).not.toBeInTheDocument();
+    await pickMany(user, search, ['Невинномысск']);
+    await user.clear(search);
+    await pickMany(user, search, ['Ставрополь']);
     await user.click(screen.getByRole('button', { name: 'Убрать «Невинномысск»' }));
-    expect(screen.getByRole('checkbox', { name: 'Невинномысск' })).not.toBeChecked();
+    const options = await openOptions(user, search);
+    expect(options.find((o) => o.label === 'Невинномысск')?.el).toHaveAttribute(
+      'aria-selected',
+      'false',
+    );
+    await user.keyboard('{Escape}');
     await user.type(screen.getByLabelText('Почта'), 'a@b.c');
     await user.click(screen.getByRole('button', { name: 'Отправить' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ city_ids: ['c1'] });
+  });
+});
+
+describe('SelectField в Form (свой список, §4.16)', () => {
+  test('значение формы, текст кнопки и подпись — имя combobox; необязательное — опция «не выбрано»', async () => {
+    const onSubmit = vi.fn();
+    const { user } = renderWithIntl(<Invite onSubmit={onSubmit} />);
+    const role = screen.getByRole('combobox', { name: 'Роль' });
+    expect(screen.getByLabelText('Роль')).toBe(role);
+    expect(selectedText(role)).toBe('Выберите роль');
+    await pick(user, 'Роль', 'Поддержка');
+    expect(selectedText(role)).toBe('Поддержка');
+    await pick(user, 'Роль', 'Выберите роль');
+    expect(selectedText(role)).toBe('Выберите роль');
+    await pick(user, 'Роль', 'Модератор');
+    await user.type(screen.getByLabelText('Почта'), 'a@b.c');
+    await user.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ role: 'moderator' });
+  });
+
+  test('обязательное с placeholder — без опции «не выбрано», пусто — ошибка под полем', async () => {
+    function Required({ onSubmit }: { onSubmit: () => void }) {
+      const form = useForm({ defaultValues: { reason: '' } });
+      return (
+        <Form form={form} onSubmit={onSubmit}>
+          <SelectField
+            name="reason"
+            label="Причина"
+            placeholder="Выберите причину"
+            options={ROLES}
+            rules={{ required: true }}
+          />
+          <Button type="submit">Отправить</Button>
+        </Form>
+      );
+    }
+    const onSubmit = vi.fn();
+    const { user } = renderWithIntl(<Required onSubmit={onSubmit} />);
+    const options = await openOptions(user, 'Причина');
+    expect(options.map((o) => o.value)).toEqual(['moderator', 'support']);
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Отправить' }));
+    const combo = screen.getByRole('combobox', { name: 'Причина' });
+    await waitFor(() => expect(combo).toHaveAttribute('aria-invalid', 'true'));
+    expect(combo).toHaveAccessibleDescription('Заполните поле');
+    expect(combo).toHaveFocus();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test('rules.onChange получает e.target.value (контракт экранов), setValue меняет кнопку', async () => {
+    const seen: string[] = [];
+    function Filters() {
+      const form = useForm({ defaultValues: { country: '' } });
+      return (
+        <Form form={form} onSubmit={() => undefined}>
+          <SelectField
+            name="country"
+            label="Страна"
+            options={[
+              { value: '', label: 'Все страны' },
+              { value: 'RU', label: 'Россия' },
+              { value: 'KZ', label: 'Казахстан' },
+            ]}
+            rules={{ onChange: (e: { target: { value: string } }) => seen.push(e.target.value) }}
+          />
+          <Button onClick={() => form.setValue('country', 'RU')}>Сбросить на Россию</Button>
+        </Form>
+      );
+    }
+    const { user } = renderWithIntl(<Filters />);
+    await pick(user, 'Страна', 'Казахстан');
+    expect(seen).toEqual(['KZ']);
+    await user.click(screen.getByRole('button', { name: 'Сбросить на Россию' }));
+    expect(selectedText('Страна')).toBe('Россия');
+  });
+
+  test('validation.failed по полю списка — на поле', async () => {
+    const { user } = renderWithIntl(
+      <Invite onSubmit={reject(validation(['body.role', 'enum']))} />,
+    );
+    await user.type(screen.getByLabelText('Почта'), 'a@b.c');
+    await user.click(screen.getByRole('button', { name: 'Отправить' }));
+    const role = screen.getByRole('combobox', { name: 'Роль' });
+    await waitFor(() => expect(role).toHaveAttribute('aria-invalid', 'true'));
+    expect(role).toHaveAccessibleDescription('Выберите значение из списка');
+  });
+
+  test('Enter на закрытом списке открывает его и не отправляет форму', async () => {
+    const onSubmit = vi.fn();
+    const { user } = renderWithIntl(<Invite onSubmit={onSubmit} />);
+    await user.type(screen.getByLabelText('Почта'), 'a@b.c');
+    screen.getByRole('combobox', { name: 'Роль' }).focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('listbox', { name: 'Роль' })).toBeVisible();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(selectedText('Роль')).toBe('Модератор');
   });
 });
 
@@ -137,9 +245,9 @@ describe('Form: отправка', () => {
     const onSubmit = vi.fn();
     const { user } = renderWithIntl(<Invite onSubmit={onSubmit} />);
     await user.type(screen.getByLabelText('Почта'), 'a@b.c');
-    await user.type(screen.getByRole('searchbox', { name: 'Города: поиск' }), 'нев{Enter}');
+    await user.type(screen.getByRole('combobox', { name: 'Города: поиск' }), 'нев{Enter}');
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByRole('checkbox', { name: 'Невинномысск' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Невинномысск' })).toBeInTheDocument();
   });
 
   test('повторная отправка, пока идёт первая, гасится', async () => {

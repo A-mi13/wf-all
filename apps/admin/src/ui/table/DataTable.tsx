@@ -24,10 +24,11 @@ import { type DataTableProps, SEARCH_DEBOUNCE_MS } from './model';
 
 export function DataTable<T>(props: DataTableProps<T>) {
   const t = useTranslations('table');
+  const ta = useTranslations('actions');
   const { rows, error, dirty, onReset } = props;
   const reset = dirty && onReset && (
     <Button variant="link" onClick={onReset}>
-      {t('reset')}
+      {ta('resetFilters')}
     </Button>
   );
 
@@ -451,6 +452,7 @@ function LoadMore({
   onLoadMore,
 }: Pick<DataTableProps<unknown>, 'hasMore' | 'loadingMore' | 'loadMoreError' | 'onLoadMore'>) {
   const t = useTranslations('table');
+  const ta = useTranslations('actions');
   if (!hasMore || !onLoadMore) return null;
   return (
     <div className={styles.footer}>
@@ -460,7 +462,7 @@ function LoadMore({
         </p>
       )}
       <Button variant="secondary" loading={loadingMore} onClick={onLoadMore}>
-        {t('load_more')}
+        {ta('showMore')}
       </Button>
     </div>
   );

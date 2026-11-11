@@ -18,6 +18,7 @@ export function StateBlock({
   tone = 'neutral',
   title,
   text,
+  illustration,
   extra,
   action,
   page,
@@ -28,6 +29,7 @@ export function StateBlock({
   tone?: StateTone;
   title: ReactNode;
   text?: ReactNode;
+  illustration?: ReactNode; // рисунок над заголовком (пустое состояние)
   extra?: ReactNode; // строка под текстом (код ошибки)
   action?: ReactNode;
   page?: boolean;
@@ -41,6 +43,7 @@ export function StateBlock({
       role={role}
       className={cx(styles.block, page && styles.page, dashed && styles.empty, TONE[tone])}
     >
+      {illustration}
       <Title className={styles.title}>{title}</Title>
       {text && <p className={styles.text}>{text}</p>}
       {extra}
