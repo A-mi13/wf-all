@@ -6,7 +6,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
-import { type ReactNode, useEffect, useState } from 'react';
+import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
 import { createApi } from '../api/client';
 import { ApiProvider } from '../api/context';
 import type { Me } from '../app/permissions';
@@ -42,15 +42,27 @@ export function SessionFrame({ me, children }: { me: Me; children: ReactNode }) 
   );
 }
 
+// Актуальные children рамки для корня роутера: роутер создаётся один раз, а замыкание первого рендера держало бы
+// прежние пропсы истории (язык витрины сменился — PageHeader остался бы на старом; ревью UF3, m3). Контекст, а не
+// ref: RouterProvider с тем же роутером корень сам не перерисует, подписчик контекста — перерисует.
+const FrameChildren = createContext<ReactNode>(null);
+function FrameRoot() {
+  return useContext(FrameChildren);
+}
+
 // Роутер в памяти на адресе path: любой адрес отрисует children (активный пункт меню, BackLink).
 export function RouterFrame({ path, children }: { path: string; children: ReactNode }) {
   const [router] = useState(() => {
-    const root = createRootRoute({ component: () => children });
+    const root = createRootRoute({ component: FrameRoot });
     const any = createRoute({ getParentRoute: () => root, path: '$' });
     return createRouter({
       routeTree: root.addChildren([any]),
       history: createMemoryHistory({ initialEntries: [path] }),
     });
   });
-  return <RouterProvider router={router} />;
+  return (
+    <FrameChildren.Provider value={children}>
+      <RouterProvider router={router} />
+    </FrameChildren.Provider>
+  );
 }

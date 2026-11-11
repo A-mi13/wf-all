@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join, posix } from 'node:path';
 import { test } from 'node:test';
 import {
   artifactAlive,
@@ -8,6 +11,7 @@ import {
   collectResults,
   findBase,
   findBaseline,
+  goneShots,
   playwrightImage,
   prOfCommit,
   resolveBaseline,
@@ -67,8 +71,10 @@ test('визуальные пути: исходники админки без т
     'apps/admin/package.json',
     'apps/admin/.ladle',
     'apps/admin/visual',
+    'apps/admin/messages',
     'packages/tokens',
     'packages/icons',
+    'packages/i18n',
     'contracts/tokens',
     'pnpm-lock.yaml',
     '.github/workflows/admin-visual.yml',
@@ -76,6 +82,43 @@ test('визуальные пути: исходники админки без т
   ]) {
     assert.ok(VISUAL_PATHS.includes(p), p);
   }
+});
+
+// Инвариант I2 (ревью UF3) без сборки: всё, что импортируют исходники админки, витрина и стенд снимков (кроме
+// тестов), лежит под визуальными путями — относительные импорты по файлу, @wf/<пакет> — packages/<пакет>. Прочие
+// пакеты npm — через pnpm-lock.yaml.
+const ROOT = join(import.meta.dirname, '..');
+const underVisual = (p) =>
+  VISUAL_PATHS.some((v) => !v.startsWith(':') && (p === v || p.startsWith(`${v}/`)));
+
+function sources(dir) {
+  return readdirSync(join(ROOT, dir), { recursive: true })
+    .map((f) => `${dir}/${String(f).replaceAll('\\', '/')}`)
+    .filter((f) => /\.(m?[jt]sx?|css)$/.test(f) && !/\.test\./.test(f));
+}
+
+test('визуальные пути покрывают всё, что импортирует админка (тексты messages/, @wf/i18n…)', () => {
+  const files = [
+    ...sources('apps/admin/src'),
+    ...sources('apps/admin/.ladle'),
+    ...sources('apps/admin/visual'),
+    'apps/admin/vite.config.ts',
+    'apps/admin/vite.shots.ts',
+  ];
+  assert.ok(files.includes('apps/admin/src/i18n/messages.ts'));
+  const outside = new Set();
+  for (const f of files) {
+    assert.ok(underVisual(f), f);
+    const src = readFileSync(join(ROOT, f), 'utf8');
+    for (const m of src.matchAll(/(?:from|import|@import)\s*\(?\s*['"]([^'"]+)['"]/g)) {
+      const spec = m[1];
+      let target = null;
+      if (spec.startsWith('.')) target = posix.normalize(posix.join(posix.dirname(f), spec));
+      else if (spec.startsWith('@wf/')) target = `packages/${spec.split('/')[1]}`;
+      if (target && !underVisual(target)) outside.add(`${f} → ${spec}`);
+    }
+  }
+  assert.deepEqual([...outside], []);
 });
 
 const LIST =
@@ -123,6 +166,23 @@ test('успешных прогонов main нет — эталона нет', 
 test('gh не ответил — ошибка, а не «эталона нет» (иначе регрессия прошла бы молча)', () => {
   const { run } = runner([[LIST, no(1)]]);
   assert.throws(() => findBaseline(run, 'BASE'), /gh run list/);
+  const other = runner([[LIST, { code: 1, stdout: '', stderr: 'HTTP 502: Bad Gateway' }]]);
+  assert.throws(() => findBaseline(other.run, 'BASE'), /gh run list/);
+});
+
+// Первый PR, вносящий workflow: на main его ещё нет — gh отвечает ошибкой «could not find any workflows».
+test('workflow ещё нет на main — эталона нет, а не падение', () => {
+  const { run } = runner([
+    [
+      LIST,
+      {
+        code: 1,
+        stdout: '',
+        stderr: 'could not find any workflows named admin-visual.yml\n',
+      },
+    ],
+  ]);
+  assert.equal(findBaseline(run, 'BASE'), null);
 });
 
 const ARTS = 'gh api repos/o/r/actions/runs/20/artifacts';
@@ -193,8 +253,8 @@ test('образ Playwright — по версии @playwright/test админк�
   assert.throws(() => playwrightImage('^1.64.1'), /точная версия/);
 });
 
-// Сам workflow: без paths, нужные события, группа concurrency посторонней метки уникальна (m-g), условие метки
-// на baseline (m-e), права только на чтение. Текстом — у node:test нет YAML-парсера без зависимостей.
+// Сам workflow: без paths, нужные события, одна группа concurrency на PR и полный прогон на любую метку (I3),
+// права только на чтение, скрытые каталоги в артефактах (I1). Текстом — у node:test нет YAML-парсера без зависимостей.
 const wf = readFileSync(join(import.meta.dirname, '../.github/workflows/admin-visual.yml'), 'utf8');
 
 test('admin-visual.yml: без paths, события PR с метками, права на чтение', () => {
@@ -208,16 +268,28 @@ test('admin-visual.yml: без paths, события PR с метками, пр�
   assert.match(wf, /cancel-in-progress: true/);
 });
 
-test('admin-visual.yml: посторонняя метка получает свою группу (+run_id) и не запускает сравнение', () => {
-  const group = wf.match(/group: (.+)/)?.[1] ?? '';
-  assert.match(group, /admin-visual-/);
-  assert.match(group, /github\.event\.pull_request\.number \|\| github\.sha/);
-  assert.match(group, /github\.event\.label\.name != 'visual-change'/);
-  assert.match(group, /github\.run_id/);
-  assert.match(
-    wf,
-    /github\.event\.action != 'labeled' && github\.event\.action != 'unlabeled'\) \|\| github\.event\.label\.name == 'visual-change'/,
+// I3 (ревью UF3): прогон от посторонней метки со skipped-job перекрыл бы красный snapshots того же head SHA —
+// любая метка гоняет полный прогон, одна группа на PR (отмена прежнего безвредна: итог тот же).
+test('admin-visual.yml: любая метка — полный прогон; одна группа concurrency на PR', () => {
+  assert.equal(
+    wf.match(/group: (.+)/)?.[1],
+    'admin-visual-${{ github.event.pull_request.number || github.sha }}',
   );
+  assert.doesNotMatch(wf, /github\.run_id\s*\)/);
+  for (const m of wf.matchAll(/^\s*if: (.+)$/gm)) {
+    assert.doesNotMatch(m[1], /github\.event\.(label|action)/, m[0]);
+  }
+});
+
+// I1 (ревью UF3): upload-artifact по умолчанию пропускает скрытые файлы и каталоги — артефакт `.out` был бы пуст.
+test('admin-visual.yml: выгрузка из скрытого каталога — с include-hidden-files: true', () => {
+  const blocks = wf.split(/\n(?=\s*- )/).filter((b) => /uses: actions\/upload-artifact@/.test(b));
+  assert.ok(blocks.length >= 2);
+  const hidden = blocks.filter((b) =>
+    [...b.matchAll(/^\s*(?:path: )?(\S*\/\.\S*)$/gm)].some((m) => !m[1].startsWith('$')),
+  );
+  assert.ok(hidden.length >= 1, 'выгрузка эталона visual/.out найдена');
+  for (const b of hidden) assert.match(b, /include-hidden-files: true/, b);
 });
 
 test('admin-visual.yml: действия закреплены полным SHA', () => {
@@ -330,4 +402,76 @@ test('сводка: эталона нет — предупреждение «в�
   });
   assert.deepEqual(s.warnings, [['Эталона нет', 'Эталона нет: вид не сверен.']]);
   assert.match(s.markdown, /- stories\/ui--button--default-light-1440\.png/);
+});
+
+// Ревью UF3, «непредусмотренный» №1: переименованная история — её старые снимки эталона пропадают молча.
+test('снимки эталона, которых нет в прогоне, — число и предупреждение', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wf-visual-gone-'));
+  try {
+    const put = (f) => {
+      mkdirSync(join(dir, posix.dirname(f)), { recursive: true });
+      writeFileSync(join(dir, f), '');
+    };
+    put('.baseline/meta.json');
+    put('.baseline/stories/a-light-390.png');
+    put('.baseline/stories/old-light-390.png');
+    put('.baseline/screens/gone-dark-1440.png');
+    put('.out/stories/a-light-390.png');
+    put('.out/stories/new-light-390.png');
+    assert.deepEqual(goneShots(join(dir, '.baseline'), join(dir, '.out')), [
+      'screens/gone-dark-1440.png',
+      'stories/old-light-390.png',
+    ]);
+    assert.deepEqual(goneShots(join(dir, 'нет'), join(dir, '.out')), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const mode = { compare: true, informative: false, note: '' };
+  const results = { diffs: [], missing: [], failed: 0, gone: ['stories/old-light-390.png'] };
+  const s = summarize({ results, mode, event: 'pull_request', pr: '', prVisualChange: false });
+  assert.deepEqual(s.warnings, [
+    [
+      'Снимки эталона пропали',
+      '1 снимков эталона нет в прогоне (история или экран переименованы?)',
+    ],
+  ]);
+  assert.match(s.markdown, /пропало снимков эталона: 1/);
+});
+
+// m4: статика visual/serve.mjs не отдаёт соседний каталог с тем же префиксом имени.
+test('serve.mjs: соседний каталог «<корень>-x» — 403', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wf-visual-serve-'));
+  mkdirSync(join(dir, 'site'));
+  mkdirSync(join(dir, 'site-x'));
+  writeFileSync(join(dir, 'site/index.html'), 'index');
+  writeFileSync(join(dir, 'site-x/secret.txt'), 'secret');
+  const port = 61190 + Math.floor(Math.random() * 9);
+  const srv = spawn(process.execPath, [
+    join(ROOT, 'apps/admin/visual/serve.mjs'),
+    join(dir, 'site'),
+    String(port),
+  ]);
+  const get = (path) =>
+    new Promise((resolve, reject) => {
+      request({ host: '127.0.0.1', port, path }, (res) => {
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () => resolve({ status: res.statusCode, body }));
+      })
+        .on('error', reject)
+        .end();
+    });
+  try {
+    let first = null;
+    for (let i = 0; i < 50 && !first; i++) {
+      first = await get('/').catch(() => new Promise((r) => setTimeout(() => r(null), 100)));
+    }
+    assert.equal(first?.body, 'index');
+    const r = await get('/..%2Fsite-x%2Fsecret.txt');
+    assert.notEqual(r.body, 'secret');
+    assert.equal(r.status, 403);
+  } finally {
+    srv.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

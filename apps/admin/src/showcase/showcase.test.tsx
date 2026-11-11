@@ -9,6 +9,7 @@ import {
   SHOWCASE_NOW,
   themeToLadle,
 } from './params';
+import { RouterFrame } from './frames';
 import { ShowcaseProvider } from './Provider';
 import { storyList } from './storyList';
 
@@ -145,6 +146,26 @@ describe('ShowcaseProvider', () => {
   });
 });
 
+// m3 (ревью UF3): роутер рамки создаётся один раз, но отрисовывает актуальных детей (язык витрины сменился —
+// пропсы истории новые)
+describe('RouterFrame', () => {
+  test('новые children после перерисовки рамки', async () => {
+    const { rerender } = render(
+      <RouterFrame path="/staff">
+        <p>первый</p>
+      </RouterFrame>,
+    );
+    expect(await screen.findByText('первый')).toBeInTheDocument();
+    rerender(
+      <RouterFrame path="/staff">
+        <p>второй</p>
+      </RouterFrame>,
+    );
+    expect(await screen.findByText('второй')).toBeInTheDocument();
+    expect(screen.queryByText('первый')).toBeNull();
+  });
+});
+
 describe('список историй для снимков', () => {
   const meta = {
     stories: {
@@ -207,6 +228,30 @@ export const Default: Story = () => null;`,
 export default { title: 'UI/X', visual: VISUAL } satisfies StoryMeta;
 export const A: Story = () => null;`;
     expect(() => storyList(bad, () => src)).toThrow(/src\/ui\/X\.stories\.tsx.*visual/);
+  });
+
+  // m2 (ревью UF3): метка не присваиванием с идентификатором — история тихо выпала бы из сравнения
+  test.each([
+    [
+      'сокращённое свойство',
+      `const visual = true;\nexport default { title: 'UI/X', visual } satisfies StoryMeta;`,
+    ],
+    ['строковый ключ', `export default { title: 'UI/X', 'visual': true } satisfies StoryMeta;`],
+    ['вычисляемый ключ', `export default { title: 'UI/X', ['layout']: true } satisfies StoryMeta;`],
+    [
+      'spread',
+      `const base = { visual: true };\nexport default { title: 'UI/X', ...base } satisfies StoryMeta;`,
+    ],
+    [
+      'spread в метках истории',
+      `export default { title: 'UI/X' } satisfies StoryMeta;\nA.meta = { ...base };`,
+    ],
+  ])('метка в форме «%s» — ошибка с файлом', (_, head) => {
+    const bad = {
+      stories: { 'x--a': { name: 'A', filePath: 'src/ui/X.stories.tsx', namedExport: 'A' } },
+    };
+    const src = `${head}\nexport const A: Story = () => null;`;
+    expect(() => storyList(bad, () => src)).toThrow(/src\/ui\/X\.stories\.tsx/);
   });
 
   test('нет default-экспорта с title — ошибка с файлом', () => {

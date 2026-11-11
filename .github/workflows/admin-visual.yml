@@ -7,21 +7,21 @@ on:
   push:
     branches: [main]
   pull_request:
-    # labeled/unlabeled: метка visual-change действует без нового пуша
+    # labeled/unlabeled: метка visual-change действует без нового пуша. Любая метка — полный прогон (ревью UF3, I3):
+    # прогон посторонней метки со skipped-job стал бы последним для head SHA и скрыл бы красный snapshots, а фильтра
+    # по имени метки у on: нет.
     types: [opened, synchronize, reopened, labeled, unlabeled]
 permissions:
   contents: read
   actions: read
   pull-requests: read
-# Отмена — только между сравнивающими прогонами (m-g): группа берётся до if job, поэтому прогон от посторонней
-# метки (docs…) получает уникальную группу (+run_id) и идущее сравнение не отменяет.
+# Одна группа на PR: новый прогон отменяет прежний — безвредно, он воспроизводит тот же итог.
 concurrency:
-  group: admin-visual-${{ github.event.pull_request.number || github.sha }}${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'visual-change' && format('-{0}', github.run_id) || '' }}
+  group: admin-visual-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 jobs:
   # База, фильтр путей, поиск эталона, срок артефакта — на раннере: там есть git и gh (m-d).
   baseline:
-    if: (github.event.action != 'labeled' && github.event.action != 'unlabeled') || github.event.label.name == 'visual-change'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -102,11 +102,13 @@ jobs:
             apps/admin/visual/test-results
           if-no-files-found: ignore
           retention-days: 14
-      # новый эталон: все снимки этого прогона main + версия образа
+      # новый эталон: все снимки этого прогона main + версия образа; .out — скрытый каталог, по умолчанию
+      # upload-artifact его пропускает (ревью UF3, I1)
       - if: github.event_name == 'push'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: visual-baseline-${{ github.sha }}
           path: apps/admin/visual/.out
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 90

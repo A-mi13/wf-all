@@ -2,7 +2,7 @@
 // админка режима shots (dist-shots) — одностраничные: путь без расширения → index.html. Только 127.0.0.1.
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 
 const [dirArg, portArg] = process.argv.slice(2);
 if (!dirArg || !portArg) throw new Error('использование: node visual/serve.mjs <каталог> <порт>');
@@ -26,7 +26,8 @@ const TYPES = {
 createServer((req, res) => {
   const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
   let file = normalize(join(root, path));
-  if (!file.startsWith(root)) {
+  // с разделителем: иначе прошёл бы соседний каталог «<корень>-x»
+  if (file !== root && !file.startsWith(root + sep)) {
     res.writeHead(403).end();
     return;
   }

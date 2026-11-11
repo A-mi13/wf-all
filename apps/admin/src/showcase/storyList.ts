@@ -15,11 +15,29 @@ export type LadleMeta = {
 
 type Flags = { title?: string; visual?: boolean; layout?: boolean };
 
+const FLAG_KEYS = new Set(['title', 'visual', 'layout']);
+
+// Имя свойства в любой записи (`visual`, `'visual'`, `['visual']`) — чтобы поймать метку не в той форме.
+function keyOf(name: ts.PropertyName | undefined): string | null {
+  if (!name) return null;
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) {
+    return name.expression.text;
+  }
+  return null;
+}
+
 function readFlags(obj: ts.ObjectLiteralExpression, file: string, where: string): Flags {
   const flags: Flags = {};
   for (const prop of obj.properties) {
-    if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
-    const key = prop.name.text;
+    // spread мог бы принести метку незаметно (ревью UF3, m2)
+    if (ts.isSpreadAssignment(prop)) throw new Error(`${file}: ${where} — spread в объекте меток`);
+    const named = keyOf(prop.name);
+    if (named === null || !FLAG_KEYS.has(named)) continue;
+    if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) {
+      throw new Error(`${file}: ${where}.${named} — только запись «${named}: литерал»`);
+    }
+    const key = named;
     const value = prop.initializer;
     if (key === 'title') {
       if (!ts.isStringLiteralLike(value))

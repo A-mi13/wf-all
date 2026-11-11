@@ -10,7 +10,14 @@
 // Эталона нет — пусто (снимки сравнение пропустят с предупреждением). Ошибка git/gh — падение job, а не «эталона
 // нет»: иначе регрессия проходила бы молча. Функции — с внедряемым исполнителем команд (тест подменяет).
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -25,8 +32,10 @@ export const VISUAL_PATHS = [
   'apps/admin/package.json',
   'apps/admin/.ladle',
   'apps/admin/visual',
+  'apps/admin/messages',
   'packages/tokens',
   'packages/icons',
+  'packages/i18n',
   'contracts/tokens',
   'pnpm-lock.yaml',
   '.github/workflows/admin-visual.yml',
@@ -56,26 +65,29 @@ export function changed(run, base) {
   return out.trim() !== '';
 }
 
+// Первый PR, вносящий workflow: на main файла ещё нет, и gh отвечает этой ошибкой — эталона нет (предупреждение),
+// а не падение. Прочие ошибки gh — по-прежнему падение.
+const NO_WORKFLOW = /could not find any workflows/;
+
 export function findBaseline(run, base, accept = () => true) {
-  const out = must(
-    run('gh', [
-      'run',
-      'list',
-      '--workflow',
-      'admin-visual.yml',
-      '--branch',
-      'main',
-      '--event',
-      'push',
-      '--status',
-      'success',
-      '--json',
-      'databaseId,headSha',
-      '--limit',
-      '100',
-    ]),
-    'gh run list',
-  );
+  const list = run('gh', [
+    'run',
+    'list',
+    '--workflow',
+    'admin-visual.yml',
+    '--branch',
+    'main',
+    '--event',
+    'push',
+    '--status',
+    'success',
+    '--json',
+    'databaseId,headSha',
+    '--limit',
+    '100',
+  ]);
+  if (list.code !== 0 && NO_WORKFLOW.test(list.stderr ?? '')) return null;
+  const out = must(list, 'gh run list');
   for (const { databaseId, headSha } of JSON.parse(out)) {
     // 1 — не предок; 128 — коммита нет в истории (force-push в main, чужой прогон): не эталон
     if (run('git', ['merge-base', '--is-ancestor', headSha, base]).code !== 0) continue;
@@ -160,12 +172,23 @@ export function collectResults(report) {
   return { diffs, missing, failed };
 }
 
+// Снимки эталона, которых нет в этом прогоне (история или экран переименованы, удалены): без счёта они пропадали бы
+// из сравнения молча. Пути — относительные, через «/», по порядку; каталога эталона нет — пусто.
+export function goneShots(baselineDir, outDir) {
+  if (!existsSync(baselineDir)) return [];
+  return readdirSync(baselineDir, { recursive: true })
+    .map((f) => String(f).replaceAll('\\', '/'))
+    .filter((f) => f.endsWith('.png') && !existsSync(join(outDir, f)))
+    .sort();
+}
+
 export function summarize({ results, mode, event, pr, prVisualChange }) {
+  const gone = results.gone ?? [];
   const lines = ['### Визуальное сравнение — снимки', ''];
   if (mode.note) lines.push(mode.note, '');
   lines.push(
     `Упавших тестов (дымовой прогон или отличие без метки): ${results.failed}.`,
-    `Отличий от эталона: ${results.diffs.length}; снимков без эталона: ${results.missing.length}.`,
+    `Отличий от эталона: ${results.diffs.length}; снимков без эталона: ${results.missing.length}; пропало снимков эталона: ${gone.length}.`,
   );
   if (results.diffs.length > 0) {
     lines.push('', ...results.diffs.slice(0, 50).map((d) => `- ${d}`));
@@ -177,6 +200,12 @@ export function summarize({ results, mode, event, pr, prVisualChange }) {
   }
   const warnings = [];
   if (!mode.compare) warnings.push(['Эталона нет', mode.note]);
+  if (gone.length > 0) {
+    warnings.push([
+      'Снимки эталона пропали',
+      `${gone.length} снимков эталона нет в прогоне (история или экран переименованы?)`,
+    ]);
+  }
   if (event === 'push' && pr && !prVisualChange && results.diffs.length > 0) {
     warnings.push([
       'Вид изменён без метки',
@@ -189,7 +218,7 @@ export function summarize({ results, mode, event, pr, prVisualChange }) {
 const exec = (cmd, args) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8' });
   if (r.error) throw r.error;
-  return { code: r.status ?? 1, stdout: r.stdout ?? '' };
+  return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 };
 
 function main(env = process.env, run = exec) {
@@ -256,7 +285,10 @@ function modeCmd(env = process.env) {
 function summaryCmd(env = process.env) {
   const mode = modeOf(env);
   const report = readJson(join(VISUAL_DIR, 'results.json'));
-  const results = report ? collectResults(report) : { diffs: [], missing: [], failed: 0 };
+  const results = {
+    ...(report ? collectResults(report) : { diffs: [], missing: [], failed: 0 }),
+    gone: mode.compare ? goneShots(join(VISUAL_DIR, '.baseline'), join(VISUAL_DIR, '.out')) : [],
+  };
   const { markdown, warnings } = summarize({
     results,
     mode,
