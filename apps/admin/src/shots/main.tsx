@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { createApi } from '../api/client';
 import { createQueryClient } from '../app/query';
 import { problem } from '../test/problem';
+import { auditServer } from '../test/audit';
 import { sectionsServer } from '../test/sections';
 import { shotsMe } from './params';
 import { http, server, start } from './server';
@@ -25,6 +26,9 @@ const params = new URLSearchParams(location.search);
 const { role: roleName, me } = shotsMe(params);
 
 sectionsServer();
+// журнал на снимках — с записями фикстуры тестов (LOG): раскрытая запись ?entry=, скрытые по ширине столбцы и
+// активная строка видны (sectionsServer отдаёт пустой журнал — тестам маршрутов содержимое не важно)
+auditServer();
 server.use(
   http.get('/v1/staff/me', ({ response }) =>
     me ? response(200).json(me) : response.untyped(problem(401, 'auth.unauthenticated')),

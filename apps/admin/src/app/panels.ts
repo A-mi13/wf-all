@@ -68,6 +68,9 @@ const marked = (state: unknown) =>
 export type PanelParam = {
   value: string | undefined;
   open(value: string): void;
+  // Другое значение открытой панели (раскрыта другая запись журнала): replace с прежним state — одна запись
+  // истории на панель, метка panel цела (закрытие — по-прежнему back на список); панели нет — как open.
+  switch(value: string): void;
   close(): void;
 };
 
@@ -112,6 +115,25 @@ export function usePanelParam<K extends PanelKey>(key: K, opts: { allowed: boole
     [router, key],
   );
 
+  const switchTo = useCallback(
+    (v: string) => {
+      if ((router.state.location.search as Record<string, unknown>)[key] === undefined) {
+        open(v);
+        return;
+      }
+      void router.navigate({
+        to: '.',
+        search: (prev: Record<string, unknown>) => ({ ...prev, [key]: SPEC[key].url(v) }),
+        // прежний state (метка panel или её отсутствие у глубокой ссылки); __TSR_key история выдаст новый —
+        // защита close от повтора (closed) снимается сменой записи
+        state: (prev) => Object.assign({}, prev),
+        replace: true,
+        resetScroll: false,
+      });
+    },
+    [router, key, open],
+  );
+
   const close = useCallback(() => {
     const loc = router.state.location;
     if ((loc.search as Record<string, unknown>)[key] === undefined) return;
@@ -131,7 +153,7 @@ export function usePanelParam<K extends PanelKey>(key: K, opts: { allowed: boole
     });
   }, [router, key]);
 
-  return { value, open, close };
+  return { value, open, switch: switchTo, close };
 }
 
 // Уход из панели на другой путь (успех активации → страница города, «Открыть город»): replace — запись панели

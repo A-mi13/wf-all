@@ -1,8 +1,10 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { reauthBus } from '../../app/reauth';
 import { renderApp } from '../../test/app';
-import { meModerator, meOwner } from '../../test/me';
+import { CITY_OTHER, CITY_OWN, meModerator, meOwner } from '../../test/me';
+import { pick, selectedText } from '../../test/pick';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
 import { account, staffServer, TEAM } from '../../test/staff';
@@ -209,5 +211,116 @@ describe('ключ без права и чужой id', () => {
     renderApp(`/staff?account=${target.id}`, { me: meOwner, history: 'browser' });
     await screen.findByRole('dialog', { name: target.display_name ?? '' });
     expect(seen.cards).toContain(target.id);
+  });
+});
+
+// Карточка сотрудника с вводом (план UF2b.10): роль и города — useLeaveGuard формы и Drawer.dirty; успех сбрасывает
+// признак до перечитывания карточки; причина и комментарий диалога выключения — useLeaveGuard (ConfirmDialog
+// своего dirty не имеет, §4.11). Browser history (R3-1).
+describe('карточка сотрудника в адресе — защита от потери', () => {
+  const MARIA2 = account({ city_ids: [CITY_OWN, CITY_OTHER] });
+  const card = () => screen.queryByRole('dialog', { name: 'Мария К.' });
+
+  async function openCard(user: ReturnType<typeof userEvent.setup>) {
+    const table = await screen.findByRole('table', { name: 'Сотрудники' });
+    await user.click(await within(table).findByRole('button', { name: 'Управлять: Мария К.' }));
+    const panel = await screen.findByRole('dialog', { name: 'Мария К.' });
+    return { panel, block: within(panel).getByRole('region', { name: 'Роль и города' }) };
+  }
+
+  test('чистая карточка, открыта изнутри → браузерная «Назад»: закрыта без вопроса', async () => {
+    staffServer({ accounts: [TEAM[0]!, MARIA2] });
+    renderApp('/staff', { me: meOwner, history: 'browser' });
+    await openCard(userEvent.setup());
+    expect(search()).toBe(`?account=${MARIA2.id}`);
+    await act(async () => window.history.back());
+    await waitFor(() => expect(card()).toBeNull());
+    await settle();
+    expect(window.location.pathname + search()).toBe('/staff');
+    expect(questions()).toHaveLength(0);
+  });
+
+  test('роль изменена → Esc → «Уйти»: ровно один вопрос, карточка закрыта, адрес без account', async () => {
+    staffServer({ accounts: [TEAM[0]!, MARIA2] });
+    renderApp('/staff', { me: meOwner, history: 'browser' });
+    const user = userEvent.setup();
+    const { block } = await openCard(user);
+    await pick(user, within(block).getByLabelText('Роль'), 'support');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await exactlyOneQuestion();
+    fireEvent.click(screen.getByRole('button', { name: 'Уйти' }));
+    await waitFor(() => expect(card()).toBeNull());
+    await waitFor(() => expect(window.location.pathname + search()).toBe('/staff'));
+    await settle();
+    expect(questions()).toHaveLength(0);
+  });
+
+  test('роль изменена → браузерная «Назад»: один вопрос, «Остаться» — ?account= и выбранная роль на месте', async () => {
+    staffServer({ accounts: [TEAM[0]!, MARIA2] });
+    renderApp('/staff', { me: meOwner, history: 'browser' });
+    const user = userEvent.setup();
+    const { block } = await openCard(user);
+    await pick(user, within(block).getByLabelText('Роль'), 'support');
+    await act(async () => window.history.back());
+    await exactlyOneQuestion();
+    fireEvent.click(screen.getByRole('button', { name: 'Остаться' }));
+    await waitFor(() => expect(questions()).toHaveLength(0));
+    await waitFor(() => expect(search()).toBe(`?account=${MARIA2.id}`));
+    await settle();
+    expect(questions()).toHaveLength(0);
+    const still = screen.getByRole('dialog', { name: 'Мария К.' });
+    const role = within(
+      within(still).getByRole('region', { name: 'Роль и города' }),
+    ).getByLabelText('Роль');
+    expect(selectedText(role)).toBe('поддержка');
+  });
+
+  test('роль сохранена (200), карточка ещё не перечитана → Esc: закрыта без вопроса', async () => {
+    // сервер ответил 200, но список и карточка отдают прежнюю версию (перечитывание не успело) — RoleBlock не
+    // пересоздан ключом version: признак «изменено» снимает сам успех
+    staffServer({ accounts: [TEAM[0]!, MARIA2] });
+    server.use(
+      http.put('/v1/staff/accounts/{staffId}/role', async ({ request, response }) => {
+        const body = await request.json();
+        return response(200).json({ ...MARIA2, ...body, version: MARIA2.version + 1 });
+      }),
+    );
+    renderApp('/staff', { me: meOwner, history: 'browser' });
+    const user = userEvent.setup();
+    const { block } = await openCard(user);
+    await user.click(
+      await within(block).findByRole('button', { name: 'Убрать «Пятигорск, Ставропольский край»' }),
+    );
+    await user.click(within(block).getByRole('button', { name: 'Сохранить' }));
+    expect(await screen.findByText('Роль и города сохранены.')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(card()).toBeNull());
+    await settle();
+    expect(questions()).toHaveLength(0);
+    expect(window.location.pathname + search()).toBe('/staff');
+  });
+
+  test('комментарий в диалоге выключения → браузерная «Назад»: один вопрос, «Остаться» — комментарий цел', async () => {
+    staffServer({ accounts: [TEAM[0]!, MARIA2] });
+    renderApp('/staff', { me: meOwner, history: 'browser' });
+    const user = userEvent.setup();
+    const { panel } = await openCard(user);
+    await user.click(
+      within(within(panel).getByRole('region', { name: 'Выключить учётку' })).getByRole('button', {
+        name: 'Выключить',
+      }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Выключить — Мария К.?' });
+    await user.type(within(dialog).getByLabelText('Комментарий'), 'Перешла в другой проект');
+    await act(async () => window.history.back());
+    await exactlyOneQuestion();
+    fireEvent.click(screen.getByRole('button', { name: 'Остаться' }));
+    await waitFor(() => expect(questions()).toHaveLength(0));
+    await waitFor(() => expect(search()).toBe(`?account=${MARIA2.id}`));
+    expect(
+      within(screen.getByRole('dialog', { name: 'Выключить — Мария К.?' })).getByLabelText(
+        'Комментарий',
+      ),
+    ).toHaveValue('Перешла в другой проект');
   });
 });

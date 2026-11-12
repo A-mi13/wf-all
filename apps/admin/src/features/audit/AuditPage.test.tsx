@@ -1,9 +1,11 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { reauthBus } from '../../app/reauth';
 import { auditRecord, auditServer, LOG, MARIA_ID } from '../../test/audit';
 import { renderApp } from '../../test/app';
+import { stubTableLayout } from '../../test/layout';
+import { stubMedia } from '../../test/media';
 import { meModerator, meOwner } from '../../test/me';
 import { http, server } from '../../test/server';
 import { pick, selectedText } from '../../test/pick';
@@ -338,4 +340,120 @@ test('строка журнала: <time dateTime> и копирование п�
     .setup()
     .click(within(row!).getByRole('button', { name: 'Копировать: id записи' }));
   expect(await navigator.clipboard.readText()).toBe(record.id);
+});
+
+// Раскрытая запись — в адресе (спека UI-фундамента §4.6, план UF2b.10): ?entry=<id> через usePanelParam — F5 и
+// пересланная ссылка её не теряют, «Назад» сворачивает. Browser history окна jsdom (R3-1): записи живут весь файл.
+describe('раскрытая запись в адресе (?entry=)', () => {
+  const A = LOG[0]!;
+  const B = LOG[1]!;
+  const toggleOf = (row: HTMLElement) => within(row).getByRole('button', { name: 'Подробнее' });
+  // строка по позиции в ответе: короткие id записей LOG совпадают (первые 8 знаков)
+  const rowOf = (t: HTMLElement, id: string) => {
+    const row = rows(t)[LOG.findIndex((r) => r.id === id)];
+    if (!row) throw new Error(`нет строки ${id}`);
+    return row;
+  };
+  const where = () => window.location.pathname + window.location.search;
+
+  test('?entry=<id> по глубокой ссылке (F5 на раскрытой) — запись раскрыта', async () => {
+    auditServer();
+    renderApp(`/audit?entry=${B.id}`, { me: meOwner, history: 'browser' });
+    const t = await table();
+    await waitFor(() => expect(toggleOf(rowOf(t, B.id))).toHaveAttribute('aria-expanded', 'true'));
+    expect(
+      within(rowOf(t, B.id)).getByRole('region', { name: /Подробности записи/ }),
+    ).toBeVisible();
+    expect(toggleOf(rowOf(t, A.id))).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('раскрыто изнутри → браузерная «Назад»: свёрнуто, адрес — список журнала', async () => {
+    auditServer();
+    renderApp('/audit', { me: meOwner, history: 'browser' });
+    const t = await table();
+    await userEvent.setup().click(toggleOf(rowOf(t, A.id)));
+    await waitFor(() => expect(where()).toBe(`/audit?entry=${A.id}`));
+    expect(toggleOf(rowOf(t, A.id))).toHaveAttribute('aria-expanded', 'true');
+    await act(async () => window.history.back());
+    await waitFor(() => expect(where()).toBe('/audit'));
+    await waitFor(() => expect(toggleOf(rowOf(t, A.id))).toHaveAttribute('aria-expanded', 'false'));
+    expect(screen.getByRole('heading', { level: 1, name: 'Журнал действий' })).toBeInTheDocument();
+  });
+
+  test('раскрыта A → «Подробнее» у B: одна запись истории, «Назад» — список, а не снова A', async () => {
+    auditServer();
+    renderApp('/audit', { me: meOwner, history: 'browser' });
+    const t = await table();
+    const user = userEvent.setup();
+    await user.click(toggleOf(rowOf(t, A.id)));
+    await waitFor(() => expect(where()).toBe(`/audit?entry=${A.id}`));
+    await user.click(toggleOf(rowOf(t, B.id)));
+    await waitFor(() => expect(where()).toBe(`/audit?entry=${B.id}`));
+    expect(toggleOf(rowOf(t, A.id))).toHaveAttribute('aria-expanded', 'false');
+    expect(toggleOf(rowOf(t, B.id))).toHaveAttribute('aria-expanded', 'true');
+    // повторный клик сворачивает — запись панели снимается (back), адрес — список
+    await user.click(toggleOf(rowOf(t, B.id)));
+    await waitFor(() => expect(where()).toBe('/audit'));
+    expect(toggleOf(rowOf(t, A.id))).toHaveAttribute('aria-expanded', 'false');
+    expect(toggleOf(rowOf(t, B.id))).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  // Ревью UF2b.10-S, I1: ключ позиции роутера — список без ключей панелей, а не запись истории. Иначе «Свернуть»
+  // (history.back на запись до раскрытия) вернул бы таблицу к прокрутке момента первого раскрытия.
+  test('прокрутил → раскрыл A → прокрутил дальше → раскрыл B → «Свернуть»: прокрутка таблицы не откатывается', async () => {
+    const restore = stubTableLayout();
+    try {
+      auditServer();
+      renderApp('/audit', { me: meOwner, history: 'browser' });
+      const t = await table();
+      const scroller = t.closest('[data-table-scroll]') as HTMLElement;
+      expect(scroller).not.toBeNull();
+      const scrollTo = (top: number) =>
+        act(() => {
+          scroller.scrollTop = top;
+          scroller.dispatchEvent(new Event('scroll'));
+        });
+      const user = userEvent.setup();
+      await scrollTo(100);
+      await user.click(toggleOf(rowOf(t, A.id)));
+      await waitFor(() => expect(where()).toBe(`/audit?entry=${A.id}`));
+      await scrollTo(1600);
+      await user.click(toggleOf(rowOf(t, B.id)));
+      await waitFor(() => expect(where()).toBe(`/audit?entry=${B.id}`));
+      await user.click(toggleOf(rowOf(t, B.id)));
+      await waitFor(() => expect(where()).toBe('/audit'));
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(scroller.scrollTop).toBe(1600);
+    } finally {
+      restore();
+    }
+  });
+
+  test('?entry= негодный или записи нет среди загруженных — ничего не раскрыто', async () => {
+    for (const entry of ['not-a-uuid', '0192f1f0-ffff-7c0d-9e1f-00000000ffff']) {
+      auditServer();
+      renderApp(`/audit?entry=${entry}`, { me: meOwner });
+      const t = await table();
+      for (const r of rows(t)) expect(toggleOf(r)).toHaveAttribute('aria-expanded', 'false');
+      cleanup();
+    }
+  });
+});
+
+// План UF2b.10: журнал — меню «Столбцы» и плотность (tableId 'audit'); объект и id — второстепенные (priority 'low',
+// есть в «Подробнее»): на 768–1023 скрыты, пока не включены.
+test('768–1023: «Объект» и «Id» скрыты по ширине, есть «Столбцы»', async () => {
+  stubMedia({ width: 900, pointer: 'fine' });
+  auditServer();
+  renderApp('/audit', { me: meOwner });
+  const t = await table();
+  await waitFor(() => expect(rows(t).length).toBeGreaterThan(0));
+  expect(
+    within(t)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent),
+  ).toEqual(['Время', 'Кто', 'Тег', 'Действие']);
+  expect(screen.getByRole('button', { name: 'Столбцы' })).toBeInTheDocument();
 });

@@ -30,6 +30,17 @@ function List() {
       <Button onClick={() => panel.open('1')}>Открыть</Button>
       <Button onClick={() => setOk(false)}>Снять право</Button>
       <Button onClick={() => account.open('0192f1c4-0000-7b21-9c5d-0000000000ad')}>Карточка</Button>
+      <Button onClick={() => account.switch('0192f1c4-0000-7b21-9c5d-0000000000be')}>
+        Другая карточка
+      </Button>
+      <Button
+        onClick={() => {
+          account.close();
+          account.close();
+        }}
+      >
+        Закрыть карточку дважды
+      </Button>
       <Button
         onClick={() => {
           panel.close();
@@ -103,6 +114,40 @@ describe('usePanelParam', () => {
     expect(back).toHaveBeenCalledTimes(1);
     expect(at()).toBe('/list?q=a');
     expect(screen.queryByText(/^панель/)).toBeNull();
+  });
+
+  // Ревью UF2b.10-S, m1: смена значения открытой панели (раскрыта другая запись журнала) — replace с прежним state:
+  // одна запись истории на панель, метка panel цела — закрытие по-прежнему back на список; повтор close — один back.
+  test('switch: открыта изнутри → другое значение replace, метка цела; close дважды — один back на список', async () => {
+    const { back, at, length } = setup('/list?q=a');
+    await screen.findByRole('heading', { name: 'Список' });
+    fireEvent.click(screen.getByRole('button', { name: 'Карточка' }));
+    await screen.findByText('карточка 0192f1c4-0000-7b21-9c5d-0000000000ad');
+    // записи истории окна живут весь файл (push усекает «вперёд») — сравнение с длиной после открытия
+    const opened = length();
+    fireEvent.click(screen.getByRole('button', { name: 'Другая карточка' }));
+    await screen.findByText('карточка 0192f1c4-0000-7b21-9c5d-0000000000be');
+    expect(at()).toBe('/list?q=a&account=0192f1c4-0000-7b21-9c5d-0000000000be');
+    expect(length()).toBe(opened);
+    expect(window.history.state).toMatchObject({ panel: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть карточку дважды' }));
+    await waitFor(() => expect(at()).toBe('/list?q=a'));
+    await settle();
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/^карточка/)).toBeNull();
+  });
+
+  test('switch без открытой панели — как open (push с меткой)', async () => {
+    const { at, back } = setup('/list');
+    await screen.findByRole('heading', { name: 'Список' });
+    fireEvent.click(screen.getByRole('button', { name: 'Другая карточка' }));
+    await screen.findByText('карточка 0192f1c4-0000-7b21-9c5d-0000000000be');
+    expect(at()).toBe('/list?account=0192f1c4-0000-7b21-9c5d-0000000000be');
+    expect(window.history.state).toMatchObject({ panel: true });
+    // push: закрытие уходит back на запись списка
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть карточку дважды' }));
+    await waitFor(() => expect(at()).toBe('/list'));
+    expect(back).toHaveBeenCalledTimes(1);
   });
 
   test('глубокая ссылка — закрытие replace без back, «Назад» дальше не ведёт в панель', async () => {

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ReauthModal } from '../features/auth/ReauthModal';
 import { isApiError } from '../api/client';
 import { ConnectionErrorState, RateLimitedState } from '../ui';
+import { restoreKeyOf, scrollRestorationId } from '../ui/table/restore';
 import { ME_KEY } from './query';
 import { routeTree } from './routes';
 import { useSession } from './session';
@@ -16,10 +17,15 @@ function createAppRouter(history?: RouterHistory) {
     routeTree,
     history,
     // «Назад» — та же прокрутка страницы и областей с data-scroll-restoration-id (таблицы; спека
-    // UI-фундамента §4.5). Ключ — запись истории (по умолчанию): в sessionStorage роутера уходят только
-    // её случайный ключ и селекторы, без текста адреса. Инлайн-скрипта на клиенте нет (ScriptOnce — только
-    // SSR: react-router Match.js:69, ScriptOnce.js:10) — CSP script-src 'self' не задета.
+    // UI-фундамента §4.5). Инлайн-скрипта на клиенте нет (ScriptOnce — только SSR: react-router Match.js:69,
+    // ScriptOnce.js:10) — CSP script-src 'self' не задета.
     scrollRestoration: true,
+    // Ключ позиции — список без ключей панелей (restoreKeyOf: путь + search без PANEL_SEARCH_KEYS), а не запись
+    // истории (по умолчанию __TSR_key): открытие, смена и закрытие панели (history.back) — одна позиция, и «Свернуть»
+    // не откатывает прокрутку к моменту первого раскрытия (ревью UF2b.10-S, I1; router-core 1.171.39
+    // scroll-restoration.ts:164-165 — getKey, :203 — снимок по ключу ухода, :267-345 — восстановление по ключу
+    // прихода). В sessionStorage роутера уходит хеш (scrollRestorationId), не текст адреса.
+    getScrollRestorationKey: (location) => scrollRestorationId(restoreKeyOf(location)),
     // кусок раздела — по намерению: наведение и фокус на пункте меню и ссылке (§4.15)
     defaultPreload: 'intent',
     // настоящая сессия приходит из RouterProvider (AppRouter)

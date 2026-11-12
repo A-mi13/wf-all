@@ -1,9 +1,10 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import { useTimeZone, useTranslations } from 'use-intl';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
+import { usePanelParam } from '../../app/panels';
 import {
   Button,
   type Column,
@@ -42,7 +43,10 @@ export function AuditView({
   const api = useApi();
   const timeZone = useTimeZone() ?? 'UTC';
   const labels = useAuditLabels();
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  // Раскрытая запись — в адресе (?entry=<id>, спека UI-фундамента §4.6): F5 и пересланная ссылка её не теряют,
+  // «Назад» сворачивает. Раскрыта одна; записи нет среди загруженных — ничего не раскрыто. Право на журнал
+  // проверил каркас.
+  const entry = usePanelParam('entry', { allowed: true });
   const query = toAuditQuery(search, timeZone);
   const list = useInfiniteQuery({
     queryKey: [...AUDIT_KEY, query],
@@ -52,12 +56,9 @@ export function AuditView({
     getNextPageParam: (p) => p.next_cursor ?? undefined,
   });
 
-  const toggle = (id: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  // раскрыта другая — switch (replace): одна запись истории на раскрытие, «Назад» и «Свернуть» ведут на список,
+  // а не на прежнюю запись
+  const toggle = (id: string) => (entry.value === id ? entry.close() : entry.switch(id));
 
   const columns: Column<AuditRecord>[] = [
     {
@@ -90,12 +91,16 @@ export function AuditView({
     {
       id: 'action',
       header: t('table.columns.action'),
-      cell: (r) => <ActionCell record={r} open={open.has(r.id)} onToggle={() => toggle(r.id)} />,
+      cell: (r) => (
+        <ActionCell record={r} open={entry.value === r.id} onToggle={() => toggle(r.id)} />
+      ),
     },
     {
       id: 'object',
       header: t('table.columns.object'),
       width: 'md',
+      // второстепенные (вид объекта и id есть в «Подробнее»): на 768–1023 скрыты, пока не включены в «Столбцах»
+      priority: 'low',
       cell: (r) => (
         <span className={styles.stack}>
           <span>{labels.object(r.object_type)}</span>
@@ -107,6 +112,7 @@ export function AuditView({
       id: 'id',
       header: t('table.columns.id'),
       width: 'sm',
+      priority: 'low',
       // короткий id на виду, копируется полный (поддержке и подтверждениям; план UF2a.10)
       cell: (r) => (
         <span className={styles.idCell}>
@@ -121,8 +127,11 @@ export function AuditView({
   return (
     <DataTable
       label={t('table.label')}
+      // меню «Столбцы» и плотность (выбор — в localStorage браузера)
+      tableId="audit"
       columns={columns}
       rowKey={(r) => r.id}
+      activeRowKey={entry.value}
       {...infiniteTableProps(list)}
       filters={{
         active,

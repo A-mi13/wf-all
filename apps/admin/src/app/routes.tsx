@@ -109,8 +109,11 @@ export const routeTree = rootRoute.addChildren([
     createRoute({
       getParentRoute: () => shellRoute,
       path: paths.audit,
-      // вкладка, фильтры и период журнала — search-параметры (перезагрузка, «Назад»)
-      validateSearch: parseAuditSearch,
+      // вкладка, фильтры, период и раскрытая запись журнала — search-параметры (перезагрузка, «Назад»)
+      validateSearch: (s: Record<string, unknown>) => ({
+        ...parseAuditSearch(s),
+        ...panelSearch(['entry'])(s),
+      }),
       ...section,
       component: lazyRouteComponent(() => import('../features/audit/AuditPage'), 'AuditPage'),
     }),

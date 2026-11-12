@@ -5,6 +5,7 @@ import { useTranslations } from 'use-intl';
 import { type ApiError, isApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
+import { useLeaveGuard } from '../../app/leaveGuard';
 import type { components } from '../../api/gen/admin';
 import { can, type Decision, decide, type Me } from '../../app/permissions';
 import { useDateTime } from '../../i18n/format';
@@ -87,12 +88,16 @@ export function StaffDrawer({
     isApiError(card.error) &&
     (card.error.status === 403 || card.error.status === 404);
   const a = missing ? undefined : card.data;
+  // Роль и города изменены, не отправлены (спека UI-фундамента §4.11): закрытие панели спрашивает Overlay.dirty,
+  // уход мимо панели (браузерная «Назад», меню) — useLeaveGuard формы; после «Уйти» — close с ignoreBlocker.
+  const [dirty, setDirty] = useState(false);
   return (
     <Drawer
       open={id !== undefined}
       onClose={onClose}
       title={a?.display_name ?? t('title')}
       dismissible={!busy}
+      dirty={dirty}
     >
       {missing ? (
         <EmptyState title={t('not_found_title')} text={t('not_found_text')} />
@@ -103,7 +108,7 @@ export function StaffDrawer({
           retrying={card.isFetching}
         />
       ) : a ? (
-        <StaffPanel key={a.id} me={me} initial={a} />
+        <StaffPanel key={a.id} me={me} initial={a} onDirty={setDirty} />
       ) : (
         <Skeleton.Form fields={4} />
       )}
@@ -111,7 +116,15 @@ export function StaffDrawer({
   );
 }
 
-function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
+function StaffPanel({
+  me,
+  initial,
+  onDirty,
+}: {
+  me: Me;
+  initial: StaffAccount;
+  onDirty: (dirty: boolean) => void;
+}) {
   const t = useTranslations('staff');
   const ta = useTranslations('account');
   const api = useApi();
@@ -220,6 +233,7 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
           target={a}
           options={actions.roleOptions}
           onApproval={onApproval}
+          onDirty={onDirty}
         />
       )}
       {actions.sessions && <SessionsBlock target={a} />}
@@ -336,11 +350,13 @@ function RoleBlock({
   target,
   options,
   onApproval,
+  onDirty,
 }: {
   me: Me;
   target: StaffAccount;
   options: readonly string[];
   onApproval: () => void;
+  onDirty: (dirty: boolean) => void;
 }) {
   const t = useTranslations('staff.drawer.role_change');
   const ta = useTranslations('actions');
@@ -358,6 +374,11 @@ function RoleBlock({
   // только снятие городов — revoke (сразу).
   const permission = roleChangePermission(target, next);
   const decision: Decision = permission ? decide(me, permission) : 'deny';
+  const dirty = form.formState.isDirty;
+  useLeaveGuard(dirty);
+  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  // блок снят (панель закрыта, роль больше не выдать) — снять признак
+  useEffect(() => () => onDirty(false), [onDirty]);
 
   const change = useStaffAction(
     async (v: RoleValues, key: string) => {
@@ -372,7 +393,11 @@ function RoleBlock({
     },
     {
       onSuccess: (o) => {
-        if (o === 'done') return void toast.success(t('saved'));
+        // сохранено: введённое — уже не потеря, до перечитывания карточки (RoleBlock пересоздаст version)
+        if (o === 'done') {
+          form.reset(form.getValues());
+          return void toast.success(t('saved'));
+        }
         // запрос ушёл на подтверждение: роль пока прежняя — форма тоже
         form.reset({ role: target.role, city_ids: target.city_ids });
         onApproval();
@@ -593,6 +618,9 @@ function DestructiveDialog({
   const api = useApi();
   const toast = useToast();
   const form = useForm<DestructiveValues>({ defaultValues: { reason: '', comment: '' } });
+  // Причина и комментарий — ввод: уход мимо диалога (браузерная «Назад», меню) спрашивает. Свой dirty у
+  // ConfirmDialog нет (§4.11): Esc и «Отмена» закрывают диалог без вопроса.
+  useLeaveGuard(form.formState.isDirty);
   const action = useStaffAction(
     async (v: DestructiveValues, key: string) => {
       const reason = REASONS.find((r) => r === v.reason);

@@ -8,6 +8,7 @@ import { meAdmin, meModerator, meOwner } from '../../test/me';
 import { account, rolesMatrix, staffServer, TEAM } from '../../test/staff';
 import { SEARCH_DEBOUNCE_MS } from '../../ui';
 import { pick, selectedText } from '../../test/pick';
+import tableStyles from '../../ui/table/DataTable.module.css';
 
 // «Роли и доступ» (спека §9.4 п. 5, §9.3; макет 07): матрица прав из API (подписи — локали),
 // «Правило двух рук» — по матрице, «Кто имеет доступ» — только с staff.accounts.read, фильтры —
@@ -245,6 +246,9 @@ test('телефон (390 + палец): матрица — таблица со 
   const grant = rowOf(matrix, 'Выдать роль владельца или админа');
   // строка таблицы, не карточка: в ячейке нет повторённой подписи столбца
   expect(within(grant).getAllByRole('cell')[1]).toHaveTextContent(/^вдвоём$/);
+  // первый столбец (право) закреплён при горизонтальной прокрутке (I6, Review Focus 14)
+  expect(within(grant).getAllByRole('cell')[0]).toHaveClass(tableStyles.pinned!);
+  expect(within(grant).getAllByRole('cell')[1]).not.toHaveClass(tableStyles.pinned!);
 });
 
 // План UF2a.10: «Правило двух рук» — термин с подсказкой (TermHint dual_approval); имя секции — сам заголовок.
@@ -264,4 +268,20 @@ test('«Правило двух рук» — подсказка термина �
   expect(
     (await screen.findAllByText(/подтвердит второй сотрудник с тем же правом/)).length,
   ).toBeGreaterThan(0);
+});
+
+// План UF2b.10: «Кто имеет доступ» — меню «Столбцы» и плотность (tableId 'staff'); последний вход — второстепенный
+// (priority 'low'): на 768–1023 скрыт, пока не включён. У матрицы меню нет.
+test('768–1023: «Последний вход» скрыт по ширине, «Столбцы» — одна кнопка (список, не матрица)', async () => {
+  stubMedia({ width: 900, pointer: 'fine' });
+  staffServer({ accounts: TEAM });
+  renderApp('/staff', { me: meOwner });
+  const list = await screen.findByRole('table', { name: 'Сотрудники' });
+  await within(list).findByText('Мария К.');
+  expect(
+    within(list)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent),
+  ).toEqual(['Сотрудник', 'Роль', 'Статус', 'Действия']);
+  expect(screen.getAllByRole('button', { name: 'Столбцы' })).toHaveLength(1);
 });

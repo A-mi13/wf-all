@@ -56,6 +56,8 @@ export function RolesMatrix() {
       label={t('label')}
       // на телефоне — таблица с горизонтальной прокруткой, а не карточки (спека UI-фундамента §3.5)
       layout="table"
+      // первый столбец (право) закреплён: прокручиваются вбок столбцы ролей (I6)
+      stickyFirstColumn
       columns={columns}
       rowKey={(p) => p.key}
       summary={false}
