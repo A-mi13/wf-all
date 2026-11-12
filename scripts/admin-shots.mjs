@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const ROLES = ['owner', 'admin', 'moderator', 'setup', 'anonymous'];
+export const ROLES = ['owner', 'admin', 'moderator', 'geo-admin', 'setup', 'anonymous'];
 export const THEMES = ['dark', 'light'];
 export const LOCALES = ['ru', 'en'];
 const PORT = 5176;

@@ -38,7 +38,15 @@ function contractQueryParams(): string[] {
 
 describe('ключи панелей и фильтров', () => {
   test('реестр панелей — по спеке §4.6', () => {
-    expect(PANEL_SEARCH_KEYS).toEqual(['account', 'invite', 'activate', 'entry', 'edit']);
+    expect(PANEL_SEARCH_KEYS).toEqual([
+      'account',
+      'invite',
+      'activate',
+      'entry',
+      'edit',
+      'start',
+      'import',
+    ]);
   });
 
   test('фильтры путей собраны из KEYS парсеров', () => {

@@ -20,10 +20,10 @@ import type { PanelKey } from './paths';
 // - Прокрутка окна не сбрасывается (resetScroll: false у open, close-replace и снятия ключа): панель поверх списка,
 //   список под затемнением остаётся на месте (ревью UF2b/II-B, m1; router-core link.ts resetScroll, по умолчанию true —
 //   scrollTo(0, 0) после навигации).
-// - Значение проверяется по ключу (id — uuid, флаг — 1, страна — ISO alpha-2): негодное — панели нет.
+// - Значение проверяется по ключу (id — uuid, флаг — 1, страна — ISO alpha-2 или new — создание): негодное — панели нет.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const COUNTRY = /^[A-Z]{2}$/;
+const COUNTRY = /^(?:[A-Z]{2}|new)$/;
 
 // Значение ключа: parse — из search роутера (значения он разбирает как JSON: «1» приходит числом) в строку панели;
 // url — обратно, в то значение, которое роутер запишет как есть (?invite=1, а не ?invite=%221%22).
@@ -42,6 +42,8 @@ const SPEC: Record<PanelKey, Spec> = {
   activate: flag,
   entry: pattern(UUID),
   edit: pattern(COUNTRY),
+  start: flag,
+  import: pattern(UUID),
 };
 
 // validateSearch маршрута: годные значения его ключей панелей (в виде для адреса), остальное отбрасывается.

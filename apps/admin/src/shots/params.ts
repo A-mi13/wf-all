@@ -1,5 +1,5 @@
 import type { Me } from '../app/permissions';
-import { meGeoModerator } from '../test/geo';
+import { meDirectoriesAdmin, meGeoModerator } from '../test/geo';
 import { meAdmin, meOwner, meSetup } from '../test/me';
 
 // Параметры адреса режима shots (план UF1a.1, раунд 1 ревью: K-I1, m1): роль → me фикстуры тестов,
@@ -9,6 +9,7 @@ export const SHOTS_ROLES = {
   owner: meOwner,
   admin: meAdmin,
   moderator: meGeoModerator,
+  'geo-admin': meDirectoriesAdmin,
   setup: meSetup,
   anonymous: null,
 } satisfies Record<string, Me | null>;

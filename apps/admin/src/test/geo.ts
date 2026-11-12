@@ -443,6 +443,25 @@ export const meGeoAdmin: Me = {
   },
 };
 
+// Админ «Справочников» целиком (G9: страны, импорт, версии, флаги — по docs/05, столбец admin): роль shots
+// geo-admin; тесты разделов G9 могут брать её же.
+export const meDirectoriesAdmin: Me = {
+  ...meGeoAdmin,
+  permissions: {
+    ...meGeoAdmin.permissions,
+    'geo.cities.activate': 'allow',
+    'geo.countries.read': 'allow',
+    'geo.countries.manage': 'allow',
+    'geo.countries.rules': 'dual',
+    'geo.imports.read': 'allow',
+    'geo.imports.run': 'allow',
+    'platform.versions.read': 'allow',
+    'platform.versions.manage': 'allow',
+    'platform.flags.read': 'allow',
+    'platform.flags.manage': 'allow',
+  },
+};
+
 export const meGeoModerator: Me = {
   ...meModerator,
   permissions: { ...meModerator.permissions, 'geo.districts.manage': 'scoped' },
