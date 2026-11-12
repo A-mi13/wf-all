@@ -64,3 +64,9 @@
   font-size: var(--wf-text-xs);
   line-height: var(--wf-text-xs-line);
 }
+
+/* Односимвольные выключены — строка приглушена и подписана «выключено» (не только цветом) */
+.row[data-off] .label,
+.off {
+  color: var(--wf-color-text-subtle);
+}

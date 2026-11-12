@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import en from '../../messages/en.json';
 import ru from '../../messages/ru.json';
-import { COMMANDS, type CommandContext } from './commands';
-import { NAV } from './nav';
+import { meModerator, meOwner } from '../test/me';
+import { COMMANDS, type CommandContext, sectionsFor } from './commands';
+import { NAV, navFor } from './nav';
 import { isPanelKey, paths } from './paths';
 
 // Реестр команд палитры (спека UI-фундамента §4.1, план UF4.3; m17). features/*/commands.ts попадают в основной кусок
@@ -35,8 +36,8 @@ const featureFiles = () =>
       }
     });
 
-// Все виды импорта: from '…', import '…' (побочный), import('…'), export … from '…'.
-const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*)(['"])([^'"]+)\1/g;
+// Все виды импорта: from '…', import '…' (побочный), import('…') и import(`…`), export … from '…'.
+const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*)(['"`])([^'"`]+)\1/g;
 function importsOf(source: string): string[] {
   return [...source.matchAll(SPECIFIER)].map((m) => m[2]!);
 }
@@ -83,9 +84,9 @@ describe('реестр команд', () => {
   test('разбор импортов видит все виды', () => {
     expect(
       importsOf(
-        "import { A } from '../a';\nimport '../b';\nconst c = import('../c');\nexport { d } from \"../d\";",
+        "import { A } from '../a';\nimport '../b';\nconst c = import('../c');\nexport { d } from \"../d\";\nimport(`../e`);",
       ),
-    ).toEqual(['../a', '../b', '../c', '../d']);
+    ).toEqual(['../a', '../b', '../c', '../d', '../e']);
   });
 
   test('app/commands.ts собирает каждый features/*/commands.ts', () => {
@@ -133,6 +134,20 @@ describe('реестр команд', () => {
       [paths.versions]: 'g v',
       [paths.flags]: 'g f',
     });
+  });
+
+  test('sectionsFor — ровно разделы меню сотрудника, «Главная» — подпись пункта меню', () => {
+    for (const me of [meOwner, meModerator]) {
+      const menu = navFor(me).flatMap((g) => g.items.map((i) => i.path));
+      expect(sectionsFor(me).map((c) => c.path)).toEqual(menu);
+    }
+    expect(COMMANDS.find((c) => c.path === paths.root)?.labelKey).toBe('nav.home');
+  });
+
+  test('плотность таблиц — только с мышью (fineOnly)', () => {
+    const density = COMMANDS.filter((x) => x.id.startsWith('density.'));
+    expect(density).toHaveLength(2);
+    for (const c of density) expect(c.fineOnly, c.id).toBe(true);
   });
 
   test('раздел — переход на свой путь', () => {

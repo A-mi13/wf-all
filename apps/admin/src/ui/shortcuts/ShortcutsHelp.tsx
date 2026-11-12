@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { Modal } from '../overlay';
 import { Switch } from '../Switch';
-import { parseCombo, type Step } from './combo';
+import { isApplePlatform, parseCombo, type Step } from './combo';
 import styles from './Shortcuts.module.css';
 
 // Шпаргалка горячих клавиш (спека UI-фундамента §4.2): строки — из реестра ShortcutsProvider, клавиши — символом
@@ -25,10 +25,6 @@ type KeyboardApi = { getLayoutMap?: () => Promise<LayoutMap> };
 
 const ESCAPE = parseCombo('escape').steps;
 const NAMES: Record<string, string> = { escape: 'Esc', enter: 'Enter' };
-
-function isMac(): boolean {
-  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-}
 
 // Клавиши шага по порядку: модификаторы, затем сама клавиша.
 function stepParts(step: Step, layout: LayoutMap | null, mac: boolean): string[] {
@@ -55,7 +51,7 @@ export function ShortcutsHelp({
 }: ShortcutsHelpProps) {
   const t = useTranslations('ui.shortcuts');
   const [layout, setLayout] = useState<LayoutMap | null>(null);
-  const mac = isMac();
+  const mac = isApplePlatform();
   useEffect(() => {
     if (!open) return;
     let alive = true;
@@ -75,13 +71,20 @@ export function ShortcutsHelp({
     };
   }, [open]);
 
+  // Односимвольные выключены — их строки остаются (переключатель рядом), но помечены «выключено» (ревью UF4-K m6);
+  // Esc закрывает окно всегда.
+  const off = (row: ShortcutsHelpItem) =>
+    !single && row.id !== 'escape' && row.steps.every((s) => !s.mod && !s.alt);
   const rows: ShortcutsHelpItem[] = [...items, { id: 'escape', label: t('escape'), steps: ESCAPE }];
   return (
     <Modal open={open} onClose={onClose} title={t('title')}>
       <ul className={styles.list}>
         {rows.map((row) => (
-          <li key={row.id} className={styles.row}>
-            <span className={styles.label}>{row.label}</span>
+          <li key={row.id} className={styles.row} data-off={off(row) ? '' : undefined}>
+            <span className={styles.label}>
+              {row.label}
+              {off(row) && <span className={styles.off}> · {t('off')}</span>}
+            </span>
             <span className={styles.keys}>
               {row.steps.map((step, i) => (
                 <Fragment key={i}>

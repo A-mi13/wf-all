@@ -39,7 +39,6 @@
     "empty": "Nothing found",
     "count": "{count, plural, =0 {Nothing found} one {# result} other {# results}}",
     "commands": {
-      "home": "Home",
       "theme_system": "Theme: system",
       "theme_light": "Theme: light",
       "theme_dark": "Theme: dark",
@@ -67,7 +66,8 @@
       "flags": "feature toggles",
       "invite": "new staff member",
       "activate": "launch new city"
-    }
+    },
+    "offline": "No connection — search unavailable"
   },
   "time": {
     "just_now": "just now"
@@ -360,7 +360,9 @@
       "escape": "Close the top window",
       "then": "then",
       "single": "Single-key shortcuts",
-      "single_hint": "Turn off if keys fire by accident (for example, with a screen reader). {mod}+K always works."
+      "single_hint": "Turn off if keys fire by accident (for example, with a screen reader). {mod}+K always works.",
+      "off": "off",
+      "search": "Search on the page"
     }
   },
   "permissions": {

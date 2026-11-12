@@ -66,9 +66,23 @@ export function parseCombo(combo: string): Combo {
   };
 }
 
-// Нажатие — в той же записи, что шаг комбинации.
-export const eventKey = (e: KeyboardEvent): string =>
-  stepKey({ code: e.code, mod: e.ctrlKey || e.metaKey, shift: e.shiftKey, alt: e.altKey });
+// Платформа Apple: mod — ⌘, иначе — Ctrl (ревью UF4-K m4: Ctrl+K в полях macOS — «удалить до конца строки»).
+export function isApplePlatform(): boolean {
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+}
+
+// Нажатие — в той же записи, что шаг комбинации. «Чужой» модификатор (Ctrl на Mac, ⌘/Win на остальных) — свой
+// префикс, которого нет ни в одной комбинации: такое нажатие не совпадает ни с чем (и не считается односимвольным).
+export const eventKey = (e: KeyboardEvent): string => {
+  const foreign = isApplePlatform() ? e.ctrlKey : e.metaKey;
+  const key = stepKey({
+    code: e.code,
+    mod: e.ctrlKey || e.metaKey,
+    shift: e.shiftKey,
+    alt: e.altKey,
+  });
+  return foreign ? `other+${key}` : key;
+};
 
 // Сами модификаторы шагом не считаются (Shift между «g» и «c» последовательность не рвёт).
 export const isModifierKey = (e: KeyboardEvent): boolean =>

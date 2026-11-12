@@ -52,8 +52,9 @@ const PLACEMENT: Record<Placement, string | undefined> = {
 // открытии и обратно на открыватель при закрытии, фокус-ловушка, Esc, блок прокрутки фона. Запись
 // стека — модальная (stack.ts): её открытие закрывает все открытые Popover.
 // Закрытый оверлей не рендерится: состояние содержимого при новом открытии чистое.
+// fill — шторка во всю высоту своего предела (палитра на телефоне), а не по содержимому.
 export function Overlay(
-  props: OverlayProps & { placement: Placement; tone?: 'default' | 'danger' },
+  props: OverlayProps & { placement: Placement; tone?: 'default' | 'danger'; fill?: boolean },
 ) {
   if (!props.open) return null;
   return createPortal(<Panel {...props} />, document.body);
@@ -62,6 +63,7 @@ export function Overlay(
 function Panel({
   placement,
   tone = 'default',
+  fill = false,
   onClose,
   title,
   description,
@@ -70,7 +72,7 @@ function Panel({
   initialFocus,
   dismissible = true,
   dirty = false,
-}: OverlayProps & { placement: Placement; tone?: 'default' | 'danger' }) {
+}: OverlayProps & { placement: Placement; tone?: 'default' | 'danger'; fill?: boolean }) {
   const t = useTranslations('actions');
   const [asking, setAsking] = useState(false);
   const titleId = useId();
@@ -154,7 +156,12 @@ function Panel({
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
-        className={cx(styles.panel, PLACEMENT[placement], tone === 'danger' && styles.danger)}
+        className={cx(
+          styles.panel,
+          PLACEMENT[placement],
+          tone === 'danger' && styles.danger,
+          fill && styles.fill,
+        )}
       >
         {placement === 'bottom' && <div className={styles.handle} aria-hidden="true" />}
         <div className={styles.header}>

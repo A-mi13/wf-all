@@ -30,6 +30,14 @@ function setup(children: ReactNode) {
 function press(code: string, key: string, init: KeyboardEventInit = {}) {
   fireEvent.keyDown(document.activeElement ?? document.body, { code, key, ...init });
 }
+function Opener() {
+  const open = useOpenShortcutsHelp();
+  return (
+    <button type="button" onClick={open}>
+      Шпаргалка
+    </button>
+  );
+}
 const ctrlK = () => press('KeyK', 'k', { ctrlKey: true });
 const openHelp = () => press('Slash', '?', { shiftKey: true });
 
@@ -290,17 +298,147 @@ describe('useShortcut', () => {
   });
 
   test('useOpenShortcutsHelp открывает шпаргалку (команда палитры)', async () => {
-    function Opener() {
-      const open = useOpenShortcutsHelp();
-      return (
-        <button type="button" onClick={open}>
-          Шпаргалка
-        </button>
-      );
-    }
     const { user } = setup(<Opener />);
     await user.click(screen.getByRole('button', { name: 'Шпаргалка' }));
     expect(await screen.findByRole('dialog', { name: 'Горячие клавиши' })).toBeInTheDocument();
+  });
+
+  test('поля textarea, select, contenteditable, role=textbox — односимвольные молчат', () => {
+    const search = vi.fn();
+    setup(
+      <>
+        <Probe combo="/" run={search} label="Поиск" />
+        <textarea aria-label="Текст" />
+        <select aria-label="Выбор">
+          <option>a</option>
+        </select>
+        <div contentEditable aria-label="Редактор" tabIndex={0} suppressContentEditableWarning>
+          <span>текст</span>
+        </div>
+        <div role="textbox" tabIndex={0} aria-label="Своё поле" />
+      </>,
+    );
+    for (const el of [
+      screen.getByLabelText('Текст'),
+      screen.getByLabelText('Выбор'),
+      screen.getByLabelText('Редактор').querySelector('span'),
+      screen.getByLabelText('Своё поле'),
+    ]) {
+      fireEvent.keyDown(el as Element, { code: 'Slash', key: '/' });
+    }
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  test('размонтирование провайдера снимает слушатель keydown', () => {
+    const add = vi.spyOn(document, 'addEventListener');
+    const remove = vi.spyOn(document, 'removeEventListener');
+    try {
+      const view = setup(<Probe combo="g c" run={() => {}} label="Города" />);
+      const handlers = add.mock.calls.filter(([type]) => type === 'keydown').map(([, fn]) => fn);
+      view.unmount();
+      const removed = remove.mock.calls.filter(([type]) => type === 'keydown').map(([, fn]) => fn);
+      expect(handlers.length).toBeGreaterThan(0);
+      for (const fn of handlers) expect(removed).toContain(fn);
+    } finally {
+      add.mockRestore();
+      remove.mockRestore();
+    }
+  });
+
+  test('событие storage другой вкладки: выключили односимвольные — g c молчит', () => {
+    const cities = vi.fn();
+    setup(<Probe combo="g c" run={cities} label="Города" />);
+    act(() => {
+      localStorage.setItem(SHORTCUTS_SINGLE_KEY, '0');
+      window.dispatchEvent(new StorageEvent('storage', { key: SHORTCUTS_SINGLE_KEY }));
+    });
+    press('KeyG', 'g');
+    press('KeyC', 'c');
+    expect(cities).not.toHaveBeenCalled();
+  });
+
+  test('конфликт: в шпаргалке одна строка на клавишу, срабатывает последняя', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const first = vi.fn();
+      const second = vi.fn();
+      setup(
+        <>
+          <Probe combo="g c" run={first} label="Первое" />
+          <Probe combo="g c" run={second} label="Второе" />
+        </>,
+      );
+      openHelp();
+      const dialog = await screen.findByRole('dialog', { name: 'Горячие клавиши' });
+      expect(within(dialog).queryByText('Первое')).toBeNull();
+      expect(within(dialog).getAllByText('Второе')).toHaveLength(1);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  test('конфликт по префиксу («g» и «g c») — ошибка', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      setup(
+        <>
+          <Probe combo="g c" run={() => {}} label="Города" />
+          <Probe combo="g" run={() => {}} label="Другое" />
+        </>,
+      );
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('«g»'));
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  test('Mac: ⌘K — палитра, Ctrl+K и Ctrl+G не срабатывают', () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    try {
+      const palette = vi.fn();
+      const cities = vi.fn();
+      setup(
+        <>
+          <Probe combo="mod+k" run={palette} label="Палитра" allowInInput />
+          <Probe combo="g c" run={cities} label="Города" />
+        </>,
+      );
+      ctrlK();
+      expect(palette).not.toHaveBeenCalled();
+      press('KeyK', 'k', { metaKey: true });
+      expect(palette).toHaveBeenCalledTimes(1);
+      press('KeyG', 'g', { ctrlKey: true });
+      press('KeyC', 'c', { ctrlKey: true });
+      expect(cities).not.toHaveBeenCalled();
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  test('не Mac: ⌘/Win+K палитру не открывает', () => {
+    const palette = vi.fn();
+    setup(<Probe combo="mod+k" run={palette} label="Палитра" allowInInput />);
+    press('KeyK', 'k', { metaKey: true });
+    expect(palette).not.toHaveBeenCalled();
+    ctrlK();
+    expect(palette).toHaveBeenCalledTimes(1);
+  });
+
+  test('односимвольные выключены — их строки в шпаргалке помечены «выключено», Ctrl+K — нет', async () => {
+    localStorage.setItem(SHORTCUTS_SINGLE_KEY, '0');
+    setup(
+      <>
+        <Probe combo="g c" run={() => {}} label="Города" />
+        <Probe combo="mod+k" run={() => {}} label="Палитра" allowInInput />
+        <Opener />
+      </>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Шпаргалка' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Горячие клавиши' });
+    const row = (name: string) => within(dialog).getByText(name).closest('li');
+    expect(row('Города')).toHaveTextContent('выключено');
+    expect(row('Палитра')).not.toHaveTextContent('выключено');
+    expect(row('Закрыть верхнее окно')).not.toHaveTextContent('выключено');
   });
 
   test('без провайдера — понятная ошибка', () => {

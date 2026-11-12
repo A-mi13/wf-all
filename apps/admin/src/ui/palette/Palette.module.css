@@ -6,11 +6,6 @@
   gap: var(--wf-space-2);
 }
 
-/* На узком экране — шторка во всю высоту (предел высоты шторки — Overlay.module.css) */
-.full {
-  min-block-size: 100dvh;
-}
-
 .input {
   position: sticky;
   top: 0;

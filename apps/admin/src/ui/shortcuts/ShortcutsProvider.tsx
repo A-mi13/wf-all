@@ -122,11 +122,15 @@ function Help(props: {
   const { open, setOpen } = props;
   useShortcut('?', () => setOpen(true), { label: t('help') });
   const list = useSyncExternalStore(props.store.subscribe, props.store.list, props.store.list);
-  const items: ShortcutsHelpItem[] = [];
+  // Одна строка на клавишу — та, что сработает (последняя регистрация, как у слушателя): при конфликте (ошибка
+  // разработки) в проде нет дублей строк и ключей React.
+  const byKey = new Map<string, ShortcutsHelpItem>();
   for (const r of list) {
-    if (!r.label || (props.handheld && r.desktopOnly)) continue;
-    items.push({ id: r.combo.key, label: r.label, steps: r.combo.steps });
+    if (props.handheld && r.desktopOnly) continue;
+    byKey.delete(r.combo.key);
+    if (r.label) byKey.set(r.combo.key, { id: r.combo.key, label: r.label, steps: r.combo.steps });
   }
+  const items = [...byKey.values()];
   return (
     <ShortcutsHelp
       open={open}

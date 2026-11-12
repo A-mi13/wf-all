@@ -103,6 +103,17 @@ type DataTableBase<T> = {
   restoreKey?: string;
 };
 
+// Поиск страницы для клавиши «/» (спека UI-фундамента §4.2): поле поиска DataTable помечено атрибутом, клавишу
+// регистрирует каркас одной регистрацией (CommandShortcuts) — таблица клавиш не регистрирует, конфликта «/» нет, и
+// истории без ShortcutsProvider работают. Первое видимое поле вне inert и hidden; нет — null (каркас откроет палитру).
+export const PAGE_SEARCH_ATTR = 'data-page-search';
+export function findPageSearch(root: ParentNode = document): HTMLElement | null {
+  for (const el of root.querySelectorAll<HTMLElement>(`[${PAGE_SEARCH_ATTR}]`)) {
+    if (!el.closest('[inert], [hidden]')) return el;
+  }
+  return null;
+}
+
 // Шапка закрепляется по умолчанию, когда строк больше этого.
 export const STICKY_HEADER_FROM = 20;
 // Строки виртуализируются по умолчанию, когда их больше этого.

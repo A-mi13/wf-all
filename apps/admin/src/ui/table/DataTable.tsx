@@ -271,6 +271,7 @@ function SearchBox({
         type="search"
         className={styles.searchInput}
         aria-label={t('search')}
+        data-page-search="" // клавиша «/» каркаса (model.ts PAGE_SEARCH_ATTR)
         placeholder={placeholder}
         value={text}
         onChange={(e) => setText(e.target.value)}

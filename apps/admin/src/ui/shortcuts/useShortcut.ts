@@ -20,8 +20,15 @@ export function createShortcutsStore() {
   const notify = () => listeners.forEach((fn) => fn());
   return {
     register(entry: Registration) {
-      const other = list.find((r) => r.combo.key === entry.combo.key);
-      // Конфликт одной комбинации — ошибка в разработке (§4.2); срабатывает последняя регистрация.
+      const key = entry.combo.key;
+      const other = list.find(
+        (r) =>
+          r.combo.key === key ||
+          r.combo.key.startsWith(key + ' ') ||
+          key.startsWith(r.combo.key + ' '),
+      );
+      // Конфликт — ошибка в разработке (§4.2): одна комбинация (срабатывает последняя регистрация) или префикс
+      // чужой последовательности («g» и «g c»: «g» сработает сразу, «g c» недостижима).
       if (other && import.meta.env.DEV) {
         console.error(
           `useShortcut: «${entry.source}» уже занято («${other.source}») — одна комбинация, два действия`,

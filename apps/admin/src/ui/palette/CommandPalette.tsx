@@ -2,19 +2,22 @@ import type { IconName } from '@wf/icons';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { isApiError } from '../../api/client';
-import { type Command, COMMANDS, type CommandContext, type NavigateTo } from '../../app/commands';
+import {
+  type Command,
+  COMMANDS,
+  type CommandContext,
+  type NavigateTo,
+  sectionsFor,
+} from '../../app/commands';
 import { isDesktopOnly } from '../../app/desktopOnly';
-import { navFor } from '../../app/nav';
 import { ENTITY_MIN_CHARS, type EntityKind, useEntitySearch } from '../../app/paletteSearch';
-import { paths } from '../../app/paths';
 import { can, decide, type Me } from '../../app/permissions';
 import { pushRecent, readRecent, type RecentItem, type RecentKind } from '../../app/recent';
 import { useSession } from '../../app/session';
 import { messagesFor } from '../../i18n/messages';
-import { cx } from '../cx';
 import { useErrorText } from '../errorText';
 import { Icon } from '../icon';
-import { useIsHandheld, useIsMobile } from '../media';
+import { useIsCoarse, useIsHandheld, useIsMobile } from '../media';
 import { Modal, Sheet } from '../overlay';
 import { SEARCH_DEBOUNCE_MS } from '../table/model';
 import { fuzzyRank } from './fuzzy';
@@ -23,7 +26,7 @@ import styles from './Palette.module.css';
 // Командная палитра (спека UI-фундамента §4.1, план UF4.5). Modal (на узком — Sheet во всю высоту): стек оверлеев,
 // ловушка фокуса, возврат фокуса. Открытие в адрес не пишется — мгновенный инструмент, а не состояние экрана.
 // - Группы: «Недавнее», «Разделы» (navFor(me) + «Главная»), «Действия» (право действия; dual — «на подтверждение»;
-//   на карманном устройстве без «только с компьютера»), сущности (app/paletteSearch.ts). Пустой запрос — недавнее и
+//   на карманном устройстве без «только с компьютера», с пальцем — без fineOnly), сущности (app/paletteSearch.ts). Пустой запрос — недавнее и
 //   разделы. Локальное ищет fuzzyRank (подпись, английская подпись, ключевые слова); подсветка — <mark>.
 // - Недавнее — readRecent(me.id) на момент открытия; пункт, к которому пропал доступ (раздела нет в меню, нет права
 //   сущности, чужой город модератора), не показывается; подпись раздела — по языку интерфейса.
@@ -41,11 +44,15 @@ export type CommandPaletteProps = {
 export function CommandPalette({ open, onClose, context }: CommandPaletteProps) {
   const t = useTranslations('palette');
   const mobile = useIsMobile();
-  const Frame = mobile ? Sheet : Modal;
-  return (
-    <Frame open={open} onClose={onClose} title={t('title')}>
-      <PaletteBody onClose={onClose} context={context} full={mobile} />
-    </Frame>
+  const body = <PaletteBody onClose={onClose} context={context} />;
+  return mobile ? (
+    <Sheet open={open} onClose={onClose} title={t('title')} fill>
+      {body}
+    </Sheet>
+  ) : (
+    <Modal open={open} onClose={onClose} title={t('title')}>
+      {body}
+    </Modal>
   );
 }
 
@@ -110,36 +117,27 @@ function recentAllowed(me: Me, item: RecentItem, sections: readonly Command[]): 
   }
 }
 
-function PaletteBody({
-  onClose,
-  context,
-  full,
-}: {
-  onClose: () => void;
-  context: CommandContext;
-  full: boolean;
-}) {
+function PaletteBody({ onClose, context }: { onClose: () => void; context: CommandContext }) {
   const session = useSession();
   const me = session.status === 'active' ? session.me : null;
   if (!me) return null;
-  return <Palette me={me} onClose={onClose} context={context} full={full} />;
+  return <Palette me={me} onClose={onClose} context={context} />;
 }
 
 function Palette({
   me,
   onClose,
   context,
-  full,
 }: {
   me: Me;
   onClose: () => void;
   context: CommandContext;
-  full: boolean;
 }) {
   const t = useTranslations('palette');
   const tr = useTranslations();
   const errorText = useErrorText();
   const handheld = useIsHandheld();
+  const coarse = useIsCoarse();
   const baseId = useId();
   const listId = `${baseId}-list`;
   const [query, setQuery] = useState('');
@@ -155,25 +153,17 @@ function Palette({
     return () => clearTimeout(timer);
   }, [query, term]);
 
-  const sections = useMemo(() => {
-    const menu = new Set(navFor(me).flatMap((g) => g.items.map((i) => i.path)));
-    return COMMANDS.filter(
-      (c) =>
-        c.group === 'section' &&
-        c.path !== undefined &&
-        (c.path === paths.root || menu.has(c.path)) &&
-        (c.permission == null || can(me, c.permission)),
-    );
-  }, [me]);
+  const sections = useMemo(() => sectionsFor(me), [me]);
   const actions = useMemo(
     () =>
       COMMANDS.filter(
         (c) =>
           c.group === 'action' &&
           (c.permission == null || can(me, c.permission)) &&
-          !(handheld && (c.desktopOnly || (c.permission != null && isDesktopOnly(c.permission)))),
+          !(handheld && (c.desktopOnly || (c.permission != null && isDesktopOnly(c.permission)))) &&
+          !(coarse && c.fineOnly),
       ),
-    [me, handheld],
+    [me, handheld, coarse],
   );
   const [stored] = useState(() => readRecent(staffId));
   const recent = stored.filter((r) => recentAllowed(me, r, sections));
@@ -240,9 +230,11 @@ function Palette({
       const status =
         g.status === 'loading'
           ? t('searching')
-          : g.status === 'error'
-            ? t('error', { text: errorText(isApiError(g.error) ? g.error : 'internal') })
-            : undefined;
+          : g.status === 'offline'
+            ? t('offline')
+            : g.status === 'error'
+              ? t('error', { text: errorText(isApiError(g.error) ? g.error : 'internal') })
+              : undefined;
       blocks.push({
         id: g.kind,
         title: t(`groups.${ENTITY_GROUP[g.kind]}`),
@@ -308,7 +300,7 @@ function Palette({
   const settled = q !== '' && q === term && !pending;
   let position = 0;
   return (
-    <div className={cx(styles.root, full && styles.full)}>
+    <div className={styles.root}>
       <input
         className={styles.input}
         type="text"

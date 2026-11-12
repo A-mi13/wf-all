@@ -3,9 +3,11 @@ import { type ComponentType, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createApi } from '../api/client';
 import { createQueryClient } from '../app/query';
+import { SEARCH_DEBOUNCE_MS } from '../ui/table/model';
 import { problem } from '../test/problem';
 import { auditServer } from '../test/audit';
 import { sectionsServer } from '../test/sections';
+import { applyShotsFixture } from './fixtures';
 import { shotsMe } from './params';
 import { http, server, start } from './server';
 import { ShotsRoot } from './ShotsRoot';
@@ -17,15 +19,18 @@ import { ShotsRoot } from './ShotsRoot';
 // отрисовка готова, шрифты загружены и запросов нет, на <html> встаёт data-shots-ready — его ждёт
 // scripts/admin-shots.mjs. В обычную сборку модуль не попадает (страж src/shots/shots.test.ts).
 // ?shots-story=<путь от src без .stories.tsx>:<экспорт> — снимок истории компонента вместо приложения.
+// ?shots-fixture=<набор> — данные состояния (fixtures.ts); ?shots-palette=<текст> — после первой отрисовки открыть
+// палитру (Ctrl+K — тем же путём, что сотрудник) и ввести текст: результаты, ошибка группы, «Ничего не нашлось».
 
 // Секрет-фикстура экрана настройки 2FA (как в тестах SetupMfaPage) — не настоящий.
 const MFA_SECRET = 'JBSWY3DPEHPK3PXP';
 
 const params = new URLSearchParams(location.search);
 // неизвестные роль или язык — ошибка до моков (pageerror → скрипт снимков выходит с кодом 1)
-const { role: roleName, me } = shotsMe(params);
+const { role: roleName, me: roleMe } = shotsMe(params);
 
 sectionsServer();
+const me = applyShotsFixture(params.get('shots-fixture'), roleMe);
 // журнал на снимках — с записями фикстуры тестов (LOG): раскрытая запись ?entry=, скрытые по ширине столбцы и
 // активная строка видны (sectionsServer отдаёт пустой журнал — тестам маршрутов содержимое не важно)
 auditServer();
@@ -75,11 +80,34 @@ createRoot(root).render(
   </StrictMode>,
 );
 
-// Готово: шрифты, ни одного запроса в полёте два кадра подряд (ленивые части и перечитывания успели).
+// Ни одного запроса в полёте два кадра подряд (ленивые части и перечитывания успели).
+const busy = () => queryClient.isFetching() > 0 || queryClient.isMutating() > 0;
+async function settle() {
+  for (let quiet = 0; quiet < 2;) {
+    await nextFrame();
+    await tick();
+    quiet = busy() ? 0 : quiet + 1;
+  }
+}
+
+// Готово: шрифты и тишина; с ?shots-palette= — ещё палитра с введённым текстом и пауза ввода палитры.
 await document.fonts.ready;
-for (let quiet = 0; quiet < 2;) {
+await settle();
+const paletteText = params.get('shots-palette');
+if (paletteText !== null) {
+  document.body.dispatchEvent(
+    new KeyboardEvent('keydown', { code: 'KeyK', key: 'k', ctrlKey: true, bubbles: true }),
+  );
   await nextFrame();
-  await tick();
-  quiet = queryClient.isFetching() === 0 && queryClient.isMutating() === 0 ? quiet + 1 : 0;
+  const field = document.querySelector<HTMLInputElement>('[role="combobox"]');
+  if (!field) throw new Error('shots: палитра не открылась');
+  // контролируемое поле React: значение — через сеттер прототипа, затем событие input
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+    field,
+    paletteText,
+  );
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, SEARCH_DEBOUNCE_MS + 100));
+  await settle();
 }
 document.documentElement.setAttribute('data-shots-ready', '');

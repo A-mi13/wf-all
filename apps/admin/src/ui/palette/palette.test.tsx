@@ -5,6 +5,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
+import { onlineManager } from '@tanstack/react-query';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { CommandContext } from '../../app/commands';
@@ -20,6 +21,7 @@ import { renderWithProviders } from '../../test/render';
 import { http, server } from '../../test/server';
 import { account, city } from '../../test/staff';
 import { Modal } from '../overlay';
+import overlayStyles from '../overlay/Overlay.module.css';
 import { AppShell } from '../shell/AppShell';
 import { SEARCH_DEBOUNCE_MS } from '../table/model';
 import { CommandPalette } from './CommandPalette';
@@ -243,6 +245,64 @@ describe('CommandPalette', () => {
       await within(group('Сотрудники')).findByRole('option', { name: /Мария К\./ }),
     ).toBeVisible();
     expect(input()).toHaveValue('ма');
+  });
+
+  test('без сети — в группах «Нет сети», не вечное «Ищем…»; число результатов объявлено', async () => {
+    entities({ cities: () => [city()] });
+    onlineManager.setOnline(false);
+    try {
+      mount(meOwner);
+      type('ст');
+      expect(await within(await findGroup('Города')).findByText(/Нет сети/)).toBeVisible();
+      expect(within(group('Сотрудники')).getByText(/Нет сети/)).toBeVisible();
+      expect(screen.queryByText('Ищем…')).toBeNull();
+      await waitFor(() =>
+        expect(document.querySelector('[data-palette-count]')?.textContent).not.toBe(''),
+      );
+    } finally {
+      onlineManager.setOnline(true);
+    }
+  });
+
+  test('запрос без букв и цифр («--») на сервер не уходит, ошибки нет', async () => {
+    const { seen } = entities();
+    mount(meOwner);
+    type('--');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, SEARCH_DEBOUNCE_MS + 100));
+    });
+    expect(seen.cities).toEqual([]);
+    expect(seen.staff).toEqual([]);
+    expect(screen.queryByRole('group', { name: 'Города' })).toBeNull();
+    expect(screen.queryByText(/Не удалось найти/)).toBeNull();
+    expect(
+      screen.getByText('Ничего не нашлось', { selector: 'p:not([data-palette-count])' }),
+    ).toBeVisible();
+  });
+
+  test('устройство с пальцем — нет «Плотности таблиц» (на нём всегда обычная)', () => {
+    stubMedia({ width: 390, pointer: 'coarse' });
+    mount(meOwner);
+    type('плот');
+    expect(screen.queryByRole('option', { name: /Плотность таблиц/ })).toBeNull();
+  });
+
+  test('телефон — шторка во всю высоту предела (fill), компьютер — окно по содержимому', () => {
+    stubMedia({ width: 390, pointer: 'coarse' });
+    const view = mount(meOwner);
+    expect(screen.getByRole('dialog', { name: 'Искать везде' })).toHaveClass(overlayStyles.fill!);
+    view.unmount();
+    stubMedia({ width: 1440, pointer: 'fine' });
+    mount(meOwner);
+    expect(screen.getByRole('dialog', { name: 'Искать везде' })).not.toHaveClass(
+      overlayStyles.fill!,
+    );
+  });
+
+  test('компьютер — «Плотность таблиц» есть', () => {
+    mount(meOwner);
+    type('плот');
+    expect(screen.getByRole('option', { name: 'Плотность таблиц: компактная' })).toBeVisible();
   });
 
   test('выбор сотрудника — переход на панель, в недавнем имя без почты', async () => {

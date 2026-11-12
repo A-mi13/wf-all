@@ -9,10 +9,10 @@ import { usePermissionCheck } from './session';
 
 // Сущности палитры (спека UI-фундамента §4.1, план UF4.5): города (listGeoCities?q=&limit=5, geo.cities.read),
 // сотрудники (listStaffAccounts?q=&limit=5, staff.accounts.read), страны — локально из кэша listGeoCountries
-// (geo.countries.read). term — уже после паузы ввода (SEARCH_DEBOUNCE_MS) и без пробелов по краям; короче 2 символов
-// и без права запрос не уходит вовсе. Ключ запроса — с term: показывается только ответ последнего запроса, прежний
-// отменяется (signal TanStack Query → fetch), когда у него не осталось наблюдателя. Каждая группа — свои «ищем…» и
-// ошибка, палитру они не роняют. У сотрудника — только display_name: почта в палитру не идёт (и в недавнее).
+// (geo.countries.read). term — уже после паузы ввода (SEARCH_DEBOUNCE_MS) и без пробелов по краям; короче 2 символов,
+// без права и без букв и цифр запрос не уходит вовсе. Ключ запроса — с term: показывается только ответ последнего
+// запроса, прежний отменяется (signal TanStack Query → fetch), когда у него не осталось наблюдателя. Каждая группа —
+// свои «ищем…», «нет сети» и ошибка, палитру они не роняют. У сотрудника — только display_name: почта в палитру не идёт (и в недавнее).
 
 export const ENTITY_MIN_CHARS = 2;
 export const ENTITY_LIMIT = 5;
@@ -29,20 +29,32 @@ export type EntityHit = {
 };
 export type EntityGroup = {
   kind: EntityKind;
-  status: 'loading' | 'error' | 'ready';
+  status: 'loading' | 'offline' | 'error' | 'ready';
   error: unknown;
   items: EntityHit[];
 };
 
-type Q = { isPending: boolean; isError: boolean; error: unknown };
+// Без сети запрос встаёт на паузу (networkMode 'online'): «Нет сети», а не вечное «Ищем…» (ревью UF4-P m1).
+type Q = { isPending: boolean; isError: boolean; error: unknown; fetchStatus: string };
 const statusOf = (q: Q): EntityGroup['status'] =>
-  q.isError ? 'error' : q.isPending ? 'loading' : 'ready';
+  q.isError
+    ? 'error'
+    : q.isPending
+      ? q.fetchStatus === 'paused'
+        ? 'offline'
+        : 'loading'
+      : 'ready';
+
+// Сервер нормализует q (normalize_text) и на пустой после нормализации отвечает 400 validation.failed («--», «..»):
+// запрос уходит, только если в нём есть буква или цифра (ревью UF4-P m2).
+const MEANINGFUL = /[\p{L}\p{N}]/u;
 
 export function useEntitySearch(term: string): EntityGroup[] {
   const api = useApi();
   const locale = useLocale();
   const can = usePermissionCheck();
   const long = term.length >= ENTITY_MIN_CHARS;
+  const remote = long && MEANINGFUL.test(term);
   const canCities = can('geo.cities.read');
   const canStaff = can('staff.accounts.read');
   const canCountries = can('geo.countries.read');
@@ -59,7 +71,7 @@ export function useEntitySearch(term: string): EntityGroup[] {
           signal,
         }),
       ),
-    enabled: canCities && long,
+    enabled: canCities && remote,
   });
   const staff = useQuery({
     queryKey: [...PALETTE_KEY, 'staff', term],
@@ -70,13 +82,13 @@ export function useEntitySearch(term: string): EntityGroup[] {
           signal,
         }),
       ),
-    enabled: canStaff && long,
+    enabled: canStaff && remote,
   });
   const countries = useGeoCountries(canCountries && long);
 
   const groups: EntityGroup[] = [];
   if (!long) return groups;
-  if (canCities) {
+  if (canCities && remote) {
     groups.push({
       kind: 'city',
       status: statusOf(cities),
@@ -91,7 +103,7 @@ export function useEntitySearch(term: string): EntityGroup[] {
       })),
     });
   }
-  if (canStaff) {
+  if (canStaff && remote) {
     groups.push({
       kind: 'staff',
       status: statusOf(staff),

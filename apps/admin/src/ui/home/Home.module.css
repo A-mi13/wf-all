@@ -2,6 +2,7 @@
    страницы (@container, пороги — tokens.container): ≥ 720 — четыре плитки в ряд, уже — по две. */
 .tiles {
   display: grid;
+  font-family: var(--wf-font-body);
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--wf-space-3);
   margin: 0;
@@ -131,6 +132,11 @@ a.tile:hover {
   color: var(--wf-color-text-subtle);
 }
 
+/* Шрифт — свой, не от body: в историях и снимках истории тело страницы без шрифта токена (ревью UF4-H r1 m2) */
+.todoRoot {
+  font-family: var(--wf-font-body);
+}
+
 /* Корень списка — цель фокуса после удачного «Повторить» (tabindex=-1, не в порядке Tab): кольца нет, фокус
    программный, следующий Tab идёт по ссылкам списка */
 .todoRoot:focus {
@@ -156,4 +162,9 @@ a.tile:hover {
 
 .todoDot[data-tone='danger'] {
   background: var(--wf-color-danger);
+}
+
+/* Обёртка историй плиток: область страницы — контейнер, иначе @container выше не сработает (ревью UF4-H r1 m1) */
+.storyArea {
+  container-type: inline-size;
 }

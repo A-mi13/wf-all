@@ -5,7 +5,7 @@ import type { Story, StoryMeta } from '../../showcase/csf';
 import { parseCombo } from './combo';
 import { ShortcutsHelp, type ShortcutsHelpItem } from './ShortcutsHelp';
 
-// Шпаргалка горячих клавиш: строки — как из реестра («/», g x, «?», Esc), односимвольные включены и
+// Шпаргалка горячих клавиш: строки — как из реестра (Ctrl/⌘+K, «/», g x, «?», Esc), односимвольные включены и
 // выключены. ShortcutsProvider — без вида: в витрине шпаргалка на готовых строках.
 export default { title: 'UI/Shortcuts/ShortcutsHelp', visual: true } satisfies StoryMeta;
 
@@ -17,7 +17,8 @@ function useItems(): ShortcutsHelpItem[] {
     steps: parseCombo(combo).steps,
   });
   return [
-    row('/', t('ui.select.search')),
+    row('mod+k', t('palette.title')),
+    row('/', t('ui.shortcuts.search')),
     row('g c', t('nav.cities')),
     row('g a', t('nav.audit')),
     row('?', t('ui.shortcuts.help')),
