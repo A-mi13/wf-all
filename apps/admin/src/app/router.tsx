@@ -28,6 +28,7 @@ import { parseStaffSearch } from '../features/staff/search';
 import { StaffPage } from '../features/staff/StaffPage';
 import { isApiError } from '../api/client';
 import { AppShell, ConnectionErrorState, PageHeader, RateLimitedState } from '../ui';
+import { forgetTablePositions } from '../ui/table/restore';
 import { useAccountCard } from './account';
 import { resolveRoute } from './guard';
 import { useLogout } from './logout';
@@ -103,6 +104,8 @@ function ActiveShell({ me }: { me: Me }) {
   const logout = useLogout();
   // число у «Подтверждений» — фоновый опрос (features/approvals/queries.ts)
   const incoming = useIncomingApprovalsCount();
+  // строки, с которых уходили в карточки (возврат «Назад» — фокус), — только этого сотрудника
+  useEffect(() => forgetTablePositions, []);
   return (
     <AppShell
       groups={NAV}
@@ -196,6 +199,11 @@ function createAppRouter(history?: RouterHistory) {
   return createRouter({
     routeTree,
     history,
+    // «Назад» — та же прокрутка страницы и областей с data-scroll-restoration-id (таблицы; спека
+    // UI-фундамента §4.5). Ключ — запись истории (по умолчанию): в sessionStorage роутера уходят только
+    // её случайный ключ и селекторы, без текста адреса. Инлайн-скрипта на клиенте нет (ScriptOnce — только
+    // SSR: react-router Match.js:69, ScriptOnce.js:10) — CSP script-src 'self' не задета.
+    scrollRestoration: true,
     // настоящая сессия приходит из RouterProvider (AppRouter)
     context: {
       session: { status: 'loading', refresh: async () => {}, afterLogout: async () => {} },

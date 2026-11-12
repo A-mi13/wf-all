@@ -6,11 +6,6 @@
   padding-block-end: var(--wf-space-4);
 }
 
-/* страница телефона с тостом: запас прокрутки под таббар и тост — как .main каркаса при data-toast-open */
-.toastPage {
-  padding-block-end: calc(var(--wf-size-tabbar) + var(--wf-size-toast) + var(--wf-space-4));
-}
-
 /* таббар-образец пустой — высота таббара каркаса */
 .tabbar {
   box-sizing: border-box;

@@ -125,12 +125,16 @@ export const LastRowWithToast: Story = () => {
     };
   }, []);
   return (
-    <div ref={page} className={cx(styles.page, styles.toastPage)}>
-      <Table rows={ROWS.slice(0, 12)} />
-      <nav className={cx(shell.tabbar, styles.tabbar)} aria-label={t('nav.label')} />
-      <div className={styles.toast} role="status">
-        <span className={styles.toastText}>{t('staff.status.disabled')}</span>
-        <Button variant="link">{t('actions.undo')}</Button>
+    // область страницы каркаса телефона (.mobile .main): нижний запас под таббар и тост берётся из правила
+    // каркаса при data-toast-open, а не повтором числа — поменяется формула каркаса, снимок это покажет
+    <div className={shell.mobile}>
+      <div ref={page} className={shell.main}>
+        <Table rows={ROWS.slice(0, 12)} />
+        <nav className={cx(shell.tabbar, styles.tabbar)} aria-label={t('nav.label')} />
+        <div className={styles.toast} role="status">
+          <span className={styles.toastText}>{t('staff.status.disabled')}</span>
+          <Button variant="link">{t('actions.undo')}</Button>
+        </div>
       </div>
     </div>
   );

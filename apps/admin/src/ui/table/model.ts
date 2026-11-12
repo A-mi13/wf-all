@@ -1,5 +1,6 @@
 import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import type { BulkReport } from './bulk';
 
 // Типы и помощники таблицы (DataTable.tsx) — отдельно от компонента (react-refresh).
 
@@ -20,7 +21,42 @@ export type Column<T> = {
 export type SortState = { column: string; direction: 'asc' | 'desc' };
 export type ChipOption = { value: string; label: string };
 
-export type DataTableProps<T> = {
+// Режимы строк взаимоисключающие (план UF2b.4): список выбора (select), карточки (card) или строки с
+// массовыми действиями (bulk) — тип не даёт задать два сразу. Карточки вместо строк (card — сетка, макет
+// «Города и запуск»): та же панель, сводка, «Показать ещё» и состояния; данные — список с именем label,
+// columns не используются.
+export type DataTableProps<T> = DataTableBase<T> &
+  (
+    | { select: DataTableSelect<T>; card?: never; bulk?: never }
+    | { card: (row: T) => ReactNode; select?: never; bulk?: never }
+    | { bulk?: DataTableBulk<T>; select?: never; card?: never }
+  );
+
+// Список выбора вместо строк (шаг «найти место» в панели): role="listbox", строка — option с
+// выделением, клик и стрелки выбирают, Enter и двойной клик — главное действие (onActivate).
+// Прокручивается только сам список (родитель задаёт высоту), действие — в подвале панели у экрана.
+export type DataTableSelect<T> = {
+  value: string | null; // rowKey выбранной строки
+  onChange: (row: T) => void;
+  onActivate?: (row: T) => void;
+  option: (row: T) => ReactNode;
+};
+
+// Массовые действия (спека UI-фундамента §4.5): выбор держит экран (сбрасывается с ним — каркас
+// key={me.id}); флажок в строке и «Выбрать видимые» в шапке (загруженные строки, кроме тех, где у
+// сотрудника нет права ни на одно действие — по городу строки); панель BulkBar — при выборе ≥ 1.
+// Выбранные строки, которых нет в данных после перечитывания (или права на которые сняли), таблица
+// снимает с выбора сама (onChange).
+export type DataTableBulk<T> = {
+  selected: ReadonlySet<string>; // rowKey выбранных
+  onChange: (next: ReadonlySet<string>) => void;
+  actions: BulkAction<T>[];
+  rowLabel: (row: T) => string; // имя строки: флажок «Выбрать: …» и список ошибок итога
+  onPending: () => unknown; // после новых 202 — экран передаёт useInvalidateApprovals()
+  onSettled?: (report: BulkReport<T>) => unknown; // после пачки — перечитать список один раз
+};
+
+type DataTableBase<T> = {
   label: string; // имя таблицы для читалки экрана
   columns: Column<T>[];
   rowKey: (row: T) => string;
@@ -49,18 +85,6 @@ export type DataTableProps<T> = {
   // таблица на любой ширине со своей горизонтальной прокруткой (матрица прав: карточки ей вредят —
   // спека UI-фундамента §3.1, §3.5).
   layout?: 'auto' | 'table';
-  // Карточки вместо строк (сетка, макет «Города и запуск»): та же панель, сводка, «Показать ещё» и
-  // состояния; данные — список с именем label, columns не используются.
-  card?: (row: T) => ReactNode;
-  // Список выбора вместо строк (шаг «найти место» в панели): role="listbox", строка — option с
-  // выделением, клик и стрелки выбирают, Enter и двойной клик — главное действие (onActivate).
-  // Прокручивается только сам список (родитель задаёт высоту), действие — в подвале панели у экрана.
-  select?: {
-    value: string | null; // rowKey выбранной строки
-    onChange: (row: T) => void;
-    onActivate?: (row: T) => void;
-    option: (row: T) => ReactNode;
-  };
   onRowClick?: (row: T) => void;
   activeRowKey?: string; // строка, открытая в панели справа
   // Закрепление (спека UI-фундамента §4.5): шапка липнет внутри своей области прокрутки (по умолчанию — при
@@ -70,10 +94,19 @@ export type DataTableProps<T> = {
   stickyFirstColumn?: boolean;
   // Меню «Столбцы» и плотность: без tableId кнопки нет; выбор — localStorage wf.admin.table.<tableId>.
   tableId?: string;
+  // Виртуализация (§4.5): DOM держит видимые строки ± запас, у таблицы aria-rowcount, у строк
+  // aria-rowindex; строки разной высоты меряются по факту. По умолчанию — при строках > VIRTUALIZE_FROM;
+  // estimateRow — ожидаемая высота строки (по умолчанию — высота строки плотности). Строки и список
+  // выбора; карточки (card, строки-карточки телефона) — content-visibility в CSS, без JS.
+  virtualize?: boolean | { estimateRow?: number };
+  // Ключ позиции для возврата «Назад» (restore.ts): по умолчанию путь + search без ключей панели.
+  restoreKey?: string;
 };
 
 // Шапка закрепляется по умолчанию, когда строк больше этого.
 export const STICKY_HEADER_FROM = 20;
+// Строки виртуализируются по умолчанию, когда их больше этого.
+export const VIRTUALIZE_FROM = 200;
 
 // Видимость столбцов: выбор пользователя важнее ширины. Скрытый в «Столбцах» (если скрываемый) не виден;
 // 'low' без явного включения (shown) скрыт по ширине окна (narrow — 768–1023); единственный оставшийся
@@ -109,7 +142,7 @@ type CursorPage<T> = { items: T[]; next_cursor: string | null };
 export function infiniteTableProps<T, P, E>(
   q: UseInfiniteQueryResult<InfiniteData<CursorPage<T>, P>, E>,
 ): Pick<
-  DataTableProps<T>,
+  DataTableBase<T>,
   | 'rows'
   | 'error'
   | 'onRetry'

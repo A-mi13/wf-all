@@ -216,7 +216,16 @@
     },
     "toast": {
       "region": "Notifications",
-      "close": "Dismiss notification"
+      "close": "Dismiss notification",
+      "undone": "Undone",
+      "not_undone": "Not undone: the action still stands",
+      "stale": "Already changed — data refreshed, nothing undone"
+    },
+    "leave": {
+      "title": "Leave without saving?",
+      "text": "What you entered will be lost",
+      "stay": "Stay",
+      "leave": "Leave"
     },
     "theme": {
       "label": "Theme",
@@ -546,7 +555,13 @@
       "cancelled": "not started {count}",
       "row_failed": "{name}: {error}",
       "row_unknown": "{name}: outcome unknown — retry sends the same request",
-      "retry_failed": "Retry unsuccessful"
+      "retry_failed": "Retry unsuccessful",
+      "paused": "Paused {seconds} s — the server asks to wait",
+      "dual_part": "{count, plural, one {# of them goes} other {# of them go}} to a second staff member for approval.",
+      "select_all": "Select visible",
+      "select_row": "Select: {name}",
+      "row_denied": "You have no permission for any action on this row",
+      "select_none": "No rows available to select"
     },
     "columns": {
       "button": "Columns",

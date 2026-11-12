@@ -22,6 +22,9 @@ export type VirtualRows = {
   place(el: HTMLElement | null, item: VirtualItem): void;
   // ставит контейнеру полную длину (--wf-virtual-total)
   placeTotal(el: HTMLElement | null): void;
+  // ставит строке-распорке таблицы (строки таблицы не позиционируются абсолютно) высоту пропущенного
+  // до окна ('before') или после него ('after') — --wf-virtual-gap
+  placeGap(el: HTMLElement | null, edge: 'before' | 'after'): void;
 };
 
 // Запас по умолчанию: строки за краем окна, чтобы быстрая прокрутка не показывала пустоту.
@@ -33,12 +36,18 @@ export function useVirtualRows({
   scrollRef,
   overscan = VIRTUAL_OVERSCAN,
   horizontal = false,
+  gap = 0,
+  getItemKey,
 }: {
   count: number;
   estimate: number;
   scrollRef: RefObject<HTMLElement | null>;
   overscan?: number;
   horizontal?: boolean;
+  gap?: number; // промежуток между элементами (border-spacing строк таблицы)
+  // ключ элемента (rowKey строки): замеры следуют за строкой, а не за индексом — перечитывание с новой
+  // строкой сверху не путает высоты
+  getItemKey?: (index: number) => string | number;
 }): VirtualRows {
   const v = useVirtualizer({
     count,
@@ -46,6 +55,8 @@ export function useVirtualRows({
     getScrollElement: () => scrollRef.current,
     overscan,
     horizontal,
+    gap,
+    ...(getItemKey ? { getItemKey } : {}),
   });
   const totalSize = v.getTotalSize();
   const items = v.getVirtualItems().map(({ index, start, size }) => ({ index, start, size }));
@@ -67,5 +78,15 @@ export function useVirtualRows({
     },
     [totalSize],
   );
-  return { items, totalSize, scrollToIndex, measure, place, placeTotal };
+  const first = items[0];
+  const last = items.at(-1);
+  const before = first ? first.start : 0;
+  const after = last ? Math.max(0, totalSize - last.start - last.size) : 0;
+  const placeGap = useCallback(
+    (el: HTMLElement | null, edge: 'before' | 'after') => {
+      if (el) setCssPx(el, '--wf-virtual-gap', edge === 'before' ? before : after);
+    },
+    [before, after],
+  );
+  return { items, totalSize, scrollToIndex, measure, place, placeTotal, placeGap };
 }

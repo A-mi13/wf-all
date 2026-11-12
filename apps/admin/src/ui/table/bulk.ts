@@ -41,6 +41,8 @@ export type BulkOptions = {
   onProgress?: (done: number, total: number) => void;
   // после 403 auth.forbidden / 401 auth.unauthenticated: перечитать me; до конца пачка стоит
   onForbidden?: () => Promise<unknown>;
+  // 429: общая пауза началась (мс) — панель показывает «пауза N с» (иначе прогресс замирает молча)
+  onPause?: (ms: number) => void;
 };
 
 // unknown — повтор строки с неизвестным исходом: без права она остаётся unknown (могла исполниться)
@@ -110,7 +112,7 @@ function retryDelay(e: ApiError): number {
 async function execute<T>(
   tasks: Task<T>[],
   action: BulkAction<T>,
-  { decide, signal, onProgress, onForbidden }: BulkOptions,
+  { decide, signal, onProgress, onForbidden, onPause }: BulkOptions,
 ): Promise<BulkReport<T>> {
   const report = emptyReport<T>();
   const queue = [...tasks];
@@ -154,7 +156,9 @@ async function execute<T>(
         (outcome === 'pending_approval' ? report.pending : report.executed).push(task.row);
       } catch (e) {
         if (isApiError(e) && e.status === 429) {
-          hold(sleep(retryDelay(e), signal));
+          const ms = retryDelay(e);
+          hold(sleep(ms, signal));
+          onPause?.(ms);
           queue.unshift(task); // тот же ключ после паузы
           continue;
         }

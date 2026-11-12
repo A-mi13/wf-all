@@ -180,6 +180,12 @@
   }
 }
 
+/* виртуально — своя высота при любой ширине контейнера: без неё окно виртуализации = вся таблица (узкая
+   панель, витрина без контейнера) */
+.scroll.virtual {
+  max-block-size: calc(100dvh - var(--wf-space-5) * 2);
+}
+
 /* карточки телефона (по окну) — прокручивается страница, своей высоты у области нет */
 .scroll.flow {
   max-block-size: none;
@@ -395,8 +401,11 @@
   display: block;
 }
 
+/* строка-карточка — блок: content-visibility к ней применим (к строкам таблицы — нет) */
 .stacked .row {
   margin-bottom: var(--wf-space-2);
+  content-visibility: auto;
+  contain-intrinsic-size: auto calc(var(--wf-density-normal-row) * 3);
 }
 
 .stacked .td,
@@ -508,9 +517,13 @@
   list-style: none;
 }
 
+/* content-visibility (спека §4.5): длинный список не рисует карточки за окном, без JS; место — по
+   ожидаемой высоте карточки, после первого показа — по факту (auto) */
 .cardItem {
   display: flex;
   min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto calc(var(--wf-size-avatar-lg) * 2);
 }
 
 .cardItem > * {
@@ -523,4 +536,65 @@
   .cards {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Виртуализация строк: распорки до и после окна — высота пропущенного (--wf-virtual-gap, setCssPx) */
+.gapRow {
+  border: 0;
+}
+
+.gap {
+  height: var(--wf-virtual-gap, 0);
+  padding: 0;
+  border: 0;
+}
+
+/* Список выбора виртуально: полоса полной длины, строки на своих местах */
+.optionsTrack {
+  position: relative;
+  flex-shrink: 0;
+  block-size: var(--wf-virtual-total, 0);
+}
+
+.virtualOption {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  transform: translateY(var(--wf-virtual-start, 0));
+}
+
+/* Массовые действия: столбец флажков и выбранная строка */
+.checkCell {
+  width: var(--wf-size-touch-min);
+  text-align: center;
+}
+
+.check {
+  inline-size: var(--wf-space-5);
+  block-size: var(--wf-space-5);
+  margin: 0;
+  accent-color: var(--wf-color-accent-ink);
+  cursor: pointer;
+}
+
+.check[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.check:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}
+
+.selected .td {
+  border-color: var(--wf-color-selected-border);
+}
+
+/* карточка телефона: рамку ячеек задают .stacked .td:first-child/:last-child — выбранная перебивает их той же
+   специфичностью, иначе рамка карточки рваная (ревью uf2b1w2, m2) */
+.stacked .selected .td,
+.stacked .selected .td:first-child,
+.stacked .selected .td:last-child {
+  border-color: var(--wf-color-selected-border);
 }

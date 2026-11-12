@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { useFormatter, useTranslations } from 'use-intl';
 import { ApiError } from '../../api/client';
 import type { Story, StoryMeta } from '../../showcase/csf';
+import { SessionFrame } from '../../showcase/frames';
+import { meOwner } from '../../test/me';
 import styles from '../../showcase/Stories.module.css';
 import { Avatar } from '../Avatar';
 import { Button } from '../Button';
 import { StatusChip } from '../StatusChip';
 import { DataTable } from './DataTable';
-import type { Column, DataTableProps } from './model';
+import type { BulkAction, Column, DataTableProps } from './model';
 
 // Таблица (базовые состояния; новые возможности — UF2b): строки с поиском и чипами, скелетон, пусто,
 // ошибка с кодом, «Показать ещё»; на узкой ширине — строки-карточки (layout: три ширины).
@@ -165,3 +167,48 @@ export const Pinned: Story = () => <Table layout="table" stickyHeader stickyFirs
 export const LoadMoreError: Story = () => (
   <Table hasMore onLoadMore={() => undefined} loadMoreError={new TypeError('Failed to fetch')} />
 );
+
+// Виртуализация (UF2b.4): 1000 строк — в DOM только окно и запас, у таблицы aria-rowcount, у строк aria-rowindex.
+const MANY: Row[] = Array.from({ length: 1000 }, (_, i) => {
+  const base = ROWS[i % ROWS.length] as Row;
+  return { ...base, id: String(i + 1), name: `${base.name} ${i + 1}` };
+});
+export const Virtual: Story = () => <Table rows={MANY} stickyHeader />;
+Virtual.storyName = 'Virtual 1000 rows';
+
+// Массовые действия (UF2b.5): флажки, «Выбрать видимые», панель «Выбрано N»; у владельца (Ольга В.) права нет —
+// флажок недоступен, причина — подсказкой.
+function useDisable(): BulkAction<Row> {
+  const t = useTranslations('staff.drawer.disable');
+  return {
+    id: 'disable',
+    label: t('button'),
+    tone: 'danger',
+    permission: (r) => ({ perm: r.role === 'owner' ? 'story.denied' : 'staff.roles.revoke' }),
+    confirm: { title: () => t('title') },
+    run: () => Promise.resolve('executed'),
+  };
+}
+
+function BulkTable() {
+  const action = useDisable();
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(['2', '3']));
+  return (
+    <Table
+      bulk={{
+        selected,
+        onChange: setSelected,
+        actions: [action],
+        rowLabel: (r) => r.name,
+        onPending: () => undefined,
+      }}
+    />
+  );
+}
+
+export const Bulk: Story = () => (
+  <SessionFrame me={meOwner}>
+    <BulkTable />
+  </SessionFrame>
+);
+Bulk.storyName = 'Bulk with denied rows';

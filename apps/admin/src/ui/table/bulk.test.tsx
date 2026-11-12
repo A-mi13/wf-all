@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { ApiError } from '../../api/client';
 import type { Decision, Me } from '../../app/permissions';
 import { CITY_OTHER, CITY_OWN, meModerator, meOwner } from '../../test/me';
+import { problem } from '../../test/problem';
 import { renderWithProviders } from '../../test/render';
 import { http, server } from '../../test/server';
 import {
@@ -342,6 +343,20 @@ describe('runBulk', () => {
     expect(c.calls).toHaveLength(1);
   });
 
+  test('429 — onPause(мс паузы) до продолжения (m4)', async () => {
+    vi.useFakeTimers();
+    const c = controlled(1);
+    const onPause = vi.fn();
+    const p = runBulk(rows(1), c.action, { decide: allow, onPause });
+    await flush();
+    c.call('r1')?.reject(tooMany(2));
+    await flush();
+    expect(onPause).toHaveBeenCalledWith(2000);
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    c.call('r1', 1)?.resolve('executed');
+    expect(ids((await p).executed)).toEqual(['r1']);
+  });
+
   test('отмена во время паузы 429 — пауза прерывается, остальные cancelled', async () => {
     vi.useFakeTimers();
     const c = controlled(1);
@@ -516,6 +531,65 @@ describe('BulkBar', () => {
     );
     expect(c.calls).toHaveLength(1);
     expect(meReads).toBeGreaterThan(0);
+  });
+
+  test('401 при перечитывании me посреди пачки — оставшиеся строки без запросов (r1-m1)', async () => {
+    const c = controlled(3);
+    server.use(
+      http.get('/v1/staff/me', ({ response }) =>
+        response.untyped(problem(401, 'auth.unauthenticated')),
+      ),
+    );
+    const { user } = renderBar(rows(6), c.action);
+    await user.click(screen.getByRole('button', { name: 'Выключить' }));
+    const dialog = await confirm('6');
+    await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
+    await waitFor(() => expect(c.calls).toHaveLength(3));
+    c.call('r1')?.reject(new ApiError({ status: 401, code: 'auth.unauthenticated' }));
+    c.call('r2')?.resolve('executed');
+    c.call('r3')?.resolve('executed');
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Выполнено 2 · ошибка 1 · пропущено 3'),
+    );
+    expect(c.calls).toHaveLength(3);
+  });
+
+  test('429 — строка «пауза N с», после паузы её нет (m4)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const c = controlled(1);
+    renderBar(rows(1), c.action);
+    fireEvent.click(screen.getByRole('button', { name: 'Выключить' }));
+    const dialog = await confirm('1');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Выключить' }));
+    await waitFor(() => expect(c.calls).toHaveLength(1));
+    c.call('r1')?.reject(tooMany(2));
+    expect(await screen.findByText('Пауза 2 с — сервер просит подождать')).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(2100));
+    await waitFor(() => expect(c.calls).toHaveLength(2));
+    expect(screen.queryByText(/Пауза/)).toBeNull();
+    c.call('r1', 1)?.resolve('executed');
+    expect(await screen.findByText('Выполнено 1')).toBeInTheDocument();
+  });
+
+  test('dual (needs_approval) у всех строк — подтверждение «Отправить на подтверждение» (m12)', async () => {
+    const c = controlled();
+    const list = [row('a', 'x.dual'), row('b', 'x.dual')];
+    const { user } = renderBar(list, c.action);
+    await user.click(screen.getByRole('button', { name: 'Выключить' }));
+    const dialog = await confirm('2');
+    expect(
+      within(dialog).getByRole('button', { name: 'Отправить на подтверждение' }),
+    ).toBeInTheDocument();
+  });
+
+  test('dual у части строк — подпись действия и строка «N уйдут на подтверждение» (m12)', async () => {
+    const c = controlled();
+    const list = [row('a', 'x.dual'), row('b')];
+    const { user } = renderBar(list, c.action);
+    await user.click(screen.getByRole('button', { name: 'Выключить' }));
+    const dialog = await confirm('2');
+    expect(within(dialog).getByRole('button', { name: 'Выключить' })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('Из них 1 уйдёт на подтверждение второму сотруднику.');
   });
 
   test('размонтирование посреди пачки: в полёте доходит, новые не стартуют, итог — тостом', async () => {
