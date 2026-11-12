@@ -147,10 +147,13 @@ export function PlaceAction({
   selected,
   onChoose,
   onClose,
+  onOpenCity,
 }: {
   selected: GeoPlace | null;
   onChoose: (p: GeoPlace) => void;
   onClose: () => void;
+  // «Открыть город» заведённого места; по умолчанию — закрыть окно и перейти (панель в адресе уходит сама — replace)
+  onOpenCity?: (cityId: string) => void;
 }) {
   const t = useTranslations('geo.activate');
   const navigate = useNavigate();
@@ -162,6 +165,10 @@ export function PlaceAction({
         variant="secondary"
         aria-label={t('open_city_label', { name: selected.name })}
         onClick={() => {
+          if (onOpenCity) {
+            onOpenCity(cityId);
+            return;
+          }
           onClose();
           void navigate({ to: paths.city, params: { cityId } });
         }}

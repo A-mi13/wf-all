@@ -12,6 +12,7 @@ import {
   infiniteTableProps,
   SelectField,
   StatusChip,
+  useReducedMotion,
 } from '../../ui';
 import styles from './geo.module.css';
 import { withCurrent } from './options';
@@ -20,6 +21,10 @@ import { CITY_STATUSES, type CitiesSearch, toCitiesQuery } from './search';
 import { useCityStatus } from './status';
 
 type GeoCity = components['schemas']['GeoCity'];
+
+// Сколько ждать кусок страницы города по клику, прежде чем перейти без View Transition (§4.15): прогретый
+// наведением готов сразу, холодный не задерживает переход заметно.
+const VT_WAIT_MS = 150;
 
 // Карточки городов (макет 07): название на языке интерфейса, чип статуса, население и районы,
 // регион, «страна выключена»; «Открыть» — страница города. Метрики макета (игроки, капитаны, матчи)
@@ -40,10 +45,38 @@ export function CityCards({
   const router = useRouter();
   const format = useFormatter();
   const statusOf = useCityStatus();
+  // переход «список → карточка» — View Transition; «уменьшить движение» — без него (§4.15)
+  const reduced = useReducedMotion();
   const list = useGeoCities(toCitiesQuery(search));
   const countries = useGeoCountries();
   const regions = useGeoRegions(search.country);
 
+  // Переход к странице города — View Transition (§4.15). TanStack Router 1.170 начинает переход, только если кусок
+  // маршрута назначения уже загружен, иначе показывает страницу без него и оставляет флаг viewTransition
+  // СЛЕДУЮЩЕЙ навигации. Поэтому кусок греется по намерению (наведение, фокус на ссылке карточки), а по клику ждём
+  // его не дольше VT_WAIT_MS: успел — переход с View Transition; не успел или не загрузился — сразу без него (пока
+  // кусок грузится — скелетон раздела, ошибка — errorComponent). Сотрудник за это время ушёл (меню, «Назад») —
+  // переход отменён (ревью UF2b/II-B, I2).
+  const toCity = (cityId: string) => ({ to: paths.city, params: { cityId } }) as const;
+  const warm = (cityId: string) => void router.preloadRoute(toCity(cityId)).catch(() => undefined);
+  const openCity = (cityId: string) => {
+    const to = toCity(cityId);
+    if (reduced) {
+      void navigate(to);
+      return;
+    }
+    const entry = () => router.latestLocation.state.__TSR_key ?? router.latestLocation.href;
+    const from = entry();
+    let ready = false;
+    const loaded = router.preloadRoute(to).then(
+      () => (ready = true),
+      () => undefined,
+    );
+    void Promise.race([loaded, new Promise((r) => setTimeout(r, VT_WAIT_MS))]).then(() => {
+      if (entry() !== from) return;
+      void navigate({ ...to, viewTransition: ready });
+    });
+  };
   const setSearch = (next: CitiesSearch) =>
     void navigate({ to: paths.cities, search: next, replace: true });
   const update = (patch: Partial<CitiesSearch>) => {
@@ -86,7 +119,8 @@ export function CityCards({
           label: t('open'),
           name: t('open_label', { name: c.name }),
           href: router.buildLocation({ to: paths.city, params: { cityId: c.id } }).href,
-          onNavigate: () => void navigate({ to: paths.city, params: { cityId: c.id } }),
+          onNavigate: () => openCity(c.id),
+          onIntent: () => warm(c.id),
         }}
       />
     );

@@ -502,3 +502,61 @@ describe('«Назад» каркаса', () => {
     expect(await city()).toHaveAttribute('href', '/geo/cities');
   });
 });
+
+// Ленивые разделы (спека UI-фундамента §4.15, план UF2b.9): экраны разделов — свои куски (lazyRouteComponent),
+// экраны входа и каркас — в основном. Страж по исходнику: статического импорта экрана раздела в routes.tsx нет.
+describe('ленивые разделы', () => {
+  // Ревью UF2b/II-B, m7: по графу статических импортов от точки входа (main.tsx), а не по строкам routes.tsx —
+  // статический импорт модуля, который сам тянет экран раздела, склеил бы кусок с основным. import type и import()
+  // в граф не входят (типы стираются, import() — граница куска).
+  test('экраны разделов не достижимы статическими импортами от main.tsx; в routes.tsx — import()', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { dirname, join, resolve } = await import('node:path');
+    const src = join(import.meta.dirname, '..');
+    const resolveFile = (from: string, spec: string) => {
+      const base = resolve(dirname(from), spec);
+      return ['', '.ts', '.tsx', '/index.ts', '/index.tsx']
+        .map((ext) => base + ext)
+        .find((p) => existsSync(p) && /\.tsx?$/.test(p));
+    };
+    const STATIC = /^(?:import|export)\s+(?!type\b)(?:[^'";]*?\sfrom\s+)?'(\.{1,2}\/[^']+)'/gm;
+    const seen = new Set<string>();
+    const queue = [join(src, 'main.tsx')];
+    while (queue.length > 0) {
+      const file = queue.pop() ?? '';
+      if (seen.has(file)) continue;
+      seen.add(file);
+      for (const m of readFileSync(file, 'utf8').matchAll(STATIC)) {
+        const next = resolveFile(file, m[1] ?? '');
+        if (next) queue.push(next);
+      }
+    }
+    const reached = [...seen].map((p) => p.slice(src.length + 1).replaceAll('\\', '/'));
+    // стражу есть что обходить: каркас, роутер и экраны входа — в основном куске
+    expect(reached).toEqual(
+      expect.arrayContaining([
+        'app/routes.tsx',
+        'ui/shell/AppShell.tsx',
+        'features/auth/LoginPage.tsx',
+      ]),
+    );
+    const pages = [
+      'audit/AuditPage',
+      'staff/StaffPage',
+      'approvals/ApprovalsPage',
+      'me/MyAccessPage',
+      'geo/CitiesPage',
+      'geo/CityPage',
+    ];
+    expect(reached.filter((p) => pages.some((page) => p === `features/${page}.tsx`))).toEqual([]);
+    const router = readFileSync(join(src, 'app/routes.tsx'), 'utf8');
+    for (const page of pages) expect(router).toContain(`import('../features/${page}')`);
+  });
+
+  test('раздел открывается: кусок загружен, скелетон сменился экраном', async () => {
+    renderApp('/me', { me: meOwner });
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Мой доступ' }),
+    ).toBeInTheDocument();
+  });
+});

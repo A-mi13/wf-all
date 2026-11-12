@@ -2,6 +2,7 @@ export { DataState, SKELETON_DELAY_MS } from './DataState';
 export { RateLimitedState } from './RateLimitedState';
 export { Skeleton, type SkeletonHeight, type SkeletonWidth } from './Skeleton';
 export {
+  ChunkErrorState,
   ConnectionErrorState,
   DesktopOnlyNotice,
   EmptyState,
@@ -11,4 +12,5 @@ export {
   NoNetworkState,
   OfflineBanner,
   PendingApprovalNotice,
+  SectionSkeleton,
 } from './states';

@@ -314,6 +314,9 @@ describe('черновик приглашения', () => {
     const reauth = await screen.findByRole('dialog', { name: 'Подтвердите вход' });
     expect(screen.getByRole('dialog', { name: 'Приглашение сотрудника' })).toBeInTheDocument();
     await user.click(within(reauth).getByRole('button', { name: 'Выйти' }));
+    // введённое не отправлено — «Выйти» спрашивает до POST (useLogout, §4.11 m8; форма под useLeaveGuard — UF2b.8)
+    const question = await screen.findByRole('dialog', { name: 'Уйти без сохранения?' });
+    await user.click(within(question).getByRole('button', { name: 'Уйти' }));
     await screen.findByRole('heading', { level: 1, name: 'Вход администратора' });
     await waitFor(() => expect(storageDump()).not.toContain('ivan.p@wf.example'));
     expect(storageDump()).not.toContain('Иван П.');

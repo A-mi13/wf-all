@@ -8,12 +8,24 @@ import {
   useState,
 } from 'react';
 import { useTranslations } from 'use-intl';
+import { isPanelKey } from '../../app/paths';
 import styles from './BackLink.module.css';
 
 // Последний адрес (с search-параметрами) каждого открытого пути — чтобы «Назад» вернул родителя с
-// его фильтрами, страницей списка и вкладкой (состояние — в адресе). Живёт в каркасе: AppShell
+// его фильтрами, страницей списка и вкладкой (состояние — в адресе). Ключи открытых панелей (PANEL_SEARCH_KEYS,
+// спека UI-фундамента §4.6) вырезаются: возврат к родителю не открывает снова пустую панель. Живёт в каркасе: AppShell
 // пересоздаётся на другого сотрудника (key={me.id}), и чужие фильтры следующему не достаются.
 const BackMemory = createContext<ReadonlyMap<string, string>>(new Map());
+
+// Пары search как записал роутер (кодировку не трогаем: URLSearchParams переписал бы пробел в «+»), без ключей панелей.
+function withoutPanels(pathname: string, searchStr: string, hash: string): string {
+  const pairs = searchStr
+    .replace(/^\?/, '')
+    .split('&')
+    // ключи панелей — латиница: сравниваются без декодирования (негодный %-код в адресе не бросит)
+    .filter((p) => p !== '' && !isPanelKey(p.split('=')[0] ?? ''));
+  return `${pathname}${pairs.length > 0 ? `?${pairs.join('&')}` : ''}${hash ? `#${hash}` : ''}`;
+}
 
 export function BackMemoryProvider({ children }: { children: ReactNode }) {
   const location = useRouterState({ select: (s) => s.location });
@@ -21,8 +33,11 @@ export function BackMemoryProvider({ children }: { children: ReactNode }) {
   // Запись — после отрисовки адреса: страница-ребёнок, открытая следующей навигацией, читает адрес
   // родителя, записанный, пока родитель был на экране (в том числе после replace фильтров).
   useEffect(() => {
-    memory.set(location.pathname, location.href);
-  }, [memory, location.pathname, location.href]);
+    memory.set(
+      location.pathname,
+      withoutPanels(location.pathname, location.searchStr, location.hash),
+    );
+  }, [memory, location.pathname, location.searchStr, location.hash]);
   return <BackMemory.Provider value={memory}>{children}</BackMemory.Provider>;
 }
 

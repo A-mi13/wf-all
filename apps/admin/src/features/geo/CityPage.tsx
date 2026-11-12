@@ -104,6 +104,7 @@ function CityView({
   return (
     <div className={styles.page}>
       <PageHeader
+        entity
         title={city.name}
         subtitle={<StatusChip tone={status.tone}>{status.text}</StatusChip>}
         actions={

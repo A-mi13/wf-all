@@ -16,7 +16,7 @@ paths:
 элементов опирается живой e2e (роли и подписи — `admin-e2e.md` «На что опирается»): меняешь роль или структуру — сверь.
 
 ## Каркас
-- `AppShell` (`src/ui/shell`) ставит роутер для стадии `active` (`ActiveShell` в `router.tsx`): меню из `NAV`
+- `AppShell` (`src/ui/shell`) ставит роутер для стадии `active` (`ActiveShell` в `src/app/Shell.tsx`; дерево маршрутов — `routes.tsx`, роутер — `router.tsx`): меню из `NAV`
   (`src/app/nav.ts`), карточка «имя, почта (одна строка, многоточие, полная — `title`; без имени почта на его месте),
   роль · города» (`useAccountCard`, названия городов — `GET /v1/geo/cities?ids=`), под ней строками — переключатель
   языка «RU · EN» (`Segmented`), тема (`ThemeSwitch`) и кнопка «Выйти» во всю ширину (secondary с иконкой; `useLogout()`
@@ -76,13 +76,13 @@ onSettled? })` — «Выбрано N», `ConfirmDialog` с числом и вт
 список выбора — `scrollToIndex` перед сменой выбора стрелкой, `aria-activedescendant` только на строку в DOM; строки-карточки
 телефона и `card` — `content-visibility`, без JS). Роутер — `scrollRestoration: true` (ключ — запись истории, ScriptOnce на
 клиенте нет); контейнер таблицы — `data-scroll-restoration-id` = хеш ключа позиции (текст адреса в storage роутера не
-уходит). `restoreKey` (`src/ui/table/restore.ts`: путь + search без `PANEL_SEARCH_KEYS`) — строка, с которой ушли (щелчок,
+уходит). `restoreKey` (`src/ui/table/restore.ts`: путь + search без `PANEL_SEARCH_KEYS` из `src/app/paths.ts`) — строка, с которой ушли (щелчок,
 Enter), получает фокус при возврате, если фокус потерян; память — в памяти вкладки, стирает размонтирование каркаса.
 Тесты — `stubTableLayout()` (`src/test/layout.ts`).
 
 ## Состояния
 `EmptyState` (`illustration` — таблица «экран → иллюстрация» в `design/README.md`), `ErrorState` (код для поддержки +
-«Повторить»), `NoNetworkState`, `OfflineBanner`, `ForbiddenState`, `DesktopOnlyNotice` (пометка `ActionGate`),
+«Повторить»; `retryLabel` — своя подпись), `SectionSkeleton` и `ChunkErrorState` («Обновить страницу») — ленивый раздел, `NoNetworkState`, `OfflineBanner`, `ForbiddenState`, `DesktopOnlyNotice` (пометка `ActionGate`),
 `RateLimitedState` (`retryAfter` из `ApiError`, отсчёт; повторный 429 с тем же значением — `key={error}`; `page` —
 вместо страницы, заголовок `h1`), `PendingApprovalNotice` (после `202`), `ConnectionErrorState` (стадия `error` сессии:
 сеть и 5xx — «нет связи»; с `error` 4xx — «сервер не пустил», текст по коду и код для поддержки).
@@ -104,8 +104,9 @@ Enter), получает фокус при возврате, если фокус
   акцента в обеих темах), вырез — `bg-elevated` (на иной поверхности — класс родителя), вырез на акценте —
   `text-inverse`), `Illustration` (`size` 48 | 64, всегда декоративная, предмет — `text-muted`).
 - `Card` (`title`, `chip`, `stats` `{value, label}[]`, `note`, `action` — кнопка `{label, onClick, variant?, disabled?}`
-  (описана заголовком; `variant` по умолчанию secondary) или ссылка `{label, name, href, onNavigate}`, `selected` —
-  только вид, `headingLevel`; `article` с именем по заголовку).
+  (описана заголовком; `variant` по умолчанию secondary) или ссылка `{label, name, href, onNavigate, onIntent?}`, `selected` —
+  только вид, `headingLevel`; `article` с именем по заголовку; нажатая ссылка — источник View Transition `.vtSource`
+  (`wf-entity`, одна на вкладку, снимается со списком), цель — `PageHeader entity`).
 - `useCountdown()` (`{ left, start(seconds) }` — отсчёт 429 по `retryAfter` и паузы повторной отправки; `start` с тем же
   числом перезапускает).
 - Подсказки и копирование (§4.8): `Tooltip` (`src/ui/hint`; наведение и фокус, `aria-describedby`),

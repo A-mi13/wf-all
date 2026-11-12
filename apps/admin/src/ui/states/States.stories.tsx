@@ -6,6 +6,7 @@ import styles from '../../showcase/Stories.module.css';
 import { Button } from '../Button';
 import { RateLimitedState } from './RateLimitedState';
 import {
+  ChunkErrorState,
   ConnectionErrorState,
   EmptyState,
   ErrorState,
@@ -13,6 +14,7 @@ import {
   LoadingRows,
   OfflineBanner,
   PendingApprovalNotice,
+  SectionSkeleton,
 } from './states';
 
 // Состояния данных (принцип 9): скелетон, пусто, ошибка с кодом и «Повторить», нет сети, нет прав; а также
@@ -80,3 +82,13 @@ export const RateLimited: Story = () => <RateLimitedState retryAfter={42} onRetr
 RateLimited.meta = { title: 'UI/States', visual: false };
 
 export const PendingApproval: Story = () => <PendingApprovalNotice />;
+
+// Ленивый раздел (§4.15): пока кусок грузится — скелетон раздела; кусок не загрузился — «Обновить страницу».
+export const SectionLoading: Story = () => <SectionSkeleton />;
+
+export const ChunkError: Story = () => (
+  <ChunkErrorState
+    error={new globalThis.Error('Failed to fetch dynamically imported module: /assets/CityPage.js')}
+    onReload={noop}
+  />
+);

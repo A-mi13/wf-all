@@ -6,6 +6,7 @@ import { type ApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import { useDraft } from '../../app/draft';
+import { useLeaveGuard } from '../../app/leaveGuard';
 import { paths } from '../../app/paths';
 import type { Me } from '../../app/permissions';
 import { useLocale } from '../../i18n/locale';
@@ -71,14 +72,25 @@ export function InviteDrawer({
   const t = useTranslations('staff.invite');
   // Пока запрос идёт, панель не закрывается: ответ 202 должен дойти до экрана.
   const busy = useIsMutating({ mutationKey: INVITE_KEY }) > 0;
+  // Введённое не отправлено (спека UI-фундамента §4.11): закрытие панели спрашивает Overlay.dirty, уход мимо панели
+  // (браузерная «Назад», меню) — useLeaveGuard формы; закрытие после «Уйти» — навигация с ignoreBlocker (usePanelParam).
+  const [dirty, setDirty] = useState(false);
   return (
-    <Drawer open={open} onClose={onClose} title={t('title')} dismissible={!busy}>
-      <InviteBody me={me} onClose={onClose} />
+    <Drawer open={open} onClose={onClose} title={t('title')} dismissible={!busy} dirty={dirty}>
+      <InviteBody me={me} onClose={onClose} onDirty={setDirty} />
     </Drawer>
   );
 }
 
-function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
+function InviteBody({
+  me,
+  onClose,
+  onDirty,
+}: {
+  me: Me;
+  onClose: () => void;
+  onDirty: (dirty: boolean) => void;
+}) {
   const t = useTranslations('staff.invite');
   const ta = useTranslations('actions');
   const tl = useTranslations('locale');
@@ -101,6 +113,12 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
   const role = useWatch({ control: form.control, name: 'role' });
   const [sent, setSent] = useState(false);
   const invalidateApprovals = useInvalidateApprovals();
+  // черновик, поднятый из storage, — не ввод этого открытия (он и так сохранён); отправленное — не потеря
+  const dirty = form.formState.isDirty && !sent;
+  useLeaveGuard(dirty);
+  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  // панель закрыта — снять признак (Drawer размонтирует тело)
+  useEffect(() => () => onDirty(false), [onDirty]);
 
   // Только ввод сотрудника (type === 'change'): ни монтирование, ни reset, ни размонтирование.
   useEffect(

@@ -2,7 +2,7 @@ import { useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
-import { type ApiError, unwrap } from '../../api/client';
+import { type ApiError, isApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import type { components } from '../../api/gen/admin';
@@ -15,6 +15,7 @@ import {
   CopyButton,
   DataState,
   Drawer,
+  EmptyState,
   ErrorState,
   Form,
   PendingApprovalNotice,
@@ -57,25 +58,55 @@ const ACTION_KEY = ['staff', 'account-action'] as const;
 // сбросить доступ (202), выключить (200/202). Разрушающие — ConfirmDialog с вводом почты цели как
 // она показана (IDN — A-форма xn--…) и причиной из списка с комментарием. После любой мутации
 // перечитываются список, карточка и сеансы (ACCOUNTS_KEY).
+// Панель — в адресе (?account=<id>, спека UI-фундамента §4.6): по глубокой ссылке и после F5 карточка
+// приходит запросом; 403 и 404 — одно состояние «Сотрудник не найден» (m10: «нет» и «не ваш» не различаются,
+// решает сервер). Открыли строкой списка — её данные до ответа (initial).
 export function StaffDrawer({
   me,
-  target,
+  id,
+  initial,
   onClose,
 }: {
   me: Me;
-  target: StaffAccount | null;
+  id: string | undefined;
+  initial?: StaffAccount;
   onClose: () => void;
 }) {
   const t = useTranslations('staff.drawer');
   const busy = useIsMutating({ mutationKey: ACTION_KEY }) > 0;
+  const api = useApi();
+  const card = useQuery({
+    queryKey: accountKey(id ?? ''),
+    queryFn: () =>
+      unwrap(api.GET('/v1/staff/accounts/{staffId}', { params: { path: { staffId: id ?? '' } } })),
+    placeholderData: initial,
+    enabled: id !== undefined,
+  });
+  const missing =
+    card.isError &&
+    isApiError(card.error) &&
+    (card.error.status === 403 || card.error.status === 404);
+  const a = missing ? undefined : card.data;
   return (
     <Drawer
-      open={target !== null}
+      open={id !== undefined}
       onClose={onClose}
-      title={target?.display_name ?? t('title')}
+      title={a?.display_name ?? t('title')}
       dismissible={!busy}
     >
-      {target && <StaffPanel key={target.id} me={me} initial={target} />}
+      {missing ? (
+        <EmptyState title={t('not_found_title')} text={t('not_found_text')} />
+      ) : card.isError && !card.isPlaceholderData ? (
+        <ErrorState
+          error={card.error}
+          onRetry={() => void card.refetch()}
+          retrying={card.isFetching}
+        />
+      ) : a ? (
+        <StaffPanel key={a.id} me={me} initial={a} />
+      ) : (
+        <Skeleton.Form fields={4} />
+      )}
     </Drawer>
   );
 }

@@ -13,7 +13,7 @@ paths:
   страница города `/geo/cities/$cityId` — вложенный адрес раздела, его право), «Страны» (`/geo/countries`,
   `geo.countries.read`), «Импорт GeoNames» (`/geo/imports`, `geo.imports.read`), «Версии приложения» (`/app/versions`,
   `platform.versions.read`), «Флаги функций» (`/flags`, `platform.flags.read`) — все открыты и на телефоне. Разделы,
-  экран которых ещё не построен, — временно только шапка (`pendingSection` в `router.tsx`; задача экрана заменяет).
+  экран которых ещё не построен, — временно только шапка (`pendingSection` в `src/app/routes.tsx`; задача экрана заменяет).
 - Чтения — `features/geo/queries.ts` (`useGeoCities`, `useGeoCity`, `useGeoDistricts`, `useGeoCountries`,
   `useGeoRegions`, `useGeoPlaces`, `useGeoImports`, `useGeoImport`, `useGeoImportJob`, `useAppVersions`,
   `useFeatureFlags`): ключи `['geo', …]` (`CITIES_KEY` — списки, карточка, районы и подписи городов модератора; язык

@@ -28,6 +28,7 @@ export { TermHint } from './hint/TermHint';
 export { Tooltip } from './hint/Tooltip';
 export { Icon, Illustration } from './icon';
 export { useIsCompact, useIsHandheld, useIsMobile } from './media';
+export { useReducedMotion } from './motion';
 export { useOnline } from './online';
 export { OtpInput, type OtpInputHandle, type OtpInputProps } from './OtpInput';
 export {
@@ -56,6 +57,7 @@ export {
   Tabs,
 } from './shell';
 export {
+  ChunkErrorState,
   ConnectionErrorState,
   DataState,
   DesktopOnlyNotice,
@@ -66,6 +68,7 @@ export {
   OfflineBanner,
   PendingApprovalNotice,
   RateLimitedState,
+  SectionSkeleton,
   Skeleton,
   type SkeletonHeight,
   type SkeletonWidth,

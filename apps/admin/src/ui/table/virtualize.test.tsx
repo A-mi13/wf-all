@@ -6,7 +6,7 @@ import { stubTableLayout } from '../../test/layout';
 import { renderWithProviders } from '../../test/render';
 import { DataTable } from './DataTable';
 import type { Column } from './model';
-import { forgetTablePositions, PANEL_SEARCH_KEYS, rememberRow, restoreKeyOf } from './restore';
+import { forgetTablePositions, rememberRow, restoreKeyOf } from './restore';
 
 // Возврат на ту же позицию и виртуализация строк (спека UI-фундамента §4.5, план UF2b.4). jsdom не
 // раскладывает: окно прокрутки — 400 px, строка — 40 px (src/test/layout.ts).
@@ -115,8 +115,14 @@ describe('select + виртуализация', () => {
 
 describe('возврат на позицию', () => {
   test('ключ позиции — путь и search без ключей панели; порядок search не важен', () => {
-    expect(PANEL_SEARCH_KEYS).toEqual([]);
     expect(restoreKeyOf({ pathname: '/staff', search: {} })).toBe('/staff');
+    // ключи панелей (PANEL_SEARCH_KEYS, UF2b.8) — вне ключа позиции, фильтры (в том числе country) — в нём
+    expect(restoreKeyOf({ pathname: '/staff', search: { q: 'a', account: 'x', invite: 1 } })).toBe(
+      restoreKeyOf({ pathname: '/staff', search: { q: 'a' } }),
+    );
+    expect(restoreKeyOf({ pathname: '/geo/cities', search: { country: 'RU' } })).not.toBe(
+      '/geo/cities',
+    );
     expect(restoreKeyOf({ pathname: '/staff', search: { q: 'a', role: 'admin' } })).toBe(
       restoreKeyOf({ pathname: '/staff', search: { role: 'admin', q: 'a' } }),
     );

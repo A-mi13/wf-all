@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { renderWithIntl } from '../test/render';
 import { Card } from './Card';
@@ -90,5 +90,41 @@ describe('Card', () => {
   test('уровень заголовка задаёт экран', () => {
     renderWithIntl(<Card title="Ставрополь" headingLevel={3} />);
     expect(screen.getByRole('heading', { level: 3, name: 'Ставрополь' })).toBeInTheDocument();
+  });
+});
+
+// Источник перехода «список → карточка» (§4.15; ревью UF2b/II-B, m5): класс .vtSource — только у нажатой карточки
+// и только пока она на экране; список снят (переход состоялся) — при возврате имя wf-entity ни у кого.
+describe('Card: источник View Transition', () => {
+  const link = (href: string, name: string) => ({
+    label: 'Открыть',
+    name,
+    href,
+    onNavigate: () => {},
+  });
+  const article = (name: string) => screen.getByRole('article', { name });
+
+  test('нажатая — .vtSource, прежняя нажатая его теряет', async () => {
+    const { user } = renderWithIntl(
+      <>
+        <Card title="А" action={link('/a', 'Открыть: А')} />
+        <Card title="Б" action={link('/b', 'Открыть: Б')} />
+      </>,
+    );
+    await user.click(screen.getByRole('link', { name: 'Открыть: А' }));
+    expect(article('А').className).toMatch(/vtSource/);
+    await user.click(screen.getByRole('link', { name: 'Открыть: Б' }));
+    expect(article('А').className).not.toMatch(/vtSource/);
+    expect(article('Б').className).toMatch(/vtSource/);
+  });
+
+  test('список снят и показан снова — источника нет', async () => {
+    const first = renderWithIntl(<Card title="А" action={link('/a', 'Открыть: А')} />);
+    await first.user.click(screen.getByRole('link', { name: 'Открыть: А' }));
+    first.unmount();
+    // переход на страницу города — уже после снятия списка (не в том же коммите)
+    await act(async () => {});
+    renderWithIntl(<Card title="А" action={link('/a', 'Открыть: А')} />);
+    expect(article('А').className).not.toMatch(/vtSource/);
   });
 });

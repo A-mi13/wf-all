@@ -1,5 +1,4 @@
 import { useIsMutating, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
@@ -7,6 +6,8 @@ import { type ApiError, isApiError, isUnknownOutcome, unwrap } from '../../api/c
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
+import type { NavigateOptions } from '@tanstack/react-router';
+import { useLeavePanelTo } from '../../app/panels';
 import { paths } from '../../app/paths';
 import { useLocale } from '../../i18n/locale';
 import { Button, Drawer, Form, type Option, SelectField, useErrorText, useToast } from '../../ui';
@@ -48,12 +49,24 @@ function ActivateFlow({ onClose }: { onClose: () => void }) {
     if (unknown.current) void invalidateCityLists(queryClient);
     onClose();
   };
+  // Уход из панели на другой путь (город, поиск в списке) — replace, не закрытие панели (history.back и push
+  // наперегонки); исход прошлой отправки неизвестен — списки устарели и здесь (G8 m14; ревью UF2b/II-B, m6).
+  const leavePanelTo = useLeavePanelTo();
+  const leave = (to: NavigateOptions) => {
+    if (unknown.current) void invalidateCityLists(queryClient);
+    leavePanelTo(to);
+  };
   const footer = place ? (
     <Button type="submit" form={formId} loading={busy}>
       {t('submit')}
     </Button>
   ) : (
-    <PlaceAction selected={selected} onChoose={setPlace} onClose={close} />
+    <PlaceAction
+      selected={selected}
+      onChoose={setPlace}
+      onClose={close}
+      onOpenCity={(cityId) => leave({ to: paths.city, params: { cityId } })}
+    />
   );
   return (
     <Drawer open onClose={close} title={t('title')} dismissible={!busy} footer={footer}>
@@ -68,8 +81,8 @@ function ActivateFlow({ onClose }: { onClose: () => void }) {
               setPlace(null);
               setReturned(true);
             }}
-            onClose={close}
             onUnknown={() => (unknown.current = true)}
+            onLeave={leave}
           />
         ) : (
           <PlaceSearch
@@ -100,20 +113,19 @@ function ActivateForm({
   id,
   place,
   onBack,
-  onClose,
   onUnknown,
+  onLeave,
 }: {
   id: string; // форма — по id: кнопка «Активировать» в подвале панели (form={id})
   place: GeoPlace;
   onBack: () => void;
-  onClose: () => void;
   onUnknown: () => void; // исход неизвестен — при закрытии панели списки перечитаются
+  onLeave: (to: NavigateOptions) => void; // уход из панели на другой путь (replace)
 }) {
   const t = useTranslations('geo.activate');
   const ts = useTranslations('geo.status');
   const api = useApi();
   const locale = useLocale();
-  const navigate = useNavigate();
   const toast = useToast();
   const errorText = useErrorText();
   const queryClient = useQueryClient();
@@ -150,8 +162,7 @@ function ActivateForm({
         queryClient.setQueryData(geoKeys.city(city.id, locale), city);
         toast.success(t('success', { name: city.name }));
         if (alive.current) {
-          onClose();
-          void navigate({ to: paths.city, params: { cityId: city.id } });
+          onLeave({ to: paths.city, params: { cityId: city.id } });
         }
         await Promise.all([
           invalidateCityLists(queryClient),
@@ -255,8 +266,7 @@ function ActivateForm({
             variant="link"
             aria-label={t('open_city_label', { name: place.name })}
             onClick={() => {
-              onClose();
-              void navigate({ to: paths.city, params: { cityId: existing } });
+              onLeave({ to: paths.city, params: { cityId: existing } });
             }}
           >
             {t('open_city')}
@@ -268,8 +278,7 @@ function ActivateForm({
             // пока место перечитывается — занята: быстрый клик не уведёт в список вместо города (раунд 1)
             loading={fresh.isPending}
             onClick={() => {
-              onClose();
-              void navigate({ to: paths.cities, search: { q: place.name } });
+              onLeave({ to: paths.cities, search: { q: place.name } });
             }}
           >
             {t('find_city')}

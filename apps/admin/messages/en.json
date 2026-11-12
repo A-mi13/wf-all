@@ -9,6 +9,7 @@
     "close": "Close",
     "back": "Back",
     "retry": "Retry",
+    "reload": "Reload page",
     "archive": "Archive",
     "restore": "Restore",
     "delete": "Delete",
@@ -725,6 +726,8 @@
     },
     "drawer": {
       "title": "Staff member",
+      "not_found_title": "Staff member not found",
+      "not_found_text": "They do not exist or the link is out of date.",
       "email": "Email",
       "copy_email": "Copy: email",
       "role": "Role",

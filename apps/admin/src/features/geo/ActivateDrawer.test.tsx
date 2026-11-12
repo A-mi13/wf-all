@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse } from 'msw';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { components } from '../../api/gen/admin';
 import type { Me } from '../../app/permissions';
 import { renderApp } from '../../test/app';
@@ -426,7 +426,8 @@ describe('уборка V1 и G8', () => {
     const find = await within(drawer).findByRole('button', { name: 'Найти город в списке' });
     expect(find).toHaveAttribute('aria-busy', 'true');
     await user.click(find);
-    expect(app.at()).toBe('/geo/cities');
+    // панель в адресе (UF2b.8): занятая кнопка не увела — адрес списка с открытой активацией
+    expect(app.at()).toBe('/geo/cities?activate=1');
     release();
     await waitFor(() => expect(find).not.toHaveAttribute('aria-busy'));
   });
@@ -484,4 +485,87 @@ describe('уборка V1 и G8', () => {
   });
 });
 
+// Ревью UF2b/II-B, m6 (G8 m14 на путях ухода из панели): исход прошлой отправки неизвестен, затем 409 — «Открыть
+// город» уводит со списка, панель не закрывается сама (replace), но списки городов всё равно устарели.
+describe('G8 m14 при уходе из панели', () => {
+  test('обрыв → 409 → «Открыть город»: списки городов помечены устаревшими', async () => {
+    const { state } = geoServer();
+    activateServer((n) => {
+      if (n === 1) return HttpResponse.error();
+      state.places = state.places.map((p) =>
+        p.geoname_id === 526815 ? { ...p, city_id: NEW_CITY } : p,
+      );
+      return problem(409, 'geo.city_already_active');
+    });
+    const app = renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await choose(user, drawer, 'м');
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    await within(drawer).findByRole('alert');
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    const open = await within(drawer).findByRole('button', { name: 'Открыть город Михайловск' });
+    // списки помечены устаревшими именно уходом (invalidateCityLists: CITIES_KEY без карточек и районов)
+    const invalidate = vi.spyOn(app.queryClient, 'invalidateQueries');
+    await user.click(open);
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${NEW_CITY}`));
+    const lists = invalidate.mock.calls.filter(
+      ([f]) => JSON.stringify(f?.queryKey) === JSON.stringify(['geo', 'cities']),
+    );
+    expect(lists).toHaveLength(1);
+  });
+});
+
 const searchQ = (at: string) => new URLSearchParams(at.split('?')[1] ?? '').get('q');
+
+// Панель в адресе (спека UI-фундамента §4.6, план UF2b.8): ?activate=1; успех — уход на страницу города с replace
+// (leavePanelTo): ни BackLink, ни браузерная «Назад» не возвращают на список с открытой активацией. Browser history
+// (R3-1): записи окна живут весь файл, тест не уходит «Назад» дальше своих push.
+describe('активация в адресе', () => {
+  async function activateFromList() {
+    geoServer();
+    activateServer();
+    const app = renderApp('/geo/cities?country=RU', { me: meActivator, history: 'browser' });
+    const { user, drawer } = await openDrawer();
+    expect(window.location.search).toBe('?country=RU&activate=1');
+    await choose(user, drawer, 'м');
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${NEW_CITY}`));
+    return { app, user };
+  }
+
+  test('активация → город → BackLink — список без открытой активации', async () => {
+    const { app, user } = await activateFromList();
+    const back = await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    expect(back).toHaveAttribute('href', '/geo/cities?country=RU');
+    await user.click(back);
+    await screen.findByRole('heading', { level: 1, name: 'Города и запуск' });
+    expect(app.at()).toBe('/geo/cities?country=RU');
+    expect(screen.queryByRole('dialog', { name: 'Активировать город' })).toBeNull();
+  });
+
+  // Ревью UF2b/II-B раунд 1 (рядом с m6): «Открыть город» шага 1 закрывал панель (history.back) и тут же делал push —
+  // две навигации наперегонки. Теперь — уход из панели replace, как у успеха активации.
+  test('шаг 1: заведённое место → «Открыть город» → «Назад» — список без активации', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities', { me: meActivator, history: 'browser' });
+    const { user, drawer } = await openDrawer();
+    await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), 'с');
+    await user.click(await within(drawer).findByRole('option', { name: /^Ставрополь/ }));
+    await user.click(within(drawer).getByRole('button', { name: 'Открыть город Ставрополь' }));
+    await waitFor(() => expect(app.at()).toMatch(/^\/geo\/cities\/3f2c8e1a/));
+    await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    await app.back();
+    await screen.findByRole('heading', { level: 1, name: 'Города и запуск' });
+    expect(app.at()).toBe('/geo/cities');
+    expect(screen.queryByRole('dialog', { name: 'Активировать город' })).toBeNull();
+  });
+
+  test('активация → город → браузерная «Назад» — список без открытой активации', async () => {
+    const { app } = await activateFromList();
+    await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    await app.back();
+    await screen.findByRole('heading', { level: 1, name: 'Города и запуск' });
+    expect(app.at()).toBe('/geo/cities?country=RU');
+    expect(screen.queryByRole('dialog', { name: 'Активировать город' })).toBeNull();
+  });
+});

@@ -26,8 +26,11 @@ paths:
   4. вёрстка без «прыжков» и случайных полос: горизонтальная прокрутка — с явным `overflow-y`, выбранное состояние не
      меняет метрик шрифта (страж `src/ui/layout-css.test.ts`).
 - **Новый раздел:** путь — константа в `src/app/paths.ts` (других путей нет); маршрут — ребёнок `shellRoute` в
-  `src/app/router.tsx`; пункт в `NAV` (`src/app/nav.ts`) — `{ path, labelKey, permission, icon }`. `permission` — ключ
-  каталога (`null` — своё, любому активному). Пункта без права в меню нет, прямой адрес (и вложенные `/раздел/…`) —
+  `src/app/routes.tsx` (роутер — `router.tsx`), экран — ленивым куском (`lazyRouteComponent(() => import(…), 'Имя')` + `...section`: скелетон
+  `SectionSkeleton`, ошибка куска — `ChunkErrorState` «Обновить страницу»; экраны входа и каркас — в основном куске,
+  страж — граф импортов от `main.tsx` в `router.test.tsx`; `defaultPreload: 'intent'`); фильтры в `validateSearch` —
+  строкой в `src/app/filterKeys.ts` (страж обходит дерево маршрутов); пункт в `NAV` (`src/app/nav.ts`) —
+  `{ path, labelKey, permission, icon }`. `permission` — ключ каталога (`null` — своё, любому активному). Пункта без права в меню нет, прямой адрес (и вложенные `/раздел/…`) —
   `ForbiddenState` сам AppShell; экран раздела проверку права не дублирует. Все разделы открыты на любой ширине и
   устройстве (спека UI §3.1): флаг `desktopOnly` остался в типе заделом, каркас его не читает, в `NAV` его нет (страж
   `nav.test.ts`). Страница начинается с `PageHeader` (единственный `h1`), вкладки — `Tabs` (управляемые, значение —
@@ -73,6 +76,14 @@ paths:
   `LeaveGuardProvider` в `AppProviders`, «Выйти» спрашивает в `useLogout` до POST); панель с вводом — `dirty` у
   `Modal`/`Drawer`/`Sheet`. Успех формы: сбросить `isDirty`, переход — после применения (эффектом) или с
   `ignoreBlocker: true`. Тесты ухода — на browser history.
+- **Панели в адресе** (§4.6) — `usePanelParam(key, { allowed })` (`src/app/panels.ts`): `open` — push с
+  `state.panel`, `close` — `history.back` (метка) или `replace` без ключа (глубокая ссылка), оба с `ignoreBlocker`;
+  повтор `close` до смены записи — ничего; ключ без права снимается `replace`; прокрутка не сбрасывается. Ключ — в
+  `PANEL_SEARCH_KEYS` (`src/app/paths.ts`, не совпадает с фильтрами и параметрами контракта — страж
+  `searchKeys.test.ts`) и `panelSearch([...])` в `validateSearch` маршрута; уход из панели на другой путь —
+  `useLeavePanelTo()` (replace). Фильтры экрана — `KEYS` + `parseKeys` (`src/app/search.ts`) в `features/*/search.ts`.
+  Переход к странице ленивого раздела с `viewTransition` — только если кусок уже готов (греть по намерению
+  `router.preloadRoute`; иначе роутер оставит флаг перехода следующей навигации), и не после ухода сотрудника.
 - **CSP** admin-api (`style-src 'self'`): во всём `src` (кроме тестов и стенда `src/test/**` — прокладка Popover API
   вставляет тестовый `<style>`) нет атрибута `style`, `<style>`, `dangerouslySetInnerHTML` и записи в `element.style` —
   только CSS Modules; цвета — только `var(--wf-color-*)`. Исключение — `setCssPx(el, '--wf-…', число)` из

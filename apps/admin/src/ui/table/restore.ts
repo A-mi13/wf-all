@@ -3,17 +3,18 @@
 // на строке, с которой ушли, — таблица: строка запоминается по щелчку или Enter под ключом позиции и
 // получает фокус, когда таблица с тем же ключом смонтирована, а фокус потерян (уход «Назад» — браузерной
 // или общим возвратом каркаса). Память — только в памяти вкладки (id строк, не storage) и стирается при
-// размонтировании каркаса (выход, другой сотрудник — key={me.id}, router.tsx).
+// размонтировании каркаса (выход, другой сотрудник — key={me.id}, Shell.tsx).
 
-// Ключи search открытой панели (карточка справа поверх списка): в ключ позиции не входят — панель
-// открыли и закрыли, а список тот же. Наполняет UF2b.8 (панели в адресе).
-export const PANEL_SEARCH_KEYS: readonly string[] = [];
+import { isPanelKey } from '../../app/paths';
+
+// Ключи search открытой панели (карточка справа поверх списка; реестр PANEL_SEARCH_KEYS — app/paths.ts, UF2b.8)
+// в ключ позиции не входят — панель открыли и закрыли, а список тот же.
 
 // Ключ позиции: путь + search без ключей панели, порядок параметров не важен; фильтры (в том числе
 // country) в ключе остаются.
 export function restoreKeyOf(location: { pathname: string; search: object }): string {
   const entries = Object.entries(location.search)
-    .filter(([k, v]) => v !== undefined && !PANEL_SEARCH_KEYS.includes(k))
+    .filter(([k, v]) => v !== undefined && !isPanelKey(k))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return entries.length > 0 ? `${location.pathname}?${JSON.stringify(entries)}` : location.pathname;
 }

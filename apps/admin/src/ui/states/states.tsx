@@ -51,10 +51,12 @@ export function ErrorState({
   error,
   onRetry,
   retrying,
+  retryLabel,
 }: {
   error: unknown;
   onRetry: () => void;
   retrying?: boolean;
+  retryLabel?: ReactNode; // по умолчанию «Повторить»; кусок раздела не загрузился — «Обновить страницу»
 }) {
   const t = useTranslations('states.error');
   const ta = useTranslations('actions');
@@ -71,7 +73,7 @@ export function ErrorState({
       }
       action={
         <Button variant="secondary" loading={retrying} onClick={onRetry}>
-          {ta('retry')}
+          {retryLabel ?? ta('retry')}
         </Button>
       }
     />
@@ -211,4 +213,29 @@ export function PendingApprovalNotice({ action }: { action?: ReactNode }) {
       {action}
     </div>
   );
+}
+
+// Раздел грузится (ленивый маршрут, спека UI-фундамента §4.15): скелетон вместо экрана раздела — шапка и таблица.
+// «Загрузка…» для читалки — один раз, у обёртки (части скелетона декоративные).
+export function SectionSkeleton() {
+  const t = useTranslations('states');
+  return (
+    <div role="status" aria-label={t('loading')}>
+      <Skeleton.Text width="medium" />
+      <Skeleton.Table />
+    </div>
+  );
+}
+
+// Кусок раздела не загрузился (вышла новая сборка, §4.15): ошибка с кодом и «Обновить страницу» — повтор загрузки
+// того же куска не поможет, нужна новая страница. onReload — по умолчанию перезагрузка документа.
+export function ChunkErrorState({
+  error,
+  onReload = () => window.location.reload(),
+}: {
+  error: unknown;
+  onReload?: () => void;
+}) {
+  const t = useTranslations('actions');
+  return <ErrorState error={error} retryLabel={t('reload')} onRetry={onReload} />;
 }

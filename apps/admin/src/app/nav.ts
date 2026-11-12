@@ -9,7 +9,7 @@ import { can, type Me } from './permissions';
 // разделы; desktopOnly ни у одного пункта нет (страж nav.test.ts). Разделы будущих модулей появятся
 // вместе с модулями. «Справочники» — план B, спека §9.4 п. 8–12; страница города — вложенный адрес
 // «Городов» (их право).
-// Новый раздел: путь — paths.ts, маршрут — router.tsx, пункт с правом — здесь.
+// Новый раздел: путь — paths.ts, маршрут — routes.tsx, пункт с правом — здесь.
 export type { NavGroup, NavItem };
 
 export const NAV: NavGroup[] = [

@@ -4,10 +4,10 @@ import { onTestFinished } from 'vitest';
 // (max-width / min-width, в px) и указателя (pointer: fine | coarse), в том числе составные через
 // «and». Ширина решает только раскладку, устройство (палец и экран уже compact) — «только с
 // компьютера»: стаб отвечает на каждый признак отдельно, а не «да» на любой запрос. Системная тема
-// (prefers-color-scheme) — светлая. Незнакомый признак — ошибка: тест не должен молча получить «нет».
+// (prefers-color-scheme) — светлая; «уменьшить движение» (prefers-reduced-motion) — reducedMotion устройства. Незнакомый признак — ошибка: тест не должен молча получить «нет».
 // set() меняет устройство на лету и оповещает подписчиков (change), как браузер. После теста
 // matchMedia возвращается прежний.
-export type MediaDevice = { width: number; pointer: 'fine' | 'coarse' };
+export type MediaDevice = { width: number; pointer: 'fine' | 'coarse'; reducedMotion?: boolean };
 
 type Listener = (e: { matches: boolean; media: string }) => void;
 
@@ -29,6 +29,8 @@ function feature(part: string, device: MediaDevice): boolean {
       return value === device.pointer;
     case 'prefers-color-scheme':
       return value === 'light';
+    case 'prefers-reduced-motion':
+      return (value === 'reduce') === (device.reducedMotion ?? false);
     default:
       throw new Error(`stubMedia: незнакомый признак «${part}»`);
   }

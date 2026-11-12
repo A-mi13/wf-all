@@ -1,7 +1,7 @@
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useTranslations } from 'use-intl';
 import { paths } from '../../app/paths';
-import { PageHeader, Tabs } from '../../ui';
+import { PageHeader, Tabs, useReducedMotion } from '../../ui';
 import { AuditView } from './AuditView';
 import { type AuditSearch, parseAuditSearch, SECTIONS } from './search';
 import styles from './audit.module.css';
@@ -27,7 +27,10 @@ export function AuditPage() {
   const tn = useTranslations('nav');
   const navigate = useNavigate();
   const search = parseAuditSearch(useSearch({ strict: false }));
-  const go = (next: AuditSearch) => void navigate({ to: paths.audit, search: clean(next) });
+  const reduced = useReducedMotion();
+  // смена вкладки — View Transition (§4.15), «уменьшить движение» — без неё; фильтры — без перехода
+  const go = (next: AuditSearch, tab = false) =>
+    void navigate({ to: paths.audit, search: clean(next), viewTransition: tab && !reduced });
 
   return (
     <div className={styles.page}>
@@ -41,10 +44,10 @@ export function AuditPage() {
         value={search.tab ?? 'all'}
         onChange={(v) => {
           const tab = SECTIONS.find((s) => s === v);
-          go({ ...search, tab, action: undefined });
+          go({ ...search, tab, action: undefined }, true);
         }}
       >
-        <AuditView search={search} onSearchChange={go} />
+        <AuditView search={search} onSearchChange={(next) => go(next)} />
       </Tabs>
     </div>
   );

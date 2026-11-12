@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, onTestFinished, test, vi } from 'vitest';
 import type { Me } from '../../app/permissions';
 import { renderApp } from '../../test/app';
 import { GEO_CITIES, geoServer, REGION_STAV } from '../../test/geo';
@@ -9,6 +9,7 @@ import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
 import { city } from '../../test/staff';
 import { pick, selectedText } from '../../test/pick';
+import { stubMedia } from '../../test/media';
 
 // «Города и запуск» (спека §9.4 п. 8, макет 07): карточки городов — название, чип статуса, регион,
 // население, районы, «страна выключена»; фильтры — search-параметры (q, status[], country,
@@ -306,5 +307,63 @@ describe('права', () => {
     await card('Ставрополь');
     expect(screen.queryByRole('button', { name: 'Активировать город' })).toBeNull();
     expect(screen.queryByRole('article', { name: 'Пятигорск' })).toBeNull();
+  });
+});
+
+// Переход «список → карточка» (спека UI-фундамента §4.15, план UF2b.9): View Transition навигации TanStack Router;
+// общий элемент — одно статическое имя wf-entity у нажатой карточки (.vtSource) и заголовка города. Нет API —
+// мгновенно; «уменьшить движение» — без перехода.
+describe('переход список → карточка', () => {
+  function stubViewTransition() {
+    const sources: number[] = [];
+    const start = vi.fn((arg: (() => Promise<void>) | { update: () => Promise<void> }) => {
+      sources.push(document.querySelectorAll('[class*="vtSource"]').length);
+      const done = Promise.resolve((typeof arg === 'function' ? arg : arg.update)());
+      return { updateCallbackDone: done, finished: done, ready: done, skipTransition() {} };
+    });
+    Object.defineProperty(document, 'startViewTransition', { configurable: true, value: start });
+    onTestFinished(() => {
+      Reflect.deleteProperty(document, 'startViewTransition');
+    });
+    return { start, sources };
+  }
+
+  test('есть API — переход с viewTransition, нажатая карточка — источник', async () => {
+    geoServer();
+    const { start, sources } = stubViewTransition();
+    const app = renderApp('/geo/cities', { me: meOwner });
+    await userEvent
+      .setup()
+      .click(within(await card('Ставрополь')).getByRole('link', { name: 'Открыть: Ставрополь' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+    // загрузка маршрута (кусок страницы города) закончена — переход уже начат или нет
+    await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(sources).toEqual([1]);
+  });
+
+  test('«уменьшить движение» — навигация без viewTransition', async () => {
+    geoServer();
+    stubMedia({ width: 1440, pointer: 'fine', reducedMotion: true });
+    const { start } = stubViewTransition();
+    const app = renderApp('/geo/cities', { me: meOwner });
+    await userEvent
+      .setup()
+      .click(within(await card('Ставрополь')).getByRole('link', { name: 'Открыть: Ставрополь' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+    // загрузка маршрута (кусок страницы города) закончена — переход уже начат или нет
+    await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  test('нет document.startViewTransition — переход мгновенный, без ошибки', async () => {
+    geoServer();
+    expect('startViewTransition' in document).toBe(false);
+    const app = renderApp('/geo/cities', { me: meOwner });
+    await userEvent
+      .setup()
+      .click(within(await card('Ставрополь')).getByRole('link', { name: 'Открыть: Ставрополь' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+    expect(await screen.findByRole('link', { name: 'Назад: Города и запуск' })).toBeInTheDocument();
   });
 });

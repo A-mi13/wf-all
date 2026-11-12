@@ -41,3 +41,8 @@
   align-items: center;
   gap: var(--wf-space-2);
 }
+
+/* Заголовок страницы сущности — цель перехода «список → карточка» (имя — одно на всё приложение, спека §4.15) */
+.vtTarget {
+  view-transition-name: wf-entity;
+}

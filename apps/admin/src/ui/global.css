@@ -13,3 +13,20 @@ body {
   margin: 0;
   background: var(--wf-color-bg);
 }
+
+/* Переходы View Transitions (спека §4.15): «список → карточка» и смена вкладок — duration.slow и ease; «уменьшить
+   движение» — без анимации (длительности токенов генератор уже обнулил, псевдоэлементы перехода — здесь). */
+::view-transition-group(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: var(--wf-duration-slow);
+  animation-timing-function: var(--wf-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
+  }
+}

@@ -18,6 +18,7 @@ const ACTIONS = [
   'close',
   'back',
   'retry',
+  'reload',
   'archive',
   'restore',
   'delete',
