@@ -7,14 +7,40 @@
 //   первой (список поверх панели — сначала список, следующим нажатием панель).
 // Открытие модальной записи оповещает подписчиков onModalOpen: открытые Popover закрываются (пузырь в
 // верхнем слое иначе висел бы поверх диалога в портале).
-type Entry = { id: symbol; panel: HTMLElement | null; modal: boolean };
+// footer — у модальной панели с подвалом её placement: пока она верхняя модальная, на <html> стоит
+// data-overlay-footer=<placement> — область тостов встаёт над подвалом (m23, правило — Toast.module.css).
+type Entry = {
+  id: symbol;
+  panel: HTMLElement | null;
+  modal: boolean;
+  placement?: string;
+  footer?: string | null;
+};
 const stack: Entry[] = [];
 const LOCK_ATTR = 'data-wf-scroll-lock';
+export const OVERLAY_FOOTER_ATTR = 'data-overlay-footer';
+// Любая верхняя модальная запись (placement панели; без panel — 'modal'): на телефоне область тостов встаёт к краю
+// окна, а не над таббаром (ревью UF2b/II-A, I1: кнопки в теле шторки иначе под тостом).
+export const OVERLAY_OPEN_ATTR = 'data-overlay-open';
 const modalOpenListeners = new Set<() => void>();
 
 function syncLock() {
   if (stack.some((e) => e.modal)) document.body.setAttribute(LOCK_ATTR, '');
   else document.body.removeAttribute(LOCK_ATTR);
+  const top = topModal();
+  if (top) document.documentElement.setAttribute(OVERLAY_OPEN_ATTR, top.placement ?? 'modal');
+  else document.documentElement.removeAttribute(OVERLAY_OPEN_ATTR);
+  const footer = top?.footer;
+  if (footer) document.documentElement.setAttribute(OVERLAY_FOOTER_ATTR, footer);
+  else document.documentElement.removeAttribute(OVERLAY_FOOTER_ATTR);
+}
+
+// Подвал записи появился или пропал (placement панели или null).
+export function setOverlayFooter(id: symbol, footer: string | null) {
+  const entry = stack.findLast((e) => e.id === id);
+  if (!entry) return;
+  entry.footer = footer;
+  syncLock();
 }
 
 // panel — элемент диалога: на него уходит фокус, когда вернуть его больше некуда (тосты).
@@ -22,10 +48,10 @@ function syncLock() {
 export function pushOverlay(
   id: symbol,
   panel: HTMLElement | null = null,
-  opts: { modal?: boolean } = {},
+  opts: { modal?: boolean; placement?: string } = {},
 ): () => void {
   const modal = opts.modal ?? true;
-  stack.push({ id, panel, modal });
+  stack.push({ id, panel, modal, placement: opts.placement });
   syncLock();
   if (modal) for (const cb of [...modalOpenListeners]) cb();
   return () => {

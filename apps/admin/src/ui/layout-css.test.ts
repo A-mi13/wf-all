@@ -231,10 +231,80 @@ test('карточка телефона: скрытая ячейка «Подр�
   expect(rule('ui/table/DataTable.module.css', '.stacked .td[hidden]')).toMatch(/display:\s*none/);
 });
 
-test('тело панели с подвалом — scroll-padding-block-end под подвал', () => {
-  expect(rule('ui/overlay/Overlay.module.css', '.body:has(+ .footer)')).toMatch(
-    /scroll-padding-block-end:\s*calc\(var\(--wf-/,
+// UF2b.6 (n6, m23, R2-m3): высота подвала — токен size.overlay-footer, не замер (setCssPx в overlay/* запрещён CSP).
+// Подвал — min-block-size по токену с border-box (кнопки в одну строку; при нехватке места ряд переносится вниз,
+// а не выходит за край Drawer — фиксированной высоты нет); область тостов при открытой панели с подвалом встаёт
+// над ним на тот же токен. Подвал — соседний flex-блок, тело он не перекрывает; перекрывает тело тост с
+// «Отменить» (ревью UF2b/I-Y) — пока корень с data-toast-open, у тела отступ прокрутки и запас под тост.
+test('подвал панели — min-block-size по size.overlay-footer, перенос кнопок, без фиксированной высоты', () => {
+  const footer = rule('ui/overlay/Overlay.module.css', '.footer');
+  expect(footer).toMatch(/min-block-size:\s*var\(--wf-size-overlay-footer\)/);
+  expect(footer).toMatch(/box-sizing:\s*border-box/);
+  expect(footer).toMatch(/flex-wrap:\s*wrap/);
+  expect(footer).not.toMatch(/(^|[;\s])(height|block-size|max-height|max-block-size):/);
+  expect(tokens.size['overlay-footer']).toBe(
+    tokens.space['4'] + tokens.size.control + tokens.space['6'] + 1,
   );
+});
+
+test('тосты над подвалом открытой панели — отступ по size.overlay-footer; над шторкой — сверху', () => {
+  expect(rule('ui/toast/Toast.module.css', ':global(:root[data-overlay-footer]) .region')).toMatch(
+    /bottom:\s*calc\(var\(--wf-size-overlay-footer\)/,
+  );
+  const sheet = rule(
+    'ui/toast/Toast.module.css',
+    ":global(:root[data-overlay-footer='bottom']) .region",
+  );
+  expect(sheet).toMatch(/top:\s*var\(--wf-/);
+  expect(sheet).toMatch(/bottom:\s*auto/);
+});
+
+// Запас под тост — только у панелей, которые тост перекрывает (ревью UF2b/II-A, m3): справа и шторка; окно по
+// центру — только на телефоне (на широком тост ниже него). Общего правила для любого .body нет: центральное окно
+// не меняет высоту на 94 px при появлении тоста.
+const TOAST_ROOM = /padding-block-end:\s*calc\(var\(--wf-size-toast\)\s*\+\s*var\(--wf-space-6\)\)/;
+test('тело панели при тосте с «Отменить» — отступ прокрутки и запас под тост у перекрываемых панелей', () => {
+  for (const placement of ['.right', '.bottom']) {
+    const body = rule(
+      'ui/overlay/Overlay.module.css',
+      `:global(:root[data-toast-open]) ${placement} .body`,
+    );
+    expect(body).toMatch(/scroll-padding-block-end:\s*calc\(var\(--wf-size-toast\)/);
+    expect(body).toMatch(TOAST_ROOM);
+  }
+  expect(rules('ui/overlay/Overlay.module.css').map((r) => r.selector)).not.toContain(
+    ':global(:root[data-toast-open]) .body',
+  );
+  const css = read('ui/overlay/Overlay.module.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const at = css.indexOf('@media (max-width: 767.98px)');
+  expect(at).toBeGreaterThanOrEqual(0);
+  expect(css.slice(at)).toMatch(
+    /:global\(:root\[data-toast-open\]\) \.center \.body\s*\{[^}]*padding-block-end:\s*calc\(var\(--wf-size-toast\)/,
+  );
+});
+
+// Ревью UF2b/II-A, I1: на телефоне открыт оверлей без подвала (LeaveDialog, ConfirmDialog — действия в теле) — область
+// тостов у нижнего края окна (space-2: таббар закрыт оверлеем), тост не выше size.toast, а запас тела (toast +
+// space-6) больше space-2 + toast — нижние кнопки остаются над тостом.
+test('телефон: оверлей без подвала — область тостов у края окна, ниже запаса тела', () => {
+  const css = read('ui/toast/Toast.module.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const at = css.indexOf('@media (max-width: 767.98px)');
+  expect(at).toBeGreaterThanOrEqual(0);
+  expect(css.slice(at)).toMatch(
+    /:global\(:root\[data-overlay-open\]:not\(\[data-overlay-footer\]\)\) \.region\s*\{[^}]*bottom:\s*var\(--wf-space-2\)/,
+  );
+  expect(tokens.space['2'] + tokens.size.toast).toBeLessThan(tokens.size.toast + tokens.space['6']);
+});
+
+test('тост на телефоне — над таббаром, однострочный (многоточие), не выше size.toast', () => {
+  const css = read('ui/toast/Toast.module.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const at = css.indexOf('@media (max-width: 767.98px)');
+  expect(at).toBeGreaterThanOrEqual(0);
+  const mobile = css.slice(at);
+  expect(mobile).toMatch(/\.region\s*\{[^}]*bottom:\s*var\(--wf-size-tabbar\)/);
+  expect(mobile).toMatch(/\.toast\s*\{[^}]*max-block-size:\s*var\(--wf-size-toast\)/);
+  expect(mobile).toMatch(/\.text\s*\{[^}]*white-space:\s*nowrap[^}]*\}/);
+  expect(mobile).toMatch(/\.text\s*\{[^}]*text-overflow:\s*ellipsis/);
 });
 
 test('страница на телефоне — scroll-padding-block-end = таббар, с тостом — таббар + тост', () => {

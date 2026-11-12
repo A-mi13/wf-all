@@ -100,3 +100,40 @@
   flex-direction: column;
   gap: var(--wf-space-2);
 }
+
+/* Открыта модальная панель с подвалом (корень с data-overlay-footer, ставит стек оверлеев, m23): тосты не над
+   кнопками — над подвалом (высота подвала — токен, n6); у шторки снизу подвал выше одного ряда — тосты сверху */
+:global(:root[data-overlay-footer]) .region {
+  bottom: calc(var(--wf-size-overlay-footer) + var(--wf-space-2));
+}
+
+:global(:root[data-overlay-footer='bottom']) .region {
+  top: var(--wf-space-4);
+  bottom: auto;
+}
+
+/* Телефон (n5): снизу над таббаром, во всю ширину; тост — одна строка не выше size.toast (на эту высоту каркас
+   поднимает отступ прокрутки страницы, пока виден тост с «Отменить»); полный текст — в DOM, читалка его слышит */
+@media (max-width: 767.98px) {
+  .region {
+    bottom: var(--wf-size-tabbar);
+    width: calc(100% - var(--wf-space-4));
+  }
+
+  /* открыт оверлей без подвала (I1): таббар закрыт — к краю окна; тело панели держит запас toast + space-6, и
+     нижние кнопки (LeaveDialog, ConfirmDialog — действия в теле) остаются над тостом. Специфичность 0,3,0 — выше
+     правила подвала: при подвале этот селектор не срабатывает (:not) */
+  :global(:root[data-overlay-open]:not([data-overlay-footer])) .region {
+    bottom: var(--wf-space-2);
+  }
+
+  .toast {
+    max-block-size: var(--wf-size-toast);
+  }
+
+  .text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}

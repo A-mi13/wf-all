@@ -135,10 +135,28 @@
   padding: var(--wf-space-3) var(--wf-space-6) var(--wf-space-6);
 }
 
-/* Фокус не закрыт подвалом (WCAG 2.4.11, спека UI-фундамента §4.5): отступ прокрутки снизу = высота подвала
-   (кнопка size.control + отступы подвала); токен size.overlay-footer — UF2b.6 */
-.body:has(+ .footer) {
-  scroll-padding-block-end: calc(var(--wf-size-control) + var(--wf-space-4) + var(--wf-space-6));
+/* Фокус не закрыт тостом (WCAG 2.4.11, §4.5, ревью UF2b/I-Y): подвал — соседний flex-блок и тело не перекрывает,
+   а тост с «Отменить» (корень с data-toast-open) лежит поверх низа тела — над подвалом или у края окна. Отступ
+   прокрутки — под тост; запас снизу того же размера: scroll-padding места прокрутки не добавляет, последний элемент
+   иначе не поднять над тостом. Тост закрылся у конца прокрутки — браузер ограничит прокрутку, содержимое опустится
+   на освободившееся место (ничего не закрыто; постоянный запас под тост съел бы место у каждой панели). */
+/* Только у панелей, которые тост перекрывает (m3): справа и шторка; окно по центру на широком тост не задевает,
+   на телефоне — задевает (правило в @media ниже). */
+:global(:root[data-toast-open]) .right .body {
+  scroll-padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+  padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+}
+
+:global(:root[data-toast-open]) .bottom .body {
+  scroll-padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+  padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+}
+
+@media (max-width: 767.98px) {
+  :global(:root[data-toast-open]) .center .body {
+    scroll-padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+    padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+  }
 }
 
 .description {
@@ -149,8 +167,12 @@
   color: var(--wf-color-text-secondary);
 }
 
+/* Подвал (n6, R2-m3): высота ряда кнопок — токен size.overlay-footer (по нему же область тостов встаёт над
+   подвалом); min, не фиксированная: не хватило ширины — кнопки переносятся рядом ниже, а не за край Drawer */
 .footer {
   flex-shrink: 0;
+  box-sizing: border-box;
+  min-block-size: var(--wf-size-overlay-footer);
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;

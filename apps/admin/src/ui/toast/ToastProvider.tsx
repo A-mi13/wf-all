@@ -1,8 +1,16 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'use-intl';
 import { cx } from '../cx';
-import { TOASTS_ATTR, topOverlayPanel } from '../overlay/stack';
+import { isOverlayStackEmpty, TOASTS_ATTR, topOverlayPanel } from '../overlay/stack';
 import {
   TOAST_HIDE_MS,
   type ToastAction,
@@ -13,7 +21,16 @@ import {
 } from './context';
 import styles from './Toast.module.css';
 
-type Item = { id: number; tone: ToastTone; text: string; action?: ToastAction };
+type Item = {
+  id: number;
+  tone: ToastTone;
+  text: string;
+  action?: ToastAction;
+  undo?: () => Promise<void>;
+};
+
+// Атрибут корня, пока на экране тост с «Отменить»: каркас поднимает отступ прокрутки страницы, панель — своего тела.
+export const TOAST_OPEN_ATTR = 'data-toast-open';
 
 const TONE: Record<ToastTone, string | undefined> = {
   success: styles.success,
@@ -39,7 +56,8 @@ const TONE: Record<ToastTone, string | undefined> = {
 // браузеру.
 export function ToastProvider({ children }: { children: ReactNode }) {
   const t = useTranslations('ui.toast');
-  const [items, setItems] = useState<Item[]>([]);
+  const ta = useTranslations('actions');
+  const [list, setItems] = useState<Item[]>([]);
   const next = useRef(0);
   const nodes = useRef(new Map<number, HTMLElement>());
   const returnTo = useRef<HTMLElement | null>(null);
@@ -50,6 +68,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Текущий список для api (стабильного: новый тост не перезапускает таймеры старых) — чей узел с фокусом.
+  const items = useRef<Item[]>([]);
+  const epoch = useRef(0);
+  useLayoutEffect(() => {
+    items.current = list;
+  }, [list]);
+
   const api = useMemo<ToastApi>(() => {
     const restoreFocus = () => {
       const top = topOverlayPanel();
@@ -59,17 +84,61 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       if (back && document.activeElement === back) return;
       top?.focus();
     };
-    const dismiss = (id: number) => {
-      if (nodes.current.get(id)?.contains(document.activeElement)) restoreFocus();
-      setItems((list) => list.filter((i) => i.id !== id));
+    // фокус был на снимаемом тосте — вернуть его (узлы — по id; снимаемые — по признаку)
+    const remove = (drop: (i: Item) => boolean) => {
+      for (const [id, el] of nodes.current)
+        if (
+          el.contains(document.activeElement) &&
+          items.current.some((i) => i.id === id && drop(i))
+        )
+          restoreFocus();
+      setItems((list) => list.filter((i) => !drop(i)));
     };
-    const push = (tone: ToastTone) => (text: string, opts?: ToastOptions) => {
+    const dismiss = (id: number) => remove((i) => i.id === id);
+    const push = (tone: ToastTone, text: string, opts?: ToastOptions) => {
       const id = ++next.current;
-      setItems((list) => [...list, { id, tone, text, action: opts?.action }]);
+      const undo = opts?.undo;
+      // новый тост с «Отменить» заменяет прежний (§4.10): отменить можно только последнее действие
+      if (undo) remove((i) => Boolean(i.undo));
+      setItems((list) => [...list, { id, tone, text, action: opts?.action, undo }]);
       return id;
     };
-    return { success: push('success'), error: push('error'), info: push('info'), dismiss };
+    const dismissUndo = () => {
+      epoch.current++;
+      remove((i) => Boolean(i.undo));
+    };
+    return {
+      success: (text, opts) => push('success', text, opts),
+      error: (text, opts) => push('error', text, opts),
+      info: (text, opts) => push('info', text, opts),
+      dismiss,
+      dismissUndo,
+      undoEpoch: () => epoch.current,
+    };
   }, []);
+
+  const hasUndo = list.some((i) => i.undo);
+  useEffect(() => {
+    if (!hasUndo) return;
+    const root = document.documentElement;
+    root.setAttribute(TOAST_OPEN_ATTR, '');
+    return () => root.removeAttribute(TOAST_OPEN_ATTR);
+  }, [hasUndo]);
+
+  // Esc закрывает новейший тост — только при ПУСТОМ стеке оверлеев (§4.8 m-h): тост ниже любой записи, в
+  // том числе подсказки. Слушатель на document; запись стека снимается её же обработчиком Esc, поэтому
+  // при открытой подсказке стек ещё не пуст, а нажатие, уже обработанное кем-то (defaultPrevented), — не наше.
+  const newest = list.at(-1)?.id;
+  useEffect(() => {
+    if (newest === undefined) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || !isOverlayStackEmpty()) return;
+      e.preventDefault();
+      api.dismiss(newest);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [newest, api]);
 
   return (
     <ToastContext value={api}>
@@ -87,26 +156,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           }}
         >
           <div aria-live="polite" className={styles.list}>
-            {items
+            {list
               .filter((i) => i.tone !== 'error')
               .map((item) => (
                 <Toast
                   key={item.id}
                   item={item}
                   closeLabel={t('close')}
+                  undoLabel={ta('undo')}
                   dismiss={api.dismiss}
                   register={register}
                 />
               ))}
           </div>
           <div aria-live="assertive" className={styles.list}>
-            {items
+            {list
               .filter((i) => i.tone === 'error')
               .map((item) => (
                 <Toast
                   key={item.id}
                   item={item}
                   closeLabel={t('close')}
+                  undoLabel={ta('undo')}
                   dismiss={api.dismiss}
                   register={register}
                 />
@@ -122,11 +193,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 function Toast({
   item,
   closeLabel,
+  undoLabel,
   dismiss,
   register,
 }: {
   item: Item;
   closeLabel: string;
+  undoLabel: string;
   dismiss: (id: number) => void; // стабильная: новый тост не перезапускает таймеры старых
   register: (id: number, el: HTMLElement) => () => void; // узел тоста — dismiss видит его фокус
 }) {
@@ -135,7 +208,7 @@ function Toast({
   const onDismiss = () => dismiss(id);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const autoHide = item.tone !== 'error';
+  const autoHide = item.tone !== 'error' && !item.undo;
   const paused = hovered || focused;
 
   // Таймер скрытия: с начала после каждой паузы (успел дочитать — успеет и нажать).
@@ -162,6 +235,19 @@ function Toast({
         />
       </svg>
       <span className={styles.text}>{item.text}</span>
+      {item.undo && (
+        <button
+          type="button"
+          className={styles.action}
+          onClick={() => {
+            const undo = item.undo;
+            onDismiss(); // снят до запроса: второе нажатие некуда, итог — отдельным тостом
+            void undo?.().catch(() => {});
+          }}
+        >
+          {undoLabel}
+        </button>
+      )}
       {item.action && (
         <button
           type="button"

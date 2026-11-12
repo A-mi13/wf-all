@@ -9,10 +9,19 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'use-intl';
+import { Button } from '../Button';
 import { cx } from '../cx';
 import { Icon } from '../icon';
+import { useIsMobile } from '../media';
 import styles from './Overlay.module.css';
-import { focusables, isTopModal, isTopOverlay, pushOverlay, trapTab } from './stack';
+import {
+  focusables,
+  isTopModal,
+  isTopOverlay,
+  pushOverlay,
+  setOverlayFooter,
+  trapTab,
+} from './stack';
 
 export type OverlayProps = {
   open: boolean;
@@ -25,6 +34,10 @@ export type OverlayProps = {
   // нет такого — сам диалог.
   initialFocus?: RefObject<HTMLElement | null>;
   dismissible?: boolean; // false — Esc и клик по фону не закрывают (идёт запрос)
+  // Введённое не сохранено (спека UI-фундамента §4.11): Esc, фон и «Закрыть» сперва спрашивают «Уйти без
+  // сохранения?» (LeaveDialog поверх); «Уйти» — onClose. Панель в адресе (UF2b.8) закрывается в onClose
+  // навигацией с ignoreBlocker: true — блокировщик формы (useLeaveGuard) второй раз не спросит.
+  dirty?: boolean;
 };
 
 type Placement = 'center' | 'right' | 'bottom';
@@ -56,8 +69,10 @@ function Panel({
   footer,
   initialFocus,
   dismissible = true,
+  dirty = false,
 }: OverlayProps & { placement: Placement; tone?: 'default' | 'danger' }) {
   const t = useTranslations('actions');
+  const [asking, setAsking] = useState(false);
   const titleId = useId();
   const descriptionId = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -69,7 +84,9 @@ function Panel({
   );
 
   const dismiss = () => {
-    if (dismissible) onClose();
+    if (!dismissible) return;
+    if (dirty) setAsking(true);
+    else onClose();
   };
   // Esc — только если оверлей верхний из всех записей стека (открытый поверх список закрывается
   // первым); Tab — если он верхний модальный (немодальная запись сверху ловушку не снимает).
@@ -103,10 +120,12 @@ function Panel({
     initial.current = target ?? null;
   });
 
+  const stackId = useRef<symbol | null>(null);
   useEffect(() => {
     const id = Symbol('overlay');
+    stackId.current = id;
     // модальная запись: открытые Popover закрываются (onModalOpen)
-    const release = pushOverlay(id, panel.current);
+    const release = pushOverlay(id, panel.current, { placement });
     const listener = (e: KeyboardEvent) => onKeyDown(e, id);
     document.addEventListener('keydown', listener);
     focusInitial();
@@ -116,7 +135,14 @@ function Panel({
       // фокус — туда, откуда открыли (кнопка в списке или в панели под подтверждением)
       if (opener?.isConnected) opener.focus();
     };
-  }, [opener]);
+    // placement у Panel постоянен (Modal/Drawer/Sheet — свой; ConfirmDialog меняет оболочку целиком)
+  }, [opener, placement]);
+
+  // Подвал — признак записи стека (тосты над подвалом): отдельный эффект, смена подвала не переоткрывает панель.
+  const footerPlacement = footer ? placement : null;
+  useEffect(() => {
+    if (stackId.current) setOverlayFooter(stackId.current, footerPlacement);
+  }, [footerPlacement]);
 
   return (
     <div className={styles.root}>
@@ -139,7 +165,7 @@ function Panel({
             type="button"
             className={styles.close}
             aria-label={t('close')}
-            onClick={onClose}
+            onClick={dismiss}
             disabled={!dismissible}
           >
             <Icon name="close" size={16} />
@@ -155,6 +181,49 @@ function Panel({
         </div>
         {footer && <div className={styles.footer}>{footer}</div>}
       </div>
+      <LeaveDialog
+        open={asking}
+        onStay={() => setAsking(false)}
+        onLeave={() => {
+          setAsking(false);
+          onClose();
+        }}
+      />
     </div>
+  );
+}
+
+export type LeaveDialogProps = {
+  open: boolean;
+  onStay: () => void; // «Остаться», Esc, фон, «Закрыть»
+  onLeave: () => void;
+  title?: ReactNode; // по умолчанию «Уйти без сохранения?»
+  text?: ReactNode; // по умолчанию «Введённое пропадёт»
+};
+
+// Вопрос при уходе с несохранённого (§4.11): закрытие панели с dirty и переход при useLeaveGuard. Фокус по
+// умолчанию — «Остаться» (случайный Enter ничего не теряет); на узком экране — шторка, как ConfirmDialog.
+export function LeaveDialog({ open, onStay, onLeave, title, text }: LeaveDialogProps) {
+  const t = useTranslations('ui.leave');
+  const mobile = useIsMobile();
+  const stay = useRef<HTMLButtonElement>(null);
+  return (
+    <Overlay
+      open={open}
+      placement={mobile ? 'bottom' : 'center'}
+      onClose={onStay}
+      title={title ?? t('title')}
+      description={text ?? t('text')}
+      initialFocus={stay}
+    >
+      <div className={styles.actions}>
+        <Button ref={stay} variant="secondary" onClick={onStay}>
+          {t('stay')}
+        </Button>
+        <Button variant="danger" onClick={onLeave}>
+          {t('leave')}
+        </Button>
+      </div>
+    </Overlay>
   );
 }

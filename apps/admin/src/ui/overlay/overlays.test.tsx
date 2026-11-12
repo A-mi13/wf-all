@@ -1,7 +1,9 @@
 import { screen, within } from '@testing-library/react';
+import type { UserEvent } from '@testing-library/user-event';
 import { ICONS } from '@wf/icons';
 import { type ComponentType, type ReactNode, StrictMode, useRef, useState } from 'react';
 import { describe, expect, test, vi } from 'vitest';
+import { stubMedia } from '../../test/media';
 import { renderWithIntl } from '../../test/render';
 import { Button } from '../Button';
 import { Select } from '../form/Select';
@@ -415,4 +417,180 @@ describe('Popover в стеке оверлеев', () => {
       if (inDrawer) expect(screen.getByRole('dialog', { name: 'Сотрудник' })).toBeInTheDocument();
     },
   );
+});
+
+// UF2b.6 (m23): пока верхняя модальная запись — панель с подвалом, на корне data-overlay-footer=<placement>
+// (тосты встают над подвалом; правило — Toast.module.css, страж layout-css.test.ts).
+test('data-overlay-footer — пока верхняя модальная панель с подвалом', async () => {
+  function Stack({ footer }: { footer: boolean }) {
+    const [drawer, setDrawer] = useState(false);
+    const [confirm, setConfirm] = useState(false);
+    return (
+      <>
+        <Button onClick={() => setDrawer(true)}>Открыть</Button>
+        <Drawer
+          open={drawer}
+          onClose={() => setDrawer(false)}
+          title="Район"
+          footer={footer ? <Button onClick={() => setConfirm(true)}>Сохранить</Button> : undefined}
+        >
+          <Button onClick={() => setConfirm(true)}>Удалить</Button>
+        </Drawer>
+        <ConfirmDialog
+          open={confirm}
+          onClose={() => setConfirm(false)}
+          onConfirm={vi.fn()}
+          title="Удалить район?"
+          confirmWord="УДАЛИТЬ"
+          confirmLabel="Удалить"
+        />
+      </>
+    );
+  }
+  const html = document.documentElement;
+  const { user, unmount } = renderWithIntl(<Stack footer />);
+  expect(html).not.toHaveAttribute('data-overlay-footer');
+  await user.click(screen.getByRole('button', { name: 'Открыть' }));
+  expect(html).toHaveAttribute('data-overlay-footer', 'right');
+  // поверх — подтверждение без подвала: тосты на обычном месте
+  await user.click(screen.getByRole('button', { name: 'Удалить' }));
+  expect(html).not.toHaveAttribute('data-overlay-footer');
+  await user.keyboard('{Escape}');
+  expect(html).toHaveAttribute('data-overlay-footer', 'right');
+  await user.keyboard('{Escape}');
+  expect(html).not.toHaveAttribute('data-overlay-footer');
+  unmount();
+
+  const bare = renderWithIntl(<Stack footer={false} />);
+  await bare.user.click(screen.getByRole('button', { name: 'Открыть' }));
+  expect(html).not.toHaveAttribute('data-overlay-footer');
+});
+
+test('data-overlay-footer у шторки — bottom', async () => {
+  renderWithIntl(
+    <Sheet open onClose={vi.fn()} title="Город" footer={<Button>Готово</Button>}>
+      <p>Тело</p>
+    </Sheet>,
+  );
+  expect(document.documentElement).toHaveAttribute('data-overlay-footer', 'bottom');
+});
+
+// UF2b.7 (§4.11): Overlay.dirty — Esc, фон и «Закрыть» при введённом спрашивают «Уйти без сохранения?» вложенным
+// диалогом; «Остаться» — фокус по умолчанию, введённое на месте; «Уйти» — onClose ровно один раз.
+describe('Overlay.dirty', () => {
+  function Dirty({ onClose }: { onClose: () => void }) {
+    const [open, setOpen] = useState(true);
+    const [email, setEmail] = useState('');
+    return (
+      <Drawer
+        open={open}
+        dirty={email !== ''}
+        onClose={() => {
+          onClose();
+          setOpen(false);
+        }}
+        title="Пригласить сотрудника"
+        footer={<Button>Пригласить</Button>}
+      >
+        <label>
+          Почта
+          <input value={email} onChange={(e) => setEmail(e.target.value)} />
+        </label>
+      </Drawer>
+    );
+  }
+  const question = () => screen.queryAllByRole('dialog', { name: 'Уйти без сохранения?' });
+  const panel = () => screen.queryByRole('dialog', { name: 'Пригласить сотрудника' });
+
+  async function typed() {
+    const onClose = vi.fn();
+    const r = renderWithIntl(<Dirty onClose={onClose} />);
+    await r.user.type(screen.getByLabelText('Почта'), 'maria@example.com');
+    return { ...r, onClose };
+  }
+
+  test('чистая панель закрывается без вопроса', async () => {
+    const onClose = vi.fn();
+    const { user } = renderWithIntl(<Dirty onClose={onClose} />);
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(question()).toHaveLength(0);
+  });
+
+  test.each([
+    ['Esc', async (u: UserEvent) => u.keyboard('{Escape}')],
+    [
+      '«Закрыть»',
+      async (u: UserEvent) =>
+        u.click(within(panel() as HTMLElement).getByRole('button', { name: 'Закрыть' })),
+    ],
+    [
+      'фон',
+      async (u: UserEvent) =>
+        u.click((panel() as HTMLElement).previousElementSibling as HTMLElement),
+    ],
+  ])(
+    '%s при введённом — один вопрос; «Остаться» — фокус по умолчанию, ввод на месте',
+    async (_, leave) => {
+      const { user, onClose } = await typed();
+      await leave(user);
+      expect(question()).toHaveLength(1);
+      expect(screen.getByRole('button', { name: 'Остаться' })).toHaveFocus();
+      await user.click(screen.getByRole('button', { name: 'Остаться' }));
+      expect(question()).toHaveLength(0);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(panel()).toBeInTheDocument();
+      expect(screen.getByLabelText('Почта')).toHaveValue('maria@example.com');
+    },
+  );
+
+  test('«Уйти» — onClose один раз, вопрос и панель закрыты', async () => {
+    const { user, onClose } = await typed();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Уйти' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(question()).toHaveLength(0);
+    expect(panel()).not.toBeInTheDocument();
+  });
+
+  test('Esc на вопросе — как «Остаться»: закрыт только вопрос', async () => {
+    const { user, onClose } = await typed();
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
+    expect(question()).toHaveLength(0);
+    expect(panel()).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// Ревью UF2b/II-A, I1: на телефоне тост с «Отменить» не над нижними кнопками верхнего оверлея без подвала
+// (LeaveDialog поверх Drawer, ConfirmDialog — действия в теле): стек ставит data-overlay-open=<placement> для
+// любой верхней модальной записи, область тостов на телефоне встаёт к нижнему краю окна, тело панели — с запасом
+// под тост (правила — Toast.module.css и Overlay.module.css, страж layout-css.test.ts).
+test('телефон: LeaveDialog поверх Drawer с подвалом — data-overlay-open=bottom без data-overlay-footer', async () => {
+  stubMedia({ width: 390, pointer: 'coarse' });
+  const html = document.documentElement;
+  function Dirty() {
+    const [open, setOpen] = useState(true);
+    return (
+      <Drawer
+        open={open}
+        dirty
+        onClose={() => setOpen(false)}
+        title="Пригласить сотрудника"
+        footer={<Button>Пригласить</Button>}
+      >
+        <p>Тело</p>
+      </Drawer>
+    );
+  }
+  const { user } = renderWithIntl(<Dirty />);
+  expect(html).toHaveAttribute('data-overlay-open', 'right');
+  expect(html).toHaveAttribute('data-overlay-footer', 'right');
+  await user.keyboard('{Escape}');
+  expect(screen.getByRole('dialog', { name: 'Уйти без сохранения?' })).toBeInTheDocument();
+  expect(html).toHaveAttribute('data-overlay-open', 'bottom');
+  expect(html).not.toHaveAttribute('data-overlay-footer');
+  await user.click(screen.getByRole('button', { name: 'Уйти' }));
+  expect(html).not.toHaveAttribute('data-overlay-open');
 });

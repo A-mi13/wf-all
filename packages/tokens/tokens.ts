@@ -223,7 +223,8 @@ export const tokens = {
     "palette": 640,
     "tabbar": 65,
     "table-header": 32,
-    "toast": 70
+    "toast": 70,
+    "overlay-footer": 89
   },
   "breakpoint": {
     "mobile": 768,

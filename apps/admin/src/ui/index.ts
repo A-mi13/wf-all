@@ -40,6 +40,8 @@ export {
   ConfirmDialog,
   type ConfirmDialogProps,
   Drawer,
+  LeaveDialog,
+  type LeaveDialogProps,
   Modal,
   type OverlayProps,
   Sheet,
