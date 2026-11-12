@@ -90,7 +90,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // id сессии, завершённой выходом. Флаг держится, пока me — 401; любая другая сессия (новый
   // вход) его снимает, и истёкшая потом сессия снова ведёт на вход с возвратом.
   const [ended, setEnded] = useState<string | null>(null);
-  const base = stateOf(q.data, q.error);
+  // Перепроверка me без учётки (возврат во вкладку, сеть вернулась, 401 другого запроса): query-core на
+  // перечитывании без data сбрасывает error и status в pending (query-core fetchState) — сессия на время запроса
+  // стала бы loading, AppRouter снял бы роутер, и экран (/accept, /login) смонтировался бы заново без введённого.
+  // Последний 401 держится, пока нет данных: без учётки — anonymous, пока сервер не ответит иначе.
+  const [held, setHeld] = useState<Error | null>(null);
+  const settled = q.error
+    ? isApiError(q.error, 'auth.unauthenticated')
+      ? q.error
+      : null
+    : q.data
+      ? null
+      : held;
+  if (settled !== held) setHeld(settled);
+  const error = q.error ?? (q.data ? null : held);
+  const base = stateOf(q.data, error);
   const sid = base.status !== 'anonymous' && q.data ? (q.data.session?.id ?? '') : null;
   if (ended !== null && sid !== null && sid !== ended) setEnded(null);
   const signedOut = base.status === 'anonymous' && ended !== null;
@@ -100,11 +114,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await refresh();
   }, [current, refresh]);
   const value = useMemo<Session>(() => {
-    const state = stateOf(q.data, q.error);
+    const state = stateOf(q.data, error);
     return state.status === 'anonymous' && signedOut
       ? { ...state, signedOut: true, refresh, afterLogout }
       : { ...state, refresh, afterLogout };
-  }, [q.data, q.error, signedOut, refresh, afterLogout]);
+  }, [q.data, error, signedOut, refresh, afterLogout]);
   const reauthRequired = value.status === 'active' && value.reauthRequired;
 
   // Сессия сотрудника известна (setup, active): черновики других сотрудников этой вкладки стираются
