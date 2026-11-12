@@ -283,6 +283,27 @@ test('тело панели при тосте с «Отменить» — отс
   );
 });
 
+// Ревью UF2b/II-A, r1-1 (снимок `Toast:OverTallConfirm` на 1440×900 — тост лёг на кнопки): на широком высокое окно по
+// центру без подвала (ConfirmDialog — действия в теле) доходило до края окна, а тост (bottom: space-6) — над его
+// низом. Пока виден тост с «Отменить», окно ниже: зазор под ним = поле корня + половина свободного места ≥ space-6 +
+// toast + space-2. Обычное окно (ниже предела) высоту не меняет (m3).
+test('широкий экран: тост с «Отменить» — окно по центру без подвала не доходит до тоста', () => {
+  const css = read('ui/overlay/Overlay.module.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const at = css.indexOf(`@media (min-width: ${tokens.breakpoint.mobile}px)`);
+  expect(at).toBeGreaterThanOrEqual(0);
+  const m = css
+    .slice(at)
+    .match(
+      /:global\(:root\[data-toast-open\]:not\(\[data-overlay-footer\]\)\) \.center\s*\{[^}]*max-height:\s*calc\(\s*100% - 2 \* \(var\(--wf-size-toast\) \+ var\(--wf-space-6\) \+ var\(--wf-space-2\) - var\(--wf-space-4\)\)\s*\)/,
+    );
+  expect(m).not.toBeNull();
+  // поле корня у окна по центру — space-4 (от него считается предел)
+  expect(rule('ui/overlay/Overlay.module.css', '.root:has(> .center)')).toMatch(
+    /padding:\s*var\(--wf-space-4\)/,
+  );
+  expect(rule('ui/toast/Toast.module.css', '.region')).toMatch(/bottom:\s*var\(--wf-space-6\)/);
+});
+
 // Ревью UF2b/II-A, I1: на телефоне открыт оверлей без подвала (LeaveDialog, ConfirmDialog — действия в теле) — область
 // тостов у нижнего края окна (space-2: таббар закрыт оверлеем), тост не выше size.toast, а запас тела (toast +
 // space-6) больше space-2 + toast — нижние кнопки остаются над тостом.

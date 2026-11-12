@@ -147,7 +147,7 @@ function TableView<T>(
   }
 
   return (
-    <div className={cx(styles.root, props.select && styles.fill)}>
+    <div className={cx(styles.root, props.select && styles.fill)} data-table-root="">
       <Toolbar {...props} menu={menu} />
       {rows !== undefined && (props.summary !== false || reset) && (
         <div className={styles.summary}>
@@ -391,11 +391,27 @@ function BulkTable<T>(props: DataTableProps<T> & { bulk: DataTableBulk<T> }) {
       selectionVersion={version}
       actions={bulk.actions}
       onClear={() => change(new Set())}
+      focusAfterClose={(bar) => focusAfterBar(bar.closest<HTMLElement>('[data-table-root]'))}
       onPending={bulk.onPending}
       onSettled={bulk.onSettled}
     />
   );
   return <TableView {...props} bulkBar={bar} selection={selection} />;
+}
+
+// Панель снята «Снять выбор» или «Закрыть» — фокус туда, где выбор и продолжается работа (m8): «Выбрать
+// видимые» в шапке; шапка скрыта (карточки телефона: display: none — браузер фокус не даёт) — флажок первой
+// строки; строк нет (пусто после перечитывания) — сама область таблицы, временно с tabindex="-1" (не цель Tab
+// и щелчка: атрибут снимается при уходе фокуса).
+function focusAfterBar(root: HTMLElement | null) {
+  if (!root) return;
+  for (const el of root.querySelectorAll<HTMLElement>('[data-bulk-check]')) {
+    el.focus();
+    if (document.activeElement === el) return;
+  }
+  root.tabIndex = -1;
+  root.addEventListener('blur', () => root.removeAttribute('tabindex'), { once: true });
+  root.focus();
 }
 
 // Флажок выбора: недоступный — aria-disabled (не disabled: остаётся в Tab-порядке, причина слышна и видна

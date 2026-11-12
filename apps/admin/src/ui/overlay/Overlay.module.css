@@ -152,6 +152,18 @@
   padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
 }
 
+/* Широкий экран (r1-1): тост внизу по центру (bottom: space-6), а высокое окно по центру без подвала (ConfirmDialog —
+   кнопки в теле) доходит до края окна — тост ложился на кнопки. Пока виден тост с «Отменить», предел высоты окна
+   ниже: зазор под окном (поле корня space-4 + половина свободного места) ≥ space-6 + toast + space-2. Окно ниже
+   предела не меняется (m3: без скачка высоты); с подвалом тосты уже над подвалом (data-overlay-footer). */
+@media (min-width: 768px) {
+  :global(:root[data-toast-open]:not([data-overlay-footer])) .center {
+    max-height: calc(
+      100% - 2 * (var(--wf-size-toast) + var(--wf-space-6) + var(--wf-space-2) - var(--wf-space-4))
+    );
+  }
+}
+
 @media (max-width: 767.98px) {
   :global(:root[data-toast-open]) .center .body {
     scroll-padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));

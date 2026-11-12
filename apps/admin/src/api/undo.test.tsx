@@ -310,6 +310,60 @@ describe('useUndoable', () => {
     expect(screen.queryByText(UNDONE)).not.toBeInTheDocument();
   });
 
+  // r1-2: обратное ждёт разблокировку; смена сотрудника отпускает его reauthBus.reject() раньше, чем UndoReset
+  // сменит поколение (эффект после рендера), — ошибку отмены не должен увидеть следующий сотрудник.
+  const toastTexts = () => document.querySelector('[data-wf-toasts]')?.textContent ?? '';
+
+  test('смена сотрудника, пока обратное ждёт разблокировку, — ошибка отмены не показана', async () => {
+    const { answers } = flagServer();
+    const { queryClient } = renderWithProviders(<Page />, { me: meOwner });
+    await done();
+    answers.push(() => problem(401, 'auth.reauth_required'));
+    click('Отменить');
+    await waitFor(() => expect(reauthBus.pending()).toBe(true));
+    // подписка сессии на кэш me синхронно зовёт reauthBus.reject() — до рендера и эффекта UndoReset
+    // (одним act: рендер и эффекты применятся в его конце — как в браузере, где TanStack рисует по setTimeout(0),
+    // а отказ обратного доходит до итога микрозадачами раньше)
+    await act(async () => {
+      queryClient.setQueryData(ME_KEY, meAdmin);
+      expect(reauthBus.pending()).toBe(false);
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(toastTexts()).toBe('');
+  });
+
+  test('«Выйти» в разблокировке, пока обратное ждёт её, — ошибка отмены не показана', async () => {
+    const { answers } = flagServer();
+    const { queryClient } = renderWithProviders(<Page />, { me: meOwner });
+    await done();
+    answers.push(() => problem(401, 'auth.reauth_required'));
+    click('Отменить');
+    await waitFor(() => expect(reauthBus.pending()).toBe(true));
+    server.use(
+      http.get('/v1/staff/me', ({ response }) =>
+        response.untyped(problem(401, 'auth.unauthenticated')),
+      ),
+    );
+    // useLogout: me перечитан (401) → onSignedOut → reject, без рендера между ними
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ME_KEY }).catch(() => {});
+      reauthBus.reject();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(toastTexts()).toBe('');
+  });
+
+  test('отказ разблокировки без смены сотрудника — ошибка отмены показана', async () => {
+    const { answers } = flagServer();
+    renderWithProviders(<Page />, { me: meOwner });
+    await done();
+    answers.push(() => problem(401, 'auth.reauth_required'));
+    click('Отменить');
+    await waitFor(() => expect(reauthBus.pending()).toBe(true));
+    act(() => reauthBus.reject());
+    await screen.findByText('Подтвердите вход кодом из приложения');
+  });
+
   test('401 reauth_required на обратном — ждёт разблокировку, затем итог', async () => {
     const { calls, answers } = flagServer();
     renderWithProviders(<Page />);

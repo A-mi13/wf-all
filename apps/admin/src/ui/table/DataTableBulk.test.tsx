@@ -293,6 +293,46 @@ describe('DataTable bulk', () => {
     expect(region()).toBeNull();
   });
 
+  // m8 (ревью uf2b1w2, раунд 1): панель снимается вместе с кнопкой, где стоял фокус, — фокус не падает на body.
+  test('«Снять выбор» — фокус на «Выбрать видимые», не на body (m8)', async () => {
+    const { user } = setup(rows(3), controlled().action);
+    await user.click(box('Строка r1'));
+    await user.click(box('Строка r2'));
+    screen.getByRole('button', { name: 'Снять выбор' }).focus();
+    await user.keyboard('{Enter}');
+    expect(region()).toBeNull();
+    expect(document.activeElement).toBe(all());
+  });
+
+  test('«Снять выбор», шапка скрыта (карточки телефона) — фокус на флажке первой строки (m8)', async () => {
+    const { user } = setup(rows(3), controlled().action);
+    await user.click(box('Строка r2'));
+    // display: none у шапки: браузер не даёт фокус скрытому элементу
+    vi.spyOn(all(), 'focus').mockImplementation(() => {});
+    await user.click(screen.getByRole('button', { name: 'Снять выбор' }));
+    expect(region()).toBeNull();
+    expect(document.activeElement).toBe(box('Строка r1'));
+  });
+
+  test('«Закрыть» итога, строк больше нет — фокус в области таблицы, не на body (m8)', async () => {
+    const c = controlled();
+    const { user, container } = setup(rows(2), c.action, meBulk, { settle: () => [] });
+    await user.click(all());
+    await runAll(user, 2);
+    await waitFor(() => expect(c.calls).toHaveLength(2));
+    c.calls[0]?.resolve('executed');
+    c.calls[1]?.reject(new TypeError('Failed to fetch'));
+    await waitFor(() => expect(screen.queryByRole('table')).toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Закрыть' }));
+    expect(region()).toBeNull();
+    const active = document.activeElement;
+    expect(active).not.toBe(document.body);
+    expect(container.contains(active)).toBe(true);
+    // фокус по месту не делает область постоянной целью Tab и щелчка
+    act(() => (active as HTMLElement).blur());
+    expect(active).not.toHaveAttribute('tabindex');
+  });
+
   test('поиск или чип посреди пачки (строк нет — скелетон) пачку не отменяют (m1)', async () => {
     const c = controlled(1);
     const user = userEvent.setup();

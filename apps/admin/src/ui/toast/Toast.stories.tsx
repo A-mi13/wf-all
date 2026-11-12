@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslations } from 'use-intl';
 import type { Story, StoryMeta } from '../../showcase/csf';
 import { Button } from '../Button';
+import { ConfirmDialog } from '../overlay/ConfirmDialog';
 import { Drawer } from '../overlay/Drawer';
 import { LeaveDialog } from '../overlay/Overlay';
 import { useToast } from './context';
@@ -103,3 +104,45 @@ export const OverLeaveDialog: Story = () => {
   );
 };
 OverLeaveDialog.meta = { title: 'UI/Toast', layout: true };
+
+// Широкий экран, высокое подтверждение по центру (последствия, поля, слово — во всю высоту окна) и тост с
+// «Отменить»: кнопки подтверждения над тостом, а не под ним (ревью UF2b/II-A, r1-1). Тело прокручено до конца —
+// там кнопки.
+export const OverTallConfirm: Story = () => {
+  const t = useTranslations();
+  const toast = useToast();
+  useOnce(() => {
+    toast.success(t('staff.drawer.disable.done'), { undo: async () => undefined });
+  });
+  useEffect(() => {
+    // после применения предела высоты (атрибут тоста ставит эффект провайдера)
+    const timer = setTimeout(() => {
+      for (const el of document.querySelectorAll('[role="dialog"] *'))
+        if (el.scrollHeight > el.clientHeight) el.scrollTop = el.scrollHeight;
+    }, 100);
+    return () => clearTimeout(timer);
+  });
+  return (
+    <ConfirmDialog
+      open
+      variant="modal"
+      onClose={() => undefined}
+      onConfirm={() => undefined}
+      title={t('staff.drawer.reset.confirm_title', { name: 'Мария К.' })}
+      text={t('staff.drawer.reset.text')}
+      consequences={[
+        t('staff.drawer.reset.consequences.secrets'),
+        t('staff.drawer.reset.consequences.sessions'),
+        t('staff.drawer.reset.consequences.invite'),
+      ]}
+      confirmWord="maria.k@wf.example"
+      confirmLabel={t('actions.submitForApproval')}
+      note={t('staff.drawer.journal')}
+    >
+      {[1, 2, 3, 4, 5, 6].map((i) => (
+        <p key={i}>{t('staff.drawer.journal')}</p>
+      ))}
+    </ConfirmDialog>
+  );
+};
+OverTallConfirm.meta = { title: 'UI/Toast', layout: true };

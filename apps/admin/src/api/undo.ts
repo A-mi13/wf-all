@@ -1,5 +1,8 @@
+import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useTranslations } from 'use-intl';
+import type { Me } from '../app/permissions';
+import { ME_KEY } from '../app/query';
 import { useErrorText } from '../ui/errorText';
 import { useToast } from '../ui/toast';
 import { isApiError, isUnknownOutcome } from './client';
@@ -16,6 +19,15 @@ export type UndoInverse<V, R> = {
   reread: (v: V, result: R) => Promise<'undone' | 'not_undone'>;
 };
 
+// Чья сессия во вкладке сейчас — по кэшу me, синхронно: id сотрудника (setup, active), иначе null (выход — me
+// перечитан с 401, mfa_pending). Кэш меняется раньше рендера, в отличие от поколения тостов (UndoReset — эффект).
+function staffNow(queryClient: QueryClient): string | null {
+  const state = queryClient.getQueryState<Me>(ME_KEY);
+  if (state?.status === 'error' && isApiError(state.error, 'auth.unauthenticated')) return null;
+  const me = state?.data;
+  return me && (me.stage === 'active' || me.stage === 'setup') ? (me.id ?? null) : null;
+}
+
 // Выполнить прямое → тост успеха с «Отменить» (сам не исчезает) → по нажатию обратное → тост итога:
 // 4xx — по коду (исходное осталось сделанным); 409 *_stale — «уже изменили», отмены нет; неизвестный исход —
 // reread. Отмена не зависит от экрана: тост и запрос живут на уровне приложения (ушли со страницы — дойдёт).
@@ -25,6 +37,7 @@ export function useUndoable<V, R, C = unknown>(
   inverse: UndoInverse<V, R>,
 ): { mutate(v: V, opts: { successText: string }): void } {
   const toast = useToast();
+  const queryClient = useQueryClient();
   const t = useTranslations('ui.toast');
   const errorText = useErrorText();
   const { mutateAsync: run } = mutation;
@@ -42,10 +55,13 @@ export function useUndoable<V, R, C = unknown>(
             undo: async () => {
               if (started) return;
               started = true;
-              // сменился сотрудник, пока обратное в полёте (dismissUndo) — итог не его, не показываем (m6)
+              // сменился сотрудник или вышел, пока обратное в полёте, — итог не его, не показываем: поколение
+              // тостов (dismissUndo, m6) и сотрудник по кэшу me — смена сотрудника отпускает ждущую разблокировку
+              // (reauthBus.reject) раньше, чем UndoReset сменит поколение (ревью UF2b/II-A, r1-2)
               const epoch = toast.undoEpoch();
+              const staff = staffNow(queryClient);
               const say = (show: () => void) => {
-                if (toast.undoEpoch() === epoch) show();
+                if (toast.undoEpoch() === epoch && staffNow(queryClient) === staff) show();
               };
               try {
                 await inv.run(v, result, newIdempotencyKey());
@@ -74,7 +90,7 @@ export function useUndoable<V, R, C = unknown>(
         () => {},
       );
     },
-    [run, inverse, toast, t, errorText],
+    [run, inverse, toast, queryClient, t, errorText],
   );
   return { mutate };
 }

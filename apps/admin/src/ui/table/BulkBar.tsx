@@ -36,6 +36,9 @@ export type BulkBarProps<T> = {
   selectionVersion?: number;
   actions: BulkAction<T>[];
   onClear: () => void;
+  // панель снимается нажатием «Снять выбор» или «Закрыть» вместе с кнопкой, где стоял фокус, — куда его
+  // перевести (DataTable: «Выбрать видимые»; bar — узел панели); без него фокус уходит на body (ревью uf2b1w2, m8)
+  focusAfterClose?: (bar: HTMLElement) => void;
   onPending: () => unknown;
   onSettled?: (report: BulkReport<T>) => unknown;
   // итог прошлой пачки без запуска — витрина и снимки (состояние «итог с ошибками»)
@@ -63,6 +66,7 @@ export function BulkBar<T>({
   selectionVersion,
   actions,
   onClear,
+  focusAfterClose,
   onPending,
   onSettled,
   preview,
@@ -192,6 +196,11 @@ export function BulkBar<T>({
     }
   };
 
+  const focusAfterBarOf = (button: HTMLElement) => {
+    const bar = button.closest('section');
+    if (bar) focusAfterClose?.(bar);
+  };
+
   const confirmRows = dialog ? allowed(dialog) : [];
   // dual (needs_approval): строки уйдут на подтверждение второму — как у одиночного действия (m12)
   const dual = dialog
@@ -216,7 +225,14 @@ export function BulkBar<T>({
       <div className={styles.row}>
         {none ? (
           // выбора нет (строки ушли из перечитанного списка) — остался только итог
-          <Button variant="link" onClick={() => setLast(null)} disabled={busy}>
+          <Button
+            variant="link"
+            onClick={(e) => {
+              focusAfterBarOf(e.currentTarget);
+              setLast(null);
+            }}
+            disabled={busy}
+          >
             {ta('close')}
           </Button>
         ) : (
@@ -242,7 +258,14 @@ export function BulkBar<T>({
                 </ActionGate>
               );
             })}
-            <Button variant="link" onClick={onClear} disabled={busy}>
+            <Button
+              variant="link"
+              onClick={(e) => {
+                focusAfterBarOf(e.currentTarget);
+                onClear();
+              }}
+              disabled={busy}
+            >
               {t('clear')}
             </Button>
           </>
