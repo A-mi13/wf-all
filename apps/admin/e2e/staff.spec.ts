@@ -206,9 +206,10 @@ test('5. админ принимает приглашение, настраив�
   adminId = me.body.id ?? '';
   expect(adminId).not.toBe('');
 
-  // стартовая — первый разрешённый раздел меню (журнал)
-  await expect(pageAdmin).toHaveURL(/\/audit$/);
-  await expect(pageAdmin.getByRole('heading', { level: 1, name: t('nav.audit') })).toBeVisible();
+  // стартовая — «Главная» (спека UI-фундамента §4.13): корень, а не первый раздел меню; «Выйти» видна на 1280
+  await expect(pageAdmin).toHaveURL(/^[^?#]+\/$/);
+  await expect(pageAdmin.getByRole('heading', { level: 1, name: t('nav.home') })).toBeVisible();
+  await expect(pageAdmin.getByRole('button', { name: t('nav.logout') })).toBeVisible();
 
   // права админа: выдаёт только модератора и поддержку — владельца и админа в списке нет
   await pageAdmin.goto('/staff');

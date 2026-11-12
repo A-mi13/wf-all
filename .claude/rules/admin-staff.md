@@ -74,7 +74,8 @@ paths:
 
 ## Экраны входа (`src/features/auth`; вне каркаса, `AuthLayout`)
 - Стадия сессии → маршрут (`guard.ts`): без сессии — `/login` (и `/accept`), `mfa_pending` — `/login` шаг 2 (и после
-  перезагрузки), `setup` — только `/setup-2fa`, `active` — `?return=` или стартовая. Экран сам не навигирует: успех
+  перезагрузки), `setup` — только `/setup-2fa`, `active` — `?return=` или стартовая — «Главная» `/` (`startPath()`,
+  любой роли; спека UI §4.13, `admin.md` «Главная»). Экран сам не навигирует: успех
   мутации → `session.refresh()`, остальное делает роутер.
 - `/login`: шаг 1 — `staffLogin` (анонимная: `security: []`, без `Idempotency-Key`), `staff.invalid_credentials` — общий
   текст, 429 — отсчёт, отправка недоступна; шаг 2 — `FactorForm` (`staffVerifyMfa`), `401 auth.unauthenticated` (5 минут

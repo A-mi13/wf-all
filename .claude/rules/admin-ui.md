@@ -26,6 +26,39 @@ paths:
   разделы, язык, тема, «Выйти»). Счётчик пункта — проп `counts` по `path` (число) и `NavItem.countLabelKey` (подпись для
   читалки, `{count}`); счётчик «Подтверждения» — `useIncomingApprovalsCount()` в `ActiveShell` (`admin-staff.md`).
 - `OfflineBanner` (`useOnline`) стоит в AppShell; `ToastProvider` — в `AppProviders`.
+- Палитра — `PaletteProvider` (`src/app/PaletteProvider.tsx`) в `ActiveShell`; `usePalette().open()`
+  (`src/ui/palette/context.ts`; вне провайдера — `null`, кнопок нет; поверх модального оверлея — ничего): «Искать
+  везде Ctrl K/⌘K» над меню (`palette.open`, `aria-keyshortcuts`, клавиша по платформе), значок поиска первым в полосе,
+  первый пункт шторки «Ещё» (шторка снимается `flushSync`).
+- Клавиши каркаса: Ctrl/⌘+K — `useShortcut('mod+k', …, { allowInInput })` в `PaletteProvider`; `g x` и `/` —
+  `CommandShortcuts` (`src/app/CommandShortcuts.tsx`): `g x` — `<ShortcutBinding>` на раздел из `sectionsFor(me)` (с
+  `permission`), переход `run(context)` (вопрос `useLeaveGuard`); `/` — одна регистрация: `findPageSearch()`
+  (`ui/table/model.ts`, поле `DataTable.search` с `data-page-search` — `PAGE_SEARCH_ATTR`, не под `inert`/`hidden`), нет —
+  палитра. Вторую регистрацию `/` (или `g x`) в экранах не заводить — конфликт. `?` — `ShortcutsProvider`. «Горячие
+  клавиши» палитры — `useOpenShortcutsHelp()` после закрытия палитры (фокус — её открывателю).
+
+## Палитра (§4.1, `src/ui/palette`)
+`CommandPalette({ open, onClose, context })` — `Modal` (на узком — `Sheet fill`), имя окна `palette.title`;
+поле `role="combobox"` (`aria-expanded`, `aria-controls`, `aria-activedescendant`, подпись `palette.input`), список —
+`listbox` с группами `role="group"` (недавнее, разделы, действия, города, сотрудники, страны), ↑/↓, Home/End, Enter;
+Esc при непустом поле сперва очищает; число результатов — вежливая живая область после паузы ввода; совпадение —
+`<mark>`; у каждой группы сущностей своё «Ищем…», «Нет сети» (`fetchStatus: 'paused'`) и ошибка; запрос на сервер —
+только если в запросе есть буква или цифра (`MEANINGFUL` в `src/app/paletteSearch.ts`: «--» не уходит). Открытие в
+адрес не пишется. Поиск —
+`fuzzyRank(query, items, { fields })` (`fuzzy.ts`: регистр, `ё`→`е`, NFKC, раскладка ru↔en `switchLayout`, ранги «с
+начала > с начала слова > подпоследовательность», `ranges` для `<mark>`; `keywordsKey` — синонимы на другом языке).
+
+## Горячие клавиши (§4.2, `src/ui/shortcuts`)
+`useShortcut(combo, handler, { enabled, allowInInput, label, permission })` — combo по `KeyboardEvent.code` (`mod+k`,
+`g c` ≤ `SEQUENCE_MS` = 1 с, `/`, `?`); один слушатель `keydown` на `document` — `ShortcutsProvider` в `AppProviders`;
+молчат в полях (`isEditableTarget`: input, textarea, select, contenteditable, combobox, textbox — кроме
+`allowInInput`), при IME, под модальной записью стека (`hasModalOverlay`; подсказка и список `Select` не глушат);
+односимвольные выключаются переключателем шпаргалки (`SHORTCUTS_SINGLE_KEY` = `wf.admin.shortcuts.single`), Ctrl/⌘+K —
+всегда; `permission` из реестра «только с компьютера» — на карманном устройстве нет. `mod` — Ctrl или ⌘; «чужой»
+модификатор (Ctrl на Apple, ⌘/Win на прочих — `isApplePlatform()` в `combo.ts`) не совпадает ни с чем. Конфликт — и
+одной комбинации, и префикса («g» и «g c») — `console.error`. Шпаргалка `?` — `ShortcutsHelp` (`Modal`, одна строка на
+клавишу — последняя регистрация, символ по `navigator.keyboard.getLayoutMap()`, нет — латиница; при выключенных
+односимвольных их строки остаются с пометкой «· выключено»); открыть из кода — `useOpenShortcutsHelp()`.
 
 ## Списки — `DataTable`
 Поиск (`search`, запрос уходит после паузы `SEARCH_DEBOUNCE_MS`; запоздавшее эхо отправленного значения набор не
@@ -109,6 +142,12 @@ Enter), получает фокус при возврате, если фокус
   (описана заголовком; `variant` по умолчанию secondary) или ссылка `{label, name, href, onNavigate, onIntent?}`, `selected` —
   только вид, `headingLevel`; `article` с именем по заголовку; нажатая ссылка — источник View Transition `.vtSource`
   (`wf-entity`, одна на вкладку, снимается со списком), цель — `PageHeader entity`).
+- Главная (`src/ui/home`): `AttentionTile` (`title`, `value`, `cap?`, `tone`, `href` + `onNavigate`/`onIntent?` — вся
+  плитка ссылка, имя — заголовок и число; «99+» при `value > cap` (99) или `more`; `state` — `attentionState(query)`:
+  скелетон, ошибка «Не загрузилось · Повторить» без ссылки (`onRetry`, `retrying`), `note` — описание ссылки, не имя) в
+  сетке `AttentionTiles({ label })` (список; ≥ 720 px области — четыре в ряд); `TodoList({ items: TodoItem[], error?:
+  TodoError })` — строки-ссылки с точкой тона, пусто — иллюстрация `goal` и «Всё спокойно», ошибка источника — строка
+  «Повторить» (пусто + ошибка — только она). После удачного «Повторить» фокус — `useRetryFocus` (если фокус потерян).
 - `useCountdown()` (`{ left, start(seconds) }` — отсчёт 429 по `retryAfter` и паузы повторной отправки; `start` с тем же
   числом перезапускает).
 - Подсказки и копирование (§4.8): `Tooltip` (`src/ui/hint`; наведение и фокус, `aria-describedby`),
@@ -168,6 +207,7 @@ Enter), получает фокус при возврате, если фокус
   `useUndoable` показывает тост по промису действия (`mutateAsync`), а не колбэку `mutate`: экран снят или второй
   вызов — тост всё равно есть; итог отмены после смены сотрудника или выхода не показывается (`undoEpoch` и
   сотрудник по кэшу me: смена отпускает ждущую разблокировку `reauthBus.reject()` раньше эффекта `UndoReset`).
+- `Sheet fill` — шторка во всю высоту своего предела (палитра на узком).
 - `Overlay.dirty` — Esc, фон и «Закрыть» сперва спрашивают `LeaveDialog` («Уйти без сохранения?», фокус на
   «Остаться»); «Уйти» — `onClose`.
 
@@ -200,7 +240,9 @@ Enter), получает фокус при возврате, если фокус
 `src/test/server.ts` и `src/test/base.ts` браузерными `src/shots/{server,base}.ts` через `resolveId` по абсолютному
 пути, отдаёт `/mockServiceWorker.js` из пакета `msw` (не из `public/`) и ставит точку входа `src/shots/main.tsx`
 (`?shots-role=owner|admin|moderator|setup|anonymous`, `?shots-locale=en`, `?shots-story=<путь>:<экспорт>`; у `anonymous`
-язык задаёт `--locale` скрипта — язык браузера). База моков — только `TEST_API` из `src/test/base.ts`; фикстуры для
+язык задаёт `--locale` скрипта — язык браузера; `?shots-fixture=home-busy|palette-error` — данные состояния
+(`SHOTS_FIXTURES` в `src/shots/fixtures.ts`: главная с делами и ошибкой, 503 поиска городов в палитре);
+`?shots-palette=<текст>` — после первой отрисовки открыть палитру и ввести текст). База моков — только `TEST_API` из `src/test/base.ts`; фикстуры для
 браузера не тянут `vitest`, `@testing-library`, `node:*` (`src/test/{app,render,setup}.tsx` из `src/shots` не
 импортировать). Страж `src/shots/shots.test.ts`: граф импортов от `src/main.tsx` (и динамические `import()`) без `msw`,
 `src/shots`, `src/test`; глобальные стили — только через `src/app/styles.ts`. `ShotsRoot` фиксирует «сейчас»

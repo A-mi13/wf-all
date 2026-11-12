@@ -10,7 +10,8 @@ import { acceptAndSetup, bootstrap, newStaff, receiveInvite } from './ui';
 // scripts/e2e-admin.sh), отданная admin-api со staticCSP, — то, чего dev-сервер не видит:
 // (1) тема до первого кадра — public/theme-init.js при явном выборе ПРОТИВ системной темы (I3: умолчание
 //     эмуляции совпало бы с ожиданием, и подсадка «без скрипта» осталась бы немой);
-// (2) обход всех разделов меню и панели приглашения без единого securitypolicyviolation;
+// (2) со стартовой «Главной» — палитра кнопкой «Искать везде», обход всех разделов меню и панели приглашения без
+//     единого securitypolicyviolation;
 // (3) фон body = tokens.color.bg[тема] на собранном CSS для обеих тем (dev ↔ прод, I2): body красит
 // глобальный CSS (src/ui/global.css, UF2a.2), до него проверялся первый блок #root.
 
@@ -111,7 +112,31 @@ test('под сотрудником: разделы меню и панель п�
   await acceptAndSetup(page, s);
   await collect();
 
-  // (2) каждый раздел — полной загрузкой по глубокой ссылке: admin-api отдаёт index.html для пути SPA
+  // (2) обход начинается со стартовой — «Главная» (UF4.1); палитра — кнопкой «Искать везде» (клавишу Ctrl+K
+  // подключает связка клавиш, здесь проверяется окно под настоящей CSP): ввод, выбор раздела — переход
+  expect(new URL(page.url()).pathname).toBe('/');
+  await expect(page.getByRole('heading', { level: 1, name: t('nav.home') })).toBeVisible();
+  await page.getByRole('button', { name: t('palette.open'), exact: true }).click();
+  const palette = page.getByRole('dialog', { name: t('palette.title') });
+  await expect(palette).toBeVisible();
+  await palette.getByRole('combobox', { name: t('palette.input'), exact: true }).fill('журн');
+  await palette.getByRole('option', { name: t('nav.audit') }).click();
+  await expect(palette).toHaveCount(0);
+  await expect(page).toHaveURL(/\/audit$/);
+  await expect(page.getByRole('heading', { level: 1, name: t('nav.audit') })).toBeVisible();
+  await collect();
+  // и клавишей Ctrl/⌘+K: настоящая сборка и обработчик страницы (перехват клавиши самим браузером headless не
+  // проверяет — нажатие получает только страница); Esc с пустым полем закрывает окно
+  await page.keyboard.press('ControlOrMeta+K');
+  await expect(palette).toBeVisible();
+  await expect(
+    palette.getByRole('combobox', { name: t('palette.input'), exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  await collect();
+
+  // каждый раздел — полной загрузкой по глубокой ссылке: admin-api отдаёт index.html для пути SPA
   for (const section of PROD_SECTIONS) {
     await page.goto(section);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();

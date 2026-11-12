@@ -41,6 +41,12 @@ describe('ключи локалей e2e', () => {
     );
   });
 
+  it('стартовая и палитра (UF4.7): «Главная» и «Искать везде» входят в список', () => {
+    expect(KEYS).toEqual(
+      expect.arrayContaining(['nav.home', 'palette.open', 'palette.title', 'palette.input']),
+    );
+  });
+
   it('t — текст ru по ключу', () => {
     expect(t('auth.login.submit')).toBe(ru.auth.login.submit);
     expect(t('roles.admin')).toBe(ru.roles.admin);

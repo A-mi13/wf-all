@@ -30,7 +30,7 @@ paths:
   `SectionSkeleton`, ошибка куска — `ChunkErrorState` «Обновить страницу»; экраны входа и каркас — в основном куске,
   страж — граф импортов от `main.tsx` в `router.test.tsx`; `defaultPreload: 'intent'`); фильтры в `validateSearch` —
   строкой в `src/app/filterKeys.ts` (страж обходит дерево маршрутов); пункт в `NAV` (`src/app/nav.ts`) —
-  `{ path, labelKey, permission, icon }`. `permission` — ключ каталога (`null` — своё, любому активному). Пункта без права в меню нет, прямой адрес (и вложенные `/раздел/…`) —
+  `{ path, labelKey, permission, icon }`; команда раздела для палитры — в `features/<раздел>/commands.ts` (ниже). `permission` — ключ каталога (`null` — своё, любому активному). Пункта без права в меню нет, прямой адрес (и вложенные `/раздел/…`) —
   `ForbiddenState` сам AppShell; экран раздела проверку права не дублирует. Все разделы открыты на любой ширине и
   устройстве (спека UI §3.1): флаг `desktopOnly` остался в типе заделом, каркас его не читает, в `NAV` его нет (страж
   `nav.test.ts`). Страница начинается с `PageHeader` (единственный `h1`), вкладки — `Tabs` (управляемые, значение —
@@ -42,6 +42,32 @@ paths:
   действия («Завершить все сеансы» — `staff.sessions.revoke`, не в реестре); решения подтверждений —
   `isDesktopOnlyDecision(action)` (любой `staff.*`). Ширина — только раскладка: `useIsMobile()` (< `breakpoint-mobile`),
   `useIsCompact()` (< `breakpoint-compact`) из `src/ui/media.ts`.
+- **Главная** (спека UI §4.13) — `/` (`paths.root`), первый пункт `NAV` (группа `nav.groups.overview`, `nav.home`,
+  `permission: null`, значок `home`; на телефоне — первая в таббаре); `startPath()` (`src/app/nav.ts`) → `/` —
+  стартовая после входа для любой роли, `?return=` важнее (`guard.ts`). Экран — `features/home/HomePage.tsx`:
+  плитки «Что требует внимания» (`AttentionTiles`/`AttentionTile`, `attentionState`) и «Список дел» (`TodoList`) из
+  существующих чтений (`features/home/queries.ts`: все `...background()`, без своего интервала, `enabled` по праву —
+  без права нет ни плитки, ни запроса; «99+» — 100 строк или `next_cursor`; импорт — среди последних `IMPORTS_LIMIT` = 5
+  записей журнала; резервные коды ≤ `CODES_WARN` — строка дела, ключ `MY_MFA_KEY`). Ошибка источника — в плитке
+  «Повторить», в списке дел — строка `TodoError`, «Всё спокойно» тогда не говорится. «Импорт идёт дольше 30 мин»
+  (`IMPORT_STUCK_MS`) — по часам клиента против `started_at` сервера: своего «сейчас» сервер не отдаёт, при перекосе
+  часов > 30 мин свежий импорт покажется зависшим (принято, ревью UF4-H m5).
+- **Палитра и реестр команд** (§4.1) — команды объявляют модули: `features/<раздел>/commands.ts` (только пути, типы,
+  ключи локалей, хуки прав, `desktopOnly` — экраны не импортировать, страж `src/app/commands.test.ts`), собирает
+  `COMMANDS` в `src/app/commands.ts` вместе с общими (тема, язык, плотность, «Горячие клавиши», «Выйти»). `Command` —
+  `{ id, group: 'section' | 'action', labelKey, keywordsKey?, icon?, permission?, desktopOnly?, fineOnly?, shortcut?,
+  path?, run(ctx) }`; раздел — `path` и право как у пункта `NAV` («Главная» — `nav.home`), `shortcut` — `g x` (§4.2);
+  `sectionsFor(me)` (`src/app/commands.ts`) — разделы меню сотрудника, один фильтр для палитры и `g x`; действие с
+  экраном — переход с ключом панели (`/staff?invite=1`), `dual` — с пометкой «на подтверждение», `desktopOnly` на
+  карманном устройстве не показывается, `fineOnly` — на устройстве с пальцем (`useIsCoarse`) нет (плотность таблиц). `PaletteProvider` (`src/app/PaletteProvider.tsx`, в `ActiveShell` под `key={me.id}`) даёт
+  `CommandContext` и `usePalette().open()` (поверх модального оверлея — ничего); сущности — `useEntitySearch`
+  (`src/app/paletteSearch.ts`: по праву, от `ENTITY_MIN_CHARS` = 2 символов, после `SEARCH_DEBOUNCE_MS`, до
+  `ENTITY_LIMIT` = 5). Фильтр палитры — удобство, решает сервер.
+- **Горячие клавиши** (§4.2) — `useShortcut` / `ShortcutsProvider` (`src/ui/shortcuts`, `admin-ui.md`). Связка:
+  Ctrl/⌘+K открывает палитру через `useShortcut` (и при открытой подсказке), `g x` регистрируются из `shortcut` команд
+  `sectionsFor(me)` с правом и «только с компьютера» (`CommandShortcuts`), `?` — шпаргалка, `/` — одной регистрацией
+  (без конфликта), `CommandContext.openShortcuts` — `useOpenShortcutsHelp()` после закрытия палитры (шпаргалку с
+  переключателем односимвольных открыть можно всегда, WCAG 2.1.4). Устройство — `admin-ui.md` «Каркас».
 
 ## Экран: данные, списки, формы
 - **Данные экрана** — только `DataState({ query, skeleton, isEmpty?, empty?, scope?, pending?, children })`
@@ -124,6 +150,10 @@ paths:
 - **Черновики форм** — `useDraft(<путь маршрута>, me.id)` (sessionStorage) внутри каркаса — черновик сотрудника: другой
   за тем же компьютером (сессия истекла, вошёл другой) его не видит, а `SessionProvider` при входе стирает чужие
   (`claimDrafts`); без владельца — только экраны входа (почта до входа). Пароли и коды в черновик не класть.
+- **Недавнее палитры** — `localStorage['wf.admin.recent.<staffId>']` (`src/app/recent.ts`: `pushRecent`, `readRecent`,
+  не больше `RECENT_LIMIT` = 8, запись — только `{ kind, id, label, path }`, у сотрудника `label` — `display_name`, без
+  почты; storage бросает — недавнего нет): `claimRecent(me.id)` при входе (`SessionProvider`) стирает чужие ключи,
+  `clearRecent()` — при выходе (`useLogout`). Пункт, к которому пропал доступ, не показывается.
 - **Общее устройство** — без сессии или другой сотрудник `SessionProvider` стирает кэш запросов, кроме me, и кэш
   мутаций: данные прошлого сотрудника не видны следующему; каркас — `key={me.id}`. Одноразовые запросы —
   `meta: ONE_SHOT` (`app/query.ts`): смена сотрудника их удаляет, а не перезапускает. Секреты (пароли, коды, секрет 2FA)
@@ -184,5 +214,7 @@ paths:
   Popover API в jsdom — прокладка `src/test/setup.ts` (`data-popover-open`, событие `toggle`, `:popover-open` в
   `matches`, тестовый `<style>` поверх таблицы jsdom): проверять видимость и роли, а не факт вызова. Живые области
   тостов без ролей: `getByRole('alert')` в тестах экранов находит только их ошибки.
+- Горячие клавиши в тесте — `fireEvent.keyDown(target, { code, key })` (совпадение по `code`: `g c` в русской
+  раскладке — `code: 'KeyG'`, `key: 'п'`), последовательность с паузой — фейковые таймеры.
 - Vitest берёт только `*.test.*` (`test.include`); живой e2e — `admin-e2e.md`; режим `shots` и витрина (каждый компонент
   `ui/index.ts` — с `*.stories.tsx`) — `admin-ui.md`.

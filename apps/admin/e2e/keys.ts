@@ -22,8 +22,13 @@ export const KEYS = [
   'auth.setup.finish',
   // каркас
   'nav.logout',
+  'nav.home', // «Главная» — стартовая после входа (UF4.1)
   'nav.audit',
   'nav.approvals',
+  // палитра: кнопка «Искать везде», окно и поле (UF4.5)
+  'palette.open',
+  'palette.title',
+  'palette.input',
   // «Роли и доступ» → «Пригласить»
   'staff.invite.open',
   'staff.invite.email',
