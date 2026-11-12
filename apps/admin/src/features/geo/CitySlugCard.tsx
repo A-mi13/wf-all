@@ -2,6 +2,7 @@ import { useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import type { ApiError } from '../../api/client';
 import type { components } from '../../api/gen/admin';
+import { useLeaveGuard } from '../../app/leaveGuard';
 import { useDateTime } from '../../i18n/format';
 import { Button, Form, TextField, useErrorText, useToast } from '../../ui';
 import styles from './geo.module.css';
@@ -28,6 +29,8 @@ export function CitySlugCard({ city, readOnly }: { city: GeoCityDetails; readOnl
     resetOptions: { keepDirtyValues: true },
   });
   const update = useUpdateCity(city.id, ['geo', 'city', city.id, 'slug']);
+  // несохранённый ввод — уход со страницы спрашивает (спека UI-фундамента §4.11); ответ сервера сбрасывает dirty
+  useLeaveGuard(form.formState.isDirty);
 
   const submit = async ({ slug }: { slug: string }) => {
     if (readOnly || slug === city.slug) return;

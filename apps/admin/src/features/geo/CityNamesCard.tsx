@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import type { components } from '../../api/gen/admin';
+import { useLeaveGuard } from '../../app/leaveGuard';
 import type { Locale } from '../../i18n/messages';
 import { Button, ConfirmDialog, Form, StatusChip, TextField, useToast } from '../../ui';
 import styles from './geo.module.css';
@@ -54,6 +55,8 @@ function NamesForm({ city, readOnly }: { city: GeoCityDetails; readOnly?: boolea
   const form = useForm<Values>({ values, resetOptions: { keepDirtyValues: true } });
   const save = useUpdateCity(city.id, ['geo', 'city', city.id, 'names']);
   const remove = useUpdateCity(city.id, ['geo', 'city', city.id, 'names', 'delete']);
+  // несохранённый ввод — уход со страницы спрашивает (спека UI-фундамента §4.11); ответ сервера сбрасывает dirty
+  useLeaveGuard(form.formState.isDirty);
   const [deleting, setDeleting] = useState<Locale | null>(null);
   // Перевод удалён — кнопки «Удалить перевод» (открывателя окна) больше нет, и фокус упал бы на body
   // (ревью G8, m4): ставим его на поле этого языка. Окно закрывается и кнопка исчезает в разных

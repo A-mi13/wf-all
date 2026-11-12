@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { type UseFormReturn, useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
-import type { ApiError } from '../../api/client';
+import { type ApiError, isApiError } from '../../api/client';
 import type { components } from '../../api/gen/admin';
+import { useUndoable } from '../../api/undo';
+import { useLeaveGuard } from '../../app/leaveGuard';
 import {
   Button,
   type Column,
@@ -16,7 +18,12 @@ import {
   useToast,
 } from '../../ui';
 import styles from './geo.module.css';
-import { useCreateDistrict, useUpdateDistrict } from './mutations';
+import {
+  type DistrictEdit,
+  useCreateDistrict,
+  useDistrictUndo,
+  useUpdateDistrict,
+} from './mutations';
 import { useGeoDistricts } from './queries';
 
 type GeoDistrict = components['schemas']['GeoDistrict'];
@@ -32,6 +39,17 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
   const errorText = useErrorText();
   const list = useGeoDistricts(cityId);
   const update = useUpdateDistrict(cityId);
+  // «В архив»/«Вернуть» — с «Отменить» в тосте (спека UI-фундамента §4.10): обратное — тот же PATCH с прежним
+  // archived новым ключом. Ошибка прямого — тост экрана; размонтированный экран (ушли, сменился сотрудник) её не
+  // показывает — как колбэк вызова mutate раньше.
+  const undoable = useUndoable(update, useDistrictUndo(cityId));
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<GeoDistrict | null>(null);
   // Архив и возврат меняют порядок строк (архивные — внизу): React переставляет строку в DOM, и в
@@ -54,17 +72,18 @@ export function DistrictsCard({ cityId, canEdit }: { cityId: string; canEdit: bo
   const setArchived = (d: GeoDistrict, archived: boolean) => {
     setRefocus(null);
     setPendingId(d.id);
-    update.mutate(
-      { id: d.id, patch: { archived } },
-      {
-        onSuccess: () => {
-          toast.success(t(archived ? 'archived_toast' : 'restored_toast', { name: d.name }));
-          setRefocus(d.id);
+    undoable
+      .mutateAsync(
+        { id: d.id, patch: { archived }, previous: { archived: !archived } },
+        { successText: t(archived ? 'archived_toast' : 'restored_toast', { name: d.name }) },
+      )
+      .then(
+        () => setRefocus(d.id),
+        (e: unknown) => {
+          if (alive.current) toast.error(errorText(isApiError(e) ? e : 'internal'));
         },
-        onError: (e) => toast.error(errorText(e)),
-        onSettled: () => setPendingId(null),
-      },
-    );
+      )
+      .finally(() => setPendingId(null));
   };
 
   const columns: Column<GeoDistrict>[] = [
@@ -166,6 +185,8 @@ function AddDistrict({ cityId }: { cityId: string }) {
   const form = useForm<{ name: string }>({ defaultValues: { name: '' } });
   const create = useCreateDistrict(cityId);
   const onError = useNameTaken()(form);
+  // набранное имя — ввод: уход со страницы спрашивает (§4.11); после «Добавить» форма чистая
+  useLeaveGuard(form.formState.isDirty);
   const submit = async ({ name }: { name: string }) => {
     const d = await create.mutateAsync(name);
     toast.success(t('added', { name: d.name }));
@@ -199,36 +220,59 @@ function RenameDistrict({
 }) {
   const t = useTranslations('geo.districts');
   const update = useUpdateDistrict(cityId);
+  // переименование — с «Отменить» в тосте (§4.10): обратное — прежнее имя новым ключом
+  const undoable = useUndoable(update, useDistrictUndo(cityId));
+  // изменённое имя — Esc, фон и «Закрыть» спрашивают (Overlay.dirty), уход мимо окна — useLeaveGuard формы (§4.11)
+  const [dirty, setDirty] = useState(false);
   return (
     <Modal
       open={district !== null}
       onClose={onClose}
       title={t('rename_title')}
       dismissible={!update.isPending}
+      dirty={dirty}
     >
-      {district && <RenameForm district={district} update={update} onClose={onClose} />}
+      {district && (
+        <RenameForm
+          district={district}
+          rename={undoable.mutateAsync}
+          busy={update.isPending}
+          onClose={onClose}
+          onDirty={setDirty}
+        />
+      )}
     </Modal>
   );
 }
 
 function RenameForm({
   district,
-  update,
+  rename,
+  busy,
   onClose,
+  onDirty,
 }: {
   district: GeoDistrict;
-  update: ReturnType<typeof useUpdateDistrict>;
+  rename: ReturnType<typeof useUndoable<DistrictEdit, GeoDistrict>>['mutateAsync'];
+  busy: boolean;
   onClose: () => void;
+  onDirty: (dirty: boolean) => void;
 }) {
   const t = useTranslations('geo.districts');
   const ta = useTranslations('actions');
-  const toast = useToast();
   const form = useForm<{ name: string }>({ defaultValues: { name: district.name } });
   const onError = useNameTaken()(form);
+  const dirty = form.formState.isDirty;
+  useLeaveGuard(dirty);
+  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  // окно закрыто — снять признак (Modal размонтирует тело)
+  useEffect(() => () => onDirty(false), [onDirty]);
   const submit = async ({ name }: { name: string }) => {
     if (name === district.name) return onClose();
-    await update.mutateAsync({ id: district.id, patch: { name } });
-    toast.success(t('renamed'));
+    await rename(
+      { id: district.id, patch: { name }, previous: { name: district.name } },
+      { successText: t('renamed') },
+    );
     onClose();
   };
   return (
@@ -240,7 +284,7 @@ function RenameForm({
         rules={{ required: true, maxLength: 100 }}
       />
       <div className={styles.row}>
-        <Button type="submit" loading={update.isPending}>
+        <Button type="submit" loading={busy}>
           {ta('save')}
         </Button>
       </div>

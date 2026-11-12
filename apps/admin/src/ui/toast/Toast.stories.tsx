@@ -4,6 +4,7 @@ import type { Story, StoryMeta } from '../../showcase/csf';
 import { Button } from '../Button';
 import { ConfirmDialog } from '../overlay/ConfirmDialog';
 import { Drawer } from '../overlay/Drawer';
+import { Modal } from '../overlay/Modal';
 import { LeaveDialog } from '../overlay/Overlay';
 import { useToast } from './context';
 
@@ -146,3 +147,31 @@ export const OverTallConfirm: Story = () => {
   );
 };
 OverTallConfirm.meta = { title: 'UI/Toast', layout: true };
+
+// Высокое окно по центру С ПОДВАЛОМ (поиск места, «Привязать к GeoNames») и тост с «Отменить» (ревью UF2b хвосты,
+// r2-2 → r2-1): окно упирается в низ экрана — тост не должен лечь на подвал и низ тела.
+export const OverTallModalFooter: Story = () => {
+  const t = useTranslations();
+  const toast = useToast();
+  useOnce(() => {
+    toast.success(t('staff.drawer.disable.done'), { undo: async () => undefined });
+  });
+  return (
+    <Modal
+      open
+      onClose={() => undefined}
+      title={t('staff.drawer.title')}
+      footer={
+        <>
+          <Button variant="secondary">{t('actions.cancel')}</Button>
+          <Button>{t('actions.save')}</Button>
+        </>
+      }
+    >
+      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => (
+        <p key={i}>{t('staff.drawer.journal')}</p>
+      ))}
+    </Modal>
+  );
+};
+OverTallModalFooter.meta = { title: 'UI/Toast', layout: true };

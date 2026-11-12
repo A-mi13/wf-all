@@ -3,12 +3,14 @@ import { isApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
+import type { UndoInverse } from '../../api/undo';
 import { useLocale } from '../../i18n/locale';
 import { CITIES_KEY, GEO_PLACES_KEY, geoKeys } from './queries';
 
 type GeoCityDetails = components['schemas']['GeoCityDetails'];
 type GeoCityPatch = components['schemas']['GeoCityPatch'];
 type GeoDistrictPatch = components['schemas']['GeoDistrictPatch'];
+type GeoDistrict = components['schemas']['GeoDistrict'];
 
 // Правки города и районов (план B, Task 19). Ответ правки города — актуальная карточка целиком: она
 // ложится в кэш getGeoCity (без второго запроса), списки и подписи городов (CITIES_KEY, кроме
@@ -116,11 +118,48 @@ export function useCreateDistrict(cityId: string) {
   );
 }
 
+// Правка района с «Отменить» (спека UI-фундамента §4.10, m11): previous — прежние значения тех же полей (экран
+// кладёт их из строки до правки: имя, archived), обратное — PATCH с ними новым ключом. version в GeoDistrictPatch
+// нет — «последняя запись побеждает», кода *_stale у района нет. Исход обратного неизвестен — районы
+// перечитываются, факт — по полям previous у района на сервере.
+export type DistrictEdit = { id: string; patch: GeoDistrictPatch; previous: GeoDistrictPatch };
+
+export function useDistrictUndo(cityId: string): UndoInverse<DistrictEdit, GeoDistrict> {
+  const api = useApi();
+  const changed = useDistrictsChanged(cityId);
+  return {
+    run: async (v, _result, key) => {
+      try {
+        await unwrap(
+          api.PATCH('/v1/geo/cities/{cityId}/districts/{districtId}', {
+            params: { path: { cityId, districtId: v.id }, header: { 'Idempotency-Key': key } },
+            body: v.previous,
+          }),
+        );
+      } finally {
+        void changed();
+      }
+    },
+    reread: async (v) => {
+      const list = await unwrap(
+        api.GET('/v1/geo/cities/{cityId}/districts', { params: { path: { cityId } } }),
+      );
+      void changed();
+      const d = list.items.find((i) => i.id === v.id);
+      if (!d) return 'not_undone';
+      const nameOk = v.previous.name === undefined || d.name === v.previous.name;
+      const archivedOk =
+        v.previous.archived === undefined || (d.archived_at !== null) === v.previous.archived;
+      return nameOk && archivedOk ? 'undone' : 'not_undone';
+    },
+  };
+}
+
 export function useUpdateDistrict(cityId: string) {
   const api = useApi();
   const changed = useDistrictsChanged(cityId);
   return useAdminMutation(
-    ({ id, patch }: { id: string; patch: GeoDistrictPatch }, key: string) =>
+    ({ id, patch }: DistrictEdit, key: string) =>
       unwrap(
         api.PATCH('/v1/geo/cities/{cityId}/districts/{districtId}', {
           params: { path: { cityId, districtId: id }, header: { 'Idempotency-Key': key } },

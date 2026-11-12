@@ -287,14 +287,14 @@ test('тело панели при тосте с «Отменить» — отс
 // центру без подвала (ConfirmDialog — действия в теле) доходило до края окна, а тост (bottom: space-6) — над его
 // низом. Пока виден тост с «Отменить», окно ниже: зазор под ним = поле корня + половина свободного места ≥ space-6 +
 // toast + space-2. Обычное окно (ниже предела) высоту не меняет (m3).
-test('широкий экран: тост с «Отменить» — окно по центру без подвала не доходит до тоста', () => {
+test('широкий экран: тост с «Отменить» — окно по центру (с подвалом и без) не доходит до тоста', () => {
   const css = read('ui/overlay/Overlay.module.css').replace(/\/\*[\s\S]*?\*\//g, '');
   const at = css.indexOf(`@media (min-width: ${tokens.breakpoint.mobile}px)`);
   expect(at).toBeGreaterThanOrEqual(0);
   const m = css
     .slice(at)
     .match(
-      /:global\(:root\[data-toast-open\]:not\(\[data-overlay-footer\]\)\) \.center\s*\{[^}]*max-height:\s*calc\(\s*100% - 2 \* \(var\(--wf-size-toast\) \+ var\(--wf-space-6\) \+ var\(--wf-space-2\) - var\(--wf-space-4\)\)\s*\)/,
+      /:global\(:root\[data-toast-open\]\) \.center\s*\{[^}]*max-height:\s*calc\(\s*100% - 2 \* \(var\(--wf-size-toast\) \+ var\(--wf-space-6\) \+ var\(--wf-space-2\) - var\(--wf-space-4\)\)\s*\)/,
     );
   expect(m).not.toBeNull();
   // поле корня у окна по центру — space-4 (от него считается предел)
@@ -302,6 +302,34 @@ test('широкий экран: тост с «Отменить» — окно �
     /padding:\s*var\(--wf-space-4\)/,
   );
   expect(rule('ui/toast/Toast.module.css', '.region')).toMatch(/bottom:\s*var\(--wf-space-6\)/);
+});
+
+// Ревью UF2b хвосты, r2-1 (снимок Toast:OverTallModalFooter до правки: на 1440×900 и 390 тост лёг на кнопки
+// подвала): подвал окна по центру не у края экрана — отступ «над подвалом» (overlay-footer + space-2 от края) попадал
+// в подвал любого окна, чей низ ближе ~170 px к краю. Окно по центру с подвалом — тосты на обычном месте (под окном),
+// а пока виден тост с «Отменить», окно ниже предела: на широком — общий с окном без подвала (выше), на телефоне —
+// зазор под окном ≥ space-2 + toast + space-2 (тост у края, таббар закрыт оверлеем).
+test('окно по центру с подвалом: тосты под окном, при «Отменить» окно ниже предела (широкий и телефон)', () => {
+  const toastCss = read('ui/toast/Toast.module.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const mobileAt = toastCss.indexOf('@media (max-width: 767.98px)');
+  expect(mobileAt).toBeGreaterThanOrEqual(0);
+  const wide = toastCss.slice(0, mobileAt);
+  const footerAt = wide.search(/:global\(:root\[data-overlay-footer\]\) \.region\s*\{/);
+  const centerWide = wide.search(
+    /:global\(:root\[data-overlay-footer='center'\]\) \.region\s*\{[^}]*bottom:\s*var\(--wf-space-6\)/,
+  );
+  // позже общего правила подвала (специфичность равная — решает порядок)
+  expect(footerAt).toBeGreaterThanOrEqual(0);
+  expect(centerWide).toBeGreaterThan(footerAt);
+  expect(toastCss.slice(mobileAt)).toMatch(
+    /:global\(:root\[data-overlay-footer='center'\]\) \.region\s*\{[^}]*bottom:\s*var\(--wf-space-2\)/,
+  );
+  const overlayCss = read('ui/overlay/Overlay.module.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const at = overlayCss.indexOf('@media (max-width: 767.98px)');
+  expect(at).toBeGreaterThanOrEqual(0);
+  expect(overlayCss.slice(at)).toMatch(
+    /:global\(:root\[data-toast-open\]\[data-overlay-footer='center'\]\) \.center\s*\{[^}]*max-height:\s*calc\(\s*100% - 2 \* \(var\(--wf-size-toast\) \+ var\(--wf-space-2\) \+ var\(--wf-space-2\) - var\(--wf-space-4\)\)\s*\)/,
+  );
 });
 
 // Ревью UF2b/II-A, I1: на телефоне открыт оверлей без подвала (LeaveDialog, ConfirmDialog — действия в теле) — область
@@ -350,4 +378,14 @@ test('страница на телефоне — scroll-padding-block-end = та
 // каждой странице. Сброс — в глобальном CSS, вместе с фоном документа.
 test('body без отступа браузера', () => {
   expect(rule('ui/global.css', 'body')).toMatch(/margin:\s*0\s*;/);
+});
+
+// Ревью UF2b/II хвосты, r2-2: строк нет — после «Снять выбор»/«Закрыть» фокус ставится на корень таблицы с временным
+// tabindex="-1" (не цель Tab и щелчка). Программный фокус после нажатия клавиши — :focus-visible, и браузер обводил
+// бы всю таблицу. Кольца у корня нет: это точка возврата фокуса, а не элемент управления; первый Tab — дальше по
+// порядку. Обычные элементы таблицы своё кольцо сохраняют.
+test('корень таблицы с временным tabindex="-1" — без кольца фокуса на всю таблицу', () => {
+  expect(rule('ui/table/DataTable.module.css', ".root[tabindex='-1']:focus")).toMatch(
+    /outline:\s*none/,
+  );
 });

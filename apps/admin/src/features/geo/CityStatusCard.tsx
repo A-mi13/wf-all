@@ -1,6 +1,7 @@
 import { useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import type { components } from '../../api/gen/admin';
+import { useLeaveGuard } from '../../app/leaveGuard';
 import { Button, Form, SelectField, useToast } from '../../ui';
 import styles from './geo.module.css';
 import { useUpdateCity } from './mutations';
@@ -25,6 +26,8 @@ export function CityStatusCard({ city, readOnly }: { city: GeoCityDetails; readO
     resetOptions: { keepDirtyValues: true },
   });
   const update = useUpdateCity(city.id, ['geo', 'city', city.id, 'status']);
+  // несохранённый ввод — уход со страницы спрашивает (спека UI-фундамента §4.11); ответ сервера сбрасывает dirty
+  useLeaveGuard(form.formState.isDirty);
 
   const submit = async ({ status }: { status: string }) => {
     if (readOnly) return;

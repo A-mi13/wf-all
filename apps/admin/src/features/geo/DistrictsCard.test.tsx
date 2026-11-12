@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
+import { problem } from '../../test/problem';
 import { renderApp } from '../../test/app';
 import { cityEditServer, district, meGeoModerator } from '../../test/geo';
 import { CITY_OWN } from '../../test/me';
@@ -245,5 +246,165 @@ describe('районы', () => {
     const card = screen.getByRole('region', { name: 'Районы' });
     expect(await within(card).findByText('Районов нет')).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Добавить район' })).toBeInTheDocument();
+  });
+});
+
+// «Отменить» в тосте (спека UI-фундамента §4.10, план UF2b.10): «В архив»/«Вернуть» и переименование района —
+// useUndoable. Обратное — новым ключом (новое действие, своя запись в журнале), прежнее значение — из переменных
+// прямого (имя до переименования), а не из перечитанного списка. У района нет version в GeoDistrictPatch — кода
+// *_stale нет («последняя запись побеждает», m11); исход обратного неизвестен — перечитать районы и сказать факт.
+describe('«Отменить»', () => {
+  const undoButton = () => screen.getByRole('button', { name: 'Отменить' });
+
+  test('«В архив» → «Отменить»: {archived: false} новым ключом, район снова действует', async () => {
+    const { table, user, sent } = await open();
+    await user.click(within(table).getByRole('button', { name: 'В архив: Промышленный' }));
+    await screen.findByText('Район «Промышленный» в архиве');
+    await user.click(undoButton());
+    expect(await screen.findByText('Отменено')).toBeInTheDocument();
+    await waitFor(() => expect(rows(table)[0]).toHaveTextContent('действует'));
+    expect(sent.map((s) => s.body)).toEqual([{ archived: true }, { archived: false }]);
+    expect(sent[1]?.path).toBe(sent[0]?.path);
+    expect(sent[1]?.key).toBeTruthy();
+    expect(sent[1]?.key).not.toBe(sent[0]?.key);
+  });
+
+  test('«Вернуть» → «Отменить»: {archived: true}, район снова в архиве', async () => {
+    const { table, user, sent } = await open({ districts: [ARCHIVED] });
+    await user.click(within(table).getByRole('button', { name: 'Вернуть: Старый центр' }));
+    await screen.findByText('Район «Старый центр» возвращён');
+    await user.click(undoButton());
+    expect(await screen.findByText('Отменено')).toBeInTheDocument();
+    await waitFor(() => expect(rows(table)[0]).toHaveTextContent('в архиве'));
+    expect(sent.map((s) => s.body)).toEqual([{ archived: false }, { archived: true }]);
+  });
+
+  test('переименование → «Отменить»: прежнее имя новым ключом', async () => {
+    const { table, user, sent } = await open();
+    await user.click(within(table).getByRole('button', { name: 'Переименовать: Промышленный' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Переименовать район' });
+    const field = within(dialog).getByRole('textbox', { name: 'Название' });
+    await user.clear(field);
+    await user.type(field, 'Юго-Западный');
+    await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await screen.findByText('Район переименован');
+    await waitFor(() => expect(table).toHaveTextContent('Юго-Западный'));
+    await user.click(undoButton());
+    expect(await screen.findByText('Отменено')).toBeInTheDocument();
+    await waitFor(() => expect(table).toHaveTextContent('Промышленный'));
+    expect(sent.map((s) => s.body)).toEqual([{ name: 'Юго-Западный' }, { name: 'Промышленный' }]);
+    expect(sent[1]?.key).not.toBe(sent[0]?.key);
+  });
+
+  test('обратное 409 geo.district_name_taken — тост по коду, район остался в архиве, повтора нет', async () => {
+    const { table, user, sent, state } = await open();
+    await user.click(within(table).getByRole('button', { name: 'В архив: Промышленный' }));
+    await screen.findByText('Район «Промышленный» в архиве');
+    // за эти секунды другой сотрудник завёл действующий район с тем же именем
+    state.districts = [
+      ...state.districts,
+      district({ id: 'c1d9e3a7-5b2f-4a8c-8e6d-0f4b7a2c9e18', name: 'Промышленный' }),
+    ];
+    await user.click(undoButton());
+    expect(await screen.findByText('Район с таким названием уже есть')).toBeInTheDocument();
+    expect(screen.queryByText('Отменено')).toBeNull();
+    expect(sent).toHaveLength(2);
+    expect(state.districts[0]?.archived_at).not.toBeNull();
+  });
+
+  test('обратное оборвалось, сервер его исполнил — перечитать районы: «Отменено», без второго запроса', async () => {
+    // ответ потерян, а на сервере обратное прошло: обработчик исполняет его и отвечает 502
+    const held: { state?: { districts: ReturnType<typeof district>[] } } = {};
+    const srv = await open({
+      answer: (op, body) => {
+        if (op !== 'patchDistrict' || (body as { archived?: boolean }).archived !== false) return;
+        held.state!.districts = held.state!.districts.map((d) => ({ ...d, archived_at: null }));
+        return problem(502, 'internal');
+      },
+    });
+    held.state = srv.state;
+    const { table, user, sent } = srv;
+    await user.click(within(table).getByRole('button', { name: 'В архив: Промышленный' }));
+    await screen.findByText('Район «Промышленный» в архиве');
+    await user.click(undoButton());
+    expect(await screen.findByText('Отменено')).toBeInTheDocument();
+    await waitFor(() => expect(rows(table)[0]).toHaveTextContent('действует'));
+    expect(sent).toHaveLength(2);
+  });
+
+  test('обратное оборвалось и не исполнено — «Не отменено», без второго запроса', async () => {
+    const { table, user, sent } = await open({
+      answer: (op, body) =>
+        op === 'patchDistrict' && (body as { archived?: boolean }).archived === false
+          ? problem(502, 'internal')
+          : undefined,
+    });
+    await user.click(within(table).getByRole('button', { name: 'В архив: Промышленный' }));
+    await screen.findByText('Район «Промышленный» в архиве');
+    await user.click(undoButton());
+    expect(await screen.findByText('Не отменено: действие осталось сделанным')).toBeInTheDocument();
+    expect(rows(table)[0]).toHaveTextContent('в архиве');
+    expect(sent).toHaveLength(2);
+  });
+});
+
+// Защита от потери (спека UI-фундамента §4.11): окно переименования с изменённым именем — Esc спрашивает
+// (Modal.dirty), браузерная «Назад» — ровно один вопрос (useLeaveGuard формы); после «Сохранить» вопроса нет.
+describe('переименование: защита от потери', () => {
+  const leaveDialogs = () => screen.queryAllByRole('dialog', { name: 'Уйти без сохранения?' });
+
+  async function typed(opts: { history?: 'browser' } = {}) {
+    cityEditServer();
+    // browser history: «Назад» — только на свою запись (город открыт из списка), записи окна живут весь файл
+    const app = renderApp('/geo/cities', { me: meGeoModerator, ...opts });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('link', { name: 'Открыть: Ставрополь' }));
+    await screen.findByRole('heading', { level: 1, name: 'Ставрополь' });
+    const table = await screen.findByRole('table', { name: 'Районы города' });
+    await user.click(within(table).getByRole('button', { name: 'Переименовать: Промышленный' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Переименовать район' });
+    const field = within(dialog).getByRole('textbox', { name: 'Название' });
+    await user.type(field, '-2');
+    return { app, user, dialog, field };
+  }
+
+  test('изменённое имя → Esc — «Уйти без сохранения?»; «Остаться» — ввод на месте', async () => {
+    const { user, field } = await typed();
+    await user.keyboard('{Escape}');
+    const ask = await screen.findByRole('dialog', { name: 'Уйти без сохранения?' });
+    await user.click(within(ask).getByRole('button', { name: 'Остаться' }));
+    await waitFor(() => expect(leaveDialogs()).toHaveLength(0));
+    expect(screen.getByRole('dialog', { name: 'Переименовать район' })).toBeInTheDocument();
+    expect(field).toHaveValue('Промышленный-2');
+  });
+
+  test('изменённое имя → браузерная «Назад» — ровно один вопрос, «Остаться» — адрес и ввод на месте', async () => {
+    const { app, user, field } = await typed({ history: 'browser' });
+    const at = app.at();
+    act(() => window.history.back());
+    await waitFor(() => expect(leaveDialogs()).toHaveLength(1));
+    await user.click(within(leaveDialogs()[0]!).getByRole('button', { name: 'Остаться' }));
+    await waitFor(() => expect(leaveDialogs()).toHaveLength(0));
+    expect(app.at()).toBe(at);
+    expect(field).toHaveValue('Промышленный-2');
+  });
+});
+
+describe('добавление района: защита от потери', () => {
+  test('набранное имя → «Назад: Города и запуск» — вопрос; после «Добавить» — без вопроса', async () => {
+    const { user, card, app } = await open();
+    const field = within(card).getByRole('textbox', { name: 'Новый район' });
+    await user.type(field, 'Северный');
+    await user.click(screen.getByRole('link', { name: 'Назад: Города и запуск' }));
+    const ask = await screen.findByRole('dialog', { name: 'Уйти без сохранения?' });
+    await user.click(within(ask).getByRole('button', { name: 'Остаться' }));
+    expect(field).toHaveValue('Северный');
+    await user.click(within(card).getByRole('button', { name: 'Добавить район' }));
+    await screen.findByText('Район «Северный» добавлен');
+    await user.click(screen.getByRole('link', { name: 'Назад: Города и запуск' }));
+    await screen.findByRole('heading', { level: 1, name: 'Города и запуск' });
+    expect(app.at()).toBe('/geo/cities');
+    expect(screen.queryByRole('dialog', { name: 'Уйти без сохранения?' })).toBeNull();
   });
 });

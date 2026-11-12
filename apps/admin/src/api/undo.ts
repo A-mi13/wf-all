@@ -32,21 +32,27 @@ function staffNow(queryClient: QueryClient): string | null {
 // 4xx — по коду (исходное осталось сделанным); 409 *_stale — «уже изменили», отмены нет; неизвестный исход —
 // reread. Отмена не зависит от экрана: тост и запрос живут на уровне приложения (ушли со страницы — дойдёт).
 // Повтор отмены — только тем же ключом (общее правило мутаций): «Отменить» одноразовая, тост снят нажатием.
+// mutate — ошибку прямого показывает экран (onError мутации); mutateAsync — для формы и строки: промис прямого
+// (ошибка уходит вызывающему — Form раскладывает её по полям), тост «Отменить» — при успехе так же.
 export function useUndoable<V, R, C = unknown>(
   mutation: AdminMutationResult<R, V, C>,
   inverse: UndoInverse<V, R>,
-): { mutate(v: V, opts: { successText: string }): void } {
+): {
+  mutate(v: V, opts: { successText: string }): void;
+  mutateAsync(v: V, opts: { successText: string }): Promise<R>;
+} {
   const toast = useToast();
   const queryClient = useQueryClient();
   const t = useTranslations('ui.toast');
   const errorText = useErrorText();
   const { mutateAsync: run } = mutation;
 
-  const mutate = useCallback(
-    (v: V, { successText }: { successText: string }) => {
+  const mutateAsync = useCallback(
+    (v: V, { successText }: { successText: string }): Promise<R> => {
       // Промис действия, а не колбэк вызова mutate: TanStack глушит колбэк вызова, если наблюдателя нет (экран
-      // снят) или следующий mutate перезаписал опции (ревью UF2b/II-A, I2). Ошибку прямого показывает экран (onError).
-      run(v).then(
+      // снят) или следующий mutate перезаписал опции (ревью UF2b/II-A, I2).
+      const done = run(v);
+      done.then(
         (result) => {
           // запущенная отмена держит обратное своего рендера: экран мог уйти
           const inv = inverse;
@@ -89,8 +95,13 @@ export function useUndoable<V, R, C = unknown>(
         },
         () => {},
       );
+      return done;
     },
     [run, inverse, toast, queryClient, t, errorText],
   );
-  return { mutate };
+  const mutate = useCallback(
+    (v: V, opts: { successText: string }) => void mutateAsync(v, opts).catch(() => {}),
+    [mutateAsync],
+  );
+  return { mutate, mutateAsync };
 }

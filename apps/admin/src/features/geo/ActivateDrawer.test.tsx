@@ -568,4 +568,49 @@ describe('активация в адресе', () => {
     expect(app.at()).toBe('/geo/cities?country=RU');
     expect(screen.queryByRole('dialog', { name: 'Активировать город' })).toBeNull();
   });
+
+  // F5 на открытой панели (глубокая ссылка, метки state.panel нет): панель открыта; «Закрыть» — replace без ключа,
+  // фильтры на месте, из приложения не уводит (запись истории не добавлена).
+  test('F5 на ?activate=1 — панель открыта; «Закрыть» — адрес без activate, фильтры на месте', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities?country=RU&activate=1', {
+      me: meActivator,
+      history: 'browser',
+    });
+    const drawer = await screen.findByRole('dialog', { name: 'Активировать город' });
+    const length = window.history.length;
+    await userEvent.setup().click(within(drawer).getByRole('button', { name: 'Закрыть' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Активировать город' })).toBeNull(),
+    );
+    expect(app.at()).toBe('/geo/cities?country=RU');
+    expect(window.history.length).toBe(length);
+  });
+
+  test('открыта из списка → браузерная «Назад» — панель закрыта, фильтры на месте', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities?country=RU', { me: meActivator, history: 'browser' });
+    await openDrawer();
+    expect(window.location.search).toBe('?country=RU&activate=1');
+    await app.back();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Активировать город' })).toBeNull(),
+    );
+    expect(app.at()).toBe('/geo/cities?country=RU');
+  });
+
+  test('?activate=1 без права активации — ключ снят, панели нет', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities?activate=1', { me: meNoActivate });
+    await screen.findByRole('heading', { level: 1, name: 'Города и запуск' });
+    await waitFor(() => expect(app.at()).toBe('/geo/cities'));
+    expect(screen.queryByRole('dialog', { name: 'Активировать город' })).toBeNull();
+  });
 });
+
+const meNoActivate: Me = {
+  ...meOwner,
+  permissions: Object.fromEntries(
+    Object.entries(meActivator.permissions).filter(([k]) => k !== 'geo.cities.activate'),
+  ),
+};

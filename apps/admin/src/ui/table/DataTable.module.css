@@ -8,6 +8,13 @@
   font-family: var(--wf-font-body);
 }
 
+/* Точка возврата фокуса (r2-2): строк нет — после «Снять выбор»/«Закрыть» фокус на корне с временным tabindex="-1"
+   (BulkBar.focusAfterClose). Программный фокус после клавиши — :focus-visible: браузер обвёл бы всю таблицу. Корень
+   не элемент управления (не в Tab-порядке, атрибут снимается на blur) — кольца нет, первый Tab идёт дальше. */
+.root[tabindex='-1']:focus {
+  outline: none;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;

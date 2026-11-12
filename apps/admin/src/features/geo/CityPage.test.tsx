@@ -412,3 +412,77 @@ describe('статус', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Ставрополь' })).toBeInTheDocument();
   });
 });
+
+// Защита от потери (спека UI-фундамента §4.11, план UF2b.10): ввод в формах города (статус, адрес, названия) —
+// уход ссылкой «Назад» или браузерной «Назад» спрашивает «Уйти без сохранения?» ровно один раз; «Остаться» —
+// адрес и ввод на месте; сохранённое — не потеря, уход без вопроса.
+describe('защита от потери', () => {
+  const leaveDialogs = () => screen.queryAllByRole('dialog', { name: 'Уйти без сохранения?' });
+  const backLink = () => screen.getByRole('link', { name: 'Назад: Города и запуск' });
+
+  const edits = {
+    адрес: async (user: ReturnType<typeof userEvent.setup>) => {
+      const slug = within(section('Адрес в вебе')).getByRole('textbox', { name: 'Адрес (slug)' });
+      await user.type(slug, '-new');
+      return {
+        card: section('Адрес в вебе'),
+        kept: () => expect(slug).toHaveValue('stavropol-new'),
+      };
+    },
+    названия: async (user: ReturnType<typeof userEvent.setup>) => {
+      const en = within(section('Названия')).getByRole('textbox', { name: /English/ });
+      await user.clear(en);
+      await user.type(en, 'Stavropol City');
+      return { card: section('Названия'), kept: () => expect(en).toHaveValue('Stavropol City') };
+    },
+    статус: async (user: ReturnType<typeof userEvent.setup>) => {
+      const box = within(section('Статус')).getByRole('combobox', { name: 'Статус города' });
+      await pick(user, box, 'pilot');
+      return { card: section('Статус'), kept: () => expect(selectedText(box)).toBe('пилот') };
+    },
+  };
+
+  test.each(Object.keys(edits) as (keyof typeof edits)[])(
+    '%s: ввод → ссылка «Назад» — один вопрос, «Остаться» — ввод на месте; после «Сохранить» — без вопроса',
+    async (name) => {
+      cityEditServer();
+      const app = renderApp(`/geo/cities/${CITY_OWN}`, { me: meGeoAdmin });
+      await title();
+      const user = userEvent.setup();
+      const { card, kept } = await edits[name](user);
+      const at = app.at();
+      await user.click(backLink());
+      await waitFor(() => expect(leaveDialogs()).toHaveLength(1));
+      await user.click(within(leaveDialogs()[0]!).getByRole('button', { name: 'Остаться' }));
+      await waitFor(() => expect(leaveDialogs()).toHaveLength(0));
+      expect(app.at()).toBe(at);
+      kept();
+      await user.click(within(card).getByRole('button', { name: 'Сохранить' }));
+      await waitFor(() =>
+        expect(within(card).getByRole('button', { name: 'Сохранить' })).not.toHaveAttribute(
+          'aria-busy',
+          'true',
+        ),
+      );
+      await screen.findByText(/сохран[её]н/);
+      await user.click(backLink());
+      await screen.findByRole('heading', { level: 1, name: 'Города и запуск' });
+      expect(leaveDialogs()).toHaveLength(0);
+    },
+  );
+
+  test('ввод в адресе → браузерная «Назад» — ровно один вопрос; «Уйти» — список', async () => {
+    cityEditServer();
+    const app = renderApp('/geo/cities', { me: meGeoAdmin, history: 'browser' });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('link', { name: 'Открыть: Ставрополь' }));
+    await title();
+    await edits.адрес(user);
+    await app.back();
+    await waitFor(() => expect(leaveDialogs()).toHaveLength(1));
+    await user.click(within(leaveDialogs()[0]!).getByRole('button', { name: 'Уйти' }));
+    await screen.findByRole('heading', { level: 1, name: 'Города и запуск' });
+    await waitFor(() => expect(leaveDialogs()).toHaveLength(0));
+    expect(app.at()).toBe('/geo/cities');
+  });
+});
