@@ -92,8 +92,9 @@ export function useGeoDistricts(cityId: string) {
   });
 }
 
-// Все страны справочника (включённые и выключенные).
-export function useGeoCountries() {
+// Все страны справочника (включённые и выключенные). enabled — палитра (src/app/paletteSearch.ts) спрашивает их
+// только с правом и от 2 символов запроса; кэш общий с экранами.
+export function useGeoCountries(enabled = true) {
   const api = useApi();
   const locale = useLocale();
   return useQuery({
@@ -101,6 +102,7 @@ export function useGeoCountries() {
     queryFn: () =>
       unwrap(api.GET('/v1/geo/countries', { params: { header: { 'Accept-Language': locale } } })),
     staleTime: 60_000,
+    enabled,
   });
 }
 

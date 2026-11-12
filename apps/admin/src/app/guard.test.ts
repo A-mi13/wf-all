@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { meModerator, meOwner } from '../test/me';
 import { resolveRoute, safeReturn } from './guard';
 
 test('возврат — путь приложения с параметрами', () => {
@@ -37,4 +38,27 @@ test('без сессии — вход с возвратом; после явн�
     search: { return: '/staff?tab=sessions' },
   });
   expect(resolveRoute({ status: 'anonymous', signedOut: true }, loc)).toEqual({ to: '/login' });
+});
+
+// Стартовая после входа — главная для всех (спека UI-фундамента §4.13, план UF4.1); адрес из ?return= (письмо,
+// истёкшая сессия) важнее главной.
+test('вход без return — главная; с return — указанный экран', () => {
+  for (const me of [meOwner, meModerator]) {
+    const active = { status: 'active' as const, me, reauthRequired: false };
+    expect(resolveRoute(active, { pathname: '/login', href: '/login', search: {} })).toEqual({
+      to: '/',
+    });
+    expect(
+      resolveRoute(active, {
+        pathname: '/login',
+        href: '/login?return=%2Fstaff',
+        search: { return: '/staff' },
+      }),
+    ).toEqual({ href: '/staff' });
+  }
+});
+
+test('активный сотрудник на корне — главная открыта, без редиректа', () => {
+  const active = { status: 'active' as const, me: meOwner, reauthRequired: false };
+  expect(resolveRoute(active, { pathname: '/', href: '/', search: {} })).toBeNull();
 });

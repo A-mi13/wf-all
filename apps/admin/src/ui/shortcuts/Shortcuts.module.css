@@ -1,0 +1,66 @@
+/* Шпаргалка горячих клавиш (спека UI-фундамента §4.2): строка «действие — клавиши», переключатель под списком. */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-2) var(--wf-space-4);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.label {
+  color: var(--wf-color-text);
+}
+
+.keys {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-1);
+  color: var(--wf-color-text-secondary);
+}
+
+.then {
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+.kbd {
+  min-inline-size: var(--wf-space-6);
+  padding: 0 var(--wf-space-1);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-sm);
+  background: var(--wf-color-chip-bg);
+  color: var(--wf-color-text);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+  text-align: center;
+}
+
+.toggle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  margin-block-start: var(--wf-space-4);
+  padding-block-start: var(--wf-space-4);
+  border-block-start: 1px solid var(--wf-color-border);
+}
+
+.hint {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}

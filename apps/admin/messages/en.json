@@ -19,14 +19,66 @@
     "resetFilters": "Reset filters",
     "submitForApproval": "Send for confirmation"
   },
+  "palette": {
+    "title": "Search everywhere",
+    "open": "Search everywhere",
+    "key_mac": "⌘K",
+    "key_other": "Ctrl K",
+    "input": "Section, action, city or staff member",
+    "groups": {
+      "recent": "Recent",
+      "sections": "Sections",
+      "actions": "Actions",
+      "cities": "Cities",
+      "staff": "Staff",
+      "countries": "Countries"
+    },
+    "searching": "Searching…",
+    "error": "Search failed: {text}",
+    "needs_approval": "needs approval",
+    "empty": "Nothing found",
+    "count": "{count, plural, =0 {Nothing found} one {# result} other {# results}}",
+    "commands": {
+      "home": "Home",
+      "theme_system": "Theme: system",
+      "theme_light": "Theme: light",
+      "theme_dark": "Theme: dark",
+      "locale_ru": "Language: русский",
+      "locale_en": "Language: English",
+      "density_compact": "Table density: compact",
+      "density_normal": "Table density: normal",
+      "shortcuts": "Keyboard shortcuts"
+    },
+    "keywords": {
+      "home": "start dashboard overview",
+      "theme": "appearance colour color dark light",
+      "locale": "language russian english",
+      "density": "table rows compact",
+      "shortcuts": "keyboard hotkeys keys",
+      "logout": "logout sign out exit",
+      "audit": "log history journal",
+      "staff": "roles access team",
+      "approvals": "two-person pending",
+      "me": "profile password sessions",
+      "cities": "city launch",
+      "countries": "country",
+      "imports": "import geonames",
+      "versions": "app release update",
+      "flags": "feature toggles",
+      "invite": "new staff member",
+      "activate": "launch new city"
+    }
+  },
   "time": {
     "just_now": "just now"
   },
   "nav": {
     "groups": {
+      "overview": "Overview",
       "security": "Security",
       "directories": "Directories"
     },
+    "home": "Home",
     "audit": "Audit log",
     "staff": "Roles and access",
     "approvals": "Approvals",
@@ -46,6 +98,38 @@
     "flags": "Feature flags",
     "account": "Profile and settings",
     "account_open": "Profile and settings: {name}"
+  },
+  "home": {
+    "subtitle": "What needs attention",
+    "tiles_label": "Indicators",
+    "todo_title": "To do",
+    "incoming": {
+      "title": "Awaiting your decision",
+      "desktop": "Decide on a computer"
+    },
+    "mine": {
+      "title": "My requests",
+      "nearest": "Nearest deadline <time></time>"
+    },
+    "imports": {
+      "title": "GeoNames import failures",
+      "scope": "Across the last 5 runs",
+      "failed": "Import {country} failed <time></time>",
+      "stuck": "Import {country} running over 30 min, started <time></time>"
+    },
+    "waitlist": {
+      "title": "Cities on the waitlist"
+    },
+    "todo": {
+      "incoming": "{count, plural, one {Review # request} other {Review # requests}}",
+      "incoming_many": "Review requests: more than 99",
+      "mine": "{count, plural, one {# request awaits a second staff member} other {# requests await a second staff member}}",
+      "mine_many": "More than 99 requests await a second staff member",
+      "import_failed": "Open import {country}: last run failed",
+      "import_stuck": "Open import {country}: running over 30 min",
+      "waitlist": "View cities on the waitlist",
+      "codes": "{count, plural, one {# recovery code left} other {# recovery codes left}}"
+    }
   },
   "pages": {
     "login": {
@@ -187,6 +271,11 @@
     "option": "{code} — {name}"
   },
   "ui": {
+    "home": {
+      "tile_error": "Didn't load",
+      "calm_title": "All quiet",
+      "calm_text": "Nothing needs your attention"
+    },
     "password": {
       "show": "Show password",
       "hide": "Hide password"
@@ -264,6 +353,14 @@
     "copy": {
       "done": "Copied",
       "manual": "Copy it manually"
+    },
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "help": "Shortcut cheat sheet",
+      "escape": "Close the top window",
+      "then": "then",
+      "single": "Single-key shortcuts",
+      "single_hint": "Turn off if keys fire by accident (for example, with a screen reader). {mod}+K always works."
     }
   },
   "permissions": {

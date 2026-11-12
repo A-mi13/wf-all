@@ -1,0 +1,71 @@
+import type { Command } from '../../app/commands';
+import { paths } from '../../app/paths';
+
+// Команды палитры «Справочников» (спека UI-фундамента §4.1): только пути и ключи локалей — экран не импортировать
+// (страж src/app/commands.test.ts). «Активировать город» — переход на ?activate=1 (панель в адресе, UF2b.8).
+export const geoCommands: Command[] = [
+  {
+    id: 'section.cities',
+    group: 'section',
+    labelKey: 'nav.cities',
+    keywordsKey: 'palette.keywords.cities',
+    icon: 'city',
+    permission: 'geo.cities.read',
+    shortcut: 'g c',
+    path: paths.cities,
+    run: (ctx) => ctx.navigate({ to: paths.cities }),
+  },
+  {
+    id: 'section.countries',
+    group: 'section',
+    labelKey: 'nav.countries',
+    keywordsKey: 'palette.keywords.countries',
+    icon: 'globe',
+    permission: 'geo.countries.read',
+    shortcut: 'g o',
+    path: paths.countries,
+    run: (ctx) => ctx.navigate({ to: paths.countries }),
+  },
+  {
+    id: 'section.imports',
+    group: 'section',
+    labelKey: 'nav.imports',
+    keywordsKey: 'palette.keywords.imports',
+    icon: 'download',
+    permission: 'geo.imports.read',
+    shortcut: 'g i',
+    path: paths.imports,
+    run: (ctx) => ctx.navigate({ to: paths.imports }),
+  },
+  {
+    id: 'section.versions',
+    group: 'section',
+    labelKey: 'nav.versions',
+    keywordsKey: 'palette.keywords.versions',
+    icon: 'phone',
+    permission: 'platform.versions.read',
+    shortcut: 'g v',
+    path: paths.versions,
+    run: (ctx) => ctx.navigate({ to: paths.versions }),
+  },
+  {
+    id: 'section.flags',
+    group: 'section',
+    labelKey: 'nav.flags',
+    keywordsKey: 'palette.keywords.flags',
+    icon: 'flag',
+    permission: 'platform.flags.read',
+    shortcut: 'g f',
+    path: paths.flags,
+    run: (ctx) => ctx.navigate({ to: paths.flags }),
+  },
+  {
+    id: 'geo.activate',
+    group: 'action',
+    labelKey: 'geo.activate.open',
+    keywordsKey: 'palette.keywords.activate',
+    icon: 'city',
+    permission: 'geo.cities.activate',
+    run: (ctx) => ctx.navigate({ to: paths.cities, search: { activate: 1 } }),
+  },
+];

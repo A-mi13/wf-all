@@ -155,8 +155,8 @@ describe('настройка 2FA', () => {
     );
 
     await user.click(done);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
     expect(ctl.ack).toBe(1);
     expect(ctl.setup).toHaveLength(1);
     // после ухода с экрана в кэше нет ни секрета, ни кодов (запросы и мутации)
@@ -294,7 +294,7 @@ describe('перезагрузки и повторы', () => {
     expect(await screen.findByText('Второй фактор уже подтверждён')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: CODE })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Продолжить' }));
-    await page('Журнал действий');
+    await page('Главная');
     expect(ctl.ack).toBe(1);
   });
 
@@ -343,7 +343,7 @@ describe('перезагрузки и повторы', () => {
     });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Продолжить' }));
-    await page('Журнал действий');
+    await page('Главная');
     expect(ctl.ack).toBe(1);
   });
 

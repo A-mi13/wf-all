@@ -6,6 +6,7 @@ import { AppShell } from '../ui';
 import { forgetTablePositions } from '../ui/table/restore';
 import { useAccountCard } from './account';
 import { useLogout } from './logout';
+import { PaletteProvider } from './PaletteProvider';
 import { NAV } from './nav';
 import type { Me } from './permissions';
 import { paths } from './paths';
@@ -28,16 +29,19 @@ function ActiveShell({ me }: { me: Me }) {
   const incoming = useIncomingApprovalsCount();
   // строки, с которых уходили в карточки (возврат «Назад» — фокус), — только этого сотрудника
   useEffect(() => forgetTablePositions, []);
+  // палитра (Ctrl/⌘+K, «Искать везде») — под key={me.id}: другой сотрудник получает её закрытой и чистой
   return (
-    <AppShell
-      groups={NAV}
-      account={account}
-      counts={{ [paths.approvals]: incoming }}
-      onLogout={() => logout.mutate()}
-      loggingOut={logout.isPending}
-      profileMenu={<LocaleSwitcher />}
-    >
-      <Outlet />
-    </AppShell>
+    <PaletteProvider>
+      <AppShell
+        groups={NAV}
+        account={account}
+        counts={{ [paths.approvals]: incoming }}
+        onLogout={() => logout.mutate()}
+        loggingOut={logout.isPending}
+        profileMenu={<LocaleSwitcher />}
+      >
+        <Outlet />
+      </AppShell>
+    </PaletteProvider>
   );
 }

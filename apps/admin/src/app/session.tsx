@@ -15,6 +15,7 @@ import { claimDrafts, clearDrafts } from './draft';
 import { can, decide, type Decision, type Me } from './permissions';
 import { isMeKey, isOneShot, ME_KEY } from './query';
 import { reauthBus } from './reauth';
+import { claimRecent } from './recent';
 
 // Сессия на клиенте (спека сотрудников §9.3, R15, P20) — из GET /v1/staff/me; он же проверка
 // связи с admin-api (R13).
@@ -107,10 +108,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const reauthRequired = value.status === 'active' && value.reauthRequired;
 
   // Сессия сотрудника известна (setup, active): черновики других сотрудников этой вкладки стираются
-  // (⚠️ Task 14: после истечения сессии за компьютер мог сесть другой).
+  // (⚠️ Task 14: после истечения сессии за компьютер мог сесть другой); так же — недавнее палитры
+  // (localStorage, спека UI-фундамента §4.1, m14).
   const staffId = value.status === 'active' || value.status === 'setup' ? value.me.id : undefined;
   useEffect(() => {
-    if (staffId) claimDrafts(staffId);
+    if (!staffId) return;
+    claimDrafts(staffId);
+    claimRecent(staffId);
   }, [staffId]);
 
   // Без сессии (401: истекла, вышли): данные прошлого сотрудника — из кэша запросов и мутаций (в

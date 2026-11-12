@@ -25,6 +25,8 @@ const EXCEPTIONS: Record<string, string> = {
   ThemeProvider: 'провайдер: обёртка витрины (ShowcaseProvider) ставит его сама',
   ToastProvider: 'провайдер: обёртка витрины ставит его сама; тосты — toast/Toast.stories.tsx',
   DesktopOnlyNotice: 'пометка ActionGate — показана в gate/ActionGate.stories.tsx (UF2a.1)',
+  ShortcutsProvider:
+    'провайдер (слушатель клавиш) без вида; шпаргалка — shortcuts/ShortcutsHelp.stories.tsx',
 };
 
 type Export = { name: string; dir: string };

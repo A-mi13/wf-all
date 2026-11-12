@@ -13,6 +13,11 @@ import { can, type Me } from './permissions';
 export type { NavGroup, NavItem };
 
 export const NAV: NavGroup[] = [
+  // Главная «Что требует внимания» (спека UI-фундамента §4.13): первый пункт, своё — видна любой роли.
+  {
+    labelKey: 'nav.groups.overview',
+    items: [{ path: paths.root, labelKey: 'nav.home', permission: null, icon: 'home' }],
+  },
   {
     labelKey: 'nav.groups.security',
     items: [
@@ -75,7 +80,8 @@ export function navFor(me: Me): NavGroup[] {
   return filterNav(NAV, (p) => can(me, p));
 }
 
-// Стартовая страница — первый разрешённый раздел меню (P19). «Мой доступ» есть у всех.
-export function startPath(me: Me): string {
-  return navFor(me)[0]?.items[0]?.path ?? paths.me;
+// Стартовая страница после входа — главная для всех ролей (спека UI-фундамента §4.13, решение пользователя
+// 28.10); адрес из ?return= важнее (guard.ts).
+export function startPath(): string {
+  return paths.root;
 }

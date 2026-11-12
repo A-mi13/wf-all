@@ -22,11 +22,63 @@
   "time": {
     "just_now": "только что"
   },
+  "palette": {
+    "title": "Искать везде",
+    "open": "Искать везде",
+    "key_mac": "⌘K",
+    "key_other": "Ctrl K",
+    "input": "Раздел, действие, город или сотрудник",
+    "groups": {
+      "recent": "Недавнее",
+      "sections": "Разделы",
+      "actions": "Действия",
+      "cities": "Города",
+      "staff": "Сотрудники",
+      "countries": "Страны"
+    },
+    "searching": "Ищем…",
+    "error": "Не удалось найти: {text}",
+    "needs_approval": "на подтверждение",
+    "empty": "Ничего не нашлось",
+    "count": "{count, plural, =0 {Ничего не нашлось} one {# результат} few {# результата} many {# результатов} other {# результата}}",
+    "commands": {
+      "home": "Главная",
+      "theme_system": "Тема: системная",
+      "theme_light": "Тема: светлая",
+      "theme_dark": "Тема: тёмная",
+      "locale_ru": "Язык: русский",
+      "locale_en": "Язык: English",
+      "density_compact": "Плотность таблиц: компактная",
+      "density_normal": "Плотность таблиц: обычная",
+      "shortcuts": "Горячие клавиши"
+    },
+    "keywords": {
+      "home": "старт сводка home start dashboard",
+      "theme": "оформление цвет theme appearance",
+      "locale": "язык language english russian",
+      "density": "таблица строки density table compact",
+      "shortcuts": "клавиатура шпаргалка keyboard shortcuts hotkeys",
+      "logout": "выход logout sign out",
+      "audit": "журнал история audit log",
+      "staff": "сотрудники команда права staff roles access team",
+      "approvals": "две руки approvals pending",
+      "me": "профиль пароль сеансы my access profile password sessions",
+      "cities": "город запуск city cities launch",
+      "countries": "страна country countries",
+      "imports": "загрузка справочник import geonames",
+      "versions": "приложение обновление app versions",
+      "flags": "функции переключатели feature flags",
+      "invite": "новый сотрудник invite staff",
+      "activate": "запуск нового города activate city launch"
+    }
+  },
   "nav": {
     "groups": {
+      "overview": "Обзор",
       "security": "Безопасность",
       "directories": "Справочники"
     },
+    "home": "Главная",
     "audit": "Журнал действий",
     "staff": "Роли и доступ",
     "approvals": "Подтверждения",
@@ -46,6 +98,38 @@
     "flags": "Флаги функций",
     "account": "Профиль и настройки",
     "account_open": "Профиль и настройки: {name}"
+  },
+  "home": {
+    "subtitle": "Что требует внимания",
+    "tiles_label": "Индикаторы",
+    "todo_title": "Список дел",
+    "incoming": {
+      "title": "Ждут вашего решения",
+      "desktop": "Решать с компьютера"
+    },
+    "mine": {
+      "title": "Мои запросы",
+      "nearest": "Ближайший срок <time></time>"
+    },
+    "imports": {
+      "title": "Сбои импорта GeoNames",
+      "scope": "По последним 5 запускам",
+      "failed": "Импорт {country} упал <time></time>",
+      "stuck": "Импорт {country} идёт дольше 30 мин, начат <time></time>"
+    },
+    "waitlist": {
+      "title": "Города в ожидании"
+    },
+    "todo": {
+      "incoming": "{count, plural, one {Разобрать # запрос} few {Разобрать # запроса} many {Разобрать # запросов} other {Разобрать # запроса}}",
+      "incoming_many": "Разобрать запросы: больше 99",
+      "mine": "{count, plural, one {# запрос ждёт второго сотрудника} few {# запроса ждут второго сотрудника} many {# запросов ждут второго сотрудника} other {# запроса ждут второго сотрудника}}",
+      "mine_many": "Больше 99 запросов ждут второго сотрудника",
+      "import_failed": "Открыть импорт {country}: последний упал",
+      "import_stuck": "Открыть импорт {country}: идёт дольше 30 мин",
+      "waitlist": "Посмотреть города в ожидании",
+      "codes": "{count, plural, one {Остался # резервный код} few {Осталось # резервных кода} many {Осталось # резервных кодов} other {Осталось # резервного кода}}"
+    }
   },
   "pages": {
     "login": {
@@ -187,6 +271,11 @@
     "option": "{code} — {name}"
   },
   "ui": {
+    "home": {
+      "tile_error": "Не загрузилось",
+      "calm_title": "Всё спокойно",
+      "calm_text": "Ничего не ждёт вашего внимания"
+    },
     "password": {
       "show": "Показать пароль",
       "hide": "Скрыть пароль"
@@ -264,6 +353,14 @@
     "copy": {
       "done": "Скопировано",
       "manual": "Скопируйте вручную"
+    },
+    "shortcuts": {
+      "title": "Горячие клавиши",
+      "help": "Шпаргалка по клавишам",
+      "escape": "Закрыть верхнее окно",
+      "then": "затем",
+      "single": "Односимвольные клавиши",
+      "single_hint": "Выключите, если клавиши срабатывают случайно (например, с программой чтения экрана). {mod}+K работает всегда."
     }
   },
   "permissions": {

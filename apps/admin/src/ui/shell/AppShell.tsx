@@ -1,5 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { type ReactNode, useId, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslations } from 'use-intl';
 import { usePermissionCheck } from '../../app/session';
 import { Avatar } from '../Avatar';
@@ -10,6 +11,7 @@ import { Icon } from '../icon';
 import { Tooltip } from '../hint/Tooltip';
 import { useIsCompact, useIsMobile } from '../media';
 import { Sheet } from '../overlay';
+import { usePalette } from '../palette/context';
 import { ForbiddenState, OfflineBanner } from '../states';
 import { ThemeSwitch } from '../theme/ThemeSwitch';
 import styles from './AppShell.module.css';
@@ -41,6 +43,8 @@ const TABBAR_ITEMS = 4;
 // - Меню — по правам (D23): пункта без права нет; прямой адрес такого раздела — ForbiddenState.
 //   Разделы открыты на любой ширине и устройстве (спека UI-фундамента §3.1): «только с компьютера» —
 //   действия (ActionGate). Решает всегда сервер.
+// - Палитра (usePalette, есть провайдер): «Искать везде ⌘K» над меню сайдбара, значок поиска первым в полосе,
+//   первым пунктом шторки «Ещё» на телефоне (спека UI-фундамента §4.1).
 // - Над страницей — баннер «нет сети».
 // - Вложенный экран раздела (адрес внутри раздела меню: /geo/cities/$cityId) — над страницей
 //   BackLink «← раздел» на последний адрес раздела с его фильтрами (BackMemoryProvider). Один на все
@@ -98,11 +102,41 @@ export function AppShell(props: AppShellProps) {
 
 type Layout = AppShellProps & { menu: NavGroup[]; current: NavItem | undefined };
 
+// Клавиша палитры по платформе: ⌘K на Apple, Ctrl K на остальных (спека UI-фундамента §4.1).
+const isApple = () =>
+  typeof navigator !== 'undefined' &&
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+
+// «Искать везде ⌘K» над меню (макет 07): открывает палитру (usePalette — провайдер в каркасе активной стадии; вне
+// него кнопки нет). Подпись клавиши — по платформе, для читалки — aria-keyshortcuts.
+function SearchButton() {
+  const t = useTranslations('palette');
+  const palette = usePalette();
+  if (!palette) return null;
+  const apple = isApple();
+  return (
+    <Button
+      variant="secondary"
+      block
+      className={styles.search}
+      aria-keyshortcuts={apple ? 'Meta+K' : 'Control+K'}
+      onClick={palette.open}
+    >
+      <Icon name="search" size={16} />
+      <span className={styles.searchLabel}>{t('open')}</span>
+      <kbd className={styles.searchKey} aria-hidden="true">
+        {t(apple ? 'key_mac' : 'key_other')}
+      </kbd>
+    </Button>
+  );
+}
+
 function Sidebar({ menu, current, counts, account, profileMenu, onLogout, loggingOut }: Layout) {
   const t = useTranslations();
   return (
     <aside className={styles.sidebar}>
       <Brand />
+      <SearchButton />
       <nav aria-label={t('nav.label')} className={styles.nav}>
         <Groups menu={menu} current={current} counts={counts} />
       </nav>
@@ -268,9 +302,23 @@ function NavLink({
 function Rail({ menu, current, counts, account, profileMenu, onLogout, loggingOut }: Layout) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
+  const palette = usePalette();
   return (
     <>
       <aside className={styles.rail}>
+        {palette && (
+          <Tooltip content={t('palette.open')} placement="right" describe={false}>
+            <button
+              type="button"
+              className={styles.railSearch}
+              aria-label={t('palette.open')}
+              aria-keyshortcuts={isApple() ? 'Meta+K' : 'Control+K'}
+              onClick={palette.open}
+            >
+              <Icon name="search" size={20} />
+            </button>
+          </Tooltip>
+        )}
         <nav aria-label={t('nav.label')} className={styles.railNav}>
           {menu.map((g) => (
             <div
@@ -339,6 +387,7 @@ function RailLink({ item, active, count }: { item: NavItem; active: boolean; cou
 function TabBar({ menu, current, counts, account, profileMenu, onLogout, loggingOut }: Layout) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
+  const palette = usePalette();
   const tabs = menu.flatMap((g) => g.items).slice(0, TABBAR_ITEMS);
   const inMore = current !== undefined && !tabs.includes(current);
 
@@ -369,6 +418,21 @@ function TabBar({ menu, current, counts, account, profileMenu, onLogout, logging
         </button>
       </nav>
       <Sheet open={open} onClose={() => setOpen(false)} title={t('nav.more_title')}>
+        {palette && (
+          <Button
+            variant="secondary"
+            block
+            className={styles.search}
+            onClick={() => {
+              // шторка снимается синхронно (с записью стека оверлеев): open() поверх модальной ничего не делает
+              flushSync(() => setOpen(false));
+              palette.open();
+            }}
+          >
+            <Icon name="search" size={16} />
+            <span className={styles.searchLabel}>{t('palette.open')}</span>
+          </Button>
+        )}
         <div className={styles.moreAccount}>
           <Avatar name={account.name} size="md" />
           <AccountText account={account} />

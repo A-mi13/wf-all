@@ -26,6 +26,9 @@ export { ActionGate } from './gate/ActionGate';
 export { GLOSSARY_KEYS, type GlossaryKey } from './hint/glossary';
 export { TermHint } from './hint/TermHint';
 export { Tooltip } from './hint/Tooltip';
+export { AttentionTile, type AttentionTileProps, AttentionTiles } from './home/AttentionTile';
+export { type AttentionState, attentionState } from './home/state';
+export { type TodoError, type TodoItem, TodoList } from './home/TodoList';
 export { Icon, Illustration } from './icon';
 export { useIsCompact, useIsHandheld, useIsMobile } from './media';
 export { useReducedMotion } from './motion';
@@ -76,6 +79,16 @@ export {
 export { NowProvider, type NowGranularity, RelativeTime, useNow } from './time';
 export { QrCode } from './QrCode';
 export { type SegmentedProps, type SegmentOption, Segmented } from './Segmented';
+export {
+  SHORTCUTS_SINGLE_KEY,
+  ShortcutsHelp,
+  type ShortcutsHelpItem,
+  type ShortcutsHelpProps,
+  ShortcutsProvider,
+  type ShortcutOptions,
+  useOpenShortcutsHelp,
+  useShortcut,
+} from './shortcuts';
 export { type ChipTone, StatusChip } from './StatusChip';
 export { Switch, type SwitchProps } from './Switch';
 export {

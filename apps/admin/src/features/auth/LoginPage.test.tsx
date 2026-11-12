@@ -96,8 +96,8 @@ describe('шаг 1 → шаг 2 → раздел', () => {
     ]);
 
     await enterCode(user, '492817');
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
     expect(seen.mfa).toHaveLength(1);
     expect(seen.mfa[0]!.body).toEqual({ code: '492817' });
     expect(seen.mfa[0]!.key).toBeTruthy();
@@ -252,7 +252,7 @@ describe('шаг 2', () => {
     act(() => vi.advanceTimersByTime(31_000));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     paste('492817');
-    await page('Журнал действий');
+    await page('Главная');
     expect(asked).toBe(2);
   });
 
@@ -324,7 +324,7 @@ describe('шаг 2', () => {
     expect(screen.queryByRole('group', { name: CODE })).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Резервный код'), 'k7m2q-x9p4t');
     await user.click(screen.getByRole('button', { name: 'Войти' }));
-    await page('Журнал действий');
+    await page('Главная');
     expect(seen.mfa.map((m) => m.body)).toEqual([{ recovery_code: 'k7m2q-x9p4t' }]);
     expect(storageDump()).not.toContain('k7m2q-x9p4t');
   });

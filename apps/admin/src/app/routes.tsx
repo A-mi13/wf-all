@@ -64,13 +64,6 @@ const setupRoute = createRoute({
   component: SetupMfaPage,
 });
 
-// Корень всегда уводит (guard): на стартовую или ко входу.
-const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: paths.root,
-  component: () => null,
-});
-
 // Разделы «Справочников», экраны которых строят следующие задачи плана B (Task 20–22): пока — только
 // шапка раздела. Маршрут нужен уже сейчас: без него прямой адрес дал бы «не найдено» вместо
 // ForbiddenState каркаса. Задача экрана заменяет component своим.
@@ -104,8 +97,15 @@ export const routeTree = rootRoute.addChildren([
   loginRoute,
   acceptRoute,
   setupRoute,
-  indexRoute,
   shellRoute.addChildren([
+    // Главная «Что требует внимания» (спека UI-фундамента §4.13): стартовая после входа; без сессии guard уводит
+    // корень ко входу без return.
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.root,
+      ...section,
+      component: lazyRouteComponent(() => import('../features/home/HomePage'), 'HomePage'),
+    }),
     createRoute({
       getParentRoute: () => shellRoute,
       path: paths.audit,

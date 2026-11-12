@@ -68,16 +68,17 @@ describe('«Справочники»', () => {
   });
 
   test('группа — после «Безопасности»', () => {
-    expect(NAV.map((g) => g.labelKey)).toEqual(['nav.groups.security', 'nav.groups.directories']);
+    expect(NAV.map((g) => g.labelKey)).toEqual([
+      'nav.groups.overview',
+      'nav.groups.security',
+      'nav.groups.directories',
+    ]);
   });
 
   test('без прав на справочники — группы нет', () => {
-    expect(navFor({ ...meOwner, permissions: { 'audit.log.read': 'allow' } })).toHaveLength(1);
-  });
-
-  test('стартовая страница не изменилась — журнал (первый раздел «Безопасности»)', () => {
-    expect(startPath(meSupport)).toBe(paths.audit);
-    expect(startPath(meModeratorGeo)).toBe(paths.audit);
+    expect(
+      navFor({ ...meOwner, permissions: { 'audit.log.read': 'allow' } }).map((g) => g.labelKey),
+    ).toEqual(['nav.groups.overview', 'nav.groups.security']);
   });
 
   test('пути разделов', () => {
@@ -114,4 +115,34 @@ test('каждый вложенный путь каркаса — внутри �
 test('ни один пункт меню не desktopOnly', () => {
   const flagged = NAV.flatMap((g) => g.items).filter((i) => 'desktopOnly' in i);
   expect(flagged.map((i) => i.path)).toEqual([]);
+});
+
+// Главная (спека UI-фундамента §4.13, план UF4.1): первый пункт меню — своё (permission: null), видна любой
+// роли; стартовая страница после входа — главная для всех (адрес из ?return= важнее — guard.ts).
+describe('«Главная»', () => {
+  test('первый пункт меню — «Главная» без права, с иконкой дома', () => {
+    expect(NAV[0]?.items[0]).toEqual({
+      path: paths.root,
+      labelKey: 'nav.home',
+      permission: null,
+      icon: 'home',
+    });
+  });
+
+  test('у любой роли «Главная» — первый пункт меню, даже без единого права', () => {
+    for (const me of [
+      meOwner,
+      meModerator,
+      meSupport,
+      meModeratorGeo,
+      { ...meOwner, permissions: {} },
+    ]) {
+      expect(menuPaths(me)[0]).toBe(paths.root);
+    }
+  });
+
+  // от роли не зависит (сигнатура без me); роли на живом роутере — router.test.tsx «стартовая страница — главная»
+  test('стартовая страница — главная', () => {
+    expect(startPath()).toBe(paths.root);
+  });
 });

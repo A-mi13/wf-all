@@ -4,6 +4,7 @@ import type { Api } from '../api/client';
 import { ApiProvider } from '../api/context';
 import { DocumentTitle } from '../i18n/DocumentTitle';
 import { LocaleProvider } from '../i18n/locale';
+import { ShortcutsProvider } from '../ui/shortcuts';
 import { ThemeProvider } from '../ui/theme';
 import { ToastProvider, useToast } from '../ui/toast';
 import { LeaveGuardProvider } from './LeaveGuardProvider';
@@ -11,7 +12,9 @@ import { SessionProvider, useSession } from './session';
 
 // Провайдеры приложения в порядке зависимостей: тема (ни от чего не зависит; атрибут уже поставил
 // public/theme-init.js) → клиент API → кэш запросов → сессия (me) → язык
-// (me.locale) → тосты (подписи — на языке) → защита от потери (вопрос — на языке, useLogout видит формы). Те же провайдеры — в тестах (src/test/render.tsx).
+// (me.locale) → тосты (подписи — на языке) → защита от потери (вопрос — на языке, useLogout видит формы) →
+// горячие клавиши (шпаргалка — на языке; выше RouterProvider, а регистрации g x — в разделах под роутером). Те же
+// провайдеры — в тестах (src/test/render.tsx).
 export function AppProviders(props: { api: Api; queryClient: QueryClient; children: ReactNode }) {
   return (
     <ThemeProvider>
@@ -22,7 +25,9 @@ export function AppProviders(props: { api: Api; queryClient: QueryClient; childr
               <ToastProvider>
                 <UndoReset />
                 <DocumentTitle />
-                <LeaveGuardProvider>{props.children}</LeaveGuardProvider>
+                <LeaveGuardProvider>
+                  <ShortcutsProvider>{props.children}</ShortcutsProvider>
+                </LeaveGuardProvider>
               </ToastProvider>
             </LocaleProvider>
           </SessionProvider>

@@ -429,3 +429,60 @@
   background: none;
   cursor: pointer;
 }
+
+/* ---------- «Искать везде» (палитра, спека UI-фундамента §4.1) ---------- */
+
+.sidebar .search {
+  margin-top: var(--wf-space-4);
+}
+
+.search {
+  justify-content: flex-start;
+  gap: var(--wf-space-2);
+}
+
+.searchLabel {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+}
+
+.searchKey {
+  flex-shrink: 0;
+  padding: 0 var(--wf-space-1);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-sm);
+  color: var(--wf-color-text-muted);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+}
+
+.railSearch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-touch-min);
+  height: var(--wf-size-touch-min);
+  margin-bottom: var(--wf-space-3);
+  padding: 0;
+  border: 0;
+  border-radius: var(--wf-radius-sm);
+  background: none;
+  color: var(--wf-color-text-muted);
+  cursor: pointer;
+}
+
+.railSearch:hover {
+  color: var(--wf-color-text);
+}
+
+.railSearch:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}
+
+.search + .moreAccount {
+  margin-top: var(--wf-space-2);
+}

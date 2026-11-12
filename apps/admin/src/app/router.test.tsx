@@ -107,34 +107,42 @@ describe('без сессии', () => {
     const app = mount('/login?return=%2F%2Fevil.example%2Fx', null);
     await page('Вход администратора');
     await app.login(meOwner);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
   });
 });
 
-describe('стартовая страница — первый разрешённый раздел меню', () => {
-  test('с журналом — журнал', async () => {
+// Спека UI-фундамента §4.13, план UF4.1: стартовая после входа — главная для всех ролей; ?return= важнее.
+describe('стартовая страница — главная', () => {
+  test('владелец: корень — главная внутри каркаса, без редиректа', async () => {
     const app = mount('/', meOwner);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
+    expect(screen.getByRole('navigation', { name: 'Разделы' })).toHaveTextContent('Главная');
   });
 
-  test('без права на журнал — следующий раздел', async () => {
+  test('без права на журнал — тоже главная', async () => {
     const app = mount('/', { ...meModerator, permissions: { 'staff.roles.read': 'allow' } });
+    await page('Главная');
+    expect(app.at()).toBe('/');
+  });
+
+  test('модератор — главная', async () => {
+    const app = mount('/', meModerator);
+    await page('Главная');
+    expect(app.at()).toBe('/');
+  });
+
+  test('вход без return — главная', async () => {
+    const app = mount('/login', meOwner);
+    await page('Главная');
+    expect(app.at()).toBe('/');
+  });
+
+  test('вход с return — указанный экран, а не главная', async () => {
+    const app = mount('/login?return=%2Fstaff', meOwner);
     await page('Роли и доступ');
     expect(app.at()).toBe('/staff');
-  });
-
-  test('scoped-право открывает раздел (модератор и журнал своих городов)', async () => {
-    const app = mount('/', meModerator);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
-  });
-
-  test('вход без return — стартовая', async () => {
-    const app = mount('/login', meOwner);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
   });
 });
 
@@ -151,12 +159,12 @@ describe('стадии', () => {
     expect(app.at()).toBe('/setup-2fa');
   });
 
-  test('после настройки 2FA — стартовая', async () => {
+  test('после настройки 2FA — стартовая (главная)', async () => {
     const app = mount('/setup-2fa', meSetup);
     await page('Настройка двухфакторной защиты');
     await app.login(meOwner);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
   });
 
   test('без сессии /setup-2fa — вход', async () => {
@@ -267,10 +275,10 @@ describe('«Справочники»', () => {
     expect(screen.queryByText('Только с компьютера')).toBeNull();
   });
 
-  test('стартовая страница не изменилась — журнал', async () => {
+  test('стартовая страница — главная', async () => {
     const app = mount('/', meAllDirectories);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
   });
 });
 
@@ -436,11 +444,18 @@ describe('каркас AppShell', () => {
     // явный выход — без return: следующий сотрудник не попадёт в чужой раздел
     await waitFor(() => expect(app.at()).toBe('/login'));
 
-    // новый вход — стартовая страница, а не раздел прежнего сотрудника
+    // новый вход — стартовая страница (главная), а не раздел прежнего сотрудника
     ctl.signedIn = true;
     await app.refetchMe();
+    await page('Главная');
+    expect(app.at()).toBe('/');
+    // в раздел (корень в return не попадает — safeReturn): возврат после истечения отличим от явного выхода
+    await userEvent.setup().click(
+      within(screen.getByRole('navigation', { name: 'Разделы' })).getByRole('link', {
+        name: 'Журнал действий',
+      }),
+    );
     await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
 
     // сессия нового входа истекла — вход с возвратом (флаг выхода не залипает)
     ctl.signedIn = false;
@@ -468,7 +483,7 @@ describe('каркас AppShell', () => {
       within(tabbar)
         .getAllByRole('link')
         .map((l) => l.textContent),
-    ).toEqual(['Журнал действий', 'Роли и доступ', 'Подтверждения', 'Мой доступ']);
+    ).toEqual(['Главная', 'Журнал действий', 'Роли и доступ', 'Подтверждения']);
     expect(within(tabbar).getByRole('button', { name: 'Ещё' })).toBeInTheDocument();
   });
 });
@@ -547,6 +562,7 @@ describe('ленивые разделы', () => {
       'me/MyAccessPage',
       'geo/CitiesPage',
       'geo/CityPage',
+      'home/HomePage',
     ];
     expect(reached.filter((p) => pages.some((page) => p === `features/${page}.tsx`))).toEqual([]);
     const router = readFileSync(join(src, 'app/routes.tsx'), 'utf8');

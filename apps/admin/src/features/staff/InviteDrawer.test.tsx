@@ -3,9 +3,9 @@ import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 import { reauthBus } from '../../app/reauth';
 import { renderApp, storageDump } from '../../test/app';
-import { auditServer } from '../../test/audit';
 import { CITY_OTHER, meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
+import { sectionsServer } from '../../test/sections';
 import { http, server } from '../../test/server';
 import { approval, staffServer, TEAM } from '../../test/staff';
 import { openOptions, pick, pickMany, selectedText } from '../../test/pick';
@@ -321,8 +321,9 @@ describe('черновик приглашения', () => {
     await waitFor(() => expect(storageDump()).not.toContain('ivan.p@wf.example'));
     expect(storageDump()).not.toContain('Иван П.');
 
-    // следующий сотрудник за этим компьютером (его стартовая — журнал)
-    auditServer({ records: [] });
+    // следующий сотрудник за этим компьютером (его стартовая — главная: её чтения — sectionsServer)
+    sectionsServer();
+    staffServer({ accounts: TEAM });
     app.me.current = meAdmin;
     await app.refetchMe();
     await user.click(await screen.findByRole('link', { name: 'Роли и доступ' }));
