@@ -575,6 +575,8 @@ StaffAccount:
       description: Живое приглашение («приглашение не принято / просрочено»); null — приглашения нет
       allOf:
         - $ref: '../root.yaml#/components/schemas/StaffInviteState'
+    player_link:
+      $ref: '../root.yaml#/components/schemas/StaffPlayerLink'
 StaffAccountPage:
   type: object
   description: Страница списка сотрудников
@@ -633,3 +635,40 @@ StaffRoles:
       description: Права в порядке каталога
       items:
         $ref: '../root.yaml#/components/schemas/RolePermission'
+StaffPlayerLinkPut:
+  type: object
+  description: Связь сотрудника с его учёткой игрока
+  required: [user_id]
+  additionalProperties: false
+  properties:
+    user_id:
+      type: string
+      format: uuid
+      description: Id учётки игрока — из findPlayerByEmail
+      example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+StaffPlayerLink:
+  type: object
+  description: >-
+    Связь «сотрудник → учётка игрока» (запрет действий над собой). В карточке сотрудника
+    (StaffAccount.player_link) — только для владельца (право staff.player_links.manage); у остальных
+    поля нет. У владельца поля нет — связи нет. До этапа 9 спеки identity сервер поле не отдаёт никому
+  required: [user_id, nickname, linked_at, linked_by_label]
+  properties:
+    user_id:
+      type: string
+      format: uuid
+      description: Id учётки игрока
+      example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+    nickname:
+      type: string
+      description: Ник игрока
+      example: kosta_10
+    linked_at:
+      type: string
+      format: date-time
+      description: Когда связь установлена
+      example: '2026-11-14T10:00:00Z'
+    linked_by_label:
+      type: string
+      description: Кто связал — имя владельца
+      example: Ольга В.

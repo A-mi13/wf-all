@@ -31,6 +31,9 @@ var (
 	ErrCityNotFound       = &Error{CodeCityNotFound}
 	ErrLastOwner          = &Error{CodeLastOwner}
 	ErrSelfAction         = &Error{CodeSelfAction}
+	// связь «сотрудник → учётка игрока» (спека identity §7.6; план I-1, R15) — сценарий этапа 9
+	ErrPlayerLinkTaken = &Error{CodePlayerLinkTaken}
+	ErrPlayerNotFound  = &Error{CodePlayerNotFound}
 )
 
 // MFAError — неудача второго фактора (шаг mfa, unlock, TOTP в «Моём доступе») или неверный текущий

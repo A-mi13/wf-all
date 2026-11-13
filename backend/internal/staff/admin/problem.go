@@ -23,6 +23,8 @@ var statusOf = map[string]int{
 	staff.CodeCityNotFound:       http.StatusUnprocessableEntity,
 	staff.CodeLastOwner:          http.StatusConflict,
 	staff.CodeSelfAction:         http.StatusConflict,
+	staff.CodePlayerLinkTaken:    http.StatusConflict,
+	staff.CodePlayerNotFound:     http.StatusUnprocessableEntity,
 }
 
 var errUnauthenticated = httpx.NewError(http.StatusUnauthorized, httpx.CodeUnauthenticated)

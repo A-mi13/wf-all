@@ -54,6 +54,8 @@ const (
 	CodeFlagNotFound     = "platform.flag_not_found"      // 404: флага с таким ключом нет
 	CodeFlagStale        = "platform.flag_stale"          // 409: флаг изменили после чтения (version не совпала)
 	CodeFlagCityNotFound = "platform.flag_city_not_found" // 422: несуществующий город в enabled_city_ids
+	CodeFlagGlobalOnly   = "platform.flag_global_only"    // 422: у флага не бывает списка городов (спека identity §4.2, §7.5)
+	CodeFlagRequires     = "platform.flag_requires"       // 409: флаг зависит от другого (auth_google → auth_apple), detail — зависимость
 )
 
 // AdminCommonCodes — коды конвейера admin-api: их может вернуть любая операция админки
@@ -68,7 +70,7 @@ var AdminApprovalCodes = []string{
 }
 
 // AdminFlagCodes — коды операции правки флага (x-error-codes updateFeatureFlag).
-var AdminFlagCodes = []string{CodeFlagNotFound, CodeFlagStale, CodeFlagCityNotFound}
+var AdminFlagCodes = []string{CodeFlagNotFound, CodeFlagStale, CodeFlagCityNotFound, CodeFlagGlobalOnly, CodeFlagRequires}
 
 // AdminPlatformCodes — все коды платформы admin-api: конвейер, подтверждения и флаги.
 var AdminPlatformCodes = slices.Concat(AdminCommonCodes, AdminApprovalCodes, AdminFlagCodes)

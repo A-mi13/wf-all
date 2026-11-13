@@ -25,15 +25,15 @@ func operations() []reflect.Method {
 	return out
 }
 
-// Нулевой Handler (&staffadmin.Handler{} — тесты конвейера; cmd/admin-api собирает New): все 27 операций тега
+// Нулевой Handler (&staffadmin.Handler{} — тесты конвейера; cmd/admin-api собирает New): все 29 операций тега
 // staff отвечают 501 http.not_implemented через Middleware — одно место, без вызова метода и без
 // паники на несобранных сценариях. Операции других тегов Middleware не трогает.
 func TestStubsNotImplemented(t *testing.T) {
 	t.Parallel()
 	mw := (&staffadmin.Handler{}).Middleware()
 	ops := operations()
-	if len(ops) != 27 {
-		t.Fatalf("операций staff %d, ждали 27", len(ops))
+	if len(ops) != 29 { // 27 планов A и B + связь «сотрудник → игрок» (план I-1, R15)
+		t.Fatalf("операций staff %d, ждали 29", len(ops))
 	}
 	for _, m := range ops {
 		called := false

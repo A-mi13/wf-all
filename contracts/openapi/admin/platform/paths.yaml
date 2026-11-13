@@ -171,6 +171,10 @@ approval-approve:
         проходят проверку (например, валюта перестала быть действующей), страну с этим кодом успели завести
         (второй из двух запросов на один код), инициатор изменился (`initiator_changed`). Запрос нужно
         подать заново.
+      - Сброс 2FA игрока (`identity.mfa_reset`) своих кодов у подтверждения не имеет: отказ исполнителя —
+        409 `platform.approval_stale`, запрос помечен `failed`. Так бывает, если у игрока уже нет 2FA,
+        сброс уже назначен, аккаунт ждёт удаления или подтверждающий связан с этим игроком (связь
+        «сотрудник → игрок»).
     parameters:
       - $ref: '../root.yaml#/components/parameters/ApprovalId'
       - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
@@ -363,6 +367,8 @@ flag:
       - platform.flag_not_found
       - platform.flag_stale
       - platform.flag_city_not_found
+      - platform.flag_global_only
+      - platform.flag_requires
     summary: Переключить флаг
     description: |
       Включает или выключает флаг везде (`enabled_globally`) и задаёт города, где он включён
@@ -378,6 +384,11 @@ flag:
         совпала): перечитайте флаг и повторите.
       - 422 `platform.flag_city_not_found` — в `enabled_city_ids` есть несуществующий город (город
         выключенной страны допустим).
+      - 422 `platform.flag_global_only` — у флага не бывает списка городов (только «везде»: например,
+        способы входа `auth_*` — до входа город неизвестен), а `enabled_city_ids` непустой.
+      - 409 `platform.flag_requires` — флаг зависит от другого: включить `auth_google` нельзя при
+        выключенном `auth_apple`, выключить `auth_apple` — при включённом `auth_google`; зависимость —
+        в `detail`.
       - 400 `validation.failed` — ключ в пути не по шаблону (`path.key`), больше 1000 городов.
     parameters:
       - $ref: '../root.yaml#/components/parameters/FlagKey'

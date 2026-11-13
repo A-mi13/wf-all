@@ -51,7 +51,30 @@
       "session_not_found": "",
       "confirm_mismatch": "",
       "documents_outdated": "",
-      "restore_token_invalid": ""
+      "restore_token_invalid": "",
+      "mfa_already_enabled": "",
+      "mfa_not_enabled": "",
+      "mfa_setup_missing": "",
+      "social_token_invalid": "",
+      "social_email_unverified": "",
+      "social_email_missing": "",
+      "signup_token_invalid": "",
+      "identity_taken": "",
+      "identity_exists": "",
+      "identity_not_found": "",
+      "last_method": "",
+      "passkey_none": "",
+      "passkey_exists": "",
+      "passkey_limit": "",
+      "passkey_not_found": "",
+      "reauth_invalid": "",
+      "reauth_method_not_allowed": "",
+      "mfa_reset_not_found": "",
+      "captain_ineligible": "",
+      "application_exists": "",
+      "application_not_found": "",
+      "application_closed": "",
+      "application_cooldown": ""
     }
   }
 }

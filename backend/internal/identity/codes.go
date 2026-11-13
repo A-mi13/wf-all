@@ -43,6 +43,36 @@ const (
 	CodeConfirmMismatch       = "identity.confirm_mismatch"         // 422: подтверждение ником не совпало
 	CodeDocumentsOutdated     = "identity.documents_outdated"       // 422: нет согласия или версии не текущие
 	CodeRestoreTokenInvalid   = "identity.restore_token_invalid"    // 410: токен отмены удаления истёк или использован
+
+	// 2FA, ключи доступа, соцвходы, свежий вход, сброс 2FA (спека §6.5; план I-1, Task 3)
+	CodeMfaAlreadyEnabled      = "identity.mfa_already_enabled"       // 409: 2FA уже включена
+	CodeMfaNotEnabled          = "identity.mfa_not_enabled"           // 409: 2FA выключена (у admin — сбрасывать нечего)
+	CodeMfaSetupMissing        = "identity.mfa_setup_missing"         // 409: нет начатого включения 2FA
+	CodeSocialTokenInvalid     = "identity.social_token_invalid"      // 400: id_token не прошёл проверку или nonce неверен
+	CodeSocialEmailUnverified  = "identity.social_email_unverified"   // 422: провайдер не подтвердил почту
+	CodeSocialEmailMissing     = "identity.social_email_missing"      // 422: в токене нет почты
+	CodeSignupTokenInvalid     = "identity.signup_token_invalid"      // 410: токен дорегистрации истёк или использован
+	CodeIdentityTaken          = "identity.identity_taken"            // 409: учётка провайдера привязана к другому аккаунту
+	CodeIdentityExists         = "identity.identity_exists"           // 409: у аккаунта уже есть привязка этого провайдера
+	CodeIdentityNotFound       = "identity.identity_not_found"        // 404: привязки нет или она чужая
+	CodeLastMethod             = "identity.last_method"               // 409: последний способ входа отвязать или удалить нельзя
+	CodePasskeyNone            = "identity.passkey_none"              // 409: у аккаунта нет ключей доступа
+	CodePasskeyExists          = "identity.passkey_exists"            // 409: ключ уже зарегистрирован
+	CodePasskeyLimit           = "identity.passkey_limit"             // 409: больше 10 ключей
+	CodePasskeyNotFound        = "identity.passkey_not_found"         // 404: ключа нет или он чужой
+	CodeReauthInvalid          = "identity.reauth_invalid"            // 400: повторная проверка не прошла (attempts_left)
+	CodeReauthMethodNotAllowed = "identity.reauth_method_not_allowed" // 422: при 2FA пароль для свежего входа не годится
+	CodeMfaResetNotFound       = "identity.mfa_reset_not_found"       // 404: назначенного сброса 2FA нет
+
+	// капитанство, админка: заявки, поиск игрока, сброс 2FA поддержкой (спека §6.5, §7.1; план I-1, Task 4)
+	CodeCaptainIneligible   = "identity.captain_ineligible"    // 409: условия заявки не выполнены (reasons)
+	CodeApplicationExists   = "identity.application_exists"    // 409: открытая заявка уже есть
+	CodeApplicationNotFound = "identity.application_not_found" // 404: заявки нет или она чужая (у модератора — вне его городов)
+	CodeApplicationClosed   = "identity.application_closed"    // 409: заявка уже решена или отозвана
+	CodeApplicationCooldown = "identity.application_cooldown"  // 409: повторная заявка раньше 7 дней после отказа (available_at)
+	CodeUserNotFound        = "identity.user_not_found"        // 404: админка — игрока нет (findPlayerByEmail, requestMfaReset)
+	CodeSelfAction          = "identity.self_action"           // 409: админка — решение о своей учётке игрока (связь К3)
+	CodeMfaResetPending     = "identity.mfa_reset_pending"     // 409: админка — сброс 2FA уже назначен (план I-1, R14)
 )
 
 // PublicCodes — коды операций identity публичного контракта.
@@ -52,10 +82,20 @@ var PublicCodes = []string{
 	CodeEmailDisposable, CodeEmailTaken, CodeEmailSame, CodeDeviceSignupLimit, CodeDeviceUntrusted, CodeDeviceRequired,
 	CodeMfaRequired, CodeMfaInvalid, CodeMfaExpired, CodePasskeyInvalid, CodeRefreshInvalid, CodeReauthRequired,
 	CodeSessionNotFound, CodeConfirmMismatch, CodeDocumentsOutdated, CodeRestoreTokenInvalid,
+	// Task 3
+	CodeMfaAlreadyEnabled, CodeMfaNotEnabled, CodeMfaSetupMissing, CodeSocialTokenInvalid, CodeSocialEmailUnverified,
+	CodeSocialEmailMissing, CodeSignupTokenInvalid, CodeIdentityTaken, CodeIdentityExists, CodeIdentityNotFound,
+	CodeLastMethod, CodePasskeyNone, CodePasskeyExists, CodePasskeyLimit, CodePasskeyNotFound, CodeReauthInvalid,
+	CodeReauthMethodNotAllowed, CodeMfaResetNotFound,
+	// Task 4
+	CodeCaptainIneligible, CodeApplicationExists, CodeApplicationNotFound, CodeApplicationClosed, CodeApplicationCooldown,
 }
 
 // AdminCodes — коды операций identity контракта admin.
-var AdminCodes = []string{}
+var AdminCodes = []string{
+	CodeApplicationNotFound, CodeApplicationClosed, CodeCaptainIneligible, CodeSelfAction, CodeUserNotFound,
+	CodeMfaNotEnabled, CodeMfaResetPending, CodeMfaResetNotFound,
+}
 
 // CrossModuleCodes — коды identity, которые отдают операции других модулей (спека §6.6, R9).
 var CrossModuleCodes = []string{CodeRestricted}

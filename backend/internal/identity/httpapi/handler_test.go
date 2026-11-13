@@ -13,9 +13,9 @@ import (
 func TestZeroHandlerNotImplemented(t *testing.T) {
 	t.Parallel()
 	n, bad := apitest.NotImplemented(identityhttp.Handler{})
-	// Task 2 — 24 операции входа, аккаунта и сессий; Task 3–4 добавят свои
-	if n != 24 {
-		t.Fatalf("операций identity %d, ждали 24", n)
+	// Task 2 — 24 операции входа, аккаунта и сессий; Task 3 — 22 (2FA, ключи доступа, соцвходы); Task 4 — 4 (капитанство)
+	if n != 50 {
+		t.Fatalf("операций identity %d, ждали 50", n)
 	}
 	for _, m := range bad {
 		t.Errorf("%s: не 501 http.not_implemented", m)

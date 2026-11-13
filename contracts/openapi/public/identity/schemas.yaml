@@ -246,8 +246,11 @@ DeviceInfo:
       example: '18.1'
     app_version:
       type: string
-      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
-      description: Версия приложения MAJOR.MINOR.PATCH
+      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)(\.(0|[1-9]\d*))?$'
+      maxLength: 32
+      description: >-
+        Версия приложения MAJOR.MINOR.PATCH или MAJOR.MINOR (iOS CFBundleShortVersionString бывает
+        из двух частей) — сервер читает 1.4 как 1.4.0
       example: 1.4.0
     device_check_token:
       type: string
@@ -715,7 +718,9 @@ SignupStartRequest:
       type: string
       minLength: 1
       maxLength: 64
-      description: Ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid
+      description: >-
+        Ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid.
+        Длиннее 64 символов — 400 validation.failed по полю (проверка схемы, до сервера)
       example: kosta_10
     birth_date:
       type: string
@@ -762,7 +767,8 @@ SignupConfirmRequest:
       maxLength: 64
       description: >-
         Новый ник — только если ответ был 409 identity.nickname_taken (ник заняли, пока шёл код);
-        без него берётся ник из startSignup
+        без него берётся ник из startSignup. Формат — 422 identity.nickname_invalid. Длиннее 64
+        символов — 400 validation.failed по полю (проверка схемы, до сервера)
       example: kosta_11
     device:
       $ref: '../root.yaml#/components/schemas/DeviceInfo'
@@ -916,7 +922,9 @@ NicknameChangeRequest:
       type: string
       minLength: 1
       maxLength: 64
-      description: Новый ник — формат как у checkNickname
+      description: >-
+        Новый ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid.
+        Длиннее 64 символов — 400 validation.failed по полю (проверка схемы, до сервера)
       example: kosta_11
 PasswordChangeRequest:
   type: object
@@ -982,7 +990,9 @@ DeletionRequest:
       type: string
       minLength: 1
       maxLength: 64
-      description: Ник аккаунта, введённый игроком; не совпал — 422 identity.confirm_mismatch
+      description: >-
+        Ник аккаунта, введённый игроком; не совпал — 422 identity.confirm_mismatch.
+        Длиннее 64 символов — 400 validation.failed по полю (проверка схемы, до сервера)
       example: kosta_10
 DeletionScheduled:
   type: object
@@ -996,3 +1006,716 @@ DeletionScheduled:
         Когда аккаунт будет удалён без возможности восстановления (UTC, через 30 дней); до этого
         любой вход предложит отменить удаление
       example: '2026-12-13T09:00:00Z'
+
+# --- Способы входа и флаги (§4.4; план I-1, Task 3) ---
+AuthMethodSwitch:
+  type: object
+  description: >-
+    Соцвход провайдера: signup — основной флаг (новая регистрация и привязка), login — аварийный
+    (вход тех, у кого провайдер уже привязан)
+  required: [signup, login]
+  properties:
+    signup:
+      type: boolean
+      description: Регистрация и привязка включены — кнопка на экране регистрации, пункт «Привязать»
+      example: true
+    login:
+      type: boolean
+      description: Вход привязанных включён — кнопка на экране входа
+      example: true
+PasskeyMethodSwitch:
+  type: object
+  description: >-
+    Ключи доступа: register — основной флаг auth_passkeys (добавление ключей), login — аварийный
+    auth_passkeys_login (вход ключом, ключ вторым фактором и для свежего входа)
+  required: [register, login]
+  properties:
+    register:
+      type: boolean
+      description: Добавление ключей включено — пункт «Добавить ключ доступа»
+      example: false
+    login:
+      type: boolean
+      description: Вход ключом включён — кнопка «Войти ключом»
+      example: true
+AuthMethods:
+  type: object
+  description: >-
+    Включённые способы входа и регистрации (флаги §4). Google выключен, если выключен Apple
+  required: [password, apple, google, passkeys]
+  properties:
+    password:
+      type: boolean
+      description: Почта и пароль — всегда true (флага нет, без них нет восстановления)
+      example: true
+    apple:
+      $ref: '../root.yaml#/components/schemas/AuthMethodSwitch'
+    google:
+      $ref: '../root.yaml#/components/schemas/AuthMethodSwitch'
+    passkeys:
+      $ref: '../root.yaml#/components/schemas/PasskeyMethodSwitch'
+
+# --- Соцвход (§3.5) ---
+SocialProvider:
+  type: string
+  description: >-
+    Провайдер соцвхода. В запросе незнакомое значение отвергает проверка схемы (400
+    validation.failed); в ответе список открытый — незнакомое показывайте общим текстом
+  enum: [apple, google]
+  x-extensible-enum: true
+SocialNonceRequest:
+  type: object
+  description: Запрос nonce соцвхода
+  required: [provider]
+  additionalProperties: false
+  properties:
+    provider:
+      $ref: '../root.yaml#/components/schemas/SocialProvider'
+SocialNonce:
+  type: object
+  description: >-
+    Одноразовый nonce соцвхода (10 минут). Apple передайте SHA-256(nonce) в hex, Google — nonce как
+    есть
+  required: [nonce_id, nonce, expires_at]
+  properties:
+    nonce_id:
+      type: string
+      format: uuid
+      description: Id nonce — вернуть вместе с id_token
+      example: 0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45
+    nonce:
+      type: string
+      description: Значение nonce (base64url) — передать SDK провайдера
+      example: c29jaWFsLW5vbmNlLWV4YW1wbGUtdmFsdWU
+    expires_at:
+      type: string
+      format: date-time
+      description: Когда nonce истечёт (UTC)
+      example: '2026-11-13T17:10:00Z'
+AppleAuthorization:
+  type: object
+  description: Данные авторизации Apple — только у провайдера apple
+  required: [authorization_code]
+  additionalProperties: false
+  properties:
+    authorization_code:
+      type: string
+      minLength: 1
+      maxLength: 1024
+      description: >-
+        Код авторизации Apple: сервер обменивает его на refresh-токен Apple для отзыва входа при
+        отвязке и удалении аккаунта (требование Apple); не удался обмен — вход всё равно проходит
+      example: c1a2b3d4e5f6.0.ab12.example-authorization-code
+    given_name:
+      type: string
+      maxLength: 100
+      description: Имя от Apple (приходит только при первом входе) — сервер его не сохраняет, можно не передавать
+      example: Константин
+    family_name:
+      type: string
+      maxLength: 100
+      description: Фамилия от Apple — сервер её не сохраняет, можно не передавать
+      example: Фёдоров
+SocialLoginRequest:
+  type: object
+  description: Вход через Apple или Google
+  required: [provider, nonce_id, id_token]
+  additionalProperties: false
+  properties:
+    provider:
+      $ref: '../root.yaml#/components/schemas/SocialProvider'
+    nonce_id:
+      type: string
+      format: uuid
+      description: Id nonce из createSocialNonce
+      example: 0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45
+    id_token:
+      type: string
+      minLength: 1
+      maxLength: 8192
+      description: id_token провайдера (JWT) как его отдал SDK; проверяет сервер
+      example: eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+    apple:
+      $ref: '../root.yaml#/components/schemas/AppleAuthorization'
+    device:
+      $ref: '../root.yaml#/components/schemas/DeviceInfo'
+SocialSignupCompleteRequest:
+  type: object
+  description: Дорегистрация после соцвхода — без пароля и кода
+  required: [signup_token, city_id, birth_date, nickname, accepted_documents]
+  additionalProperties: false
+  properties:
+    signup_token:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: Токен из AuthResult.social_signup
+      example: U2lnbnVwLXRva2VuLTI1Ni1iaXRzLWJhc2U2NHVybC14eXo
+    city_id:
+      type: string
+      format: uuid
+      description: Город из listCities или findNearestCity
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    birth_date:
+      type: string
+      format: date
+      description: Дата рождения; младше порога страны города — 422 identity.too_young
+      example: '1998-04-17'
+    nickname:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: >-
+        Ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid. Длиннее 64
+        символов — 400 validation.failed по полю (проверка схемы, до сервера)
+      example: kosta_10
+    accepted_documents:
+      type: array
+      minItems: 1
+      maxItems: 10
+      description: >-
+        Принятые версии всех текущих документов (getLegalDocuments); нет какого-то или версия не
+        текущая — 422 identity.documents_outdated
+      items:
+        $ref: '../root.yaml#/components/schemas/AcceptedDocument'
+    locale:
+      $ref: '../root.yaml#/components/schemas/Locale'
+    device:
+      $ref: '../root.yaml#/components/schemas/DeviceInfo'
+SocialLinkRequest:
+  type: object
+  description: Привязка Apple или Google к вошедшему аккаунту
+  required: [provider, nonce_id, id_token]
+  additionalProperties: false
+  properties:
+    provider:
+      $ref: '../root.yaml#/components/schemas/SocialProvider'
+    nonce_id:
+      type: string
+      format: uuid
+      description: Id nonce из createSocialNonce
+      example: 0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45
+    id_token:
+      type: string
+      minLength: 1
+      maxLength: 8192
+      description: id_token провайдера (JWT) как его отдал SDK
+      example: eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+    apple:
+      $ref: '../root.yaml#/components/schemas/AppleAuthorization'
+
+# --- Второй фактор и свежий вход ключом (§3.3, §3.6, §3.13) ---
+MfaPasskeyOptionsRequest:
+  type: object
+  description: Задача WebAuthn для второго фактора
+  required: [mfa_token]
+  additionalProperties: false
+  properties:
+    mfa_token:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: Токен из AuthResult.mfa
+      example: Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1
+PasskeyLoginRequest:
+  type: object
+  description: Вход ключом доступа — ответ ключа на задачу startPasskeyLogin и устройство
+  required: [challenge_id, credential]
+  additionalProperties: false
+  properties:
+    challenge_id:
+      type: string
+      format: uuid
+      description: Id задачи из startPasskeyLogin
+      example: 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+    credential:
+      $ref: '../root.yaml#/components/schemas/WebAuthnCredential'
+    device:
+      $ref: '../root.yaml#/components/schemas/DeviceInfo'
+ReauthSocial:
+  type: object
+  description: Свежий вход через привязанного провайдера
+  required: [provider, nonce_id, id_token]
+  additionalProperties: false
+  properties:
+    provider:
+      $ref: '../root.yaml#/components/schemas/SocialProvider'
+    nonce_id:
+      type: string
+      format: uuid
+      description: Id nonce из createSocialNonce
+      example: 0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45
+    id_token:
+      type: string
+      minLength: 1
+      maxLength: 8192
+      description: id_token провайдера (JWT); его sub должен быть привязан к аккаунту
+      example: eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+ReauthRequest:
+  type: object
+  description: >-
+    Подтверждение владельца — ровно одно из password, totp_code, recovery_code, passkey, social (ни
+    одного или больше одного — 400 validation.failed по полю body). При 2FA пароль не годится
+  additionalProperties: false
+  properties:
+    password:
+      type: string
+      minLength: 1
+      description: Текущий пароль — только у аккаунта без 2FA
+      example: Жёлтая карточка на 90-й
+    totp_code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: Код из приложения-аутентификатора — 6 цифр
+      example: '492817'
+    recovery_code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: Резервный код вида xxxxx-xxxxx; сгорает
+      example: k7m2q-x9p4t
+    passkey:
+      $ref: '../root.yaml#/components/schemas/PasskeyAssertion'
+    social:
+      $ref: '../root.yaml#/components/schemas/ReauthSocial'
+ReauthResult:
+  type: object
+  description: Свежий вход подтверждён
+  required: [reauth_until]
+  properties:
+    reauth_until:
+      type: string
+      format: date-time
+      description: До какого момента (UTC) чувствительные операции не спросят подтверждения
+      example: '2026-11-13T17:10:00Z'
+
+# --- Способы входа аккаунта, 2FA, ключи доступа (§6.2.4) ---
+LinkedIdentity:
+  type: object
+  description: Привязанная учётка Apple или Google
+  required: [id, provider, email, email_is_private_relay, linked_at]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id привязки — для unlinkIdentity
+      example: 0193a1c7-5d6e-7b71-a8f9-0a1b2c3d4e56
+    provider:
+      $ref: '../root.yaml#/components/schemas/SocialProvider'
+    email:
+      type: string
+      nullable: true
+      description: Почта у провайдера или null, если провайдер её не дал
+      example: kosta.f@example.com
+    email_is_private_relay:
+      type: boolean
+      description: Почта — скрытый адрес Apple (privaterelay.appleid.com)
+      example: false
+    linked_at:
+      type: string
+      format: date-time
+      description: Когда привязана (UTC)
+      example: '2026-10-02T12:00:00Z'
+Passkey:
+  type: object
+  description: Ключ доступа аккаунта
+  required: [id, name, created_at, last_used_at, backed_up]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id ключа — для renamePasskey и deletePasskey
+      example: 0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67
+    name:
+      type: string
+      description: Имя ключа (задал игрок или по умолчанию — модель устройства)
+      example: iPhone Кости
+    created_at:
+      type: string
+      format: date-time
+      description: Когда добавлен (UTC)
+      example: '2026-10-05T19:40:00Z'
+    last_used_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Последний вход этим ключом (UTC) или null
+      example: '2026-11-12T08:05:00Z'
+    backed_up:
+      type: boolean
+      description: Ключ синхронизируется между устройствами (iCloud Keychain, Google Password Manager)
+      example: true
+MfaStatus:
+  type: object
+  description: Состояние двухфакторной аутентификации
+  required: [totp_enabled, confirmed_at, recovery_codes_left, reset_scheduled_at]
+  properties:
+    totp_enabled:
+      type: boolean
+      description: 2FA (TOTP) включена
+      example: true
+    confirmed_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Когда 2FA включена (UTC) или null
+      example: '2026-09-20T10:15:00Z'
+    recovery_codes_left:
+      type: integer
+      minimum: 0
+      maximum: 10
+      description: Сколько резервных кодов осталось; 0 при выключенной 2FA
+      example: 8
+    reset_scheduled_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: >-
+        Когда будет выполнен сброс 2FA по запросу в поддержку (UTC) или null. Не null — предупредите
+        игрока и предложите отменить (cancelMyMfaReset)
+      example: null
+MyAuthMethods:
+  type: object
+  description: Способы входа аккаунта — экран «Способы входа»
+  required: [has_password, identities, passkeys, mfa]
+  properties:
+    has_password:
+      type: boolean
+      description: У аккаунта есть пароль
+      example: true
+    identities:
+      type: array
+      description: Привязки Apple и Google (не больше одной на провайдера)
+      items:
+        $ref: '../root.yaml#/components/schemas/LinkedIdentity'
+    passkeys:
+      type: array
+      description: Ключи доступа (не больше 10)
+      items:
+        $ref: '../root.yaml#/components/schemas/Passkey'
+    mfa:
+      $ref: '../root.yaml#/components/schemas/MfaStatus'
+TotpSetup:
+  type: object
+  description: >-
+    Секрет TOTP для приложения-аутентификатора; отдаётся один раз, не кэшируется и не сохраняется в
+    ключах идемпотентности
+  required: [secret, otpauth_uri]
+  properties:
+    secret:
+      type: string
+      description: Секрет TOTP в base32 — для ручного ввода в приложение
+      example: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+    otpauth_uri:
+      type: string
+      description: URI для QR-кода (issuer — имя продукта, account — ник)
+      example: 'otpauth://totp/WF:kosta_10?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=WF'
+TotpConfirmRequest:
+  type: object
+  description: Код из приложения-аутентификатора для включения 2FA
+  required: [code]
+  additionalProperties: false
+  properties:
+    code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: 6 цифр; пробелы между цифрами допустимы
+      example: '492817'
+RecoveryCodes:
+  type: object
+  description: >-
+    Резервные коды — показываются один раз; каждый годится один раз вместо кода TOTP
+  required: [recovery_codes]
+  properties:
+    recovery_codes:
+      type: array
+      minItems: 10
+      maxItems: 10
+      description: 10 кодов вида xxxxx-xxxxx
+      items:
+        type: string
+        description: Резервный код
+        example: k7m2q-x9p4t
+      example:
+        - k7m2q-x9p4t
+        - a3b5c-d7e2f
+        - m4n6p-q8r3s
+        - t5u7v-w9x2y
+        - z3a5b-c7d2e
+        - f4g6h-j8k3l
+        - n5p7q-r9s2t
+        - u3v5w-x7y2z
+        - b4c6d-e8f3g
+        - h5j7k-l9m2n
+PasskeyRegisterRequest:
+  type: object
+  description: Ответ ключа на задачу startPasskeyRegistration
+  required: [challenge_id, credential]
+  additionalProperties: false
+  properties:
+    challenge_id:
+      type: string
+      format: uuid
+      description: Id задачи из startPasskeyRegistration
+      example: 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+    credential:
+      $ref: '../root.yaml#/components/schemas/WebAuthnCredential'
+    name:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: Имя ключа; нет — сервер возьмёт модель устройства
+      example: iPhone Кости
+PasskeyRenameRequest:
+  type: object
+  description: Новое имя ключа доступа
+  required: [name]
+  additionalProperties: false
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: Новое имя
+      example: Рабочий ноутбук
+
+# --- Капитанство (§3.12, §6.2.4, §7.3; план I-1, Task 4) ---
+CaptainIneligibility:
+  type: string
+  description: >-
+    Почему заявку подать нельзя: too_young — возраст ниже порога страны города; restricted —
+    ограничение captain; profile_incomplete — не заполнен профиль игрока (основная позиция);
+    captain_elsewhere_in_city — уже капитан другой команды в этом городе; already_permitted — допуск
+    в городе уже есть; checks_unavailable — условия сейчас проверить нельзя (модули профиля или
+    команд ещё не запущены). Незнакомое значение показывайте общим текстом
+  enum:
+    - too_young
+    - restricted
+    - profile_incomplete
+    - captain_elsewhere_in_city
+    - already_permitted
+    - checks_unavailable
+  x-extensible-enum: true
+CaptainApplicationStatus:
+  type: string
+  description: >-
+    Статус заявки: pending — ждёт решения модератора; approved — одобрена (допуск выдан); rejected —
+    отклонена (код причины и комментарий); withdrawn — отозвана игроком или удалением аккаунта
+  enum: [pending, approved, rejected, withdrawn]
+  x-extensible-enum: true
+CaptainRejectionCode:
+  type: string
+  description: >-
+    Причина отказа: profile_incomplete — профиль не заполнен; insufficient_info — мало сведений о
+    команде и поле; contact_unreachable — не удалось связаться; suspicious_activity — подозрение на
+    мультиаккаунт или накрутку; duplicate_account — есть другой аккаунт-капитан; other — другое
+    (подробности — в комментарии). Тексты для игрока — локали клиента
+  enum:
+    - profile_incomplete
+    - insufficient_info
+    - contact_unreachable
+    - suspicious_activity
+    - duplicate_account
+    - other
+  x-extensible-enum: true
+CaptainPermit:
+  type: object
+  description: Допуск капитана в городе
+  required: [city_id, granted_at, probationary]
+  properties:
+    city_id:
+      type: string
+      format: uuid
+      description: Город допуска
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    granted_at:
+      type: string
+      format: date-time
+      description: Когда допуск выдан (UTC)
+      example: '2026-11-05T12:00:00Z'
+    probationary:
+      type: boolean
+      description: Испытательный срок — снимается после первых матчей команды
+      example: true
+CaptainEligibility:
+  type: object
+  description: Можно ли подать заявку в текущем городе игрока
+  required: [city_id, eligible, reasons, available_at]
+  properties:
+    city_id:
+      type: string
+      format: uuid
+      description: Текущий город игрока — город заявки
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    eligible:
+      type: boolean
+      description: Заявку можно подать сейчас
+      example: false
+    reasons:
+      type: array
+      description: Почему нельзя; пусто, если можно
+      items:
+        $ref: '../root.yaml#/components/schemas/CaptainIneligibility'
+      example: [profile_incomplete]
+    available_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Когда закончится пауза после отказа (UTC) или null, если паузы нет
+      example: null
+CaptainApplication:
+  type: object
+  description: Заявка в капитаны — как её видит заявитель
+  required:
+    - id
+    - city_id
+    - status
+    - proposed_format
+    - proposed_pitch
+    - play_frequency
+    - contact_link
+    - note
+    - has_phone
+    - created_at
+    - decided_at
+    - rejection_code
+    - comment
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id заявки
+      example: 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+    city_id:
+      type: string
+      format: uuid
+      description: Город заявки — текущий город игрока на момент подачи
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    status:
+      $ref: '../root.yaml#/components/schemas/CaptainApplicationStatus'
+    proposed_format:
+      type: string
+      nullable: true
+      description: Формат игры, который игрок хочет собирать, или null
+      example: 6×6 по средам
+    proposed_pitch:
+      type: string
+      nullable: true
+      description: Поле, где игрок планирует играть, или null
+      example: Динамо, искусственное поле
+    play_frequency:
+      type: string
+      nullable: true
+      description: Как часто игрок собирает игры, или null
+      example: раз в неделю
+    contact_link:
+      type: string
+      nullable: true
+      description: Ссылка для связи (https) или null
+      example: https://t.me/kosta_10
+    note:
+      type: string
+      nullable: true
+      description: Свободный текст игрока или null
+      example: Собираю ребят с работы третий год
+    has_phone:
+      type: boolean
+      description: Телефон указан (сам номер игроку не возвращается)
+      example: true
+    created_at:
+      type: string
+      format: date-time
+      description: Когда подана (UTC)
+      example: '2026-11-13T09:00:00Z'
+    decided_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Когда решена или отозвана (UTC) или null
+      example: null
+    rejection_code:
+      type: string
+      nullable: true
+      description: Код причины отказа (значения CaptainRejectionCode) или null
+      allOf:
+        - $ref: '../root.yaml#/components/schemas/CaptainRejectionCode'
+    comment:
+      type: string
+      nullable: true
+      description: Комментарий модератора к решению или null
+      example: null
+Captaincy:
+  type: object
+  description: Капитанство игрока — экран «Стать капитаном»
+  required: [permits, eligibility, open_application]
+  properties:
+    permits:
+      type: array
+      description: Допуски капитана по городам; пусто — допусков нет
+      items:
+        $ref: '../root.yaml#/components/schemas/CaptainPermit'
+    eligibility:
+      $ref: '../root.yaml#/components/schemas/CaptainEligibility'
+    open_application:
+      type: object
+      nullable: true
+      description: Заявка, ждущая решения, или null
+      allOf:
+        - $ref: '../root.yaml#/components/schemas/CaptainApplication'
+CaptainApplicationPage:
+  type: object
+  description: Страница своих заявок, новые сверху
+  required: [items, next_cursor]
+  properties:
+    items:
+      type: array
+      description: Заявки страницы
+      items:
+        $ref: '../root.yaml#/components/schemas/CaptainApplication'
+    next_cursor:
+      type: string
+      nullable: true
+      description: Курсор следующей страницы; null — страниц больше нет
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTEtMTNUMDk6MDA6MDBaIl19
+CaptainApplicationSubmitRequest:
+  type: object
+  description: Форма заявки в капитаны — все поля необязательны
+  additionalProperties: false
+  properties:
+    proposed_format:
+      type: string
+      minLength: 1
+      maxLength: 200
+      description: Какие игры собирать (формат, дни)
+      example: 6×6 по средам
+    proposed_pitch:
+      type: string
+      minLength: 1
+      maxLength: 200
+      description: Где играть
+      example: Динамо, искусственное поле
+    play_frequency:
+      type: string
+      minLength: 1
+      maxLength: 200
+      description: Как часто
+      example: раз в неделю
+    contact_link:
+      type: string
+      maxLength: 300
+      pattern: '^https://'
+      description: Ссылка для связи — только https
+      example: https://t.me/kosta_10
+    note:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: Свободный текст для модератора
+      example: Собираю ребят с работы третий год
+    phone:
+      type: string
+      pattern: '^\+[1-9][0-9]{6,14}$'
+      description: Телефон в формате E.164 — контакт для модератора, не подтверждается
+      example: '+79181234567'

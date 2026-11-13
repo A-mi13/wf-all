@@ -196,7 +196,9 @@ func TestAdminPlatformCodes(t *testing.T) {
 	}
 	approvals := []string{"platform.approval_not_found", "platform.approval_self",
 		"platform.approval_stale", "platform.approval_closed"}
-	flags := []string{"platform.flag_not_found", "platform.flag_stale", "platform.flag_city_not_found"}
+	// флаги: план B + правила флагов способов входа (спека identity §7.5, план I-1 Task 4)
+	flags := []string{"platform.flag_not_found", "platform.flag_stale", "platform.flag_city_not_found",
+		"platform.flag_global_only", "platform.flag_requires"}
 	if !slices.Equal(AdminCommonCodes, common) {
 		t.Errorf("AdminCommonCodes = %v, want %v", AdminCommonCodes, common)
 	}

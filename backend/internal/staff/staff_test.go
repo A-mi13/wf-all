@@ -60,6 +60,8 @@ func TestErrorsAndCodes(t *testing.T) {
 		staff.ErrCityNotFound:       staff.CodeCityNotFound,
 		staff.ErrLastOwner:          staff.CodeLastOwner,
 		staff.ErrSelfAction:         staff.CodeSelfAction,
+		staff.ErrPlayerLinkTaken:    staff.CodePlayerLinkTaken,
+		staff.ErrPlayerNotFound:     staff.CodePlayerNotFound,
 	}
 	for err, code := range cases {
 		got, ok := staff.CodeOf(err)

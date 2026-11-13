@@ -111,6 +111,12 @@ x-anonymous-mutations:
   - refreshSession
   - cancelDeletion
   - createDeviceChallenge
+  - startMfaPasskey
+  - createSocialNonce
+  - socialLogin
+  - completeSocialSignup
+  - startPasskeyLogin
+  - passkeyLogin
 paths:
   /v1/cities:
     $ref: './geo/paths.yaml#/cities'
@@ -168,6 +174,56 @@ paths:
     $ref: './identity/paths.yaml#/me-documents'
   /v1/me/delete:
     $ref: './identity/paths.yaml#/me-delete'
+  /v1/auth/methods:
+    $ref: './identity/paths.yaml#/auth-methods'
+  /v1/auth/mfa/passkey-options:
+    $ref: './identity/paths.yaml#/auth-mfa-passkey-options'
+  /v1/auth/social/nonces:
+    $ref: './identity/paths.yaml#/auth-social-nonces'
+  /v1/auth/social:
+    $ref: './identity/paths.yaml#/auth-social'
+  /v1/auth/social/signup:
+    $ref: './identity/paths.yaml#/auth-social-signup'
+  /v1/auth/passkey/options:
+    $ref: './identity/paths.yaml#/auth-passkey-options'
+  /v1/auth/passkey:
+    $ref: './identity/paths.yaml#/auth-passkey'
+  /v1/me/reauth:
+    $ref: './identity/paths.yaml#/me-reauth'
+  /v1/me/reauth/passkey-options:
+    $ref: './identity/paths.yaml#/me-reauth-passkey-options'
+  /v1/me/auth-methods:
+    $ref: './identity/paths.yaml#/me-auth-methods'
+  /v1/me/identities:
+    $ref: './identity/paths.yaml#/me-identities'
+  /v1/me/identities/{identityId}:
+    $ref: './identity/paths.yaml#/me-identity'
+  /v1/me/mfa:
+    $ref: './identity/paths.yaml#/me-mfa'
+  /v1/me/mfa/totp/setup:
+    $ref: './identity/paths.yaml#/me-mfa-totp-setup'
+  /v1/me/mfa/totp/confirm:
+    $ref: './identity/paths.yaml#/me-mfa-totp-confirm'
+  /v1/me/mfa/totp:
+    $ref: './identity/paths.yaml#/me-mfa-totp'
+  /v1/me/mfa/recovery-codes:
+    $ref: './identity/paths.yaml#/me-mfa-recovery-codes'
+  /v1/me/passkeys/registration-options:
+    $ref: './identity/paths.yaml#/me-passkeys-registration-options'
+  /v1/me/passkeys:
+    $ref: './identity/paths.yaml#/me-passkeys'
+  /v1/me/passkeys/{passkeyId}:
+    $ref: './identity/paths.yaml#/me-passkey'
+  /v1/me/mfa-reset:
+    $ref: './identity/paths.yaml#/me-mfa-reset'
+  /v1/me/captaincy:
+    $ref: './identity/paths.yaml#/me-captaincy'
+  /v1/me/captain-applications:
+    $ref: './identity/paths.yaml#/me-captain-applications'
+  /v1/captain-applications:
+    $ref: './identity/paths.yaml#/captain-applications'
+  /v1/captain-applications/{applicationId}/withdraw:
+    $ref: './identity/paths.yaml#/captain-application-withdraw'
 components:
   securitySchemes:
     bearer:
@@ -215,6 +271,53 @@ components:
         type: string
         format: uuid
       example: 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+    IdentityId:
+      name: identityId
+      in: path
+      required: true
+      description: Id привязки Apple или Google из listMyAuthMethods
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c7-5d6e-7b71-a8f9-0a1b2c3d4e56
+    PasskeyId:
+      name: passkeyId
+      in: path
+      required: true
+      description: Id ключа доступа из listMyAuthMethods
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      description: Id своей заявки в капитаны из listMyCaptainApplications или getMyCaptaincy
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+      schema:
+        type: string
+        maxLength: 1024
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTEtMTNUMDk6MDA6MDBaIl19
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Размер страницы, от 1 до 100; без параметра — 20
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      example: 20
   headers:
     CacheNoStore:
       description: Ответ с токенами или секретом — не кэшируется нигде, в том числе браузером
@@ -511,3 +614,69 @@ components:
       $ref: './identity/schemas.yaml#/DeletionRequest'
     DeletionScheduled:
       $ref: './identity/schemas.yaml#/DeletionScheduled'
+    AuthMethodSwitch:
+      $ref: './identity/schemas.yaml#/AuthMethodSwitch'
+    PasskeyMethodSwitch:
+      $ref: './identity/schemas.yaml#/PasskeyMethodSwitch'
+    AuthMethods:
+      $ref: './identity/schemas.yaml#/AuthMethods'
+    SocialProvider:
+      $ref: './identity/schemas.yaml#/SocialProvider'
+    SocialNonceRequest:
+      $ref: './identity/schemas.yaml#/SocialNonceRequest'
+    SocialNonce:
+      $ref: './identity/schemas.yaml#/SocialNonce'
+    AppleAuthorization:
+      $ref: './identity/schemas.yaml#/AppleAuthorization'
+    SocialLoginRequest:
+      $ref: './identity/schemas.yaml#/SocialLoginRequest'
+    SocialSignupCompleteRequest:
+      $ref: './identity/schemas.yaml#/SocialSignupCompleteRequest'
+    SocialLinkRequest:
+      $ref: './identity/schemas.yaml#/SocialLinkRequest'
+    MfaPasskeyOptionsRequest:
+      $ref: './identity/schemas.yaml#/MfaPasskeyOptionsRequest'
+    PasskeyLoginRequest:
+      $ref: './identity/schemas.yaml#/PasskeyLoginRequest'
+    ReauthSocial:
+      $ref: './identity/schemas.yaml#/ReauthSocial'
+    ReauthRequest:
+      $ref: './identity/schemas.yaml#/ReauthRequest'
+    ReauthResult:
+      $ref: './identity/schemas.yaml#/ReauthResult'
+    LinkedIdentity:
+      $ref: './identity/schemas.yaml#/LinkedIdentity'
+    Passkey:
+      $ref: './identity/schemas.yaml#/Passkey'
+    MfaStatus:
+      $ref: './identity/schemas.yaml#/MfaStatus'
+    MyAuthMethods:
+      $ref: './identity/schemas.yaml#/MyAuthMethods'
+    TotpSetup:
+      $ref: './identity/schemas.yaml#/TotpSetup'
+    TotpConfirmRequest:
+      $ref: './identity/schemas.yaml#/TotpConfirmRequest'
+    RecoveryCodes:
+      $ref: './identity/schemas.yaml#/RecoveryCodes'
+    PasskeyRegisterRequest:
+      $ref: './identity/schemas.yaml#/PasskeyRegisterRequest'
+    PasskeyRenameRequest:
+      $ref: './identity/schemas.yaml#/PasskeyRenameRequest'
+    CaptainIneligibility:
+      $ref: './identity/schemas.yaml#/CaptainIneligibility'
+    CaptainApplicationStatus:
+      $ref: './identity/schemas.yaml#/CaptainApplicationStatus'
+    CaptainRejectionCode:
+      $ref: './identity/schemas.yaml#/CaptainRejectionCode'
+    CaptainPermit:
+      $ref: './identity/schemas.yaml#/CaptainPermit'
+    CaptainEligibility:
+      $ref: './identity/schemas.yaml#/CaptainEligibility'
+    CaptainApplication:
+      $ref: './identity/schemas.yaml#/CaptainApplication'
+    Captaincy:
+      $ref: './identity/schemas.yaml#/Captaincy'
+    CaptainApplicationPage:
+      $ref: './identity/schemas.yaml#/CaptainApplicationPage'
+    CaptainApplicationSubmitRequest:
+      $ref: './identity/schemas.yaml#/CaptainApplicationSubmitRequest'

@@ -1,0 +1,395 @@
+# Схемы модуля identity контракта admin (спека identity §7; план I-1, Task 4, Приложение 2). Префикс Identity —
+# одно пространство components.schemas бандла (как Geo…); перечисления — копии public: контракты независимы.
+
+IdentityCaptainApplicationStatus:
+  type: string
+  description: >-
+    Статус заявки: pending — ждёт решения; approved — одобрена (допуск выдан); rejected — отклонена;
+    withdrawn — отозвана игроком или удалением аккаунта
+  enum: [pending, approved, rejected, withdrawn]
+  x-extensible-enum: true
+IdentityCaptainRejectionCode:
+  type: string
+  description: >-
+    Код причины отказа — подпись из локалей админки: profile_incomplete — профиль не заполнен;
+    insufficient_info — мало сведений о команде и поле; contact_unreachable — не удалось связаться;
+    suspicious_activity — подозрение на мультиаккаунт или накрутку; duplicate_account — есть другой
+    аккаунт-капитан; other — другое (комментарий обязателен)
+  enum:
+    - profile_incomplete
+    - insufficient_info
+    - contact_unreachable
+    - suspicious_activity
+    - duplicate_account
+    - other
+  x-extensible-enum: true
+IdentityCaptainCheck:
+  type: string
+  description: >-
+    Условие капитанства в карточке: age — возраст не ниже порога страны города; restrictions — нет
+    ограничения captain; profile — профиль заполнен; captaincy — не капитан другой команды в городе
+  enum: [age, restrictions, profile, captaincy]
+  x-extensible-enum: true
+IdentityCheckState:
+  type: string
+  description: >-
+    Состояние условия: ok — выполнено; failed — не выполнено; unavailable — проверить нельзя (модуль
+    проверки ещё не запущен) — одобрить заявку нельзя
+  enum: [ok, failed, unavailable]
+  x-extensible-enum: true
+IdentityAuthMethodKind:
+  type: string
+  description: >-
+    Способ входа в статистике флагов: apple, google, passkeys (ключи доступа — как в ключах флагов
+    auth_passkeys). Это не способ входа сессии (там passkey) — значения различаются намеренно
+  enum: [apple, google, passkeys]
+  x-extensible-enum: true
+IdentityCaptainApplication:
+  type: object
+  description: Заявка в капитаны — строка очереди и решённая заявка
+  required:
+    - id
+    - user_id
+    - nickname
+    - city_id
+    - age_years
+    - account_age_days
+    - status
+    - proposed_format
+    - proposed_pitch
+    - play_frequency
+    - contact_link
+    - note
+    - has_phone
+    - created_at
+    - decided_at
+    - decided_by_label
+    - rejection_code
+    - comment
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id заявки
+      example: 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+    user_id:
+      type: string
+      format: uuid
+      description: Id игрока-заявителя
+      example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+    nickname:
+      type: string
+      description: Ник заявителя
+      example: kosta_10
+    city_id:
+      type: string
+      format: uuid
+      description: Город заявки
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    age_years:
+      type: integer
+      minimum: 0
+      description: Возраст заявителя в годах на момент ответа (дата рождения не отдаётся)
+      example: 28
+    account_age_days:
+      type: integer
+      minimum: 0
+      description: Стаж аккаунта заявителя в днях на момент ответа
+      example: 256
+    status:
+      $ref: '../root.yaml#/components/schemas/IdentityCaptainApplicationStatus'
+    proposed_format:
+      type: string
+      nullable: true
+      description: Какие игры игрок хочет собирать, или null
+      example: 6×6 по средам
+    proposed_pitch:
+      type: string
+      nullable: true
+      description: Где играть, или null
+      example: Динамо, искусственное поле
+    play_frequency:
+      type: string
+      nullable: true
+      description: Как часто, или null
+      example: раз в неделю
+    contact_link:
+      type: string
+      nullable: true
+      description: Ссылка для связи (https) или null
+      example: https://t.me/kosta_10
+    note:
+      type: string
+      nullable: true
+      description: Свободный текст игрока или null
+      example: Собираю ребят с работы третий год
+    has_phone:
+      type: boolean
+      description: Телефон указан (номер — getCaptainApplicationContact, с причиной)
+      example: true
+    created_at:
+      type: string
+      format: date-time
+      description: Когда подана
+      example: '2026-11-13T09:00:00Z'
+    decided_at:
+      type: string
+      format: date-time
+      nullable: true
+      description: Когда решена или отозвана; null — ждёт решения
+      example: null
+    decided_by_label:
+      type: string
+      nullable: true
+      description: Кто решил — имя сотрудника; null — не решена или отозвана игроком
+      example: null
+    rejection_code:
+      type: string
+      nullable: true
+      description: Код причины отказа (значения IdentityCaptainRejectionCode) или null
+      allOf:
+        - $ref: '../root.yaml#/components/schemas/IdentityCaptainRejectionCode'
+    comment:
+      type: string
+      nullable: true
+      description: Комментарий к решению или null
+      example: null
+IdentityCaptainApplicationPage:
+  type: object
+  description: Страница очереди заявок
+  required: [items, next_cursor]
+  properties:
+    items:
+      type: array
+      description: Заявки страницы (по умолчанию — старые сверху)
+      items:
+        $ref: '../root.yaml#/components/schemas/IdentityCaptainApplication'
+    next_cursor:
+      type: string
+      nullable: true
+      description: Курсор следующей страницы; null — страниц больше нет
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTEtMTNUMDk6MDA6MDBaIl19
+IdentityCaptainApplicationCard:
+  type: object
+  description: Карточка заявки — заявка, заявитель, условия сейчас, прошлые заявки, связанные аккаунты
+  required: [application, applicant, checks, history, linked_accounts]
+  properties:
+    application:
+      $ref: '../root.yaml#/components/schemas/IdentityCaptainApplication'
+    applicant:
+      type: object
+      description: Заявитель
+      required: [user_id, nickname, city_id, age_years, account_age_days]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Id игрока
+          example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+        nickname:
+          type: string
+          description: Ник
+          example: kosta_10
+        city_id:
+          type: string
+          format: uuid
+          description: Текущий город игрока
+          example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        age_years:
+          type: integer
+          minimum: 0
+          description: Возраст в годах (дата рождения не отдаётся)
+          example: 28
+        account_age_days:
+          type: integer
+          minimum: 0
+          description: Стаж аккаунта в днях
+          example: 256
+    checks:
+      type: array
+      description: Условия капитанства сейчас — галочки карточки
+      items:
+        type: object
+        description: Условие и его состояние
+        required: [check, state]
+        properties:
+          check:
+            $ref: '../root.yaml#/components/schemas/IdentityCaptainCheck'
+          state:
+            $ref: '../root.yaml#/components/schemas/IdentityCheckState'
+      example:
+        - check: age
+          state: ok
+        - check: restrictions
+          state: ok
+        - check: profile
+          state: unavailable
+        - check: captaincy
+          state: unavailable
+    history:
+      type: array
+      description: Прошлые заявки игрока с решениями, новые сверху (без текущей)
+      items:
+        $ref: '../root.yaml#/components/schemas/IdentityCaptainApplication'
+    linked_accounts:
+      type: integer
+      minimum: 0
+      description: Сколько других аккаунтов связано с заявителем по устройствам
+      example: 0
+IdentityApplicantContact:
+  type: object
+  description: Контакты заявителя — чтение записано в журнал с причиной
+  required: [email, phone]
+  properties:
+    email:
+      type: string
+      description: Почта аккаунта
+      example: kosta.f@example.com
+    phone:
+      type: string
+      nullable: true
+      description: Телефон из заявки (E.164, не подтверждён) или null
+      example: '+79181234567'
+IdentityCaptainApprove:
+  type: object
+  description: Одобрение заявки
+  additionalProperties: false
+  properties:
+    comment:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: Комментарий к решению — увидит игрок
+      example: Знаю по городскому турниру
+IdentityCaptainReject:
+  type: object
+  description: Отказ по заявке — код причины и комментарий (обязателен при other)
+  required: [rejection_code]
+  additionalProperties: false
+  properties:
+    rejection_code:
+      $ref: '../root.yaml#/components/schemas/IdentityCaptainRejectionCode'
+    comment:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: Комментарий — увидит игрок; обязателен при rejection_code = other
+      example: Расскажите подробнее, где и когда собираете игры
+IdentityAuthMethodsUsage:
+  type: object
+  description: Сколько игроков входят каждым способом — для экрана флагов
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: По строке на способ
+      items:
+        type: object
+        description: Способ входа и число игроков
+        required: [method, only_method, linked]
+        properties:
+          method:
+            $ref: '../root.yaml#/components/schemas/IdentityAuthMethodKind'
+          only_method:
+            type: integer
+            minimum: 0
+            description: Сколько игроков входят только этим способом (нет пароля и других способов)
+            example: 12
+          linked:
+            type: integer
+            minimum: 0
+            description: У скольких игроков способ есть всего
+            example: 840
+      example:
+        - method: apple
+          only_method: 12
+          linked: 840
+        - method: google
+          only_method: 5
+          linked: 310
+        - method: passkeys
+          only_method: 0
+          linked: 95
+IdentityPlayerLookup:
+  type: object
+  description: Игрок, найденный по почте, — для поддержки
+  required: [id, nickname, city_id, status, created_at, mfa_enabled, mfa_reset]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id игрока — для requestMfaReset и связи сотрудника
+      example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+    nickname:
+      type: string
+      description: Ник
+      example: kosta_10
+    city_id:
+      type: string
+      format: uuid
+      description: Город игрока
+      example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+    status:
+      type: string
+      description: >-
+        Статус аккаунта: active, suspended, banned, pending_deletion (список открытый — незнакомое
+        значение показывайте общим текстом)
+      example: active
+    created_at:
+      type: string
+      format: date-time
+      description: Когда создан аккаунт
+      example: '2026-03-02T18:20:00Z'
+    mfa_enabled:
+      type: boolean
+      description: Включена ли 2FA
+      example: true
+    mfa_reset:
+      type: object
+      nullable: true
+      description: Назначенный сброс 2FA или null
+      required: [id, execute_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id сброса — для cancelMfaReset
+          example: 0193a1ca-8091-7ea1-9b2c-3d4e5f6a7b89
+        execute_at:
+          type: string
+          format: date-time
+          description: Когда сброс выполнится
+          example: '2026-11-20T09:00:00Z'
+IdentityMfaResetRequest:
+  type: object
+  description: Запрос сброса 2FA игрока
+  required: [reason]
+  additionalProperties: false
+  properties:
+    reason:
+      type: string
+      minLength: 3
+      maxLength: 500
+      description: Почему и как проверена личность — попадёт в журнал и в запрос на подтверждение
+      example: Потерял телефон, личность проверена по документам
+    ticket:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: Номер обращения в поддержке
+      example: SUP-4812
+IdentityMfaResetCancelled:
+  type: object
+  description: Отменённый сброс 2FA
+  required: [id, cancelled_at]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id сброса
+      example: 0193a1ca-8091-7ea1-9b2c-3d4e5f6a7b89
+    cancelled_at:
+      type: string
+      format: date-time
+      description: Когда отменён
+      example: '2026-11-15T10:00:00Z'

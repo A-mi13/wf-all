@@ -8,7 +8,7 @@ ApprovalAction:
     (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или
     городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца;
     geo.country_rules — правила страны (валюта, возрастные пороги, выключение); geo.country_create —
-    новая страна
+    новая страна; identity.mfa_reset — сброс 2FA игрока, потерявшего все вторые факторы
   enum:
     - staff.invite
     - staff.role_change
@@ -16,6 +16,7 @@ ApprovalAction:
     - staff.revoke_owner
     - geo.country_rules
     - geo.country_create
+    - identity.mfa_reset
   x-extensible-enum: true
 ApprovalStatus:
   type: string

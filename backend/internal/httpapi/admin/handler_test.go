@@ -87,8 +87,8 @@ func TestServerStubsNotImplemented(t *testing.T) {
 			t.Errorf("%s: ответ %v, ошибка %v — ждали 501 http.not_implemented", m.Name, resp, err)
 		}
 	}
-	if n != 54 {
-		t.Fatalf("операций сервера %d, ждали 54", n)
+	if n != 65 { // 33 плана A, 21 плана B, 11 identity плана I-1
+		t.Fatalf("операций сервера %d, ждали 65", n)
 	}
 }
 
@@ -519,6 +519,9 @@ func TestIdentityAdminCodesDocumented(t *testing.T) {
 		t.Fatal(err)
 	}
 	documented := documentedWithPrefix(t, spec, "identity.")
+	if len(documented) == 0 {
+		t.Fatal("в контракте admin нет кодов identity.* — страж вхолостую (план I-1, Task 4)")
+	}
 	if want := slices.Sorted(slices.Values(identity.AdminCodes)); !slices.Equal(documented, want) {
 		t.Fatalf("коды identity.* операций %v, identity.AdminCodes %v", documented, want)
 	}

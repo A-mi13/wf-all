@@ -455,6 +455,9 @@
       "geo": {
         "country_rules": "Country rules",
         "country_create": "New country"
+      },
+      "identity": {
+        "mfa_reset": "Player 2FA reset"
       }
     },
     "subtitle": "Two-person actions are carried out by a second staff member with the permission. A request lives for 24 hours.",
@@ -607,7 +610,9 @@
       "approval_closed": "The request is already decided, cancelled or expired",
       "flag_not_found": "Flag not found",
       "flag_stale": "The flag was changed while you were editing it. Refresh the page",
-      "flag_city_not_found": "One of the selected cities does not exist"
+      "flag_city_not_found": "One of the selected cities does not exist",
+      "flag_global_only": "This flag can only be enabled everywhere, without cities",
+      "flag_requires": "The flag depends on another: Google needs Apple on, Apple cannot be turned off while Google is on"
     },
     "staff": {
       "invalid_credentials": "Wrong email or password",
@@ -620,7 +625,9 @@
       "session_not_found": "Session not found or already ended",
       "city_not_found": "City not found",
       "last_owner": "The platform can't be left without an owner",
-      "self_action": "You can't do this to yourself — use My access"
+      "self_action": "You can't do this to yourself — use My access",
+      "player_link_taken": "This player account is already linked to another staff member",
+      "player_not_found": "Player account not found"
     },
     "geo": {
       "city_not_found": "City not found",
@@ -638,6 +645,16 @@
       "district_name_taken": "A district with this name already exists",
       "country_not_enabled": "The country is not in the directory or is disabled",
       "region_not_found": "The region is not from this country"
+    },
+    "identity": {
+      "application_not_found": "Application not found",
+      "application_closed": "The application has already been decided or withdrawn",
+      "captain_ineligible": "Captaincy conditions are not met right now",
+      "self_action": "This is your own player account — another staff member must decide",
+      "user_not_found": "No player with this email",
+      "mfa_not_enabled": "The player has no 2FA — nothing to reset",
+      "mfa_reset_pending": "A 2FA reset is already scheduled for this player",
+      "mfa_reset_not_found": "No scheduled 2FA reset"
     }
   },
   "roles": {

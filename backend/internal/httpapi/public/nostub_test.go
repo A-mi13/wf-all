@@ -57,7 +57,42 @@ var opsBase = map[string]opRequest{
 	"confirmEmailChange":    {http.MethodPost, "/v1/me/email-change/confirm", `{"code_id":"0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12","code":"492817"}`},
 	"acceptDocuments":       {http.MethodPost, "/v1/me/documents", `{"accepted_documents":[{"document":"terms","version":"2026-11-01"}]}`},
 	"deleteAccount":         {http.MethodPost, "/v1/me/delete", `{"confirm_nickname":"kosta_10"}`},
+	// identity — 2FA, ключи доступа, соцвходы, способы входа, свежий вход (план I-1, Task 3)
+	"getAuthMethods":           {http.MethodGet, "/v1/auth/methods", ""},
+	"startMfaPasskey":          {http.MethodPost, "/v1/auth/mfa/passkey-options", `{"mfa_token":"Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1"}`},
+	"createSocialNonce":        {http.MethodPost, "/v1/auth/social/nonces", `{"provider":"apple"}`},
+	"socialLogin":              {http.MethodPost, "/v1/auth/social", `{"provider":"apple","nonce_id":"0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45",` + `"id_token":"` + providerJWT + `","apple":{"authorization_code":"c1a2b3d4e5f6.0.ab12.example-authorization-code"},"device":` + deviceJSON + `}`},
+	"completeSocialSignup":     {http.MethodPost, "/v1/auth/social/signup", `{"signup_token":"signup-token-from-social-login",` + `"city_id":"3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47","birth_date":"1998-04-17","nickname":"kosta_10",` + `"accepted_documents":[{"document":"terms","version":"2026-11-01"}],"device":` + deviceJSON + `}`},
+	"startPasskeyLogin":        {http.MethodPost, "/v1/auth/passkey/options", ""},
+	"passkeyLogin":             {http.MethodPost, "/v1/auth/passkey", `{"challenge_id":"0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34","credential":` + credentialJSON + `,"device":` + deviceJSON + `}`},
+	"reauthenticate":           {http.MethodPost, "/v1/me/reauth", `{"totp_code":"492817"}`},
+	"startReauthPasskey":       {http.MethodPost, "/v1/me/reauth/passkey-options", ""},
+	"listMyAuthMethods":        {http.MethodGet, "/v1/me/auth-methods", ""},
+	"linkIdentity":             {http.MethodPost, "/v1/me/identities", `{"provider":"google","nonce_id":"0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45","id_token":"` + providerJWT + `"}`},
+	"unlinkIdentity":           {http.MethodDelete, "/v1/me/identities/0193a1c7-5d6e-7b71-a8f9-0a1b2c3d4e56", ""},
+	"getMyMfa":                 {http.MethodGet, "/v1/me/mfa", ""},
+	"setupTotp":                {http.MethodPost, "/v1/me/mfa/totp/setup", ""},
+	"confirmTotp":              {http.MethodPost, "/v1/me/mfa/totp/confirm", `{"code":"492817"}`},
+	"disableTotp":              {http.MethodDelete, "/v1/me/mfa/totp", ""},
+	"regenerateRecoveryCodes":  {http.MethodPost, "/v1/me/mfa/recovery-codes", ""},
+	"startPasskeyRegistration": {http.MethodPost, "/v1/me/passkeys/registration-options", ""},
+	"registerPasskey":          {http.MethodPost, "/v1/me/passkeys", `{"challenge_id":"0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34","credential":` + credentialJSON + `,"name":"iPhone"}`},
+	"renamePasskey":            {http.MethodPatch, "/v1/me/passkeys/0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67", `{"name":"Рабочий ноутбук"}`},
+	"deletePasskey":            {http.MethodDelete, "/v1/me/passkeys/0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67", ""},
+	"cancelMyMfaReset":         {http.MethodDelete, "/v1/me/mfa-reset", ""},
+	// identity — капитанство (план I-1, Task 4)
+	"getMyCaptaincy":             {http.MethodGet, "/v1/me/captaincy", ""},
+	"listMyCaptainApplications":  {http.MethodGet, "/v1/me/captain-applications?limit=20", ""},
+	"submitCaptainApplication":   {http.MethodPost, "/v1/captain-applications", `{"proposed_format":"6×6 по средам","contact_link":"https://t.me/kosta_10","phone":"+79181234567"}`},
+	"withdrawCaptainApplication": {http.MethodPost, "/v1/captain-applications/0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78/withdraw", ""},
 }
+
+// providerJWT — выдуманный id_token провайдера (форма JWT, подпись — слово signature).
+const providerJWT = "eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl"
+
+// credentialJSON — ответ платформенного API WebAuthn (сервер разбирает его сам; схема — свободный объект).
+const credentialJSON = `{"id":"KbDl1lrv0Ue6hXXH3Z2E1g","rawId":"KbDl1lrv0Ue6hXXH3Z2E1g","type":"public-key",` +
+	`"response":{"clientDataJSON":"eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0","signature":"MEUCIQDgYk0"}}`
 
 // deviceJSON — годное по схеме DeviceInfo устройство мобильного клиента.
 const deviceJSON = `{"platform":"ios","install_id":"6F9619FF-8B86-4D01-B42D-00CF4FC964FF","model":"iPhone15,2",` +
@@ -73,6 +108,13 @@ var pendingOps = []string{
 	"confirmPasswordReset", "refreshSession", "cancelDeletion", "getLegalDocuments", "createDeviceChallenge", "logout",
 	"getMe", "updateMe", "changeNickname", "listMySessions", "revokeMySession", "revokeOtherSessions", "changePassword",
 	"startEmailChange", "confirmEmailChange", "acceptDocuments", "deleteAccount",
+	// Task 3: 2FA, ключи доступа, соцвходы, способы входа, свежий вход — этапы 5, 7, 8 спеки identity
+	"getAuthMethods", "startMfaPasskey", "createSocialNonce", "socialLogin", "completeSocialSignup", "startPasskeyLogin",
+	"passkeyLogin", "reauthenticate", "startReauthPasskey", "listMyAuthMethods", "linkIdentity", "unlinkIdentity",
+	"getMyMfa", "setupTotp", "confirmTotp", "disableTotp", "regenerateRecoveryCodes", "startPasskeyRegistration",
+	"registerPasskey", "renamePasskey", "deletePasskey", "cancelMyMfaReset",
+	// Task 4: капитанство — этап 9 спеки identity
+	"getMyCaptaincy", "listMyCaptainApplications", "submitCaptainApplication", "withdrawCaptainApplication",
 }
 
 // pendingOpsAtFreeze — замороженное множество (R2, R17): после заморозки контракта identity (Task 5 плана I-1) только
@@ -84,6 +126,13 @@ var pendingOpsAtFreeze = []string{
 	"confirmPasswordReset", "refreshSession", "cancelDeletion", "getLegalDocuments", "createDeviceChallenge", "logout",
 	"getMe", "updateMe", "changeNickname", "listMySessions", "revokeMySession", "revokeOtherSessions", "changePassword",
 	"startEmailChange", "confirmEmailChange", "acceptDocuments", "deleteAccount",
+	// Task 3
+	"getAuthMethods", "startMfaPasskey", "createSocialNonce", "socialLogin", "completeSocialSignup", "startPasskeyLogin",
+	"passkeyLogin", "reauthenticate", "startReauthPasskey", "listMyAuthMethods", "linkIdentity", "unlinkIdentity",
+	"getMyMfa", "setupTotp", "confirmTotp", "disableTotp", "regenerateRecoveryCodes", "startPasskeyRegistration",
+	"registerPasskey", "renamePasskey", "deletePasskey", "cancelMyMfaReset",
+	// Task 4
+	"getMyCaptaincy", "listMyCaptainApplications", "submitCaptainApplication", "withdrawCaptainApplication",
 }
 
 // Страж «без заглушек» (план I-1, R2): собранный public.Server (подделки geo, версий и сессий) на каждой операции

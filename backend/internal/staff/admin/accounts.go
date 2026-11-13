@@ -270,3 +270,16 @@ func utcPtr(t *time.Time) *time.Time {
 	u := t.UTC()
 	return &u
 }
+
+// PutStaffPlayerLink — PUT /v1/staff/accounts/{staffId}/player-link: связь «сотрудник → учётка игрока» (спека
+// identity §7.6; план I-1, R15). Контракт заморожен до кода: операция отвечает 501 и стоит в pendingOps стража
+// TestNoStubOperations (internal/httpapi/admin) до этапа 9 спеки identity (ник игрока — порт identity при сборке).
+func (h *Handler) PutStaffPlayerLink(context.Context, oapi.PutStaffPlayerLinkRequestObject) (oapi.PutStaffPlayerLinkResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// DeleteStaffPlayerLink — DELETE /v1/staff/accounts/{staffId}/player-link: снять связь «сотрудник → учётка игрока»
+// (спека identity §7.6; план I-1, R15) — 501 до этапа 9, как PutStaffPlayerLink.
+func (h *Handler) DeleteStaffPlayerLink(context.Context, oapi.DeleteStaffPlayerLinkRequestObject) (oapi.DeleteStaffPlayerLinkResponseObject, error) {
+	return nil, errNotImplemented
+}

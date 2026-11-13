@@ -1,0 +1,342 @@
+# Операции модуля identity контракта admin (спека identity §7.1; план I-1, Task 4, Приложение 1): заявки в
+# капитаны, поиск игрока по почте для поддержки, сброс 2FA через поддержку, статистика способов входа. Тег identity —
+# реализует internal/identity/admin (встроен в internal/httpapi/admin.Server); до реализации этапа 9 операция
+# отвечает 501 http.not_implemented. Город заявки не в пути: скоуп модератора (право scoped) проверяет сценарий.
+
+captain-applications:
+  get:
+    operationId: listCaptainApplications
+    tags: [identity]
+    x-permission: identity.captain_applications.read
+    x-error-codes: []
+    summary: Очередь заявок в капитаны
+    description: |
+      Раздел «Капитаны»: заявки игроков с ником, городом, возрастом и стажем аккаунта. По умолчанию —
+      ожидающие решения (`status=pending`), старые сверху. Модератору — только заявки его городов:
+      заявок чужих городов в списке нет, фильтр `city_id` чужого города даёт пустую страницу.
+      Владелец, админ и поддержка видят все города. Страницы по курсору; испорченный курсор — 400
+      `validation.failed` по полю `query.cursor`.
+    parameters:
+      - name: status
+        in: query
+        required: false
+        description: Статус заявок; без параметра — pending
+        schema:
+          $ref: '../root.yaml#/components/schemas/IdentityCaptainApplicationStatus'
+        example: pending
+      - name: city_id
+        in: query
+        required: false
+        description: Только заявки этого города
+        schema:
+          type: string
+          format: uuid
+        example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+      - $ref: '../root.yaml#/components/parameters/Cursor'
+      - $ref: '../root.yaml#/components/parameters/Limit'
+    responses:
+      '200':
+        description: Страница заявок
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/IdentityCaptainApplicationPage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+captain-application:
+  get:
+    operationId: getCaptainApplication
+    tags: [identity]
+    x-permission: identity.captain_applications.read
+    x-error-codes: [identity.application_not_found]
+    summary: Карточка заявки
+    description: |
+      Заявка с полями формы и «телефон указан / нет» (сам телефон — `getCaptainApplicationContact`),
+      заявитель (ник, город, возраст в годах, стаж аккаунта в днях), условия капитанства сейчас
+      (`checks`: `unavailable` — модуль проверки ещё не запущен, одобрить нельзя), прошлые заявки
+      игрока с решениями и число связанных аккаунтов. Чтение своей учётки игрока
+      (связь «сотрудник → игрок») не запрещено.
+
+      Коды ошибок: 404 `identity.application_not_found` — заявки нет; модератору — и заявка чужого
+      города (неотличимо от несуществующей).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ApplicationId'
+    responses:
+      '200':
+        description: Карточка заявки
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/IdentityCaptainApplicationCard'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+captain-application-contact:
+  get:
+    operationId: getCaptainApplicationContact
+    tags: [identity]
+    x-permission: identity.pii.read
+    x-error-codes: [identity.application_not_found]
+    summary: Контакты заявителя
+    description: |
+      «Показать контакты» в карточке заявки: почта и телефон заявителя (телефон не подтверждён). Причина
+      обязательна всем (3–200 символов) и идёт заголовком `X-WF-Access-Reason`, не в query (URL и
+      журналы прокси не несут свободного текста, CWE-598); значение — UTF-8 в percent-encoding
+      (`encodeURIComponent`). Каждое чтение пишется в журнал с причиной.
+
+      Коды ошибок:
+      - 404 `identity.application_not_found` — заявки нет; модератору — и заявка чужого города.
+      - 400 `validation.failed` по полю `header.X-WF-Access-Reason` — нет причины, сырая кириллица
+        или пробел (не закодированы), битая кодировка; 422 `validation.failed` по тому же полю —
+        причина после декодирования короче 3 или длиннее 200 символов.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ApplicationId'
+      - $ref: '../root.yaml#/components/parameters/AccessReason'
+    responses:
+      '200':
+        description: Почта и телефон заявителя
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/IdentityApplicantContact'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+captain-application-approve:
+  post:
+    operationId: approveCaptainApplication
+    tags: [identity]
+    x-permission: identity.captain_applications.decide
+    x-error-codes:
+      - identity.application_not_found
+      - identity.application_closed
+      - identity.captain_ineligible
+      - identity.self_action
+    summary: Одобрить заявку
+    description: |
+      Одобрение — одной транзакцией: условия капитанства перепроверяются в момент решения, игрок
+      получает допуск капитана в городе заявки (с испытательным сроком), заявка — `approved`; запись в
+      журнал, письмо игроку. Подтверждения вдвоём нет: решение обратимо (допуск отзывает модерация).
+      Модератор решает только заявки своих городов. Ответ — решённая заявка.
+
+      Коды ошибок:
+      - 404 `identity.application_not_found` — заявки нет; модератору — и заявка чужого города.
+      - 409 `identity.application_closed` — заявка уже решена или отозвана.
+      - 409 `identity.captain_ineligible` — условия перестали выполняться (`reasons`); в том числе
+        `checks_unavailable` — проверка ещё не запущена.
+      - 409 `identity.self_action` — заявитель — ваша собственная учётка игрока
+        (связь «сотрудник → игрок»): решение о себе принимает другой сотрудник.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ApplicationId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Комментарий к решению — необязателен
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/IdentityCaptainApprove'
+    responses:
+      '200':
+        description: Заявка одобрена
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/IdentityCaptainApplication'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+captain-application-reject:
+  post:
+    operationId: rejectCaptainApplication
+    tags: [identity]
+    x-permission: identity.captain_applications.decide
+    x-error-codes:
+      - identity.application_not_found
+      - identity.application_closed
+      - identity.self_action
+    summary: Отклонить заявку
+    description: |
+      Отказ с кодом причины из списка и комментарием; заявка — `rejected`, запись в журнал, письмо
+      игроку. Повторную заявку игрок подаст не раньше чем через 7 дней. Модератор решает только
+      заявки своих городов. Ответ — решённая заявка.
+
+      Комментарий обязателен при `rejection_code = other`: без него — 422 `validation.failed` по
+      полю `body.comment` (правило `required`).
+
+      Коды ошибок:
+      - 404 `identity.application_not_found` — заявки нет; модератору — и заявка чужого города.
+      - 409 `identity.application_closed` — заявка уже решена или отозвана.
+      - 409 `identity.self_action` — заявитель — ваша собственная учётка игрока
+        (связь «сотрудник → игрок»).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ApplicationId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Код причины и комментарий
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/IdentityCaptainReject'
+    responses:
+      '200':
+        description: Заявка отклонена
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/IdentityCaptainApplication'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-methods-usage:
+  get:
+    operationId: getAuthMethodsUsage
+    tags: [identity]
+    x-permission: platform.flags.read
+    x-error-codes: []
+    summary: Сколько игроков входят каждым способом
+    description: |
+      Экран «Флаги функций»: по способам `apple`, `google`, `passkeys` — сколько игроков входят только
+      им (`only_method`) и у скольких он есть всего (`linked`). Перед выключением аварийного флага
+      (`auth_*_login`) экран показывает `only_method`: этим игрокам останется только «Забыли пароль?».
+    responses:
+      '200':
+        description: Статистика способов входа
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/IdentityAuthMethodsUsage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+users-lookup:
+  get:
+    operationId: findPlayerByEmail
+    tags: [identity]
+    x-permission: identity.pii.read
+    x-error-codes: [identity.user_not_found]
+    summary: Найти игрока по почте
+    description: |
+      Поддержка: точный поиск игрока по почте — ник, город, статус, есть ли 2FA и назначенный сброс.
+      Почта (`X-WF-Lookup-Email`) и причина (`X-WF-Access-Reason`) обязательны всем и идут
+      заголовками, не в query (URL и журналы прокси не несут ПД, CWE-598); значения — UTF-8 в
+      percent-encoding (`encodeURIComponent`). Каждое чтение пишется в журнал с причиной. Модератору —
+      только игроки его городов.
+
+      Коды ошибок:
+      - 404 `identity.user_not_found` — игрока с такой почтой нет; модератору — и игрок чужого города.
+      - 400 `validation.failed` по полю `header.X-WF-Lookup-Email` или `header.X-WF-Access-Reason` —
+        нет заголовка, значение не закодировано или кодировка битая; 422 `validation.failed` по тому
+        же полю — после декодирования почта длиннее 254 байт, причина короче 3 или длиннее 200
+        символов.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/LookupEmail'
+      - $ref: '../root.yaml#/components/parameters/AccessReason'
+    responses:
+      '200':
+        description: Игрок
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/IdentityPlayerLookup'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+user-mfa-reset:
+  post:
+    operationId: requestMfaReset
+    tags: [identity]
+    x-permission: identity.mfa.reset
+    x-error-codes:
+      - identity.user_not_found
+      - identity.self_action
+      - identity.mfa_not_enabled
+      - identity.mfa_reset_pending
+    summary: Запросить сброс 2FA игрока
+    description: |
+      Поддержка, когда игрок потерял все вторые факторы (TOTP, резервные коды, ключи доступа) и
+      личность проверена по регламенту. Всегда вдвоём: ответ 202 с запросом на подтверждение
+      (действие `identity.mfa_reset`), второй сотрудник решает его во «Входящих» подтверждений.
+      После подтверждения — 7 дней ожидания с письмом владельцу: любой вход владельца со вторым
+      фактором или «Отменить» в его настройках отменяет сброс; по истечении 2FA снимается, сессии
+      игрока отзываются.
+
+      Коды ошибок:
+      - 404 `identity.user_not_found` — игрока нет.
+      - 409 `identity.self_action` — цель — ваша собственная учётка игрока
+        (связь «сотрудник → игрок»).
+      - 409 `identity.mfa_not_enabled` — у игрока нет 2FA — сбрасывать нечего.
+      - 409 `identity.mfa_reset_pending` — сброс уже назначен (дата — в `findPlayerByEmail`).
+      Если к моменту подтверждения у игрока уже нет 2FA или сброс уже назначен, подтверждение
+      ответит 409 `platform.approval_stale`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/UserId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Причина и номер обращения
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/IdentityMfaResetRequest'
+    responses:
+      '202':
+        description: Создан запрос на подтверждение сброса
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ApprovalAccepted'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+mfa-reset-cancel:
+  post:
+    operationId: cancelMfaReset
+    tags: [identity]
+    x-permission: identity.mfa.reset
+    x-error-codes:
+      - identity.mfa_reset_not_found
+      - identity.self_action
+    summary: Отменить назначенный сброс 2FA
+    description: |
+      Отмена назначенного (подтверждённого, ждущего 7 дней) сброса 2FA игрока — сразу, без второго
+      сотрудника: отмена привилегий не даёт. Владельцу уходит письмо, запись в журнал. Ответ — id
+      сброса и время отмены.
+
+      Коды ошибок:
+      - 404 `identity.mfa_reset_not_found` — сброса нет, он уже выполнен или отменён.
+      - 409 `identity.self_action` — сброс вашей собственной учётки игрока
+        (связь «сотрудник → игрок»).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ResetId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '200':
+        description: Сброс отменён
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/IdentityMfaResetCancelled'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'

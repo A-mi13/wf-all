@@ -48,7 +48,7 @@ func TestNoStubOperations(t *testing.T) {
 				if req.method != http.MethodGet {
 					key = uuid.NewString()
 				}
-				rec := e.send(req.method, req.path, token, key, req.body)
+				rec := e.send(req.method, req.path, token, key, req.body, opsHeaders[opID(op)]...)
 				body := rec.Body.String()
 				stub := rec.Code == http.StatusNotImplemented || strings.Contains(body, `"code":"`+httpx.CodeNotImplemented+`"`)
 				switch {
@@ -83,11 +83,21 @@ func TestNoStubOperations(t *testing.T) {
 // http.not_implemented (контракт identity заморожен до кода, этапы спеки выкатываются по очереди — план I-1, R1, R2).
 // Реализовали операцию — убрать её отсюда (TestNoStubOperations падает «убрать из pendingOps»). Список и
 // TestPendingOpsExpire удаляет последняя задача последнего плана identity.
-var pendingOps = []string{}
+var pendingOps = []string{
+	// Task 4: заявки в капитаны, поиск игрока, сброс 2FA, статистика способов входа — этап 9 спеки identity
+	"listCaptainApplications", "getCaptainApplication", "getCaptainApplicationContact", "approveCaptainApplication",
+	"rejectCaptainApplication", "getAuthMethodsUsage", "findPlayerByEmail", "requestMfaReset", "cancelMfaReset",
+	// связь «сотрудник → учётка игрока» (тег staff, §7.6, R15) — этап 9
+	"putStaffPlayerLink", "deleteStaffPlayerLink",
+}
 
 // pendingOpsAtFreeze — замороженное множество (R2, R17): после заморозки контракта identity (Task 5 плана I-1) только
 // уменьшается; pendingOps — его подмножество.
-var pendingOpsAtFreeze = []string{}
+var pendingOpsAtFreeze = []string{
+	"listCaptainApplications", "getCaptainApplication", "getCaptainApplicationContact", "approveCaptainApplication",
+	"rejectCaptainApplication", "getAuthMethodsUsage", "findPlayerByEmail", "requestMfaReset", "cancelMfaReset",
+	"putStaffPlayerLink", "deleteStaffPlayerLink",
+}
 
 // pendingStaffOps — операции тега staff, которым можно быть в pendingOps: связь «сотрудник → учётка игрока»
 // (спека identity §7.6, R15) реализует этап 9 identity.

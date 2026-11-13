@@ -143,3 +143,138 @@ func (Handler) AcceptDocuments(context.Context, oapi.AcceptDocumentsRequestObjec
 func (Handler) DeleteAccount(context.Context, oapi.DeleteAccountRequestObject) (oapi.DeleteAccountResponseObject, error) {
 	return nil, errNotImplemented
 }
+
+// 2FA, ключи доступа, соцвходы, способы входа, свежий вход (план I-1, Task 3; спека identity §6.3) — реализуют этапы 5,
+// 7 и 8 спеки.
+
+// GetAuthMethods — GET /v1/auth/methods: способы входа.
+func (Handler) GetAuthMethods(context.Context, oapi.GetAuthMethodsRequestObject) (oapi.GetAuthMethodsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// StartMfaPasskey — POST /v1/auth/mfa/passkey-options: задача WebAuthn для второго фактора.
+func (Handler) StartMfaPasskey(context.Context, oapi.StartMfaPasskeyRequestObject) (oapi.StartMfaPasskeyResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// CreateSocialNonce — POST /v1/auth/social/nonces: nonce для входа через Apple или Google.
+func (Handler) CreateSocialNonce(context.Context, oapi.CreateSocialNonceRequestObject) (oapi.CreateSocialNonceResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// SocialLogin — POST /v1/auth/social: войти через Apple или Google.
+func (Handler) SocialLogin(context.Context, oapi.SocialLoginRequestObject) (oapi.SocialLoginResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// CompleteSocialSignup — POST /v1/auth/social/signup: дорегистрация после Apple или Google.
+func (Handler) CompleteSocialSignup(context.Context, oapi.CompleteSocialSignupRequestObject) (oapi.CompleteSocialSignupResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// StartPasskeyLogin — POST /v1/auth/passkey/options: задача WebAuthn для входа ключом.
+func (Handler) StartPasskeyLogin(context.Context, oapi.StartPasskeyLoginRequestObject) (oapi.StartPasskeyLoginResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// PasskeyLogin — POST /v1/auth/passkey: войти ключом доступа.
+func (Handler) PasskeyLogin(context.Context, oapi.PasskeyLoginRequestObject) (oapi.PasskeyLoginResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// Reauthenticate — POST /v1/me/reauth: свежий вход.
+func (Handler) Reauthenticate(context.Context, oapi.ReauthenticateRequestObject) (oapi.ReauthenticateResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// StartReauthPasskey — POST /v1/me/reauth/passkey-options: задача WebAuthn для свежего входа.
+func (Handler) StartReauthPasskey(context.Context, oapi.StartReauthPasskeyRequestObject) (oapi.StartReauthPasskeyResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ListMyAuthMethods — GET /v1/me/auth-methods: мои способы входа.
+func (Handler) ListMyAuthMethods(context.Context, oapi.ListMyAuthMethodsRequestObject) (oapi.ListMyAuthMethodsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// LinkIdentity — POST /v1/me/identities: привязать Apple или Google.
+func (Handler) LinkIdentity(context.Context, oapi.LinkIdentityRequestObject) (oapi.LinkIdentityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// UnlinkIdentity — DELETE /v1/me/identities/{identityId}: отвязать Apple или Google.
+func (Handler) UnlinkIdentity(context.Context, oapi.UnlinkIdentityRequestObject) (oapi.UnlinkIdentityResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// GetMyMfa — GET /v1/me/mfa: состояние 2FA.
+func (Handler) GetMyMfa(context.Context, oapi.GetMyMfaRequestObject) (oapi.GetMyMfaResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// SetupTotp — POST /v1/me/mfa/totp/setup: начать включение 2FA.
+func (Handler) SetupTotp(context.Context, oapi.SetupTotpRequestObject) (oapi.SetupTotpResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ConfirmTotp — POST /v1/me/mfa/totp/confirm: подтвердить включение 2FA.
+func (Handler) ConfirmTotp(context.Context, oapi.ConfirmTotpRequestObject) (oapi.ConfirmTotpResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// DisableTotp — DELETE /v1/me/mfa/totp: выключить 2FA.
+func (Handler) DisableTotp(context.Context, oapi.DisableTotpRequestObject) (oapi.DisableTotpResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// RegenerateRecoveryCodes — POST /v1/me/mfa/recovery-codes: новые резервные коды.
+func (Handler) RegenerateRecoveryCodes(context.Context, oapi.RegenerateRecoveryCodesRequestObject) (oapi.RegenerateRecoveryCodesResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// StartPasskeyRegistration — POST /v1/me/passkeys/registration-options: задача WebAuthn для нового ключа.
+func (Handler) StartPasskeyRegistration(context.Context, oapi.StartPasskeyRegistrationRequestObject) (oapi.StartPasskeyRegistrationResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// RegisterPasskey — POST /v1/me/passkeys: добавить ключ доступа.
+func (Handler) RegisterPasskey(context.Context, oapi.RegisterPasskeyRequestObject) (oapi.RegisterPasskeyResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// RenamePasskey — PATCH /v1/me/passkeys/{passkeyId}: переименовать ключ доступа.
+func (Handler) RenamePasskey(context.Context, oapi.RenamePasskeyRequestObject) (oapi.RenamePasskeyResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// DeletePasskey — DELETE /v1/me/passkeys/{passkeyId}: удалить ключ доступа.
+func (Handler) DeletePasskey(context.Context, oapi.DeletePasskeyRequestObject) (oapi.DeletePasskeyResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// CancelMyMfaReset — DELETE /v1/me/mfa-reset: отменить сброс 2FA через поддержку.
+func (Handler) CancelMyMfaReset(context.Context, oapi.CancelMyMfaResetRequestObject) (oapi.CancelMyMfaResetResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// Капитанство (план I-1, Task 4; спека identity §3.12, §6.3) — реализует этап 9 спеки.
+
+// GetMyCaptaincy — GET /v1/me/captaincy: моё капитанство.
+func (Handler) GetMyCaptaincy(context.Context, oapi.GetMyCaptaincyRequestObject) (oapi.GetMyCaptaincyResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// ListMyCaptainApplications — GET /v1/me/captain-applications: мои заявки в капитаны.
+func (Handler) ListMyCaptainApplications(context.Context, oapi.ListMyCaptainApplicationsRequestObject) (oapi.ListMyCaptainApplicationsResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// SubmitCaptainApplication — POST /v1/captain-applications: подать заявку в капитаны.
+func (Handler) SubmitCaptainApplication(context.Context, oapi.SubmitCaptainApplicationRequestObject) (oapi.SubmitCaptainApplicationResponseObject, error) {
+	return nil, errNotImplemented
+}
+
+// WithdrawCaptainApplication — POST /v1/captain-applications/{applicationId}/withdraw: отозвать заявку в капитаны.
+func (Handler) WithdrawCaptainApplication(context.Context, oapi.WithdrawCaptainApplicationRequestObject) (oapi.WithdrawCaptainApplicationResponseObject, error) {
+	return nil, errNotImplemented
+}
