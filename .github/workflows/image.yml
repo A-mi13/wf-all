@@ -120,8 +120,11 @@ jobs:
           # API за тем же origin: без сессии — 401 Problem, вход без Origin — 403 auth.csrf_failed;
           # обрыв соединения — код 000, а не выход bash -e мимо fail
           code=$(curl -sS -o me.json -w '%{http_code}' http://127.0.0.1:18081/v1/staff/me) || code=000
-          [ "$code" = 401 ] && grep -q '"status":401' me.json || fail "GET /v1/staff/me: $code $(cat me.json 2>/dev/null)"
+          if ! { [ "$code" = 401 ] && grep -q '"status":401' me.json; }; then
+            fail "GET /v1/staff/me: $code $(cat me.json 2>/dev/null)"
+          fi
           code=$(curl -sS -o login.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' \
             http://127.0.0.1:18081/v1/staff/auth/login) || code=000
-          [ "$code" = 403 ] && grep -q '"code":"auth.csrf_failed"' login.json ||
+          if ! { [ "$code" = 403 ] && grep -q '"code":"auth.csrf_failed"' login.json; }; then
             fail "POST /v1/staff/auth/login без Origin: $code $(cat login.json 2>/dev/null)"
+          fi

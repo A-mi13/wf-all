@@ -18,6 +18,9 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN npm install --global --no-fund --no-audit \
       "pnpm@$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '')")" \
     && pnpm --version
+# Node из devEngines pnpm ставит в node_modules/.bin (runtime-зависимость лок-файла) и запускает им postinstall
+# пакетов; этому бинарнику на Alpine нужна libatomic (первый прогон image.yml, PR #14: libatomic.so.1 not found).
+RUN apk add --no-cache libatomic
 # без backend/: правка Go не сбрасывает кэш слоёв админки
 COPY apps/ apps/
 COPY packages/ packages/
