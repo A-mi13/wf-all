@@ -1,0 +1,32 @@
+# Контекст сборки образа (backend/Dockerfile, контекст — корень репозитория: render.yaml, job image в CI).
+# Список разрешённого: всё закрыто, открыто только нужное сборке бэкенда и админки; внутри открытого снова
+# закрыты зависимости, сборки, секреты и тесты Go. Без этого файла в слои ушли бы node_modules, .tools/pg и .env.
+*
+!backend/
+!apps/admin/
+# apps/web — только манифест: лок-файл воркспейса знает его импортёр, исходники веба образу не нужны
+!apps/web/package.json
+!packages/
+# @wf/contracts — devDependency админки по воркспейсу: манифест и src
+!contracts/package.json
+# типы @wf/contracts/* берут тесты src/i18n, а tsc сборки компилирует src целиком (с тестами)
+!contracts/src/
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!scripts/check-admin-dist.mjs
+
+**/node_modules
+**/dist
+**/dist-*
+**/.env
+**/.env.*
+!**/.env.example
+**/.task
+**/*.tsbuildinfo
+**/test-results
+**/playwright-report
+**/*_test.go
+backend/tools
+apps/admin/e2e
+apps/admin/visual

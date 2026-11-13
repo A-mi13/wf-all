@@ -587,3 +587,21 @@ func TestOperatorLostWholeKey(t *testing.T) {
 		t.Fatalf("keys_lost у команд без флага: %d записей", n)
 	}
 }
+
+// Предупреждение SMTP opportunistic на нелокальном хосте — в журнал сервиса (logOut в формате ADMIN_LOG_FORMAT), а не
+// стандартным логгером до slog.SetDefault (ревью плана C, m2).
+func TestRunWarnsOpportunisticSMTPInServiceLog(t *testing.T) {
+	t.Parallel()
+	var logBuf bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err := run(ctx, nil, offlineEnv("ADMIN_MAIL_SMTP_ADDR=smtp.example.com:587", "ADMIN_MAIL_SMTP_TLS=opportunistic",
+		"ADMIN_LOG_FORMAT=json"), io.Discard, &logBuf)
+	if err == nil {
+		t.Fatal("база недостижима, а run вернул nil")
+	}
+	if out := logBuf.String(); !strings.Contains(out, `"level":"WARN"`) || !strings.Contains(out, "opportunistic") ||
+		!strings.Contains(out, "smtp.example.com") {
+		t.Fatalf("нет предупреждения opportunistic в журнале сервиса: %q", out)
+	}
+}

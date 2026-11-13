@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -29,7 +30,17 @@ type Inserter interface {
 type RelayConfig struct {
 	Batch int           // событий за одну транзакцию
 	Poll  time.Duration // страховочный опрос, если NOTIFY потерялся
+	// StopTimeout — срок остановки после отмены ctx Run (LISTEN и пачка в полёте); 0 — defaultStopTimeout.
+	// Воркер передаёт config.WorkerRelayStop (бюджет остановки, план C R4).
+	StopTimeout time.Duration
 }
+
+// defaultStopTimeout — срок остановки relay, если RelayConfig.StopTimeout не задан.
+const defaultStopTimeout = 5 * time.Second
+
+// ErrRelayStopTimeout — relay не остановился за StopTimeout (завис LISTEN или пачка: отмена не дошла по сети).
+// Горутины relay ещё живут; процесс идёт дальше — к остановке River и выходу.
+var ErrRelayStopTimeout = errors.New("events: relay не остановился за срок")
 
 // Relay раскладывает события outbox подписчикам: на каждого — задача River в той же
 // транзакции, что и отметка published_at (спека §6.5). Инстансов воркера может быть сколько
@@ -49,8 +60,31 @@ func NewRelay(pool *pgxpool.Pool, ins Inserter, reg *Registry, log *slog.Logger,
 }
 
 // Run работает до отмены ctx. LISTEN держится на отдельном соединении вне пула: с PgBouncer
-// в transaction mode он несовместим (docs/deploy-dev.md).
+// в transaction mode он несовместим (docs/deploy-dev.md). После отмены ждёт остановки не дольше StopTimeout: не
+// уложился — ErrRelayStopTimeout (остановку воркера зависшее соединение не держит).
 func (r *Relay) Run(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.run(ctx)
+	}()
+	<-ctx.Done()
+	stop := r.cfg.StopTimeout
+	if stop <= 0 {
+		stop = defaultStopTimeout
+	}
+	t := time.NewTimer(stop)
+	defer t.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-t.C:
+		return fmt.Errorf("%w (%s)", ErrRelayStopTimeout, stop)
+	}
+}
+
+// run — цикл relay до отмены ctx и остановки слушателя.
+func (r *Relay) run(ctx context.Context) {
 	wake := make(chan struct{}, 1)
 	var wg sync.WaitGroup
 	wg.Go(func() { r.listen(ctx, wake) })
@@ -63,7 +97,7 @@ func (r *Relay) Run(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		case <-wake:
 		case <-poll.C:
 		}
@@ -143,7 +177,12 @@ func (r *Relay) listenOnce(ctx context.Context, wake chan<- struct{}) (bool, err
 	if err != nil {
 		return false, err
 	}
-	defer conn.Close(context.WithoutCancel(ctx))
+	defer func() {
+		// закрытие — со сроком: Terminate в оборванную сеть не держит остановку
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		_ = conn.Close(closeCtx)
+	}()
 	if _, err := conn.Exec(ctx, "LISTEN "+Channel); err != nil {
 		return false, err
 	}

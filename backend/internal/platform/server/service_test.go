@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -186,5 +187,56 @@ func TestRunServiceWithoutBackground(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("RunService: %v", err)
+	}
+}
+
+// Ready (ожидание схемы admin-api, план C R3) — до сборки и открытия порта: пока он не вернулся, порт не слушается
+// (Render не переключает трафик); ошибка Ready — отказ старта без сборки и без порта.
+func TestRunServiceReadyBeforeListen(t *testing.T) {
+	t.Parallel()
+	addr, url := freeAddr(t), dbtest.NewURL(t)
+	entered, release := make(chan struct{}), make(chan error)
+	built := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		done <- server.RunService(ctx, "test", server.HTTPConfig{
+			HTTP: config.HTTP{Addr: addr, ShutdownTimeout: time.Second},
+			DB:   config.DB{URL: url, MaxConns: 2},
+			Ready: func(context.Context, *slog.Logger, *pgxpool.Pool) error {
+				close(entered)
+				return <-release
+			},
+		}, io.Discard, func(*slog.Logger, *pgxpool.Pool) (server.Service, error) {
+			built <- struct{}{}
+			return server.Service{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}, nil
+		})
+	}()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("RunService вернулся до Ready: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("Ready не вызван")
+	}
+	if c, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", addr); err == nil {
+		_ = c.Close()
+		t.Fatal("порт слушается до готовности схемы")
+	}
+	select {
+	case <-built:
+		t.Fatal("сборка до готовности схемы")
+	default:
+	}
+	errReady := errors.New("схема отстаёт")
+	release <- errReady
+	if err := <-done; !errors.Is(err, errReady) {
+		t.Fatalf("RunService = %v, ждали ошибку Ready", err)
+	}
+	select {
+	case <-built:
+		t.Fatal("сборка после отказа Ready")
+	default:
 	}
 }

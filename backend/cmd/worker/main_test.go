@@ -372,3 +372,21 @@ func TestCommandUsageErrors(t *testing.T) {
 		t.Fatalf("прочий отказ: код %d", code)
 	}
 }
+
+// Предупреждение SMTP opportunistic на нелокальном хосте — в журнал воркера (logOut в формате WORKER_LOG_FORMAT), а не
+// стандартным логгером до slog.SetDefault (ревью плана C, m2).
+func TestRunWarnsOpportunisticSMTPInServiceLog(t *testing.T) {
+	t.Parallel()
+	var logBuf bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	env := []string{"WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1", "WORKER_LOG_FORMAT=json",
+		"WORKER_MAIL_SMTP_ADDR=smtp.example.com:587", "WORKER_MAIL_FROM=WF <noreply@wf.local>", "WORKER_MAIL_SMTP_TLS=opportunistic"}
+	if err := run(ctx, nil, env, io.Discard, &logBuf); err == nil {
+		t.Fatal("база недостижима, а run вернул nil")
+	}
+	if out := logBuf.String(); !strings.Contains(out, `"level":"WARN"`) || !strings.Contains(out, "opportunistic") ||
+		!strings.Contains(out, "smtp.example.com") {
+		t.Fatalf("нет предупреждения opportunistic в журнале воркера: %q", out)
+	}
+}

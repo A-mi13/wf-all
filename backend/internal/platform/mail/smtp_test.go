@@ -2,10 +2,12 @@ package mail_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"strings"
 	"testing"
@@ -111,11 +113,106 @@ func TestNewSMTPValidates(t *testing.T) {
 		"битый From":       {Addr: "localhost:25", From: "nope", TLS: "none"},
 		"неизвестный TLS":  {Addr: "localhost:25", From: "a@b.co", TLS: "maybe"},
 		"пароль без имени": {Addr: "localhost:25", From: "a@b.co", TLS: "none", Password: "x"},
+		"пустой TLS":       {Addr: "localhost:25", From: "a@b.co"},
 	} {
 		if _, err := mail.NewSMTP(c); err == nil {
 			t.Errorf("%s: принято", name)
 		}
 	}
+}
+
+// Без TLS — только Mailpit (план C, R8): опечатка в ADMIN_MAIL_SMTP_TLS на стенде не должна отправить API-ключ
+// Resend открытым текстом. Локальный — только точный список хостов, «похожие» имена — нет.
+func TestNewSMTPRejectsPlainRemote(t *testing.T) {
+	for _, addr := range []string{
+		"smtp.example.com:587", "smtp.resend.com:587", "localhost.example.com:25", "127.0.0.1.nip.io:25",
+		"0.0.0.0:25", ":25", "10.0.0.5:25", "127.0.0.2:25", "[::ffff:127.0.0.1]:25",
+	} {
+		t.Run(addr, func(t *testing.T) {
+			_, err := mail.NewSMTP(mail.SMTPConfig{Addr: addr, From: "a@b.co", TLS: "none"})
+			if err == nil {
+				t.Fatalf("%s без TLS принят", addr)
+			}
+			if !strings.Contains(err.Error(), "TLS") {
+				t.Fatalf("ошибка не про TLS: %v", err)
+			}
+		})
+	}
+}
+
+// Логин на петле без TLS — тоже отказ: учётные данные есть только у настоящего провайдера, а петля на стенде — это
+// локальный прокси Render, не Mailpit. Секрет в текст ошибки (лог старта) не попадает.
+func TestNewSMTPRejectsPlainWithAuth(t *testing.T) {
+	const user, pass = "resend-user-x", "re_secret_value_42"
+	for _, addr := range []string{"127.0.0.1:1025", "localhost:1025", "[::1]:1025"} {
+		t.Run(addr, func(t *testing.T) {
+			_, err := mail.NewSMTP(mail.SMTPConfig{Addr: addr, From: "a@b.co", TLS: "none", Username: user, Password: pass})
+			if err == nil {
+				t.Fatal("логин без TLS принят")
+			}
+			if strings.Contains(err.Error(), pass) || strings.Contains(err.Error(), user) {
+				t.Fatalf("в ошибке учётные данные: %v", err)
+			}
+		})
+	}
+	// логин без пароля — тоже логин
+	if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: "127.0.0.1:1025", From: "a@b.co", TLS: "none", Username: user}); err == nil {
+		t.Fatal("имя пользователя без TLS принято")
+	}
+}
+
+// Mailpit (dev, живой e2e, проверка образа в CI) — без TLS и логина на петле — работает как раньше.
+func TestNewSMTPMailpit(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:11026", "127.0.0.1:11025", "localhost:1025", "LOCALHOST:1025", "[::1]:1025"} {
+		if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: addr, From: "WF <noreply@wf.local>", TLS: "none"}); err != nil {
+			t.Errorf("%s: %v", addr, err)
+		}
+	}
+	// с TLS логин допустим на любом хосте
+	for _, tls := range []string{"mandatory", "opportunistic"} {
+		if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: "smtp.example.com:587", From: "a@b.co", TLS: tls,
+			Username: "u", Password: "p"}); err != nil {
+			t.Errorf("%s: %v", tls, err)
+		}
+	}
+}
+
+// opportunistic с нелокальным хостом — старт, но предупреждение в лог (на стенде — mandatory): сервер без STARTTLS
+// получил бы логин открытым текстом. На петле — без предупреждения. Журнал — SMTPConfig.Log (журнал сервиса), без
+// него — slog.Default().
+func TestNewSMTPOpportunisticRemoteWarns(t *testing.T) {
+	check := func(t *testing.T, buf *bytes.Buffer, logTo *slog.Logger) {
+		t.Helper()
+		if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: "127.0.0.1:1025", From: "a@b.co", TLS: "opportunistic",
+			Log: logTo}); err != nil {
+			t.Fatal(err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("предупреждение на петле: %s", buf.String())
+		}
+		if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: "smtp.example.com:587", From: "a@b.co", TLS: "opportunistic",
+			Username: "u", Password: "secret-p", Log: logTo}); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "smtp.example.com") {
+			t.Fatalf("нет предупреждения про opportunistic: %q", out)
+		}
+		if strings.Contains(out, "secret-p") {
+			t.Fatalf("пароль в логе: %q", out)
+		}
+	}
+	t.Run("журнал сервиса", func(t *testing.T) {
+		var buf bytes.Buffer
+		check(t, &buf, slog.New(slog.NewTextHandler(&buf, nil)))
+	})
+	t.Run("без журнала — slog.Default", func(t *testing.T) {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+		check(t, &buf, nil)
+	})
 }
 
 func TestMemory(t *testing.T) {

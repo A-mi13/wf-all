@@ -45,7 +45,7 @@ paths:
   Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
   фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены
   (ошибка или nil) — HTTP гасится, `RunService` возвращает ошибку (стражи `service_test.go`). `RunHTTP` — обёртка без фона
-  (`cmd/api`). У admin-api: HTTP-дренаж `ADMIN_SHUTDOWN_TIMEOUT` (10 с) + River мягко 12 с + жёстко 5 с = 27 с (запас до SIGKILL 30 с).
+  (`cmd/api`). У admin-api: HTTP-дренаж `ADMIN_SHUTDOWN_TIMEOUT` (10 с по умолчанию, стенд 8 с) + River мягко `config.AdminRiverSoftStop` (10 с) + жёстко `config.HardStop` (5 с) ≤ `config.StopBudget` (25 с из окна Render 30 с; стражи `TestAdminShutdownBudget`, `TestRenderYAMLStopBudget`). Воркер: relay со сроком `config.WorkerRelayStop` (5 с, `events.ErrRelayStopTimeout`), River мягко 15 с + жёстко 5 с. `HTTPConfig.Ready` — до порта (admin-api: `migrate.WaitSchema`, `<PREFIX>_DB_SCHEMA_WAIT` 10 мин; 42501/42P01 — «отстаёт»; команды оператора — одна проверка). Слоты очередей > пул − 3 — WARN `queue.WarnPool` при старте.
 - Виды задач исполняющих бинарников — списки `queue.WorkerKinds()` и `queue.AdminKinds()` (имя и срок исполнителя).
   Рескьюер лидера River (задача `running` дольше часа) ищет исполнителя вида в СВОЁМ клиенте и без него выбрасывает
   задачу (`discarded`), поэтому каждый бинарник регистрирует виды другого заглушками `queue.AddForeign` (срок — как у
@@ -85,7 +85,7 @@ paths:
   вернёт ошибку, задача уйдёт в повтор и после `MaxAttempts` станет «мёртвой»); адрес находит
   `mail.Composer` модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en). `mail.SMTP.Send` закрывает
   соединение по отмене ctx (остановка River, срок задачи): висящий SMTP не держит остановку до своего таймаута 20 с
-  (`TestSMTPSendHonorsCancel`). Письма сотрудников — не `mail.SendArgs`, а `staff.NewMailArgs` на очереди
+  (`TestSMTPSendHonorsCancel`). `mail.NewSMTP`: TLS `none` — только петля (`127.0.0.1`/`::1`/`localhost`) без логина, иначе отказ старта (стражи `TestNewSMTPRejectsPlainRemote`/`…WithAuth`/`TestNewSMTPMailpit`); клиент умеет только STARTTLS (465/2465 не подходят); `SMTPConfig.Log` — журнал сервиса для предупреждений конфигурации. Письма сотрудников — не `mail.SendArgs`, а `staff.NewMailArgs` на очереди
   `queue.Staff`: их исполняет River-клиент admin-api (SMTP `ADMIN_MAIL_*`), не воркер (`backend-staff.md`, «Фон»).
 - Пароли — `password.Check` + `password.Hasher` (argon2id под семафором; `password.DefaultParams()` — минимум OWASP);
   «нет почты» — `VerifyDummy`. Пароль приводится к NFKC; длиннее `password.MaxInputBytes` (1024 байта) —

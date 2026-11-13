@@ -11,7 +11,7 @@
 | База | Neon, проект `wf-dev`, Postgres 18, регион Frankfurt | база `wf`; роль-владелец Neon = наш `migrator`; роль `api` — права из `grants.sql` (справочник `geo` — только чтение); роль `worker` — для разовых команд оператора (раздел «Импорт городов GeoNames») |
 | API | Render, веб-сервис `wf-api` (`render.yaml`), бесплатный тариф, Frankfurt — https://wf-api-o3rn.onrender.com | команда `migrate-then-api`: `migrate up`, затем `api` (shell в `dockerCommand` Render не разбирает — сценарий лежит в образе); проверка живости `/healthz` (процесс жив, без базы; готовность с базой — `/readyz`); деплой из `main` после зелёного CI |
 | Swagger | https://wf-api-o3rn.onrender.com/docs | Swagger UI по контракту, вшитому в образ (`/docs/openapi.json` — сам контракт для генераторов клиентов); «Try it out» шлёт запросы на этот же стенд |
-| Проверка образа | CI, задание `image` в `.github/workflows/backend.yml` | сборка, миграции на чистую базу, старт API, `/healthz`, `/readyz`, `/docs`, smoke публичных ручек `/v1/cities` и `/v1/app/min-version` — как на Render; локально Docker не нужен |
+| Проверка образа | CI, workflow `.github/workflows/image.yml` (пути — buildFilter `wf-api`) | сборка из корня репозитория (образ с собранной админкой), миграции на чистую базу, старт API, `/healthz`, `/readyz`, `/docs`, smoke публичных ручек `/v1/cities` и `/v1/app/min-version`; admin-api в контейнере со статикой `/app/admin` — как на Render; локально Docker не нужен |
 
 Ограничения бесплатного стенда: Render усыпляет сервис после 15 минут без запросов, первый запрос
 будит его около минуты; воркера нет (на бесплатном тарифе Render фоновых процессов нет); база Neon
@@ -396,9 +396,9 @@ SELECT has_table_privilege('admin', 'staff_accounts', 'INSERT') AS admin_staff,
 | `ADMIN_STATIC_DIR` | каталог собранной `apps/admin`, если admin-api отдаёт её сам |
 | `ADMIN_RATE_LIMITS` | как `API_RATE_LIMITS` |
 
-Остановка (SIGTERM): сначала дренаж HTTP (`ADMIN_SHUTDOWN_TIMEOUT`, 10 с), затем чистка и River — мягко до 12 с
+Остановка (SIGTERM): сначала дренаж HTTP (`ADMIN_SHUTDOWN_TIMEOUT`, 10 с; на стенде 8 с), затем чистка и River — мягко до 10 с
 (письмо в полёте доигрывается), не уложилось — ctx письма отменяется: SMTP-соединение закрывается сразу
-(`mail.SMTP`), задача вернётся в повтор (River ждёт до 5 с); итого до 27 с — с запасом в 30 с до SIGKILL Render.
+(`mail.SMTP`), задача вернётся в повтор (River ждёт до 5 с); итого до 25 с (на стенде 23 с) — бюджет `config.StopBudget` из окна 30 с до SIGKILL Render.
 Письмо, которое SMTP принял, а задача не успела завершиться, может прийти дважды.
 
 Зависшие задачи (процесс убит посреди задачи) возвращает рескьюер лидера River — через час задача `running`
