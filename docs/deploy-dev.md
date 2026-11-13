@@ -396,9 +396,9 @@ SELECT has_table_privilege('admin', 'staff_accounts', 'INSERT') AS admin_staff,
 | `ADMIN_STATIC_DIR` | каталог собранной `apps/admin`, если admin-api отдаёт её сам |
 | `ADMIN_RATE_LIMITS` | как `API_RATE_LIMITS` |
 
-Остановка (SIGTERM): сначала дренаж HTTP (`ADMIN_SHUTDOWN_TIMEOUT`, 10 с), затем чистка и River — мягко до 12 с
+Остановка (SIGTERM): сначала дренаж HTTP (`ADMIN_SHUTDOWN_TIMEOUT`, 10 с; на стенде 8 с), затем чистка и River — мягко до 10 с
 (письмо в полёте доигрывается), не уложилось — ctx письма отменяется: SMTP-соединение закрывается сразу
-(`mail.SMTP`), задача вернётся в повтор (River ждёт до 5 с); итого до 27 с — с запасом в 30 с до SIGKILL Render.
+(`mail.SMTP`), задача вернётся в повтор (River ждёт до 5 с); итого до 25 с (на стенде 23 с) — бюджет `config.StopBudget` из окна 30 с до SIGKILL Render.
 Письмо, которое SMTP принял, а задача не успела завершиться, может прийти дважды.
 
 Зависшие задачи (процесс убит посреди задачи) возвращает рескьюер лидера River — через час задача `running`
