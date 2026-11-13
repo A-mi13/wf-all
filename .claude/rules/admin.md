@@ -130,8 +130,8 @@ paths:
   (`useDecide` → `needs_approval`). Решает всегда сервер.
 - **Запросы** — `useApi()` (openapi-fetch, тот же origin, `credentials: 'same-origin'`); запросы —
   `networkMode: 'online'` (`query.ts`). Клиент сам ставит `X-WF-Admin` на мутациях и бросает
-  `ApiError {status, code, fields, retryAfter, attemptsLeft, replaySkipped}` на любой не-2xx (`retryAfter` — только из
-  заголовка `Retry-After`: поля `retry_after` в теле нет). `401 auth.reauth_required` — ждёт разблокировку (`reauthBus`)
+  `ApiError {status, code, fields, retryAfter, attemptsLeft, replaySkipped, jobId}` на любой не-2xx (`retryAfter` — только из
+  заголовка `Retry-After`: поля `retry_after` в теле нет; `jobId` — только у `409 geo.import_in_progress`, поле `job_id` Problem). `401 auth.reauth_required` — ждёт разблокировку (`reauthBus`)
   и повторяет запрос; `401 auth.unauthenticated` и `403 auth.forbidden` любого запроса или мутации перечитывают me
   (`query.ts`, `cancelRefetch: false`: серия отказов разом — одно перечитывание, идущее не отменяется; права сняли, пока
   вкладка открыта, — меню и разделы следуют новым). Мутации с кодом второго фактора в теле — `...noReplay()` (после
@@ -147,6 +147,8 @@ paths:
   `X-WF-Background: 1` не продлевает сессию. `401 auth.reauth_required` фонового запроса, как и любого, открывает
   разблокировку (§9.3: через 20 минут бездействия вкладка показывает модалку, а не замёрзший счётчик); открыта уже —
   запрос ждёт её же, второй раз не открывает.
+  Опрос, который может не кончиться (задача импорта «в очереди» на стенде без воркера), — с потолком по времени от
+  монтирования, а не по числу тиков (`admin-geo.md` «Импорт GeoNames»).
 - **Черновики форм** — `useDraft(<путь маршрута>, me.id)` (sessionStorage) внутри каркаса — черновик сотрудника: другой
   за тем же компьютером (сессия истекла, вошёл другой) его не видит, а `SessionProvider` при входе стирает чужие
   (`claimDrafts`); без владельца — только экраны входа (почта до входа). Пароли и коды в черновик не класть.

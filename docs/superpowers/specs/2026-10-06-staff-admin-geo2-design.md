@@ -182,8 +182,10 @@ geo»), §5 и §11. Дизайн: `design/screens/07-Админка.dc.html`, `
   владелец.
 - **U4–U8** — обязательные требования к спекам будущих модулей (docs/05, 5.3): повторные ограничения и
   предел 30 дней за 90 (moderation); заявленная связь «сотрудник → игрок» как запрет действий над собой
-  (moderation, teams); ПД у поддержки — только с причиной (identity); пороги и валюта страны с открытыми
-  городами и награды с начислением — вдвоём (geo, economy); публикация и слияние полей — разные права
+  (moderation, teams); ПД у поддержки — только с причиной (identity); **U7:** создание страны, смена валюты и
+  возрастных порогов, выключение страны — всегда вдвоём (`geo.countries.rules`, действия `geo.country_create`,
+  `geo.country_rules`; решение пользователя 27.10.2026, условие «есть открытые города» снято); включение — сразу
+  (`geo.countries.manage`); награды с начислением — вдвоём (economy); публикация и слияние полей — разные права
   (pitches).
 - **M10.** `GET /v1/geo/cities` модератору возвращает только его города (право `scoped`) уже в плане A
   (§6.1). Исключения нет: города модератору выбирают владелец и админ, им видны все.
@@ -774,7 +776,8 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 | `POST …/{cityId}/districts`, `PATCH …/districts/{districtId}` | `geo.districts.manage` | район чужого города → `404 geo.district_not_found` (тест: модератор своего города, район чужого) |
 | `GET /v1/geo/countries`, `POST`, `PATCH /{code}` | `geo.countries.read` / `geo.countries.rules` (`POST` — всегда `202`, U7) / `handler`: `geo.countries.manage`, `geo.countries.rules` (`PATCH`: валюта, пороги, выключение — `202`; включение и прочее — сразу) | валюта — по списку ISO 4217, `country_code` — ISO 3166-1 alpha-2 |
 | `GET /v1/geo/countries/{code}/regions` | `geo.cities.read` | **новая**: выбор региона при активации |
-| `POST /v1/geo/imports {country}`, `GET /v1/geo/imports`, `GET …/{importId}` | `geo.imports.run` / `…read` | **новая** `GET {id}` — отчёт сверки (ambiguous, conflict) |
+| `POST /v1/geo/imports {country}`, `GET /v1/geo/imports`, `GET …/{importId}` | `geo.imports.run` / `…read` | **новая** `GET {id}` — отчёт сверки (ambiguous, conflict); `409 geo.import_in_progress` несёт `job_id` существующей задачи (R26) |
+| `GET /v1/geo/imports/jobs/{jobId}`, `POST …/jobs/{jobId}/cancel` | `geo.imports.read` / `geo.imports.run` | **новые** (план B, R7, R22): состояние задачи River до появления строки журнала; отмена задачи «в очереди» — §6.2; коды `geo.import_job_not_found`, `geo.import_job_not_cancellable` |
 | `GET /v1/app/versions`, `PUT /v1/app/versions/{platform}` | `platform.versions.read` / `…manage` | **новая** `GET` |
 | `GET /v1/flags`, `PATCH /v1/flags/{key} {version, enabled_globally?, enabled_city_ids?}` | `platform.flags.read` / `…manage` | **новые**; запись в `platform/flags`; `version` в теле (расхождение → `409 platform.flag_stale`); несуществующий флаг → `404 platform.flag_not_found`; города проверяются; событие `platform.flag_changed` с детерминированным uuid агрегата |
 
@@ -782,14 +785,27 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 
 - admin-api ставит задачу своим River-клиентом (§4.10).
 - Ручка отвечает `202 {job_id}`: строку `geonames_imports` создаёт сам импорт в воркере (спека geo §5.4
-  шаг 1), у `admin` на ней только чтение. Журнал ищется по `river_job_id`. Строка `running` уже есть или
-  River отказал по уникальности → `409 geo.import_in_progress`.
+  шаг 1), у `admin` на ней только чтение. Журнал ищется по `river_job_id`; до строки экран следит за задачей
+  через `getGeoImportJob` (`JobGet` клиента River, R7). River отказал по уникальности (`job_id` существующей
+  задачи) или есть **свежая** строка `running` страны (не старше `StaleAfter` = 40 мин; `job_id` — её
+  `river_job_id`, у оператора — без него) → `409 geo.import_in_progress` (R26). Зависшая строка не мешает:
+  её закрывает `failed` поставленная задача (спека geo §5.4).
 - Страна проверяется по `^[A-Z]{2}$`, а `jobs.NewImportArgs` нормализует регистр.
 - Задача `geo.import` на `ErrImportInProgress` (параллельный импорт оператора) уходит в
-  `river.JobSnooze(1 мин)`, а не в discarded.
-- Аудит постановки — от имени сотрудника. В `geonames_imports.started_by` (uuid без FK, «сотрудник; NULL —
-  оператор») пишется id из `staff_accounts`; `writeAudit` импорта переходит с `actor_user_id` на
-  `actor_staff_id`.
+  `river.JobSnooze(1 мин)`, а не в discarded; старше 2 ч от постановки — отменяется (R8).
+- **Ответ пользователя Q1 (R3):** в аргументах задачи — только id сотрудника (`started_by`), без имени и роли:
+  `river_job` читает роль `api`, ПД сотрудников видит только admin-api. Постановку (`geo.import_requested`,
+  объект `geonames_import_job` = `id.Named("geonames_import_job", <job_id>)`) пишет admin-api от сотрудника в
+  транзакции с `InsertTx`; аудит импорта воркер пишет от `system` с `after.started_by`; «кто запустил» в журнале
+  импортов — из записи постановки. В `geonames_imports.started_by` (uuid без FK, «сотрудник; NULL — оператор»)
+  — id из `staff_accounts`.
+- Отмена задачи «в очереди» (`cancelGeoImportJob`, R22): без воркера на стенде поставленная задача держала бы
+  уникальность страны вечно. Бегущий импорт не отменяется (`409 geo.import_job_not_cancellable`), уже
+  отменённая — 200 без второй записи журнала; аудит `geo.import_cancelled` — от сотрудника (подробности и
+  принятое остаточное окно — спека geo §5.4).
+- Исполнители подтверждений geo (`geo.country_create`, `geo.country_rules`) пишут аудит без IP и UA
+  (`approvals.Meta{}`), как исполнители `staff`: IP и UA решения — в записи `platform.approval_executed`
+  (ревью G6 m10). Прямые операции geo пишут IP и UA запроса (R20).
 
 ### 6.3. Обязательные хвосты этапа 1
 
@@ -823,8 +839,9 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 
 - События — по спеке geo §6: `geo.city_activated`, `geo.city_status_changed`, `geo.city_renamed`,
   `geo.city_slug_changed`, `geo.city_linked`, `geo.district_created|updated|archived`,
-  `geo.country_updated`, `platform.app_versions_changed`, плюс `platform.flag_changed`.
-- Коды — по спеке geo §8, без `geo.forbidden` и `platform.forbidden` (§2.4).
+  `geo.country_created` (план B, R15), `geo.country_updated`, `platform.app_versions_changed`, плюс
+  `platform.flag_changed`.
+- Коды — по спеке geo §8 (там же коды плана B, R4), без `geo.forbidden` и `platform.forbidden` (§2.4).
 - Подписи флагов — в локалях админки (`flags.<ключ>`).
 
 ## 7. Ошибки
@@ -1083,7 +1100,7 @@ geo,versions,flags}/`, `src/api/`. Правила — новое `.claude/rules/
 | План | Состав | Что видно вживую |
 |---|---|---|
 | **A. Ролевая модель и вход** | 1) `docs/05-ролевая-модель.md` и **отдельное ревью модели** (opus и пользователь) до кода. 2) Платформа: миграция 0020, `auth.Staff`, `perm`, `approvals`, конвейер §5, контракт `x-permission`. 3) Параллельно: модуль `staff` ∥ каркас админки, набор компонентов, экраны 1–7 на MSW. 4) Сборка вживую и e2e | вход, 2FA, приглашения, роли, подтверждения, журнал |
-| **B. geo 2/2** | 1) Хвосты §6.3. 2) Ручки §6.1–6.2 ∥ экраны 8–12. 3) e2e | города, импорт, страны, версии, флаги |
+| **B. geo 2/2** (выполнен в ветке `spec/geo2-render`, план `docs/superpowers/plans/2026-10-27-staff-b-geo2.md`) | 1) Хвосты §6.3. 2) Ручки §6.1–6.2 ∥ экраны 8–12. 3) e2e | города, импорт, страны, версии, флаги |
 | **C. Render** | `wf-admin-api` (тот же образ, `CMD admin-api`) отдаёт и статику админки (`ADMIN_STATIC_DIR`, один origin без rewrite); `wf-worker` (импорт geo); роль БД `admin` на Neon; SMTP для писем (`ADMIN_MAIL_*`); `staff bootstrap` первого владельца; `docs/deploy-dev.md` | админка на стенде |
 
 Решения плана C за пользователем: background worker на Render платный, нужен SMTP-провайдер.

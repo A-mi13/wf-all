@@ -71,15 +71,26 @@ Esc при непустом поле сперва очищает; число р�
 горизонтальной прокруткой (по умолчанию `auto` — карточки на узком экране); пусто — `empty` (своё пустое без фильтров,
 «Очередь пуста»), ошибка — «Повторить» (`retrying` — занята, пока идёт перезапрос). Роли строк и ячеек — явные: на
 телефоне строки-карточки, подпись столбца в ячейке видна и слышна. Скелетон — `LoadingRows` (только здесь; удалять —
-сперва перевести на `Skeleton.Table`).
+сперва перевести на `Skeleton.Table`). Поиск страницы без таблицы строк (матрица флагов) — `SearchBox` (то же поле
+`search` таблицы, та же пауза и клавиша `/`).
 
-Виртуализация (§4.5, `src/ui/virtual`): `useVirtualRows({ count, estimate, scrollRef, overscan?, horizontal? })` —
+Виртуализация (§4.5, `src/ui/virtual`): `useVirtualRows({ count, estimate, scrollRef, overscan?, horizontal?, keep? })` (`keep` — индекс, который
+всегда в окне: элемент с фокусом) —
 обёртка `@tanstack/react-virtual` (`items`, `totalSize`, `scrollToIndex`, `measure` — ref элемента с `data-index`,
-`place`/`placeTotal` — положение числами `--wf-virtual-start/-size/-total` через `setCssPx`, второй и последний
-разрешённый вызыватель; CSP-исключение — `admin.md`); `VirtualList({ items, estimate, renderItem, label, onReady? })` —
+`place`/`placeTotal` — положение числами `--wf-virtual-start/-size/-total` через `setCssPx`; вызыватели — только
+`src/ui/popover/*` и `src/ui/virtual/*`, CSP-исключение — `admin.md`); `VirtualList({ items, estimate, renderItem, label, onReady? })` —
 список с `aria-setsize`/`aria-posinset`, окно прокрутки — высота родителя. Карточные списки — `content-visibility`.
 В jsdom размеров нет: `clientHeight` окна (`[data-virtual-viewport]`), `offsetHeight` строк, `scrollHeight` и
 `scrollTo` подменяет тест (`virtual.test.tsx`).
+
+Матрица (`src/ui/virtual/VirtualMatrix.tsx`; флаги функций — до 2000 городов столбцами): `VirtualMatrix({ label, rows,
+rowKey, corner, rowHeader, fixed, columns, columnKey, columnHeader, cell })` — таблица (`table-layout: fixed`), первый
+столбец закреплён (`sticky`), за ним неподвижные `fixed` («Везде»), дальше столбцы-значения: при числе >
+`MATRIX_VIRTUALIZE_FROM` = 30 (замер G9-F) — горизонтальная виртуализация, в DOM окно ± запас, пропущенное — распорки
+`--wf-virtual-gap`; ширины — `--wf-matrix-head`/`--wf-matrix-col` (через `setCssPx`); `aria-colcount` у таблицы,
+`aria-colindex` у каждой ячейки. Клавиатура: столбец с фокусом всегда в DOM (`useVirtualRows({ keep })`), `focusin` —
+`scrollToIndex(i, 'auto')`. Тесты — стаб `clientWidth`/`scrollLeft`/`scrollWidth` окна `[data-matrix-scroll]`
+(`VirtualMatrix.test.tsx`).
 
 Массовые действия (§4.5, `src/ui/table/{bulk.ts,BulkBar.tsx}`): `BulkAction<T>` (`permission(row) → { perm, cityId? }` —
 право по городу строки, `confirm.title(n)`, `run(row, key) → 'executed' | 'pending_approval'`, `concurrency` — по
@@ -129,7 +140,8 @@ Enter), получает фокус при возврате, если фокус
   `Avatar` (инициалы, декоративный), `QrCode` (`value`, `label`; матрица — `uqr`, SVG-путь без inline-стилей, без сети).
 - `Segmented` (сегменты в одну строку: `label` группы, `options` `{value, text, name?, title?, lang?}` — `name`
   начинается с видимого `text`, WCAG 2.5.3; сегмент-значок — `{value, icon, name, title?}`: видимого текста нет, `name`
-  обязателен, `title` — для мыши; `aria-pressed`, `busy` — `aria-disabled`, фокус остаётся, нажатие гасится).
+  обязателен, `title` — для мыши; `aria-pressed`, `busy` — `aria-disabled`, фокус остаётся, нажатие гасится; `wide` —
+  подписи словами, сегмент по ширине своей подписи, а не 40 px: «Все · Живые · Пилот · Ожидание»).
 - `Switch` (`checked`, `onChange`, `label`, `hideLabel` — подпись только для читалки, `disabled`, `busy` — запрос в
   полёте: `aria-busy` + `aria-disabled`, фокус остаётся, нажатие гасится; `role="switch"` + `aria-checked`, Space/Enter
   — нативная кнопка).
