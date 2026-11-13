@@ -1,4 +1,4 @@
-# Dev-стенд на Render (бесплатный тариф): публичный API для нативного приложения.
+# Dev-стенд на Render (бесплатный тариф): публичный API для нативного приложения (wf-api) и админка (wf-admin-api).
 # Образ — backend/Dockerfile, тот же, что потом пойдёт на свой сервер (docs/deploy-dev.md).
 # Секреты (строки подключения к Neon) задаются в настройках сервиса, не здесь: sync: false.
 services:
@@ -67,4 +67,83 @@ services:
       - key: API_DATABASE_URL
         sync: false
       - key: MIGRATOR_DATABASE_URL
+        sync: false
+  # Админка (план C, Task 5): API сотрудников и собранная apps/admin с одного origin, тот же образ, что у wf-api.
+  # Бесплатный тариф (ответ Q3): засыпает через 15 минут без запросов, письма очереди staff уходят при первом
+  # запросе после сна. Воркера на Render нет (Q1, R9). Миграции накатывает только wf-api; admin-api при старте ждёт
+  # нужную версию схемы (ADMIN_DB_SCHEMA_WAIT, R3). Переменные sync: false — в панели сервиса, порядок — Task 7
+  # плана C (до их заполнения admin-api не стартует: обязательные переменные).
+  # Страж значений — render_stand_test.go (config).
+  - type: web
+    name: wf-admin-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    dockerCommand: admin-api
+    healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
+    # maxShutdownDelaySeconds не задаётся: окно — умолчание Render 30 с, бюджет процесса 25 с (R4)
+    buildFilter:
+      paths:
+        - backend/**
+        - apps/admin/**
+        - apps/web/package.json
+        - packages/**
+        - contracts/package.json
+        - contracts/src/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - .dockerignore
+        - scripts/check-admin-dist.mjs
+        - render.yaml
+    envVars:
+      - key: ADMIN_HTTP_ADDR
+        value: 0.0.0.0:10000
+      - key: ADMIN_LOG_FORMAT
+        value: json
+      # Swagger админки на стенде выключен (R5): аллоулиста нет, /docs был бы публичной картой поверхности
+      - key: ADMIN_DOCS_ENABLED
+        value: 'false'
+      # та же цепочка прокси, что у wf-api (петля локального прокси Render free и частные сети)
+      - key: ADMIN_TRUSTED_PROXIES
+        value: 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      - key: ADMIN_CLIENT_IP_HEADER
+        value: CF-Connecting-IP
+      # cookie __Host- с Secure; ADMIN_IP_ALLOWLIST не задаётся — аллоулист только с закрытым origin (R6)
+      - key: ADMIN_COOKIE_SECURE
+        value: 'true'
+      # каталог собранной админки в образе (backend/Dockerfile, R1)
+      - key: ADMIN_STATIC_DIR
+        value: /app/admin
+      # остановка: дренаж 8 с + River 10 + 5 = 23 с из бюджета 25 с (config.StopBudget, R4)
+      - key: ADMIN_SHUTDOWN_TIMEOUT
+        value: 8s
+      # ждать схему от wf-api — меньше 15 минут, которые Render ждёт проверку здоровья при деплое (R3)
+      - key: ADMIN_DB_SCHEMA_WAIT
+        value: 10m
+      # 5 писем staff + LISTEN + тикер + HTTP; сумма пулов стенда — против max_connections Neon (TestRenderYAMLPools)
+      - key: ADMIN_DB_MAX_CONNS
+        value: '10'
+      # письма — только по TLS (R8); Resend на Render free — только STARTTLS-порт 2587 (25/465/587 закрыты)
+      - key: ADMIN_MAIL_SMTP_TLS
+        value: mandatory
+      - key: ADMIN_DATABASE_URL
+        sync: false
+      # кольцо ключей сотрудников — base64url, копия у пользователя, не generateValue (R2)
+      - key: ADMIN_STAFF_SECRET_KEYS
+        sync: false
+      # адрес сервиса, который видит браузер: https://<имя>.onrender.com без пути и порта (CSRF по Origin)
+      - key: ADMIN_ORIGIN
+        sync: false
+      - key: ADMIN_MAIL_SMTP_ADDR
+        sync: false
+      - key: ADMIN_MAIL_FROM
+        sync: false
+      - key: ADMIN_MAIL_SMTP_USERNAME
+        sync: false
+      - key: ADMIN_MAIL_SMTP_PASSWORD
         sync: false

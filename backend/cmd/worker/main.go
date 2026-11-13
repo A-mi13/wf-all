@@ -75,8 +75,9 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 	if err != nil {
 		return err
 	}
+	log := logx.New(logOut, cfg.Log).With("service", "worker")
 	// почта нужна только воркеру, не разовым командам; проверяется до подключения к базе:
-	// нет WORKER_MAIL_* или битый адрес SMTP — отказ старта
+	// нет WORKER_MAIL_* или битый адрес SMTP — отказ старта; предупреждения — в журнал воркера
 	var sender *mail.SMTP
 	if len(args) == 0 {
 		mc, err := config.Load[config.Mail]("WORKER_", environ)
@@ -84,11 +85,10 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 			return err
 		}
 		if sender, err = mail.NewSMTP(mail.SMTPConfig{Addr: mc.SMTPAddr, From: mc.From,
-			Username: mc.Username, Password: mc.Password, TLS: mc.TLS}); err != nil {
+			Username: mc.Username, Password: mc.Password, TLS: mc.TLS, Log: log}); err != nil {
 			return err
 		}
 	}
-	log := logx.New(logOut, cfg.Log).With("service", "worker")
 	// сторонние библиотеки и стандартный log — через тот же логгер с маскированием ПД
 	slog.SetDefault(log)
 	pool, err := db.Open(ctx, cfg.DB)

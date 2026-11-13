@@ -178,30 +178,41 @@ func TestNewSMTPMailpit(t *testing.T) {
 }
 
 // opportunistic с нелокальным хостом — старт, но предупреждение в лог (на стенде — mandatory): сервер без STARTTLS
-// получил бы логин открытым текстом. На петле — без предупреждения.
+// получил бы логин открытым текстом. На петле — без предупреждения. Журнал — SMTPConfig.Log (журнал сервиса), без
+// него — slog.Default().
 func TestNewSMTPOpportunisticRemoteWarns(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: "127.0.0.1:1025", From: "a@b.co", TLS: "opportunistic"}); err != nil {
-		t.Fatal(err)
+	check := func(t *testing.T, buf *bytes.Buffer, logTo *slog.Logger) {
+		t.Helper()
+		if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: "127.0.0.1:1025", From: "a@b.co", TLS: "opportunistic",
+			Log: logTo}); err != nil {
+			t.Fatal(err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("предупреждение на петле: %s", buf.String())
+		}
+		if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: "smtp.example.com:587", From: "a@b.co", TLS: "opportunistic",
+			Username: "u", Password: "secret-p", Log: logTo}); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "smtp.example.com") {
+			t.Fatalf("нет предупреждения про opportunistic: %q", out)
+		}
+		if strings.Contains(out, "secret-p") {
+			t.Fatalf("пароль в логе: %q", out)
+		}
 	}
-	if buf.Len() != 0 {
-		t.Fatalf("предупреждение на петле: %s", buf.String())
-	}
-	if _, err := mail.NewSMTP(mail.SMTPConfig{Addr: "smtp.example.com:587", From: "a@b.co", TLS: "opportunistic",
-		Username: "u", Password: "secret-p"}); err != nil {
-		t.Fatal(err)
-	}
-	out := buf.String()
-	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "smtp.example.com") {
-		t.Fatalf("нет предупреждения про opportunistic: %q", out)
-	}
-	if strings.Contains(out, "secret-p") {
-		t.Fatalf("пароль в логе: %q", out)
-	}
+	t.Run("журнал сервиса", func(t *testing.T) {
+		var buf bytes.Buffer
+		check(t, &buf, slog.New(slog.NewTextHandler(&buf, nil)))
+	})
+	t.Run("без журнала — slog.Default", func(t *testing.T) {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+		check(t, &buf, nil)
+	})
 }
 
 func TestMemory(t *testing.T) {

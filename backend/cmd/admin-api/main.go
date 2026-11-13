@@ -119,16 +119,18 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	if cmd != nil {
 		return runCommand(ctx, *cmd, cfg, ring, cat, out, logOut)
 	}
+	// журнал предупреждений старта — тот же формат и вывод, что у сервиса (RunService создаёт свой позже)
+	startLog := logx.New(logOut, cfg.Log).With("service", "admin-api")
 	// SMTP — только серверу (письма шлёт фон): битый адрес — отказ старта до базы
 	sender, err := mail.NewSMTP(mail.SMTPConfig{Addr: cfg.Mail.SMTPAddr, From: cfg.Mail.From,
-		Username: cfg.Mail.Username, Password: cfg.Mail.Password, TLS: cfg.Mail.TLS})
+		Username: cfg.Mail.Username, Password: cfg.Mail.Password, TLS: cfg.Mail.TLS, Log: startLog})
 	if err != nil {
 		return err
 	}
 	send := wrapSender(sender)
 	// бюджет остановки — предупреждение, не отказ: локально дренаж бывает и длиннее
 	if st := config.AdminStopTime(cfg.HTTP.ShutdownTimeout); st > config.StopBudget {
-		logx.New(logOut, cfg.Log).Warn("остановка admin-api может не уложиться в окно хостинга до SIGKILL",
+		startLog.Warn("остановка admin-api может не уложиться в окно хостинга до SIGKILL",
 			"stop", st, "budget", config.StopBudget, "drain", cfg.HTTP.ShutdownTimeout)
 	}
 	return server.RunService(ctx, "admin-api", server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB,

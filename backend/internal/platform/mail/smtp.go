@@ -23,6 +23,9 @@ type SMTPConfig struct {
 	Username string // пусто — без аутентификации (Mailpit)
 	Password string
 	TLS      string // mandatory | opportunistic | none
+	// Log — журнал предупреждений конфигурации (opportunistic на нелокальном хосте): журнал сервиса, созданный до
+	// NewSMTP; nil — slog.Default().
+	Log *slog.Logger
 }
 
 type SMTP struct {
@@ -63,7 +66,11 @@ func NewSMTP(c SMTPConfig) (*SMTP, error) {
 	}
 	if policy == gomail.TLSOpportunistic && !local {
 		// сервер без STARTTLS получил бы логин открытым текстом; на стенде — mandatory
-		slog.Default().Warn("mail: SMTP с TLS opportunistic на нелокальном хосте — без STARTTLS письмо и логин уйдут открытым текстом; нужен mandatory",
+		log := c.Log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Warn("mail: SMTP с TLS opportunistic на нелокальном хосте — без STARTTLS письмо и логин уйдут открытым текстом; нужен mandatory",
 			"host", host)
 	}
 	return &SMTP{host: host, port: port, from: c.From, user: c.Username, pass: c.Password, tls: policy}, nil
