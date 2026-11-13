@@ -39,8 +39,9 @@ info:
       `auth.csrf_failed` (403 — запрос не со страницы админки: нет `Origin` админки или заголовка
       `X-WF-Admin`), `auth.ip_not_allowed` (403 — вход в админку с этого адреса закрыт),
       `auth.reauth_required` (401 — подтвердите вход вторым фактором, `staffUnlock`),
-      `auth.setup_required` (403 — сначала завершите настройку 2FA), `http.not_implemented`
-      (501 — операция описана в контракте, но сервер её ещё не исполняет).
+      `auth.setup_required` (403 — сначала завершите настройку 2FA). Общий с публичным API код
+      `http.not_implemented` (501 — операция описана в контракте, но сервер её ещё не исполняет:
+      этапы выкатываются по очереди; это не ошибка клиента).
     - **X-WF-Admin: 1** — обязательный заголовок каждого изменяющего запроса (POST, PUT, PATCH,
       DELETE) вместе с `Origin` админки — защита от подделки запроса с чужого сайта.
     - **X-WF-Background: 1** — необязательный заголовок фоновых запросов клиента (опрос счётчика
@@ -2000,6 +2001,7 @@ paths:
         - staff.access.reset_elevated
         - staff.access.reset
         - geo.countries.rules
+        - identity.mfa.reset
       x-error-codes:
         - platform.approval_not_found
         - platform.approval_self
@@ -2067,6 +2069,7 @@ paths:
         - staff.access.reset_elevated
         - staff.access.reset
         - geo.countries.rules
+        - identity.mfa.reset
       x-error-codes:
         - platform.approval_not_found
         - platform.approval_self
@@ -2455,7 +2458,7 @@ components:
       description: Ошибка в формате RFC 9457
       headers:
         Retry-After:
-          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded
+          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded и 429 identity.resend_too_soon (повтор отправки кода раньше паузы)
           schema:
             type: integer
             minimum: 1
@@ -2521,6 +2524,35 @@ components:
           minimum: 0
           description: Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
           example: 3
+        reasons:
+          type: array
+          description: 'Причины отказа машинными значениями — только у двух кодов. У identity.captain_ineligible — невыполненные условия заявки в капитаны (значения схемы CaptainIneligibility; ограничение captain — причина restricted). У identity.password_weak — ровно одно значение: too_short (короче 10 символов), common (из списка распространённых паролей) или too_long (длиннее потолка). Список открытый: незнакомое значение показывайте общим текстом кода'
+          items:
+            type: string
+            description: Машинное значение причины
+            example: too_short
+          example:
+            - too_short
+        methods:
+          type: array
+          description: 'Только у identity.mfa_required — вторые факторы аккаунта, которые принимает эта операция (значения схемы MfaMethod): totp, recovery_code, passkey. У confirmPasswordReset — только totp и recovery_code: ключ доступа при сбросе пароля не принимается. Клиент показывает выбор из этих способов и повторяет запрос со вторым фактором'
+          items:
+            type: string
+            description: Способ второго фактора (MfaMethod)
+            example: totp
+          example:
+            - totp
+            - recovery_code
+        available_at:
+          type: string
+          format: date-time
+          description: Когда действие станет доступно (UTC) — только у identity.nickname_change_too_soon (смена ника раньше 30 дней) и identity.application_cooldown (повторная заявка в капитаны раньше 7 дней после отказа)
+          example: '2026-12-13T09:30:00Z'
+        blocked_until:
+          type: string
+          format: date-time
+          description: До какого момента (UTC) заблокирован аккаунт — только у identity.account_blocked. Поля нет у этого кода — блокировка бессрочная (null не приходит)
+          example: '2026-11-20T00:00:00Z'
         job_id:
           type: integer
           format: int64
@@ -4736,12 +4768,12 @@ x-error-codes-common:
   - idempotency.in_progress
   - idempotency.replay_unavailable
   - feature.disabled
+  - http.not_implemented
   - auth.forbidden
   - auth.csrf_failed
   - auth.ip_not_allowed
   - auth.reauth_required
   - auth.setup_required
-  - http.not_implemented
 x-anonymous-mutations:
   - staffLogin
   - staffAcceptInvite

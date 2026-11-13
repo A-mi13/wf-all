@@ -92,6 +92,9 @@ var rows = []row{
 	changing("staff.access.reset", "сбросить доступ модератору или поддержке", dual, dual, deny, deny),
 	changing("staff.invites.resend", "отправить приглашение повторно", allow, allow, deny, deny),
 	changing("staff.sessions.revoke", "завершить чужие сессии (админ — только модераторов и поддержки)", allow, allow, deny, deny),
+	// спека identity §7.6 (U5, К3): связь сотрудника с его учёткой игрока — только запрет решений о себе
+	changing("staff.player_links.manage", "привязать к сотруднику его учётку игрока (запрет решений о себе)", allow, deny,
+		deny, deny),
 	// журнал действий
 	city(reading("audit.log.read", "читать журнал действий (модератор — свои города и свои записи)", allow, allow, scoped, allow)),
 	// geo — справочник городов
@@ -114,16 +117,23 @@ var rows = []row{
 	changing("platform.versions.manage", "минимальная и рекомендуемая версия, ссылка на стор", allow, allow, deny, deny),
 	reading("platform.flags.read", "флаги функций", allow, allow, allow, allow),
 	changing("platform.flags.manage", "переключать флаги функций по городам", allow, allow, deny, deny),
+	// identity — заявки в капитаны, ПД игроков, сброс 2FA (спека identity §7.2)
+	city(reading("identity.captain_applications.read", "очередь и карточки заявок в капитаны", allow, allow, scoped, allow)),
+	city(changing("identity.captain_applications.decide", "одобрять и отклонять заявки в капитаны", allow, allow, scoped,
+		deny)),
+	city(reading("identity.pii.read", "почта и телефон игрока, поиск по почте; каждое чтение — в журнал, с причиной", allow,
+		allow, scoped, allow)),
+	// решение пользователя 13.11 (В1): сброс 2FA — только вдвоём; отмена назначенного сброса — по тому же праву сразу
+	changing("identity.mfa.reset", "сбросить 2FA игрока, потерявшего все факторы; отмена назначенного сброса", dual, dual,
+		deny, deny),
 
 	// черновые строки будущих модулей (макет 07, «Роли и доступ»)
-	draft(city(changing("teams.captains.approve", "одобрять заявки на капитанство", allow, allow, scoped, deny))),
 	draft(city(changing("pitches.pitches.moderate", "публиковать и объединять площадки", allow, allow, scoped, deny))),
 	draft(city(reading("moderation.reports.read", "читать жалобы и споры", allow, allow, scoped, allow))),
 	draft(city(changing("moderation.reports.resolve", "решать жалобы и споры с формулировкой", allow, allow, scoped, deny))),
 	draft(city(changing("moderation.restrictions.apply", "накладывать ограничения до 30 дней", allow, allow, scoped, deny))),
 	draft(changing("moderation.bans.issue", "блокировать навсегда, без срока", dual, dual, deny, deny)),
 	draft(city(changing("results.reports.annul", "аннулировать протокол матча (снятие голов у всех)", dual, dual, deny, deny))),
-	draft(city(reading("identity.pii.read", "видеть почту и телефон игрока (каждое чтение — в журнал)", allow, allow, scoped, allow))),
 	draft(changing("economy.catalog.manage", "каталог косметики, подписок и наград", allow, allow, deny, deny)),
 	draft(changing("economy.credits.grant", "ручное начисление кредитов и очков", dual, dual, deny, deny)),
 }

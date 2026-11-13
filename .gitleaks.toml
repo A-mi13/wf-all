@@ -18,3 +18,13 @@ regexes = ['''^\s*"[A-Za-z0-9+/=]{80}",''']
 [[allowlists]]
 description = "тестовый вектор RFC 6238 (TOTP): base32 от ASCII «12345678901234567890» — публичный, не секрет"
 regexes = ['''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''']
+
+[[allowlists]]
+description = "примеры identity (план I-1): authenticatorData WebAuthn и JWT в контракте (подпись — слово signature), выдуманные токены в nostub_test.go — форматы, не секреты"
+regexes = [
+  '''SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ''',
+  '''eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl''',
+  '''Yx3kQp1bZt7Lm2Vb4Np8Rt1Zw6Yc0Hs5Ae9Df3Gh7Jk''',
+  '''UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj''',
+  '''Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1''',
+]

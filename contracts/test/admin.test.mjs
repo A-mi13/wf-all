@@ -24,6 +24,7 @@ const DUAL = [
   'staff.access.reset_elevated',
   'staff.access.reset',
   'geo.countries.rules',
+  'identity.mfa.reset',
 ];
 const expected = {
   staffLogin: ['post', '/v1/staff/auth/login', 'staff', 'anonymous'],

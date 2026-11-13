@@ -49,7 +49,7 @@ func TestRegistryPanics(t *testing.T) {
 		approvals.NewRegistry().Register(approvals.Action{Name: "staff.invite", Permission: "staff.roles.nope", Exec: noop})
 	})
 	mustPanic(t, "черновое право", "черновое", func() {
-		approvals.NewRegistry().Register(approvals.Action{Name: "teams.approve", Permission: "teams.captains.approve", Exec: noop})
+		approvals.NewRegistry().Register(approvals.Action{Name: "pitches.moderate", Permission: "pitches.pitches.moderate", Exec: noop})
 	})
 	r := approvals.NewRegistry()
 	r.Register(approvals.Action{Name: "staff.invite", Permission: "staff.roles.grant", Exec: noop})

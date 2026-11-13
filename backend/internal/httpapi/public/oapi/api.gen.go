@@ -15,12 +15,40 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
 	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// Defines values for AccountStatus.
+const (
+	Active          AccountStatus = "active"
+	Banned          AccountStatus = "banned"
+	Deleted         AccountStatus = "deleted"
+	PendingDeletion AccountStatus = "pending_deletion"
+	Suspended       AccountStatus = "suspended"
+)
+
+// Valid indicates whether the value is a known member of the AccountStatus enum.
+func (e AccountStatus) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Banned:
+		return true
+	case Deleted:
+		return true
+	case PendingDeletion:
+		return true
+	case Suspended:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for AppPlatform.
 const (
@@ -34,6 +62,54 @@ func (e AppPlatform) Valid() bool {
 	case Android:
 		return true
 	case Ios:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthMethod.
+const (
+	AuthMethodApple    AuthMethod = "apple"
+	AuthMethodGoogle   AuthMethod = "google"
+	AuthMethodPasskey  AuthMethod = "passkey"
+	AuthMethodPassword AuthMethod = "password"
+)
+
+// Valid indicates whether the value is a known member of the AuthMethod enum.
+func (e AuthMethod) Valid() bool {
+	switch e {
+	case AuthMethodApple:
+		return true
+	case AuthMethodGoogle:
+		return true
+	case AuthMethodPasskey:
+		return true
+	case AuthMethodPassword:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthStatus.
+const (
+	AuthStatusAuthenticated   AuthStatus = "authenticated"
+	AuthStatusDeletionPending AuthStatus = "deletion_pending"
+	AuthStatusMfaRequired     AuthStatus = "mfa_required"
+	AuthStatusSignupRequired  AuthStatus = "signup_required"
+)
+
+// Valid indicates whether the value is a known member of the AuthStatus enum.
+func (e AuthStatus) Valid() bool {
+	switch e {
+	case AuthStatusAuthenticated:
+		return true
+	case AuthStatusDeletionPending:
+		return true
+	case AuthStatusMfaRequired:
+		return true
+	case AuthStatusSignupRequired:
 		return true
 	default:
 		return false
@@ -61,6 +137,137 @@ func (e CityStatus) Valid() bool {
 	}
 }
 
+// Defines values for ClientKind.
+const (
+	Mobile ClientKind = "mobile"
+	Web    ClientKind = "web"
+)
+
+// Valid indicates whether the value is a known member of the ClientKind enum.
+func (e ClientKind) Valid() bool {
+	switch e {
+	case Mobile:
+		return true
+	case Web:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeviceIntegrityKind.
+const (
+	AppAttestAssertion   DeviceIntegrityKind = "app_attest_assertion"
+	AppAttestAttestation DeviceIntegrityKind = "app_attest_attestation"
+	PlayIntegrity        DeviceIntegrityKind = "play_integrity"
+)
+
+// Valid indicates whether the value is a known member of the DeviceIntegrityKind enum.
+func (e DeviceIntegrityKind) Valid() bool {
+	switch e {
+	case AppAttestAssertion:
+		return true
+	case AppAttestAttestation:
+		return true
+	case PlayIntegrity:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LegalDocumentKind.
+const (
+	Privacy LegalDocumentKind = "privacy"
+	Terms   LegalDocumentKind = "terms"
+)
+
+// Valid indicates whether the value is a known member of the LegalDocumentKind enum.
+func (e LegalDocumentKind) Valid() bool {
+	switch e {
+	case Privacy:
+		return true
+	case Terms:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Locale.
+const (
+	En Locale = "en"
+	Ru Locale = "ru"
+)
+
+// Valid indicates whether the value is a known member of the Locale enum.
+func (e Locale) Valid() bool {
+	switch e {
+	case En:
+		return true
+	case Ru:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MfaMethod.
+const (
+	MfaMethodPasskey      MfaMethod = "passkey"
+	MfaMethodRecoveryCode MfaMethod = "recovery_code"
+	MfaMethodTotp         MfaMethod = "totp"
+)
+
+// Valid indicates whether the value is a known member of the MfaMethod enum.
+func (e MfaMethod) Valid() bool {
+	switch e {
+	case MfaMethodPasskey:
+		return true
+	case MfaMethodRecoveryCode:
+		return true
+	case MfaMethodTotp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NicknameUnavailableReason.
+const (
+	Invalid  NicknameUnavailableReason = "invalid"
+	Reserved NicknameUnavailableReason = "reserved"
+	Taken    NicknameUnavailableReason = "taken"
+)
+
+// Valid indicates whether the value is a known member of the NicknameUnavailableReason enum.
+func (e NicknameUnavailableReason) Valid() bool {
+	switch e {
+	case Invalid:
+		return true
+	case Reserved:
+		return true
+	case Taken:
+		return true
+	default:
+		return false
+	}
+}
+
+// AcceptedDocument Принятая игроком версия документа
+type AcceptedDocument struct {
+	// Document Юридический документ: terms — правила сервиса, privacy — политика конфиденциальности
+	Document LegalDocumentKind `json:"document"`
+
+	// Version Версия из getLegalDocuments
+	//
+	// Example: 2026-11-01
+	Version string `json:"version"`
+}
+
+// AccountStatus Статус аккаунта: active — обычный; suspended — часть возможностей закрыта ограничениями (restrictions); banned — заблокирован; pending_deletion — ждёт удаления (вход отменяет удаление); deleted — удалён
+type AccountStatus string
+
 // AppMinVersion Версии приложения для платформы. Все три поля null — версии ещё не заведены, приложение работает без проверки
 type AppMinVersion struct {
 	// MinVersion Минимальная версия MAJOR.MINOR.PATCH — ниже неё приложение требует обновиться
@@ -84,6 +291,69 @@ type AppMinVersion struct {
 
 // AppPlatform Платформа мобильного приложения
 type AppPlatform string
+
+// AuthMethod Способ входа, которым создана сессия
+type AuthMethod string
+
+// AuthResult Результат входа или регистрации. Клиент ветвится по `status`, поле ветки приходит только в ней:
+//
+//   - `authenticated` — `tokens` и `user`. Мобильный клиент кладёт `tokens.refresh_token` в
+//     Keychain / Keystore; веб-BFF — в зашифрованную cookie. `user.documents_acceptance_required` —
+//     показать экран «примите новую версию документов» → `acceptDocuments`;
+//   - `mfa_required` — `mfa`: экран второго фактора → `completeMfa` с `mfa.mfa_token`
+//     (ключом доступа — сначала `startMfaPasskey`); `mfa.reset_at` — назначен сброс 2FA через
+//     поддержку, предупредить игрока;
+//   - `signup_required` — `social_signup`: экран дорегистрации (город, дата рождения, ник,
+//     документы) → `completeSocialSignup` с `social_signup.signup_token`;
+//   - `deletion_pending` — `deletion`: экран «Аккаунт будет удалён `purge_at`. Отменить удаление?»
+//     → `cancelDeletion` с `deletion.restore_token`. Сессия не выдана.
+//
+// Незнакомый `status` (enum открытый) — показать общий текст ошибки и предложить обновить приложение.
+type AuthResult struct {
+	// Deletion Аккаунт ждёт удаления: вход подтвердил владельца, но сессия не выдана. Отмена удаления — cancelDeletion с restore_token
+	Deletion *DeletionPending `json:"deletion,omitempty"`
+
+	// Mfa Нужен второй фактор: mfa_token одноразовый, живёт 5 минут и выдерживает 5 неверных вводов — затем вход начинается заново
+	Mfa *MfaChallenge `json:"mfa,omitempty"`
+
+	// SocialSignup Учётка Apple или Google ещё не привязана ни к одному аккаунту — нужна дорегистрация completeSocialSignup
+	SocialSignup *SocialSignupPending `json:"social_signup,omitempty"`
+
+	// Status Исход входа: authenticated — сессия выдана (tokens, user); mfa_required — нужен второй фактор (mfa); signup_required — учётка провайдера новая, нужна дорегистрация (social_signup); deletion_pending — аккаунт ждёт удаления, сессии нет, можно отменить удаление (deletion)
+	Status AuthStatus `json:"status"`
+
+	// Tokens Токены сессии. access — короткий (10 минут), идёт в заголовке Authorization: Bearer; refresh — непрозрачный, меняется на каждом refreshSession (прежний после этого не действует)
+	Tokens *TokenPair `json:"tokens,omitempty"`
+
+	// User Игрок, на которого выдана сессия
+	User *AuthUser `json:"user,omitempty"`
+}
+
+// AuthStatus Исход входа: authenticated — сессия выдана (tokens, user); mfa_required — нужен второй фактор (mfa); signup_required — учётка провайдера новая, нужна дорегистрация (social_signup); deletion_pending — аккаунт ждёт удаления, сессии нет, можно отменить удаление (deletion)
+type AuthStatus string
+
+// AuthUser Игрок, на которого выдана сессия
+type AuthUser struct {
+	// DocumentsAcceptanceRequired Вышла новая версия правил сервиса или политики конфиденциальности, а игрок её ещё не принял — показать экран согласия и вызвать acceptDocuments
+	//
+	// Example: false
+	DocumentsAcceptanceRequired bool `json:"documents_acceptance_required"`
+
+	// Id Id игрока
+	//
+	// Example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+	Id openapi_types.UUID `json:"id"`
+
+	// NewUser Аккаунт создан этим вызовом (регистрация) — клиент ведёт на шаг «Кто ты на поле»
+	//
+	// Example: false
+	NewUser bool `json:"new_user"`
+
+	// Nickname Ник игрока
+	//
+	// Example: kosta_10
+	Nickname string `json:"nickname"`
+}
 
 // City Город платформы — пункт списка выбора города и основа карточки города
 type City struct {
@@ -202,6 +472,27 @@ type CityPage struct {
 // CityStatus Статус города. waitlist — игр пока нет, приложение показывает «станьте капитаном» (экран «Пустой город»); pilot — первые команды и модератор; live — город работает. Список открытый — незнакомое значение клиент обязан пережить
 type CityStatus string
 
+// ClientKind Клиент сессии: mobile — приложение, web — сайт (через BFF)
+type ClientKind string
+
+// CodeSent Код отправлен (или нет — ответ одинаков, существование аккаунта не раскрывается): 6 цифр, живёт 15 минут, 5 неверных вводов гасят его
+type CodeSent struct {
+	// CodeId Id кода — передайте в подтверждение и в resendAuthCode
+	//
+	// Example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+	CodeId openapi_types.UUID `json:"code_id"`
+
+	// ExpiresAt Когда код истечёт (UTC)
+	//
+	// Example: 2026-11-13T17:15:00Z
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// ResendAvailableAt С какого момента можно отправить код повторно (UTC) — до него кнопка «Отправить снова» неактивна
+	//
+	// Example: 2026-11-13T17:01:00Z
+	ResendAvailableAt time.Time `json:"resend_available_at"`
+}
+
 // CountryRef Страна записи — код и название на языке ответа
 type CountryRef struct {
 	// Code Код страны ISO 3166-1 alpha-2
@@ -215,6 +506,127 @@ type CountryRef struct {
 	Name string `json:"name"`
 }
 
+// DeletionCancelRequest Отмена удаления аккаунта
+type DeletionCancelRequest struct {
+	// Device Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам
+	Device *DeviceInfo `json:"device,omitempty"`
+
+	// RestoreToken Токен из AuthResult.deletion
+	//
+	// Example: UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj
+	RestoreToken string `json:"restore_token"`
+}
+
+// DeletionPending Аккаунт ждёт удаления: вход подтвердил владельца, но сессия не выдана. Отмена удаления — cancelDeletion с restore_token
+type DeletionPending struct {
+	// ExpiresAt Когда restore_token истечёт (UTC); после — войдите снова
+	//
+	// Example: 2026-11-13T17:10:00Z
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// PurgeAt Когда аккаунт будет удалён без возможности восстановления (UTC)
+	//
+	// Example: 2026-12-10T09:00:00Z
+	PurgeAt time.Time `json:"purge_at"`
+
+	// RestoreToken Токен отмены удаления (256 бит, base64url), одноразовый, живёт 10 минут
+	//
+	// Example: UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj
+	RestoreToken string `json:"restore_token"`
+}
+
+// DeletionRequest Подтверждение удаления аккаунта ником
+type DeletionRequest struct {
+	// ConfirmNickname Ник аккаунта, введённый игроком; не совпал — 422 identity.confirm_mismatch
+	//
+	// Example: kosta_10
+	ConfirmNickname string `json:"confirm_nickname"`
+}
+
+// DeletionScheduled Удаление назначено; все сессии отозваны
+type DeletionScheduled struct {
+	// PurgeAt Когда аккаунт будет удалён без возможности восстановления (UTC, через 30 дней); до этого любой вход предложит отменить удаление
+	//
+	// Example: 2026-12-13T09:00:00Z
+	PurgeAt time.Time `json:"purge_at"`
+}
+
+// DeviceChallenge Задача проверки целостности приложения — одноразовая, живёт 5 минут
+type DeviceChallenge struct {
+	// Challenge Случайное значение (base64url) — clientDataHash App Attest или основа requestHash Play Integrity
+	//
+	// Example: c2VydmVyLWNoYWxsZW5nZS0zMi1ieXRlcy1iYXNlNjR1cmw
+	Challenge string `json:"challenge"`
+
+	// ChallengeId Id задачи — передайте в device.integrity.challenge_id
+	//
+	// Example: 0193a1c4-2a3b-7e41-b5c6-7d8e9f0a1b23
+	ChallengeId openapi_types.UUID `json:"challenge_id"`
+
+	// ExpiresAt Когда задача истечёт (UTC)
+	//
+	// Example: 2026-11-13T17:05:00Z
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// DeviceInfo Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам
+type DeviceInfo struct {
+	// AppVersion Версия приложения MAJOR.MINOR.PATCH
+	//
+	// Example: 1.4.0
+	AppVersion string `json:"app_version"`
+
+	// DeviceCheckToken Токен Apple DeviceCheck (base64) — только iOS, нужен на регистрации (счётчик регистраций устройства)
+	//
+	// Example: AgAAAJ1xQw0eZr8ZfU1v7cQ3kNm2LpR9sT4uV6wX8yZ0aBcD
+	DeviceCheckToken *string `json:"device_check_token,omitempty"`
+
+	// InstallId Идентификатор установки: iOS — UUID, сохранённый в Keychain; Android — ANDROID_ID. Сервер хранит только его HMAC
+	//
+	// Example: 6F9619FF-8B86-4D01-B42D-00CF4FC964FF
+	InstallId string `json:"install_id"`
+
+	// Integrity Проверка целостности приложения по задаче createDeviceChallenge. Нет или не прошла — в режиме наблюдения запрос получает требование антибота (403 humancheck.required), в строгом — 403 identity.device_untrusted
+	Integrity *DeviceIntegrity `json:"integrity,omitempty"`
+
+	// Model Модель устройства — для экрана «Где вы вошли»
+	//
+	// Example: iPhone15,2
+	Model string `json:"model"`
+
+	// OsVersion Версия ОС
+	//
+	// Example: 18.1
+	OsVersion string `json:"os_version"`
+
+	// Platform Платформа мобильного приложения
+	Platform AppPlatform `json:"platform"`
+}
+
+// DeviceIntegrity Проверка целостности приложения по задаче createDeviceChallenge. Нет или не прошла — в режиме наблюдения запрос получает требование антибота (403 humancheck.required), в строгом — 403 identity.device_untrusted
+type DeviceIntegrity struct {
+	// ChallengeId Id задачи из createDeviceChallenge (одноразовая, 5 минут)
+	//
+	// Example: 0193a1c4-2a3b-7e41-b5c6-7d8e9f0a1b23
+	ChallengeId openapi_types.UUID `json:"challenge_id"`
+
+	// KeyId Id ключа App Attest (base64) — только у app_attest_*
+	//
+	// Example: bXlLZXlJZEZyb21BcHBBdHRlc3Q9
+	KeyId *string `json:"key_id,omitempty"`
+
+	// Kind Вид проверки целостности: app_attest_attestation — первая аттестация ключа App Attest (iOS); app_attest_assertion — утверждение тем же ключом; play_integrity — токен Play Integrity (Android)
+	Kind DeviceIntegrityKind `json:"kind"`
+
+	// Payload Base64: объект аттестации App Attest, утверждение или токен Play Integrity (requestHash — base64url(SHA-256(challenge)))
+	//
+	// Example: o2NmbXRvYXBwbGUtYXBwYXR0ZXN0Z2F0dFN0bXSiY3g1Y4JZAuQ
+	Payload string `json:"payload"`
+}
+
+// DeviceIntegrityKind Вид проверки целостности: app_attest_attestation — первая аттестация ключа App Attest (iOS); app_attest_assertion — утверждение тем же ключом; play_integrity — токен Play Integrity (Android)
+type DeviceIntegrityKind string
+
 // District Район города — фильтр полей и матчей
 type District struct {
 	// Id Id района
@@ -226,6 +638,33 @@ type District struct {
 	//
 	// Example: Промышленный
 	Name string `json:"name"`
+}
+
+// DocumentsAcceptRequest Согласие с текущими версиями документов
+type DocumentsAcceptRequest struct {
+	// AcceptedDocuments Принятые версии; версия не текущая или документа нет среди текущих — 422 identity.documents_outdated
+	AcceptedDocuments []AcceptedDocument `json:"accepted_documents"`
+}
+
+// EmailChangeConfirmRequest Подтверждение новой почты кодом
+type EmailChangeConfirmRequest struct {
+	// Code 6 цифр из письма на новую почту
+	//
+	// Example: 492817
+	Code string `json:"code"`
+
+	// CodeId Id кода из startEmailChange
+	//
+	// Example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+	CodeId openapi_types.UUID `json:"code_id"`
+}
+
+// EmailChangeStartRequest Новая почта — код придёт на неё
+type EmailChangeStartRequest struct {
+	// NewEmail Новая почта; регистр и пробелы по краям не важны
+	//
+	// Example: kosta.new@example.com
+	NewEmail string `json:"new_email"`
 }
 
 // GeoPlace Населённый пункт справочника GeoNames (CC BY 4.0), в котором находится точка запроса
@@ -270,6 +709,203 @@ type GeoPoint struct {
 	Lon float64 `json:"lon"`
 }
 
+// LegalDocument Текущая версия документа
+type LegalDocument struct {
+	// Document Юридический документ: terms — правила сервиса, privacy — политика конфиденциальности
+	Document LegalDocumentKind `json:"document"`
+
+	// Url Где прочитать текст документа
+	//
+	// Example: https://wherefootball.example/legal/terms/2026-11-01
+	Url string `json:"url"`
+
+	// Version Версия — дата YYYY-MM-DD или semver; сравнивается на равенство
+	//
+	// Example: 2026-11-01
+	Version string `json:"version"`
+}
+
+// LegalDocumentKind Юридический документ: terms — правила сервиса, privacy — политика конфиденциальности
+type LegalDocumentKind string
+
+// LegalDocumentList Текущие версии всех документов — каждую нужно принять при регистрации
+type LegalDocumentList struct {
+	// Items Документы по одному на вид
+	Items []LegalDocument `json:"items"`
+}
+
+// Locale Язык интерфейса и писем
+type Locale string
+
+// LoginRequest Вход по почте и паролю
+type LoginRequest struct {
+	// Device Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам
+	Device *DeviceInfo `json:"device,omitempty"`
+
+	// Email Почта аккаунта; регистр и пробелы по краям не важны
+	//
+	// Example: kosta.f@example.com
+	Email string `json:"email"`
+
+	// Password Пароль как введён
+	//
+	// Example: Жёлтая карточка на 90-й
+	Password string `json:"password"`
+}
+
+// Me Аккаунт текущего игрока — экран настроек и проверка состояния после входа
+type Me struct {
+	// BirthDate Дата рождения — меняется только через поддержку
+	//
+	// Example: 1998-04-17
+	BirthDate openapi_types.Date `json:"birth_date"`
+
+	// CityId Город игрока (справочник geo)
+	//
+	// Example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+	CityId openapi_types.UUID `json:"city_id"`
+
+	// CreatedAt Когда создан аккаунт (UTC)
+	//
+	// Example: 2026-03-02T18:20:00Z
+	CreatedAt time.Time `json:"created_at"`
+
+	// Documents Согласие с каждым документом
+	Documents []MeDocument `json:"documents"`
+
+	// DocumentsAcceptanceRequired Есть непринятая текущая версия документа — показать экран согласия → acceptDocuments
+	//
+	// Example: false
+	DocumentsAcceptanceRequired bool `json:"documents_acceptance_required"`
+
+	// Email Почта аккаунта (подтверждена)
+	//
+	// Example: kosta.f@example.com
+	Email string `json:"email"`
+
+	// HasPassword У аккаунта есть пароль; false — входит только через Apple, Google или ключ доступа (changePassword задаст пароль)
+	//
+	// Example: true
+	HasPassword bool `json:"has_password"`
+
+	// Id Id игрока
+	//
+	// Example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+	Id openapi_types.UUID `json:"id"`
+
+	// Locale Язык интерфейса и писем
+	Locale Locale `json:"locale"`
+
+	// MfaEnabled Включена двухфакторная аутентификация
+	//
+	// Example: false
+	MfaEnabled bool `json:"mfa_enabled"`
+
+	// Nickname Ник
+	//
+	// Example: kosta_10
+	Nickname string `json:"nickname"`
+
+	// NicknameChangeableAt С какого момента ник можно сменить (UTC; раз в 30 дней); null — можно сейчас
+	//
+	// Example: 2026-12-13T09:30:00Z
+	NicknameChangeableAt *time.Time `json:"nickname_changeable_at"`
+
+	// Restrictions Действующие ограничения; пусто — ограничений нет
+	Restrictions []MeRestriction `json:"restrictions"`
+
+	// Status Статус аккаунта: active — обычный; suspended — часть возможностей закрыта ограничениями (restrictions); banned — заблокирован; pending_deletion — ждёт удаления (вход отменяет удаление); deleted — удалён
+	Status AccountStatus `json:"status"`
+}
+
+// MeDocument Согласие игрока с документом
+type MeDocument struct {
+	// AcceptedVersion Последняя принятая версия или null, если документ не принимался
+	//
+	// Example: 2026-06-01
+	AcceptedVersion *string `json:"accepted_version"`
+
+	// CurrentVersion Текущая версия документа
+	//
+	// Example: 2026-11-01
+	CurrentVersion string `json:"current_version"`
+
+	// Document Юридический документ: terms — правила сервиса, privacy — политика конфиденциальности
+	Document LegalDocumentKind `json:"document"`
+
+	// Url Текст текущей версии
+	//
+	// Example: https://wherefootball.example/legal/terms/2026-11-01
+	Url string `json:"url"`
+}
+
+// MeRestriction Ограничение возможности санкцией модерации
+type MeRestriction struct {
+	// Capability Закрытая возможность (список ведёт модерация; незнакомое значение показывайте общим текстом): create_match, comment, captain…
+	//
+	// Example: comment
+	Capability string `json:"capability"`
+
+	// Until До какого момента (UTC); null — бессрочно
+	//
+	// Example: 2026-11-20T00:00:00Z
+	Until *time.Time `json:"until"`
+}
+
+// MeUpdate Правка настроек аккаунта — хотя бы одно поле
+type MeUpdate struct {
+	// Locale Язык интерфейса и писем
+	Locale *Locale `json:"locale,omitempty"`
+}
+
+// MfaChallenge Нужен второй фактор: mfa_token одноразовый, живёт 5 минут и выдерживает 5 неверных вводов — затем вход начинается заново
+type MfaChallenge struct {
+	// ExpiresAt Когда mfa_token истечёт (UTC); после — 410 identity.mfa_expired
+	//
+	// Example: 2026-11-13T17:05:00Z
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Methods Вторые факторы аккаунта, которые принимает этот шаг; passkey — только если у аккаунта есть ключ доступа и вход ключами включён
+	//
+	// Example: ["totp","recovery_code"]
+	Methods []MfaMethod `json:"methods"`
+
+	// MfaToken Токен шага второго фактора (256 бит, base64url) — передайте в completeMfa
+	//
+	// Example: Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1
+	MfaToken string `json:"mfa_token"`
+
+	// ResetAt Назначенный через поддержку сброс 2FA (UTC) или null. Вход со вторым фактором отменяет сброс — предупредите игрока «через N дней 2FA будет сброшена»
+	ResetAt *time.Time `json:"reset_at"`
+}
+
+// MfaCompleteRequest Второй фактор входа: mfa_token и ровно одно из code, recovery_code, passkey (ни одного или больше одного — 400 validation.failed по полю body). Ключом доступа — сначала startMfaPasskey
+type MfaCompleteRequest struct {
+	// Code Код из приложения-аутентификатора — 6 цифр; пробелы между цифрами допустимы
+	//
+	// Example: 492817
+	Code *string `json:"code,omitempty"`
+
+	// Device Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам
+	Device *DeviceInfo `json:"device,omitempty"`
+
+	// MfaToken Токен из AuthResult.mfa
+	//
+	// Example: Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1
+	MfaToken string `json:"mfa_token"`
+
+	// Passkey Ответ ключа доступа на задачу WebAuthn
+	Passkey *PasskeyAssertion `json:"passkey,omitempty"`
+
+	// RecoveryCode Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны; сгорает
+	//
+	// Example: k7m2q-x9p4t
+	RecoveryCode *string `json:"recovery_code,omitempty"`
+}
+
+// MfaMethod Второй фактор: totp — код из приложения-аутентификатора; recovery_code — резервный код; passkey — ключ доступа (WebAuthn)
+type MfaMethod string
+
 // NearestCity Автоопределение города по точке — ближайший работающий город и место точки
 type NearestCity struct {
 	// Here Населённый пункт, в котором точка (радиус пункта растёт с населением, от 2 до 30 км; из накрывающих — ближайший); null — точка вне населённых пунктов или в стране, где платформа не работает
@@ -278,6 +914,28 @@ type NearestCity struct {
 	// NearestOpen Ближайший видимый город со статусом pilot или live, без ограничения расстояния; null — таких городов нет
 	NearestOpen *OpenCity `json:"nearest_open"`
 }
+
+// NicknameAvailability Доступность ника; проверка при вводе, окончательная — при регистрации
+type NicknameAvailability struct {
+	// Available Ник можно взять
+	//
+	// Example: false
+	Available bool `json:"available"`
+
+	// Reason Почему нельзя (значения NicknameUnavailableReason: invalid, taken, reserved) или null, если ник доступен
+	Reason *NicknameUnavailableReason `json:"reason"`
+}
+
+// NicknameChangeRequest Новый ник
+type NicknameChangeRequest struct {
+	// Nickname Новый ник — формат как у checkNickname
+	//
+	// Example: kosta_11
+	Nickname string `json:"nickname"`
+}
+
+// NicknameUnavailableReason Почему ник недоступен: invalid — не проходит формат (3–20 символов, буквы, цифры, «_», «.», «-»; не с знака и не на знак, без двух знаков подряд, не из одних цифр); taken — занят; reserved — зарезервирован или освободился недавно
+type NicknameUnavailableReason string
 
 // OpenCity Ближайший работающий город (pilot или live) и расстояние до него
 type OpenCity struct {
@@ -290,12 +948,85 @@ type OpenCity struct {
 	DistanceM float64 `json:"distance_m"`
 }
 
+// PasskeyAssertion Ответ ключа доступа на задачу WebAuthn
+type PasskeyAssertion struct {
+	// ChallengeId Id задачи из WebAuthnOptions
+	//
+	// Example: 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+	ChallengeId openapi_types.UUID `json:"challenge_id"`
+
+	// Credential Ответ платформенного API как есть — RegistrationResponseJSON (регистрация ключа) или AuthenticationResponseJSON (вход) по W3C WebAuthn Level 3; разбирает сервер
+	//
+	// Example: {"id":"KbDl1lrv0Ue6hXXH3Z2E1g","rawId":"KbDl1lrv0Ue6hXXH3Z2E1g","response":{"authenticatorData":"SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ","clientDataJSON":"eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0","signature":"MEUCIQDgYk0","userHandle":"dXNlci1oYW5kbGU"},"type":"public-key"}
+	Credential WebAuthnCredential `json:"credential"`
+}
+
+// PasswordChangeRequest Новый пароль (текущий подтверждается свежим входом — reauthenticate)
+type PasswordChangeRequest struct {
+	// NewPassword Новый пароль — политика как при регистрации
+	//
+	// Example: Свисток на 46-й минуте
+	NewPassword string `json:"new_password"`
+}
+
+// PasswordResetConfirmRequest Новый пароль по коду из письма. Аккаунт с 2FA — ещё второй фактор в mfa (без него — 400 identity.mfa_required, код при этом не тратится)
+type PasswordResetConfirmRequest struct {
+	// Code 6 цифр из письма
+	//
+	// Example: 492817
+	Code string `json:"code"`
+
+	// CodeId Id кода из CodeSent
+	//
+	// Example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+	CodeId openapi_types.UUID `json:"code_id"`
+
+	// Device Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам
+	Device *DeviceInfo `json:"device,omitempty"`
+
+	// Mfa Второй фактор — ровно одно из code и recovery_code (ни одного или оба — 400 validation.failed). Ключ доступа здесь не принимается: войдите ключом и смените пароль в настройках
+	Mfa *struct {
+		// Code Код из приложения-аутентификатора — 6 цифр
+		//
+		// Example: 492817
+		Code *string `json:"code,omitempty"`
+
+		// RecoveryCode Резервный код вида xxxxx-xxxxx; сгорает
+		//
+		// Example: k7m2q-x9p4t
+		RecoveryCode *string `json:"recovery_code,omitempty"`
+	} `json:"mfa,omitempty"`
+
+	// NewPassword Новый пароль — та же политика, что при регистрации (identity.password_weak)
+	//
+	// Example: Свисток на 46-й минуте
+	NewPassword string `json:"new_password"`
+}
+
+// PasswordResetStartRequest Запрос кода сброса пароля
+type PasswordResetStartRequest struct {
+	// Email Почта аккаунта
+	//
+	// Example: kosta.f@example.com
+	Email string `json:"email"`
+}
+
 // Problem Ошибка по RFC 9457. Решение принимается по code, тексты — для разработчика
 type Problem struct {
 	// AttemptsLeft Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
 	//
 	// Example: 3
 	AttemptsLeft *int `json:"attempts_left,omitempty"`
+
+	// AvailableAt Когда действие станет доступно (UTC) — только у identity.nickname_change_too_soon (смена ника раньше 30 дней) и identity.application_cooldown (повторная заявка в капитаны раньше 7 дней после отказа)
+	//
+	// Example: 2026-12-13T09:30:00Z
+	AvailableAt *time.Time `json:"available_at,omitempty"`
+
+	// BlockedUntil До какого момента (UTC) заблокирован аккаунт — только у identity.account_blocked. Поля нет у этого кода — блокировка бессрочная (null не приходит)
+	//
+	// Example: 2026-11-20T00:00:00Z
+	BlockedUntil *time.Time `json:"blocked_until,omitempty"`
 
 	// Challenge Задача антибота — только у humancheck.required. Формат протокола ALTCHA, поля в camelCase, как их ждёт виджет ALTCHA: найдите число от 0 до maxNumber, при котором SHA-256(salt + число) в hex равен challenge, и повторите запрос с решением в заголовке X-WF-Humancheck (base64 от JSON с полями algorithm, challenge, number, salt, signature)
 	Challenge *struct {
@@ -353,6 +1084,16 @@ type Problem struct {
 	// Example: 1842
 	JobId *int64 `json:"job_id,omitempty"`
 
+	// Methods Только у identity.mfa_required — вторые факторы аккаунта, которые принимает эта операция (значения схемы MfaMethod): totp, recovery_code, passkey. У confirmPasswordReset — только totp и recovery_code: ключ доступа при сбросе пароля не принимается. Клиент показывает выбор из этих способов и повторяет запрос со вторым фактором
+	//
+	// Example: ["totp","recovery_code"]
+	Methods *[]string `json:"methods,omitempty"`
+
+	// Reasons Причины отказа машинными значениями — только у двух кодов. У identity.captain_ineligible — невыполненные условия заявки в капитаны (значения схемы CaptainIneligibility; ограничение captain — причина restricted). У identity.password_weak — ровно одно значение: too_short (короче 10 символов), common (из списка распространённых паролей) или too_long (длиннее потолка). Список открытый: незнакомое значение показывайте общим текстом кода
+	//
+	// Example: ["too_short"]
+	Reasons *[]string `json:"reasons,omitempty"`
+
 	// RequestId Id запроса — по нему запрос находится в логах сервера
 	//
 	// Example: wf-api-7d9f/Yx3kQp1bZt-000042
@@ -374,6 +1115,19 @@ type Problem struct {
 	Type string `json:"type"`
 }
 
+// RefreshRequest Обмен refresh-токена на новую пару
+type RefreshRequest struct {
+	// InstallId install_id устройства (как в DeviceInfo) — по нему сервер узнаёт повтор с того же устройства в окне гонки; мобильный клиент передаёт всегда
+	//
+	// Example: 6F9619FF-8B86-4D01-B42D-00CF4FC964FF
+	InstallId *string `json:"install_id,omitempty"`
+
+	// RefreshToken Текущий refresh-токен
+	//
+	// Example: Yx3kQp1bZt7Lm2Vb4Np8Rt1Zw6Yc0Hs5Ae9Df3Gh7Jk
+	RefreshToken string `json:"refresh_token"`
+}
+
 // RegionRef Регион (субъект, область) — id и название на языке ответа
 type RegionRef struct {
 	// Id Id региона
@@ -387,13 +1141,213 @@ type RegionRef struct {
 	Name string `json:"name"`
 }
 
+// RevokedCount Итог «выйти везде, кроме этого»
+type RevokedCount struct {
+	// Revoked Сколько сессий отозвано
+	//
+	// Example: 3
+	Revoked int `json:"revoked"`
+}
+
+// Session Вход на устройстве — строка экрана «Где вы вошли»
+type Session struct {
+	// AppVersion Версия приложения или null у веба
+	//
+	// Example: 1.4.0
+	AppVersion *string `json:"app_version"`
+
+	// AuthMethod Способ входа, которым создана сессия
+	AuthMethod AuthMethod `json:"auth_method"`
+
+	// Browser Браузер и ОС по User-Agent у веба или null у приложения
+	//
+	// Example: Safari 18, macOS
+	Browser *string `json:"browser"`
+
+	// City Город по IP на языке аккаунта или null (не определён); сам IP не отдаётся
+	//
+	// Example: Ставрополь
+	City *string `json:"city"`
+
+	// ClientKind Клиент сессии: mobile — приложение, web — сайт (через BFF)
+	ClientKind ClientKind `json:"client_kind"`
+
+	// CreatedAt Когда выполнен вход (UTC)
+	//
+	// Example: 2026-11-01T08:15:00Z
+	CreatedAt time.Time `json:"created_at"`
+
+	// Current Это сессия текущего запроса
+	//
+	// Example: true
+	Current bool `json:"current"`
+
+	// DeviceModel Модель устройства или null у веба
+	//
+	// Example: iPhone15,2
+	DeviceModel *string `json:"device_model"`
+
+	// Id Id сессии — для revokeMySession
+	//
+	// Example: 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+	Id openapi_types.UUID `json:"id"`
+
+	// LastSeenAt Последняя активность (UTC, точность — до 10 минут)
+	//
+	// Example: 2026-11-13T16:50:00Z
+	LastSeenAt time.Time `json:"last_seen_at"`
+
+	// OsVersion Версия ОС или null
+	//
+	// Example: 18.1
+	OsVersion *string `json:"os_version"`
+
+	// Platform Платформа приложения (значения AppPlatform) или null у веба
+	Platform *AppPlatform `json:"platform"`
+}
+
+// SessionList Живые сессии аккаунта (не больше 100; при превышении старшие отзываются)
+type SessionList struct {
+	// Items Сессии, новые сверху
+	Items []Session `json:"items"`
+}
+
+// SignupConfirmRequest Подтверждение регистрации кодом из письма
+type SignupConfirmRequest struct {
+	// Code 6 цифр из письма
+	//
+	// Example: 492817
+	Code string `json:"code"`
+
+	// CodeId Id кода из CodeSent
+	//
+	// Example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+	CodeId openapi_types.UUID `json:"code_id"`
+
+	// Device Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам
+	Device *DeviceInfo `json:"device,omitempty"`
+
+	// Nickname Новый ник — только если ответ был 409 identity.nickname_taken (ник заняли, пока шёл код); без него берётся ник из startSignup
+	//
+	// Example: kosta_11
+	Nickname *string `json:"nickname,omitempty"`
+}
+
+// SignupStartRequest Форма регистрации по почте
+type SignupStartRequest struct {
+	// AcceptedDocuments Принятые версии всех текущих документов (getLegalDocuments); нет какого-то или версия не текущая — 422 identity.documents_outdated
+	AcceptedDocuments []AcceptedDocument `json:"accepted_documents"`
+
+	// BirthDate Дата рождения; младше порога страны города — 422 identity.too_young
+	//
+	// Example: 1998-04-17
+	BirthDate openapi_types.Date `json:"birth_date"`
+
+	// CityId Город из listCities или findNearestCity
+	//
+	// Example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+	CityId openapi_types.UUID `json:"city_id"`
+
+	// Device Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам
+	Device *DeviceInfo `json:"device,omitempty"`
+
+	// Email Почта; регистр и пробелы по краям не важны, домен на кириллице принимается
+	//
+	// Example: kosta.f@example.com
+	Email string `json:"email"`
+
+	// Locale Язык интерфейса и писем
+	Locale *Locale `json:"locale,omitempty"`
+
+	// Nickname Ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid
+	//
+	// Example: kosta_10
+	Nickname string `json:"nickname"`
+
+	// Password Пароль как введён: не короче 10 символов, не из списка распространённых, не длиннее потолка — иначе 422 identity.password_weak с причиной в reasons
+	//
+	// Example: Жёлтая карточка на 90-й
+	Password string `json:"password"`
+}
+
+// SocialSignupPending Учётка Apple или Google ещё не привязана ни к одному аккаунту — нужна дорегистрация completeSocialSignup
+type SocialSignupPending struct {
+	// Email Подтверждённая провайдером почта — станет почтой аккаунта
+	//
+	// Example: kosta.f@example.com
+	Email string `json:"email"`
+
+	// EmailIsPrivateRelay Почта — скрытый адрес Apple (privaterelay.appleid.com); письма идут через Apple
+	//
+	// Example: false
+	EmailIsPrivateRelay bool `json:"email_is_private_relay"`
+
+	// ExpiresAt Когда signup_token истечёт (UTC); после — 410 identity.signup_token_invalid
+	//
+	// Example: 2026-11-13T17:15:00Z
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// SignupToken Токен дорегистрации (256 бит, base64url), одноразовый
+	//
+	// Example: U2lnbnVwLXRva2VuLTI1Ni1iaXRzLWJhc2U2NHVybC14eXo
+	SignupToken string `json:"signup_token"`
+}
+
+// TokenPair Токены сессии. access — короткий (10 минут), идёт в заголовке Authorization: Bearer; refresh — непрозрачный, меняется на каждом refreshSession (прежний после этого не действует)
+type TokenPair struct {
+	// AccessExpiresAt Когда access-токен истечёт (UTC); после — 401 auth.unauthenticated, обновите токен
+	//
+	// Example: 2026-11-13T17:10:00Z
+	AccessExpiresAt time.Time `json:"access_expires_at"`
+
+	// AccessToken Access-токен (JWT EdDSA) — заголовок «Authorization — Bearer» у операций с замком
+	//
+	// Example: eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+	AccessToken string `json:"access_token"`
+
+	// RefreshIdleExpiresAt До какого момента refresh действует без использования (UTC); каждое обновление продлевает срок. Телефон — 90 дней, веб — 30 дней
+	//
+	// Example: 2027-02-11T17:00:00Z
+	RefreshIdleExpiresAt time.Time `json:"refresh_idle_expires_at"`
+
+	// RefreshToken Refresh-токен (256 бит, base64url) — только для refreshSession; хранить в Keychain / Keystore, никуда больше не передавать
+	//
+	// Example: Yx3kQp1bZt7Lm2Vb4Np8Rt1Zw6Yc0Hs5Ae9Df3Gh7Jk
+	RefreshToken string `json:"refresh_token"`
+
+	// SessionId Id сессии — совпадает с id в listMySessions (отметка «это устройство»)
+	//
+	// Example: 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+	SessionId openapi_types.UUID `json:"session_id"`
+}
+
+// WebAuthnCredential Ответ платформенного API как есть — RegistrationResponseJSON (регистрация ключа) или AuthenticationResponseJSON (вход) по W3C WebAuthn Level 3; разбирает сервер
+//
+// Example: {"id":"KbDl1lrv0Ue6hXXH3Z2E1g","rawId":"KbDl1lrv0Ue6hXXH3Z2E1g","response":{"authenticatorData":"SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ","clientDataJSON":"eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0","signature":"MEUCIQDgYk0","userHandle":"dXNlci1oYW5kbGU"},"type":"public-key"}
+type WebAuthnCredential map[string]interface{}
+
 // AcceptLanguage defines model for AcceptLanguage.
 type AcceptLanguage = string
+
+// CodeId defines model for CodeId.
+type CodeId = openapi_types.UUID
+
+// IdempotencyKey defines model for IdempotencyKey.
+type IdempotencyKey = string
+
+// SessionId defines model for SessionId.
+type SessionId = openapi_types.UUID
 
 // GetAppMinVersionParams defines parameters for GetAppMinVersion.
 type GetAppMinVersionParams struct {
 	// Platform Платформа приложения, которое спрашивает
 	Platform AppPlatform `form:"platform" json:"platform"`
+}
+
+// LogoutParams defines parameters for Logout.
+type LogoutParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 }
 
 // ListCitiesParams defines parameters for ListCities.
@@ -441,11 +1395,146 @@ type GetCityParams struct {
 	AcceptLanguage *AcceptLanguage `json:"Accept-Language,omitempty"`
 }
 
+// UpdateMeParams defines parameters for UpdateMe.
+type UpdateMeParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// DeleteAccountParams defines parameters for DeleteAccount.
+type DeleteAccountParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// AcceptDocumentsParams defines parameters for AcceptDocuments.
+type AcceptDocumentsParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// StartEmailChangeParams defines parameters for StartEmailChange.
+type StartEmailChangeParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// ConfirmEmailChangeParams defines parameters for ConfirmEmailChange.
+type ConfirmEmailChangeParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// ChangeNicknameParams defines parameters for ChangeNickname.
+type ChangeNicknameParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// ChangePasswordParams defines parameters for ChangePassword.
+type ChangePasswordParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// RevokeOtherSessionsParams defines parameters for RevokeOtherSessions.
+type RevokeOtherSessionsParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// RevokeMySessionParams defines parameters for RevokeMySession.
+type RevokeMySessionParams struct {
+	// IdempotencyKey Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// CheckNicknameParams defines parameters for CheckNickname.
+type CheckNicknameParams struct {
+	// Nickname Ник, как его ввёл игрок
+	Nickname string `form:"nickname" json:"nickname"`
+}
+
+// CancelDeletionJSONRequestBody defines body for CancelDeletion for application/json ContentType.
+type CancelDeletionJSONRequestBody = DeletionCancelRequest
+
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody = LoginRequest
+
+// CompleteMfaJSONRequestBody defines body for CompleteMfa for application/json ContentType.
+type CompleteMfaJSONRequestBody = MfaCompleteRequest
+
+// StartPasswordResetJSONRequestBody defines body for StartPasswordReset for application/json ContentType.
+type StartPasswordResetJSONRequestBody = PasswordResetStartRequest
+
+// ConfirmPasswordResetJSONRequestBody defines body for ConfirmPasswordReset for application/json ContentType.
+type ConfirmPasswordResetJSONRequestBody = PasswordResetConfirmRequest
+
+// RefreshSessionJSONRequestBody defines body for RefreshSession for application/json ContentType.
+type RefreshSessionJSONRequestBody = RefreshRequest
+
+// StartSignupJSONRequestBody defines body for StartSignup for application/json ContentType.
+type StartSignupJSONRequestBody = SignupStartRequest
+
+// ConfirmSignupJSONRequestBody defines body for ConfirmSignup for application/json ContentType.
+type ConfirmSignupJSONRequestBody = SignupConfirmRequest
+
+// UpdateMeJSONRequestBody defines body for UpdateMe for application/json ContentType.
+type UpdateMeJSONRequestBody = MeUpdate
+
+// DeleteAccountJSONRequestBody defines body for DeleteAccount for application/json ContentType.
+type DeleteAccountJSONRequestBody = DeletionRequest
+
+// AcceptDocumentsJSONRequestBody defines body for AcceptDocuments for application/json ContentType.
+type AcceptDocumentsJSONRequestBody = DocumentsAcceptRequest
+
+// StartEmailChangeJSONRequestBody defines body for StartEmailChange for application/json ContentType.
+type StartEmailChangeJSONRequestBody = EmailChangeStartRequest
+
+// ConfirmEmailChangeJSONRequestBody defines body for ConfirmEmailChange for application/json ContentType.
+type ConfirmEmailChangeJSONRequestBody = EmailChangeConfirmRequest
+
+// ChangeNicknameJSONRequestBody defines body for ChangeNickname for application/json ContentType.
+type ChangeNicknameJSONRequestBody = NicknameChangeRequest
+
+// ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
+type ChangePasswordJSONRequestBody = PasswordChangeRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetAppMinVersion Минимальная версия приложения
 	// (GET /v1/app/min-version)
 	GetAppMinVersion(w http.ResponseWriter, r *http.Request, params GetAppMinVersionParams)
+	// ResendAuthCode Отправить код повторно
+	// (POST /v1/auth/codes/{codeId}/resend)
+	ResendAuthCode(w http.ResponseWriter, r *http.Request, codeId CodeId)
+	// CancelDeletion Отменить удаление аккаунта
+	// (POST /v1/auth/deletion/cancel)
+	CancelDeletion(w http.ResponseWriter, r *http.Request)
+	// Login Войти по почте и паролю
+	// (POST /v1/auth/login)
+	Login(w http.ResponseWriter, r *http.Request)
+	// Logout Выйти
+	// (POST /v1/auth/logout)
+	Logout(w http.ResponseWriter, r *http.Request, params LogoutParams)
+	// CompleteMfa Второй фактор входа
+	// (POST /v1/auth/mfa)
+	CompleteMfa(w http.ResponseWriter, r *http.Request)
+	// StartPasswordReset Начать сброс пароля
+	// (POST /v1/auth/password-reset)
+	StartPasswordReset(w http.ResponseWriter, r *http.Request)
+	// ConfirmPasswordReset Задать новый пароль по коду
+	// (POST /v1/auth/password-reset/confirm)
+	ConfirmPasswordReset(w http.ResponseWriter, r *http.Request)
+	// RefreshSession Обновить токены
+	// (POST /v1/auth/refresh)
+	RefreshSession(w http.ResponseWriter, r *http.Request)
+	// StartSignup Начать регистрацию по почте
+	// (POST /v1/auth/signup)
+	StartSignup(w http.ResponseWriter, r *http.Request)
+	// ConfirmSignup Подтвердить регистрацию кодом
+	// (POST /v1/auth/signup/confirm)
+	ConfirmSignup(w http.ResponseWriter, r *http.Request)
 	// ListCities Список городов
 	// (GET /v1/cities)
 	ListCities(w http.ResponseWriter, r *http.Request, params ListCitiesParams)
@@ -458,6 +1547,48 @@ type ServerInterface interface {
 	// GetCity Город с настройками
 	// (GET /v1/cities/{cityId})
 	GetCity(w http.ResponseWriter, r *http.Request, cityId openapi_types.UUID, params GetCityParams)
+	// CreateDeviceChallenge Задача проверки целостности приложения
+	// (POST /v1/devices/challenges)
+	CreateDeviceChallenge(w http.ResponseWriter, r *http.Request)
+	// GetLegalDocuments Текущие версии документов
+	// (GET /v1/legal/documents)
+	GetLegalDocuments(w http.ResponseWriter, r *http.Request)
+	// GetMe Мой аккаунт
+	// (GET /v1/me)
+	GetMe(w http.ResponseWriter, r *http.Request)
+	// UpdateMe Изменить настройки аккаунта
+	// (PATCH /v1/me)
+	UpdateMe(w http.ResponseWriter, r *http.Request, params UpdateMeParams)
+	// DeleteAccount Удалить аккаунт
+	// (POST /v1/me/delete)
+	DeleteAccount(w http.ResponseWriter, r *http.Request, params DeleteAccountParams)
+	// AcceptDocuments Принять документы
+	// (POST /v1/me/documents)
+	AcceptDocuments(w http.ResponseWriter, r *http.Request, params AcceptDocumentsParams)
+	// StartEmailChange Начать смену почты
+	// (POST /v1/me/email-change)
+	StartEmailChange(w http.ResponseWriter, r *http.Request, params StartEmailChangeParams)
+	// ConfirmEmailChange Подтвердить новую почту
+	// (POST /v1/me/email-change/confirm)
+	ConfirmEmailChange(w http.ResponseWriter, r *http.Request, params ConfirmEmailChangeParams)
+	// ChangeNickname Сменить ник
+	// (PATCH /v1/me/nickname)
+	ChangeNickname(w http.ResponseWriter, r *http.Request, params ChangeNicknameParams)
+	// ChangePassword Сменить или задать пароль
+	// (POST /v1/me/password)
+	ChangePassword(w http.ResponseWriter, r *http.Request, params ChangePasswordParams)
+	// ListMySessions Где я вошёл
+	// (GET /v1/me/sessions)
+	ListMySessions(w http.ResponseWriter, r *http.Request)
+	// RevokeOtherSessions Выйти везде, кроме этого устройства
+	// (POST /v1/me/sessions/revoke-others)
+	RevokeOtherSessions(w http.ResponseWriter, r *http.Request, params RevokeOtherSessionsParams)
+	// RevokeMySession Выйти на устройстве
+	// (DELETE /v1/me/sessions/{sessionId})
+	RevokeMySession(w http.ResponseWriter, r *http.Request, sessionId SessionId, params RevokeMySessionParams)
+	// CheckNickname Проверить ник
+	// (GET /v1/nicknames/availability)
+	CheckNickname(w http.ResponseWriter, r *http.Request, params CheckNicknameParams)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -467,6 +1598,66 @@ type Unimplemented struct{}
 // GetAppMinVersion Минимальная версия приложения
 // (GET /v1/app/min-version)
 func (_ Unimplemented) GetAppMinVersion(w http.ResponseWriter, r *http.Request, params GetAppMinVersionParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ResendAuthCode Отправить код повторно
+// (POST /v1/auth/codes/{codeId}/resend)
+func (_ Unimplemented) ResendAuthCode(w http.ResponseWriter, r *http.Request, codeId CodeId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CancelDeletion Отменить удаление аккаунта
+// (POST /v1/auth/deletion/cancel)
+func (_ Unimplemented) CancelDeletion(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Login Войти по почте и паролю
+// (POST /v1/auth/login)
+func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Logout Выйти
+// (POST /v1/auth/logout)
+func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request, params LogoutParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CompleteMfa Второй фактор входа
+// (POST /v1/auth/mfa)
+func (_ Unimplemented) CompleteMfa(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPasswordReset Начать сброс пароля
+// (POST /v1/auth/password-reset)
+func (_ Unimplemented) StartPasswordReset(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ConfirmPasswordReset Задать новый пароль по коду
+// (POST /v1/auth/password-reset/confirm)
+func (_ Unimplemented) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshSession Обновить токены
+// (POST /v1/auth/refresh)
+func (_ Unimplemented) RefreshSession(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartSignup Начать регистрацию по почте
+// (POST /v1/auth/signup)
+func (_ Unimplemented) StartSignup(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ConfirmSignup Подтвердить регистрацию кодом
+// (POST /v1/auth/signup/confirm)
+func (_ Unimplemented) ConfirmSignup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -491,6 +1682,90 @@ func (_ Unimplemented) FindNearestCity(w http.ResponseWriter, r *http.Request, p
 // GetCity Город с настройками
 // (GET /v1/cities/{cityId})
 func (_ Unimplemented) GetCity(w http.ResponseWriter, r *http.Request, cityId openapi_types.UUID, params GetCityParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateDeviceChallenge Задача проверки целостности приложения
+// (POST /v1/devices/challenges)
+func (_ Unimplemented) CreateDeviceChallenge(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetLegalDocuments Текущие версии документов
+// (GET /v1/legal/documents)
+func (_ Unimplemented) GetLegalDocuments(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetMe Мой аккаунт
+// (GET /v1/me)
+func (_ Unimplemented) GetMe(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateMe Изменить настройки аккаунта
+// (PATCH /v1/me)
+func (_ Unimplemented) UpdateMe(w http.ResponseWriter, r *http.Request, params UpdateMeParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteAccount Удалить аккаунт
+// (POST /v1/me/delete)
+func (_ Unimplemented) DeleteAccount(w http.ResponseWriter, r *http.Request, params DeleteAccountParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcceptDocuments Принять документы
+// (POST /v1/me/documents)
+func (_ Unimplemented) AcceptDocuments(w http.ResponseWriter, r *http.Request, params AcceptDocumentsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartEmailChange Начать смену почты
+// (POST /v1/me/email-change)
+func (_ Unimplemented) StartEmailChange(w http.ResponseWriter, r *http.Request, params StartEmailChangeParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ConfirmEmailChange Подтвердить новую почту
+// (POST /v1/me/email-change/confirm)
+func (_ Unimplemented) ConfirmEmailChange(w http.ResponseWriter, r *http.Request, params ConfirmEmailChangeParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ChangeNickname Сменить ник
+// (PATCH /v1/me/nickname)
+func (_ Unimplemented) ChangeNickname(w http.ResponseWriter, r *http.Request, params ChangeNicknameParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ChangePassword Сменить или задать пароль
+// (POST /v1/me/password)
+func (_ Unimplemented) ChangePassword(w http.ResponseWriter, r *http.Request, params ChangePasswordParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListMySessions Где я вошёл
+// (GET /v1/me/sessions)
+func (_ Unimplemented) ListMySessions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeOtherSessions Выйти везде, кроме этого устройства
+// (POST /v1/me/sessions/revoke-others)
+func (_ Unimplemented) RevokeOtherSessions(w http.ResponseWriter, r *http.Request, params RevokeOtherSessionsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeMySession Выйти на устройстве
+// (DELETE /v1/me/sessions/{sessionId})
+func (_ Unimplemented) RevokeMySession(w http.ResponseWriter, r *http.Request, sessionId SessionId, params RevokeMySessionParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckNickname Проверить ник
+// (GET /v1/nicknames/availability)
+func (_ Unimplemented) CheckNickname(w http.ResponseWriter, r *http.Request, params CheckNicknameParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -527,6 +1802,189 @@ func (siw *ServerInterfaceWrapper) GetAppMinVersion(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAppMinVersion(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResendAuthCode operation middleware
+func (siw *ServerInterfaceWrapper) ResendAuthCode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "codeId" -------------
+	var codeId CodeId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "codeId", chi.URLParam(r, "codeId"), &codeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "codeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResendAuthCode(w, r, codeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelDeletion operation middleware
+func (siw *ServerInterfaceWrapper) CancelDeletion(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelDeletion(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Login operation middleware
+func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params LogoutParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Logout(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteMfa operation middleware
+func (siw *ServerInterfaceWrapper) CompleteMfa(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteMfa(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) StartPasswordReset(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPasswordReset(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmPasswordReset operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmPasswordReset(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshSession operation middleware
+func (siw *ServerInterfaceWrapper) RefreshSession(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshSession(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartSignup operation middleware
+func (siw *ServerInterfaceWrapper) StartSignup(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartSignup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmSignup operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmSignup(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmSignup(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -809,6 +2267,509 @@ func (siw *ServerInterfaceWrapper) GetCity(w http.ResponseWriter, r *http.Reques
 	handler.ServeHTTP(w, r)
 }
 
+// CreateDeviceChallenge operation middleware
+func (siw *ServerInterfaceWrapper) CreateDeviceChallenge(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDeviceChallenge(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLegalDocuments operation middleware
+func (siw *ServerInterfaceWrapper) GetLegalDocuments(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLegalDocuments(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMe operation middleware
+func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMe operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMe(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdateMeParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMe(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteAccount operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAccountParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteAccount(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptDocuments operation middleware
+func (siw *ServerInterfaceWrapper) AcceptDocuments(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AcceptDocumentsParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptDocuments(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartEmailChange operation middleware
+func (siw *ServerInterfaceWrapper) StartEmailChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StartEmailChangeParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartEmailChange(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmEmailChange operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmEmailChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ConfirmEmailChangeParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmEmailChange(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangeNickname operation middleware
+func (siw *ServerInterfaceWrapper) ChangeNickname(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ChangeNicknameParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangeNickname(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangePassword operation middleware
+func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ChangePasswordParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangePassword(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMySessions operation middleware
+func (siw *ServerInterfaceWrapper) ListMySessions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMySessions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeOtherSessions operation middleware
+func (siw *ServerInterfaceWrapper) RevokeOtherSessions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RevokeOtherSessionsParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeOtherSessions(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeMySession operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMySession(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "sessionId" -------------
+	var sessionId SessionId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionId", chi.URLParam(r, "sessionId"), &sessionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sessionId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RevokeMySessionParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMySession(w, r, sessionId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckNickname operation middleware
+func (siw *ServerInterfaceWrapper) CheckNickname(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CheckNicknameParams
+
+	// ------------- Required query parameter "nickname" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "nickname", r.URL.Query(), &params.Nickname, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "nickname"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nickname", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckNickname(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -937,6 +2898,78 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/app/min-version", wrapper.GetAppMinVersion)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/nicknames/availability", wrapper.CheckNickname)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/signup", wrapper.StartSignup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/signup/confirm", wrapper.ConfirmSignup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/codes/{codeId}/resend", wrapper.ResendAuthCode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/login", wrapper.Login)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/mfa", wrapper.CompleteMfa)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/password-reset", wrapper.StartPasswordReset)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/password-reset/confirm", wrapper.ConfirmPasswordReset)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/refresh", wrapper.RefreshSession)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/deletion/cancel", wrapper.CancelDeletion)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/auth/logout", wrapper.Logout)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/legal/documents", wrapper.GetLegalDocuments)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/devices/challenges", wrapper.CreateDeviceChallenge)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/me", wrapper.GetMe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/me", wrapper.UpdateMe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/me/nickname", wrapper.ChangeNickname)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/me/sessions/revoke-others", wrapper.RevokeOtherSessions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/me/sessions/{sessionId}", wrapper.RevokeMySession)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/me/password", wrapper.ChangePassword)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/me/email-change", wrapper.StartEmailChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/me/email-change/confirm", wrapper.ConfirmEmailChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/me/documents", wrapper.AcceptDocuments)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/me/delete", wrapper.DeleteAccount)
+	})
 
 	return r
 }
@@ -987,6 +3020,608 @@ type GetAppMinVersiondefaultApplicationProblemPlusJSONResponse struct {
 }
 
 func (response GetAppMinVersiondefaultApplicationProblemPlusJSONResponse) VisitGetAppMinVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResendAuthCodeRequestObject struct {
+	CodeId CodeId `json:"codeId"`
+}
+
+type ResendAuthCodeResponseObject interface {
+	VisitResendAuthCodeResponse(w http.ResponseWriter) error
+}
+
+type ResendAuthCode202ResponseHeaders struct {
+	CacheControl string
+}
+
+type ResendAuthCode202JSONResponse struct {
+	Body    CodeSent
+	Headers ResendAuthCode202ResponseHeaders
+}
+
+func (response ResendAuthCode202JSONResponse) VisitResendAuthCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResendAuthCode429ResponseHeaders struct {
+	RetryAfter int
+}
+
+type ResendAuthCode429ApplicationProblemPlusJSONResponse struct {
+	Body    Problem
+	Headers ResendAuthCode429ResponseHeaders
+}
+
+func (response ResendAuthCode429ApplicationProblemPlusJSONResponse) VisitResendAuthCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResendAuthCodedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ResendAuthCodedefaultApplicationProblemPlusJSONResponse) VisitResendAuthCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelDeletionRequestObject struct {
+	Body *CancelDeletionJSONRequestBody
+}
+
+type CancelDeletionResponseObject interface {
+	VisitCancelDeletionResponse(w http.ResponseWriter) error
+}
+
+type CancelDeletion200ResponseHeaders struct {
+	CacheControl string
+}
+
+type CancelDeletion200JSONResponse struct {
+	Body    AuthResult
+	Headers CancelDeletion200ResponseHeaders
+}
+
+func (response CancelDeletion200JSONResponse) VisitCancelDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelDeletiondefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response CancelDeletiondefaultApplicationProblemPlusJSONResponse) VisitCancelDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LoginRequestObject struct {
+	Body *LoginJSONRequestBody
+}
+
+type LoginResponseObject interface {
+	VisitLoginResponse(w http.ResponseWriter) error
+}
+
+type Login200ResponseHeaders struct {
+	CacheControl string
+}
+
+type Login200JSONResponse struct {
+	Body    AuthResult
+	Headers Login200ResponseHeaders
+}
+
+func (response Login200JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Login403ApplicationProblemPlusJSONResponse Problem
+
+func (response Login403ApplicationProblemPlusJSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LogindefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response LogindefaultApplicationProblemPlusJSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LogoutRequestObject struct {
+	Params LogoutParams
+}
+
+type LogoutResponseObject interface {
+	VisitLogoutResponse(w http.ResponseWriter) error
+}
+
+type Logout204Response struct {
+}
+
+func (response Logout204Response) VisitLogoutResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type LogoutdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response LogoutdefaultApplicationProblemPlusJSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMfaRequestObject struct {
+	Body *CompleteMfaJSONRequestBody
+}
+
+type CompleteMfaResponseObject interface {
+	VisitCompleteMfaResponse(w http.ResponseWriter) error
+}
+
+type CompleteMfa200ResponseHeaders struct {
+	CacheControl string
+}
+
+type CompleteMfa200JSONResponse struct {
+	Body    AuthResult
+	Headers CompleteMfa200ResponseHeaders
+}
+
+func (response CompleteMfa200JSONResponse) VisitCompleteMfaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMfa400ApplicationProblemPlusJSONResponse Problem
+
+func (response CompleteMfa400ApplicationProblemPlusJSONResponse) VisitCompleteMfaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMfadefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response CompleteMfadefaultApplicationProblemPlusJSONResponse) VisitCompleteMfaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartPasswordResetRequestObject struct {
+	Body *StartPasswordResetJSONRequestBody
+}
+
+type StartPasswordResetResponseObject interface {
+	VisitStartPasswordResetResponse(w http.ResponseWriter) error
+}
+
+type StartPasswordReset202ResponseHeaders struct {
+	CacheControl string
+}
+
+type StartPasswordReset202JSONResponse struct {
+	Body    CodeSent
+	Headers StartPasswordReset202ResponseHeaders
+}
+
+func (response StartPasswordReset202JSONResponse) VisitStartPasswordResetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartPasswordResetdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response StartPasswordResetdefaultApplicationProblemPlusJSONResponse) VisitStartPasswordResetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmPasswordResetRequestObject struct {
+	Body *ConfirmPasswordResetJSONRequestBody
+}
+
+type ConfirmPasswordResetResponseObject interface {
+	VisitConfirmPasswordResetResponse(w http.ResponseWriter) error
+}
+
+type ConfirmPasswordReset200ResponseHeaders struct {
+	CacheControl string
+}
+
+type ConfirmPasswordReset200JSONResponse struct {
+	Body    AuthResult
+	Headers ConfirmPasswordReset200ResponseHeaders
+}
+
+func (response ConfirmPasswordReset200JSONResponse) VisitConfirmPasswordResetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmPasswordReset400ApplicationProblemPlusJSONResponse Problem
+
+func (response ConfirmPasswordReset400ApplicationProblemPlusJSONResponse) VisitConfirmPasswordResetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmPasswordReset422ApplicationProblemPlusJSONResponse Problem
+
+func (response ConfirmPasswordReset422ApplicationProblemPlusJSONResponse) VisitConfirmPasswordResetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmPasswordResetdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ConfirmPasswordResetdefaultApplicationProblemPlusJSONResponse) VisitConfirmPasswordResetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSessionRequestObject struct {
+	Body *RefreshSessionJSONRequestBody
+}
+
+type RefreshSessionResponseObject interface {
+	VisitRefreshSessionResponse(w http.ResponseWriter) error
+}
+
+type RefreshSession200ResponseHeaders struct {
+	CacheControl string
+}
+
+type RefreshSession200JSONResponse struct {
+	Body    TokenPair
+	Headers RefreshSession200ResponseHeaders
+}
+
+func (response RefreshSession200JSONResponse) VisitRefreshSessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSessiondefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response RefreshSessiondefaultApplicationProblemPlusJSONResponse) VisitRefreshSessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSignupRequestObject struct {
+	Body *StartSignupJSONRequestBody
+}
+
+type StartSignupResponseObject interface {
+	VisitStartSignupResponse(w http.ResponseWriter) error
+}
+
+type StartSignup202ResponseHeaders struct {
+	CacheControl string
+}
+
+type StartSignup202JSONResponse struct {
+	Body    CodeSent
+	Headers StartSignup202ResponseHeaders
+}
+
+func (response StartSignup202JSONResponse) VisitStartSignupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSignup422ApplicationProblemPlusJSONResponse Problem
+
+func (response StartSignup422ApplicationProblemPlusJSONResponse) VisitStartSignupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSignupdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response StartSignupdefaultApplicationProblemPlusJSONResponse) VisitStartSignupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSignupRequestObject struct {
+	Body *ConfirmSignupJSONRequestBody
+}
+
+type ConfirmSignupResponseObject interface {
+	VisitConfirmSignupResponse(w http.ResponseWriter) error
+}
+
+type ConfirmSignup201ResponseHeaders struct {
+	CacheControl string
+}
+
+type ConfirmSignup201JSONResponse struct {
+	Body    AuthResult
+	Headers ConfirmSignup201ResponseHeaders
+}
+
+func (response ConfirmSignup201JSONResponse) VisitConfirmSignupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSignup400ApplicationProblemPlusJSONResponse Problem
+
+func (response ConfirmSignup400ApplicationProblemPlusJSONResponse) VisitConfirmSignupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSignupdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ConfirmSignupdefaultApplicationProblemPlusJSONResponse) VisitConfirmSignupResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -1231,11 +3866,773 @@ func (response GetCitydefaultApplicationProblemPlusJSONResponse) VisitGetCityRes
 	return err
 }
 
+type CreateDeviceChallengeRequestObject struct {
+}
+
+type CreateDeviceChallengeResponseObject interface {
+	VisitCreateDeviceChallengeResponse(w http.ResponseWriter) error
+}
+
+type CreateDeviceChallenge201ResponseHeaders struct {
+	CacheControl string
+}
+
+type CreateDeviceChallenge201JSONResponse struct {
+	Body    DeviceChallenge
+	Headers CreateDeviceChallenge201ResponseHeaders
+}
+
+func (response CreateDeviceChallenge201JSONResponse) VisitCreateDeviceChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeviceChallengedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response CreateDeviceChallengedefaultApplicationProblemPlusJSONResponse) VisitCreateDeviceChallengeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLegalDocumentsRequestObject struct {
+}
+
+type GetLegalDocumentsResponseObject interface {
+	VisitGetLegalDocumentsResponse(w http.ResponseWriter) error
+}
+
+type GetLegalDocuments200ResponseHeaders struct {
+	CacheControl string
+}
+
+type GetLegalDocuments200JSONResponse struct {
+	Body    LegalDocumentList
+	Headers GetLegalDocuments200ResponseHeaders
+}
+
+func (response GetLegalDocuments200JSONResponse) VisitGetLegalDocumentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLegalDocumentsdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response GetLegalDocumentsdefaultApplicationProblemPlusJSONResponse) VisitGetLegalDocumentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMeRequestObject struct {
+}
+
+type GetMeResponseObject interface {
+	VisitGetMeResponse(w http.ResponseWriter) error
+}
+
+type GetMe200ResponseHeaders struct {
+	CacheControl string
+}
+
+type GetMe200JSONResponse struct {
+	Body    Me
+	Headers GetMe200ResponseHeaders
+}
+
+func (response GetMe200JSONResponse) VisitGetMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response GetMedefaultApplicationProblemPlusJSONResponse) VisitGetMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMeRequestObject struct {
+	Params UpdateMeParams
+	Body   *UpdateMeJSONRequestBody
+}
+
+type UpdateMeResponseObject interface {
+	VisitUpdateMeResponse(w http.ResponseWriter) error
+}
+
+type UpdateMe200ResponseHeaders struct {
+	CacheControl string
+}
+
+type UpdateMe200JSONResponse struct {
+	Body    Me
+	Headers UpdateMe200ResponseHeaders
+}
+
+func (response UpdateMe200JSONResponse) VisitUpdateMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response UpdateMedefaultApplicationProblemPlusJSONResponse) VisitUpdateMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAccountRequestObject struct {
+	Params DeleteAccountParams
+	Body   *DeleteAccountJSONRequestBody
+}
+
+type DeleteAccountResponseObject interface {
+	VisitDeleteAccountResponse(w http.ResponseWriter) error
+}
+
+type DeleteAccount200ResponseHeaders struct {
+	CacheControl string
+}
+
+type DeleteAccount200JSONResponse struct {
+	Body    DeletionScheduled
+	Headers DeleteAccount200ResponseHeaders
+}
+
+func (response DeleteAccount200JSONResponse) VisitDeleteAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAccountdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response DeleteAccountdefaultApplicationProblemPlusJSONResponse) VisitDeleteAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptDocumentsRequestObject struct {
+	Params AcceptDocumentsParams
+	Body   *AcceptDocumentsJSONRequestBody
+}
+
+type AcceptDocumentsResponseObject interface {
+	VisitAcceptDocumentsResponse(w http.ResponseWriter) error
+}
+
+type AcceptDocuments200ResponseHeaders struct {
+	CacheControl string
+}
+
+type AcceptDocuments200JSONResponse struct {
+	Body    Me
+	Headers AcceptDocuments200ResponseHeaders
+}
+
+func (response AcceptDocuments200JSONResponse) VisitAcceptDocumentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptDocumentsdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response AcceptDocumentsdefaultApplicationProblemPlusJSONResponse) VisitAcceptDocumentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailChangeRequestObject struct {
+	Params StartEmailChangeParams
+	Body   *StartEmailChangeJSONRequestBody
+}
+
+type StartEmailChangeResponseObject interface {
+	VisitStartEmailChangeResponse(w http.ResponseWriter) error
+}
+
+type StartEmailChange202ResponseHeaders struct {
+	CacheControl string
+}
+
+type StartEmailChange202JSONResponse struct {
+	Body    CodeSent
+	Headers StartEmailChange202ResponseHeaders
+}
+
+func (response StartEmailChange202JSONResponse) VisitStartEmailChangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailChangedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response StartEmailChangedefaultApplicationProblemPlusJSONResponse) VisitStartEmailChangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmEmailChangeRequestObject struct {
+	Params ConfirmEmailChangeParams
+	Body   *ConfirmEmailChangeJSONRequestBody
+}
+
+type ConfirmEmailChangeResponseObject interface {
+	VisitConfirmEmailChangeResponse(w http.ResponseWriter) error
+}
+
+type ConfirmEmailChange200ResponseHeaders struct {
+	CacheControl string
+}
+
+type ConfirmEmailChange200JSONResponse struct {
+	Body    Me
+	Headers ConfirmEmailChange200ResponseHeaders
+}
+
+func (response ConfirmEmailChange200JSONResponse) VisitConfirmEmailChangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmEmailChange400ApplicationProblemPlusJSONResponse Problem
+
+func (response ConfirmEmailChange400ApplicationProblemPlusJSONResponse) VisitConfirmEmailChangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmEmailChangedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ConfirmEmailChangedefaultApplicationProblemPlusJSONResponse) VisitConfirmEmailChangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangeNicknameRequestObject struct {
+	Params ChangeNicknameParams
+	Body   *ChangeNicknameJSONRequestBody
+}
+
+type ChangeNicknameResponseObject interface {
+	VisitChangeNicknameResponse(w http.ResponseWriter) error
+}
+
+type ChangeNickname200ResponseHeaders struct {
+	CacheControl string
+}
+
+type ChangeNickname200JSONResponse struct {
+	Body    Me
+	Headers ChangeNickname200ResponseHeaders
+}
+
+func (response ChangeNickname200JSONResponse) VisitChangeNicknameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangeNickname409ApplicationProblemPlusJSONResponse Problem
+
+func (response ChangeNickname409ApplicationProblemPlusJSONResponse) VisitChangeNicknameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangeNicknamedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ChangeNicknamedefaultApplicationProblemPlusJSONResponse) VisitChangeNicknameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePasswordRequestObject struct {
+	Params ChangePasswordParams
+	Body   *ChangePasswordJSONRequestBody
+}
+
+type ChangePasswordResponseObject interface {
+	VisitChangePasswordResponse(w http.ResponseWriter) error
+}
+
+type ChangePassword204Response struct {
+}
+
+func (response ChangePassword204Response) VisitChangePasswordResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ChangePassword422ApplicationProblemPlusJSONResponse Problem
+
+func (response ChangePassword422ApplicationProblemPlusJSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePassworddefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ChangePassworddefaultApplicationProblemPlusJSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMySessionsRequestObject struct {
+}
+
+type ListMySessionsResponseObject interface {
+	VisitListMySessionsResponse(w http.ResponseWriter) error
+}
+
+type ListMySessions200ResponseHeaders struct {
+	CacheControl string
+}
+
+type ListMySessions200JSONResponse struct {
+	Body    SessionList
+	Headers ListMySessions200ResponseHeaders
+}
+
+func (response ListMySessions200JSONResponse) VisitListMySessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMySessionsdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response ListMySessionsdefaultApplicationProblemPlusJSONResponse) VisitListMySessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeOtherSessionsRequestObject struct {
+	Params RevokeOtherSessionsParams
+}
+
+type RevokeOtherSessionsResponseObject interface {
+	VisitRevokeOtherSessionsResponse(w http.ResponseWriter) error
+}
+
+type RevokeOtherSessions200ResponseHeaders struct {
+	CacheControl string
+}
+
+type RevokeOtherSessions200JSONResponse struct {
+	Body    RevokedCount
+	Headers RevokeOtherSessions200ResponseHeaders
+}
+
+func (response RevokeOtherSessions200JSONResponse) VisitRevokeOtherSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeOtherSessionsdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeOtherSessionsdefaultApplicationProblemPlusJSONResponse) VisitRevokeOtherSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMySessionRequestObject struct {
+	SessionId SessionId `json:"sessionId"`
+	Params    RevokeMySessionParams
+}
+
+type RevokeMySessionResponseObject interface {
+	VisitRevokeMySessionResponse(w http.ResponseWriter) error
+}
+
+type RevokeMySession204Response struct {
+}
+
+func (response RevokeMySession204Response) VisitRevokeMySessionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMySessiondefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeMySessiondefaultApplicationProblemPlusJSONResponse) VisitRevokeMySessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckNicknameRequestObject struct {
+	Params CheckNicknameParams
+}
+
+type CheckNicknameResponseObject interface {
+	VisitCheckNicknameResponse(w http.ResponseWriter) error
+}
+
+type CheckNickname200ResponseHeaders struct {
+	CacheControl string
+}
+
+type CheckNickname200JSONResponse struct {
+	Body    NicknameAvailability
+	Headers CheckNickname200ResponseHeaders
+}
+
+func (response CheckNickname200JSONResponse) VisitCheckNicknameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprint(response.Headers.CacheControl))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckNicknamedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	Headers    ProblemResponseHeaders
+	StatusCode int
+}
+
+func (response CheckNicknamedefaultApplicationProblemPlusJSONResponse) VisitCheckNicknameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetAppMinVersion Минимальная версия приложения
 	// (GET /v1/app/min-version)
 	GetAppMinVersion(ctx context.Context, request GetAppMinVersionRequestObject) (GetAppMinVersionResponseObject, error)
+	// ResendAuthCode Отправить код повторно
+	// (POST /v1/auth/codes/{codeId}/resend)
+	ResendAuthCode(ctx context.Context, request ResendAuthCodeRequestObject) (ResendAuthCodeResponseObject, error)
+	// CancelDeletion Отменить удаление аккаунта
+	// (POST /v1/auth/deletion/cancel)
+	CancelDeletion(ctx context.Context, request CancelDeletionRequestObject) (CancelDeletionResponseObject, error)
+	// Login Войти по почте и паролю
+	// (POST /v1/auth/login)
+	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
+	// Logout Выйти
+	// (POST /v1/auth/logout)
+	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// CompleteMfa Второй фактор входа
+	// (POST /v1/auth/mfa)
+	CompleteMfa(ctx context.Context, request CompleteMfaRequestObject) (CompleteMfaResponseObject, error)
+	// StartPasswordReset Начать сброс пароля
+	// (POST /v1/auth/password-reset)
+	StartPasswordReset(ctx context.Context, request StartPasswordResetRequestObject) (StartPasswordResetResponseObject, error)
+	// ConfirmPasswordReset Задать новый пароль по коду
+	// (POST /v1/auth/password-reset/confirm)
+	ConfirmPasswordReset(ctx context.Context, request ConfirmPasswordResetRequestObject) (ConfirmPasswordResetResponseObject, error)
+	// RefreshSession Обновить токены
+	// (POST /v1/auth/refresh)
+	RefreshSession(ctx context.Context, request RefreshSessionRequestObject) (RefreshSessionResponseObject, error)
+	// StartSignup Начать регистрацию по почте
+	// (POST /v1/auth/signup)
+	StartSignup(ctx context.Context, request StartSignupRequestObject) (StartSignupResponseObject, error)
+	// ConfirmSignup Подтвердить регистрацию кодом
+	// (POST /v1/auth/signup/confirm)
+	ConfirmSignup(ctx context.Context, request ConfirmSignupRequestObject) (ConfirmSignupResponseObject, error)
 	// ListCities Список городов
 	// (GET /v1/cities)
 	ListCities(ctx context.Context, request ListCitiesRequestObject) (ListCitiesResponseObject, error)
@@ -1248,6 +4645,48 @@ type StrictServerInterface interface {
 	// GetCity Город с настройками
 	// (GET /v1/cities/{cityId})
 	GetCity(ctx context.Context, request GetCityRequestObject) (GetCityResponseObject, error)
+	// CreateDeviceChallenge Задача проверки целостности приложения
+	// (POST /v1/devices/challenges)
+	CreateDeviceChallenge(ctx context.Context, request CreateDeviceChallengeRequestObject) (CreateDeviceChallengeResponseObject, error)
+	// GetLegalDocuments Текущие версии документов
+	// (GET /v1/legal/documents)
+	GetLegalDocuments(ctx context.Context, request GetLegalDocumentsRequestObject) (GetLegalDocumentsResponseObject, error)
+	// GetMe Мой аккаунт
+	// (GET /v1/me)
+	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
+	// UpdateMe Изменить настройки аккаунта
+	// (PATCH /v1/me)
+	UpdateMe(ctx context.Context, request UpdateMeRequestObject) (UpdateMeResponseObject, error)
+	// DeleteAccount Удалить аккаунт
+	// (POST /v1/me/delete)
+	DeleteAccount(ctx context.Context, request DeleteAccountRequestObject) (DeleteAccountResponseObject, error)
+	// AcceptDocuments Принять документы
+	// (POST /v1/me/documents)
+	AcceptDocuments(ctx context.Context, request AcceptDocumentsRequestObject) (AcceptDocumentsResponseObject, error)
+	// StartEmailChange Начать смену почты
+	// (POST /v1/me/email-change)
+	StartEmailChange(ctx context.Context, request StartEmailChangeRequestObject) (StartEmailChangeResponseObject, error)
+	// ConfirmEmailChange Подтвердить новую почту
+	// (POST /v1/me/email-change/confirm)
+	ConfirmEmailChange(ctx context.Context, request ConfirmEmailChangeRequestObject) (ConfirmEmailChangeResponseObject, error)
+	// ChangeNickname Сменить ник
+	// (PATCH /v1/me/nickname)
+	ChangeNickname(ctx context.Context, request ChangeNicknameRequestObject) (ChangeNicknameResponseObject, error)
+	// ChangePassword Сменить или задать пароль
+	// (POST /v1/me/password)
+	ChangePassword(ctx context.Context, request ChangePasswordRequestObject) (ChangePasswordResponseObject, error)
+	// ListMySessions Где я вошёл
+	// (GET /v1/me/sessions)
+	ListMySessions(ctx context.Context, request ListMySessionsRequestObject) (ListMySessionsResponseObject, error)
+	// RevokeOtherSessions Выйти везде, кроме этого устройства
+	// (POST /v1/me/sessions/revoke-others)
+	RevokeOtherSessions(ctx context.Context, request RevokeOtherSessionsRequestObject) (RevokeOtherSessionsResponseObject, error)
+	// RevokeMySession Выйти на устройстве
+	// (DELETE /v1/me/sessions/{sessionId})
+	RevokeMySession(ctx context.Context, request RevokeMySessionRequestObject) (RevokeMySessionResponseObject, error)
+	// CheckNickname Проверить ник
+	// (GET /v1/nicknames/availability)
+	CheckNickname(ctx context.Context, request CheckNicknameRequestObject) (CheckNicknameResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -1308,6 +4747,306 @@ func (sh *strictHandler) GetAppMinVersion(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAppMinVersionResponseObject); ok {
 		if err := validResponse.VisitGetAppMinVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResendAuthCode operation middleware
+func (sh *strictHandler) ResendAuthCode(w http.ResponseWriter, r *http.Request, codeId CodeId) {
+	var request ResendAuthCodeRequestObject
+
+	request.CodeId = codeId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResendAuthCode(ctx, request.(ResendAuthCodeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResendAuthCode")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResendAuthCodeResponseObject); ok {
+		if err := validResponse.VisitResendAuthCodeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelDeletion operation middleware
+func (sh *strictHandler) CancelDeletion(w http.ResponseWriter, r *http.Request) {
+	var request CancelDeletionRequestObject
+
+	var body CancelDeletionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelDeletion(ctx, request.(CancelDeletionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelDeletion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelDeletionResponseObject); ok {
+		if err := validResponse.VisitCancelDeletionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Login operation middleware
+func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var request LoginRequestObject
+
+	var body LoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Login(ctx, request.(LoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Login")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LoginResponseObject); ok {
+		if err := validResponse.VisitLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Logout operation middleware
+func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request, params LogoutParams) {
+	var request LogoutRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Logout(ctx, request.(LogoutRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Logout")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LogoutResponseObject); ok {
+		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteMfa operation middleware
+func (sh *strictHandler) CompleteMfa(w http.ResponseWriter, r *http.Request) {
+	var request CompleteMfaRequestObject
+
+	var body CompleteMfaJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteMfa(ctx, request.(CompleteMfaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteMfa")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteMfaResponseObject); ok {
+		if err := validResponse.VisitCompleteMfaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartPasswordReset operation middleware
+func (sh *strictHandler) StartPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var request StartPasswordResetRequestObject
+
+	var body StartPasswordResetJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartPasswordReset(ctx, request.(StartPasswordResetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartPasswordReset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartPasswordResetResponseObject); ok {
+		if err := validResponse.VisitStartPasswordResetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ConfirmPasswordReset operation middleware
+func (sh *strictHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var request ConfirmPasswordResetRequestObject
+
+	var body ConfirmPasswordResetJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ConfirmPasswordReset(ctx, request.(ConfirmPasswordResetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ConfirmPasswordReset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ConfirmPasswordResetResponseObject); ok {
+		if err := validResponse.VisitConfirmPasswordResetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RefreshSession operation middleware
+func (sh *strictHandler) RefreshSession(w http.ResponseWriter, r *http.Request) {
+	var request RefreshSessionRequestObject
+
+	var body RefreshSessionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RefreshSession(ctx, request.(RefreshSessionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RefreshSession")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RefreshSessionResponseObject); ok {
+		if err := validResponse.VisitRefreshSessionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartSignup operation middleware
+func (sh *strictHandler) StartSignup(w http.ResponseWriter, r *http.Request) {
+	var request StartSignupRequestObject
+
+	var body StartSignupJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartSignup(ctx, request.(StartSignupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartSignup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartSignupResponseObject); ok {
+		if err := validResponse.VisitStartSignupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ConfirmSignup operation middleware
+func (sh *strictHandler) ConfirmSignup(w http.ResponseWriter, r *http.Request) {
+	var request ConfirmSignupRequestObject
+
+	var body ConfirmSignupJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ConfirmSignup(ctx, request.(ConfirmSignupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ConfirmSignup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ConfirmSignupResponseObject); ok {
+		if err := validResponse.VisitConfirmSignupResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -1421,166 +5160,858 @@ func (sh *strictHandler) GetCity(w http.ResponseWriter, r *http.Request, cityId 
 	}
 }
 
+// CreateDeviceChallenge operation middleware
+func (sh *strictHandler) CreateDeviceChallenge(w http.ResponseWriter, r *http.Request) {
+	var request CreateDeviceChallengeRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDeviceChallenge(ctx, request.(CreateDeviceChallengeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDeviceChallenge")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateDeviceChallengeResponseObject); ok {
+		if err := validResponse.VisitCreateDeviceChallengeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetLegalDocuments operation middleware
+func (sh *strictHandler) GetLegalDocuments(w http.ResponseWriter, r *http.Request) {
+	var request GetLegalDocumentsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetLegalDocuments(ctx, request.(GetLegalDocumentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetLegalDocuments")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetLegalDocumentsResponseObject); ok {
+		if err := validResponse.VisitGetLegalDocumentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMe operation middleware
+func (sh *strictHandler) GetMe(w http.ResponseWriter, r *http.Request) {
+	var request GetMeRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMe(ctx, request.(GetMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMe")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMeResponseObject); ok {
+		if err := validResponse.VisitGetMeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateMe operation middleware
+func (sh *strictHandler) UpdateMe(w http.ResponseWriter, r *http.Request, params UpdateMeParams) {
+	var request UpdateMeRequestObject
+
+	request.Params = params
+
+	var body UpdateMeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMe(ctx, request.(UpdateMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMe")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateMeResponseObject); ok {
+		if err := validResponse.VisitUpdateMeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteAccount operation middleware
+func (sh *strictHandler) DeleteAccount(w http.ResponseWriter, r *http.Request, params DeleteAccountParams) {
+	var request DeleteAccountRequestObject
+
+	request.Params = params
+
+	var body DeleteAccountJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteAccount(ctx, request.(DeleteAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteAccountResponseObject); ok {
+		if err := validResponse.VisitDeleteAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AcceptDocuments operation middleware
+func (sh *strictHandler) AcceptDocuments(w http.ResponseWriter, r *http.Request, params AcceptDocumentsParams) {
+	var request AcceptDocumentsRequestObject
+
+	request.Params = params
+
+	var body AcceptDocumentsJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AcceptDocuments(ctx, request.(AcceptDocumentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AcceptDocuments")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AcceptDocumentsResponseObject); ok {
+		if err := validResponse.VisitAcceptDocumentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartEmailChange operation middleware
+func (sh *strictHandler) StartEmailChange(w http.ResponseWriter, r *http.Request, params StartEmailChangeParams) {
+	var request StartEmailChangeRequestObject
+
+	request.Params = params
+
+	var body StartEmailChangeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartEmailChange(ctx, request.(StartEmailChangeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartEmailChange")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartEmailChangeResponseObject); ok {
+		if err := validResponse.VisitStartEmailChangeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ConfirmEmailChange operation middleware
+func (sh *strictHandler) ConfirmEmailChange(w http.ResponseWriter, r *http.Request, params ConfirmEmailChangeParams) {
+	var request ConfirmEmailChangeRequestObject
+
+	request.Params = params
+
+	var body ConfirmEmailChangeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ConfirmEmailChange(ctx, request.(ConfirmEmailChangeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ConfirmEmailChange")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ConfirmEmailChangeResponseObject); ok {
+		if err := validResponse.VisitConfirmEmailChangeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ChangeNickname operation middleware
+func (sh *strictHandler) ChangeNickname(w http.ResponseWriter, r *http.Request, params ChangeNicknameParams) {
+	var request ChangeNicknameRequestObject
+
+	request.Params = params
+
+	var body ChangeNicknameJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ChangeNickname(ctx, request.(ChangeNicknameRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ChangeNickname")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ChangeNicknameResponseObject); ok {
+		if err := validResponse.VisitChangeNicknameResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ChangePassword operation middleware
+func (sh *strictHandler) ChangePassword(w http.ResponseWriter, r *http.Request, params ChangePasswordParams) {
+	var request ChangePasswordRequestObject
+
+	request.Params = params
+
+	var body ChangePasswordJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ChangePassword(ctx, request.(ChangePasswordRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ChangePassword")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ChangePasswordResponseObject); ok {
+		if err := validResponse.VisitChangePasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMySessions operation middleware
+func (sh *strictHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
+	var request ListMySessionsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMySessions(ctx, request.(ListMySessionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMySessions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMySessionsResponseObject); ok {
+		if err := validResponse.VisitListMySessionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeOtherSessions operation middleware
+func (sh *strictHandler) RevokeOtherSessions(w http.ResponseWriter, r *http.Request, params RevokeOtherSessionsParams) {
+	var request RevokeOtherSessionsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeOtherSessions(ctx, request.(RevokeOtherSessionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeOtherSessions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeOtherSessionsResponseObject); ok {
+		if err := validResponse.VisitRevokeOtherSessionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMySession operation middleware
+func (sh *strictHandler) RevokeMySession(w http.ResponseWriter, r *http.Request, sessionId SessionId, params RevokeMySessionParams) {
+	var request RevokeMySessionRequestObject
+
+	request.SessionId = sessionId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMySession(ctx, request.(RevokeMySessionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMySession")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMySessionResponseObject); ok {
+		if err := validResponse.VisitRevokeMySessionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CheckNickname operation middleware
+func (sh *strictHandler) CheckNickname(w http.ResponseWriter, r *http.Request, params CheckNicknameParams) {
+	var request CheckNicknameRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CheckNickname(ctx, request.(CheckNicknameRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CheckNickname")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CheckNicknameResponseObject); ok {
+		if err := validResponse.VisitCheckNicknameResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
 // Stored as a slice of fixed-width chunks rather than one concatenated
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"d7AG1k7y2Btaz3fsnWSHNgzbiTVRp5Yf/N8BAA==",
+	"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",
+	"I3yqzakMuwXJypik/P8NAA==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

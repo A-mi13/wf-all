@@ -22,7 +22,9 @@ info:
       решением в заголовке `X-WF-Humancheck`), `idempotency.key_reused` (422 — ключ уже
       использован с другим запросом), `idempotency.in_progress` (409 — запрос с этим ключом ещё
       выполняется), `idempotency.replay_unavailable` (409 — действие выполнено, перечитайте
-      состояние), `feature.disabled` (403 — функция выключена в вашем городе).
+      состояние), `feature.disabled` (403 — функция выключена в вашем городе),
+      `http.not_implemented` (501 — операция описана в контракте, но сервер её ещё не исполняет:
+      этапы выкатываются по очереди; это не ошибка клиента).
     - **Idempotency-Key** — обязательный заголовок мутирующих операций: новый ключ (UUID) на
       каждое действие пользователя, тот же ключ при повторе после обрыва сети — действие не
       выполнится дважды: повтор отдаёт сохранённый ответ с заголовком `Idempotency-Replayed: true`.
@@ -38,9 +40,31 @@ info:
     - **Кэш** — значение `Cache-Control` каждой операции описано в её ответе 200.
     - **Тело запроса** — не больше 1 МиБ.
     - Поле `request_id` в ошибке — назовите его, сообщая о проблеме: по нему находится запрос в логах.
+    - `identity.restricted` (403) — возможность закрыта санкцией модерации (например, создание
+      матча или комментарии); его отдают операции разных модулей. Срок — в `restrictions` из
+      `getMe`.
+
+    **Вход и токены.** Вход (`login`, `completeMfa`, регистрация `confirmSignup`, отмена удаления
+    `cancelDeletion`, сброс пароля `confirmPasswordReset`) отвечает `AuthResult`; при
+    `status: authenticated` в нём пара токенов `TokenPair`:
+
+    - **access** — JWT на 10 минут, заголовок `Authorization: Bearer <access>` у операций с замком;
+    - **refresh** — непрозрачная строка: мобильный клиент хранит её в Keychain (iOS) или Keystore
+      (Android) и никуда, кроме `refreshSession`, не передаёт. Каждый `refreshSession` выдаёт новую
+      пару, прежний refresh больше не действует; срок бездействия — 90 дней на телефоне, 30 в вебе;
+    - на `401 auth.unauthenticated` — один `refreshSession` и повтор запроса; `401
+      identity.refresh_invalid` — войти заново. Обновление — последовательно, не параллельно, на одно
+      устройство;
+    - **веб** ходит через свой сервер (BFF): токены лежат в зашифрованной cookie, браузер их не видит;
+    - **`device`** — мобильный клиент обязан передать объект `device` (`DeviceInfo`) в теле
+      регистрации, входа, второго фактора, сброса пароля и отмены удаления; без него — `422
+      identity.device_required`. Веб (BFF) поле не передаёт — устройство веба сервер узнаёт сам;
+    - ответы с токенами — `Cache-Control: no-store`; выход — `logout`, сессии — `listMySessions`.
 security:
   - bearer: []
 tags:
+  - name: identity
+    description: Игрок и его вход — регистрация и вход по почте, коды из письма, токены и сессии, аккаунт, двухфакторная аутентификация, ключи доступа, вход через Apple и Google, согласие с документами, удаление аккаунта, заявка в капитаны
   - name: geo
     description: Справочник городов и автоопределение города по геопозиции — выбор города, экран города, «пустой город»
   - name: platform
@@ -348,6 +372,1060 @@ paths:
                 $ref: '#/components/schemas/AppMinVersion'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/nicknames/availability:
+    get:
+      operationId: checkNickname
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth_check
+      x-error-codes: []
+      summary: Проверить ник
+      description: |
+        Доступен ли ник — проверка при вводе на экране регистрации и смены ника (с задержкой после
+        ввода, не на каждую букву). Без аутентификации; ники публичны, ответ ничего не раскрывает.
+
+        Неверный формат — не ошибка, а `200 {available: false, reason: invalid}`. Ответ — подсказка:
+        окончательно ник проверяют `startSignup`, `confirmSignup` и `changeNickname` (его могут занять
+        между проверкой и отправкой формы).
+      parameters:
+        - name: nickname
+          in: query
+          required: true
+          description: Ник, как его ввёл игрок
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+          example: kosta_10
+      responses:
+        '200':
+          description: Доступность ника
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NicknameAvailability'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/signup:
+    post:
+      operationId: startSignup
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth_send
+      x-error-codes:
+        - identity.documents_outdated
+        - identity.device_required
+        - identity.too_young
+        - identity.city_not_found
+        - identity.password_weak
+        - identity.nickname_invalid
+        - identity.nickname_taken
+        - identity.email_disposable
+        - identity.device_signup_limit
+        - identity.device_untrusted
+      summary: Начать регистрацию по почте
+      description: |
+        Форма регистрации: почта, пароль, ник, дата рождения, город и согласие с текущими версиями
+        документов. Проверяет форму и отправляет 6-значный код на почту; аккаунт создаёт
+        `confirmSignup`. Анонимная операция: регистрация возможна только без сессии; от повторов
+        защищают одноразовый код, уникальность почты и ника и лимиты (`auth_send`).
+
+        Ответ `202 CodeSent` не зависит от того, есть ли аккаунт на эту почту: владельцу занятой почты
+        уходит письмо «у вас уже есть аккаунт», а в ответе разницы нет — переходите к вводу кода.
+
+        Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+        не передаёт, поле игнорируется. При подозрительной активности — `403 humancheck.required`:
+        решите задачу и повторите.
+
+        Ошибки формы:
+        - `identity.documents_outdated` (422) — нет согласия с каким-то документом или версия не
+          текущая: перечитайте `getLegalDocuments` и покажите документы снова;
+        - `identity.too_young` (422) — возраст ниже порога страны города: вежливый отказ, ничего не
+          сохраняется;
+        - `identity.city_not_found` (422) — города нет или его страна выключена: выберите город заново;
+        - `identity.password_weak` (422) — причина в `reasons` (одно значение): `too_short`, `common`,
+          `too_long`;
+        - `identity.nickname_invalid` (422), `identity.nickname_taken` (409) — выберите другой ник;
+        - `identity.email_disposable` (422) — одноразовый почтовый домен;
+        - `identity.device_signup_limit` (403) — с устройства уже две регистрации: покажите причину и
+          ссылку на поддержку;
+        - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+      requestBody:
+        required: true
+        description: Форма регистрации
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupStartRequest'
+      responses:
+        '202':
+          description: Код отправлен (ответ одинаков при занятой почте)
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeSent'
+        '422':
+          description: Форма не прошла проверку
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                password_weak:
+                  summary: Пароль короче 10 символов
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    code: identity.password_weak
+                    reasons:
+                      - too_short
+                too_young:
+                  summary: Возраст ниже порога страны города
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    code: identity.too_young
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/signup/confirm:
+    post:
+      operationId: confirmSignup
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth
+      x-error-codes:
+        - identity.code_invalid
+        - identity.code_expired
+        - identity.nickname_taken
+        - identity.email_taken
+        - identity.device_signup_limit
+        - identity.device_required
+      summary: Подтвердить регистрацию кодом
+      description: |
+        Код из письма завершает регистрацию: создаётся аккаунт и сессия — `201 AuthResult` со
+        `status: authenticated` и `user.new_user: true`. Анонимная операция: вход возможен только без
+        сессии; от повторов защищает одноразовый код (погашенный код второй раз не сработает).
+
+        Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+        не передаёт, поле игнорируется.
+
+        - `identity.code_invalid` (400) — неверный код, в `attempts_left` — сколько попыток осталось;
+        - `identity.code_expired` (410) — код истёк, погашен или исчерпал 5 попыток: начните
+          регистрацию заново или запросите повтор `resendAuthCode`, если код ещё жив;
+        - `identity.nickname_taken` (409) — ник заняли, пока шёл код: код не тратится, повторите вызов
+          с новым `nickname`;
+        - `identity.email_taken` (409) — почту заняли параллельной регистрацией: войдите;
+        - `identity.device_signup_limit` (403) — лимит регистраций устройства.
+      requestBody:
+        required: true
+        description: Код и при необходимости новый ник
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupConfirmRequest'
+      responses:
+        '201':
+          description: Аккаунт создан, сессия выдана
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+        '400':
+          description: Неверный код
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                code_invalid:
+                  summary: Неверный код, осталось 3 попытки
+                  value:
+                    type: about:blank
+                    title: Bad Request
+                    status: 400
+                    code: identity.code_invalid
+                    attempts_left: 3
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/codes/{codeId}/resend:
+    post:
+      operationId: resendAuthCode
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth_send
+      x-error-codes:
+        - identity.resend_too_soon
+        - identity.code_expired
+      summary: Отправить код повторно
+      description: |
+        Повторная отправка того же кода (регистрация, сброс пароля, смена почты): попытки не
+        обнуляются, паузы растут 60 → 120 → 300 с, не больше 4 отправок. Анонимная операция: код
+        регистрации и сброса запрашивают без сессии; от повторов защищают паузы и лимиты.
+
+        Ответ `202 CodeSent` не зависит от того, есть ли аккаунт: для несуществующей почты паузы и
+        ответы те же.
+
+        - `identity.resend_too_soon` (429) — раньше паузы: заголовок `Retry-After` — через сколько
+          секунд; кнопку держите неактивной до `resend_available_at`;
+        - `identity.code_expired` (410) — код истёк, погашен или исчерпал отправки: начните заново.
+      parameters:
+        - $ref: '#/components/parameters/CodeId'
+      responses:
+        '202':
+          description: Код отправлен повторно
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeSent'
+        '429':
+          description: Повтор раньше паузы
+          headers:
+            Retry-After:
+              description: Через сколько секунд отправить снова
+              required: true
+              schema:
+                type: integer
+                minimum: 1
+              example: 45
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                resend_too_soon:
+                  summary: Пауза ещё не прошла
+                  value:
+                    type: about:blank
+                    title: Too Many Requests
+                    status: 429
+                    code: identity.resend_too_soon
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/login:
+    post:
+      operationId: login
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth
+      x-error-codes:
+        - identity.invalid_credentials
+        - identity.account_blocked
+        - identity.device_untrusted
+        - identity.device_required
+      summary: Войти по почте и паролю
+      description: |
+        Вход по почте и паролю. Ответ `200 AuthResult`: `authenticated` (сессия), `mfa_required`
+        (нужен второй фактор → `completeMfa`) или `deletion_pending` (аккаунт ждёт удаления →
+        `cancelDeletion`). Анонимная операция: вход возможен только без сессии; от перебора защищают
+        лимиты по IP, устройству и почте и антибот.
+
+        Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+        не передаёт, поле игнорируется. При подозрительной активности (неудачи по почте или с адреса) —
+        `403 humancheck.required`: решите задачу и повторите.
+
+        - `identity.invalid_credentials` (400) — почта или пароль неверны; ответ одинаков, если
+          аккаунта нет, у аккаунта нет пароля (вход только через Apple или Google) или пароль неверен:
+          предложите сброс пароля и соцвход;
+        - `identity.account_blocked` (403) — аккаунт заблокирован; `blocked_until` — до какого момента,
+          поля нет — бессрочно;
+        - `identity.device_untrusted` (403) — проверка целостности приложения не прошла.
+
+        Вход с нового для аккаунта устройства отправляет владельцу письмо.
+      requestBody:
+        required: true
+        description: Почта, пароль и устройство
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Результат входа
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+        '403':
+          description: Аккаунт заблокирован или устройство не прошло проверку
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                account_blocked:
+                  summary: Заблокирован до 20 ноября
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: identity.account_blocked
+                    blocked_until: '2026-11-20T00:00:00Z'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/mfa:
+    post:
+      operationId: completeMfa
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth
+      x-error-codes:
+        - identity.mfa_invalid
+        - identity.mfa_expired
+        - identity.passkey_invalid
+        - identity.device_required
+      summary: Второй фактор входа
+      description: |
+        Второй шаг входа после `AuthResult.status = mfa_required`: `mfa_token` и ровно одно из `code`
+        (приложение-аутентификатор), `recovery_code` (резервный код, сгорает), `passkey` (ответ ключа
+        доступа на задачу `startMfaPasskey`); ни одного или больше одного — `400 validation.failed` по
+        полю `body`. Ответ — `200 AuthResult` (`authenticated` или `deletion_pending`). Вход со вторым
+        фактором отменяет назначенный через поддержку сброс 2FA. Анонимная операция: вход возможен
+        только без сессии; от перебора защищают одноразовый `mfa_token` (5 попыток), лимит неудач на
+        аккаунт и лимиты класса `auth`.
+
+        Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+        не передаёт, поле игнорируется.
+
+        - `identity.mfa_invalid` (400) — неверный код, в `attempts_left` — сколько попыток осталось у
+          этого `mfa_token`;
+        - `identity.mfa_expired` (410) — `mfa_token` истёк или исчерпан: начните вход заново;
+        - `identity.passkey_invalid` (400) — ключ доступа не прошёл проверку.
+      requestBody:
+        required: true
+        description: Токен шага и второй фактор
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaCompleteRequest'
+      responses:
+        '200':
+          description: Результат входа
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+        '400':
+          description: Неверный второй фактор
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                mfa_invalid:
+                  summary: Неверный код, осталось 4 попытки
+                  value:
+                    type: about:blank
+                    title: Bad Request
+                    status: 400
+                    code: identity.mfa_invalid
+                    attempts_left: 4
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/password-reset:
+    post:
+      operationId: startPasswordReset
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth_send
+      x-error-codes: []
+      summary: Начать сброс пароля
+      description: |
+        Отправляет 6-значный код сброса на почту аккаунта. Анонимная операция: забывший пароль
+        сессии не имеет; от рассылок защищают лимиты по почте и IP и антибот.
+
+        Ответ `202 CodeSent` не зависит от того, есть ли аккаунт: на неизвестную почту письмо не
+        уходит, но ответ тот же — переходите к вводу кода. При подозрительной активности — `403
+        humancheck.required`: решите задачу и повторите.
+      requestBody:
+        required: true
+        description: Почта аккаунта
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetStartRequest'
+      responses:
+        '202':
+          description: Код отправлен (ответ одинаков для неизвестной почты)
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeSent'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/password-reset/confirm:
+    post:
+      operationId: confirmPasswordReset
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth
+      x-error-codes:
+        - identity.code_invalid
+        - identity.code_expired
+        - identity.password_weak
+        - identity.mfa_required
+        - identity.mfa_invalid
+        - identity.device_required
+      summary: Задать новый пароль по коду
+      description: |
+        Новый пароль по коду из письма. Успех отзывает все сессии аккаунта и выдаёт новую на этом
+        устройстве — `200 AuthResult` (`authenticated`, либо `deletion_pending`, если аккаунт ждёт
+        удаления). Аккаунт без пароля (только соцвход) так получает пароль. Анонимная операция:
+        забывший пароль сессии не имеет; от повторов защищает одноразовый код.
+
+        Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+        не передаёт, поле игнорируется.
+
+        Аккаунт с 2FA: сброс по почте вторую ступень не обходит. Без `mfa` — `400
+        identity.mfa_required`, в `methods` — принимаемые факторы (`totp`, `recovery_code`; ключ доступа
+        здесь не принимается — войдите ключом и смените пароль в настройках); код при этом не тратится
+        и попытка не считается — повторите с `mfa`.
+
+        - `identity.code_invalid` (400, `attempts_left`), `identity.code_expired` (410) — как у
+          `confirmSignup`;
+        - `identity.password_weak` (422) — причина в `reasons`;
+        - `identity.mfa_invalid` (400, `attempts_left`) — неверный второй фактор.
+      requestBody:
+        required: true
+        description: Код, новый пароль и при 2FA — второй фактор
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '200':
+          description: Пароль сменён, сессия выдана
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+        '400':
+          description: Неверный код, нужен или неверен второй фактор
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                mfa_required:
+                  summary: У аккаунта 2FA — нужен второй фактор
+                  value:
+                    type: about:blank
+                    title: Bad Request
+                    status: 400
+                    code: identity.mfa_required
+                    methods:
+                      - totp
+                      - recovery_code
+                code_invalid:
+                  summary: Неверный код из письма
+                  value:
+                    type: about:blank
+                    title: Bad Request
+                    status: 400
+                    code: identity.code_invalid
+                    attempts_left: 2
+                mfa_invalid:
+                  summary: Неверный второй фактор
+                  value:
+                    type: about:blank
+                    title: Bad Request
+                    status: 400
+                    code: identity.mfa_invalid
+                    attempts_left: 4
+        '422':
+          description: Пароль не подходит
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                password_weak:
+                  summary: Пароль из списка распространённых
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    code: identity.password_weak
+                    reasons:
+                      - common
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/refresh:
+    post:
+      operationId: refreshSession
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth_refresh
+      x-error-codes:
+        - identity.refresh_invalid
+      summary: Обновить токены
+      description: |
+        Обмен refresh-токена на новую пару: каждый вызов выдаёт новый `refresh_token`, прежний больше
+        не действует (ротация), срок бездействия продлевается. Вызывайте при `401
+        auth.unauthenticated` один раз и повторяйте исходный запрос. Анонимная операция: access уже
+        истёк, сессию подтверждает сам refresh-токен (`Authorization` не читается); от повторов
+        защищает ротация.
+
+        Вызывайте последовательно, не параллельно, на одно устройство: повтор уже использованного
+        токена отзывает сессию. Исключение — окно гонки 15 секунд с того же устройства (`install_id`):
+        ответ тот же, что у первого вызова.
+
+        - `identity.refresh_invalid` (401) — токен неизвестен, истёк, отозван или повторён вне окна:
+          войдите заново.
+      requestBody:
+        required: true
+        description: Refresh-токен и устройство
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Новая пара токенов
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/deletion/cancel:
+    post:
+      operationId: cancelDeletion
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth
+      x-error-codes:
+        - identity.restore_token_invalid
+        - identity.device_required
+      summary: Отменить удаление аккаунта
+      description: |
+        После входа с `AuthResult.status = deletion_pending` игрок подтверждает «Отменить удаление»:
+        аккаунт снова активен, выдаётся сессия — `200 AuthResult` (`authenticated`), владельцу уходит
+        письмо. Анонимная операция: сессии у аккаунта, ждущего удаления, нет; владельца подтверждает
+        одноразовый `restore_token` (10 минут), выданный только после входа.
+
+        Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+        не передаёт, поле игнорируется.
+
+        - `identity.restore_token_invalid` (410) — токен истёк или использован: войдите снова.
+      requestBody:
+        required: true
+        description: Токен отмены удаления
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeletionCancelRequest'
+      responses:
+        '200':
+          description: Удаление отменено, сессия выдана
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      tags:
+        - identity
+      x-error-codes: []
+      summary: Выйти
+      description: |
+        Отзывает текущую сессию (её refresh-токен больше не действует, access — в пределах 5 секунд).
+        Клиент удаляет токены у себя. Повтор с тем же `Idempotency-Key` — тот же ответ.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Сессия отозвана
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/legal/documents:
+    get:
+      operationId: getLegalDocuments
+      tags:
+        - identity
+      security: []
+      x-error-codes: []
+      summary: Текущие версии документов
+      description: |
+        Правила сервиса и политика конфиденциальности — текущие версии и ссылки на тексты. Экран
+        регистрации показывает их и передаёт принятые версии в `accepted_documents`; ответ
+        `422 identity.documents_outdated` — сигнал перечитать список. Без аутентификации; ответ
+        кэшируется до 5 минут.
+      responses:
+        '200':
+          description: Текущие документы
+          headers:
+            Cache-Control:
+              description: Справочник — общие кэши хранят до 5 минут
+              required: true
+              schema:
+                type: string
+              example: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegalDocumentList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/devices/challenges:
+    post:
+      operationId: createDeviceChallenge
+      tags:
+        - identity
+      security: []
+      x-rate-limit: auth
+      x-error-codes: []
+      summary: Задача проверки целостности приложения
+      description: |
+        Одноразовая задача (5 минут) для App Attest (iOS) или Play Integrity (Android): приложение
+        подписывает её и передаёт результат в `device.integrity` регистрации или входа. Анонимная
+        операция: нужна до входа; от повторов защищает одноразовость задачи и лимиты класса `auth`.
+        Веб её не вызывает.
+      responses:
+        '201':
+          description: Задача выдана
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceChallenge'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me:
+    get:
+      operationId: getMe
+      tags:
+        - identity
+      x-error-codes: []
+      summary: Мой аккаунт
+      description: |
+        Аккаунт текущего игрока: почта, ник и когда его можно сменить, дата рождения, город, язык,
+        статус, ограничения, есть ли пароль и 2FA, согласие с документами. Приложение зовёт после входа
+        и на экране настроек; `documents_acceptance_required: true` — показать экран согласия.
+      responses:
+        '200':
+          description: Аккаунт
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      operationId: updateMe
+      tags:
+        - identity
+      x-error-codes: []
+      summary: Изменить настройки аккаунта
+      description: |
+        Правка настроек аккаунта — сейчас язык (`locale`) интерфейса и писем. Хотя бы одно поле, иначе
+        `400 validation.failed`. Ответ — аккаунт целиком.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: Изменяемые поля
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeUpdate'
+      responses:
+        '200':
+          description: Аккаунт после правки
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/nickname:
+    patch:
+      operationId: changeNickname
+      tags:
+        - identity
+      x-rate-limit: account_secure
+      x-error-codes:
+        - identity.nickname_invalid
+        - identity.nickname_taken
+        - identity.nickname_change_too_soon
+      summary: Сменить ник
+      description: |
+        Новый ник — не чаще раза в 30 дней; прежний ник 90 дней никто не сможет взять. Ответ — аккаунт
+        с новым ником и `nickname_changeable_at`.
+
+        - `identity.nickname_invalid` (422), `identity.nickname_taken` (409) — выберите другой ник;
+        - `identity.nickname_change_too_soon` (409) — раньше срока; `available_at` — с какого момента.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: Новый ник
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NicknameChangeRequest'
+      responses:
+        '200':
+          description: Аккаунт с новым ником
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '409':
+          description: Ник занят или менять его ещё рано
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                nickname_change_too_soon:
+                  summary: Ник менялся меньше 30 дней назад
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: identity.nickname_change_too_soon
+                    available_at: '2026-12-13T09:30:00Z'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/sessions:
+    get:
+      operationId: listMySessions
+      tags:
+        - identity
+      x-error-codes: []
+      summary: Где я вошёл
+      description: |
+        Живые сессии аккаунта для экрана «Где вы вошли»: устройство или браузер, способ входа, город по
+        IP (сам IP не отдаётся), когда вошли и последняя активность; `current` — эта сессия. Без
+        страниц: живых сессий не больше 100.
+      responses:
+        '200':
+          description: Сессии
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/sessions/revoke-others:
+    post:
+      operationId: revokeOtherSessions
+      tags:
+        - identity
+      x-error-codes: []
+      summary: Выйти везде, кроме этого устройства
+      description: |
+        Отзывает все сессии аккаунта, кроме текущей; ответ — сколько отозвано (0 — других не было).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Сессии отозваны
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokedCount'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/sessions/{sessionId}:
+    delete:
+      operationId: revokeMySession
+      tags:
+        - identity
+      x-error-codes:
+        - identity.session_not_found
+      summary: Выйти на устройстве
+      description: |
+        Отзывает свою сессию по id («выйти здесь»); текущая — клиент выходит. Отзыв действует на всех
+        операциях в пределах 5 секунд.
+
+        - `identity.session_not_found` (404) — сессии нет, она уже отозвана или чужая.
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Сессия отозвана
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/password:
+    post:
+      operationId: changePassword
+      tags:
+        - identity
+      x-rate-limit: account_secure
+      x-error-codes:
+        - identity.reauth_required
+        - identity.password_weak
+      summary: Сменить или задать пароль
+      description: |
+        Новый пароль; аккаунт без пароля (только соцвход) так его задаёт. Нужен свежий вход (≤ 10
+        минут, текущий пароль или второй фактор подтверждается там), иначе `403
+        identity.reauth_required`; получить — `reauthenticate`. Отзывает все другие сессии, владельцу
+        уходит письмо.
+
+        - `identity.password_weak` (422) — причина в `reasons`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: Новый пароль
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChangeRequest'
+      responses:
+        '204':
+          description: Пароль сменён
+        '422':
+          description: Пароль не подходит
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                password_weak:
+                  summary: Пароль длиннее потолка
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    code: identity.password_weak
+                    reasons:
+                      - too_long
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/email-change:
+    post:
+      operationId: startEmailChange
+      tags:
+        - identity
+      x-rate-limit: auth_send
+      x-error-codes:
+        - identity.reauth_required
+        - identity.email_same
+        - identity.email_disposable
+      summary: Начать смену почты
+      description: |
+        Отправляет 6-значный код на новую почту; почта меняется после `confirmEmailChange`. Нужен
+        свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+
+        Если новая почта занята другим аккаунтом, ответ тот же `202`: код не придёт, а на новый адрес
+        уйдёт письмо «на этот адрес уже есть аккаунт».
+
+        - `identity.email_same` (422) — новая почта совпадает с текущей;
+        - `identity.email_disposable` (422) — одноразовый почтовый домен.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: Новая почта
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailChangeStartRequest'
+      responses:
+        '202':
+          description: Код отправлен на новую почту
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeSent'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/email-change/confirm:
+    post:
+      operationId: confirmEmailChange
+      tags:
+        - identity
+      x-rate-limit: auth
+      x-error-codes:
+        - identity.code_invalid
+        - identity.code_expired
+        - identity.email_taken
+      summary: Подтвердить новую почту
+      description: |
+        Код с новой почты меняет почту аккаунта; на прежнюю уходит уведомление. Другие сессии не
+        отзываются, привязки Apple и Google не меняются. Ответ — аккаунт с новой почтой.
+
+        - `identity.code_invalid` (400, `attempts_left`), `identity.code_expired` (410) — как у
+          `confirmSignup`;
+        - `identity.email_taken` (409) — почту заняли, пока шёл код.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: Код с новой почты
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailChangeConfirmRequest'
+      responses:
+        '200':
+          description: Почта изменена
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '400':
+          description: Неверный код
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                code_invalid:
+                  summary: Неверный код, осталась 1 попытка
+                  value:
+                    type: about:blank
+                    title: Bad Request
+                    status: 400
+                    code: identity.code_invalid
+                    attempts_left: 1
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/documents:
+    post:
+      operationId: acceptDocuments
+      tags:
+        - identity
+      x-error-codes:
+        - identity.documents_outdated
+      summary: Принять документы
+      description: |
+        Согласие с новыми версиями правил сервиса и политики конфиденциальности — после экрана, который
+        клиент показывает при `documents_acceptance_required: true`. Ответ — аккаунт с обновлённым
+        согласием. Работу с устаревшим согласием сервер не блокирует — экран обязан показать клиент.
+
+        - `identity.documents_outdated` (422) — версия не текущая: перечитайте `getLegalDocuments`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: Принятые версии
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentsAcceptRequest'
+      responses:
+        '200':
+          description: Согласие сохранено
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/me/delete:
+    post:
+      operationId: deleteAccount
+      tags:
+        - identity
+      x-rate-limit: account_secure
+      x-error-codes:
+        - identity.reauth_required
+        - identity.confirm_mismatch
+      summary: Удалить аккаунт
+      description: |
+        Назначает удаление через 30 дней: аккаунт сразу скрыт от других игроков, все сессии отозваны,
+        открытая заявка в капитаны отозвана, владельцу уходит письмо. До `purge_at` любой вход
+        предлагает отменить удаление (`AuthResult.status = deletion_pending` → `cancelDeletion`); после —
+        аккаунт удаляется необратимо. Нужен свежий вход (≤ 10 минут), иначе `403
+        identity.reauth_required`; получить — `reauthenticate`.
+
+        - `identity.confirm_mismatch` (422) — введённый ник не совпал с ником аккаунта.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        description: Подтверждение ником
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeletionRequest'
+      responses:
+        '200':
+          description: Удаление назначено
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletionScheduled'
+        default:
+          $ref: '#/components/responses/Problem'
 components:
   securitySchemes:
     bearer:
@@ -374,7 +1452,37 @@ components:
       schema:
         type: string
       example: ru-RU,ru;q=0.9,en;q=0.8
+    CodeId:
+      name: codeId
+      in: path
+      required: true
+      description: Id кода из письма — code_id ответа CodeSent
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: Id своей сессии из listMySessions
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
   headers:
+    CacheNoStore:
+      description: Ответ с токенами или секретом — не кэшируется нигде, в том числе браузером
+      required: true
+      schema:
+        type: string
+      example: no-store
+    CachePrivate:
+      description: Ответ зависит от игрока — общим кэшам и браузеру его не хранить
+      required: true
+      schema:
+        type: string
+      example: private, no-store
     Vary:
       description: Всегда Accept-Language — ответ зависит от языка, кэши хранят языки раздельно
       required: true
@@ -392,7 +1500,7 @@ components:
       description: Ошибка в формате RFC 9457
       headers:
         Retry-After:
-          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded
+          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded и 429 identity.resend_too_soon (повтор отправки кода раньше паузы)
           schema:
             type: integer
             minimum: 1
@@ -458,6 +1566,35 @@ components:
           minimum: 0
           description: Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
           example: 3
+        reasons:
+          type: array
+          description: 'Причины отказа машинными значениями — только у двух кодов. У identity.captain_ineligible — невыполненные условия заявки в капитаны (значения схемы CaptainIneligibility; ограничение captain — причина restricted). У identity.password_weak — ровно одно значение: too_short (короче 10 символов), common (из списка распространённых паролей) или too_long (длиннее потолка). Список открытый: незнакомое значение показывайте общим текстом кода'
+          items:
+            type: string
+            description: Машинное значение причины
+            example: too_short
+          example:
+            - too_short
+        methods:
+          type: array
+          description: 'Только у identity.mfa_required — вторые факторы аккаунта, которые принимает эта операция (значения схемы MfaMethod): totp, recovery_code, passkey. У confirmPasswordReset — только totp и recovery_code: ключ доступа при сбросе пароля не принимается. Клиент показывает выбор из этих способов и повторяет запрос со вторым фактором'
+          items:
+            type: string
+            description: Способ второго фактора (MfaMethod)
+            example: totp
+          example:
+            - totp
+            - recovery_code
+        available_at:
+          type: string
+          format: date-time
+          description: Когда действие станет доступно (UTC) — только у identity.nickname_change_too_soon (смена ника раньше 30 дней) и identity.application_cooldown (повторная заявка в капитаны раньше 7 дней после отказа)
+          example: '2026-12-13T09:30:00Z'
+        blocked_until:
+          type: string
+          format: date-time
+          description: До какого момента (UTC) заблокирован аккаунт — только у identity.account_blocked. Поля нет у этого кода — блокировка бессрочная (null не приходит)
+          example: '2026-11-20T00:00:00Z'
         job_id:
           type: integer
           format: int64
@@ -792,6 +1929,1013 @@ components:
           nullable: true
           description: Страница приложения в магазине платформы (App Store, Google Play), только https
           example: https://apps.apple.com/app/id6740000000
+    AuthStatus:
+      type: string
+      description: 'Исход входа: authenticated — сессия выдана (tokens, user); mfa_required — нужен второй фактор (mfa); signup_required — учётка провайдера новая, нужна дорегистрация (social_signup); deletion_pending — аккаунт ждёт удаления, сессии нет, можно отменить удаление (deletion)'
+      enum:
+        - authenticated
+        - mfa_required
+        - signup_required
+        - deletion_pending
+      x-extensible-enum: true
+    AuthResult:
+      type: object
+      description: |
+        Результат входа или регистрации. Клиент ветвится по `status`, поле ветки приходит только в ней:
+
+        - `authenticated` — `tokens` и `user`. Мобильный клиент кладёт `tokens.refresh_token` в
+          Keychain / Keystore; веб-BFF — в зашифрованную cookie. `user.documents_acceptance_required` —
+          показать экран «примите новую версию документов» → `acceptDocuments`;
+        - `mfa_required` — `mfa`: экран второго фактора → `completeMfa` с `mfa.mfa_token`
+          (ключом доступа — сначала `startMfaPasskey`); `mfa.reset_at` — назначен сброс 2FA через
+          поддержку, предупредить игрока;
+        - `signup_required` — `social_signup`: экран дорегистрации (город, дата рождения, ник,
+          документы) → `completeSocialSignup` с `social_signup.signup_token`;
+        - `deletion_pending` — `deletion`: экран «Аккаунт будет удалён `purge_at`. Отменить удаление?»
+          → `cancelDeletion` с `deletion.restore_token`. Сессия не выдана.
+
+        Незнакомый `status` (enum открытый) — показать общий текст ошибки и предложить обновить приложение.
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/AuthStatus'
+        tokens:
+          $ref: '#/components/schemas/TokenPair'
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        mfa:
+          $ref: '#/components/schemas/MfaChallenge'
+        social_signup:
+          $ref: '#/components/schemas/SocialSignupPending'
+        deletion:
+          $ref: '#/components/schemas/DeletionPending'
+    TokenPair:
+      type: object
+      description: 'Токены сессии. access — короткий (10 минут), идёт в заголовке Authorization: Bearer; refresh — непрозрачный, меняется на каждом refreshSession (прежний после этого не действует)'
+      required:
+        - access_token
+        - access_expires_at
+        - refresh_token
+        - refresh_idle_expires_at
+        - session_id
+      properties:
+        access_token:
+          type: string
+          description: Access-токен (JWT EdDSA) — заголовок «Authorization — Bearer» у операций с замком
+          example: eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+        access_expires_at:
+          type: string
+          format: date-time
+          description: Когда access-токен истечёт (UTC); после — 401 auth.unauthenticated, обновите токен
+          example: '2026-11-13T17:10:00Z'
+        refresh_token:
+          type: string
+          description: Refresh-токен (256 бит, base64url) — только для refreshSession; хранить в Keychain / Keystore, никуда больше не передавать
+          example: Yx3kQp1bZt7Lm2Vb4Np8Rt1Zw6Yc0Hs5Ae9Df3Gh7Jk
+        refresh_idle_expires_at:
+          type: string
+          format: date-time
+          description: До какого момента refresh действует без использования (UTC); каждое обновление продлевает срок. Телефон — 90 дней, веб — 30 дней
+          example: '2027-02-11T17:00:00Z'
+        session_id:
+          type: string
+          format: uuid
+          description: Id сессии — совпадает с id в listMySessions (отметка «это устройство»)
+          example: 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+    AuthUser:
+      type: object
+      description: Игрок, на которого выдана сессия
+      required:
+        - id
+        - nickname
+        - new_user
+        - documents_acceptance_required
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id игрока
+          example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+        nickname:
+          type: string
+          description: Ник игрока
+          example: kosta_10
+        new_user:
+          type: boolean
+          description: Аккаунт создан этим вызовом (регистрация) — клиент ведёт на шаг «Кто ты на поле»
+          example: false
+        documents_acceptance_required:
+          type: boolean
+          description: Вышла новая версия правил сервиса или политики конфиденциальности, а игрок её ещё не принял — показать экран согласия и вызвать acceptDocuments
+          example: false
+    MfaMethod:
+      type: string
+      description: 'Второй фактор: totp — код из приложения-аутентификатора; recovery_code — резервный код; passkey — ключ доступа (WebAuthn)'
+      enum:
+        - totp
+        - recovery_code
+        - passkey
+      x-extensible-enum: true
+    MfaChallenge:
+      type: object
+      description: 'Нужен второй фактор: mfa_token одноразовый, живёт 5 минут и выдерживает 5 неверных вводов — затем вход начинается заново'
+      required:
+        - mfa_token
+        - expires_at
+        - methods
+        - reset_at
+      properties:
+        mfa_token:
+          type: string
+          description: Токен шага второго фактора (256 бит, base64url) — передайте в completeMfa
+          example: Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1
+        expires_at:
+          type: string
+          format: date-time
+          description: Когда mfa_token истечёт (UTC); после — 410 identity.mfa_expired
+          example: '2026-11-13T17:05:00Z'
+        methods:
+          type: array
+          minItems: 1
+          description: Вторые факторы аккаунта, которые принимает этот шаг; passkey — только если у аккаунта есть ключ доступа и вход ключами включён
+          items:
+            $ref: '#/components/schemas/MfaMethod'
+          example:
+            - totp
+            - recovery_code
+        reset_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Назначенный через поддержку сброс 2FA (UTC) или null. Вход со вторым фактором отменяет сброс — предупредите игрока «через N дней 2FA будет сброшена»
+          example: null
+    SocialSignupPending:
+      type: object
+      description: Учётка Apple или Google ещё не привязана ни к одному аккаунту — нужна дорегистрация completeSocialSignup
+      required:
+        - signup_token
+        - expires_at
+        - email
+        - email_is_private_relay
+      properties:
+        signup_token:
+          type: string
+          description: Токен дорегистрации (256 бит, base64url), одноразовый
+          example: U2lnbnVwLXRva2VuLTI1Ni1iaXRzLWJhc2U2NHVybC14eXo
+        expires_at:
+          type: string
+          format: date-time
+          description: Когда signup_token истечёт (UTC); после — 410 identity.signup_token_invalid
+          example: '2026-11-13T17:15:00Z'
+        email:
+          type: string
+          description: Подтверждённая провайдером почта — станет почтой аккаунта
+          example: kosta.f@example.com
+        email_is_private_relay:
+          type: boolean
+          description: Почта — скрытый адрес Apple (privaterelay.appleid.com); письма идут через Apple
+          example: false
+    DeletionPending:
+      type: object
+      description: 'Аккаунт ждёт удаления: вход подтвердил владельца, но сессия не выдана. Отмена удаления — cancelDeletion с restore_token'
+      required:
+        - restore_token
+        - expires_at
+        - purge_at
+      properties:
+        restore_token:
+          type: string
+          description: Токен отмены удаления (256 бит, base64url), одноразовый, живёт 10 минут
+          example: UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj
+        expires_at:
+          type: string
+          format: date-time
+          description: Когда restore_token истечёт (UTC); после — войдите снова
+          example: '2026-11-13T17:10:00Z'
+        purge_at:
+          type: string
+          format: date-time
+          description: Когда аккаунт будет удалён без возможности восстановления (UTC)
+          example: '2026-12-10T09:00:00Z'
+    CodeSent:
+      type: object
+      description: 'Код отправлен (или нет — ответ одинаков, существование аккаунта не раскрывается): 6 цифр, живёт 15 минут, 5 неверных вводов гасят его'
+      required:
+        - code_id
+        - expires_at
+        - resend_available_at
+      properties:
+        code_id:
+          type: string
+          format: uuid
+          description: Id кода — передайте в подтверждение и в resendAuthCode
+          example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+        expires_at:
+          type: string
+          format: date-time
+          description: Когда код истечёт (UTC)
+          example: '2026-11-13T17:15:00Z'
+        resend_available_at:
+          type: string
+          format: date-time
+          description: С какого момента можно отправить код повторно (UTC) — до него кнопка «Отправить снова» неактивна
+          example: '2026-11-13T17:01:00Z'
+    DeviceInfo:
+      type: object
+      description: Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам
+      required:
+        - platform
+        - install_id
+        - model
+        - os_version
+        - app_version
+      additionalProperties: false
+      properties:
+        platform:
+          $ref: '#/components/schemas/AppPlatform'
+        install_id:
+          type: string
+          minLength: 16
+          maxLength: 128
+          description: 'Идентификатор установки: iOS — UUID, сохранённый в Keychain; Android — ANDROID_ID. Сервер хранит только его HMAC'
+          example: 6F9619FF-8B86-4D01-B42D-00CF4FC964FF
+        model:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Модель устройства — для экрана «Где вы вошли»
+          example: iPhone15,2
+        os_version:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: Версия ОС
+          example: '18.1'
+        app_version:
+          type: string
+          pattern: ^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$
+          description: Версия приложения MAJOR.MINOR.PATCH
+          example: 1.4.0
+        device_check_token:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Токен Apple DeviceCheck (base64) — только iOS, нужен на регистрации (счётчик регистраций устройства)
+          example: AgAAAJ1xQw0eZr8ZfU1v7cQ3kNm2LpR9sT4uV6wX8yZ0aBcD
+        integrity:
+          $ref: '#/components/schemas/DeviceIntegrity'
+    DeviceIntegrityKind:
+      type: string
+      description: 'Вид проверки целостности: app_attest_attestation — первая аттестация ключа App Attest (iOS); app_attest_assertion — утверждение тем же ключом; play_integrity — токен Play Integrity (Android)'
+      enum:
+        - app_attest_attestation
+        - app_attest_assertion
+        - play_integrity
+      x-extensible-enum: true
+    DeviceIntegrity:
+      type: object
+      description: Проверка целостности приложения по задаче createDeviceChallenge. Нет или не прошла — в режиме наблюдения запрос получает требование антибота (403 humancheck.required), в строгом — 403 identity.device_untrusted
+      required:
+        - challenge_id
+        - kind
+        - payload
+      additionalProperties: false
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+          description: Id задачи из createDeviceChallenge (одноразовая, 5 минут)
+          example: 0193a1c4-2a3b-7e41-b5c6-7d8e9f0a1b23
+        kind:
+          $ref: '#/components/schemas/DeviceIntegrityKind'
+        key_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Id ключа App Attest (base64) — только у app_attest_*
+          example: bXlLZXlJZEZyb21BcHBBdHRlc3Q9
+        payload:
+          type: string
+          minLength: 1
+          maxLength: 16384
+          description: 'Base64: объект аттестации App Attest, утверждение или токен Play Integrity (requestHash — base64url(SHA-256(challenge)))'
+          example: o2NmbXRvYXBwbGUtYXBwYXR0ZXN0Z2F0dFN0bXSiY3g1Y4JZAuQ
+    DeviceChallenge:
+      type: object
+      description: Задача проверки целостности приложения — одноразовая, живёт 5 минут
+      required:
+        - challenge_id
+        - challenge
+        - expires_at
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+          description: Id задачи — передайте в device.integrity.challenge_id
+          example: 0193a1c4-2a3b-7e41-b5c6-7d8e9f0a1b23
+        challenge:
+          type: string
+          description: Случайное значение (base64url) — clientDataHash App Attest или основа requestHash Play Integrity
+          example: c2VydmVyLWNoYWxsZW5nZS0zMi1ieXRlcy1iYXNlNjR1cmw
+        expires_at:
+          type: string
+          format: date-time
+          description: Когда задача истечёт (UTC)
+          example: '2026-11-13T17:05:00Z'
+    WebAuthnOptions:
+      type: object
+      description: 'Задача WebAuthn: options передайте платформенному API (iOS ASAuthorization, Android Credential Manager, браузер navigator.credentials), ответ — вместе с challenge_id'
+      required:
+        - challenge_id
+        - options
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+          description: Id задачи — вернуть вместе с ответом платформенного API
+          example: 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+        options:
+          type: object
+          additionalProperties: true
+          description: PublicKeyCredentialCreationOptionsJSON (регистрация ключа) или PublicKeyCredentialRequestOptionsJSON (вход) по W3C WebAuthn Level 3
+          example:
+            challenge: c2VydmVyLWNoYWxsZW5nZS0zMi1ieXRlcw
+            rpId: wherefootball.example
+            timeout: 300000
+            userVerification: required
+            allowCredentials: []
+    WebAuthnCredential:
+      type: object
+      additionalProperties: true
+      description: Ответ платформенного API как есть — RegistrationResponseJSON (регистрация ключа) или AuthenticationResponseJSON (вход) по W3C WebAuthn Level 3; разбирает сервер
+      example:
+        id: KbDl1lrv0Ue6hXXH3Z2E1g
+        rawId: KbDl1lrv0Ue6hXXH3Z2E1g
+        type: public-key
+        response:
+          clientDataJSON: eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0
+          authenticatorData: SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ
+          signature: MEUCIQDgYk0
+          userHandle: dXNlci1oYW5kbGU
+    PasskeyAssertion:
+      type: object
+      description: Ответ ключа доступа на задачу WebAuthn
+      required:
+        - challenge_id
+        - credential
+      additionalProperties: false
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+          description: Id задачи из WebAuthnOptions
+          example: 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+        credential:
+          $ref: '#/components/schemas/WebAuthnCredential'
+    NicknameUnavailableReason:
+      type: string
+      description: 'Почему ник недоступен: invalid — не проходит формат (3–20 символов, буквы, цифры, «_», «.», «-»; не с знака и не на знак, без двух знаков подряд, не из одних цифр); taken — занят; reserved — зарезервирован или освободился недавно'
+      enum:
+        - invalid
+        - taken
+        - reserved
+      x-extensible-enum: true
+    NicknameAvailability:
+      type: object
+      description: Доступность ника; проверка при вводе, окончательная — при регистрации
+      required:
+        - available
+        - reason
+      properties:
+        available:
+          type: boolean
+          description: Ник можно взять
+          example: false
+        reason:
+          type: string
+          nullable: true
+          description: 'Почему нельзя (значения NicknameUnavailableReason: invalid, taken, reserved) или null, если ник доступен'
+          allOf:
+            - $ref: '#/components/schemas/NicknameUnavailableReason'
+    LegalDocumentKind:
+      type: string
+      description: 'Юридический документ: terms — правила сервиса, privacy — политика конфиденциальности'
+      enum:
+        - terms
+        - privacy
+      x-extensible-enum: true
+    LegalDocument:
+      type: object
+      description: Текущая версия документа
+      required:
+        - document
+        - version
+        - url
+      properties:
+        document:
+          $ref: '#/components/schemas/LegalDocumentKind'
+        version:
+          type: string
+          description: Версия — дата YYYY-MM-DD или semver; сравнивается на равенство
+          example: '2026-11-01'
+        url:
+          type: string
+          format: uri
+          description: Где прочитать текст документа
+          example: https://wherefootball.example/legal/terms/2026-11-01
+    LegalDocumentList:
+      type: object
+      description: Текущие версии всех документов — каждую нужно принять при регистрации
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: Документы по одному на вид
+          items:
+            $ref: '#/components/schemas/LegalDocument'
+    AcceptedDocument:
+      type: object
+      description: Принятая игроком версия документа
+      required:
+        - document
+        - version
+      additionalProperties: false
+      properties:
+        document:
+          $ref: '#/components/schemas/LegalDocumentKind'
+        version:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: Версия из getLegalDocuments
+          example: '2026-11-01'
+    Locale:
+      type: string
+      description: Язык интерфейса и писем
+      enum:
+        - ru
+        - en
+      x-extensible-enum: true
+    AccountStatus:
+      type: string
+      description: 'Статус аккаунта: active — обычный; suspended — часть возможностей закрыта ограничениями (restrictions); banned — заблокирован; pending_deletion — ждёт удаления (вход отменяет удаление); deleted — удалён'
+      enum:
+        - active
+        - suspended
+        - banned
+        - pending_deletion
+        - deleted
+      x-extensible-enum: true
+    MeRestriction:
+      type: object
+      description: Ограничение возможности санкцией модерации
+      required:
+        - capability
+        - until
+      properties:
+        capability:
+          type: string
+          description: 'Закрытая возможность (список ведёт модерация; незнакомое значение показывайте общим текстом): create_match, comment, captain…'
+          example: comment
+        until:
+          type: string
+          format: date-time
+          nullable: true
+          description: До какого момента (UTC); null — бессрочно
+          example: '2026-11-20T00:00:00Z'
+    MeDocument:
+      type: object
+      description: Согласие игрока с документом
+      required:
+        - document
+        - accepted_version
+        - current_version
+        - url
+      properties:
+        document:
+          $ref: '#/components/schemas/LegalDocumentKind'
+        accepted_version:
+          type: string
+          nullable: true
+          description: Последняя принятая версия или null, если документ не принимался
+          example: '2026-06-01'
+        current_version:
+          type: string
+          description: Текущая версия документа
+          example: '2026-11-01'
+        url:
+          type: string
+          format: uri
+          description: Текст текущей версии
+          example: https://wherefootball.example/legal/terms/2026-11-01
+    Me:
+      type: object
+      description: Аккаунт текущего игрока — экран настроек и проверка состояния после входа
+      required:
+        - id
+        - email
+        - nickname
+        - nickname_changeable_at
+        - birth_date
+        - city_id
+        - locale
+        - status
+        - created_at
+        - has_password
+        - mfa_enabled
+        - restrictions
+        - documents
+        - documents_acceptance_required
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id игрока
+          example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+        email:
+          type: string
+          description: Почта аккаунта (подтверждена)
+          example: kosta.f@example.com
+        nickname:
+          type: string
+          description: Ник
+          example: kosta_10
+        nickname_changeable_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: С какого момента ник можно сменить (UTC; раз в 30 дней); null — можно сейчас
+          example: '2026-12-13T09:30:00Z'
+        birth_date:
+          type: string
+          format: date
+          description: Дата рождения — меняется только через поддержку
+          example: '1998-04-17'
+        city_id:
+          type: string
+          format: uuid
+          description: Город игрока (справочник geo)
+          example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        locale:
+          $ref: '#/components/schemas/Locale'
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        created_at:
+          type: string
+          format: date-time
+          description: Когда создан аккаунт (UTC)
+          example: '2026-03-02T18:20:00Z'
+        has_password:
+          type: boolean
+          description: У аккаунта есть пароль; false — входит только через Apple, Google или ключ доступа (changePassword задаст пароль)
+          example: true
+        mfa_enabled:
+          type: boolean
+          description: Включена двухфакторная аутентификация
+          example: false
+        restrictions:
+          type: array
+          description: Действующие ограничения; пусто — ограничений нет
+          items:
+            $ref: '#/components/schemas/MeRestriction'
+        documents:
+          type: array
+          description: Согласие с каждым документом
+          items:
+            $ref: '#/components/schemas/MeDocument'
+        documents_acceptance_required:
+          type: boolean
+          description: Есть непринятая текущая версия документа — показать экран согласия → acceptDocuments
+          example: false
+    MeUpdate:
+      type: object
+      description: Правка настроек аккаунта — хотя бы одно поле
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        locale:
+          $ref: '#/components/schemas/Locale'
+    ClientKind:
+      type: string
+      description: 'Клиент сессии: mobile — приложение, web — сайт (через BFF)'
+      enum:
+        - mobile
+        - web
+      x-extensible-enum: true
+    AuthMethod:
+      type: string
+      description: Способ входа, которым создана сессия
+      enum:
+        - password
+        - apple
+        - google
+        - passkey
+      x-extensible-enum: true
+    Session:
+      type: object
+      description: Вход на устройстве — строка экрана «Где вы вошли»
+      required:
+        - id
+        - current
+        - client_kind
+        - platform
+        - device_model
+        - os_version
+        - app_version
+        - browser
+        - auth_method
+        - city
+        - created_at
+        - last_seen_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id сессии — для revokeMySession
+          example: 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+        current:
+          type: boolean
+          description: Это сессия текущего запроса
+          example: true
+        client_kind:
+          $ref: '#/components/schemas/ClientKind'
+        platform:
+          type: string
+          nullable: true
+          description: Платформа приложения (значения AppPlatform) или null у веба
+          allOf:
+            - $ref: '#/components/schemas/AppPlatform'
+        device_model:
+          type: string
+          nullable: true
+          description: Модель устройства или null у веба
+          example: iPhone15,2
+        os_version:
+          type: string
+          nullable: true
+          description: Версия ОС или null
+          example: '18.1'
+        app_version:
+          type: string
+          nullable: true
+          description: Версия приложения или null у веба
+          example: 1.4.0
+        browser:
+          type: string
+          nullable: true
+          description: Браузер и ОС по User-Agent у веба или null у приложения
+          example: Safari 18, macOS
+        auth_method:
+          $ref: '#/components/schemas/AuthMethod'
+        city:
+          type: string
+          nullable: true
+          description: Город по IP на языке аккаунта или null (не определён); сам IP не отдаётся
+          example: Ставрополь
+        created_at:
+          type: string
+          format: date-time
+          description: Когда выполнен вход (UTC)
+          example: '2026-11-01T08:15:00Z'
+        last_seen_at:
+          type: string
+          format: date-time
+          description: Последняя активность (UTC, точность — до 10 минут)
+          example: '2026-11-13T16:50:00Z'
+    SessionList:
+      type: object
+      description: Живые сессии аккаунта (не больше 100; при превышении старшие отзываются)
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: Сессии, новые сверху
+          items:
+            $ref: '#/components/schemas/Session'
+    RevokedCount:
+      type: object
+      description: Итог «выйти везде, кроме этого»
+      required:
+        - revoked
+      properties:
+        revoked:
+          type: integer
+          minimum: 0
+          description: Сколько сессий отозвано
+          example: 3
+    SignupStartRequest:
+      type: object
+      description: Форма регистрации по почте
+      required:
+        - email
+        - password
+        - nickname
+        - birth_date
+        - city_id
+        - accepted_documents
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: Почта; регистр и пробелы по краям не важны, домен на кириллице принимается
+          example: kosta.f@example.com
+        password:
+          type: string
+          minLength: 1
+          description: 'Пароль как введён: не короче 10 символов, не из списка распространённых, не длиннее потолка — иначе 422 identity.password_weak с причиной в reasons'
+          example: Жёлтая карточка на 90-й
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid
+          example: kosta_10
+        birth_date:
+          type: string
+          format: date
+          description: Дата рождения; младше порога страны города — 422 identity.too_young
+          example: '1998-04-17'
+        city_id:
+          type: string
+          format: uuid
+          description: Город из listCities или findNearestCity
+          example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        accepted_documents:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: Принятые версии всех текущих документов (getLegalDocuments); нет какого-то или версия не текущая — 422 identity.documents_outdated
+          items:
+            $ref: '#/components/schemas/AcceptedDocument'
+        locale:
+          $ref: '#/components/schemas/Locale'
+        device:
+          $ref: '#/components/schemas/DeviceInfo'
+    SignupConfirmRequest:
+      type: object
+      description: Подтверждение регистрации кодом из письма
+      required:
+        - code_id
+        - code
+      additionalProperties: false
+      properties:
+        code_id:
+          type: string
+          format: uuid
+          description: Id кода из CodeSent
+          example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+        code:
+          type: string
+          pattern: ^[0-9]{6}$
+          description: 6 цифр из письма
+          example: '492817'
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Новый ник — только если ответ был 409 identity.nickname_taken (ник заняли, пока шёл код); без него берётся ник из startSignup
+          example: kosta_11
+        device:
+          $ref: '#/components/schemas/DeviceInfo'
+    LoginRequest:
+      type: object
+      description: Вход по почте и паролю
+      required:
+        - email
+        - password
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: Почта аккаунта; регистр и пробелы по краям не важны
+          example: kosta.f@example.com
+        password:
+          type: string
+          minLength: 1
+          description: Пароль как введён
+          example: Жёлтая карточка на 90-й
+        device:
+          $ref: '#/components/schemas/DeviceInfo'
+    MfaCompleteRequest:
+      type: object
+      description: 'Второй фактор входа: mfa_token и ровно одно из code, recovery_code, passkey (ни одного или больше одного — 400 validation.failed по полю body). Ключом доступа — сначала startMfaPasskey'
+      required:
+        - mfa_token
+      additionalProperties: false
+      properties:
+        mfa_token:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Токен из AuthResult.mfa
+          example: Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1
+        code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Код из приложения-аутентификатора — 6 цифр; пробелы между цифрами допустимы
+          example: '492817'
+        recovery_code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны; сгорает
+          example: k7m2q-x9p4t
+        passkey:
+          $ref: '#/components/schemas/PasskeyAssertion'
+        device:
+          $ref: '#/components/schemas/DeviceInfo'
+    PasswordResetStartRequest:
+      type: object
+      description: Запрос кода сброса пароля
+      required:
+        - email
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: Почта аккаунта
+          example: kosta.f@example.com
+    PasswordResetConfirmRequest:
+      type: object
+      description: Новый пароль по коду из письма. Аккаунт с 2FA — ещё второй фактор в mfa (без него — 400 identity.mfa_required, код при этом не тратится)
+      required:
+        - code_id
+        - code
+        - new_password
+      additionalProperties: false
+      properties:
+        code_id:
+          type: string
+          format: uuid
+          description: Id кода из CodeSent
+          example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+        code:
+          type: string
+          pattern: ^[0-9]{6}$
+          description: 6 цифр из письма
+          example: '492817'
+        new_password:
+          type: string
+          minLength: 1
+          description: Новый пароль — та же политика, что при регистрации (identity.password_weak)
+          example: Свисток на 46-й минуте
+        mfa:
+          type: object
+          description: 'Второй фактор — ровно одно из code и recovery_code (ни одного или оба — 400 validation.failed). Ключ доступа здесь не принимается: войдите ключом и смените пароль в настройках'
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+              minLength: 1
+              maxLength: 64
+              description: Код из приложения-аутентификатора — 6 цифр
+              example: '492817'
+            recovery_code:
+              type: string
+              minLength: 1
+              maxLength: 64
+              description: Резервный код вида xxxxx-xxxxx; сгорает
+              example: k7m2q-x9p4t
+        device:
+          $ref: '#/components/schemas/DeviceInfo'
+    RefreshRequest:
+      type: object
+      description: Обмен refresh-токена на новую пару
+      required:
+        - refresh_token
+      additionalProperties: false
+      properties:
+        refresh_token:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Текущий refresh-токен
+          example: Yx3kQp1bZt7Lm2Vb4Np8Rt1Zw6Yc0Hs5Ae9Df3Gh7Jk
+        install_id:
+          type: string
+          minLength: 16
+          maxLength: 128
+          description: install_id устройства (как в DeviceInfo) — по нему сервер узнаёт повтор с того же устройства в окне гонки; мобильный клиент передаёт всегда
+          example: 6F9619FF-8B86-4D01-B42D-00CF4FC964FF
+    DeletionCancelRequest:
+      type: object
+      description: Отмена удаления аккаунта
+      required:
+        - restore_token
+      additionalProperties: false
+      properties:
+        restore_token:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Токен из AuthResult.deletion
+          example: UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj
+        device:
+          $ref: '#/components/schemas/DeviceInfo'
+    NicknameChangeRequest:
+      type: object
+      description: Новый ник
+      required:
+        - nickname
+      additionalProperties: false
+      properties:
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Новый ник — формат как у checkNickname
+          example: kosta_11
+    PasswordChangeRequest:
+      type: object
+      description: Новый пароль (текущий подтверждается свежим входом — reauthenticate)
+      required:
+        - new_password
+      additionalProperties: false
+      properties:
+        new_password:
+          type: string
+          minLength: 1
+          description: Новый пароль — политика как при регистрации
+          example: Свисток на 46-й минуте
+    EmailChangeStartRequest:
+      type: object
+      description: Новая почта — код придёт на неё
+      required:
+        - new_email
+      additionalProperties: false
+      properties:
+        new_email:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: Новая почта; регистр и пробелы по краям не важны
+          example: kosta.new@example.com
+    EmailChangeConfirmRequest:
+      type: object
+      description: Подтверждение новой почты кодом
+      required:
+        - code_id
+        - code
+      additionalProperties: false
+      properties:
+        code_id:
+          type: string
+          format: uuid
+          description: Id кода из startEmailChange
+          example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+        code:
+          type: string
+          pattern: ^[0-9]{6}$
+          description: 6 цифр из письма на новую почту
+          example: '492817'
+    DocumentsAcceptRequest:
+      type: object
+      description: Согласие с текущими версиями документов
+      required:
+        - accepted_documents
+      additionalProperties: false
+      properties:
+        accepted_documents:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: Принятые версии; версия не текущая или документа нет среди текущих — 422 identity.documents_outdated
+          items:
+            $ref: '#/components/schemas/AcceptedDocument'
+    DeletionRequest:
+      type: object
+      description: Подтверждение удаления аккаунта ником
+      required:
+        - confirm_nickname
+      additionalProperties: false
+      properties:
+        confirm_nickname:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Ник аккаунта, введённый игроком; не совпал — 422 identity.confirm_mismatch
+          example: kosta_10
+    DeletionScheduled:
+      type: object
+      description: Удаление назначено; все сессии отозваны
+      required:
+        - purge_at
+      properties:
+        purge_at:
+          type: string
+          format: date-time
+          description: Когда аккаунт будет удалён без возможности восстановления (UTC, через 30 дней); до этого любой вход предложит отменить удаление
+          example: '2026-12-13T09:00:00Z'
 x-error-codes-common:
   - internal
   - request.invalid
@@ -806,4 +2950,15 @@ x-error-codes-common:
   - idempotency.in_progress
   - idempotency.replay_unavailable
   - feature.disabled
-x-anonymous-mutations: []
+  - http.not_implemented
+x-anonymous-mutations:
+  - startSignup
+  - confirmSignup
+  - resendAuthCode
+  - login
+  - completeMfa
+  - startPasswordReset
+  - confirmPasswordReset
+  - refreshSession
+  - cancelDeletion
+  - createDeviceChallenge

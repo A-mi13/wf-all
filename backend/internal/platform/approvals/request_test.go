@@ -94,7 +94,7 @@ func TestRequestPayload(t *testing.T) {
 	e.reg.Register(approvals.Action{Name: "test.badperm", Permission: "staff.roles.grant", Exec: e.run,
 		Permit: func(json.RawMessage) (string, error) { return "staff.roles.nope", nil }})
 	e.reg.Register(approvals.Action{Name: "test.draftperm", Permission: "staff.roles.grant", Exec: e.run,
-		Permit: func(json.RawMessage) (string, error) { return "teams.captains.approve", nil }})
+		Permit: func(json.RawMessage) (string, error) { return "pitches.pitches.moderate", nil }})
 	bad := map[string]struct {
 		action string
 		p      any

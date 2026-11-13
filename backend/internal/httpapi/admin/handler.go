@@ -155,8 +155,9 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	// ошибок staff.Problem, стирание cookie при погашенной сессии, 501 у несобранного хендлера;
 	// requestMeta — последним, то есть внешним (strict-сервер оборачивает по порядку): IP и UA для
 	// операций платформы и стирание cookie при погашенной сессии в подписи решившего
-	srv := Server{staffHandler: o.Staff, geoHandler: o.Geo, approvals: o.Approvals, audit: o.DB, clock: o.Clock,
-		flags: flags.NewStore(o.DB), cities: geo.New(o.DB).ExistingCityIDs}
+	// identity — нулевой хендлер: 501 на каждую операцию до реализации (план I-1, R2; pendingOps в nostub_test.go)
+	srv := Server{staffHandler: o.Staff, geoHandler: o.Geo, identityHandler: identityHandler{}, approvals: o.Approvals,
+		audit: o.DB, clock: o.Clock, flags: flags.NewStore(o.DB), cities: geo.New(o.DB).ExistingCityIDs}
 	if o.Approvals != nil {
 		srv.label = o.Staff.Label
 	}

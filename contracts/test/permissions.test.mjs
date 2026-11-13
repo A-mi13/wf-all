@@ -18,7 +18,7 @@ const fixture = {
     { key: 'teams.teams.read', draft: false, mutating: false },
     { key: 'teams.teams.manage', draft: false, mutating: true },
     { key: 'teams.teams.transfer', draft: false, mutating: true },
-    { key: 'teams.captains.approve', draft: true, mutating: true },
+    { key: 'pitches.pitches.moderate', draft: true, mutating: true },
   ],
 };
 
@@ -128,9 +128,9 @@ const planted = {
     },
   ],
   'черновое право': [
-    /x-permission «teams\.captains\.approve» — черновое/,
+    /x-permission «pitches\.pitches\.moderate» — черновое/,
     (d) => {
-      create(d)['x-permission'] = 'teams.captains.approve';
+      create(d)['x-permission'] = 'pitches.pitches.moderate';
       delete create(d)['x-permission-any'];
     },
   ],
@@ -159,9 +159,9 @@ const planted = {
     },
   ],
   'черновой ключ в x-permission-any': [
-    /x-permission-any: «teams\.captains\.approve» — черновое/,
+    /x-permission-any: «pitches\.pitches\.moderate» — черновое/,
     (d) => {
-      create(d)['x-permission-any'] = ['teams.captains.approve'];
+      create(d)['x-permission-any'] = ['pitches.pitches.moderate'];
     },
   ],
   'служебное значение в x-permission-any': [

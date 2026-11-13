@@ -10,7 +10,8 @@
     "validation": { "failed": "" },
     "http": {
       "not_found": "",
-      "method_not_allowed": ""
+      "method_not_allowed": "",
+      "not_implemented": ""
     },
     "auth": { "unauthenticated": "" },
     "ratelimit": { "exceeded": "" },
@@ -21,6 +22,36 @@
       "replay_unavailable": ""
     },
     "feature": { "disabled": "" },
-    "geo": { "city_not_found": "" }
+    "geo": { "city_not_found": "" },
+    "identity": {
+      "restricted": "",
+      "invalid_credentials": "",
+      "account_blocked": "",
+      "code_invalid": "",
+      "code_expired": "",
+      "resend_too_soon": "",
+      "too_young": "",
+      "city_not_found": "",
+      "password_weak": "",
+      "nickname_invalid": "",
+      "nickname_taken": "",
+      "nickname_change_too_soon": "",
+      "email_disposable": "",
+      "email_taken": "",
+      "email_same": "",
+      "device_signup_limit": "",
+      "device_untrusted": "",
+      "device_required": "",
+      "mfa_required": "",
+      "mfa_invalid": "",
+      "mfa_expired": "",
+      "passkey_invalid": "",
+      "refresh_invalid": "",
+      "reauth_required": "",
+      "session_not_found": "",
+      "confirm_mismatch": "",
+      "documents_outdated": "",
+      "restore_token_invalid": ""
+    }
   }
 }

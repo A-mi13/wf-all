@@ -3,11 +3,17 @@ package public_test
 import (
 	"context"
 	"errors"
+	"testing"
 
 	"github.com/google/uuid"
 
 	"wf/backend/internal/geo"
+	"wf/backend/internal/httpapi/public"
 	"wf/backend/internal/platform/appversion"
+	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/clock"
+	"wf/backend/internal/platform/keys"
+	"wf/backend/internal/platform/token"
 )
 
 var (
@@ -102,4 +108,38 @@ type fakeVersions struct {
 func (f *fakeVersions) Get(_ context.Context, p appversion.Platform) (appversion.Versions, bool, error) {
 	f.asked = p
 	return f.v, f.ok, f.err
+}
+
+// fakeSession — подделка загрузчика сессий для операций с замком (до этапа сессий identity в public собран
+// auth.NoSessions — любой токен 401): одна живая сессия, её access-токен выпущен своим token.Issuer.
+type fakeSession struct {
+	userID, sessionID uuid.UUID
+	token             string
+}
+
+func (f *fakeSession) LoadSession(_ context.Context, id uuid.UUID) (*auth.Principal, error) {
+	if id != f.sessionID {
+		return nil, auth.ErrSessionInvalid
+	}
+	return &auth.Principal{UserID: f.userID, SessionID: f.sessionID, Status: "active"}, nil
+}
+
+// withFakeSession — o получает выпускающего токены и загрузчик с одной живой сессией; токен — в результате.
+func withFakeSession(t *testing.T, o *public.Options) *fakeSession {
+	t.Helper()
+	seed, err := keys.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := token.ParseKeys([]string{seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := token.NewIssuer(k, clock.System)
+	f := &fakeSession{userID: uuid.Must(uuid.NewV7()), sessionID: uuid.Must(uuid.NewV7())}
+	if f.token, _, err = issuer.Access(f.userID, f.sessionID); err != nil {
+		t.Fatal(err)
+	}
+	o.Tokens, o.Sessions = issuer, f
+	return f
 }

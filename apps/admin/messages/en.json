@@ -388,6 +388,9 @@
       },
       "sessions": {
         "revoke": "End other staff members' sessions (admins: moderators and support only)"
+      },
+      "player_links": {
+        "manage": "Link a staff member to their player account (no decisions about oneself)"
       }
     },
     "audit": {
@@ -426,6 +429,18 @@
       "flags": {
         "read": "Feature flags",
         "manage": "Toggle feature flags by city"
+      }
+    },
+    "identity": {
+      "captain_applications": {
+        "read": "Captain application queue and cards",
+        "decide": "Approve and reject captain applications"
+      },
+      "pii": {
+        "read": "Player's email and phone, search by email; every read is logged with a reason"
+      },
+      "mfa": {
+        "reset": "Reset 2FA for a player who lost all factors; cancel a scheduled reset"
       }
     }
   },

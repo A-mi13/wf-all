@@ -26,7 +26,8 @@ const DefaultClass = "default"
 // DefaultRules — стартовые политики. IP щедрее пользователя: за одним адресом мобильного
 // оператора (CGNAT) — многие. auth — вход, регистрация, коды: перебор паролей и рассылки.
 // geo_nearest — автоопределение города (спека geo §4.2). staff_auth — вход в админку (спека
-// сотрудников §4.6).
+// сотрудников §4.6). auth_send, auth_refresh, auth_check, account_secure — вход и аккаунт игрока (спека
+// identity §6.4).
 func DefaultRules() Rules {
 	return Rules{
 		DefaultClass: {
@@ -37,6 +38,27 @@ func DefaultRules() Rules {
 		"auth": {
 			IP:     Policy{Limit: 60, Period: time.Minute, Burst: 20},
 			Device: Policy{Limit: 20, Period: time.Minute, Burst: 10},
+		},
+		// спека identity §6.4: отправка писем с кодами — регистрация, сброс пароля, повтор кода, смена почты
+		"auth_send": {
+			IP:     Policy{Limit: 10, Period: time.Minute, Burst: 5},
+			User:   Policy{Limit: 5, Period: time.Minute, Burst: 3},
+			Device: Policy{Limit: 5, Period: time.Minute, Burst: 3},
+		},
+		// обновление токена: за одним адресом CGNAT много людей — IP щедрый, устройство строже
+		"auth_refresh": {
+			IP:     Policy{Limit: 300, Period: time.Minute, Burst: 60},
+			Device: Policy{Limit: 30, Period: time.Minute, Burst: 10},
+		},
+		// проверка доступности ника при вводе
+		"auth_check": {
+			IP:     Policy{Limit: 60, Period: time.Minute, Burst: 20},
+			Device: Policy{Limit: 30, Period: time.Minute, Burst: 10},
+		},
+		// чувствительные операции аккаунта: смена ника, пароля, почты, 2FA, ключи доступа, удаление
+		"account_secure": {
+			IP:   Policy{Limit: 60, Period: time.Minute, Burst: 20},
+			User: Policy{Limit: 10, Period: time.Minute, Burst: 5},
 		},
 		// автоопределение города по точке (спека geo §4.2): ручка анонимная — только по IP;
 		// приложение спрашивает на старте и по кнопке «определить», не на каждый ввод

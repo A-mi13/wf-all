@@ -188,8 +188,12 @@ func funcName(e ast.Expr) string {
 // (x-error-codes-common контракта admin вместе с PlatformCodes) — AdminCommonCodes, коды операций
 // подтверждений — AdminApprovalCodes, коды операций флагов (план B, Task 7) — AdminFlagCodes.
 func TestAdminPlatformCodes(t *testing.T) {
+	// http.not_implemented — общий код обоих контрактов (план I-1, R1): он в PlatformCodes, не здесь
 	common := []string{"auth.forbidden", "auth.csrf_failed", "auth.ip_not_allowed",
-		"auth.reauth_required", "auth.setup_required", "http.not_implemented"}
+		"auth.reauth_required", "auth.setup_required"}
+	if !slices.Contains(PlatformCodes, CodeNotImplemented) || len(PlatformCodes) != 14 {
+		t.Errorf("PlatformCodes = %v: ждали 14 кодов с %s (R1)", PlatformCodes, CodeNotImplemented)
+	}
 	approvals := []string{"platform.approval_not_found", "platform.approval_self",
 		"platform.approval_stale", "platform.approval_closed"}
 	flags := []string{"platform.flag_not_found", "platform.flag_stale", "platform.flag_city_not_found"}

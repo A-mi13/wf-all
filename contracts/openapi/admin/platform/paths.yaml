@@ -136,6 +136,7 @@ approval-approve:
       - staff.access.reset_elevated
       - staff.access.reset
       - geo.countries.rules
+      - identity.mfa.reset
     x-error-codes:
       - platform.approval_not_found
       - platform.approval_self
@@ -202,6 +203,7 @@ approval-reject:
       - staff.access.reset_elevated
       - staff.access.reset
       - geo.countries.rules
+      - identity.mfa.reset
     x-error-codes:
       - platform.approval_not_found
       - platform.approval_self

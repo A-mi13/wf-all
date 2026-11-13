@@ -20,6 +20,9 @@ const (
 	CodeIdempotencyInProgress        = "idempotency.in_progress"        // 409: запрос с этим ключом ещё выполняется
 	CodeIdempotencyReplayUnavailable = "idempotency.replay_unavailable" // 409: действие выполнено, ответ не сохранился — перечитать состояние
 	CodeFeatureDisabled              = "feature.disabled"               // 403: функция выключена флагом (в городе)
+	// 501: операция описана в контракте, но сервер её ещё не исполняет — этапы выкатываются по очереди, клиент
+	// отличает «ещё нет» от «сломалось» (общий код обоих контрактов, план I-1, R1)
+	CodeNotImplemented = "http.not_implemented"
 )
 
 // PlatformCodes — все коды платформы.
@@ -28,7 +31,7 @@ var PlatformCodes = []string{
 	CodeValidationFailed, CodeNotFound, CodeMethodNotAllowed,
 	CodeUnauthenticated, CodeRateLimited, CodeHumancheckRequired,
 	CodeIdempotencyKeyReused, CodeIdempotencyInProgress, CodeIdempotencyReplayUnavailable,
-	CodeFeatureDisabled,
+	CodeFeatureDisabled, CodeNotImplemented,
 }
 
 // Коды admin-api: только в контракте admin (спека сотрудников §5.1, §7; D18), в публичный не
@@ -42,7 +45,6 @@ const (
 	CodeIPNotAllowed     = "auth.ip_not_allowed"         // 403: адрес вне ADMIN_IP_ALLOWLIST
 	CodeReauthRequired   = "auth.reauth_required"        // 401: бездействие или смена сети — нужен второй фактор
 	CodeSetupRequired    = "auth.setup_required"         // 403: стадия setup — сначала настройка 2FA
-	CodeNotImplemented   = "http.not_implemented"        // 501: операция контракта ещё не исполняется сервером
 	CodeApprovalNotFound = "platform.approval_not_found" // 404: запроса на подтверждение нет
 	CodeApprovalSelf     = "platform.approval_self"      // 409: свой запрос или запрос о себе
 	CodeApprovalStale    = "platform.approval_stale"     // 409: цель изменилась после запроса
@@ -58,7 +60,6 @@ const (
 // (x-error-codes-common контракта admin вместе с PlatformCodes).
 var AdminCommonCodes = []string{
 	CodeForbidden, CodeCSRFFailed, CodeIPNotAllowed, CodeReauthRequired, CodeSetupRequired,
-	CodeNotImplemented,
 }
 
 // AdminApprovalCodes — коды операций подтверждений вдвоём (x-error-codes approve/reject/cancel).

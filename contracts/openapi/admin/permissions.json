@@ -62,6 +62,11 @@
       "mutating": true
     },
     {
+      "key": "staff.player_links.manage",
+      "draft": false,
+      "mutating": true
+    },
+    {
       "key": "audit.log.read",
       "draft": false,
       "mutating": false
@@ -142,8 +147,23 @@
       "mutating": true
     },
     {
-      "key": "teams.captains.approve",
-      "draft": true,
+      "key": "identity.captain_applications.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "identity.captain_applications.decide",
+      "draft": false,
+      "mutating": true
+    },
+    {
+      "key": "identity.pii.read",
+      "draft": false,
+      "mutating": false
+    },
+    {
+      "key": "identity.mfa.reset",
+      "draft": false,
       "mutating": true
     },
     {
@@ -175,11 +195,6 @@
       "key": "results.reports.annul",
       "draft": true,
       "mutating": true
-    },
-    {
-      "key": "identity.pii.read",
-      "draft": true,
-      "mutating": false
     },
     {
       "key": "economy.catalog.manage",

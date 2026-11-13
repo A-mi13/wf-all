@@ -1501,6 +1501,33 @@ export interface components {
              */
             attempts_left?: number;
             /**
+             * @description Причины отказа машинными значениями — только у двух кодов. У identity.captain_ineligible — невыполненные условия заявки в капитаны (значения схемы CaptainIneligibility; ограничение captain — причина restricted). У identity.password_weak — ровно одно значение: too_short (короче 10 символов), common (из списка распространённых паролей) или too_long (длиннее потолка). Список открытый: незнакомое значение показывайте общим текстом кода
+             * @example [
+             *       "too_short"
+             *     ]
+             */
+            reasons?: string[];
+            /**
+             * @description Только у identity.mfa_required — вторые факторы аккаунта, которые принимает эта операция (значения схемы MfaMethod): totp, recovery_code, passkey. У confirmPasswordReset — только totp и recovery_code: ключ доступа при сбросе пароля не принимается. Клиент показывает выбор из этих способов и повторяет запрос со вторым фактором
+             * @example [
+             *       "totp",
+             *       "recovery_code"
+             *     ]
+             */
+            methods?: string[];
+            /**
+             * Format: date-time
+             * @description Когда действие станет доступно (UTC) — только у identity.nickname_change_too_soon (смена ника раньше 30 дней) и identity.application_cooldown (повторная заявка в капитаны раньше 7 дней после отказа)
+             * @example 2026-12-13T09:30:00Z
+             */
+            available_at?: string;
+            /**
+             * Format: date-time
+             * @description До какого момента (UTC) заблокирован аккаунт — только у identity.account_blocked. Поля нет у этого кода — блокировка бессрочная (null не приходит)
+             * @example 2026-11-20T00:00:00Z
+             */
+            blocked_until?: string;
+            /**
              * Format: int64
              * @description Только у geo.import_in_progress админки — id задачи импорта страны, которая уже стоит в очереди или выполняется; её можно отменить cancelGeoImportJob
              * @example 1842
@@ -3158,7 +3185,7 @@ export interface components {
         Problem: {
             headers: {
                 /**
-                 * @description Через сколько секунд повторить — только у 429 ratelimit.exceeded
+                 * @description Через сколько секунд повторить — только у 429 ratelimit.exceeded и 429 identity.resend_too_soon (повтор отправки кода раньше паузы)
                  * @example 30
                  */
                 "Retry-After"?: number;

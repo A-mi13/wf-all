@@ -14,6 +14,7 @@ import (
 
 	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
+	identityadmin "wf/backend/internal/identity/admin"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/audit"
 	"wf/backend/internal/platform/auth"
@@ -33,6 +34,9 @@ import (
 type Server struct {
 	*staffHandler // тег staff: вход, сессии, «Мой доступ», роли и доступ сотрудников
 	*geoHandler   // тег geo: города для выбора городов модератора
+	// тег identity: заявки в капитаны, ПД игроков, сброс 2FA; встроен значением — нулевое значение отвечает 501 на
+	// каждую операцию (план I-1, R2), Options не растут до реализации
+	identityHandler
 
 	// операции платформы; нулевые (Server{} в тестах конвейера) — 501 http.not_implemented
 	approvals ApprovalService                                    // подтверждения вдвоём
@@ -47,8 +51,9 @@ type Server struct {
 // Псевдонимы — имена встроенных полей: хендлеры модулей называются одинаково (Handler), а имя
 // встроенного поля — имя типа. Модуль-реализатора apitest.Owners берёт из пакета типа.
 type (
-	staffHandler = staffadmin.Handler
-	geoHandler   = geoadmin.Handler
+	staffHandler    = staffadmin.Handler
+	geoHandler      = geoadmin.Handler
+	identityHandler = identityadmin.Handler
 )
 
 var _ oapi.StrictServerInterface = Server{}

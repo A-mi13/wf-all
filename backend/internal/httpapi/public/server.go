@@ -5,6 +5,7 @@ import (
 
 	geohttp "wf/backend/internal/geo/httpapi"
 	"wf/backend/internal/httpapi/public/oapi"
+	identityhttp "wf/backend/internal/identity/httpapi"
 	"wf/backend/internal/platform/appversion"
 )
 
@@ -13,8 +14,14 @@ import (
 // операцию, и реализованную двумя модулями (неоднозначный метод) — спека §8.2.
 type Server struct {
 	geohttp.Handler // тег geo: справочник городов, автоопределение
-	versions        appversion.Reader
+	// тег identity: вход, аккаунт, сессии; нулевое значение — 501 на каждую операцию (план I-1, R2)
+	identityHandler
+	versions appversion.Reader
 }
+
+// identityHandler — имя встроенного поля: хендлеры модулей называются одинаково (Handler), а второй встроенный
+// Handler — ошибка компиляции «duplicate field». Модуль-реализатора apitest.Owners берёт из пакета типа.
+type identityHandler = identityhttp.Handler
 
 var _ oapi.StrictServerInterface = Server{}
 
