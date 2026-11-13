@@ -59,6 +59,34 @@ export const KEYS = [
   'locale.en', // «English» — опция языка в приглашении
   'pages.accept.title', // заголовок /accept: ссылка письма ?lang=en открывает экран на EN (IL2)
   'flagsPage.label', // матрица флагов — первая виртуализация (столбцы) под настоящей CSP (G9-F)
+  // импорт GeoNames и активация города поверх настоящего воркера (план B, Task 23, geo.spec.ts)
+  'nav.imports',
+  'nav.cities',
+  'geo.imports.start',
+  'geo.imports.label',
+  'geo.imports.started', // «Импорт {country} поставлен в очередь» — тост постановки
+  'geo.imports.dialog.title',
+  'geo.imports.dialog.country',
+  'geo.imports.dialog.submit',
+  'geo.imports.job.label',
+  'geo.imports.job.states.completed',
+  'geo.imports.job.open_report',
+  'geo.imports.statuses.succeeded',
+  'geo.imports.report.label',
+  'geo.imports.report.groups.conflict',
+  'geo.imports.report.empty_group',
+  'geo.activate.open',
+  'geo.activate.title',
+  'geo.activate.places_label',
+  'geo.activate.choose',
+  'geo.activate.status',
+  'geo.activate.submit',
+  'geo.status.pilot',
+  'geo.city.facts.label',
+  'audit.actor.system',
+  'audit.actions.geo.import',
+  'audit.actions.geo.import_requested',
+  'audit.actions.geo.city_activated',
 ] as const;
 
 export type Key = (typeof KEYS)[number];

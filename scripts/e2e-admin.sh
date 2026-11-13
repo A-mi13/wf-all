@@ -7,17 +7,21 @@
 #      прошёл бы проверку портов и пересоздал бы базу и exe под первым; замок держится до конца прогона,
 #      брошенный (процесс с его PID умер) — забирается;
 #   1. порты e2e свободны (свои, чтобы не задеть ./task dev: Vite 5174/5175, admin-api 18181/18182/18183,
-#      Mailpit 18026/11026);
+#      Mailpit 18026/11026, фикстура GeoNames 18190);
 #   2. база wf_e2e на том же кластере пересоздана (DROP … WITH (FORCE)): чистка и истечение подтверждений
-#      идут по реальным часам — общие данные dev не трогаем;
+#      идут по реальным часам — общие данные dev не трогаем; каждый прогон — с чистой базы, поэтому повторный прогон
+#      сценария geo (импорт RU, активация места 526815) не встречает «уже импортировано» и «город уже активен»;
 #   3. миграции и права ролей (cmd/migrate up → grants.sql);
-#   4. admin-api собран в .tools/e2e/;
+#   4. admin-api, воркер и HTTPS-фикстура GeoNames (план B, Task 23) собраны в .tools/e2e/: импорт и активация идут
+#      через настоящий воркер (webServer Playwright, база wf_e2e под ролью worker, Mailpit e2e), источник — фикстура
+#      cmd/geofixture на 127.0.0.1:18190 (выдержки testdata, корень TLS — PEM для WORKER_GEONAMES_CA_FILE): внешней сети
+#      прогон не трогает. Порты, адрес и путь PEM — apps/admin/e2e/env.ts;
 #   5. одноразовый ключ сотрудников ADMIN_STAFF_SECRET_KEYS (base64url, только в окружении прогона, не выводится);
 #   6. проект prod (план UI-фундамента UF1b.7) — собранная админка: vite build (без tsc; шаг стенда, не «сборка
 #      по просьбе») и проверка dist (scripts/check-admin-dist.mjs: light-dark( есть, полифила и MSW нет) —
 #      каждый прогон, чтобы прод-проект не проверял сборку старого дерева.
-# Dev-значения ADMIN_* (корневой Taskfile грузит backend/.env) из окружения убираются: admin-api получает
-# только окружение e2e (apps/admin/e2e/env.ts).
+# Dev-значения ADMIN_* и WORKER_* (корневой Taskfile грузит backend/.env: база dev, настоящий GeoNames) из окружения
+# убираются: admin-api и воркер получают только окружение e2e (apps/admin/e2e/env.ts).
 #
 # Кластер: локально — scripts/pg.sh (127.0.0.1:WF_PG_PORT, суперпользователь postgres без пароля); в CI —
 # сервис postgis/postgis:18-3.6 с ролями и расширениями из deploy/dev/initdb/20_wf.sql
@@ -95,7 +99,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # 1. Порты: занятый — понятная ошибка до сборки (чужие процессы не трогаем)
-ports="18026 11026"
+ports="18026 11026 18190"
 case ",$PROJECTS," in *,chromium,*) ports="$ports 5174 18181" ;; esac
 case ",$PROJECTS," in *,webkit,*) ports="$ports 5175 18182" ;; esac
 case ",$PROJECTS," in *,prod,*) ports="$ports 18183" ;; esac
@@ -146,12 +150,16 @@ INSERT INTO city_names (city_id, locale, name)
 SELECT c.id, 'ru', c.name FROM cities c WHERE c.slug LIKE 'flagtest-%';
 SQL
 
-# 4. admin-api
+# 4. admin-api, воркер и фикстура GeoNames
 (cd backend && go build -o "../.tools/e2e/admin-api$exe" ./cmd/admin-api)
+(cd backend && go build -o "../.tools/e2e/worker$exe" ./cmd/worker)
+(cd backend && go build -o "../.tools/e2e/geofixture$exe" ./cmd/geofixture)
+# PEM прошлого прогона не должен сойти за свежий: фикстура пишет новый корень при старте
+rm -f .tools/e2e/geofixture-ca.pem
 
 # 5. Окружение прогона: без dev-настроек админки, с базой и одноразовым ключом e2e
 for k in $(compgen -e); do
-  case "$k" in ADMIN_* | WF_ADMIN_API_ORIGIN) unset "$k" ;; esac
+  case "$k" in ADMIN_* | WORKER_* | WF_ADMIN_API_ORIGIN) unset "$k" ;; esac
 done
 # Ключ — base64url (ревью 27.10, Minor 1): Git Bash (MSYS), запуская не-MSYS программу (pnpm → node →
 # admin-api), переписывает значение окружения с ведущим «/» в путь Windows («C:/Program Files/Git/…») —
@@ -161,8 +169,9 @@ done
 WF_E2E_STAFF_SECRET_KEYS=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
 export WF_E2E_STAFF_SECRET_KEYS
 export WF_E2E_ADMIN_DATABASE_URL="postgres://admin:admin@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
+export WF_E2E_WORKER_DATABASE_URL="postgres://worker:worker@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
 export WF_E2E_PROJECTS="$PROJECTS"
-export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
+export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_WORKER_DATABASE_URL;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
 
 # 6. Прод-проект: свежая сборка админки и её проверка (dist — apps/admin/dist, ADMIN_STATIC_DIR пары prod)
 case ",$PROJECTS," in

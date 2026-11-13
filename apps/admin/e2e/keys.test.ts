@@ -47,6 +47,24 @@ describe('ключи локалей e2e', () => {
     );
   });
 
+  it('импорт и активация (план B, Task 23): подписи сценария geo.spec входят в список', () => {
+    expect(KEYS).toEqual(
+      expect.arrayContaining([
+        'nav.imports',
+        'geo.imports.start',
+        'geo.imports.job.states.completed',
+        'geo.imports.statuses.succeeded',
+        'geo.imports.report.groups.conflict',
+        'geo.activate.open',
+        'geo.activate.places_label',
+        'audit.actions.geo.import_requested',
+        'audit.actions.geo.import',
+        'audit.actions.geo.city_activated',
+        'audit.actor.system',
+      ]),
+    );
+  });
+
   it('t — текст ru по ключу', () => {
     expect(t('auth.login.submit')).toBe(ru.auth.login.submit);
     expect(t('roles.admin')).toBe(ru.roles.admin);

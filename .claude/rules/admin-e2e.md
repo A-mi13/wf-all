@@ -22,6 +22,10 @@ paths:
   `ADMIN_STATIC_DIR` только у него, с настоящим `staticCSP`, Chromium, `__Host-` cookie); Mailpit 18026/11026. Ключ и
   база прогона `WF_E2E_*` — только admin-api под именами `ADMIN_*`, у Vite, Mailpit и дочерних процессов затёрты пустыми
   (Playwright складывает окружение сервера поверх `process.env`).
+- Импорт GeoNames: скрипт собирает ещё воркер и `cmd/geofixture` (в образ не входит); серверы — Mailpit → фикстура
+  GeoNames 18190 (HTTPS, тестовый ключ `httptest`, PEM корня `.tools/e2e/geofixture-ca.pem` → `WORKER_GEONAMES_CA_FILE`,
+  готовность `/readyz`) → воркер (`workerEnv`: база `wf_e2e` под `worker`, источник — только фикстура, Mailpit e2e;
+  готовность — строка «воркер запущен») → пары; dev `WORKER_*` вычищаются, `WF_E2E_WORKER_DATABASE_URL` — только воркеру.
 - Пары admin-api на одной базе все исполняют очередь staff: письмо может уйти из пары другого браузера со ссылкой на
   чужой origin — сценарии берут из письма только код.
 - Проекты по умолчанию — `chromium,webkit,prod` (одно умолчание в `e2e/env.ts` и скрипте, страж `env.test.ts`), поэтому
@@ -43,6 +47,10 @@ paths:
   `aria-colcount`, последний город прокручивается в окно, `--wf-virtual-start` > 0. Городов больше порога засевает
   `scripts/e2e-admin.sh` шаг 3a после миграций (`FLAG_CITIES` = `E2E_FLAG_CITIES` = 150 ≥ `MATRIX_VIRTUALIZE_FROM` × 3,
   страж `env.test.ts`).
+- `geo.spec.ts` — импорт RU из фикстуры → «выполнена», кто запустил — владелец, конфликтов нет → активация Михайловска
+  526815 (Свердловская область) пилотом, slug `mikhaylovsk` (тёзка из сида — `mihaylovsk`, R13) → журнал
+  (`geo.import_requested` — владелец, `geo.import` — система, `geo.city_activated` — владелец); один проект — `geoProject`
+  (prod, без него chromium), без `securitypolicyviolation` на всём пути.
 - TOTP — `TotpDevice` (код шага один раз, иначе ждёт следующий), письма — `waitForMail` (фон admin-api шлёт не сразу);
   «письмо одно» — принято не раньше подтверждения и `expectMailCountStable` (~3 с опроса), а не одна проверка «сейчас
   одно».

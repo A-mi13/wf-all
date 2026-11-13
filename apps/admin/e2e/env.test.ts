@@ -13,12 +13,19 @@ import {
   DEFAULT_PROJECTS,
   E2E_FLAG_CITIES,
   enabledProjects,
+  fixtureArgs,
+  fixtureEnv,
+  GEOFIXTURE,
+  GEOFIXTURE_CA,
+  GEOFIXTURE_URL,
+  geoProject,
   mailpitEnv,
   origin,
   PAIRS,
   pairOf,
   ROOT,
   viteEnv,
+  workerEnv,
 } from './env';
 import { PROD_SECTIONS } from './sections';
 
@@ -231,6 +238,109 @@ describe('окружение e2e', () => {
     expect([...PROD_SECTIONS].sort()).toEqual(
       NAV.flatMap((g) => g.items.map((i) => i.path)).sort(),
     );
+  });
+
+  // План B, Task 23: импорт и активация поверх настоящего воркера и HTTPS-фикстуры GeoNames. Корневой Taskfile грузит
+  // backend/.env — dev-значения WORKER_* (база wf, настоящий download.geonames.org) не должны дойти ни до воркера, ни
+  // до других процессов прогона: e2e не ходит во внешнюю сеть и не пишет в dev-базу.
+  it('cleanEnv убирает и dev-настройки воркера (WORKER_*)', () => {
+    expect(
+      cleanEnv({
+        WORKER_DATABASE_URL: 'postgres://worker:worker@localhost:15432/wf',
+        WORKER_GEONAMES_BASE_URL: 'https://download.geonames.org',
+        PATH: '/bin',
+      }),
+    ).toEqual({ PATH: '/bin' });
+  });
+
+  const WORKER_DB = 'postgres://worker:worker@127.0.0.1:15432/wf_e2e?sslmode=disable';
+
+  it('воркер получает только значения e2e: база прогона, фикстура GeoNames с её корнем, Mailpit e2e; внешней сети нет', () => {
+    vi.stubEnv(
+      'WORKER_DATABASE_URL',
+      'postgres://worker:worker@localhost:15432/wf?sslmode=disable',
+    );
+    vi.stubEnv('WORKER_GEONAMES_BASE_URL', 'https://download.geonames.org');
+    vi.stubEnv('WORKER_MAIL_SMTP_USERNAME', 'dev-user');
+    vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', WORKER_DB);
+    const env = workerEnv();
+    expect(env).not.toHaveProperty('WORKER_MAIL_SMTP_USERNAME');
+    expect(env).toMatchObject({
+      WORKER_DATABASE_URL: WORKER_DB,
+      WORKER_GEONAMES_BASE_URL: 'https://127.0.0.1:18190',
+      WORKER_GEONAMES_CA_FILE: path.join(ROOT, '.tools', 'e2e', 'geofixture-ca.pem'),
+      WORKER_MAIL_SMTP_ADDR: '127.0.0.1:11026',
+      WORKER_MAIL_SMTP_TLS: 'none',
+    });
+    expect(GEOFIXTURE_URL).toBe(`https://127.0.0.1:${GEOFIXTURE.port}`);
+    expect(env.WORKER_GEONAMES_CA_FILE).toBe(GEOFIXTURE_CA);
+    // ни одно значение окружения воркера не ведёт к настоящему GeoNames
+    expect(Object.values(env).filter((v) => v?.includes('geonames.org'))).toEqual([]);
+    // путь PEM собран node, а не Git Bash: абсолютный путь этой ОС, MSYS его не переписывает
+    expect(path.isAbsolute(GEOFIXTURE_CA)).toBe(true);
+    expect(fixtureArgs()).toEqual([
+      '--addr',
+      `127.0.0.1:${GEOFIXTURE.port}`,
+      '--data',
+      path.join(ROOT, 'backend', 'internal', 'geo', 'internal', 'source', 'testdata'),
+      '--ca-out',
+      GEOFIXTURE_CA,
+    ]);
+  });
+
+  it('адрес базы воркера не postgres:// (переписан) — ошибка без значения', () => {
+    const bad = 'C:/Program Files/Git/worker:worker@127.0.0.1:15432/wf_e2e';
+    vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', bad);
+    const message = errorOf(() => workerEnv());
+    expect(message).toMatch(/WF_E2E_WORKER_DATABASE_URL.*postgres:/);
+    expect(message).not.toContain('Program Files');
+  });
+
+  it('база воркера прогона — только у воркера: Vite, Mailpit, фикстура и admin-api её не наследуют', () => {
+    vi.stubEnv('WF_E2E_ADMIN_DATABASE_URL', DB_URL);
+    vi.stubEnv('WF_E2E_STAFF_SECRET_KEYS', KEY);
+    vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', WORKER_DB);
+    for (const env of [
+      viteEnv(PAIRS.chromium),
+      mailpitEnv(),
+      fixtureEnv(),
+      adminApiEnv(PAIRS.prod),
+    ]) {
+      expect(env.WF_E2E_WORKER_DATABASE_URL).toBe('');
+      expect(Object.values(env)).not.toContain(WORKER_DB);
+    }
+    const w = workerEnv();
+    expect(Object.values(w).filter((v) => v === WORKER_DB)).toHaveLength(1);
+    expect(Object.values(w)).not.toContain(KEY);
+    expect(Object.values(w)).not.toContain(DB_URL);
+    expect(fixtureEnv()).toMatchObject({
+      WF_E2E_STAFF_SECRET_KEYS: '',
+      WF_E2E_ADMIN_DATABASE_URL: '',
+    });
+  });
+
+  // Импорт и активация идут в общей базе один раз за прогон (место 526815 активируется однажды): сценарий — в одном
+  // проекте. prod — Chromium с настоящей CSP (ловит securitypolicyviolation), без него — chromium.
+  it('сценарий geo — один проект: prod, без него chromium, без обоих — нет', () => {
+    expect(geoProject(['chromium', 'webkit', 'prod'])).toBe('prod');
+    expect(geoProject(['chromium', 'prod'])).toBe('prod');
+    expect(geoProject(['chromium', 'webkit'])).toBe('chromium');
+    expect(geoProject(['webkit'])).toBeUndefined();
+  });
+
+  it('скрипт: порт фикстуры — в проверке занятых, воркер и фикстура собраны до Playwright, база воркера — вне MSYS', () => {
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'e2e-admin.sh'), 'utf8');
+    expect(sh).toMatch(new RegExp(`^ports="18026 11026 ${GEOFIXTURE.port}"$`, 'm'));
+    const run = sh.indexOf('pnpm exec playwright test');
+    for (const build of ['./cmd/worker', './cmd/geofixture']) {
+      const at = sh.indexOf(`go build -o "../.tools/e2e/${build.slice(6)}$exe" ${build}`);
+      expect(at, build).toBeGreaterThan(-1);
+      expect(run).toBeGreaterThan(at);
+    }
+    expect(sh).toMatch(/^export WF_E2E_WORKER_DATABASE_URL="postgres:\/\/worker:worker@/m);
+    expect(sh).toMatch(/MSYS2_ENV_CONV_EXCL="[^"]*WF_E2E_WORKER_DATABASE_URL/);
+    // dev WORKER_* убираются из окружения прогона, как ADMIN_*
+    expect(sh).toMatch(/ADMIN_\* \| WORKER_\* \| WF_ADMIN_API_ORIGIN\) unset/);
   });
 
   it('имя cookie — как httpapi/admin.CookieName: __Host- только с Secure', () => {

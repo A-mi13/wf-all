@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net/http"
@@ -174,6 +175,8 @@ func TestRunRejectsInvalidGeoNamesConfig(t *testing.T) {
 		{"WORKER_GEONAMES_BASE_URL=download.geonames.org", "WORKER_GEONAMES_BASE_URL"},
 		{"WORKER_GEONAMES_MAX_COMPRESSED=0", "WORKER_GEONAMES_MAX_COMPRESSED"},
 		{"WORKER_GEONAMES_MAX_UNCOMPRESSED=-1", "WORKER_GEONAMES_MAX_UNCOMPRESSED"},
+		// дополнительный корень источника (Task 23): файла нет — отказ до базы, а не x509 на первом импорте
+		{"WORKER_GEONAMES_CA_FILE=" + filepath.Join(t.TempDir(), "nope.pem"), "WORKER_GEONAMES_CA_FILE"},
 	} {
 		t.Run(tc.kv, func(t *testing.T) {
 			err := run(context.Background(), []string{"geo", "import", "--country", "RU"}, []string{base, tc.kv}, io.Discard, io.Discard)
@@ -316,6 +319,33 @@ func TestGeoImportCommandRunsSynchronously(t *testing.T) {
 	}
 	if places != 3 || jobs != 0 || status != "succeeded" || startedBy != nil || riverJob != nil || role != "operator" {
 		t.Fatalf("мест %d, задач %d, журнал %s %v %v, аудит %q", places, jobs, status, startedBy, riverJob, role)
+	}
+}
+
+// WORKER_GEONAMES_CA_FILE (план B, Task 23): без подставленного клиента воркер собирает свой — системные корни плюс
+// корень из файла; сервер с тестовым сертификатом httptest (как фикстура живого e2e) принят, импорт проходит.
+// Без ключа тот же сервер — x509 (не вакуумно: системные корни ему не доверяют).
+func TestGeoImportCommandTrustsCAFile(t *testing.T) {
+	t.Parallel()
+	srv := geonamesTLS(t)
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := host{clock: clocktest.New(time.Now())}
+	args := []string{"geo", "import", "--country", "RU"}
+	base := []string{"WORKER_DATABASE_URL=" + dbtest.NewURL(t), "WORKER_GEONAMES_BASE_URL=" + srv.URL}
+	var out bytes.Buffer
+	if err := runOn(context.Background(), h, args, base, &out, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "x509") {
+		t.Fatalf("без корня: err = %v, ждали x509", err)
+	}
+	out.Reset()
+	if err := runOn(context.Background(), h, args, append(base, "WORKER_GEONAMES_CA_FILE="+ca), &out, io.Discard); err != nil {
+		t.Fatalf("с корнем из файла: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "мест: 3") {
+		t.Fatalf("вывод:\n%s", out.String())
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -68,6 +69,11 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 	if err := errors.Join(validateRelay(cfg.Relay), validateGeoNames(cfg.GeoNames)); err != nil {
 		return err
 	}
+	// клиент источника GeoNames — до базы: битый WORKER_GEONAMES_CA_FILE — отказ старта, а не x509 на первом импорте
+	geoClient, err := geoNamesClient(h.httpClient, cfg.GeoNames)
+	if err != nil {
+		return err
+	}
 	// почта нужна только воркеру, не разовым командам; проверяется до подключения к базе:
 	// нет WORKER_MAIL_* или битый адрес SMTP — отказ старта
 	var sender *mail.SMTP
@@ -94,7 +100,7 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 		return err
 	}
 	geo := geojobs.Config{BaseURL: cfg.GeoNames.BaseURL, MaxCompressed: cfg.GeoNames.MaxCompressed,
-		MaxUncompressed: cfg.GeoNames.MaxUncompressed, HTTPClient: h.httpClient}
+		MaxUncompressed: cfg.GeoNames.MaxUncompressed, HTTPClient: geoClient}
 	if len(args) > 0 {
 		return command(ctx, args, pool, reg, geo, h.clock, out, log)
 	}
@@ -248,6 +254,26 @@ func validateGeoNames(g config.GeoNames) error {
 		errs = append(errs, fmt.Errorf("WORKER_GEONAMES_MAX_UNCOMPRESSED = %d: нужно больше нуля", g.MaxUncompressed))
 	}
 	return errors.Join(errs...)
+}
+
+// geoNamesTimeout — предел одного запроса к источнику, как у клиента по умолчанию пакета source (15 мин): копию клиента
+// с нулевым Timeout source не ограничивает.
+const geoNamesTimeout = 15 * time.Minute
+
+// geoNamesClient — HTTP-клиент загрузки GeoNames: подставленный хостом (тесты) — как есть; без WORKER_GEONAMES_CA_FILE —
+// nil (клиент по умолчанию source, системные корни); с ним — системные корни плюс корень из файла (HTTPS-фикстура
+// живого e2e, зеркало с собственным CA; Task 23).
+func geoNamesClient(given *http.Client, g config.GeoNames) (*http.Client, error) {
+	if given != nil {
+		return given, nil
+	}
+	pool, err := g.RootCAs()
+	if err != nil || pool == nil {
+		return nil, err
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone() //nolint:forcetypeassert // DefaultTransport — *http.Transport
+	tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	return &http.Client{Transport: tr, Timeout: geoNamesTimeout}, nil
 }
 
 // validateRelay — до подключения к базе: пачка меньше 1 зациклила бы Drain, неположительный

@@ -12,9 +12,39 @@ const exe = process.platform === 'win32' ? '.exe' : '';
 // admin-api собирает scripts/e2e-admin.sh; Mailpit — scripts/bootstrap.sh (тот же, что у ./task mail)
 export const ADMIN_API_BIN = path.join(ROOT, '.tools', 'e2e', `admin-api${exe}`);
 export const MAILPIT_BIN = path.join(ROOT, '.tools', 'bin', `mailpit${exe}`);
+// воркер и HTTPS-фикстура GeoNames (план B, Task 23) — их тоже собирает scripts/e2e-admin.sh
+export const WORKER_BIN = path.join(ROOT, '.tools', 'e2e', `worker${exe}`);
+export const GEOFIXTURE_BIN = path.join(ROOT, '.tools', 'e2e', `geofixture${exe}`);
 
 export const MAILPIT = { ui: 18026, smtp: 11026 } as const;
 export const MAILPIT_URL = `http://127.0.0.1:${MAILPIT.ui}`;
+
+// HTTPS-фикстура GeoNames (backend/cmd/geofixture): выгрузка RU из выдержек репозитория по путям download.geonames.org,
+// сертификат — тестовый ключ httptest, корень — PEM в GEOFIXTURE_CA (воркер доверяет ему через
+// WORKER_GEONAMES_CA_FILE). Путь собирает node, а не Git Bash: MSYS переписал бы значение с ведущим «/» (урок 27.10).
+export const GEOFIXTURE = { port: 18190 } as const;
+export const GEOFIXTURE_URL = `https://127.0.0.1:${GEOFIXTURE.port}`;
+export const GEOFIXTURE_CA = path.join(ROOT, '.tools', 'e2e', 'geofixture-ca.pem');
+const GEO_TESTDATA = path.join(
+  ROOT,
+  'backend',
+  'internal',
+  'geo',
+  'internal',
+  'source',
+  'testdata',
+);
+
+export function fixtureArgs(): string[] {
+  return [
+    '--addr',
+    `127.0.0.1:${GEOFIXTURE.port}`,
+    '--data',
+    GEO_TESTDATA,
+    '--ca-out',
+    GEOFIXTURE_CA,
+  ];
+}
 
 // Пара «Vite + admin-api» на проект браузера. Chromium — cookie как в проде (__Host- + Secure: R6,
 // Chromium принимает её на http://127.0.0.1). WebKit __Host- + Secure на http не принимает (R6) —
@@ -57,6 +87,12 @@ export function pairOf(project: string): Pair {
   return PAIRS[project as ProjectName];
 }
 
+// Сценарий импорта и активации (geo.spec.ts) — в одном проекте: место 526815 активируется в общей базе один раз за
+// прогон. prod — Chromium с настоящей CSP (ловит securitypolicyviolation), без него — chromium; без обоих — не идёт.
+export function geoProject(projects: readonly ProjectName[]): ProjectName | undefined {
+  return (['prod', 'chromium'] as const).find((p) => projects.includes(p));
+}
+
 // Проекты прогона: WF_E2E_PROJECTS (через запятую), по умолчанию DEFAULT_PROJECTS. CI — chromium,prod
 // (браузер WebKit на раннере требует системных библиотек через apt).
 export function enabledProjects(env: NodeJS.ProcessEnv = process.env): ProjectName[] {
@@ -67,10 +103,13 @@ export function enabledProjects(env: NodeJS.ProcessEnv = process.env): ProjectNa
   return names as ProjectName[];
 }
 
-// Окружение процесса без dev-настроек админки: ADMIN_* и адрес прокси Vite.
+// Окружение процесса без dev-настроек админки и воркера: ADMIN_*, WORKER_* (backend/.env — база dev и настоящий GeoNames)
+// и адрес прокси Vite.
 export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return Object.fromEntries(
-    Object.entries(env).filter(([k]) => !k.startsWith('ADMIN_') && k !== 'WF_ADMIN_API_ORIGIN'),
+    Object.entries(env).filter(
+      ([k]) => !k.startsWith('ADMIN_') && !k.startsWith('WORKER_') && k !== 'WF_ADMIN_API_ORIGIN',
+    ),
   );
 }
 
@@ -78,7 +117,12 @@ export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 // и уже под именами ADMIN_* (adminApiEnv). Playwright запускает webServer с окружением поверх process.env
 // (DEFAULT_ENVIRONMENT_VARIABLES, process.env, env сервера), поэтому «не передать» нельзя — значения
 // затираются пустыми (ревью Task 16, M7): ни Vite, ни Mailpit, ни дочерние процессы их не видят.
-const RUN_SECRETS = { WF_E2E_STAFF_SECRET_KEYS: '', WF_E2E_ADMIN_DATABASE_URL: '' } as const;
+// База воркера (WF_E2E_WORKER_DATABASE_URL) — так же: только воркеру, под именем WORKER_DATABASE_URL.
+const RUN_SECRETS = {
+  WF_E2E_STAFF_SECRET_KEYS: '',
+  WF_E2E_ADMIN_DATABASE_URL: '',
+  WF_E2E_WORKER_DATABASE_URL: '',
+} as const;
 
 function required(name: string): string {
   const v = process.env[name];
@@ -152,6 +196,27 @@ export function viteEnv(p: Pair & { vite: number }): NodeJS.ProcessEnv {
     WF_ADMIN_API_ORIGIN: apiOrigin(p),
     WF_E2E_VITE_CACHE_DIR: `node_modules/.vite-e2e-${p.vite}`,
   };
+}
+
+// Окружение воркера (план B, Task 23): база прогона под ролью worker, источник GeoNames — только фикстура со своим
+// корнем (внешней сети прогон не трогает), почта — Mailpit e2e (WORKER_MAIL_* воркеру обязательны).
+export function workerEnv(): NodeJS.ProcessEnv {
+  return {
+    ...cleanEnv(),
+    ...RUN_SECRETS,
+    WORKER_DATABASE_URL: runDatabaseUrl('WF_E2E_WORKER_DATABASE_URL'),
+    WORKER_LOG_FORMAT: 'text',
+    WORKER_GEONAMES_BASE_URL: GEOFIXTURE_URL,
+    WORKER_GEONAMES_CA_FILE: GEOFIXTURE_CA,
+    WORKER_MAIL_SMTP_ADDR: `127.0.0.1:${MAILPIT.smtp}`,
+    WORKER_MAIL_FROM: 'WhereFootball e2e <noreply@wf-e2e.test>',
+    WORKER_MAIL_SMTP_TLS: 'none',
+  };
+}
+
+// Окружение фикстуры: поверх process.env раннера — без ключа и баз прогона.
+export function fixtureEnv(): NodeJS.ProcessEnv {
+  return { ...RUN_SECRETS };
 }
 
 // Окружение Mailpit: поверх process.env раннера (см. RUN_SECRETS) — без ключа и базы прогона.

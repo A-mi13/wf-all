@@ -6,6 +6,11 @@ import {
   browserOf,
   cleanEnv,
   enabledProjects,
+  fixtureArgs,
+  fixtureEnv,
+  GEOFIXTURE_BIN,
+  GEOFIXTURE_URL,
+  geoProject,
   MAILPIT,
   MAILPIT_BIN,
   MAILPIT_URL,
@@ -14,6 +19,8 @@ import {
   PAIRS,
   type ProjectName,
   viteEnv,
+  WORKER_BIN,
+  workerEnv,
 } from './e2e/env';
 
 // Живой e2e админки (Task 16): настоящие admin-api, Postgres (база wf_e2e) и Mailpit. Запуск — только
@@ -45,6 +52,27 @@ const servers: NonNullable<PlaywrightTestConfig['webServer']> = [
     timeout: 30_000,
     stdout: 'ignore',
   },
+  // HTTPS-фикстура GeoNames (план B, Task 23): готова, когда PEM корня записан и /readyz отвечает (сертификат
+  // тестовый — проверку готовности он не останавливает); воркер стартует после неё и доверяет корню из файла
+  {
+    command: [GEOFIXTURE_BIN, ...fixtureArgs()].map((a) => `"${a}"`).join(' '),
+    url: `${GEOFIXTURE_URL}/readyz`,
+    ignoreHTTPSErrors: true,
+    env: fixtureEnv() as Record<string, string>,
+    reuseExistingServer: false,
+    timeout: 30_000,
+    stdout: 'ignore',
+  },
+  // Воркер: исполняет задачу geo.import из общей базы. Порта нет — готовность по строке журнала «воркер запущен»
+  // (уровень info); журнал — в вывод прогона: ошибка старта видна текстом, а не одним кодом выхода
+  {
+    command: `"${WORKER_BIN}"`,
+    wait: { stderr: /воркер запущен/ },
+    env: workerEnv() as Record<string, string>,
+    reuseExistingServer: false,
+    timeout: 60_000,
+    stdout: 'ignore',
+  },
 ];
 for (const name of projects) {
   const pair = PAIRS[name];
@@ -69,11 +97,15 @@ for (const name of projects) {
 
 // Какие сценарии в каком проекте: полный сценарий §11 — Chromium; вход с протухшей cookie — в обоих
 // браузерах; собранная админка под настоящей CSP (тема до первого кадра, обход разделов) — prod.
+// Импорт и активация (geo.spec.ts) — в одном проекте (geoProject): prod (Chromium под настоящей CSP), без него —
+// chromium; место GeoNames активируется в общей базе один раз за прогон.
 const specs: Record<ProjectName, string[]> = {
   chromium: ['staff.spec.ts', 'stale-cookie.spec.ts'],
   webkit: ['stale-cookie.spec.ts'],
   prod: ['prod.spec.ts'],
 };
+const geo = geoProject(projects);
+if (geo) specs[geo].push('geo.spec.ts');
 
 export default defineConfig({
   testDir: './e2e',

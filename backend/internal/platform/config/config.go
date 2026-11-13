@@ -127,6 +127,9 @@ type GeoNames struct {
 	BaseURL         string `env:"GEONAMES_BASE_URL" envDefault:"https://download.geonames.org"`
 	MaxCompressed   int64  `env:"GEONAMES_MAX_COMPRESSED" envDefault:"52428800"`    // 50 МБ
 	MaxUncompressed int64  `env:"GEONAMES_MAX_UNCOMPRESSED" envDefault:"209715200"` // 200 МБ
+	// CAFile — PEM дополнительного корня для источника (HTTPS-фикстура живого e2e, зеркало с собственным CA); пусто —
+	// только системные корни. Файлом, потому что на Windows Go не читает SSL_CERT_FILE (системное хранилище).
+	CAFile string `env:"GEONAMES_CA_FILE"`
 }
 
 // Worker — без почты: Mail (WORKER_MAIL_*) воркер читает отдельно, только в режиме воркера —
