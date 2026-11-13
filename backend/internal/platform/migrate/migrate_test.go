@@ -11,6 +11,7 @@ import (
 // Клон уже мигрирован шаблоном: откатываем всё до нуля и накатываем снова.
 // Ловит сломанные Down-секции и несовместимость с текущей версией PostgreSQL.
 func TestMigrationsRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	p, err := migrate.NewProvider(dbtest.New(t), nil)
 	if err != nil {
@@ -29,6 +30,7 @@ func TestMigrationsRoundTrip(t *testing.T) {
 
 // Проверяет, что миграции создают схему очереди River.
 func TestRiverSchemaPresent(t *testing.T) {
+	t.Parallel()
 	var ok bool
 	err := dbtest.New(t).QueryRow(`select to_regclass('public.river_job') is not null`).Scan(&ok)
 	if err != nil {

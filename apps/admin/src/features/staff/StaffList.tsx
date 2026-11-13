@@ -117,6 +117,8 @@ export function StaffList({
       id: 'last_login',
       header: t('list.columns.last_login'),
       width: 'md',
+      // второстепенное: на 768–1023 скрыт, пока не включён в «Столбцах»; на телефоне — под «Подробнее»
+      priority: 'low',
       cell: (a) =>
         a.last_login_at ? (
           dateTime(a.last_login_at)
@@ -146,6 +148,8 @@ export function StaffList({
   return (
     <DataTable
       label={t('list.label')}
+      // меню «Столбцы» и плотность (выбор — в localStorage браузера)
+      tableId="staff"
       columns={columns}
       rowKey={(a) => a.id}
       activeRowKey={activeId}

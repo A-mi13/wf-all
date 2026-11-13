@@ -73,6 +73,10 @@ func (h *Handler) CreateStaffInvite(ctx context.Context, req oapi.CreateStaffInv
 	if b.CityIds != nil {
 		in.CityIDs = *b.CityIds
 	}
+	if b.Locale != nil {
+		l := string(*b.Locale)
+		in.Locale = &l
+	}
 	ap, err := h.app.Invite(ctx, s, in, meta(ctx))
 	if err != nil {
 		return nil, err

@@ -47,6 +47,7 @@ func (l *downLimiter) Over(context.Context, string, ratelimit.Policy) (bool, err
 // отказа Add): как в ratelimit.Middleware, проверка пропускается, а не 500 и не 429 — сотрудник с живой
 // сессией работает, невалидная cookie по-прежнему стирается и запрос идёт анонимно (401); сбой — в логе.
 func TestSessionLimiterUnavailable(t *testing.T) {
+	t.Parallel()
 	type want struct {
 		status    int
 		code      string
@@ -74,6 +75,7 @@ func TestSessionLimiterUnavailable(t *testing.T) {
 			want{status: http.StatusUnauthorized, code: httpx.CodeUnauthenticated, cleared: true, adds: 1, logged: []string{overMsg, addMsg}}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			o := testOptions(t)
 			o.Limiter = c.lim
 			o.Sessions = &fakeSessions{staff: map[string]*auth.Staff{"tok": staffOf(perm.Owner, auth.StageActive, false)}}

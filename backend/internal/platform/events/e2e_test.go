@@ -18,6 +18,7 @@ import (
 // Спека §1 п. 4: событие из outbox доходит до двух подписчиков через relay и River, повтор
 // доставки не задваивает обработку, устаревшая версия агрегата отбрасывается.
 func TestEventReachesSubscribersThroughRelayAndRiver(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	effects(t, pool)
 	reg, err := events.NewRegistry(

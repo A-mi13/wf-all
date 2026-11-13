@@ -20,7 +20,9 @@
     "@fontsource/oswald": "5.3.0",
     "@tanstack/react-query": "5.104.5",
     "@tanstack/react-router": "1.170.46",
+    "@tanstack/react-virtual": "3.14.26",
     "@wf/i18n": "workspace:*",
+    "@wf/icons": "workspace:*",
     "@wf/tokens": "workspace:*",
     "openapi-fetch": "0.17.0",
     "react": "catalog:",
@@ -30,6 +32,7 @@
     "use-intl": "4.14.9"
   },
   "devDependencies": {
+    "@ladle/react": "5.1.1",
     "@playwright/test": "1.64.1",
     "@testing-library/dom": "10.4.2",
     "@testing-library/jest-dom": "7.0.1",

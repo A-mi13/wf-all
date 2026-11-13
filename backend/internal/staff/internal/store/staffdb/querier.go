@@ -82,7 +82,9 @@ type Querier interface {
 	// Учётка и абсолютный срок текущей сессии для GET /v1/staff/me.
 	GetMe(ctx context.Context, arg GetMeParams) (GetMeRow, error)
 	InsertInvite(ctx context.Context, arg InsertInviteParams) error
-	// Новая учётка в статусе invited; почта занята (любой статус) — нет строки.
+	// Новая учётка в статусе invited; почта занята (любой статус) — нет строки. Язык — выбранный приглашающим (IL2);
+	// NULL (запрос до IL2, оператор) — 'ru', то же значение, что DEFAULT колонки (0020_staff.sql): DEFAULT в COALESCE
+	// не пишется.
 	InsertInvitedAccount(ctx context.Context, arg InsertInvitedAccountParams) (int64, error)
 	// Поколение резервных кодов: HMAC нормализованного кода ключом key_id (один ключ на поколение).
 	InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) error
@@ -105,7 +107,7 @@ type Querier interface {
 	// резервные коды (как CountRecoveryOnOldKeys), живые коды приглашений (код есть только у живого). Команда оператора
 	// сверяет их со своим кольцом (App.KeyCheck).
 	ListStoredKeyIDs(ctx context.Context) ([]string, error)
-	// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка, роль и города модератора.
+	// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка (версия и имя — R5), роль и города модератора.
 	LoadSession(ctx context.Context, tokenHash []byte) (LoadSessionRow, error)
 	// Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
 	// снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите,

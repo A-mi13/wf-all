@@ -30,6 +30,7 @@ func names(lists ...[]queue.Kind) []string {
 // Реестр admin-api (I1 ревью 10c): настоящие исполнители — ровно queue.AdminKinds со сроками исполнителей;
 // исполняющий клиент знает и виды воркера (заглушки) — объединение обоих списков (зеркально TestWorkerKinds).
 func TestAdminKinds(t *testing.T) {
+	t.Parallel()
 	d := staff.Deps{}
 	if got, want := rivertest.Kinds(realWorkers(d, nil)), names(queue.AdminKinds()); !slices.Equal(got, want) {
 		t.Fatalf("исполнители admin-api %v, queue.AdminKinds %v", got, want)
@@ -48,6 +49,7 @@ func TestAdminKinds(t *testing.T) {
 // admin-api — лидер River, воркер убит посреди письма mail.send (задача running больше часа): рескьюер admin-api
 // возвращает её в retryable (исполнит воркер), а не выбрасывает как неизвестный вид.
 func TestRescuerKeepsWorkerJobs(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t)
 	var jobID int64
 	if err := e.owner.QueryRow(context.Background(), `INSERT INTO river_job (kind, queue, state, args, attempt, max_attempts,
@@ -89,6 +91,7 @@ func waitRescued(t *testing.T, pool *pgxpool.Pool, id int64) {
 // клиент admin-api (staffQueues), и которой нет у воркера (queue.Config); очереди двух бинарников не пересекаются —
 // иначе задачу одного взяла бы заглушка другого.
 func TestAdminKindsQueues(t *testing.T) {
+	t.Parallel()
 	// вид — из самих аргументов (Kind), а не строкой таблицы (m-r5)
 	queues := map[string]string{}
 	for _, a := range []interface {

@@ -22,8 +22,9 @@ export function useField(name: string, hasHint: boolean) {
   const id = useId();
   const { formState } = useFormContext();
   const error = get(formState.errors, name) as RhfFieldError | undefined;
+  const labelId = `${id}-label`;
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const describedBy = [hasHint && hintId, error && errorId].filter(Boolean).join(' ') || undefined;
-  return { id, hintId, errorId, error, describedBy, invalid: Boolean(error) };
+  return { id, labelId, hintId, errorId, error, describedBy, invalid: Boolean(error) };
 }

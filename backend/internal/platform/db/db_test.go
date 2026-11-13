@@ -11,6 +11,7 @@ import (
 )
 
 func TestOpenPingsDatabase(t *testing.T) {
+	t.Parallel()
 	pool, err := db.Open(context.Background(), config.DB{URL: dbtest.NewURL(t), MaxConns: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -22,6 +23,7 @@ func TestOpenPingsDatabase(t *testing.T) {
 }
 
 func TestOpenFailsFastOnUnreachableDB(t *testing.T) {
+	t.Parallel()
 	_, err := db.Open(context.Background(), config.DB{ //nolint:gosec // фиктивные тестовые креды, не боевой секрет
 		URL: "postgres://x:x@127.0.0.1:1/wf?sslmode=disable&connect_timeout=1", MaxConns: 1,
 	})
@@ -34,6 +36,7 @@ func TestOpenFailsFastOnUnreachableDB(t *testing.T) {
 // pgx маскирует пароль «best effort», и хвосты вида "PW" после пробела,
 // '@' в пароле или незакрытая кавычка проходят в текст ошибки как есть.
 func TestOpenDoesNotLeakPasswordOnParseError(t *testing.T) {
+	t.Parallel()
 	for _, url := range malformedURLsWithPassword {
 		_, err := db.Open(context.Background(), config.DB{URL: url, MaxConns: 1})
 		if err == nil {

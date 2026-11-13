@@ -53,6 +53,8 @@ tasks:
       - pnpm --filter @wf/contracts gen:web
       - pnpm --filter @wf/contracts gen:admin
       - pnpm --filter @wf/tokens build
+      # иконки артборда 14 → packages/icons/icons.json (дорисованное — icons.extra.json, руками)
+      - node design/tools/extract-icons.mjs
 
   contracts:breaking:
     desc: Ломающие изменения контрактов относительно базы (CONTRACTS_BASE, по умолчанию origin/main)
@@ -89,7 +91,7 @@ tasks:
   packages:ci:
     desc: Тесты, typecheck и линт границ общих пакетов и контрактов
     cmds:
-      - pnpm --filter @wf/config --filter @wf/tokens --filter @wf/i18n --filter @wf/contracts test
+      - pnpm --filter @wf/config --filter @wf/tokens --filter @wf/icons --filter @wf/i18n --filter @wf/contracts test
       - pnpm --filter @wf/i18n typecheck
       # пакеты не импортируют приложения — корневой eslint.config.mjs
       - pnpm run lint:packages
@@ -98,6 +100,10 @@ tasks:
     desc: Тест извлечения экранов из экспорта канваса
     # через pnpm — чтобы работал Node из devEngines, а не предустановленный на раннере
     cmds: ['pnpm run design:test']
+
+  scripts:test:
+    desc: Тесты скриптов репозитория (scripts/*.test.mjs — снимки админки и др.)
+    cmds: ['node --test "scripts/*.test.mjs"']
 
   secrets:
     desc: gitleaks по истории репозитория
@@ -114,12 +120,14 @@ tasks:
       - task: workflows
       - task: packages:ci
       - task: design:test
+      - task: scripts:test
       - task: backend:ci
       # ломающие правки контрактов против origin/main — как шаг job backend в CI (PR #12: выпадал локально)
       - task: contracts:breaking
       - task: admin:ci
-      # живой e2e админки: нужен Postgres (как backend:ci), порты 5174/5175, 18181/18182, 18026/11026;
-      # проекты по умолчанию chromium,webkit — нужен браузер WebKit (pnpm --filter @wf/admin exec
-      # playwright install chromium webkit), без него — WF_E2E_PROJECTS=chromium ./task ci (как в CI)
+      # живой e2e админки: нужен Postgres (как backend:ci), порты 5174/5175, 18181/18182/18183, 18026/11026, 18190;
+      # проекты по умолчанию chromium,webkit,prod (prod — собранная админка под настоящей CSP: скрипт сам
+      # делает vite build) — нужен браузер WebKit (pnpm --filter @wf/admin exec playwright install chromium
+      # webkit), без него — WF_E2E_PROJECTS=chromium,prod ./task ci (как в CI)
       - task: admin:e2e
       - task: web:ci

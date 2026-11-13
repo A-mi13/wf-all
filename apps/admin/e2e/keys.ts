@@ -22,16 +22,23 @@ export const KEYS = [
   'auth.setup.finish',
   // каркас
   'nav.logout',
+  'nav.home', // «Главная» — стартовая после входа (UF4.1)
   'nav.audit',
   'nav.approvals',
+  // палитра: кнопка «Искать везде», окно и поле (UF4.5)
+  'palette.open',
+  'palette.title',
+  'palette.input',
   // «Роли и доступ» → «Пригласить»
   'staff.invite.open',
   'staff.invite.email',
   'staff.invite.name',
   'staff.invite.role',
-  'staff.invite.submit',
+  'staff.invite.locale', // язык новичка (IL2)
+  'actions.submitForApproval', // «Отправить на подтверждение» — общее действие (словарь actions.*)
   'roles.owner',
   'roles.admin',
+  'roles.moderator',
   'roles.support',
   // «Подтверждения»
   'approvals.tabs.incoming',
@@ -47,23 +54,58 @@ export const KEYS = [
   'audit.actions.staff.invite_accepted',
   'audit.actions.platform.approval_requested',
   'audit.actions.platform.approval_executed',
+  // переключатель языка до входа (код языка — начало имени кнопки «EN — English»)
+  'locale.short.en',
+  'locale.en', // «English» — опция языка в приглашении
+  'pages.accept.title', // заголовок /accept: ссылка письма ?lang=en открывает экран на EN (IL2)
+  'flagsPage.label', // матрица флагов — первая виртуализация (столбцы) под настоящей CSP (G9-F)
+  // импорт GeoNames и активация города поверх настоящего воркера (план B, Task 23, geo.spec.ts)
+  'nav.imports',
+  'nav.cities',
+  'geo.imports.start',
+  'geo.imports.label',
+  'geo.imports.started', // «Импорт {country} поставлен в очередь» — тост постановки
+  'geo.imports.dialog.title',
+  'geo.imports.dialog.country',
+  'geo.imports.dialog.submit',
+  'geo.imports.job.label',
+  'geo.imports.job.states.completed',
+  'geo.imports.job.open_report',
+  'geo.imports.statuses.succeeded',
+  'geo.imports.report.label',
+  'geo.imports.report.groups.conflict',
+  'geo.imports.report.empty_group',
+  'geo.activate.open',
+  'geo.activate.title',
+  'geo.activate.places_label',
+  'geo.activate.choose',
+  'geo.activate.status',
+  'geo.activate.submit',
+  'geo.status.pilot',
+  'geo.city.facts.label',
+  'audit.actor.system',
+  'audit.actions.geo.import',
+  'audit.actions.geo.import_requested',
+  'audit.actions.geo.city_activated',
 ] as const;
 
 export type Key = (typeof KEYS)[number];
+export type Lang = 'ru' | 'en';
 
-const ru: unknown = JSON.parse(
-  readFileSync(new URL('../messages/ru.json', import.meta.url), 'utf8'),
-);
+const catalogs: Record<Lang, unknown> = {
+  ru: JSON.parse(readFileSync(new URL('../messages/ru.json', import.meta.url), 'utf8')),
+  en: JSON.parse(readFileSync(new URL('../messages/en.json', import.meta.url), 'utf8')),
+};
 
-// Текст ru по ключу (e2e идёт на ru: язык по умолчанию, у новых сотрудников — тоже). Ключ не из
-// KEYS — ошибка: поиск мимо стража сломался бы молча при переименовании.
-export function t(key: Key): string {
+// Текст по ключу (e2e идёт на ru: язык по умолчанию, у новых сотрудников — тоже; en — сценарий принятия
+// приглашения на EN). Ключ не из KEYS — ошибка: поиск мимо стража сломался бы молча при переименовании.
+export function t(key: Key, lang: Lang = 'ru'): string {
   if (!(KEYS as readonly string[]).includes(key)) {
     throw new Error(`e2e: ключа «${key}» нет в KEYS (e2e/keys.ts)`);
   }
   const v = key.split('.').reduce<unknown>((node, part) => {
     return node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined;
-  }, ru);
-  if (typeof v !== 'string' || v === '') throw new Error(`e2e: нет текста ru для «${key}»`);
+  }, catalogs[lang]);
+  if (typeof v !== 'string' || v === '') throw new Error(`e2e: нет текста ${lang} для «${key}»`);
   return v;
 }

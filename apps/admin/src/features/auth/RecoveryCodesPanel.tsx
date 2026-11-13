@@ -1,14 +1,13 @@
 import { useTranslations } from 'use-intl';
-import { Button } from '../../ui';
+import { Button, CopyButton } from '../../ui';
 import styles from './Auth.module.css';
-import { useCopy } from './copy';
 
 // Резервные коды — один раз после выдачи (настройка 2FA, перевыпуск в «Моём доступе»): список,
-// «Скопировать коды», «Скачать .txt». Коды живут только в памяти экрана, который их показал: панель
-// их не сохраняет и в сеть не отправляет (файл собирается на клиенте Blob-ом).
+// «Копировать: резервные коды» (CopyButton: буфер, при отказе — поле «вручную» рядом, тоже только в DOM),
+// «Скачать .txt». Коды живут только в памяти экрана, который их показал: панель их не сохраняет и в сеть не
+// отправляет (файл собирается на клиенте Blob-ом).
 export function RecoveryCodesPanel({ codes }: { codes: string[] }) {
   const t = useTranslations('auth.setup');
-  const copy = useCopy();
 
   const download = () => {
     const text = [t('file_header'), '', ...codes, ''].join('\n');
@@ -31,9 +30,7 @@ export function RecoveryCodesPanel({ codes }: { codes: string[] }) {
         ))}
       </ul>
       <div className={styles.row}>
-        <Button variant="secondary" onClick={() => void copy(codes.join('\n'))}>
-          {t('copy_codes')}
-        </Button>
+        <CopyButton value={codes.join('\n')} label={t('copy_codes')} display="text" />
         <Button variant="secondary" onClick={download}>
           {t('download')}
         </Button>

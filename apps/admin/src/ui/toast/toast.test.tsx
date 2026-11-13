@@ -1,7 +1,10 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { useRef, useState } from 'react';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { renderWithIntl } from '../../test/render';
 import { Button } from '../Button';
+import { Drawer } from '../overlay/Drawer';
+import { Popover } from '../popover/Popover';
 import { TOAST_HIDE_MS, useToast } from './index';
 
 function Harness({ undo }: { undo?: () => void }) {
@@ -95,6 +98,120 @@ test('наведение останавливает таймер успеха, �
   expect(screen.getByText(OK)).toBeInTheDocument();
   act(() => vi.advanceTimersByTime(1));
   expect(screen.queryByText(OK)).not.toBeInTheDocument();
+});
+
+// UF2b.6 (спека UI-фундамента §4.10, §4.8 m-h, n5): тост с «Отменить»
+function UndoHarness({ undo }: { undo: () => Promise<void> }) {
+  const toast = useToast();
+  const anchor = useRef<HTMLButtonElement>(null);
+  const [hint, setHint] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  return (
+    <>
+      <Button onClick={() => toast.success('Район в архиве', { undo })}>Архив</Button>
+      <Button onClick={() => toast.success('Флаг выключен', { undo })}>Флаг</Button>
+      <Button onClick={() => toast.success(OK)}>Успех</Button>
+      <Button onClick={() => toast.dismissUndo()}>Снять отмену</Button>
+      <Button onClick={() => setDrawer(true)}>Панель</Button>
+      <button ref={anchor} type="button" onClick={() => setHint(true)}>
+        Подсказка
+      </button>
+      <Popover anchor={anchor} open={hint} kind="hint" onClose={() => setHint(false)}>
+        Текст подсказки
+      </Popover>
+      <Drawer open={drawer} onClose={() => setDrawer(false)} title="Район">
+        <p>Тело</p>
+      </Drawer>
+    </>
+  );
+}
+
+describe('тост с «Отменить»', () => {
+  const setupUndo = (undo = vi.fn(async () => {})) => ({
+    undo,
+    ...renderWithIntl(<UndoHarness undo={undo} />),
+  });
+  const esc = () => fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+  const html = document.documentElement;
+
+  test('сам не исчезает; data-toast-open на корне, пока он на экране', () => {
+    setupUndo();
+    expect(html).not.toHaveAttribute('data-toast-open');
+    click('Архив');
+    act(() => vi.advanceTimersByTime(10 * 60_000));
+    expect(screen.getByText('Район в архиве')).toBeInTheDocument();
+    expect(html).toHaveAttribute('data-toast-open');
+    click('Закрыть уведомление');
+    expect(screen.queryByText('Район в архиве')).not.toBeInTheDocument();
+    expect(html).not.toHaveAttribute('data-toast-open');
+  });
+
+  test('обычный успех data-toast-open не ставит', () => {
+    setupUndo();
+    click('Успех');
+    expect(html).not.toHaveAttribute('data-toast-open');
+  });
+
+  test('«Отменить» вызывает отмену один раз и снимает тост', () => {
+    const { undo } = setupUndo();
+    click('Архив');
+    const button = screen.getByRole('button', { name: 'Отменить' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Район в архиве')).not.toBeInTheDocument();
+    expect(html).not.toHaveAttribute('data-toast-open');
+  });
+
+  test('новый тост с «Отменить» заменяет прежний', () => {
+    setupUndo();
+    click('Архив');
+    click('Флаг');
+    expect(screen.queryByText('Район в архиве')).not.toBeInTheDocument();
+    expect(screen.getByText('Флаг выключен')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Отменить' })).toHaveLength(1);
+  });
+
+  test('dismissUndo снимает тосты с отменой, остальные живут', () => {
+    setupUndo();
+    click('Успех');
+    click('Архив');
+    click('Снять отмену');
+    expect(screen.queryByText('Район в архиве')).not.toBeInTheDocument();
+    expect(screen.getByText(OK)).toBeInTheDocument();
+    expect(html).not.toHaveAttribute('data-toast-open');
+  });
+
+  test('Esc без оверлеев закрывает новейший тост', () => {
+    setupUndo();
+    click('Успех');
+    click('Архив');
+    esc();
+    expect(screen.queryByText('Район в архиве')).not.toBeInTheDocument();
+    expect(screen.getByText(OK)).toBeInTheDocument();
+  });
+
+  test('подсказка открыта + тост: Esc закрывает подсказку, тост остаётся; второй Esc — тост (m-h)', () => {
+    setupUndo();
+    click('Архив');
+    click('Подсказка');
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    esc();
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.getByText('Район в архиве')).toBeInTheDocument();
+    esc();
+    expect(screen.queryByText('Район в архиве')).not.toBeInTheDocument();
+  });
+
+  test('при открытом Drawer Esc закрывает панель, тост не трогает', () => {
+    setupUndo();
+    click('Архив');
+    click('Панель');
+    expect(screen.getByRole('dialog', { name: 'Район' })).toBeInTheDocument();
+    esc();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Район в архиве')).toBeInTheDocument();
+  });
 });
 
 test('новый тост не перезапускает таймер прежнего', () => {

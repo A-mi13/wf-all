@@ -34,6 +34,7 @@ func (e *env) accountID(email string) uuid.UUID {
 // письмо staff.bootstrapped каждому активному владельцу (выключенному и новой учётке — нет). Код —
 // рабочий.
 func TestOperatorBootstrap(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	a := e.addMember("owner.a@wf.example", memberOpts{Role: "owner"})
@@ -93,6 +94,7 @@ func TestOperatorBootstrap(t *testing.T) {
 
 // На пустой базе bootstrap не ставит ни одного письма staff.bootstrapped (только приглашение).
 func TestOperatorBootstrapEmpty(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	if _, err := e.app.OperatorBootstrap(context.Background(), "first@wf.example", "Первый"); err != nil {
 		t.Fatal(err)
@@ -108,6 +110,7 @@ func TestOperatorBootstrapEmpty(t *testing.T) {
 // OperatorInviteResend: новый код без паузы и проверки прав, назначение — последнего приглашения;
 // не invited — wrong_stage, нет — not_found; аудит от оператора.
 func TestOperatorInviteResend(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, old := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeReset)
@@ -130,7 +133,7 @@ func TestOperatorInviteResend(t *testing.T) {
 		if c == c2 {
 			continue
 		}
-		if _, err := e.app.AcceptInvite(ctx, m.Email, c, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+		if _, err := e.app.AcceptInvite(ctx, m.Email, c, newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 			t.Fatalf("прежний код %s: %v", c, err)
 		}
 	}
@@ -152,6 +155,7 @@ func TestOperatorInviteResend(t *testing.T) {
 
 // createInvited (для 8b): модератор с городами, автор — сотрудник; почта занята — ErrEmailTaken.
 func TestCreateInvited(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
@@ -198,6 +202,7 @@ func newRing(t *testing.T, prev ...string) (*keys.Ring, string) {
 // перешифрованы текущим ключом и открываются без старого; резервные коды на старом ключе
 // посчитаны; повторный rekey ничего не трогает.
 func TestRekey(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	// старое кольцо: сотрудники созданы с ним
@@ -260,6 +265,7 @@ func TestRekey(t *testing.T) {
 // перечисляются (id), остальные перешифровываются, итог (и счёт строк не на текущем ключе) — в отчёте
 // и аудите staff.rekeyed.
 func TestRekeyUnreadable(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	use := func(r *keys.Ring) {
@@ -298,6 +304,7 @@ func TestRekeyUnreadable(t *testing.T) {
 // Сверка ключей базы с кольцом (отказ 1 ревью 10c, I-r1): сколько разных key_id секретов staff (секреты TOTP,
 // НЕИСПОЛЬЗОВАННЫЕ резервные коды — как у rekey, живые коды приглашений) в кольце есть и сколько нет.
 func TestKeyCheck(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	check := func(name string, wantKnown, wantUnknown int) {
@@ -325,6 +332,7 @@ func TestKeyCheck(t *testing.T) {
 // K_old использованы входом (used_at; использованные rekey не трогает и не считает); после удаления K_old итог rekey — нули, и сверка ключей
 // команды тоже чиста — команда оператора не должна отказывать с верным кольцом.
 func TestKeyCheckAfterRotation(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	oldRing, oldKey := newRing(t)
@@ -357,6 +365,7 @@ func TestKeyCheckAfterRotation(t *testing.T) {
 // Пожелание ревью 10c: команда оператора с --keys-lost (ctx WithKeysLost) помечает свою запись аудита
 // keys_lost = true — разбор инцидента видит, какой код выпущен вопреки чужому кольцу; без флага пометки нет.
 func TestOperatorKeysLostAudited(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t) // сброс доступа гасит запросы — нужны подтверждения
 	ctx := context.Background()
 	lost := app.WithKeysLost(ctx)

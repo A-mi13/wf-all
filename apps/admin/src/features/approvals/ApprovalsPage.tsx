@@ -2,7 +2,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useTranslations } from 'use-intl';
 import { paths } from '../../app/paths';
 import { useSession } from '../../app/session';
-import { PageHeader, Tabs } from '../../ui';
+import { PageHeader, Tabs, useReducedMotion } from '../../ui';
 import { ApprovalsList } from './ApprovalsList';
 import { useIncomingApprovalsCount } from './queries';
 import { type ApprovalBox, parseApprovalsSearch } from './search';
@@ -19,6 +19,7 @@ export function ApprovalsPage() {
   const navigate = useNavigate();
   const box: ApprovalBox = parseApprovalsSearch(useSearch({ strict: false })).box ?? 'incoming';
   const incoming = useIncomingApprovalsCount();
+  const reduced = useReducedMotion();
   if (session.status !== 'active') return null;
 
   return (
@@ -36,6 +37,8 @@ export function ApprovalsPage() {
             to: paths.approvals,
             search: v === 'mine' ? { box: 'mine' } : {},
             replace: true,
+            // смена вкладки — View Transition (§4.15), «уменьшить движение» — без неё
+            viewTransition: !reduced,
           })
         }
       >

@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ICONS } from '@wf/icons';
 import { HttpResponse } from 'msw';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { components } from '../../api/gen/admin';
@@ -14,6 +15,7 @@ import {
   OLGA,
 } from '../../test/approvals';
 import { renderApp } from '../../test/app';
+import { stubMedia } from '../../test/media';
 import { CITY_OTHER, CITY_OWN, meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
 import { http, server } from '../../test/server';
@@ -41,19 +43,17 @@ function directory() {
 const page = () => screen.findByRole('heading', { level: 1, name: 'Подтверждения' });
 const table = (name: string) => screen.findByRole('table', { name });
 const rows = (t: HTMLElement) => within(t).getAllByRole('row').slice(1);
+// кнопки решения строки: «Копировать: id запроса» есть у любой строки (UF2a.10) — не решение
+const decisionButtons = (row: HTMLElement) =>
+  within(row)
+    .queryAllByRole('button')
+    .filter((b) => b.getAttribute('aria-label') !== 'Копировать: id запроса');
 const listCalls = (seen: { lists: URLSearchParams[]; background: (string | null)[] }) =>
   seen.lists.filter((_, i) => seen.background[i] === null);
 
+// Телефон — узкий экран и палец (спека UI-фундамента §3.2).
 function phone() {
-  vi.stubGlobal(
-    'matchMedia',
-    vi.fn((query: string) => ({
-      matches: query.includes('max-width'),
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    })),
-  );
+  stubMedia({ width: 390, pointer: 'coarse' });
 }
 
 describe('вкладки', () => {
@@ -94,6 +94,19 @@ describe('вкладки', () => {
     expect(await screen.findByText('Входящих нет')).toBeInTheDocument();
   });
 
+  // Пустая очередь — иллюстрация «свисток» (спека UI-фундамента §4.4, таблица «экран → иллюстрация»
+  // в design/README.md): у обеих вкладок экрана.
+  test.each([
+    ['/approvals', 'Входящих нет'],
+    ['/approvals?box=mine', 'Вы ничего не отправляли'],
+  ])('пусто (%s) — иллюстрация whistle', async (path, title) => {
+    approvalsServer({ incoming: [], mine: [] });
+    renderApp(path, { me: meOwner });
+    const block = (await screen.findByText(title)).parentElement!.parentElement!;
+    const svg = block.querySelector('svg[width="64"]');
+    expect(svg?.querySelector('path')).toHaveAttribute('d', ICONS.whistle.layers[0]?.d);
+  });
+
   test('«Показать ещё» — следующая страница по курсору', async () => {
     directory();
     const second = approval({
@@ -130,7 +143,8 @@ describe('карточка запроса', () => {
     expect(row).toHaveTextContent('модератор');
     expect(await within(row!).findByText(/Ставрополь/)).toBeInTheDocument();
     expect(row).toHaveTextContent('ждёт решения');
-    expect(row).toHaveTextContent(/до /);
+    // срок — RelativeTime (UF2a.10); срок фикстуры уже прошёл (сервер ещё не погасил) — «истёк …» (ревью m2)
+    expect(row).toHaveTextContent(/истёк /);
   });
 
   test('смена роли: цель по id (карточка сотрудника), было → стало', async () => {
@@ -213,7 +227,7 @@ describe('карточка запроса', () => {
     expect(system).toHaveTextContent('система');
     expect(system).toHaveTextContent('Причина: Инициатор изменился после запроса');
     // решённые — без кнопок
-    expect(within(failed!).queryByRole('button')).toBeNull();
+    expect(decisionButtons(failed!)).toEqual([]);
   });
 
   test('неизвестный код неудачи — общий текст, не сырой код и не пусто', async () => {
@@ -244,7 +258,7 @@ describe('подтвердить', () => {
     const [after] = rows(await table('Входящие запросы'));
     expect(after).toHaveTextContent('Иван П.');
     expect(after).toHaveTextContent('исполнен');
-    expect(within(after!).queryByRole('button')).toBeNull();
+    expect(decisionButtons(after!)).toEqual([]);
   });
 
   test('executed — учётки перечитаны (карточка цели)', async () => {
@@ -759,7 +773,7 @@ describe('отменить', () => {
     await userEvent.setup().click(within(rows(t)[0]!).getByRole('button', { name: 'Отменить' }));
     await screen.findByText('Запрос отменён.');
     await waitFor(() => expect(rows(t)[0]).toHaveTextContent('отменён'));
-    expect(within(rows(t)[0]!).queryByRole('button')).toBeNull();
+    expect(decisionButtons(rows(t)[0]!)).toEqual([]);
     release();
   });
 });
@@ -831,8 +845,12 @@ describe('отменить — ошибки', () => {
   });
 });
 
+// «Только с компьютера» — по устройству, а не ширине (спека UI-фундамента §3.2): 390 + палец —
+// пометка вместо решений по staff.*; 640 + мышь (масштаб на ноутбуке) — решения есть.
+const DESKTOP_ONLY = 'Выдача и снятие прав — только с компьютера';
+
 describe('телефон', () => {
-  test('решения по staff.* скрыты — «Выдача прав — только с компьютера», чтение есть', async () => {
+  test('решения по staff.* скрыты — пометка «только с компьютера», чтение есть', async () => {
     phone();
     directory();
     approvalsServer();
@@ -842,8 +860,106 @@ describe('телефон', () => {
     expect(row).toHaveTextContent('Иван П.');
     expect(within(row!).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
     expect(within(row!).queryByRole('button', { name: 'Отклонить' })).toBeNull();
-    expect(row).toHaveTextContent('Выдача прав — только с компьютера');
+    expect(row).toHaveTextContent(DESKTOP_ONLY);
   });
+
+  test('незнакомое будущее staff.future_action — тоже пометка (закрыто по умолчанию)', async () => {
+    phone();
+    directory();
+    approvalsServer({
+      // открытый enum: сервер новее клиента — действия нет в типе
+      incoming: [
+        approval({
+          ...INCOMING,
+          action: 'staff.future_action' as Approval['action'],
+          payload: { v: 1 },
+        }),
+      ],
+    });
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    expect(within(row!).queryByRole('button', { name: 'Подтвердить' })).toBeNull();
+    expect(row).toHaveTextContent(DESKTOP_ONLY);
+  });
+
+  test('640 px + мышь (масштаб на ноутбуке) — решения staff.* есть', async () => {
+    stubMedia({ width: 640, pointer: 'fine' });
+    directory();
+    approvalsServer();
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    expect(within(row!).getByRole('button', { name: 'Подтвердить' })).toBeInTheDocument();
+    expect(within(row!).getByRole('button', { name: 'Отклонить' })).toBeInTheDocument();
+    expect(row).not.toHaveTextContent(DESKTOP_ONLY);
+  });
+
+  // План B, Task 17: ограничение «только с компьютера» — для выдачи прав (staff.*); правила страны
+  // (geo.*) на телефоне решаются (спека §9.4).
+  test.each([
+    ['390 + палец', { width: 390, pointer: 'coarse' }],
+    ['640 + мышь', { width: 640, pointer: 'fine' }],
+  ] as const)('решения по geo.* доступны: %s', async (_, device) => {
+    stubMedia(device);
+    directory();
+    approvalsServer({ incoming: [GEO_RULES] });
+    renderApp('/approvals', { me: meOwner });
+    const [row] = rows(await table('Входящие запросы'));
+    expect(within(row!).getByRole('button', { name: 'Подтвердить' })).toBeInTheDocument();
+    expect(within(row!).getByRole('button', { name: 'Отклонить' })).toBeInTheDocument();
+    expect(row).not.toHaveTextContent(DESKTOP_ONLY);
+  });
+});
+
+// Правила и создание страны (план B, Task 17): «что будет сделано» — страна и «было → стало».
+const GEO_RULES = approval({
+  id: '0192f1e2-4c5d-7e6f-a081-0000000000a1',
+  action: 'geo.country_rules',
+  permission: 'geo.countries.rules',
+  payload: {
+    v: 1,
+    code: 'RU',
+    version: 7,
+    from: { currency: 'RUB' },
+    to: { currency: 'KZT' },
+    patch: { currency: 'KZT' },
+  },
+  requested_by: IGOR,
+});
+
+test('geo: правила страны и новая страна — в «что будет сделано», без «Кому»', async () => {
+  directory();
+  approvalsServer({
+    incoming: [
+      GEO_RULES,
+      approval({
+        id: '0192f1e2-4c5d-7e6f-a081-0000000000a2',
+        action: 'geo.country_create',
+        permission: 'geo.countries.rules',
+        payload: {
+          v: 1,
+          code: 'KZ',
+          currency: 'KZT',
+          default_locale: 'ru',
+          phone_prefix: '+7',
+          week_starts_on: 1,
+          min_signup_age: 14,
+          age_of_majority: 18,
+          is_enabled: false,
+          names: { ru: 'Казахстан' },
+        },
+        requested_by: IGOR,
+      }),
+    ],
+  });
+  renderApp('/approvals', { me: meOwner });
+  const [rules, create] = rows(await table('Входящие запросы'));
+  expect(rules).toHaveTextContent('Правила страны');
+  expect(within(rules!).getByText('Страна')).toBeInTheDocument();
+  expect(within(rules!).getByText('RU: валюта RUB → KZT')).toBeInTheDocument();
+  expect(within(rules!).queryByText('Кому')).toBeNull();
+  expect(create).toHaveTextContent('Новая страна');
+  expect(create).toHaveTextContent('новая страна KZ: KZT, ru, +7, неделя с пн, 14/18, выключена');
+  expect(within(create!).queryByText('Кому')).toBeNull();
 });
 
 // Общее устройство: сессия A истекла (401 → вход с return), за компьютер сел B. Кэш запросов живёт
@@ -995,4 +1111,32 @@ describe('фокус после решения', () => {
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     expect(screen.getByRole('tabpanel').contains(document.activeElement)).toBe(true);
   });
+});
+
+// План UF2a.10: id запроса — CopyButton «Копировать: id запроса»; запрошено и срок — RelativeTime (<time dateTime>).
+test('строка запроса: копирование id и время — <time dateTime>', async () => {
+  const a = approval({ id: '0192f1c4-aaaa-7b21-9c5d-0000000000a1', action: 'staff.invite' });
+  approvalsServer({ incoming: [a] });
+  renderApp('/approvals', { me: meOwner });
+  const [row] = rows(await table('Входящие запросы'));
+  await userEvent
+    .setup()
+    .click(within(row!).getByRole('button', { name: 'Копировать: id запроса' }));
+  expect(await navigator.clipboard.readText()).toBe(a.id);
+  expect(
+    [...row!.querySelectorAll('time[datetime]')].map((t) => t.getAttribute('datetime')),
+  ).toEqual([a.requested_at, a.expires_at]);
+});
+
+// Ревью UF2a/III-S m2: срок в будущем — «истекает через …»; прошёл, а запрос ещё pending (ExpireDue не дошёл,
+// вкладка открыта дольше срока) — «истёк …», а не «истекает 5 мин назад».
+test.each([
+  ['впереди', 2.5, /истекает через 2 дня/],
+  ['прошёл', -2.5, /истёк 2 дня назад/],
+] as const)('срок %s — %s', async (_, days, text) => {
+  const expires = new Date(Date.now() + days * 86_400_000).toISOString();
+  approvalsServer({ incoming: [approval({ expires_at: expires })] });
+  renderApp('/approvals', { me: meOwner });
+  const [row] = rows(await table('Входящие запросы'));
+  expect(row).toHaveTextContent(text);
 });

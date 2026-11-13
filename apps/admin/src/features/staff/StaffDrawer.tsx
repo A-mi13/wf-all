@@ -2,21 +2,26 @@ import { useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
-import { type ApiError, unwrap } from '../../api/client';
+import { type ApiError, isApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
+import { useLeaveGuard } from '../../app/leaveGuard';
 import type { components } from '../../api/gen/admin';
 import { can, type Decision, decide, type Me } from '../../app/permissions';
 import { useDateTime } from '../../i18n/format';
 import {
+  ActionGate,
   Button,
   ConfirmDialog,
+  CopyButton,
+  DataState,
   Drawer,
+  EmptyState,
   ErrorState,
   Form,
-  LoadingRows,
   PendingApprovalNotice,
   SelectField,
+  Skeleton,
   StatusChip,
   TextField,
   useCountdown,
@@ -28,7 +33,15 @@ import { useInvalidateApprovals } from '../approvals/queries';
 import { cityLabel, useCityNames } from './cities';
 import { CityField } from './CityField';
 import { ACCOUNTS_KEY, accountKey, accountSessionsKey, useRoleLabel } from './queries';
-import { ROLES, roleChangePermission, type StaffAccount, staffActions } from './roles';
+import {
+  DISABLE_PERMISSIONS,
+  RESET_PERMISSIONS,
+  ROLE_CHANGE_PERMISSIONS,
+  ROLES,
+  roleChangePermission,
+  type StaffAccount,
+  staffActions,
+} from './roles';
 import { useStaffStatus } from './status';
 import styles from './staff.module.css';
 
@@ -46,30 +59,72 @@ const ACTION_KEY = ['staff', 'account-action'] as const;
 // сбросить доступ (202), выключить (200/202). Разрушающие — ConfirmDialog с вводом почты цели как
 // она показана (IDN — A-форма xn--…) и причиной из списка с комментарием. После любой мутации
 // перечитываются список, карточка и сеансы (ACCOUNTS_KEY).
+// Панель — в адресе (?account=<id>, спека UI-фундамента §4.6): по глубокой ссылке и после F5 карточка
+// приходит запросом; 403 и 404 — одно состояние «Сотрудник не найден» (m10: «нет» и «не ваш» не различаются,
+// решает сервер). Открыли строкой списка — её данные до ответа (initial).
 export function StaffDrawer({
   me,
-  target,
+  id,
+  initial,
   onClose,
 }: {
   me: Me;
-  target: StaffAccount | null;
+  id: string | undefined;
+  initial?: StaffAccount;
   onClose: () => void;
 }) {
   const t = useTranslations('staff.drawer');
   const busy = useIsMutating({ mutationKey: ACTION_KEY }) > 0;
+  const api = useApi();
+  const card = useQuery({
+    queryKey: accountKey(id ?? ''),
+    queryFn: () =>
+      unwrap(api.GET('/v1/staff/accounts/{staffId}', { params: { path: { staffId: id ?? '' } } })),
+    placeholderData: initial,
+    enabled: id !== undefined,
+  });
+  const missing =
+    card.isError &&
+    isApiError(card.error) &&
+    (card.error.status === 403 || card.error.status === 404);
+  const a = missing ? undefined : card.data;
+  // Роль и города изменены, не отправлены (спека UI-фундамента §4.11): закрытие панели спрашивает Overlay.dirty,
+  // уход мимо панели (браузерная «Назад», меню) — useLeaveGuard формы; после «Уйти» — close с ignoreBlocker.
+  const [dirty, setDirty] = useState(false);
   return (
     <Drawer
-      open={target !== null}
+      open={id !== undefined}
       onClose={onClose}
-      title={target?.display_name ?? t('title')}
+      title={a?.display_name ?? t('title')}
       dismissible={!busy}
+      dirty={dirty}
     >
-      {target && <StaffPanel key={target.id} me={me} initial={target} />}
+      {missing ? (
+        <EmptyState title={t('not_found_title')} text={t('not_found_text')} />
+      ) : card.isError && !card.isPlaceholderData ? (
+        <ErrorState
+          error={card.error}
+          onRetry={() => void card.refetch()}
+          retrying={card.isFetching}
+        />
+      ) : a ? (
+        <StaffPanel key={a.id} me={me} initial={a} onDirty={setDirty} />
+      ) : (
+        <Skeleton.Form fields={4} />
+      )}
     </Drawer>
   );
 }
 
-function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
+function StaffPanel({
+  me,
+  initial,
+  onDirty,
+}: {
+  me: Me;
+  initial: StaffAccount;
+  onDirty: (dirty: boolean) => void;
+}) {
   const t = useTranslations('staff');
   const ta = useTranslations('account');
   const api = useApi();
@@ -131,7 +186,10 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
       <dl className={styles.facts}>
         <dt>{t('drawer.email')}</dt>
         {/* почта как хранится (A-форма xn--…) — её же вводят в подтверждении */}
-        <dd>{a.email}</dd>
+        <dd className={styles.copyable}>
+          {a.email}
+          <CopyButton value={a.email} label={t('drawer.copy_email')} />
+        </dd>
         <dt>{t('drawer.status')}</dt>
         <dd>
           <StatusChip tone={status.tone}>{status.text}</StatusChip>
@@ -175,6 +233,7 @@ function StaffPanel({ me, initial }: { me: Me; initial: StaffAccount }) {
           target={a}
           options={actions.roleOptions}
           onApproval={onApproval}
+          onDirty={onDirty}
         />
       )}
       {actions.sessions && <SessionsBlock target={a} />}
@@ -267,16 +326,19 @@ function ResendBlock({ target }: { target: StaffAccount }) {
   return (
     <Block title={t('title')}>
       <p className={styles.text}>{t('text')}</p>
-      <div className={styles.row}>
-        <Button
-          variant="secondary"
-          loading={resend.isPending}
-          disabled={limited}
-          onClick={() => resend.mutate()}
-        >
-          {limited ? t('wait', { seconds: wait.left }) : t('button')}
-        </Button>
-      </div>
+      {/* прав не выдаёт и не снимает — доступно и на телефоне (спека UI-фундамента §3.1) */}
+      <ActionGate permission="staff.invites.resend">
+        <div className={styles.row}>
+          <Button
+            variant="secondary"
+            loading={resend.isPending}
+            disabled={limited}
+            onClick={() => resend.mutate()}
+          >
+            {limited ? t('wait', { seconds: wait.left }) : t('button')}
+          </Button>
+        </div>
+      </ActionGate>
     </Block>
   );
 }
@@ -288,13 +350,16 @@ function RoleBlock({
   target,
   options,
   onApproval,
+  onDirty,
 }: {
   me: Me;
   target: StaffAccount;
   options: readonly string[];
   onApproval: () => void;
+  onDirty: (dirty: boolean) => void;
 }) {
   const t = useTranslations('staff.drawer.role_change');
+  const ta = useTranslations('actions');
   const api = useApi();
   const toast = useToast();
   const errorText = useErrorText();
@@ -309,6 +374,11 @@ function RoleBlock({
   // только снятие городов — revoke (сразу).
   const permission = roleChangePermission(target, next);
   const decision: Decision = permission ? decide(me, permission) : 'deny';
+  const dirty = form.formState.isDirty;
+  useLeaveGuard(dirty);
+  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  // блок снят (панель закрыта, роль больше не выдать) — снять признак
+  useEffect(() => () => onDirty(false), [onDirty]);
 
   const change = useStaffAction(
     async (v: RoleValues, key: string) => {
@@ -323,7 +393,11 @@ function RoleBlock({
     },
     {
       onSuccess: (o) => {
-        if (o === 'done') return void toast.success(t('saved'));
+        // сохранено: введённое — уже не потеря, до перечитывания карточки (RoleBlock пересоздаст version)
+        if (o === 'done') {
+          form.reset(form.getValues());
+          return void toast.success(t('saved'));
+        }
         // запрос ушёл на подтверждение: роль пока прежняя — форма тоже
         form.reset({ role: target.role, city_ids: target.city_ids });
         onApproval();
@@ -331,51 +405,55 @@ function RoleBlock({
     },
   );
 
+  // Смена роли и городов выдаёт или снимает права — на карманном устройстве пометка вместо формы
+  // (спека UI-фундамента §3.2); текущая роль и города видны выше, в сведениях панели.
   return (
     <Block title={t('title')}>
-      <Form
-        form={form}
-        onSubmit={(v) => (permission && decision !== 'deny' ? change.mutateAsync(v) : undefined)}
-        onError={(e) => {
-          if (toasted(e)) return true; // текст — общим тостом
-          if (e.code !== 'staff.city_not_found') return false;
-          form.setError(
-            'city_ids',
-            { type: 'server', message: errorText(e) },
-            { shouldFocus: true },
-          );
-          return true;
-        }}
-      >
-        <SelectField
-          name="role"
-          label={t('role')}
-          options={options.map((r) => ({ value: r, label: roleLabel(r) }))}
-        />
-        {role === 'moderator' && (
-          <CityField
-            name="city_ids"
-            label={t('cities')}
-            rules={{
-              validate: {
-                min_items: (v: unknown) =>
-                  form.getValues('role') !== 'moderator' || (Array.isArray(v) && v.length > 0),
-              },
-            }}
+      <ActionGate permission={ROLE_CHANGE_PERMISSIONS} compact>
+        <Form
+          form={form}
+          onSubmit={(v) => (permission && decision !== 'deny' ? change.mutateAsync(v) : undefined)}
+          onError={(e) => {
+            if (toasted(e)) return true; // текст — общим тостом
+            if (e.code !== 'staff.city_not_found') return false;
+            form.setError(
+              'city_ids',
+              { type: 'server', message: errorText(e) },
+              { shouldFocus: true },
+            );
+            return true;
+          }}
+        >
+          <SelectField
+            name="role"
+            label={t('role')}
+            options={options.map((r) => ({ value: r, label: roleLabel(r) }))}
           />
-        )}
-        {permission && decision === 'deny' && <p className={styles.text}>{t('denied')}</p>}
-        <div className={styles.row}>
-          <Button
-            type="submit"
-            variant={decision === 'needs_approval' ? 'secondary' : 'primary'}
-            loading={change.isPending}
-            disabled={!permission || decision === 'deny'}
-          >
-            {decision === 'needs_approval' ? t('request') : t('save')}
-          </Button>
-        </div>
-      </Form>
+          {role === 'moderator' && (
+            <CityField
+              name="city_ids"
+              label={t('cities')}
+              rules={{
+                validate: {
+                  min_items: (v: unknown) =>
+                    form.getValues('role') !== 'moderator' || (Array.isArray(v) && v.length > 0),
+                },
+              }}
+            />
+          )}
+          {permission && decision === 'deny' && <p className={styles.text}>{t('denied')}</p>}
+          <div className={styles.row}>
+            <Button
+              type="submit"
+              variant={decision === 'needs_approval' ? 'secondary' : 'primary'}
+              loading={change.isPending}
+              disabled={!permission || decision === 'deny'}
+            >
+              {decision === 'needs_approval' ? ta('submitForApproval') : ta('save')}
+            </Button>
+          </div>
+        </Form>
+      </ActionGate>
     </Block>
   );
 }
@@ -414,48 +492,51 @@ function SessionsBlock({ target }: { target: StaffAccount }) {
     },
   );
 
-  let body: ReactNode;
-  if (sessions.isPending) body = <LoadingRows rows={2} />;
-  else if (sessions.isError)
-    body = (
-      <ErrorState
-        error={sessions.error}
-        onRetry={() => void sessions.refetch()}
-        retrying={sessions.isFetching}
-      />
-    );
-  else if (sessions.data.items.length === 0) body = <p className={styles.text}>{t('empty')}</p>;
-  else
-    body = (
-      // role="list": Safari снимает семантику списка с list-style: none
-      <ul role="list" aria-label={t('label')} className={styles.sessions}>
-        {sessions.data.items.map((s) => {
-          const l = label(s);
-          return (
-            <li key={s.id} className={styles.session}>
-              <strong className={styles.sessionDevice}>{l.device}</strong>
-              {l.details}
-            </li>
-          );
-        })}
-      </ul>
-    );
+  // загрузка, ошибка, 403, нет сети — DataState блока панели (скелетон по форме списка)
+  const body = (
+    <DataState
+      query={sessions}
+      scope="block"
+      skeleton={<Skeleton.Table columns={1} rows={2} head={false} />}
+      isEmpty={(d) => d.items.length === 0}
+      empty={<p className={styles.text}>{t('empty')}</p>}
+    >
+      {(data) => (
+        // role="list": Safari снимает семантику списка с list-style: none
+        <ul role="list" aria-label={t('label')} className={styles.sessions}>
+          {data.items.map((s) => {
+            const l = label(s);
+            return (
+              <li key={s.id} className={styles.session}>
+                <strong className={styles.sessionDevice}>{l.device}</strong>
+                {l.details}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </DataState>
+  );
 
   return (
     <Block title={t('title')}>
       {body}
-      <div className={styles.row}>
-        <Button
-          variant="danger-outline"
-          disabled={!sessions.data || sessions.data.items.length === 0}
-          onClick={() => {
-            revokeAll.reset();
-            setConfirming(true);
-          }}
-        >
-          {t('revoke_all')}
-        </Button>
-      </div>
+      {/* защитное действие, прав не снимает: на телефоне доступно, в том числе у цели-админа (право
+          самого действия — staff.sessions.revoke, а не grant_elevated блока; спека UI-фундамента §3.2, m5) */}
+      <ActionGate permission="staff.sessions.revoke">
+        <div className={styles.row}>
+          <Button
+            variant="danger-outline"
+            disabled={!sessions.data || sessions.data.items.length === 0}
+            onClick={() => {
+              revokeAll.reset();
+              setConfirming(true);
+            }}
+          >
+            {t('revoke_all')}
+          </Button>
+        </div>
+      </ActionGate>
       <ConfirmDialog
         open={confirming}
         onClose={() => setConfirming(false)}
@@ -496,11 +577,14 @@ function DestructiveBlock({
   return (
     <Block title={t('title')}>
       <p className={styles.text}>{t('text')}</p>
-      <div className={styles.row}>
-        <Button variant="danger-outline" onClick={() => setOpen(true)}>
-          {label}
-        </Button>
-      </div>
+      {/* снимает права — на карманном устройстве пометка (спека UI-фундамента §3.2) */}
+      <ActionGate permission={kind === 'reset' ? RESET_PERMISSIONS : DISABLE_PERMISSIONS} compact>
+        <div className={styles.row}>
+          <Button variant="danger-outline" onClick={() => setOpen(true)}>
+            {label}
+          </Button>
+        </div>
+      </ActionGate>
       {open && (
         <DestructiveDialog
           kind={kind}
@@ -530,9 +614,13 @@ function DestructiveDialog({
   const t = useTranslations(`staff.drawer.${kind}`);
   const tc = useTranslations('staff.drawer');
   const tr = useTranslations('reasons');
+  const ta = useTranslations('actions');
   const api = useApi();
   const toast = useToast();
   const form = useForm<DestructiveValues>({ defaultValues: { reason: '', comment: '' } });
+  // Причина и комментарий — ввод: уход мимо диалога (браузерная «Назад», меню) спрашивает. Свой dirty у
+  // ConfirmDialog нет (§4.11): Esc и «Отмена» закрывают диалог без вопроса.
+  useLeaveGuard(form.formState.isDirty);
   const action = useStaffAction(
     async (v: DestructiveValues, key: string) => {
       const reason = REASONS.find((r) => r === v.reason);
@@ -568,10 +656,10 @@ function DestructiveDialog({
       : [t('consequences.role'), t('consequences.sessions'), t('consequences.history')];
   const confirmLabel =
     kind === 'reset'
-      ? t('confirm')
+      ? ta('submitForApproval')
       : decision === 'allow'
         ? t('confirm_now')
-        : t('confirm_request');
+        : ta('submitForApproval');
 
   return (
     <ConfirmDialog

@@ -83,6 +83,10 @@ var ErrInitiatorChanged = fmt.Errorf("approvals: инициатор измени
 // admin-api (10c) обязана зарегистрировать проверку (staff) до старта сервера — Registry.Validate.
 var errNoInitiatorCheck = errors.New("approvals: проверка инициатора не зарегистрирована (Registry.SetInitiatorCheck)")
 
+// errNoActorLock — действие с LockActors без хука замка акторов не исполняется (fail-closed), Validate — отказ
+// сборки (R21).
+var errNoActorLock = errors.New("approvals: хук замка акторов не зарегистрирован (Registry.SetActorLock)")
+
 // failure — бизнес-отказ исполнителя или проверки инициатора (Fail).
 type failure struct{ err error }
 
@@ -126,6 +130,10 @@ type Action struct {
 	// Target — цель (сотрудник; uuid.Nil — цели ещё нет) и город запроса (uuid.Nil — без города).
 	// nil — ни цели, ни города.
 	Target func(payload json.RawMessage) (targetID, cityID uuid.UUID)
+	// LockActors — действие модуля, который сам не берёт замки учёток инициатора и подтверждающего (всё, кроме
+	// staff.*): платформа зовёт хук ActorLock в транзакции подтверждения (R21). У staff.* — false: их execLocks
+	// берёт замок владельцев ДО учёток, двойной замок нарушил бы этот порядок.
+	LockActors bool
 }
 
 // InitiatorCheck — проверка инициатора a.RequestedBy в транзакции подтверждения (регистрирует staff).
@@ -139,11 +147,20 @@ type Action struct {
 // failed (initiator_changed), наружу ErrStale. Иная ошибка — сбой (откат, запрос pending).
 type InitiatorCheck func(ctx context.Context, tx pgx.Tx, a Approval) error
 
+// ActorLock — хук замка акторов для действий с LockActors (R21, регистрирует staff): в транзакции подтверждения
+// после замка строки запроса и проверки инициатора, до savepoint исполнителя, берёт FOR SHARE учёток инициатора
+// и подтверждающего по возрастанию id (порядок «строка approvals → учётки» — как у staff) и перепроверяет их под
+// замком. Инициатор изменился — Fail(ErrInitiatorChanged): failed (initiator_changed), наружу ErrStale;
+// подтверждающий выключен, сменил роль или сессия погашена — обычная ошибка (откат всего, запрос pending).
+// approver — копия принципала с подписью решения (Label = decided_by_label).
+type ActorLock func(ctx context.Context, tx pgx.Tx, a Approval, approver *auth.Staff) error
+
 // Registry — действия «вдвоём» и проверка инициатора. Заполняется при сборке admin-api.
 type Registry struct {
 	mu      sync.RWMutex
 	actions map[string]Action
 	check   InitiatorCheck
+	lock    ActorLock
 }
 
 // NewRegistry — пустой реестр.
@@ -187,6 +204,19 @@ func (r *Registry) SetInitiatorCheck(c InitiatorCheck) {
 	r.check = c
 }
 
+// SetActorLock — хук замка акторов (регистрирует staff). Второй вызов или nil — паника.
+func (r *Registry) SetActorLock(f ActorLock) {
+	if f == nil {
+		panic("approvals: пустой хук замка акторов")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lock != nil {
+		panic("approvals: хук замка акторов уже зарегистрирован")
+	}
+	r.lock = f
+}
+
 // Actions — имена действий по алфавиту (страж подписей approvals.actions.<действие>, D21).
 func (r *Registry) Actions() []string {
 	r.mu.RLock()
@@ -199,13 +229,21 @@ func (r *Registry) Actions() []string {
 	return names
 }
 
-// Validate — реестр готов к подтверждениям: есть действия — есть и проверка инициатора. Сборка
-// admin-api (10c) зовёт после регистрации модулей, до старта сервера.
+// Validate — реестр готов к подтверждениям: есть действия — есть и проверка инициатора; есть действие с
+// LockActors — есть и хук замка акторов. Сборка admin-api (10c) зовёт после регистрации модулей, до старта
+// сервера.
 func (r *Registry) Validate() error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if len(r.actions) > 0 && r.check == nil {
 		return errNoInitiatorCheck
+	}
+	if r.lock == nil {
+		for _, a := range r.actions {
+			if a.LockActors {
+				return fmt.Errorf("%w: действие %s", errNoActorLock, a.Name)
+			}
+		}
 	}
 	return nil
 }
@@ -221,6 +259,12 @@ func (r *Registry) initiatorCheck() InitiatorCheck {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.check
+}
+
+func (r *Registry) actorLock() ActorLock {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lock
 }
 
 // checkPermission — право из каталога perm, не черновое.
@@ -259,4 +303,18 @@ type Approval struct {
 type Meta struct {
 	IP        netip.Addr
 	UserAgent string
+}
+
+type metaKey struct{}
+
+// WithMeta — Meta запроса в ctx операции: кладёт strict-middleware admin-api (requestMeta, план B R20) для операций
+// платформы и модулей, у которых нет своего Middleware (geo); модуль читает MetaFrom.
+func WithMeta(ctx context.Context, m Meta) context.Context {
+	return context.WithValue(ctx, metaKey{}, m)
+}
+
+// MetaFrom — Meta запроса из ctx (WithMeta); нет — нулевая (NULL в журнале).
+func MetaFrom(ctx context.Context) Meta {
+	m, _ := ctx.Value(metaKey{}).(Meta)
+	return m
 }

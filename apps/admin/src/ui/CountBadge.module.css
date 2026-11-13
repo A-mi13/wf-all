@@ -17,7 +17,7 @@
 
 .active {
   background: var(--wf-color-chip-accent-bg);
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 /* Только для читалки экрана */

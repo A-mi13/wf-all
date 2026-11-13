@@ -28,7 +28,11 @@ type ListParams struct {
 	ActionPrefix string
 	ObjectType   string
 	ObjectID     uuid.UUID
-	From, To     time.Time
+	// ObjectIDs — объект из списка (R3: «кто запустил» для страницы задач импорта одним запросом), вместе с
+	// ObjectType. nil — без фильтра; пустой, но не nil — ни одной записи (как CityIDs: пустая страница не
+	// получает весь журнал).
+	ObjectIDs []uuid.UUID
+	From, To  time.Time
 	// CityIDs == nil — без ограничения городом (глобальная роль). CityIDs != nil — журнал
 	// модератора: записи этих городов (scope_city_id) и его собственные (actor_staff_id =
 	// OwnStaffID); пустой, но не nil срез — только собственные. Скоуп выбирает вызывающий по праву
@@ -69,6 +73,8 @@ func List(ctx context.Context, q auditdb.DBTX, p ListParams) (items []Record, ne
 		ActionExact:  exact,
 		ObjectType:   optString(p.ObjectType),
 		ObjectID:     optUUID(p.ObjectID),
+		ByObjectIds:  p.ObjectIDs != nil,
+		ObjectIds:    p.ObjectIDs,
 		FromAt:       optTime(p.From),
 		ToAt:         optTime(p.To),
 		Scoped:       p.CityIDs != nil,

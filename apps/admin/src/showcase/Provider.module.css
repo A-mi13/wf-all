@@ -1,0 +1,9 @@
+/* Холст истории: фон, цвет и шрифт админки (у приложения их задают AppShell и AuthLayout, не body).
+   display: flow-root — поля детей не выпадают наружу; снимок CI — корень истории (data-showcase-root). */
+.canvas {
+  display: flow-root;
+  padding: var(--wf-space-4);
+  background: var(--wf-color-bg);
+  color: var(--wf-color-text);
+  font-family: var(--wf-font-body);
+}

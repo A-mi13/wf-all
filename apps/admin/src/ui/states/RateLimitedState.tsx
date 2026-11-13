@@ -17,6 +17,7 @@ export function RateLimitedState({
   page?: boolean;
 }) {
   const t = useTranslations('states.rate_limited');
+  const ta = useTranslations('actions');
   const left = useCountdown(retryAfter ?? 0);
   return (
     <StateBlock
@@ -32,7 +33,7 @@ export function RateLimitedState({
           </Button>
         ) : (
           <Button variant="secondary" onClick={onRetry}>
-            {t('retry')}
+            {ta('retry')}
           </Button>
         )
       }

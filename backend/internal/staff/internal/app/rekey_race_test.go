@@ -14,6 +14,7 @@ import (
 // секрета) перестало бы совпадать с базой. Барьер: чужая транзакция держит строку staff_mfa, MFASetup
 // встаёт за ней первым, Rekey — вторым; после освобождения в базе — секрет, который выдал MFASetup.
 func TestRekeyConcurrentMFASetup(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	oldRing, oldKey := newRing(t)

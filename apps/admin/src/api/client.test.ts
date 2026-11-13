@@ -161,6 +161,39 @@ describe('Problem → ApiError', () => {
     expect(err).toMatchObject({ status: 400, code: 'staff.mfa_invalid', attemptsLeft: 0 });
   });
 
+  // План B, Task 20 (I-2): 409 geo.import_in_progress несёт id задачи страны — экран показывает её строку.
+  const start = () =>
+    createApi(TEST_API).POST('/v1/geo/imports', {
+      params: { header: { 'Idempotency-Key': KEY } },
+      body: { country: 'RU' },
+    });
+
+  test('job_id из Problem — ApiError.jobId', async () => {
+    server.use(
+      http.post('/v1/geo/imports', ({ response }) =>
+        response.untyped(problem(409, 'geo.import_in_progress', { job_id: 1842 })),
+      ),
+    );
+    const err = await caught(start());
+    expect(err).toMatchObject({ status: 409, code: 'geo.import_in_progress', jobId: 1842 });
+  });
+
+  test.each([
+    ['поля нет', {}],
+    ['не число', { job_id: '1842' }],
+    ['не целое', { job_id: 18.5 }],
+    ['отрицательное', { job_id: -1 }],
+  ])('job_id: %s — jobId undefined', async (_, extra) => {
+    server.use(
+      http.post('/v1/geo/imports', ({ response }) =>
+        response.untyped(problem(409, 'geo.import_in_progress', extra as Record<string, unknown>)),
+      ),
+    );
+    const err = await caught(start());
+    expect(err.code).toBe('geo.import_in_progress');
+    expect(err.jobId).toBeUndefined();
+  });
+
   test('ответ не Problem (прокси отдал HTML) — код internal со статусом ответа', async () => {
     server.use(
       http.get('/v1/staff/me', ({ response }) =>

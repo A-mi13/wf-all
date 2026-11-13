@@ -6,11 +6,115 @@ package geodb
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type Querier interface {
+	// admin1 источника: ascii-название и название на языке страны (выбрано импортом по §3.4; пусто — нет).
+	ActivateAdmin1(ctx context.Context, arg ActivateAdmin1Params) (ActivateAdmin1Row, error)
+	// Названия нового города по языкам (массивы одной длины).
+	ActivateCityNames(ctx context.Context, arg ActivateCityNamesParams) error
+	// На месте уже есть город (быстрый ответ 409; гонку ловит cities_geoname_id_key).
+	ActivateCityOnPlace(ctx context.Context, geonameID int64) (bool, error)
+	// Страна активации по коду: id, язык, включена ли.
+	ActivateCountry(ctx context.Context, code string) (ActivateCountryRow, error)
+	// Активация сериализуется со сверкой импорта страны (ревью G5 I1-r1): разделяемый advisory-замок транзакции
+	// (класс, страна) первым замком сценария — активации друг друга не ждут, сверка страны (ImportReconcileLock,
+	// эксклюзивный) ждёт их и наоборот. Ключ — app.countryLockKey.
+	ActivateCountryLock(ctx context.Context, arg ActivateCountryLockParams) error
+	// Новый город из места: точка — из источника, версия 1, время — часов сценария. 0 строк — место удалено
+	// параллельным импортом после ActivatePlace (geo.place_not_found, а не FK на city_names).
+	ActivateInsertCity(ctx context.Context, arg ActivateInsertCityParams) (int64, error)
+	// Новый регион страны с кодом admin1; уже есть (в том числе параллельная активация вставила и закоммитила) —
+	// ни одной строки, без 23505 (regions_country_admin1_key — частичный уникальный индекс).
+	ActivateInsertRegion(ctx context.Context, arg ActivateInsertRegionParams) (uuid.UUID, error)
+	// ---------------------------------------------------------------------------
+	// Активация города (activateGeoCity, Task 10; спека geo §5.3, R13). Всё — в одной транзакции сценария.
+	// ---------------------------------------------------------------------------
+	// Место источника для активации; missing — пропало из источника (missing_since не NULL, R13).
+	ActivatePlace(ctx context.Context, geonameID int64) (ActivatePlaceRow, error)
+	// Названия места по языкам (выбраны импортом по §3.4).
+	ActivatePlaceNames(ctx context.Context, geonameID int64) ([]ActivatePlaceNamesRow, error)
+	// Регион страны по коду admin1.
+	ActivateRegionByAdmin1(ctx context.Context, arg ActivateRegionByAdmin1Params) (uuid.UUID, error)
+	// Названия нового региона: строка языка страны — каноническое имя, прочие — из admin1 источника.
+	ActivateRegionNames(ctx context.Context, arg ActivateRegionNamesParams) error
+	// Регион из запроса — только своей страны; ascii-название admin1 региона (для суффикса slug), если есть.
+	ActivateRegionOfCountry(ctx context.Context, arg ActivateRegionOfCountryParams) (ActivateRegionOfCountryRow, error)
+	// Город есть (любой статус и страна) — 404 geo.city_not_found у районов.
+	AdminCityExists(ctx context.Context, id uuid.UUID) (bool, error)
+	// Названия города по всем языкам (GeoCityDetails.names).
+	AdminCityNames(ctx context.Context, cityID uuid.UUID) ([]AdminCityNamesRow, error)
+	// История адресов города, новые сверху (GeoCityDetails.slug_history).
+	AdminCitySlugHistory(ctx context.Context, cityID uuid.UUID) ([]AdminCitySlugHistoryRow, error)
+	// Страна есть в справочнике (включённая или нет) — 404 geo.country_not_found у регионов.
+	AdminCountryExists(ctx context.Context, code string) (bool, error)
+	// Названия всех стран по всем языкам (GeoCountry.names).
+	AdminCountryNames(ctx context.Context) ([]AdminCountryNamesRow, error)
+	// Карточка города админки (getGeoCity): без фильтра видимости страны; canonical_locale — язык страны.
+	AdminGetCity(ctx context.Context, arg AdminGetCityParams) (AdminGetCityRow, error)
+	// Страна с правилами по коду для ответа правки (как строка AdminListCountries).
+	AdminGetCountry(ctx context.Context, arg AdminGetCountryParams) (AdminGetCountryRow, error)
+	// Строка журнала импорта с отчётом сверки (getGeoImport).
+	AdminGetImport(ctx context.Context, id uuid.UUID) (AdminGetImportRow, error)
+	// Города админки (listGeoCities): все статусы и страны (country_enabled в ответе), фильтры и порядок — как у
+	// публичного ListCities (ранг статуса, population DESC, id) плюс region_id; uuid.Nil в region_id — без
+	// фильтра (has_region). districts_count — районы без архивных.
+	AdminListCities(ctx context.Context, arg AdminListCitiesParams) ([]AdminListCitiesRow, error)
+	// Все страны по коду: правила, название на локали (иначе каноническое), число городов pilot/live.
+	AdminListCountries(ctx context.Context, locale string) ([]AdminListCountriesRow, error)
+	// Районы города включая архивные: действующие по названию, затем архивные по названию.
+	AdminListDistricts(ctx context.Context, cityID uuid.UUID) ([]AdminListDistrictsRow, error)
+	// Журнал импортов, новые сверху (started_at DESC, id DESC); пустой country и has_job false — без фильтра;
+	// курсор — строго после (after_started_at, after_id) в этом порядке.
+	AdminListImports(ctx context.Context, arg AdminListImportsParams) ([]AdminListImportsRow, error)
+	// Запросы админки geo (план B, Task 9–10; спека сотрудников §6, спека geo §4.1, §5.3). Отдельно от
+	// публичных cities.sql: админка видит все статусы и страны, в том числе выключенные (без co.is_enabled).
+	// Исполняет admin-api под ролью admin (grants.sql: SELECT на справочник и источник, запись справочника).
+	// Перед «||» — sqlc.arg(x), не @x (см. cities.sql).
+	// Места источника для активации (listGeoPlaces). Страна места — по §4.1: заведено городом — страна
+	// города (в том числе переопределённая), иначе страна источника; её нет в справочнике — код источника
+	// вместо названия. Название: запрошенная локаль → язык страны → name источника; регион: у заведённого —
+	// регион города, иначе admin1 источника (локаль → язык страны → ascii_name); пустая строка — нет.
+	// пустой q_prefix — без поиска (уже нормализован normalize_text); пустой country — без фильтра (по стране места).
+	// Порядок: population по убыванию, geoname_id; курсор — строго после (after_population, after_geoname_id).
+	AdminListPlaces(ctx context.Context, arg AdminListPlacesParams) ([]AdminListPlacesRow, error)
+	// Регионы страны по названию на языке ответа (иначе каноническое), затем id.
+	AdminListRegions(ctx context.Context, arg AdminListRegionsParams) ([]AdminListRegionsRow, error)
+	// Места-кандидаты отчёта сверки: название и регион на языке ответа (иначе язык страны источника, затем
+	// name/ascii_name источника), население. Пропавших из таблицы мест (удалены следующим импортом) нет в ответе.
+	AdminPlacesByIDs(ctx context.Context, arg AdminPlacesByIDsParams) ([]AdminPlacesByIDsRow, error)
+	// Названия регионов страны по всем языкам (GeoRegion.names).
+	AdminRegionNames(ctx context.Context, code string) ([]RegionName, error)
+	// Страна города без замка — ключ разделяемого замка страны до замка строки (linkGeoCity).
+	CityCountryCode(ctx context.Context, id uuid.UUID) (string, error)
+	// ---------------------------------------------------------------------------
+	// Правка города (updateGeoCity, Task 11; спека geo §5.2, R10, R11) и ручная привязка (linkGeoCity, R14).
+	// ---------------------------------------------------------------------------
+	// Город под замком правки: текущие значения для сравнения «изменилось ли», язык страны (каноническое имя).
+	CityForUpdate(ctx context.Context, id uuid.UUID) (CityForUpdateRow, error)
+	// ---------------------------------------------------------------------------
+	// Страны (createGeoCountry, updateGeoCountry и исполнители geo.country_create, geo.country_rules, Task 13;
+	// спека geo §5.2, R12, R25). Правила страны — всегда вдвоём (решение пользователя 27.10).
+	// ---------------------------------------------------------------------------
+	// Страна под замком правки по коду: текущие правила для сравнения «меняется ли» и итоговой проверки.
+	CountryForUpdate(ctx context.Context, code string) (CountryForUpdateRow, error)
+	// Страна под замком исполнителя по id (из payload запроса).
+	CountryForUpdateByID(ctx context.Context, id uuid.UUID) (CountryForUpdateByIDRow, error)
+	// Названия страны по языкам.
+	CountryNamesOf(ctx context.Context, countryID uuid.UUID) ([]CountryNamesOfRow, error)
+	// Перевод города удалён (строку языка страны сценарий не удаляет).
+	DeleteCityName(ctx context.Context, arg DeleteCityNameParams) error
+	// Перевод страны удалён (строку языка страны сценарий не удаляет).
+	DeleteCountryName(ctx context.Context, arg DeleteCountryNameParams) error
+	// Свой прежний адрес возвращается текущим — строка истории удаляется.
+	DeleteOwnSlugHistory(ctx context.Context, arg DeleteOwnSlugHistoryParams) (int64, error)
+	// Район города под замком правки; район другого города — ни одной строки (404 без раскрытия существования).
+	DistrictForUpdate(ctx context.Context, arg DistrictForUpdateParams) (DistrictForUpdateRow, error)
+	// Какие из id есть в cities (все статусы и страны; проверка городов флага, R19).
+	ExistingCityIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 	// Настройки города для других модулей (§7): без фильтра видимости — country_enabled в ответе.
 	GetCitySettings(ctx context.Context, id uuid.UUID) (GetCitySettingsRow, error)
 	// Город с правилами страны (CityDetails без районов); страна выключена или города нет — 0 строк.
@@ -33,6 +137,8 @@ type Querier interface {
 	// Импорт GeoNames (спека geo §5.4): журнал geonames_imports, источник geonames_*, сверка
 	// заведённых городов. Исполняет воркер (роль worker, grants.sql §3.8).
 	ImportCountry(ctx context.Context, code string) (ImportCountryRow, error)
+	// Время базы (now() транзакции) — опора часов команды оператора (app.OperatorClock, ревью G7 m9).
+	ImportDBNow(ctx context.Context) (time.Time, error)
 	ImportDeleteAdmin1Names(ctx context.Context, countryCode string) error
 	ImportDeleteGone(ctx context.Context, arg ImportDeleteGoneParams) (int64, error)
 	ImportDeletePlaceNames(ctx context.Context, geonameID []int64) error
@@ -45,16 +151,34 @@ type Querier interface {
 	ImportFindOwnRunning(ctx context.Context, arg ImportFindOwnRunningParams) (uuid.UUID, error)
 	ImportInsertAdmin1Names(ctx context.Context, arg ImportInsertAdmin1NamesParams) (int64, error)
 	ImportInsertPlaceNames(ctx context.Context, arg ImportInsertPlaceNamesParams) (int64, error)
+	// Отмены одной задачи импорта сериализуются (K6): эксклюзивный advisory-замок транзакции (класс, id задачи по
+	// модулю 2^31 − 1 — совпадение ключей двух задач только заставит отмены подождать друг друга).
+	ImportJobCancelLock(ctx context.Context, arg ImportJobCancelLockParams) error
 	// Мест в прошлом успешном импорте страны — база порога 90 % (шаг 4).
 	ImportLastSucceededPlaces(ctx context.Context, countryCode string) (int32, error)
+	// Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id,
+	// начатые не раньше not_before (created_at задачи − допуск часов, ревью G7 m5): после сброса последовательности River
+	// id повторяется, и строка прежней задачи с тем же id карточке новой не достаётся.
+	ImportLatestByJob(ctx context.Context, arg ImportLatestByJobParams) (uuid.UUID, error)
 	ImportLinkCity(ctx context.Context, arg ImportLinkCityParams) (int64, error)
 	// Региону, найденному по названию, — код admin1 (если пуст и не занят другим регионом страны:
 	// уникальность regions_country_admin1_key).
 	ImportLinkRegion(ctx context.Context, arg ImportLinkRegionParams) (int64, error)
 	// Пропали из источника, но на них ссылается город: остаются с отметкой и попадают в отчёт (шаг 4).
 	ImportMarkMissing(ctx context.Context, arg ImportMarkMissingParams) ([]int64, error)
+	// Сверка страны исключает активации городов этой страны (ревью G5 I1-r1): эксклюзивный advisory-замок транзакции
+	// (класс, страна) — ключ app.countryLockKey; активация берёт тот же ключ разделяемым (ActivateCountryLock).
+	ImportReconcileLock(ctx context.Context, arg ImportReconcileLockParams) error
+	// Недостающие переводы региона из admin1 — только если у региона именно этот код (ревью G6 I1): код
+	// выставлен этой транзакцией (ImportLinkRegion) или уже совпадал. Другой код или код, отданный другому
+	// региону, — 0 строк.
 	ImportRegionNamesFromAdmin1(ctx context.Context, arg ImportRegionNamesFromAdmin1Params) (int64, error)
 	ImportRestart(ctx context.Context, arg ImportRestartParams) error
+	// Постановка и отмена импорта из админки (план B, Task 14; роль admin).
+	// Свежая строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+	// оператора, job_id в ответе нет). Зависшая (started_at < stale_before — граница ImportFailStale) не в счёт (ревью G7
+	// I1): процесс убит без итога, её закроет begin воркера поставленной задачи.
+	ImportRunningJob(ctx context.Context, arg ImportRunningJobParams) (*int64, error)
 	ImportStart(ctx context.Context, arg ImportStartParams) error
 	ImportSucceed(ctx context.Context, arg ImportSucceedParams) (int64, error)
 	// Заведённые города страны без geoname_id — кандидаты сверки (шаг 5).
@@ -62,6 +186,16 @@ type Querier interface {
 	ImportUpsertAdmin1(ctx context.Context, arg ImportUpsertAdmin1Params) error
 	// Пачка мест (до 1000): массивы одной длины, по элементу на место.
 	ImportUpsertPlaces(ctx context.Context, arg ImportUpsertPlacesParams) error
+	// Новая страна (исполнитель geo.country_create): версия 1; занятый код — 23505 countries_code_key.
+	InsertCountry(ctx context.Context, arg InsertCountryParams) error
+	// ---------------------------------------------------------------------------
+	// Районы (createGeoDistrict, updateGeoDistrict, Task 12; спека geo §3.2, §5.2). Дубль имени среди действующих —
+	// 23505 districts_city_name_active_key (normalize_text: регистр, ё/е).
+	// ---------------------------------------------------------------------------
+	// Новый район города; время — часов сценария.
+	InsertDistrict(ctx context.Context, arg InsertDistrictParams) (InsertDistrictRow, error)
+	// Прежний текущий адрес — в историю; время — часов сценария.
+	InsertSlugHistory(ctx context.Context, arg InsertSlugHistoryParams) error
 	// Районы города без архивных (§3.2).
 	ListActiveDistricts(ctx context.Context, cityID uuid.UUID) ([]ListActiveDistrictsRow, error)
 	// Публичный список городов (спека geo §4.2). Видимость — только страны is_enabled (§4.1).
@@ -83,8 +217,27 @@ type Querier interface {
 	// Кандидаты «here» (спека geo §4.3): места источника в радиусе поиска, ближайшие первыми.
 	// Накрытие r(population) отбирает Go (domain.CoverRadiusMeters) — константы в одном месте.
 	PlacesWithin(ctx context.Context, arg PlacesWithinParams) ([]PlacesWithinRow, error)
-	// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity.
+	// Город по slug: текущий slug раньше истории (prio 0); видимость проверяет GetVisibleCity. Ветка истории
+	// намеренно первой: без ORDER BY s.prio выиграла бы она — это ловит TestResolveCitySlugPrefersCurrent.
 	ResolveCitySlug(ctx context.Context, slug string) (uuid.UUID, error)
+	// Смены адреса на один slug сериализуются (ревью G6 m4): эксклюзивный advisory-замок транзакции (класс, hashtext(slug))
+	// до проверки SlugOwner — иначе проверка, прошедшая до коммита чужой смены на тот же slug, и третья смена, унёсшая
+	// его в историю, дают текущий slug одного города в истории другого. Совпадение хэшей двух slug — только ожидание.
+	SlugLock(ctx context.Context, arg SlugLockParams) error
+	// Чей адрес: текущий slug города (history = false) или строка истории (history = true); нет — ни одной строки.
+	SlugOwner(ctx context.Context, slug string) (SlugOwnerRow, error)
+	// Адрес занят: текущий slug города или прежний адрес из истории.
+	SlugTaken(ctx context.Context, slug string) (bool, error)
+	// Поля города после правки; версия растёт на число событий транзакции (R11).
+	UpdateCityFields(ctx context.Context, arg UpdateCityFieldsParams) (int64, error)
+	// Поля страны после правки, версия + 1.
+	UpdateCountryFields(ctx context.Context, arg UpdateCountryFieldsParams) (int64, error)
+	// Имя и архив района после правки, версия + 1.
+	UpdateDistrict(ctx context.Context, arg UpdateDistrictParams) (UpdateDistrictRow, error)
+	// Название города на языке (новое или переписанное).
+	UpsertCityName(ctx context.Context, arg UpsertCityNameParams) error
+	// Название страны на языке (новое или переписанное).
+	UpsertCountryName(ctx context.Context, arg UpsertCountryNameParams) error
 }
 
 var _ Querier = (*Queries)(nil)

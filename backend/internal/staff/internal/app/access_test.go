@@ -95,6 +95,7 @@ func wantFactorFailure(t *testing.T, err, kind error, left int) {
 
 // R15: активная сессия — учётка, роль, города модератора, права роли и текущая сессия.
 func TestMeActive(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	c1, c2 := e.city("kazan"), e.city("perm")
 	m := e.addMember("mod@wf.example", memberOpts{Role: "moderator", Name: "Ольга В.", Locale: "en", Cities: []uuid.UUID{c1, c2}})
@@ -137,6 +138,7 @@ func TestMeActive(t *testing.T) {
 
 // P20: в mfa_pending — только стадия и сессия; учётки, ролей, городов и прав нет, списки пустые.
 func TestMeMFAPending(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("mod@wf.example", memberOpts{Role: "moderator", Cities: []uuid.UUID{e.city("kazan")}})
 	s := e.pending(m)
@@ -157,6 +159,7 @@ func TestMeMFAPending(t *testing.T) {
 
 // R15: в setup — учётка без прав.
 func TestMeSetup(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("new@wf.example", memberOpts{Role: "admin", Status: "invited", NoMFA: true, Name: "Новый"})
 	tok, sid := e.rawSession(m.ID, auth.StageSetup, ipHome, metaWeb.UserAgent, t0)
@@ -181,6 +184,7 @@ func TestMeSetup(t *testing.T) {
 
 // P20: Reauth (бездействие) — reauth_required, остальное как у активной сессии.
 func TestMeReauth(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	tok := e.signIn(m)
@@ -201,6 +205,7 @@ func TestMeReauth(t *testing.T) {
 // «Мой доступ»: только свои живые сессии, новые сверху; текущая отмечена; IP — подсеть /24 или /48;
 // пустой User-Agent — nil.
 func TestMySessions(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	other := e.addMember("ivan@wf.example", memberOpts{})
@@ -237,6 +242,7 @@ func TestMySessions(t *testing.T) {
 // Своя сессия гасится (revoked) и пишется в аудит; чужая, несуществующая и уже погашенная —
 // staff.session_not_found без различия; текущую тоже можно (контракт) — дальше сессии нет.
 func TestRevokeMySession(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{Name: "Ольга В."})
 	other := e.addMember("ivan@wf.example", memberOpts{})
@@ -279,6 +285,7 @@ func TestRevokeMySession(t *testing.T) {
 
 // «Завершить остальные»: счёт погашенных, текущая жива, чужие не тронуты; повтор — 0.
 func TestRevokeOtherSessions(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	other := e.addMember("ivan@wf.example", memberOpts{})
@@ -315,6 +322,7 @@ func TestRevokeOtherSessions(t *testing.T) {
 // auth.ErrSessionReplaced (401 без стирания новой cookie); погашенная сессия — ErrSessionInvalid. Так
 // же ведут себя «завершить сессию» и смена языка: ничего не меняют и ничего не пишут.
 func TestSelfMutationsRecheckSession(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	_, laptop := e.rawSession(m.ID, auth.StageActive, ipHome, "x", t0.Add(-time.Hour))
@@ -365,6 +373,7 @@ func TestSelfMutationsRecheckSession(t *testing.T) {
 // withFactor засчитывает неудачей только staff.ErrMFAInvalid и staff.ErrPasswordInvalid: иной «вид
 // неудачи» от check — ошибка без записи неудачи (откат), а не MFAError.
 func TestWithFactorRejectsUnknownFailKind(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))
@@ -391,6 +400,7 @@ func TestWithFactorRejectsUnknownFailKind(t *testing.T) {
 // (password_changed), текущая жива, резервный код сгорает, счётчик неудач — 0; ровно одна
 // закоммиченная транзакция; аудит staff.password_changed.
 func TestChangePasswordSuccess(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	tok := e.signIn(m)
@@ -440,6 +450,7 @@ func TestChangePasswordSuccess(t *testing.T) {
 // фактор не проверяется: резервный код не сгорает. Успех обнуляет счётчик. Пятая подряд закрывает
 // учётку и гасит сессии.
 func TestChangePasswordFailures(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{Role: "support"})
 	s := e.load(e.signIn(m))
@@ -501,6 +512,7 @@ func TestChangePasswordFailures(t *testing.T) {
 // Погашенная сессия (вышли в другой вкладке) — auth.ErrSessionInvalid без записи неудачи и без
 // проверки пароля.
 func TestChangePasswordRevokedSession(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))
@@ -520,6 +532,7 @@ func TestChangePasswordRevokedSession(t *testing.T) {
 // ошибка, а не код модуля: staff.wrong_stage нет в x-error-codes changeStaffPassword (ревью 10a m1).
 // Неудача не пишется, пароль не меняется.
 func TestChangePasswordNotActiveIsInternal(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	pending := e.load(e.login(context.Background(), m))
@@ -539,6 +552,7 @@ func TestChangePasswordNotActiveIsInternal(t *testing.T) {
 // Параллельные неверные текущие пароли не обходят порог «5 подряд»: пять неудач (attempts_left
 // 4…0), остальные — отказ погашенной блокировкой сессии; одна блокировка.
 func TestChangePasswordConcurrentFailures(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))
@@ -580,6 +594,7 @@ func TestChangePasswordConcurrentFailures(t *testing.T) {
 // Политика нового пароля и выбор второго фактора — ошибки поля до транзакции: неудача не
 // пишется, пароль не меняется.
 func TestChangePasswordValidation(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))
@@ -610,6 +625,7 @@ func TestChangePasswordValidation(t *testing.T) {
 
 // Язык: ru|en сохраняется с аудитом (было/стало); тот же язык — без записи; иное — ошибка поля.
 func TestSetLocale(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.addMember("olga.v@wf.example", memberOpts{})
 	s := e.load(e.signIn(m))

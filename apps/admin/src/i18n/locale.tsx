@@ -4,18 +4,22 @@ import { IntlProvider } from 'use-intl';
 import type { Me } from '../app/permissions';
 import { ME_KEY } from '../app/query';
 import { useSession } from '../app/session';
+import { useDeviceLocale } from './deviceLocale';
 import { browserTimeZone } from './format';
-import { defaultLocale, type Locale, messagesFor } from './messages';
+import { type Locale, messagesFor } from './messages';
 
 const isLocale = (v: unknown): v is Locale => v === 'ru' || v === 'en';
 
-// Язык интерфейса — me.locale (спека §9.1): одно место хранения на сервере, выбор переживает
-// перезагрузку и другие устройства. До входа и при незнакомом значении — язык по умолчанию.
+// Язык интерфейса (спека §9.1 «Локали»): на setup и active — me.locale (хранится на сервере, переживает
+// перезагрузку и другие устройства; меняет его LocaleSwitcher через PATCH). До входа (anonymous, mfa_pending,
+// загрузка, ошибка) и при незнакомом me.locale — выбор устройства wf.locale (./deviceLocale.ts; решение 10.11):
+// он на сервер не уходит и после входа учётку не переписывает.
 // eslint-disable-next-line react-refresh/only-export-components
 export function useLocale(): Locale {
   const s = useSession();
+  const device = useDeviceLocale();
   const own = s.status === 'active' || s.status === 'setup' ? s.me.locale : undefined;
-  return isLocale(own) ? own : defaultLocale;
+  return isLocale(own) ? own : device;
 }
 
 // Сохранённый на сервере язык (204 updateStaffMeLocale) — сразу в кэш me: тексты меняются без

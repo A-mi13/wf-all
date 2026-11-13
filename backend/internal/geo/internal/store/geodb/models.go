@@ -3,3 +3,13 @@
 //   sqlc v1.31.1
 
 package geodb
+
+import (
+	"github.com/google/uuid"
+)
+
+type RegionName struct {
+	RegionID uuid.UUID
+	Locale   string
+	Name     string
+}

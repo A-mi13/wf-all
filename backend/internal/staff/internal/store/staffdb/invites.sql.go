@@ -297,8 +297,9 @@ func (q *Queries) InsertInvite(ctx context.Context, arg InsertInviteParams) erro
 }
 
 const insertInvitedAccount = `-- name: InsertInvitedAccount :one
-INSERT INTO staff_accounts (id, email, display_name, status, created_at, created_by)
-VALUES ($1, $2::citext, $3, 'invited', $4, $5)
+INSERT INTO staff_accounts (id, email, display_name, status, created_at, created_by, locale)
+VALUES ($1, $2::citext, $3, 'invited', $4, $5,
+        COALESCE($6::text, 'ru'))
 ON CONFLICT ON CONSTRAINT staff_accounts_email_key DO NOTHING
 RETURNING version
 `
@@ -309,9 +310,12 @@ type InsertInvitedAccountParams struct {
 	DisplayName string
 	Now         time.Time
 	CreatedBy   *uuid.UUID
+	Locale      *string
 }
 
-// Новая учётка в статусе invited; почта занята (любой статус) — нет строки.
+// Новая учётка в статусе invited; почта занята (любой статус) — нет строки. Язык — выбранный приглашающим (IL2);
+// NULL (запрос до IL2, оператор) — 'ru', то же значение, что DEFAULT колонки (0020_staff.sql): DEFAULT в COALESCE
+// не пишется.
 func (q *Queries) InsertInvitedAccount(ctx context.Context, arg InsertInvitedAccountParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertInvitedAccount,
 		arg.ID,
@@ -319,6 +323,7 @@ func (q *Queries) InsertInvitedAccount(ctx context.Context, arg InsertInvitedAcc
 		arg.DisplayName,
 		arg.Now,
 		arg.CreatedBy,
+		arg.Locale,
 	)
 	var version int64
 	err := row.Scan(&version)
@@ -482,7 +487,7 @@ func (q *Queries) ListStoredKeyIDs(ctx context.Context) ([]string, error) {
 
 const lockAccountByEmail = `-- name: LockAccountByEmail :one
 
-SELECT a.id, a.status::text AS status, a.display_name, a.version, r.role::text AS role
+SELECT a.id, a.status::text AS status, a.display_name, a.locale, a.version, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.email = $1::citext
@@ -493,6 +498,7 @@ type LockAccountByEmailRow struct {
 	ID          uuid.UUID
 	Status      string
 	DisplayName string
+	Locale      string
 	Version     int64
 	Role        string
 }
@@ -509,6 +515,7 @@ func (q *Queries) LockAccountByEmail(ctx context.Context, email string) (LockAcc
 		&i.ID,
 		&i.Status,
 		&i.DisplayName,
+		&i.Locale,
 		&i.Version,
 		&i.Role,
 	)

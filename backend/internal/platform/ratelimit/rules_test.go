@@ -11,6 +11,7 @@ import (
 )
 
 func TestDefaultRulesValid(t *testing.T) {
+	t.Parallel()
 	r := ratelimit.DefaultRules()
 	for _, class := range []string{"default", "auth", "geo_nearest", "staff_auth"} {
 		cp, ok := r[class]
@@ -32,6 +33,7 @@ func TestDefaultRulesValid(t *testing.T) {
 // 30 запросов в минуту со всплеском 10. Правило — раньше класса в контракте: иначе API не стартует
 // (ratelimit.UnknownClasses).
 func TestDefaultRulesGeoNearest(t *testing.T) {
+	t.Parallel()
 	cp, ok := ratelimit.DefaultRules()["geo_nearest"]
 	if !ok {
 		t.Fatal("нет класса geo_nearest")
@@ -47,6 +49,7 @@ func TestDefaultRulesGeoNearest(t *testing.T) {
 // IP-ключ считает отказы сессии (перебор cookie). Правило — раньше класса в контракте admin: иначе
 // admin-api не стартует (ratelimit.UnknownClasses).
 func TestDefaultRulesStaffAuth(t *testing.T) {
+	t.Parallel()
 	cp, ok := ratelimit.DefaultRules()["staff_auth"]
 	if !ok {
 		t.Fatal("нет класса staff_auth")
@@ -64,6 +67,7 @@ func TestDefaultRulesStaffAuth(t *testing.T) {
 }
 
 func TestParseRules(t *testing.T) {
+	t.Parallel()
 	got, err := ratelimit.ParseRules("auth.ip=10/1m:5, default.device=off, upload.user=30/1h", ratelimit.DefaultRules())
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +100,7 @@ func TestParseRules(t *testing.T) {
 
 // Rules.Validate — проверка на старте api: все политики всех классов и обязательный default.
 func TestRulesValidate(t *testing.T) {
+	t.Parallel()
 	if err := ratelimit.DefaultRules().Validate(); err != nil {
 		t.Fatalf("умолчания отвергнуты: %v", err)
 	}
@@ -119,6 +124,7 @@ func TestRulesValidate(t *testing.T) {
 
 // База — переданная карта, а не свежий DefaultRules: ParseRules её не трогает.
 func TestParseRulesKeepsBase(t *testing.T) {
+	t.Parallel()
 	base := ratelimit.DefaultRules()
 	if _, err := ratelimit.ParseRules("auth.ip=10/1m", base); err != nil {
 		t.Fatal(err)
@@ -131,6 +137,7 @@ func TestParseRulesKeepsBase(t *testing.T) {
 // Страж: класс x-rate-limit в контракте без политики — ошибка конфигурации (проверяет тест
 // хендлеров на настоящих контрактах, Task 19).
 func TestUnknownClasses(t *testing.T) {
+	t.Parallel()
 	spec, err := openapi3.NewLoader().LoadFromData([]byte(`
 openapi: 3.0.3
 info: {title: t, version: "1"}
@@ -155,6 +162,7 @@ paths:
 // операция молча уходила в класс default (Route.Extension даёт ""), и опечатка в контракте
 // (x-rate-limit: 5, x-rate-limit: "") снимала с ручки её лимит без единого сигнала.
 func TestUnknownClassesNonString(t *testing.T) {
+	t.Parallel()
 	spec, err := openapi3.NewLoader().LoadFromData([]byte(`
 openapi: 3.0.3
 info: {title: t, version: "1"}
@@ -187,6 +195,7 @@ paths:
 // Класс правил, которого нет ни в DefaultRules, ни в x-rate-limit контракта, — опечатка в
 // API_RATE_LIMITS / ADMIN_RATE_LIMITS: переопределение молча не действовало бы.
 func TestStrayClasses(t *testing.T) {
+	t.Parallel()
 	spec, err := openapi3.NewLoader().LoadFromData([]byte(`
 openapi: 3.0.3
 info: {title: t, version: "1"}

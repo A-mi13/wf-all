@@ -1,0 +1,132 @@
+/* Скелетоны по форме будущего содержимого (спека UI-фундамента §4.3): мерцание фона — CSS-анимацией,
+   при reduced motion — статичный блок. Размеры — только токены. */
+
+.bone {
+  display: block;
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-slot-empty);
+  animation: shimmer calc(var(--wf-duration-slow) * 4) var(--wf-ease) infinite alternate;
+}
+
+@keyframes shimmer {
+  to {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bone {
+    animation: none;
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+}
+
+/* Строка текста: высота — строка мелкого текста */
+.line {
+  height: var(--wf-text-sm-line);
+}
+
+.wFull {
+  width: 100%;
+}
+
+.wLong {
+  width: 84%;
+}
+
+.wMedium {
+  width: 60%;
+}
+
+.wShort {
+  width: 36%;
+}
+
+/* Последняя строка абзаца короче — текст, а не полосы */
+.paragraph .line:last-child:not(:only-child) {
+  width: 60%;
+}
+
+.hSm {
+  height: var(--wf-space-6);
+}
+
+.hMd {
+  height: var(--wf-size-control);
+}
+
+.hLg {
+  height: var(--wf-space-16);
+}
+
+.hXl {
+  height: var(--wf-size-avatar-lg);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  padding: var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg-elevated);
+}
+
+.title {
+  width: 40%;
+  height: var(--wf-text-lg-line);
+}
+
+.table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+}
+
+.row {
+  display: flex;
+  gap: var(--wf-space-4);
+  align-items: center;
+  min-height: var(--wf-size-touch-min);
+}
+
+.head {
+  min-height: var(--wf-size-table-header);
+}
+
+.cell {
+  flex: 1 1 0;
+  height: var(--wf-text-sm-line);
+}
+
+.head .cell {
+  height: var(--wf-text-xs-line);
+  opacity: 0.6;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+}
+
+.label {
+  width: 30%;
+  height: var(--wf-text-xs-line);
+}
+
+.control {
+  height: var(--wf-size-control);
+}

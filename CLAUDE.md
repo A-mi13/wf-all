@@ -16,20 +16,37 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 8. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
 
 ## File structure
-- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc}` (`permdoc` — кодогенерация таблицы прав, в образ не входит), `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
+- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc,geofixture}` (`permdoc` — кодогенерация таблицы прав, в образ не входит; `geofixture` — HTTPS-фикстура GeoNames для живого e2e, тоже вне образа), `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
 - `contracts/` — OpenAPI: исходники `openapi/{public,admin}/` по модулям, бандлы `openapi/{public,admin}.yaml` (сгенерированы) — источник истины; `tokens/tokens.json`
-- `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`
+- `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`, `@wf/icons`
 - `deploy/dev/` — роли и расширения БД; dev-стенд (Neon + Render): `backend/Dockerfile`, `render.yaml`, `docs/deploy-dev.md`; `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
 - `design/` — бриф, `screens/*.dc.html`, `tools/extract-export.mjs`; `product/` — «почему так»
 - Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`,
   `docs/05-ролевая-модель.md` (роли игроков и сотрудников, матрица прав — генерируется `./task gen`)
 - Архитектура бэкенда (модули, владение таблицами, платформа, стражи, порядок): `docs/superpowers/specs/2026-10-01-backend-architecture-design.md`
-- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`, модуль сотрудников — `backend-staff`)
+- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`, модуль сотрудников — `backend-staff`; админка — ядро `admin` и области `admin-ui` (компоненты, тема, витрина, снимки), `admin-e2e`, `admin-geo`, `admin-staff` (сессия, вход, разделы сотрудников))
 
 ## Skills и агенты
 Проектных скиллов нет: справочники восстанавливаются из `backend/migrations/README.md` и `design/README.md`.
-Субагенты плана — `wf-implementer` (задача по брифу; model при вызове: лёгкое — sonnet, иначе opus) и `wf-reviewer` (любое ревью, только opus); haiku не использовать.
-Оба работают по уровню риска A/B/C: исполнитель до первого теста составляет таблицу режимов отказа, ревьюер
+Субагенты плана — `wf-implementer` (задача или группа связанных задач по брифу), `wf-reviewer` (ревью группы или ветки, `effort: high` — фактический уровень всех ревью до 10.11, `max` не работал из-за переменной окружения; повторное ревью раунда — продолжением того же ревьюера: кэш тёплый, контекст есть; `wf-reviewer-recheck` — только после паузы > 1 ч или когда контекст ревьюера > ~400 тыс. токенов — замер и решение пользователя 03.11.2026); model всех — только opus, sonnet и haiku не использовать (пользователь, 28.10.2026). Скорость агентов (пачки чтений, короткие отчёты, долгие тесты на переднем плане) — в их определениях; разборы — `.superpowers/sdd/2026-10-28-staff-b-geo2/{agent-timing-analysis,speedup-research}.md`.
+Контроллер (решения пользователя 10.11.2026): поручение — 2–3 задачи, ориентир ≤ 150 ходов / ≤ 350 тыс. контекста;
+заход плана из 4–7 задач — двумя-тремя исполнителями параллельно по непересекающимся путям (общие файлы — заранее
+контроллер или один владелец, в брифе «Не трогай»). Бриф: «Читать» (файлы и диапазоны — исполнитель берёт первым
+ходом), «Не трогай», «Done when». **Ворота перед ревью:** контроллер сам гоняет «Done when», admin typecheck,
+`gofmt -l`/`prettier --check` по путям, сверяет `git status` со списком путей; красное — назад исполнителю. Команды
+контроллера — с `cd /f/ideas/wherefootball &&` или абсолютными путями (cwd сдвигается: бриф ревью однажды записался
+мимо каталога); списки путей — в файле по одному на строку, перед eslint/prettier сверить их число (пустой список —
+ложный зелёный). Пакет ревью
+— без сгенерированного кода (`':(exclude)*.gen.go' ':(exclude)*.sql.go' ':(exclude)**/querier.go'
+':(exclude)apps/admin/src/api/gen/**' ':(exclude)contracts/openapi/admin.yaml' ':(exclude)contracts/openapi/public.yaml'
+':(exclude)pnpm-lock.yaml'`), раунд — только приращение. Два раунда по одной находке — пересмотреть бриф или своё
+решение; три раунда по задаче — к пользователю.
+
+## Reflect
+Журнал сессии: `.superpowers/sdd/<сессия>/progress.md` (строки текущей даты). Правки предлагать в:
+`.claude/agents/*.md`, `.claude/rules/*.md`, раздел «Skills и агенты» CLAUDE.md, память `agent-speed.md`, `work-cadence.md`.
+Пороги: контекст исполнителя > 400 тыс., одиночных чтений > 25% ходов, любое ожидание человека, вызов ≥ 300 с вне go test/e2e/plant.
+Все трое работают по уровню риска A/B/C: исполнитель до первого теста составляет таблицу режимов отказа, ревьюер
 обязательно проходит 10 категорий нестандартных условий (A) и опровергает каждую находку до отчёта (`.claude/agents/`).
 
 ## What NOT to do
@@ -42,6 +59,8 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 ## Git policy
 - В этом проекте коммитить по ходу работы разрешено (пользователь, 24.09.2026); формат коммита, пуш и запреты — по глобальному CLAUDE.md.
 - В папке параллельно работают другие агенты: коммитить только свои пути — `git add <пути> && git commit -m "…" -- <пути>`.
+- Субагенты-исполнители не коммитят (пользователь, 03.11.2026: `git commit` ждёт его подтверждения): пути и сообщение
+  — в раздел «Коммит» отчёта, коммит делает контроллер, один на задачу или группу; коммиты контроллера — по очереди.
 - Никогда: `git add -A` / `git add .` / `git commit -a`, `git stash`, `git reset`, `git clean`, `git checkout -- .`.
 - pre-commit (lefthook) только проверяет: неотформатированное (prettier, gofmt) и секреты (gitleaks) отклоняют коммит, команда исправления — в сообщении хука.
 
@@ -50,10 +69,27 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - Комментарии в коде — по-русски, идентификаторы — по-английски. Переводы строк LF.
 
 ## Проверки
-- Тесты гонять самому после правок: `./task backend:test` (нужен Postgres), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`; живой e2e админки — `./task admin:e2e` (Playwright + admin-api + Mailpit, нужен Postgres; свои порты и база `wf_e2e` — README).
+- Тесты гонять самому после правок: `./task backend:test` (нужен Postgres), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`; живой e2e админки — `./task admin:e2e` (Playwright + admin-api + Mailpit, нужен Postgres; свои порты и база `wf_e2e` — README; проекты по умолчанию `chromium,webkit,prod` — для `prod` скрипт сам собирает админку и проверяет `dist`; без WebKit локально — `WF_E2E_PROJECTS=chromium,prod`).
 - `./task ci` включает lint/typecheck/build — как и они, только по просьбе (глобальный CLAUDE.md). Постоянная просьба
   пользователя (05.10.2026): после финального ревью ветки и волны исправлений, до пуша и PR — полный `./task ci`
   самому; красное — чинить до PR (на PR #11 CI дважды падал на lint, которого не было локально).
+- Снимки экранов админки для ревьюера — `./task admin:shots -- <пути> --out <каталог>` (Vite `--mode shots` с моками
+  MSW в браузере на фикстурах тестов + Playwright; 1440/768/390 × тёмная/светлая, `--role`, `--locale en`,
+  `--touch` — устройство с пальцем (`pointer: coarse`): «только с компьютера» решает устройство, без него 390 — узкое
+  окно с мышью; история компонента — путь `'?shots-story=ui/icon/Icon:AllIcons'` (в кавычках; скрипт сам добавит `/`); работает на Windows, в Git Bash пути без ведущего `/`
+  или `MSYS_NO_PATHCONV=1`). Каталог — `.superpowers/sdd/<сессия>/shots/<группа>/`; PNG не коммитятся и удаляются
+  после ревью. Тесты скриптов репозитория — `./task scripts:test`.
+- Витрина компонентов админки — `./task admin:stories` (Ladle 5.1.1, http://localhost:61000; истории
+  `src/ui/**/*.stories.tsx` рядом с компонентом на типах `src/showcase/csf.ts`, обёртка — `.ladle/components.tsx`;
+  `storyName`/`title` — только латиница, страж `src/ui/stories.test.ts`). Визуальное сравнение — только в Linux-CI
+  (`.github/workflows/admin-visual.yml`, образ Playwright): эталон — артефакт последнего подходящего зелёного прогона
+  `main`, в репозитории эталонов нет; намеренное изменение вида — метка PR `visual-change` (отчёт без падения).
+  Проверка `admin-visual` не обязательна в защите `main`; перевод в обязательную — по критерию спеки UI-фундамента
+  §5.3 (≥ 4 недели и ≥ 20 прогонов без ложных срабатываний, «эталона нет» < 10 %, job ≤ 12 минут).
+- Подсадка бага — `node scripts/plant.mjs --file F --find S --replace S --expect "<имя теста>" -- <команда>`
+  (пачка — `--spec`): база без подсадки обязана быть зелёной, возврат байт в байт со сверкой SHA при любом
+  исходе, SURVIVED — тест вакуумен; один вызов укладывается в `--budget` 540 с (вызов Bash — с `timeout: 600000`),
+  оборванный → `--recover`.
 - Кодогенерация — `./task gen`; сгенерированное коммитится (`gen:check` в CI сверяет).
 - Локальный Postgres 18 + PostGIS без Docker: `bash scripts/pg.sh install|init|start|stop|status|psql|port` → 127.0.0.1:`WF_PG_PORT` из `deploy/dev/.env` (по умолчанию 15432, `.tools/pg`).
 - `node --test` — только с глобом в кавычках: `node --test "dir/*.test.mjs"` (каталог на этой Node не сканируется).

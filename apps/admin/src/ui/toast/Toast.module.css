@@ -20,8 +20,7 @@
   padding: var(--wf-space-3) var(--wf-space-4);
   border: 1px solid var(--wf-color-border);
   border-radius: var(--wf-radius-md);
-  box-shadow: 0 var(--wf-space-4) var(--wf-space-10)
-    color-mix(in srgb, var(--wf-color-bg) 80%, transparent);
+  box-shadow: var(--wf-shadow-toast);
   font-family: var(--wf-font-body);
   pointer-events: auto;
 }
@@ -29,7 +28,7 @@
 .success {
   border-color: var(--wf-color-chip-accent-bg);
   background: var(--wf-color-pitch);
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 .error {
@@ -92,7 +91,7 @@
 
 .action:focus-visible,
 .close:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 
@@ -100,4 +99,53 @@
   display: flex;
   flex-direction: column;
   gap: var(--wf-space-2);
+}
+
+/* Открыта модальная панель с подвалом (корень с data-overlay-footer, ставит стек оверлеев, m23): тосты не над
+   кнопками — над подвалом (высота подвала — токен, n6); у шторки снизу подвал выше одного ряда — тосты сверху */
+:global(:root[data-overlay-footer]) .region {
+  bottom: calc(var(--wf-size-overlay-footer) + var(--wf-space-2));
+}
+
+:global(:root[data-overlay-footer='bottom']) .region {
+  top: var(--wf-space-4);
+  bottom: auto;
+}
+
+/* Окно по центру с подвалом (r2-1): подвал не у края экрана — «над подвалом» от края попадало в подвал окна, чей
+   низ ближе ~170 px к краю (кнопки под тостом). Тосты на обычном месте, под окном; пока виден тост с «Отменить»,
+   окно ниже предела (Overlay.module.css) и до тоста не доходит. Равная специфичность — правило после общего. */
+:global(:root[data-overlay-footer='center']) .region {
+  bottom: var(--wf-space-6);
+}
+
+/* Телефон (n5): снизу над таббаром, во всю ширину; тост — одна строка не выше size.toast (на эту высоту каркас
+   поднимает отступ прокрутки страницы, пока виден тост с «Отменить»); полный текст — в DOM, читалка его слышит */
+@media (max-width: 767.98px) {
+  .region {
+    bottom: var(--wf-size-tabbar);
+    width: calc(100% - var(--wf-space-4));
+  }
+
+  /* открыт оверлей без подвала (I1): таббар закрыт — к краю окна; тело панели держит запас toast + space-6, и
+     нижние кнопки (LeaveDialog, ConfirmDialog — действия в теле) остаются над тостом. Специфичность 0,3,0 — выше
+     правила подвала: при подвале этот селектор не срабатывает (:not) */
+  :global(:root[data-overlay-open]:not([data-overlay-footer])) .region {
+    bottom: var(--wf-space-2);
+  }
+
+  /* окно по центру с подвалом (r2-1): тост у края окна, окно при «Отменить» ниже предела (Overlay.module.css) */
+  :global(:root[data-overlay-footer='center']) .region {
+    bottom: var(--wf-space-2);
+  }
+
+  .toast {
+    max-block-size: var(--wf-size-toast);
+  }
+
+  .text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 }

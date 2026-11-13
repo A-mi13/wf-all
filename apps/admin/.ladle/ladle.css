@@ -1,0 +1,10 @@
+/* Витрина: под историей в режиме preview — фон админки, а не Ладла (холст истории — по содержимому,
+   его снимает CI). Только оформление оболочки Ладла; компоненты — CSS Modules. */
+html[data-mode='preview'] .ladle-background {
+  background: var(--wf-color-bg);
+}
+
+/* переключатель языка над историей (полный режим) */
+.wf-ladle-bar {
+  margin-block-end: var(--wf-space-4);
+}

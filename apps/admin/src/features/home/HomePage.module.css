@@ -1,0 +1,23 @@
+/* Главная: плитки, под ними — список дел (раскладка страницы; вид плиток и строк — src/ui/home) */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-6);
+  /* зазор под линией PageHeader, как у первого блока других разделов */
+  padding-top: var(--wf-space-4);
+}
+
+.todo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+}
+
+.heading {
+  margin: 0;
+  font-family: var(--wf-font-display);
+  font-size: var(--wf-text-lg);
+  line-height: var(--wf-text-lg-line);
+  font-weight: 600;
+  color: var(--wf-color-text);
+}

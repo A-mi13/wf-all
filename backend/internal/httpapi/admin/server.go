@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,6 +17,8 @@ import (
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/audit"
 	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/clock"
+	"wf/backend/internal/platform/flags"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/peer"
 	"wf/backend/internal/staff"
@@ -34,7 +37,11 @@ type Server struct {
 	// операции платформы; нулевые (Server{} в тестах конвейера) — 501 http.not_implemented
 	approvals ApprovalService                                    // подтверждения вдвоём
 	label     func(context.Context, *auth.Staff) (string, error) // подпись решившего (Staff.Label)
-	audit     *pgxpool.Pool                                      // журнал действий (роль admin)
+	audit     *pgxpool.Pool                                      // журнал действий, версии приложения (роль admin)
+	clock     clock.Clock                                        // время записи версий приложения
+	flags     *flags.Store                                       // флаги функций
+	// cities — какие из id есть в справочнике geo (geo.Service.ExistingCityIDs, R19): города флага
+	cities func(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 }
 
 // Псевдонимы — имена встроенных полей: хендлеры модулей называются одинаково (Handler), а имя
@@ -52,13 +59,10 @@ var (
 	errForbidden       = httpx.NewError(http.StatusForbidden, httpx.CodeForbidden)
 )
 
-// metaKey — approvals.Meta запроса в ctx операций (requestMeta).
-type metaKey struct{}
-
-// requestMeta — strict-middleware операций платформы (сборка ставит его внешним, после Middleware staff):
-//   - откуда запрос (IP — peer, User-Agent — httpx.UserAgent: ≤ 512 байт) в ctx: strict-сервер не передаёт операции
-//     *http.Request, а meta модуля staff заполняет только его Middleware и только для операций тега staff
-//     (ревью 10a, отказ 3);
+// requestMeta — strict-middleware операций платформы и geo (сборка ставит его внешним, после Middleware staff):
+//   - откуда запрос (IP — peer, User-Agent — httpx.UserAgent: ≤ 512 байт) в ctx — approvals.WithMeta: strict-сервер
+//     не передаёт операции *http.Request, а meta модуля staff заполняет только его Middleware и только для операций
+//     тега staff (ревью 10a, отказ 3); geo читает approvals.MetaFrom (R20, Task 16 плана B);
 //   - auth.ErrSessionInvalid операции (подпись решившего или перепроверка подтверждающего под замком
 //     исполнителя approve: сессию погасили или учётку выключили после конвейера) — 401 и стирание cookie
 //     clearCookie, как у Middleware staff (ревью 10b m3, уборка №8 m3). Ошибки операций
@@ -66,7 +70,7 @@ type metaKey struct{}
 func requestMeta(clearCookie *http.Cookie) oapi.StrictMiddlewareFunc {
 	return func(f oapi.StrictHandlerFunc, _ string) oapi.StrictHandlerFunc {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
-			ctx = context.WithValue(ctx, metaKey{}, approvals.Meta{IP: peer.From(ctx).IP, UserAgent: httpx.UserAgent(r)})
+			ctx = approvals.WithMeta(ctx, approvals.Meta{IP: peer.From(ctx).IP, UserAgent: httpx.UserAgent(r)})
 			resp, err := f(ctx, w, r, req)
 			if err != nil && errors.Is(err, auth.ErrSessionInvalid) {
 				http.SetCookie(w, clearCookie)
@@ -78,10 +82,7 @@ func requestMeta(clearCookie *http.Cookie) oapi.StrictMiddlewareFunc {
 }
 
 // metaFrom — IP и User-Agent запроса для аудита решений.
-func metaFrom(ctx context.Context) approvals.Meta {
-	m, _ := ctx.Value(metaKey{}).(approvals.Meta)
-	return m
-}
+func metaFrom(ctx context.Context) approvals.Meta { return approvals.MetaFrom(ctx) }
 
 // Операции платформы (тег platform): подтверждения вдвоём (спека §4.8) и журнал действий (§5.3). Тонкие:
 // запрос → approvals.Service / audit.List → ответ контракта. Ошибки — через staffadmin.Problem (единственный
@@ -179,7 +180,7 @@ func (s Server) ApproveApproval(ctx context.Context, req oapi.ApproveApprovalReq
 	}
 	ap, err := s.approvals.Approve(ctx, st, label, metaFrom(ctx), req.ApprovalId, comment)
 	if err != nil {
-		return nil, approveProblem(err)
+		return nil, approveProblem(ap, err)
 	}
 	if ap.Status != approvals.StatusExecuted {
 		return nil, fmt.Errorf("admin: approve %s без ошибки, но в состоянии %s", ap.ID, ap.Status)
@@ -192,12 +193,32 @@ func (s Server) ApproveApproval(ctx context.Context, req oapi.ApproveApprovalReq
 }
 
 // approveProblem — ошибка approve клиенту: код staff.* — только из approveStaffCodes, иной — 500 (без
-// обёртки %w: Problem не должен узнать в нём код модуля); остальное — decisionProblem.
-func approveProblem(err error) error {
+// обёртки %w: Problem не должен узнать в нём код модуля); отказ исполнителя модуля не из staff с кодом (запрос
+// уже закоммичен failed, код — в его error) — 409 platform.approval_stale: бизнес-кодов модулей у approve нет
+// (R4, x-error-codes approveApproval не растёт; ревью G4, Task 13); остальное — decisionProblem.
+func approveProblem(ap approvals.Approval, err error) error {
 	if code, ok := staff.CodeOf(err); ok && !slices.Contains(approveStaffCodes, code) {
 		return fmt.Errorf("admin: approve: исполнитель вернул код %s вне x-error-codes approveApproval", code)
 	}
+	if pe, ok := errors.AsType[httpx.ProblemError](err); ok && ap.Status == approvals.StatusFailed &&
+		moduleCode(pe.Problem().Code) {
+		return approvals.ErrStale
+	}
 	return decisionProblem("approve", err)
+}
+
+// moduleCode — код бизнес-ошибки модуля, кроме staff (у staff свой список approveStaffCodes): не платформы
+// (platform.*, auth.*, validation.*, http.*, …) — у них префикс из httpx.PlatformCodes.
+func moduleCode(code string) bool {
+	if strings.HasPrefix(code, "staff.") {
+		return false
+	}
+	for _, c := range httpx.PlatformCodes {
+		if prefix, _, ok := strings.Cut(c, "."); ok && strings.HasPrefix(code, prefix+".") {
+			return false
+		}
+	}
+	return true
 }
 
 // decisionProblem — ошибка решения (approve, reject, cancel) клиенту. auth.ErrSessionInvalid уходит как есть,

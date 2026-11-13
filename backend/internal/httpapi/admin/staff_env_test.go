@@ -200,18 +200,26 @@ func (e *staffEnv) count(sql string, args ...any) int {
 // после OperatorBootstrap или исполненного приглашения.
 func (e *staffEnv) invite(email, role string) uuid.UUID {
 	e.t.Helper()
-	staffID, inviteID := uuid.New(), uuid.New()
+	staffID := uuid.New()
 	now := e.clock.Now()
 	e.exec(`INSERT INTO staff_accounts (id, email, display_name, locale, status, created_at)
 		VALUES ($1, $2, $3, 'ru', 'invited', $4)`, staffID, email, "Сотрудник "+strings.Split(email, "@")[0], now)
 	e.exec(`INSERT INTO staff_roles (staff_id, role, granted_at) VALUES ($1, $2::staff_role, $3)`, staffID, role, now)
+	e.sendInvite(staffID)
+	return staffID
+}
+
+// sendInvite — приглашение с кодом inviteCode заведённому сотруднику (учётка и роль уже есть).
+func (e *staffEnv) sendInvite(staffID uuid.UUID) {
+	e.t.Helper()
+	inviteID := uuid.New()
+	now := e.clock.Now()
 	ct, keyID, err := e.ring.Seal([]byte(inviteCode), inviteID[:])
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	e.exec(`INSERT INTO staff_invites (id, staff_id, purpose, code_enc, code_key_id, expires_at, sends, last_sent_at, created_at)
 		VALUES ($1, $2, 'invite', $3, $4, $5, 1, $6, $6)`, inviteID, staffID, ct, keyID, now.Add(24*time.Hour), now)
-	return staffID
 }
 
 // send — запрос к admin-api: token — cookie сессии ("" — без cookie), key — Idempotency-Key ("" — без
@@ -376,7 +384,21 @@ func (e *staffEnv) code(m member) string {
 // firstLogin — приглашение → принятие → секрет → подтверждение → ack: сотрудник с активной сессией.
 func (e *staffEnv) firstLogin(email, role string) member {
 	e.t.Helper()
-	m := member{id: e.invite(email, role), email: email}
+	return e.acceptInvite(member{id: e.invite(email, role), email: email})
+}
+
+// firstLoginModerator — firstLogin модератора с городами (роль и города — одним оператором, e.moderator).
+func (e *staffEnv) firstLoginModerator(email string, cities ...uuid.UUID) member {
+	e.t.Helper()
+	m := member{id: e.moderator(email, cities...), email: email}
+	e.sendInvite(m.id)
+	return e.acceptInvite(m)
+}
+
+// acceptInvite — принятие приглашения, TOTP и коды восстановления: токен active.
+func (e *staffEnv) acceptInvite(m member) member {
+	e.t.Helper()
+	email := m.email
 	rec := e.anon("/v1/staff/auth/invite/accept", "", jsonOf(e.t, map[string]string{"email": email, "code": inviteCode, "password": staffPassword}))
 	wantStatus(e.t, rec, http.StatusOK)
 	setup := newToken(e.t, rec)

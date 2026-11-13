@@ -1,7 +1,9 @@
 package admin_test
 
 import (
+	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -10,9 +12,17 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"wf/backend/internal/geo"
+	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
+	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/platform/testkit/dbtest"
@@ -21,8 +31,9 @@ import (
 // Тест прав по всем операциям контракта admin (спека сотрудников §11, Task 10b): каждая операция × субъекты
 // «владелец, админ, модератор своего города, модератор чужого, поддержка, без сессии, mfa_pending, setup,
 // Reauth». Ожидания для ключей каталога выводятся из perm.Matrix, для handler — ручная таблица, сверенная с
-// матрицей. Хендлеры нулевые (тест конвейера, без сценариев): прошедший права запрос отвечает 501 заглушки
-// (журнал — 200: он читает базу без сценариев), отказ конвейера — 401/403 со своим кодом.
+// матрицей. Хендлер staff нулевой (прошедший права запрос отвечает 501 заглушки); журнал, версии, флаги и все
+// операции geo — настоящие (liveOps, liveGeo; план B Task 15–16): проход — не 401/403 и не 5xx, а модератор чужого
+// города на handler-операции (updateGeoCity) получает 403 от сценария. Отказ конвейера — 401/403 со своим кодом.
 
 // opRequest — запрос операции по схеме контракта (валидатор стоит до прав: тело обязано быть годным).
 type opRequest struct{ method, path, body string }
@@ -63,6 +74,28 @@ var (
 		"approveApproval":              {http.MethodPost, "/v1/approvals/" + anyID.String() + "/approve", `{}`},
 		"rejectApproval":               {http.MethodPost, "/v1/approvals/" + anyID.String() + "/reject", `{"comment":"Сначала обучение"}`},
 		"cancelApproval":               {http.MethodPost, "/v1/approvals/" + anyID.String() + "/cancel", ""},
+		// план B (Task 7): тела — по схемам контракта, город пути — cityInPath
+		"listGeoPlaces":      {http.MethodGet, "/v1/geo/places?q=%D1%81%D1%82%D0%B0%D0%B2&country=RU", ""},
+		"getGeoCity":         {http.MethodGet, "/v1/geo/cities/" + cityInPath.String(), ""},
+		"activateGeoCity":    {http.MethodPost, "/v1/geo/cities", `{"geoname_id":526815}`},
+		"updateGeoCity":      {http.MethodPatch, "/v1/geo/cities/" + cityInPath.String(), `{"names":{"en":"Stavropol"}}`},
+		"linkGeoCity":        {http.MethodPost, "/v1/geo/cities/" + cityInPath.String() + "/link", `{"geoname_id":487846}`},
+		"listGeoDistricts":   {http.MethodGet, "/v1/geo/cities/" + cityInPath.String() + "/districts", ""},
+		"createGeoDistrict":  {http.MethodPost, "/v1/geo/cities/" + cityInPath.String() + "/districts", `{"name":"Промышленный"}`},
+		"updateGeoDistrict":  {http.MethodPatch, "/v1/geo/cities/" + cityInPath.String() + "/districts/" + anyID.String(), `{"archived":true}`},
+		"listGeoCountries":   {http.MethodGet, "/v1/geo/countries", ""},
+		"createGeoCountry":   {http.MethodPost, "/v1/geo/countries", `{"code":"KZ","currency":"KZT","default_locale":"ru","phone_prefix":"+7","week_starts_on":1,"min_signup_age":14,"age_of_majority":18,"names":{"ru":"Казахстан","en":"Kazakhstan"}}`},
+		"updateGeoCountry":   {http.MethodPatch, "/v1/geo/countries/RU", `{"phone_prefix":"+7"}`},
+		"listGeoRegions":     {http.MethodGet, "/v1/geo/countries/RU/regions", ""},
+		"startGeoImport":     {http.MethodPost, "/v1/geo/imports", `{"country":"RU"}`},
+		"listGeoImports":     {http.MethodGet, "/v1/geo/imports?country=RU", ""},
+		"getGeoImport":       {http.MethodGet, "/v1/geo/imports/" + anyID.String(), ""},
+		"getGeoImportJob":    {http.MethodGet, "/v1/geo/imports/jobs/42", ""},
+		"cancelGeoImportJob": {http.MethodPost, "/v1/geo/imports/jobs/42/cancel", ""},
+		"listAppVersions":    {http.MethodGet, "/v1/app/versions", ""},
+		"putAppVersions":     {http.MethodPut, "/v1/app/versions/ios", `{"min_version":"1.4.0","recommended_version":"1.6.2","store_url":"https://apps.apple.com/app/id6740000000"}`},
+		"listFeatureFlags":   {http.MethodGet, "/v1/flags", ""},
+		"updateFeatureFlag":  {http.MethodPatch, "/v1/flags/economy", `{"version":1,"enabled_globally":true}`},
 	}
 	// handlerRoles — ручная таблица операций x-permission: handler: какие роли конвейер пропускает (точное
 	// право и цель решает сценарий). Сверяется с матрицей: хоть одно право из x-permission-any не Deny.
@@ -73,6 +106,9 @@ var (
 		"resetStaffAccess":    {perm.Owner, perm.Admin},
 		"approveApproval":     {perm.Owner, perm.Admin},
 		"rejectApproval":      {perm.Owner, perm.Admin},
+		// план B: названия — geo.cities.rename (модератор — scoped, свой город сверяет сценарий, R10)
+		"updateGeoCity":    {perm.Owner, perm.Admin, perm.Moderator},
+		"updateGeoCountry": {perm.Owner, perm.Admin},
 	}
 )
 
@@ -80,11 +116,18 @@ var (
 type cityRow struct{ own, foreign outcome }
 
 // cityRows — ручная таблица операций с {cityId} в пути (ревью 10b m6): ожидания модератора своего и чужого
-// города задаются здесь явно, а не выводятся из expected. На контракте плана A таких операций нет —
-// субъекты moderator-own и moderator-foreign пока отвечают одинаково на всё; различимы станут с первой
-// операцией с {cityId} (план B): без строки здесь она уронит TestPermissionsAllOperations
-// (cityRowViolations), а путь её строки opsBase обязан вести в cityInPath.
-var cityRows = map[string]cityRow{}
+// города задаются здесь явно, а не выводятся из expected. Операция с {cityId} без строки здесь уронит
+// TestPermissionsAllOperations (cityRowViolations), а путь её строки opsBase обязан вести в cityInPath.
+var cityRows = map[string]cityRow{
+	"getGeoCity":       {own: pass, foreign: forbidden}, // geo.cities.read — scoped
+	"listGeoDistricts": {own: pass, foreign: forbidden}, // geo.cities.read — scoped
+	// handler: конвейер город пути не сверяет — чужой город отсекает сценарий (Decide по полю, R10, Review Focus 1):
+	// тест идёт на настоящем хендлере geo (Task 16, m6 плана A — раньше свой и чужой были неразличимы)
+	"updateGeoCity":     {own: pass, foreign: forbidden},
+	"linkGeoCity":       {own: forbidden, foreign: forbidden}, // geo.cities.manage — у модератора deny
+	"createGeoDistrict": {own: pass, foreign: forbidden},      // geo.districts.manage — scoped
+	"updateGeoDistrict": {own: pass, foreign: forbidden},      // geo.districts.manage — scoped
+}
 
 // cityRowViolations — операции контракта с {cityId} без строки rows (или со строкой opsBase не в город
 // cityInPath) и строки rows без такой операции.
@@ -202,7 +245,32 @@ func expected(t *testing.T, op *openapi3.Operation, path string, s subject) outc
 	return pass
 }
 
+// liveGeo — настоящий хендлер geo на пуле теста: клиент River (импорт) и действия подтверждения geo в своём реестре
+// с подменёнными хуками staff (учёток тестовых субъектов в базе нет).
+func liveGeo(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *geoadmin.Handler {
+	t.Helper()
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh := geoadmin.New(geo.New(pool), geoadmin.Deps{Pool: pool, Clock: clk, River: rc})
+	reg := approvals.NewRegistry()
+	gh.RegisterApprovals(reg, approvals.New(pool, clk, reg))
+	reg.SetInitiatorCheck(func(context.Context, pgx.Tx, approvals.Approval) error { return nil })
+	reg.SetActorLock(func(context.Context, pgx.Tx, approvals.Approval, *auth.Staff) error { return nil })
+	if err := reg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return gh
+}
+
+// liveOps — операции платформы с настоящими хендлерами в сборке теста (Task 15): журнал проверяется выше по 200,
+// версии и флаги пишут базу — проход до хендлера по отсутствию отказа конвейера. Операции тега geo — тоже
+// настоящие (liveGeo, Task 16): «проход» — не 401 и не 403 конвейера или сценария, исход — забота сценария.
+var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "listFeatureFlags": {}, "updateFeatureFlag": {}}
+
 func TestPermissionsAllOperations(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +286,7 @@ func TestPermissionsAllOperations(t *testing.T) {
 	o := testOptions(t)
 	o.DB = pools.As // журнал читается под ролью admin
 	o.Sessions = &fakeSessions{staff: sessions}
+	o.Geo = liveGeo(t, pools.As, o.Clock)
 	h := newHandler(t, o)
 
 	for _, v := range cityRowViolations(spec, cityRows) {
@@ -240,6 +309,8 @@ func TestPermissionsAllOperations(t *testing.T) {
 			if opID(op) == "listAudit" {
 				passStatus = http.StatusOK
 			}
+			_, live := liveOps[opID(op)]
+			live = live || slices.Contains(op.Tags, "geo")
 			row, cityOp := cityRows[opID(op)]
 			for _, s := range subjects {
 				want := expected(t, op, path, s)
@@ -251,6 +322,14 @@ func TestPermissionsAllOperations(t *testing.T) {
 				}
 				rec := serve(h, call(req.method, req.path, s.token, req.body))
 				checked++
+				if want.pass && live {
+					// настоящий хендлер платформы: дошёл — не отказ конвейера (401, 403); исход — забота хендлера
+					// (повтор правки флага той же version — 409 platform.flag_stale)
+					if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden || rec.Code >= 500 {
+						t.Errorf("%s × %s: %d %s — ждали проход до хендлера", opID(op), s.name, rec.Code, rec.Body.String())
+					}
+					continue
+				}
 				if want.pass {
 					if rec.Code != passStatus {
 						t.Errorf("%s × %s: %d %s — ждали проход до хендлера (%d)", opID(op), s.name, rec.Code, rec.Body.String(), passStatus)
@@ -276,6 +355,7 @@ func TestPermissionsAllOperations(t *testing.T) {
 // Страж cityRows не вакуумен: контракт с операцией {cityId} без строки — нарушение; та же операция со
 // строкой — нет; строка без операции — нарушение. На текущем контракте нарушений нет.
 func TestCityRowsGuard(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -283,13 +363,14 @@ func TestCityRowsGuard(t *testing.T) {
 	if bad := cityRowViolations(spec, cityRows); len(bad) != 0 {
 		t.Fatalf("текущий контракт: %v", bad)
 	}
-	spec.Paths.Set("/v1/geo/cities/{cityId}", &openapi3.PathItem{Get: &openapi3.Operation{
-		OperationID: "getGeoCity", Extensions: map[string]any{"x-permission": "geo.cities.read"},
+	spec.Paths.Set("/v1/geo/cities/{cityId}/probe", &openapi3.PathItem{Get: &openapi3.Operation{
+		OperationID: "probeGeoCity", Extensions: map[string]any{"x-permission": "geo.cities.read"},
 	}})
-	if bad := cityRowViolations(spec, cityRows); len(bad) != 1 || !strings.Contains(bad[0], "getGeoCity") {
+	if bad := cityRowViolations(spec, cityRows); len(bad) != 1 || !strings.Contains(bad[0], "probeGeoCity") {
 		t.Fatalf("операция с {cityId} без строки: %v", bad)
 	}
-	rows := map[string]cityRow{"getGeoCity": {own: pass, foreign: forbidden}}
+	rows := maps.Clone(cityRows)
+	rows["probeGeoCity"] = cityRow{own: pass, foreign: forbidden}
 	if bad := cityRowViolations(spec, rows); len(bad) != 0 {
 		t.Fatalf("со строкой: %v", bad)
 	}
@@ -327,6 +408,7 @@ func pathMatches(pattern, path string) bool {
 // Ручная таблица handler сверена с матрицей: роли, у которых хоть одно право из x-permission-any не Deny, —
 // ровно роли таблицы; лишняя строка таблицы (операция не handler) — падение.
 func TestHandlerRolesMatchMatrix(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)

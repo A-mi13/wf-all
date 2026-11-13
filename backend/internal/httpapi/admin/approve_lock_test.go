@@ -20,6 +20,7 @@ import (
 // откатилась целиком — запрос pending, решений в журнале нет. Шов — трассировщик пула сценариев: первый
 // запрос ManageShareAccount (замок учёток исполнителя) гасит сессию с другого соединения.
 func TestApproveSessionRevokedUnderLockClearsCookie(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]

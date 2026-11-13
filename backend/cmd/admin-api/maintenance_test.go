@@ -13,6 +13,7 @@ import (
 // Непредвиденное 1 финального ревью: исполняющий клиент admin-api — от queue.MaintenanceConfig, как у воркера
 // (TestWorkerRiverMaintenance): став лидером схемы, admin-api чистит и спасает задачи с теми же сроками.
 func TestAdminRiverMaintenance(t *testing.T) {
+	t.Parallel()
 	workers := river.NewWorkers()
 	c := riverConfig(workers, slog.New(slog.DiscardHandler))
 	if d := queue.MaintenanceDiff(c); len(d) != 0 {

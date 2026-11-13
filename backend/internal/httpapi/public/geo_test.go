@@ -71,6 +71,7 @@ func bodyOf(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 // Каждая операция отвечает по контракту (запрос и ответ сверяет apitest) со своим Cache-Control;
 // справочники — с Vary: Accept-Language, min-version — без него.
 func TestPublicOperationsMatchContract(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	h := newPublic(t, testOptions(t))
 	for _, c := range []struct{ target, cache, vary string }{
@@ -97,6 +98,7 @@ func TestPublicOperationsMatchContract(t *testing.T) {
 // /v1/cities/nearest и /v1/cities/by-slug/{slug} не перехватываются шаблоном /v1/cities/{cityId}
 // ни роутером контракта (валидатор, gorillamux), ни chi (strict-хендлер) — спека geo §4.2.
 func TestCityRoutesDoNotShadowEachOther(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	o := testOptions(t)
 	for _, c := range []struct {
@@ -121,6 +123,7 @@ func TestCityRoutesDoNotShadowEachOther(t *testing.T) {
 
 // Параметры списка доходят до сценария.
 func TestListCitiesPassesParams(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	g := &fakeGeo{}
 	o := testOptions(t)
@@ -135,6 +138,7 @@ func TestListCitiesPassesParams(t *testing.T) {
 
 // Тело списка: город по схеме City; есть курсор — next_cursor строкой, конец — null (поле есть).
 func TestListCitiesBody(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	o := testOptions(t)
 	for _, c := range []struct {
@@ -161,6 +165,7 @@ func TestListCitiesBody(t *testing.T) {
 
 // nearest_open и here — объекты или null (поля обязательны); контракт сверяет apitest.
 func TestNearestBody(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	o := testOptions(t)
 	o.Geo = &fakeGeo{nearest: &geo.Nearest{}}
@@ -181,6 +186,7 @@ func TestNearestBody(t *testing.T) {
 // несколько строк — всегда 200 и Vary; Content-Language только при выбранном языке; сценарий
 // получает тот же язык ("" — названия на языке страны каждой записи).
 func TestAcceptLanguage(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	o := testOptions(t)
 	targets := []string{"/v1/cities?limit=1", cityPath, "/v1/cities/by-slug/stavropol", "/v1/cities/nearest?lat=45.04&lon=41.97"}
@@ -231,6 +237,7 @@ func TestAcceptLanguage(t *testing.T) {
 // сценария как есть; NaN, ±Inf, переполнение, не число, пусто, нет параметра, вне диапазона — 400
 // validation.failed с полем, сценарий не вызывается; 500 не бывает.
 func TestNearestCoordinateEdges(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	o := testOptions(t)
 	for _, c := range []struct {
@@ -282,6 +289,7 @@ func TestNearestCoordinateEdges(t *testing.T) {
 // Ошибки сценария — коды контракта: нет города — 404 geo.city_not_found (и по slug), q из одних
 // знаков — 400 по query.q, негодный курсор — Problem платформы как есть, сбой — 500 internal.
 func TestGeoErrors(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	o := testOptions(t)
 	for _, c := range []struct {
@@ -314,6 +322,7 @@ func TestGeoErrors(t *testing.T) {
 // min-version: незаведённая платформа — 200 с null; заведённая — значения; незнакомая и пропущенная
 // платформа — 400 от валидатора без обращения к хранилищу; сбой хранилища — 500.
 func TestAppMinVersion(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	o := testOptions(t)
 
@@ -361,8 +370,9 @@ func TestAppMinVersion(t *testing.T) {
 // Автоопределение — свой класс лимита geo_nearest (x-rate-limit контракта): исчерпанный
 // geo_nearest не трогает справочник (класс default).
 func TestNearestHasOwnRateClass(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
-	o.Limiter = ratelimit.NewPG(o.DB, clock.System)
+	o.Limiter = ratelimit.NewPG(o.DB, clock.System, ratelimit.Players)
 	o.RateRules = ratelimit.DefaultRules()
 	o.RateRules["geo_nearest"] = ratelimit.ClassPolicy{IP: ratelimit.Policy{Limit: 1, Period: time.Hour}}
 	h := newPublic(t, o)
@@ -379,19 +389,41 @@ func TestNearestHasOwnRateClass(t *testing.T) {
 }
 
 // Координаты не попадают в лог приложения (спека geo §4.2): лог доступа пишет путь без query,
-// ошибки валидации — без значений.
+// ошибки валидации — без значений (NaN и выход за диапазон — lat=91, geo 1 Task 7/8), сбой сценария (500)
+// пишет причину без запроса.
 func TestNearestCoordinatesNotLogged(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
+	o := testOptions(t)
+	o.Geo = &fakeGeo{err: errors.New("pgx: сломалось")}
+	failing, err := public.NewHandler(slog.New(slog.NewTextHandler(&logs, nil)), o)
+	if err != nil {
+		t.Fatal(err)
+	}
 	h, err := public.NewHandler(slog.New(slog.NewTextHandler(&logs, nil)), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	serve(h, request("/v1/cities/nearest?lat=45.0417&lon=41.9734"))
-	serve(h, request("/v1/cities/nearest?lat=NaN&lon=41.9734"))
-	if !strings.Contains(logs.String(), "/v1/cities/nearest") {
-		t.Fatal("лога доступа нет — страж проверяет вхолостую")
+	for _, c := range []struct {
+		h      http.Handler
+		query  string
+		status int
+	}{
+		{h, "lat=45.0417&lon=41.9734", http.StatusOK},
+		{h, "lat=NaN&lon=41.9734", http.StatusBadRequest},
+		{h, "lat=91.0517&lon=41.9734", http.StatusBadRequest},
+		{failing, "lat=45.0417&lon=41.9734", http.StatusInternalServerError},
+	} {
+		if got := serve(c.h, request("/v1/cities/nearest?"+c.query)).Code; got != c.status {
+			t.Fatalf("%s: %d, ждали %d", c.query, got, c.status)
+		}
 	}
-	if strings.Contains(logs.String(), "45.0417") || strings.Contains(logs.String(), "41.9734") {
-		t.Fatalf("координаты в логе: %s", logs.String())
+	if !strings.Contains(logs.String(), "/v1/cities/nearest") || !strings.Contains(logs.String(), "сломалось") {
+		t.Fatal("лога доступа или причины 500 нет — страж проверяет вхолостую")
+	}
+	for _, v := range []string{"45.0417", "41.9734", "91.0517"} {
+		if strings.Contains(logs.String(), v) {
+			t.Fatalf("координата %s в логе: %s", v, logs.String())
+		}
 	}
 }

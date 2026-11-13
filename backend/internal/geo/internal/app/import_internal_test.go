@@ -10,6 +10,7 @@ import (
 // Поле to альтернативного названия: год, дата трёх форматов (все встречаются в RU, 02.10.2026);
 // непонятное значение — истёкшее (лучше не взять название, чем взять устаревшее).
 func TestEnded(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 	cases := map[string]bool{
 		"": false, "1946": true, "2025": true, "2026": false, "2030": false,
@@ -26,6 +27,7 @@ func TestEnded(t *testing.T) {
 
 // Недостающие коды admin1 в тексте ошибки: не больше 20, дальше — сколько ещё.
 func TestCodeList(t *testing.T) {
+	t.Parallel()
 	codes := make([]string, 25)
 	for i := range codes {
 		codes[i] = fmt.Sprintf("%02d", i+1)

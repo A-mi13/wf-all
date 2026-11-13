@@ -27,6 +27,7 @@ func (e *env) lockedSession(m member) uuid.UUID {
 // ComposeLocked (§4.12): кто закрыт (имя и почта), когда, IP маскирован до /24 — на языке
 // получателя; staff_accounts.locale нормализуется (en-US → en, неизвестный — ru).
 func TestComposeLocked(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ruOwner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
 	enAdmin := e.addMember("admin@wf.example", memberOpts{Role: "admin", Locale: "en"})
@@ -83,6 +84,7 @@ func TestComposeLocked(t *testing.T) {
 // (locked_until пуст; причину гашения сессии письмо не смотрит), получатель выключен, не владелец и не
 // админ или не существует.
 func TestComposeLockedSkips(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	owner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})
 	support := e.addMember("support@wf.example", memberOpts{Role: "support"})

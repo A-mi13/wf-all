@@ -17,12 +17,12 @@
 
 .accent {
   background: var(--wf-color-chip-accent-bg);
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 .success {
   background: var(--wf-color-success-bg);
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 .warning {

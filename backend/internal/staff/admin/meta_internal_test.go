@@ -15,6 +15,7 @@ import (
 // неизменяемый журнал), — только через httpx.UserAgent: заголовок 100 КБ → ровно MaxUserAgentBytes, начало
 // сохранено. Тот же помощник у requestMeta операций подтверждений (TestDecisionHugeUserAgent в httpapi/admin).
 func TestMetaUserAgentCapped(t *testing.T) {
+	t.Parallel()
 	h := New(staff.Deps{}, Cookie{Name: "wf_admin_session"})
 	huge := "Mozilla/5.0 " + strings.Repeat("x", 100<<10)
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/staff/auth/login", nil)

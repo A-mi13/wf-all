@@ -2,8 +2,12 @@ import type { ReactNode } from 'react';
 import { useTranslations } from 'use-intl';
 import { isApiError } from '../../api/client';
 import { Button } from '../Button';
+import { cx } from '../cx';
 import { useErrorText } from '../errorText';
+import type { IconName } from '@wf/icons';
+import { Icon, Illustration } from '../icon';
 import { useOnline } from '../online';
+import { Skeleton } from './Skeleton';
 import { StateBlock } from './StateBlock';
 import styles from './States.module.css';
 
@@ -12,23 +16,27 @@ import styles from './States.module.css';
 // нашлось» — хорошая новость, а не пустота).
 
 // Пусто: по умолчанию — «Ничего не нашлось… Это не ошибка — просто пусто»; action — обычно
-// «Сбросить фильтры». tone="accent" — пустая очередь как хорошая новость.
+// «Сбросить фильтры». tone="accent" — пустая очередь как хорошая новость. illustration — рисунок набора
+// (спека UI-фундамента §4.4: 48–64, декоративный — смысл в заголовке; экран → рисунок — design/README.md).
 export function EmptyState({
   title,
   text,
   action,
   tone = 'neutral',
+  illustration,
 }: {
   title?: ReactNode;
   text?: ReactNode;
   action?: ReactNode;
   tone?: 'neutral' | 'accent';
+  illustration?: IconName;
 }) {
   const t = useTranslations('states.empty');
   return (
     <StateBlock
       dashed={tone === 'neutral'}
       tone={tone}
+      illustration={illustration && <Illustration name={illustration} size={64} />}
       title={title ?? t('title')}
       text={text ?? t('text')}
       action={action}
@@ -43,12 +51,15 @@ export function ErrorState({
   error,
   onRetry,
   retrying,
+  retryLabel,
 }: {
   error: unknown;
   onRetry: () => void;
   retrying?: boolean;
+  retryLabel?: ReactNode; // по умолчанию «Повторить»; кусок раздела не загрузился — «Обновить страницу»
 }) {
   const t = useTranslations('states.error');
+  const ta = useTranslations('actions');
   const errorText = useErrorText();
   const api = isApiError(error) ? error : null;
   return (
@@ -62,24 +73,52 @@ export function ErrorState({
       }
       action={
         <Button variant="secondary" loading={retrying} onClick={onRetry}>
-          {t('retry')}
+          {retryLabel ?? ta('retry')}
         </Button>
       }
     />
   );
 }
 
-// Скелетон строк вместо крутилки: высота списка не прыгает, когда данные приедут. Для читалки —
-// «Загрузка…» (role="status").
+// Скелетон строк вместо крутилки (обёртка над Skeleton.Table без шапки): высота списка не прыгает, когда
+// данные приедут. Для читалки — «Загрузка…» (role="status"). Экраны его не рисуют — только DataTable;
+// экран идёт через DataState (страж loading.test.ts).
 export function LoadingRows({ rows = 5 }: { rows?: number }) {
   const t = useTranslations('states');
   return (
-    <div role="status" className={styles.skeleton}>
+    <div role="status">
       <span className={styles.srOnly}>{t('loading')}</span>
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className={styles.skeletonRow} aria-hidden="true" data-skeleton-row="" />
-      ))}
+      <Skeleton.Table columns={1} rows={rows} head={false} />
     </div>
+  );
+}
+
+// Нет сети (спека §4.3): данных нет, запрос на паузе (networkMode 'online' — без сети TanStack Query ставит
+// паузу и сам продолжит при возврате сети) или оборвался сетевым сбоем при «онлайн» браузере — тогда onRetry:
+// событие online может не прийти (сеть «есть», сервера нет).
+export function NoNetworkState({
+  onRetry,
+  retrying,
+}: {
+  onRetry?: () => void;
+  retrying?: boolean;
+}) {
+  const t = useTranslations('states.no_network');
+  const ta = useTranslations('actions');
+  return (
+    <StateBlock
+      role="status"
+      tone="warning"
+      title={t('title')}
+      text={t('text')}
+      action={
+        onRetry && (
+          <Button variant="secondary" loading={retrying} onClick={onRetry}>
+            {ta('retry')}
+          </Button>
+        )
+      }
+    />
   );
 }
 
@@ -100,16 +139,34 @@ export function OfflineBanner() {
   );
 }
 
-// Прямой адрес раздела без права (D23): в меню такого раздела нет.
-export function ForbiddenState() {
+// Прямой адрес раздела без права (D23): в меню такого раздела нет. scope 'block' — 403 внутри карточки или
+// панели (DataState scope="block"): без h1 (у страницы он один) и «к этим данным», а не «к разделу».
+export function ForbiddenState({ scope = 'page' }: { scope?: 'page' | 'block' }) {
   const t = useTranslations('states.forbidden');
+  if (scope === 'block')
+    return <StateBlock tone="muted" title={t('block_title')} text={t('block_text')} />;
   return <StateBlock page tone="muted" title={t('title')} text={t('text')} />;
 }
 
-// Раздел на телефоне закрыт (D22, макет 08): выдача прав и настройки — только с компьютера.
-export function DesktopOnlyState() {
+// Пометка вместо действия на карманном устройстве (спека UI-фундамента §3.2; ставит ActionGate):
+// выдача и снятие прав — только с компьютера. Текст, не кнопка и не disabled-кнопка: недоступное
+// действие не попадает в Tab-порядок и не притворяется нажимаемым. compact — одна строка с иконкой
+// (в панели, в шапке, в строке таблицы), иначе — блок с пояснением.
+export function DesktopOnlyNotice({ compact }: { compact?: boolean }) {
   const t = useTranslations('states.desktop_only');
-  return <StateBlock page tone="warning" title={t('title')} text={t('text')} />;
+  if (compact)
+    return (
+      <p className={styles.desktopOnly} data-desktop-only="compact">
+        <Icon name="monitor" size={16} />
+        <span>{t('notice')}</span>
+      </p>
+    );
+  return (
+    <div className={cx(styles.block, styles.toneMuted)} data-desktop-only="block">
+      <p className={styles.title}>{t('notice')}</p>
+      <p className={styles.text}>{t('hint')}</p>
+    </div>
+  );
 }
 
 // Стадия error сессии: admin-api не ответил на GET /v1/staff/me (сеть, 5xx) — «нет связи». Ответил
@@ -118,6 +175,7 @@ export function DesktopOnlyState() {
 export function ConnectionErrorState({ error, onRetry }: { error?: unknown; onRetry: () => void }) {
   const t = useTranslations('states.connection');
   const te = useTranslations('states.error');
+  const ta = useTranslations('actions');
   const errorText = useErrorText();
   if (isApiError(error) && error.status >= 400 && error.status < 500)
     return (
@@ -130,7 +188,7 @@ export function ConnectionErrorState({ error, onRetry }: { error?: unknown; onRe
         extra={
           <p className={styles.code}>{te('code', { status: error.status, code: error.code })}</p>
         }
-        action={<Button onClick={onRetry}>{t('retry')}</Button>}
+        action={<Button onClick={onRetry}>{ta('retry')}</Button>}
       />
     );
   return (
@@ -140,7 +198,7 @@ export function ConnectionErrorState({ error, onRetry }: { error?: unknown; onRe
       tone="warning"
       title={t('title')}
       text={t('text')}
-      action={<Button onClick={onRetry}>{t('retry')}</Button>}
+      action={<Button onClick={onRetry}>{ta('retry')}</Button>}
     />
   );
 }
@@ -155,4 +213,29 @@ export function PendingApprovalNotice({ action }: { action?: ReactNode }) {
       {action}
     </div>
   );
+}
+
+// Раздел грузится (ленивый маршрут, спека UI-фундамента §4.15): скелетон вместо экрана раздела — шапка и таблица.
+// «Загрузка…» для читалки — один раз, у обёртки (части скелетона декоративные).
+export function SectionSkeleton() {
+  const t = useTranslations('states');
+  return (
+    <div role="status" aria-label={t('loading')}>
+      <Skeleton.Text width="medium" />
+      <Skeleton.Table />
+    </div>
+  );
+}
+
+// Кусок раздела не загрузился (вышла новая сборка, §4.15): ошибка с кодом и «Обновить страницу» — повтор загрузки
+// того же куска не поможет, нужна новая страница. onReload — по умолчанию перезагрузка документа.
+export function ChunkErrorState({
+  error,
+  onReload = () => window.location.reload(),
+}: {
+  error: unknown;
+  onReload?: () => void;
+}) {
+  const t = useTranslations('actions');
+  return <ErrorState error={error} retryLabel={t('reload')} onRetry={onReload} />;
 }

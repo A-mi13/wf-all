@@ -5,12 +5,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"wf/backend/internal/platform/appversion"
+	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/testkit/dbtest"
 )
 
 // Чтение под ролью api (права прода из grants.sql): нет строки — ok=false, не ошибка.
 func TestReaderGet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "api")
 	r := appversion.NewReader(pools.As)
@@ -41,5 +46,129 @@ func TestReaderGet(t *testing.T) {
 	// строка одной платформы не отдаётся другой
 	if _, ok, err := r.Get(ctx, appversion.IOS); err != nil || ok {
 		t.Fatalf("ios после заведения android: %v %v", ok, err)
+	}
+}
+
+// Запись версий (Task 15): Put в транзакции — создание (before nil, version 1), правка (before — прежние значения,
+// version + 1), те же значения — без записи (version не растёт); List — заведённые платформы по имени.
+func TestPutAndList(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pools := dbtest.NewPoolsAs(t, "admin")
+	at := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	ios := appversion.Versions{Platform: appversion.IOS, Min: "1.0.0", Recommended: "1.2.0", StoreURL: "https://apps.apple.com/app/id1"}
+	put := func(v appversion.Versions) (before *appversion.Versions, after appversion.Versions) {
+		t.Helper()
+		err := db.InTx(ctx, pools.As, func(_ context.Context, tx pgx.Tx) (err error) {
+			before, after, err = appversion.Put(ctx, tx, v, at)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return before, after
+	}
+	before, after := put(ios)
+	if before != nil || after.Version != 1 || after.Min != "1.0.0" || after.Recommended != "1.2.0" || !after.UpdatedAt.Equal(at) {
+		t.Fatalf("создание: %+v %+v", before, after)
+	}
+	next := ios
+	next.Min = "1.1.0"
+	before, after = put(next)
+	if before == nil || before.Min != "1.0.0" || before.Version != 1 || after.Version != 2 || after.Min != "1.1.0" {
+		t.Fatalf("правка: %+v %+v", before, after)
+	}
+	before, after = put(next)
+	if before == nil || after.Version != 2 || before.Version != 2 {
+		t.Fatalf("без изменений: %+v %+v", before, after)
+	}
+	put(appversion.Versions{Platform: appversion.Android, Min: "2.0.0", Recommended: "2.0.0", StoreURL: "https://play.google.com/store/apps/details?id=a"})
+	list, err := appversion.List(ctx, pools.As)
+	if err != nil || len(list) != 2 || list[0].Platform != appversion.Android || list[1].Platform != appversion.IOS || list[1].Version != 2 {
+		t.Fatalf("список: %+v %v", list, err)
+	}
+}
+
+// Ревью G7 m2: первое заведение платформы двумя сотрудниками разом. Первая tx вставила строку и не закоммичена,
+// вторая не нашла строку под FOR UPDATE (пустоту замок не держит) и упёрлась во вставку. После коммита первой вторая
+// видит её строку как «было»: другие значения — правка version 2 с before = строка первой; те же — без записи.
+func TestPutFirstCreateConcurrent(t *testing.T) {
+	t.Parallel()
+	ios := appversion.Versions{Platform: appversion.IOS, Min: "1.0.0", Recommended: "1.2.0", StoreURL: "https://apps.apple.com/app/id1"}
+	other := ios
+	other.Min = "1.1.0"
+	for _, c := range []struct {
+		name        string
+		second      appversion.Versions
+		wantVersion int64
+	}{{"другие значения", other, 2}, {"те же значения", ios, 1}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			pools := dbtest.NewPoolsAs(t, "admin")
+			at := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+			tx1, err := pools.As.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx1.Rollback(ctx) }()
+			if before, _, err := appversion.Put(ctx, tx1, ios, at); err != nil || before != nil {
+				t.Fatalf("первое: %+v %v", before, err)
+			}
+			type result struct {
+				before *appversion.Versions
+				after  appversion.Versions
+				err    error
+			}
+			done := make(chan result, 1)
+			go func() {
+				var r result
+				r.err = db.InTx(ctx, pools.As, func(_ context.Context, tx pgx.Tx) (err error) {
+					r.before, r.after, err = appversion.Put(ctx, tx, c.second, at.Add(time.Minute))
+					return err
+				})
+				done <- r
+			}()
+			if !waitBlocked(t, pools.Owner, 15*time.Second) {
+				t.Fatal("второе не встало за первым")
+			}
+			if err := tx1.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			var r result
+			select {
+			case r = <-done:
+			case <-time.After(30 * time.Second):
+				t.Fatal("второе не завершилось")
+			}
+			if r.err != nil || r.before == nil || r.before.Version != 1 || r.before.Min != "1.0.0" ||
+				r.after.Version != c.wantVersion || r.after.Min != c.second.Min {
+				t.Fatalf("второе: было %+v, стало %+v, %v", r.before, r.after, r.err)
+			}
+		})
+	}
+}
+
+// waitBlocked — в базе теста есть незахваченный замок (кто-то ждёт чужую транзакцию); опрос раз в 10 мс, срок d.
+func waitBlocked(t *testing.T, owner *pgxpool.Pool, d time.Duration) bool {
+	t.Helper()
+	deadline := time.After(d)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var n int
+		if err := owner.QueryRow(context.Background(), `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+			WHERE NOT l.granted AND a.datname = current_database()`).Scan(&n); err != nil {
+			t.Errorf("pg_locks: %v", err)
+			return false
+		}
+		if n > 0 {
+			return true
+		}
+		select {
+		case <-deadline:
+			return false
+		case <-tick.C:
+		}
 	}
 }

@@ -14,12 +14,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 
 	"wf/backend/internal/geo/internal/app"
 	"wf/backend/internal/geo/internal/source"
 	"wf/backend/internal/platform/clock"
-	"wf/backend/internal/platform/queue"
 )
 
 // Ошибки импорта для сборки (cmd/worker) и ручки постановки: пакет app внутренний.
@@ -36,34 +34,22 @@ type Config struct {
 	HTTPClient      *http.Client
 }
 
-// ImportArgs — задача импорта страны. StartedBy — сотрудник, поставивший импорт (журнал и
-// аудит), только id. Уникальность — по Country (тег river:"unique").
-type ImportArgs struct {
-	V         int        `json:"v"`
-	Country   string     `json:"country" river:"unique"`
-	StartedBy *uuid.UUID `json:"started_by,omitempty"`
-}
+// ImportArgs — задача импорта страны (живёт в app: её ставит сценарий админки, R8). Только id сотрудника (R3).
+type ImportArgs = app.ImportArgs
 
-// NewImportArgs — аргументы текущей версии; задачу ставить только так.
+// NewImportArgs — аргументы текущей версии; задачу ставить только так (регистр кода нормализуется).
 func NewImportArgs(country string, startedBy *uuid.UUID) ImportArgs {
-	return ImportArgs{V: 1, Country: country, StartedBy: startedBy}
+	return app.NewImportArgs(country, startedBy)
 }
 
-func (ImportArgs) Kind() string { return "geo.import" }
-
-func (ImportArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{
-		Queue:       queue.Maintenance,
-		MaxAttempts: 3,
-		// по стране: пока импорт страны не завершён, второй River отбросит как дубль (409
-		// geo.import_in_progress у ручки); completed в списке нет — повторный импорт после
-		// успешного ставится сразу, а не после чистки River
-		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
-			rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateScheduled,
-			rivertype.JobStateRunning, rivertype.JobStateRetryable,
-		}},
-	}
-}
+const (
+	// snoozeInProgress — через сколько повторить задачу, пока импорт страны идёт у оператора (geo 1 Task 11 M1):
+	// JobSnooze не тратит попытку и не уводит задачу в discarded.
+	snoozeInProgress = time.Minute
+	// maxQueuedAge — задача старше (от постановки) не откладывается, а отменяется: страховка от вечного ожидания
+	// чужого импорта (R8); уникальность страны освобождается, сотрудник поставит импорт заново.
+	maxQueuedAge = 2 * time.Hour
+)
 
 type importer interface {
 	Import(ctx context.Context, country string, startedBy *uuid.UUID, riverJobID *int64) (app.ImportResult, error)
@@ -72,14 +58,22 @@ type importer interface {
 // ImportWorker — исполнитель geo.import и команды оператора.
 type ImportWorker struct {
 	river.WorkerDefaults[ImportArgs]
-	im importer
+	im  importer
+	clk clock.Clock
+	log *slog.Logger
 }
 
 func NewImportWorker(pool *pgxpool.Pool, clk clock.Clock, cfg Config, log *slog.Logger) *ImportWorker {
 	return &ImportWorker{im: app.NewImporter(pool, clk, source.FetchConfig{
 		BaseURL: cfg.BaseURL, MaxCompressed: cfg.MaxCompressed, MaxUncompressed: cfg.MaxUncompressed,
 		HTTPClient: cfg.HTTPClient,
-	}, log)}
+	}, log), clk: clk, log: log}
+}
+
+// OperatorClock — часы команды оператора по времени базы (app.OperatorClock, ревью G7 m9): base + (now() базы −
+// base.Now()). Команда geo import идёт с машины оператора — её часы не источник времени журнала.
+func OperatorClock(ctx context.Context, pool *pgxpool.Pool, base clock.Clock) (clock.Clock, error) {
+	return app.OperatorClock(ctx, pool, base)
 }
 
 // Timeout — 30 минут; строку журнала, пережившую его на 10 минут, следующий запуск считает
@@ -92,8 +86,17 @@ func (w *ImportWorker) Work(ctx context.Context, job *river.Job[ImportArgs]) err
 		return fmt.Errorf("geo: версия аргументов geo.import %d не поддерживается этим воркером", job.Args.V)
 	}
 	_, err := w.im.Import(ctx, job.Args.Country, job.Args.StartedBy, &job.ID)
-	if errors.Is(err, app.ErrCountryNotFound) {
+	switch {
+	case errors.Is(err, app.ErrCountryNotFound):
 		return river.JobCancel(err) // повтор не поможет
+	case errors.Is(err, app.ErrImportInProgress):
+		// импорт страны идёт у оператора: ждать, а не тратить попытки (R8); граница — включительно: ровно 2 ч ещё ждём
+		if age := w.clk.Now().Sub(job.CreatedAt); age > maxQueuedAge {
+			w.log.Error("задача geo.import ждёт чужой импорт страны дольше срока — отменена", "job_id", job.ID,
+				"country", job.Args.Country, "age", age.String(), "err", err)
+			return river.JobCancel(fmt.Errorf("geo: задача %d ждёт импорт страны дольше %s: %w", job.ID, maxQueuedAge, err))
+		}
+		return river.JobSnooze(snoozeInProgress)
 	}
 	return err
 }

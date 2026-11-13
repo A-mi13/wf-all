@@ -1,10 +1,12 @@
 // Package dbtest выдаёт каждому тесту свою чистую базу — клон мигрированного шаблона.
-// pgtestdb мигрирует шаблон один раз на весь прогон (advisory-lock), клон ~10 мс.
+// pgtestdb мигрирует шаблон один раз на весь прогон (advisory-lock); клон (~21 МБ, CREATE DATABASE … TEMPLATE)
+// и его DROP — ~0,25 с каждый в одиночку и дороже под нагрузкой: это главная цена теста (S1, замер 03.11).
 package dbtest
 
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net"
 	"os"
 	"testing"
@@ -54,14 +56,21 @@ func migrator() pgtestdb.Migrator {
 // requireServer падает с понятным советом, если Postgres не запущен.
 func requireServer(t testing.TB, c pgtestdb.Config) {
 	t.Helper()
+	if err := dial(c); err != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+// dial — Postgres слушает порт конфигурации; иначе ошибка с советом.
+func dial(c pgtestdb.Config) error {
 	dialer := net.Dialer{Timeout: 2 * time.Second}
 	conn, err := dialer.DialContext(context.Background(), "tcp", net.JoinHostPort(c.Host, c.Port))
 	if err != nil {
-		t.Fatalf("Postgres недоступен на %s (порт: WF_TEST_PG_PORT → WF_PG_PORT → 15432) — "+
-			"запусти ./task infra:up или проверь, что порт совпадает с WF_PG_PORT в deploy/dev/.env (%v)",
+		return fmt.Errorf("dbtest: Postgres недоступен на %s (порт: WF_TEST_PG_PORT → WF_PG_PORT → 15432) — "+
+			"запусти ./task infra:up или проверь, что порт совпадает с WF_PG_PORT в deploy/dev/.env (%w)",
 			net.JoinHostPort(c.Host, c.Port), err)
 	}
-	_ = conn.Close()
+	return conn.Close()
 }
 
 func New(t testing.TB) *sql.DB {

@@ -15,6 +15,7 @@ import (
 // там DML) их нет; роль api их не читает (42501). Повтор тем же ключом отдаёт сохранённый ответ — из новой
 // таблицы.
 func TestStaffIdempotencyOwnTable(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	a := e.owners(1)[0]
 	c1, c2 := e.city("vremensk"), e.city("pokrovsk")

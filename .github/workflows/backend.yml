@@ -31,7 +31,10 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30: backend:ci = gen:check + lint + test, а у test предел пакета -timeout 20m (httpapi/admin ~10 мин): job не
+    # должен обрывать прогон раньше предела go test (иначе вместо имени зависшего теста — «отменено по таймауту»);
+    # остальное (bootstrap из кеша, lint, gen:check, контракты) — до 10 мин сверху
+    timeout-minutes: 30
     services:
       db:
         image: postgis/postgis:18-3.6

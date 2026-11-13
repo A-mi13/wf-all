@@ -20,6 +20,7 @@ import (
 // Приглашение (P13, §4.3): всегда запрос (202); право — grant_elevated для owner/admin, иначе grant;
 // без права — 403 до обращения к почте.
 func TestInviteRights(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c := e.city("kazan")
@@ -70,6 +71,7 @@ func TestInviteRights(t *testing.T) {
 // Почта занята действующей (active) или приглашённой (invited) учёткой — 409 staff.email_taken на этапе
 // запроса, в любом регистре; запроса нет.
 func TestInviteEmailTaken(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	owner := e.as(e.addMember("owner@wf.example", memberOpts{Role: "owner"}))
 	e.addMember("active@wf.example", memberOpts{Role: "support"})
@@ -88,6 +90,7 @@ func TestInviteEmailTaken(t *testing.T) {
 // Поля приглашения: почта и имя — как у bootstrap; роль — из списка; города — только у модератора
 // (хотя бы один, не больше 100), несуществующий — 422 staff.city_not_found.
 func TestInviteValidation(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	owner := e.as(e.addMember("owner@wf.example", memberOpts{Role: "owner"}))
 	c := e.city("kazan")
@@ -130,6 +133,7 @@ func TestInviteValidation(t *testing.T) {
 // модератора (отложенный триггер и права grants.sql), created_by и granted_by — подтвердивший;
 // приглашение и письмо staff.invite; аудит staff.invited от подтвердившего; событие staff.invited.
 func TestInviteExecute(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	c1, c2 := e.city("kazan"), e.city("perm")
 	a := e.addMember("owner.a@wf.example", memberOpts{Role: "owner"})
@@ -177,6 +181,7 @@ func TestInviteExecute(t *testing.T) {
 // доступа той же учётки с новой ролью, городами и именем: пароль, второй фактор, коды и сессии стёрты,
 // статус invited, новое приглашение, версия выросла; история (id) сохраняется.
 func TestInviteDisabledReturnsSameAccount(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	c := e.city("kazan")
 	a := e.addMember("owner.a@wf.example", memberOpts{Role: "owner"})
@@ -224,6 +229,7 @@ func TestInviteDisabledReturnsSameAccount(t *testing.T) {
 // вместе — ровно одно executed, второе failed (staff.email_taken), учётка одна, частичных записей
 // второго нет (savepoint).
 func TestInviteConcurrentSameEmail(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	a := e.addMember("owner.a@wf.example", memberOpts{Role: "owner"})
 	b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))

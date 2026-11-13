@@ -14,6 +14,7 @@ import (
 
 // Чистит воркер — под ролью worker.
 func TestCleanupDeletesOnlyExpired(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "worker")
 	ctx := context.Background()
 	if _, err := pools.Owner.Exec(ctx, `INSERT INTO rate_limits (key, tat) VALUES
@@ -49,6 +50,7 @@ func TestCleanupDeletesOnlyExpired(t *testing.T) {
 
 // Больше одной пачки: воркер повторяет удаление, пока не вычистит всё просроченное.
 func TestCleanupManyBatches(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "worker")
 	ctx := context.Background()
 	if _, err := pools.Owner.Exec(ctx, `INSERT INTO rate_limits (key, tat)

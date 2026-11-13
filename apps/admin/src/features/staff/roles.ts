@@ -21,6 +21,24 @@ const grantPermission = (role: string) =>
   isElevated(role) ? 'staff.roles.grant_elevated' : 'staff.roles.grant';
 
 // Роли, которые сотрудник может выдать приглашением (§9.3: кнопка «Пригласить» и выбор роли).
+// Права приглашения — выдача любой роли (для ActionGate: на карманном устройстве — пометка).
+export const INVITE_PERMISSIONS = ['staff.roles.grant', 'staff.roles.grant_elevated'] as const;
+
+// Семейства прав действий — для ActionGate (на карманном устройстве — пометка): любое право семейства
+// в реестре «только с компьютера», какое именно спросит roles.ts — зависит от роли цели и изменения.
+// Смена роли и городов (roleChangePermission даёт одно из них), сброс доступа, выключение.
+export const ROLE_CHANGE_PERMISSIONS = [
+  'staff.roles.grant',
+  'staff.roles.grant_elevated',
+  'staff.roles.revoke',
+] as const;
+export const RESET_PERMISSIONS = ['staff.access.reset', 'staff.access.reset_elevated'] as const;
+export const DISABLE_PERMISSIONS = [
+  'staff.roles.revoke',
+  'staff.roles.revoke_admin',
+  'staff.roles.revoke_owner',
+] as const;
+
 export function grantableRoles(me: Me): StaffRole[] {
   return ROLES.filter((r) => can(me, grantPermission(r)));
 }

@@ -126,13 +126,18 @@ geo»), §5 и §11. Дизайн: `design/screens/07-Админка.dc.html`, `
 | `geo.cities.rename` — названия по локалям | allow | allow | scoped | deny |
 | `geo.districts.manage` | allow | allow | scoped | deny |
 | `geo.countries.read` | allow | allow | allow | allow |
-| `geo.countries.manage` | allow | allow | deny | deny |
+| `geo.countries.manage` — включение страны и прочие её поля | allow | allow | deny | deny |
+| `geo.countries.rules` — создание страны, валюта, пороги, выключение | dual | dual | deny | deny |
 | `geo.imports.read` | allow | allow | deny | allow |
 | `geo.imports.run` | allow | allow | deny | deny |
 | `platform.versions.read` | allow | allow | allow | allow |
 | `platform.versions.manage` | allow | allow | deny | deny |
 | `platform.flags.read` | allow | allow | allow | allow |
 | `platform.flags.manage` | allow | allow | deny | deny |
+
+Правила страны (U7, `docs/05` 5.3; решение пользователя 27.10): создание страны, смена валюты и возрастных порогов
+и выключение страны — всегда вдвоём (`geo.countries.rules`, действия `geo.country_create` и `geo.country_rules`,
+§4.8), независимо от статусов городов; включение страны и прочие её поля — сразу (`geo.countries.manage`).
 
 Строки будущих модулей — по макету 07, раздел «Роли и доступ»: капитаны, площадки, жалобы, ограничения,
 вечная блокировка (`dual`), аннулирование протокола (`dual`), персональные данные (с аудитом чтения),
@@ -177,8 +182,10 @@ geo»), §5 и §11. Дизайн: `design/screens/07-Админка.dc.html`, `
   владелец.
 - **U4–U8** — обязательные требования к спекам будущих модулей (docs/05, 5.3): повторные ограничения и
   предел 30 дней за 90 (moderation); заявленная связь «сотрудник → игрок» как запрет действий над собой
-  (moderation, teams); ПД у поддержки — только с причиной (identity); пороги и валюта страны с открытыми
-  городами и награды с начислением — вдвоём (geo, economy); публикация и слияние полей — разные права
+  (moderation, teams); ПД у поддержки — только с причиной (identity); **U7:** создание страны, смена валюты и
+  возрастных порогов, выключение страны — всегда вдвоём (`geo.countries.rules`, действия `geo.country_create`,
+  `geo.country_rules`; решение пользователя 27.10.2026, условие «есть открытые города» снято); включение — сразу
+  (`geo.countries.manage`); награды с начислением — вдвоём (economy); публикация и слияние полей — разные права
   (pitches).
 - **M10.** `GET /v1/geo/cities` модератору возвращает только его города (право `scoped`) уже в плане A
   (§6.1). Исключения нет: города модератору выбирают владелец и админ, им видны все.
@@ -260,6 +267,13 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
   комментарии), а у роли `api` на `idempotency_keys` DML — она читала бы их, подменяла сохранённый ответ и
   снимала ключ. admin-api собирает `idempotency.Middleware` с `Config{Table: idempotency.Staff}`; публичный
   API — по умолчанию `idempotency_keys` (не меняется). Права — §3.3; чистка — §4.10.
+- **`staff_rate_limits`** (платформа, `platform/ratelimit`; план B, R2, миграция `0022`) — счётчики лимитов admin-api:
+  вход по почте (`email:<hmac>`), IP класса `staff_auth`, субъект `staff:<класс>:<id>`, потолок аудита приглашений,
+  классы `default` конвейера. Схема — копия `rate_limits` (`UNLOGGED`, PK `key`, индекс по `tat`). Своя таблица по той
+  же причине, что ключи идемпотентности: у роли `api` на `rate_limits` DML — взлом публичного API стирал бы счётчики
+  перебора входа сотрудника или закрывал вход всем вставкой большого `tat`. admin-api собирает лимитер
+  `ratelimit.NewPG(pool, clock, ratelimit.Staff)` (`assemble`: сценарии, конвейер, команды оператора); публичный API —
+  `ratelimit.Players`. Права — §3.3; чистка — тикер admin-api (§4.10).
 - **`feature_flags`** (план B): `version bigint`. Ключи флагов заводятся миграциями модулей, админ только
   переключает.
 
@@ -270,6 +284,9 @@ CREATE TYPE staff_invite_purpose AS ENUM ('invite', 'access_reset');
   ничего (страж `TestRolePrivileges`, сквозной — `TestStaffIdempotencyOwnTable`). Обратно: у `admin` на
   `idempotency_keys` игроков — ничего (admin-api в неё не ходит; периодику `idempotency.cleanup` лидер только
   ставит в `river_job`, исполняет воркер).
+- `staff_rate_limits` (§3.2) — тоже ветка `staff_*`: DML только у `admin`; у `api` и `worker` — ничего (страж
+  `TestRolePrivileges`, сквозной — `TestStaffRateLimitsOwnTable`). На `rate_limits` игроков у `admin` — ничего (своя
+  ветка `grants.sql`; `api` и `worker` — DML, как было; периодику `ratelimit.cleanup` лидер admin-api только ставит).
 - `admin` — права на служебные таблицы River, как у воркера (исполнение задач очереди `staff`, §4.10).
 - `admin`: `DELETE` на `city_slug_history` (план B; спека geo §3.8).
 - `api`: к `staff_*` и `approvals` доступа нет, sequence-прав тоже (страж §11).
@@ -351,14 +368,27 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
 
 ### 4.3. Приглашение и повторная отправка
 
-1. `POST /v1/staff/invites {email, display_name, role, city_ids?}` (`x-permission: handler`, право —
+1. `POST /v1/staff/invites {email, display_name, role, city_ids?, locale?}` (`x-permission: handler`, право —
    `staff.roles.grant` или `…grant_elevated` по роли) создаёт подтверждение и отвечает `202 {approval}`.
+   `locale` (`ru | en`, IL2, решение пользователя 10.11) — язык учётки и писем новичка, его выбирает приглашающий;
+   нет поля — язык приглашающего (`me.locale` инициатора на момент создания запроса); иное — `400 validation.failed`
+   по `body.locale`, код `enum`. Язык — в payload подтверждения: смена языка инициатора до подтверждения его не
+   меняет; исполнитель проверяет его как прочие поля payload (не `ru`/`en` — `failed`, `platform.approval_stale`).
+   Запрос, поданный до IL2 (поля нет), исполняется: новая учётка — язык по умолчанию базы, выключенная — прежний.
+   Админка: поле «Язык сотрудника» (RU/EN) в форме приглашения, по умолчанию — язык админки приглашающего, показан
+   явно и уходит в теле всегда (сервер не подставляет умолчание молча); выбор живёт в черновике формы, «Пригласить
+   ещё» возвращает умолчание. Сводка подтверждения `staff.invite` показывает язык строкой «Язык» (подтверждающий
+   видит всё; незнакомое значение — как есть). Запись `staff.invited` новой учётки несёт `after.locale` (след выбора
+   после чистки решённых запросов).
 2. Исполнение подтверждения:
-   - создаётся учётка `invited`, роль и города;
+   - создаётся учётка `invited` с языком из payload, роль и города;
    - приглашение получает новый код;
-   - письмо `staff.invite` со ссылкой `ADMIN_ORIGIN/accept` (без почты в адресе) и кодом.
+   - письмо `staff.invite` на языке учётки со ссылкой `ADMIN_ORIGIN/accept?lang=<язык учётки>` (без почты в
+     адресе) и кодом; так же — все повторные отправки (админом, самим сотрудником, оператором) и письмо
+     `staff.access_reset`.
 
-   Почта уже есть: учётка выключена — сброс доступа той же учётки, иначе `409 staff.email_taken`.
+   Почта уже есть: учётка выключена — сброс доступа той же учётки (язык перезаписывается выбранным
+   приглашающим; сменился — было/стало `locale` в записи `staff.invited`), иначе `409 staff.email_taken`.
 3. Повторная отправка самим сотрудником: `POST /v1/staff/auth/invite/resend {email}` — анонимная,
    всегда `202`.
    - Письмо отправляется, только если есть живое приглашение, с последней отправки прошло 60 с,
@@ -378,9 +408,14 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
 
 ### 4.4. Принятие приглашения (первый вход)
 
-`POST /v1/staff/auth/invite/accept {email, code, password}`:
+`POST /v1/staff/auth/invite/accept {email, code, password, locale?}`:
 
 - Проверки — в таком порядке, без изменения состояния до успеха кода:
+  - форма тела по схеме контракта (валидатор admin-api, до сценария): `locale`, если передан, — `ru` или `en`,
+    иначе `400 validation.failed` по `body.locale` с кодом `enum` (как у `PATCH me/locale`; пустая строка,
+    регистр, регион и `null` — тоже), без записи неудачи. Поэтому через HTTP мусор в `locale` отсекается раньше
+    правил пароля (у `password` в схеме ограничений длины нет); сценарий при прямом вызове проверяет пароль, затем
+    `locale` (`checkLocale`, та же проверка);
   - пароль проходит правила: `400 validation.failed`, поле `body.password`, код
     `too_short|common|too_long`;
   - приглашение живо и код верен. Неверный код ничего не стирает и не считается в строке приглашения:
@@ -397,10 +432,18 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
 - Ответ при любой ошибке кода, почты или срока одинаковый: `400 staff.invite_invalid`.
 - Успех:
   - пароль сохраняется, неподтверждённый TOTP (если был) сбрасывается;
+  - язык `locale` (выбранный на экране приглашения, решение пользователя 10.11) — в учётку в той же
+    транзакции, после сверки кода под замком: при любой неудаче язык прежний; нет поля — прежний; повторное
+    принятие перезаписывает. Админка шлёт `locale` всегда — язык, на котором показан экран принятия (выбор
+    «RU · EN» на устройстве или язык браузера): «что видишь, то и сохраняется». `me.locale` стадии `setup` с ним
+    совпадает, и `/setup-2fa` открывается на нём (сменить язык до `active` иначе нельзя: `PATCH me/locale` —
+    только активная сессия). Сброс доступа сотруднику с `en` на устройстве `ru-RU`: экран на RU с переключателем
+    рядом — что выбрано на экране в момент принятия, то и пишется (принято осознанно, раунд 2 IL);
   - приглашение **не гасится** — до `recovery-codes/ack`. Потерянную сессию настройки можно
     возобновить повторным `accept` тем же или новым кодом;
   - старая сессия из cookie гасится, создаётся новая в стадии `setup` (cookie §5.2);
-  - аудит `staff.invite_accepted`.
+  - аудит `staff.invite_accepted`; язык сменился — в той же записи было/стало (`before.locale`,
+    `after.locale`), отдельной `staff.locale_changed` нет.
 
 ### 4.5. Настройка 2FA (стадия `setup`)
 
@@ -503,6 +546,20 @@ geo. archtest: модуль заносится в `modules.go` и `ownership.go`
   нет: счётчик в меню (§9.3).
 - Регистрируются в этом срезе (модуль `staff`): `staff.invite`, `staff.role_change`, `staff.access_reset`,
   `staff.revoke_owner`. Подписи действий — в локалях админки (`approvals.actions.<action>`).
+- **Действия модулей не из `staff`** (план B, R5, R21; первым — `geo.country_create`, `geo.country_rules`):
+  - инициатор в payload — `approvals.Initiator{init_id, init_ver}` (`approvals.InitiatorOf(auth.Staff)`): версия и
+    подпись учётки несёт принципал (`auth.Staff.Version`, `Label` — заполняет загрузчик сессии `staff`), модуль
+    таблиц `staff_*` не читает; проверка инициатора `staff` читает те же поля из любого payload. Отставшая версия
+    ведёт к отказу (`failed`, `initiator_changed`), а не к пропуску;
+  - действие объявляет `LockActors: true`: платформа в транзакции подтверждения — после замка строки запроса и
+    проверки инициатора, до savepoint исполнителя — зовёт хук `Registry.SetActorLock` (регистрирует `staff`):
+    `FOR SHARE` учёток инициатора и подтверждающего по возрастанию id (порядок «строка `approvals` → учётки» тот
+    же, что у `staff`), инициатор изменился — `failed` (`initiator_changed`, `409 platform.approval_stale`),
+    подтверждающий выключен, сменил роль или сессия погашена — откат, запрос `pending`. Действие с `LockActors`
+    без хука — отказ `Registry.Validate()` при сборке. У `staff.*` `LockActors = false`: их исполнитель сам берёт
+    замок владельцев раньше учёток;
+  - исполнитель получает копию принципала подтверждающего с `Label` = `decided_by_label` (подпись решения, а не
+    загрузки сессии): аудит модуля и запрос не расходятся при смене имени между ними.
 
 ### 4.9. Управление сотрудниками
 
@@ -567,7 +624,9 @@ admin-api запускает свой River-клиент с исполнител
     (`PurgeDecided`);
   - удаляет просроченные ключи идемпотентности admin-api (`idempotency.DeleteExpired(ctx, pool,
     idempotency.Staff)`: порции по 1000, как у чистки `idempotency_keys` воркером; у воркера прав на
-    `staff_idempotency_keys` нет).
+    `staff_idempotency_keys` нет);
+  - удаляет строки лимитов admin-api с `tat` в прошлом по часам сервиса (`ratelimit.DeleteExpired(ctx, pool,
+    clock, ratelimit.Staff)`: порции по 1000; у воркера прав на `staff_rate_limits` нет; план B, R2).
 
 ### 4.11. Ротация ключей
 
@@ -715,9 +774,10 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 | `POST /v1/geo/cities/{cityId}/link {geoname_id}` | `geo.cities.manage` | **новая**: ручная привязка неоднозначного города из отчёта сверки |
 | `GET …/{cityId}/districts` | `geo.cities.read` | — |
 | `POST …/{cityId}/districts`, `PATCH …/districts/{districtId}` | `geo.districts.manage` | район чужого города → `404 geo.district_not_found` (тест: модератор своего города, район чужого) |
-| `GET /v1/geo/countries`, `POST`, `PATCH /{code}` | read / `geo.countries.manage` | валюта — по списку ISO 4217, `country_code` — ISO 3166-1 alpha-2 |
+| `GET /v1/geo/countries`, `POST`, `PATCH /{code}` | `geo.countries.read` / `geo.countries.rules` (`POST` — всегда `202`, U7) / `handler`: `geo.countries.manage`, `geo.countries.rules` (`PATCH`: валюта, пороги, выключение — `202`; включение и прочее — сразу) | валюта — по списку ISO 4217, `country_code` — ISO 3166-1 alpha-2 |
 | `GET /v1/geo/countries/{code}/regions` | `geo.cities.read` | **новая**: выбор региона при активации |
-| `POST /v1/geo/imports {country}`, `GET /v1/geo/imports`, `GET …/{importId}` | `geo.imports.run` / `…read` | **новая** `GET {id}` — отчёт сверки (ambiguous, conflict) |
+| `POST /v1/geo/imports {country}`, `GET /v1/geo/imports`, `GET …/{importId}` | `geo.imports.run` / `…read` | **новая** `GET {id}` — отчёт сверки (ambiguous, conflict); `409 geo.import_in_progress` несёт `job_id` существующей задачи (R26) |
+| `GET /v1/geo/imports/jobs/{jobId}`, `POST …/jobs/{jobId}/cancel` | `geo.imports.read` / `geo.imports.run` | **новые** (план B, R7, R22): состояние задачи River до появления строки журнала; отмена задачи «в очереди» — §6.2; коды `geo.import_job_not_found`, `geo.import_job_not_cancellable` |
 | `GET /v1/app/versions`, `PUT /v1/app/versions/{platform}` | `platform.versions.read` / `…manage` | **новая** `GET` |
 | `GET /v1/flags`, `PATCH /v1/flags/{key} {version, enabled_globally?, enabled_city_ids?}` | `platform.flags.read` / `…manage` | **новые**; запись в `platform/flags`; `version` в теле (расхождение → `409 platform.flag_stale`); несуществующий флаг → `404 platform.flag_not_found`; города проверяются; событие `platform.flag_changed` с детерминированным uuid агрегата |
 
@@ -725,14 +785,27 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 
 - admin-api ставит задачу своим River-клиентом (§4.10).
 - Ручка отвечает `202 {job_id}`: строку `geonames_imports` создаёт сам импорт в воркере (спека geo §5.4
-  шаг 1), у `admin` на ней только чтение. Журнал ищется по `river_job_id`. Строка `running` уже есть или
-  River отказал по уникальности → `409 geo.import_in_progress`.
+  шаг 1), у `admin` на ней только чтение. Журнал ищется по `river_job_id`; до строки экран следит за задачей
+  через `getGeoImportJob` (`JobGet` клиента River, R7). River отказал по уникальности (`job_id` существующей
+  задачи) или есть **свежая** строка `running` страны (не старше `StaleAfter` = 40 мин; `job_id` — её
+  `river_job_id`, у оператора — без него) → `409 geo.import_in_progress` (R26). Зависшая строка не мешает:
+  её закрывает `failed` поставленная задача (спека geo §5.4).
 - Страна проверяется по `^[A-Z]{2}$`, а `jobs.NewImportArgs` нормализует регистр.
 - Задача `geo.import` на `ErrImportInProgress` (параллельный импорт оператора) уходит в
-  `river.JobSnooze(1 мин)`, а не в discarded.
-- Аудит постановки — от имени сотрудника. В `geonames_imports.started_by` (uuid без FK, «сотрудник; NULL —
-  оператор») пишется id из `staff_accounts`; `writeAudit` импорта переходит с `actor_user_id` на
-  `actor_staff_id`.
+  `river.JobSnooze(1 мин)`, а не в discarded; старше 2 ч от постановки — отменяется (R8).
+- **Ответ пользователя Q1 (R3):** в аргументах задачи — только id сотрудника (`started_by`), без имени и роли:
+  `river_job` читает роль `api`, ПД сотрудников видит только admin-api. Постановку (`geo.import_requested`,
+  объект `geonames_import_job` = `id.Named("geonames_import_job", <job_id>)`) пишет admin-api от сотрудника в
+  транзакции с `InsertTx`; аудит импорта воркер пишет от `system` с `after.started_by`; «кто запустил» в журнале
+  импортов — из записи постановки. В `geonames_imports.started_by` (uuid без FK, «сотрудник; NULL — оператор»)
+  — id из `staff_accounts`.
+- Отмена задачи «в очереди» (`cancelGeoImportJob`, R22): без воркера на стенде поставленная задача держала бы
+  уникальность страны вечно. Бегущий импорт не отменяется (`409 geo.import_job_not_cancellable`), уже
+  отменённая — 200 без второй записи журнала; аудит `geo.import_cancelled` — от сотрудника (подробности и
+  принятое остаточное окно — спека geo §5.4).
+- Исполнители подтверждений geo (`geo.country_create`, `geo.country_rules`) пишут аудит без IP и UA
+  (`approvals.Meta{}`), как исполнители `staff`: IP и UA решения — в записи `platform.approval_executed`
+  (ревью G6 m10). Прямые операции geo пишут IP и UA запроса (R20).
 
 ### 6.3. Обязательные хвосты этапа 1
 
@@ -766,8 +839,9 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 
 - События — по спеке geo §6: `geo.city_activated`, `geo.city_status_changed`, `geo.city_renamed`,
   `geo.city_slug_changed`, `geo.city_linked`, `geo.district_created|updated|archived`,
-  `geo.country_updated`, `platform.app_versions_changed`, плюс `platform.flag_changed`.
-- Коды — по спеке geo §8, без `geo.forbidden` и `platform.forbidden` (§2.4).
+  `geo.country_created` (план B, R15), `geo.country_updated`, `platform.app_versions_changed`, плюс
+  `platform.flag_changed`.
+- Коды — по спеке geo §8 (там же коды плана B, R4), без `geo.forbidden` и `platform.forbidden` (§2.4).
 - Подписи флагов — в локалях админки (`flags.<ключ>`).
 
 ## 7. Ошибки
@@ -844,8 +918,8 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 | Шрифты | Oswald и Manrope через `@fontsource`, без внешних запросов |
 | Формы | react-hook-form; `validation.failed` раскладывается по полям |
 | QR | SVG на клиенте (библиотека — первым шагом плана); секрет не уходит наружу |
-| Тема | тёмная (токены только тёмные) |
-| Локали | ru и en (en — перевод), переключатель в меню профиля, выбор сохраняется `PATCH /v1/staff/me/locale` |
+| Тема | две темы, по умолчанию системная (спека UI-фундамента §2, §4.12) |
+| Локали | ru и en (en — перевод), переключатель в меню профиля, выбор сохраняется `PATCH /v1/staff/me/locale`; до входа (вход, приглашение, 2FA) — переключатель на экранах входа, выбор хранится на устройстве (`localStorage[wf.locale]`), после входа главнее `me.locale` (решение пользователя 10.11); язык, на котором показан экран приглашения (выбор или язык браузера), всегда уходит в `accept` полем `locale` и сохраняется в учётку — настройка 2FA и письма идут на нём (§4.4); язык новичка при приглашении задаёт приглашающий (`locale` приглашения, по умолчанию свой), ссылка письма — `/accept?lang=<язык учётки>`: `?lang` открывает /accept на нём, если на устройстве нет `wf.locale` (IL2, §4.3): разбор терпимый (регистр, регион, хвостовая запятая автолинковщика — `ru,`, `EN`, `en-US`; незнакомое — как без параметра), язык ссылки в storage не пишется и действует, пока открыт /accept (уход с экрана — снова выбор устройства или язык браузера), переключатель «RU · EN» главнее, принятие пишет язык экрана |
 
 ### 9.2. Набор компонентов (`src/ui`)
 
@@ -870,6 +944,9 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
   - 429 — таймер по `Retry-After`;
   - «только с компьютера»;
   - «отправлено на подтверждение» — после `202`.
+- **Продолжение набора** — спека UI-фундамента (`2026-10-28-ui-foundation-design.md`) §4: `Popover`, свой
+  `SelectField` и `DateField`, `DataState` и скелетоны, `Tooltip`/`TermHint`/`CopyButton`, `RelativeTime`, `ActionGate`
+  («только с компьютера» — по устройству, §3.2) и далее.
 
 ### 9.3. Сессия на клиенте
 
@@ -930,15 +1007,17 @@ peer → IP-аллоулист → LimitBody → Timeout → маршруты �
 11. **Версии приложения** (*): iOS и Android — минимальная, рекомендуемая, ссылка на стор.
 12. **Флаги функций** (07): матрица «функция × город» с переключателями, глобальный переключатель.
 
-Меню — по макету 07: «Безопасность» (Журнал, Роли и доступ, Подтверждения, Мой доступ), «Справочники»
-(Города и запуск, Страны, Импорт, Версии, Флаги). Разделы будущих модулей не показываются, пока модуль
-не построен. Стартовая страница — первый разрешённый раздел.
+Меню — по макету 07: «Главная» первой (своя группа «Обзор», любому активному), «Безопасность» (Журнал, Роли и
+доступ, Подтверждения, Мой доступ), «Справочники» (Города и запуск, Страны, Импорт, Версии, Флаги). Разделы будущих
+модулей не показываются, пока модуль не построен. Стартовая страница после входа — «Главная» (спека UI-фундамента
+§4.13); адрес из `?return=` важнее.
 
-Телефон (08) — ограничение интерфейса, не защита:
-- работают вход, принятие приглашения, **настройка 2FA**, журнал, подтверждения (список и чтение);
-- подтверждение и отклонение действий `staff.*` скрыты — «выдача прав только с компьютера»;
-- закрыты города, импорт, страны, версии, флаги, роли и «Мой доступ» — «Этот раздел открывается только
-  с компьютера».
+Телефон (08) — ограничение интерфейса, не защита; определяется устройством (палец и экран уже 1024), а не шириной
+окна — компьютер при крупном масштабе действий не теряет. Открыты все разделы. Только с компьютера — действия, которые
+выдают или снимают права сотрудника: приглашение, смена роли и городов, выключение, сброс доступа, и решения по любым
+запросам `staff.*`; вместо кнопок — пометка «только с компьютера». Просмотр ролей, матрицы, сотрудников и их сеансов,
+«Мой доступ», справочники (включая активацию города), решения `geo.*` — на телефоне доступны (спека UI-фундамента
+`2026-10-28-ui-foundation-design.md` §3).
 
 ### 9.5. Структура
 
@@ -1021,7 +1100,7 @@ geo,versions,flags}/`, `src/api/`. Правила — новое `.claude/rules/
 | План | Состав | Что видно вживую |
 |---|---|---|
 | **A. Ролевая модель и вход** | 1) `docs/05-ролевая-модель.md` и **отдельное ревью модели** (opus и пользователь) до кода. 2) Платформа: миграция 0020, `auth.Staff`, `perm`, `approvals`, конвейер §5, контракт `x-permission`. 3) Параллельно: модуль `staff` ∥ каркас админки, набор компонентов, экраны 1–7 на MSW. 4) Сборка вживую и e2e | вход, 2FA, приглашения, роли, подтверждения, журнал |
-| **B. geo 2/2** | 1) Хвосты §6.3. 2) Ручки §6.1–6.2 ∥ экраны 8–12. 3) e2e | города, импорт, страны, версии, флаги |
+| **B. geo 2/2** (выполнен в ветке `spec/geo2-render`, план `docs/superpowers/plans/2026-10-27-staff-b-geo2.md`) | 1) Хвосты §6.3. 2) Ручки §6.1–6.2 ∥ экраны 8–12. 3) e2e | города, импорт, страны, версии, флаги |
 | **C. Render** | `wf-admin-api` (тот же образ, `CMD admin-api`) отдаёт и статику админки (`ADMIN_STATIC_DIR`, один origin без rewrite); `wf-worker` (импорт geo); роль БД `admin` на Neon; SMTP для писем (`ADMIN_MAIL_*`); `staff bootstrap` первого владельца; `docs/deploy-dev.md` | админка на стенде |
 
 Решения плана C за пользователем: background worker на Render платный, нужен SMTP-провайдер.

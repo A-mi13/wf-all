@@ -13,6 +13,7 @@ const p = "wf/backend/internal/"
 
 // Подсадка багов: каждое нарушение из спеки §4.3–4.4 должно ловиться.
 func TestImportViolation(t *testing.T) {
+	t.Parallel()
 	allowed := [][2]string{
 		{p + "teams/internal/app", p + "identity"},
 		{p + "teams/internal/app", p + "identity/intx"},
@@ -67,6 +68,7 @@ func TestImportViolation(t *testing.T) {
 
 // Список пар §4.4 согласован с проверкой импортов: каждая пара — разрешённый импорт.
 func TestIntxPairsAreAllowedImports(t *testing.T) {
+	t.Parallel()
 	for pair := range IntxPairs {
 		from, to := p+pair[0]+"/internal/app", p+pair[1]+"/intx"
 		if v := importViolation(from, to); v != "" {
@@ -76,6 +78,7 @@ func TestIntxPairsAreAllowedImports(t *testing.T) {
 }
 
 func TestInternalDirsAreKnown(t *testing.T) {
+	t.Parallel()
 	entries, err := os.ReadDir("..")
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +92,7 @@ func TestInternalDirsAreKnown(t *testing.T) {
 
 // Главный страж: прямые импорты всех пакетов модуля wf/backend, включая тесты.
 func TestModuleImportsRespectBoundaries(t *testing.T) {
+	t.Parallel()
 	cmd := exec.CommandContext(context.Background(), "go", "list", "-f",
 		`{{.ImportPath}}{{range .Imports}} {{.}}{{end}}{{range .TestImports}} {{.}}{{end}}{{range .XTestImports}} {{.}}{{end}}`,
 		"./...")

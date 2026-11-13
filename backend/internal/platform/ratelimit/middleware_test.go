@@ -62,6 +62,7 @@ func doDevice(h http.Handler, method, path, ip, device string, p *auth.Principal
 }
 
 func TestMiddleware(t *testing.T) {
+	t.Parallel()
 	l, c, _ := limiter(t)
 	rules := ratelimit.Rules{
 		"default": {IP: ratelimit.Policy{Limit: 100, Period: time.Minute}, User: ratelimit.Policy{Limit: 2, Period: time.Minute}},
@@ -115,6 +116,7 @@ func TestMiddleware(t *testing.T) {
 
 // Устройство: метка BFF у анонима, устройство сессии у пользователя (оно важнее метки BFF).
 func TestMiddlewareDevice(t *testing.T) {
+	t.Parallel()
 	l, _, _ := limiter(t)
 	rules := ratelimit.Rules{
 		"default": {Device: ratelimit.Policy{Limit: 1, Period: time.Minute}},
@@ -164,6 +166,7 @@ func (*recording) Over(context.Context, string, ratelimit.Policy) (bool, error) 
 
 // Формат ключей: <вид>:<класс>:<значение>; устройство — s: (сессия) или b: (метка BFF).
 func TestMiddlewareKeys(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	who := &auth.Principal{UserID: uuid.New(), DeviceID: uuid.New()}
 	for _, tc := range []struct {
@@ -192,6 +195,7 @@ func TestMiddlewareKeys(t *testing.T) {
 
 // Маршрут не из контракта лимитом не считается — его ответит роутер.
 func TestMiddlewareSkipsUnknownRoute(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	h := pipeline(t, failing{}, ratelimit.DefaultRules(), &logs)
 	if rec := do(h, http.MethodGet, "/docs", "203.0.113.1", nil); rec.Code != 204 {
@@ -214,6 +218,7 @@ func (failing) Over(context.Context, string, ratelimit.Policy) (bool, error) {
 
 // Хранилище лимитов недоступно — запрос проходит, ошибка — в лог (fail-open).
 func TestMiddlewareFailOpen(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	h := pipeline(t, failing{}, ratelimit.DefaultRules(), &logs)
 	if rec := do(h, http.MethodGet, "/feed", "203.0.113.1", nil); rec.Code != 204 {
@@ -246,6 +251,7 @@ func asUser(id uuid.UUID) func(context.Context) context.Context {
 // Сотрудник admin-api считается ключом staff:<класс>:<id> по политике User; устройства сессии у
 // него нет — метка BFF (если есть) считается как у анонима.
 func TestMiddlewareStaffKeys(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	id := uuid.New()
 	for _, tc := range []struct {
@@ -267,6 +273,7 @@ func TestMiddlewareStaffKeys(t *testing.T) {
 // Игрок и сотрудник не делят счётчик, даже с одинаковым id: исчерпанный лимит игрока не режет
 // сотрудника, и наоборот.
 func TestMiddlewareUserAndStaffCountSeparately(t *testing.T) {
+	t.Parallel()
 	l, _, _ := limiter(t)
 	rules := ratelimit.Rules{
 		"default": {IP: ratelimit.Policy{Limit: 100, Period: time.Minute}, User: ratelimit.Policy{Limit: 1, Period: time.Minute}},

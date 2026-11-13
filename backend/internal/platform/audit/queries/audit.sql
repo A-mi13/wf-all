@@ -19,6 +19,7 @@ WHERE (sqlc.narg(actor_staff_id)::uuid IS NULL OR actor_staff_id = sqlc.narg(act
        OR action = sqlc.narg(action_exact)::text)
   AND (sqlc.narg(object_type)::text IS NULL OR object_type = sqlc.narg(object_type))
   AND (sqlc.narg(object_id)::uuid IS NULL OR object_id = sqlc.narg(object_id))
+  AND (NOT @by_object_ids::bool OR object_id = ANY(@object_ids::uuid[]))
   AND (sqlc.narg(from_at)::timestamptz IS NULL OR created_at >= sqlc.narg(from_at))
   AND (sqlc.narg(to_at)::timestamptz IS NULL OR created_at < sqlc.narg(to_at))
   AND (NOT @scoped::bool OR scope_city_id = ANY(@city_ids::uuid[]) OR actor_staff_id = @own_staff_id::uuid)

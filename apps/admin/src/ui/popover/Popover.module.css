@@ -1,0 +1,26 @@
+/* Пузырь в верхнем слое (спека UI-фундамента §4.8): координаты — от окна (position: fixed), числа
+   --wf-pop-* пишет Popover на сам элемент (setCssPx). Стиль popover по умолчанию у браузера — по центру
+   окна (inset: 0; margin: auto) — снят. Оформление содержимого (подсказка, меню, список) — у вызывателя. */
+.popover {
+  box-sizing: border-box;
+  position: fixed;
+  inset: auto;
+  left: var(--wf-pop-x, 0);
+  top: var(--wf-pop-y, 0);
+  max-height: var(--wf-pop-max-h, none);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg-elevated);
+  color: var(--wf-color-text);
+  box-shadow: var(--wf-shadow-overlay);
+  font-family: var(--wf-font-body);
+}
+
+.popover:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}

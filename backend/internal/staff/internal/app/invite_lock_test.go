@@ -38,6 +38,9 @@ func (e *env) holdAccount(staffIDs ...uuid.UUID) (release func()) {
 // задерживает ответ. Иначе время ответа выдавало бы существование почты сильнее, чем у входа.
 // Записи (раунд 1, 14.10.2026) у всех путей принятия одинаковые — одна запись неудачи, как у входа;
 // у повторной отправки — никаких.
+//
+// serial: пороги реального времени (ответ < 3 с, повторная отправка за 300 мс) — под соседними тестами пакета
+// (argon2 общего хэшера, клоны баз) они ложно краснеют.
 func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 	e := newEnv(t)
 	active := e.addMember("active@wf.example", memberOpts{})
@@ -52,7 +55,7 @@ func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 	// неверный код к годному приглашению: ответ без замка учётки и строки, неудача — в аудите
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	_, err := e.app.AcceptInvite(ctx, valid.Email, otherCode(validCode), newPassword, "", metaWeb)
+	_, err := e.app.AcceptInvite(ctx, valid.Email, otherCode(validCode), newPassword, nil, "", metaWeb)
 	cancel()
 	if !errors.Is(err, staff.ErrInviteInvalid) || time.Since(start) > 3*time.Second {
 		t.Fatalf("неверный код к годному: %v за %v", err, time.Since(start))
@@ -72,7 +75,7 @@ func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 	for _, m := range []member{active, off, closed, expired} {
 		start := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, err := e.app.AcceptInvite(ctx, m.Email, "k7m2p-x4q6d", newPassword, "", metaWeb)
+		_, err := e.app.AcceptInvite(ctx, m.Email, "k7m2p-x4q6d", newPassword, nil, "", metaWeb)
 		cancel()
 		if !errors.Is(err, staff.ErrInviteInvalid) || time.Since(start) > 3*time.Second {
 			t.Fatalf("принятие %s: %v за %v", m.Email, err, time.Since(start))
@@ -90,6 +93,7 @@ func TestInviteIneligibleTakesNoLocks(t *testing.T) {
 // Шесть параллельных неверных кодов и верный в ту же секунду (общий старт): верный принят, код жив,
 // каждая неверная — своя запись аудита (параллельные неудачи не теряются и ничего не стирают).
 func TestAcceptInviteConcurrentWrong(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	before := e.inviteSecret(m.ID)
@@ -105,7 +109,7 @@ func TestAcceptInviteConcurrentWrong(t *testing.T) {
 		}
 		wg.Go(func() {
 			<-start
-			_, errs[i] = e.app.AcceptInvite(context.Background(), m.Email, in, newPassword, "", metaWeb)
+			_, errs[i] = e.app.AcceptInvite(context.Background(), m.Email, in, newPassword, nil, "", metaWeb)
 		})
 	}
 	close(start)
@@ -132,6 +136,7 @@ func TestAcceptInviteConcurrentWrong(t *testing.T) {
 // приглашение: под замком сверка идёт с кодом новой строки — старый код отвергается (с записью
 // неудачи), сессии нет.
 func TestAcceptInviteReissuedWhileWaiting(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, oldCode := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -145,7 +150,7 @@ func TestAcceptInviteReissuedWhileWaiting(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := e.app.AcceptInvite(ctx, m.Email, oldCode, newPassword, "", metaWeb)
+		_, err := e.app.AcceptInvite(ctx, m.Email, oldCode, newPassword, ptr("en"), "", metaWeb)
 		done <- err
 	}()
 	e.waitLockWaiters(1)
@@ -164,6 +169,10 @@ func TestAcceptInviteReissuedWhileWaiting(t *testing.T) {
 	}
 	if n := len(e.audits("staff.invite_accept_failed")); n != 1 {
 		t.Fatalf("аудит неудачи %d", n)
+	}
+	// язык с экрана приглашения — только при успехе: под замком код оказался неверен
+	if l := e.localeOf(m.ID); l != "ru" {
+		t.Fatalf("язык %q после неудачи под замком", l)
 	}
 	e.accept(m, newCode)
 }
@@ -197,6 +206,7 @@ func (h cancelingHasher) Hash(ctx context.Context, pw string) (string, error) {
 
 // M-3: обрыв соединения между хэшем пароля и транзакцией не теряет запись неверной попытки (detached).
 func TestAcceptInviteCanceledAfterHash(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	wrong := otherCode(code)
@@ -206,7 +216,7 @@ func TestAcceptInviteCanceledAfterHash(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	e.app.SetHasher(cancelingHasher{Hasher: h, cancel: cancel})
-	if _, err := e.app.AcceptInvite(ctx, m.Email, wrong, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+	if _, err := e.app.AcceptInvite(ctx, m.Email, wrong, newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 		t.Fatalf("неверный код после обрыва: %v", err)
 	}
 	if ctx.Err() == nil {
@@ -219,6 +229,7 @@ func TestAcceptInviteCanceledAfterHash(t *testing.T) {
 
 // M-3: два одновременных bootstrap одной почты — один успех, второй staff.email_taken.
 func TestOperatorBootstrapConcurrent(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	var (
 		wg   sync.WaitGroup

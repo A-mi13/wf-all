@@ -324,7 +324,7 @@ func prepare(raw source.Raw, run importRun, now time.Time) prepared {
 			continue
 		}
 		p.places = append(p.places, pl)
-		for _, l := range domain.SupportedLocales {
+		for _, l := range domain.SupportedLocales() {
 			if n := chooseName(alts[pl.GeonameID], l, run.locale, pl.Name, pl.ASCIIName); n != "" {
 				p.names = append(p.names, placeName{pl.GeonameID, l, n})
 			}
@@ -337,7 +337,7 @@ func prepare(raw source.Raw, run importRun, now time.Time) prepared {
 		}
 		codes[a.Code] = true
 		p.admin1 = append(p.admin1, a)
-		for _, l := range domain.SupportedLocales {
+		for _, l := range domain.SupportedLocales() {
 			if n := chooseName(alts[a.GeonameID], l, run.locale, a.Name, a.ASCIIName); n != "" {
 				p.admin1Names = append(p.admin1Names, admin1Name{a.Code, l, n})
 			}
@@ -346,17 +346,22 @@ func prepare(raw source.Raw, run importRun, now time.Time) prepared {
 	return p
 }
 
-// chooseName — §3.4 шаг 7: запасное название для языка страны — name, для en — ascii_name,
-// для прочих — нет (строка не пишется).
+// chooseName — название по §3.4 с запасным шага 7 (nameFallback).
 func chooseName(cands []domain.AltName, locale, countryLocale, name, ascii string) string {
-	fallback := ""
+	return strings.TrimSpace(domain.ChooseName(cands, locale, locale == countryLocale,
+		nameFallback(locale, countryLocale, name, ascii)))
+}
+
+// nameFallback — §3.4 шаг 7: запасное название для языка страны — name GeoNames, для en — ascii_name, для
+// прочих — нет (строка не пишется). Общее для импорта (chooseName) и активации (activationNames).
+func nameFallback(locale, countryLocale, name, ascii string) string {
 	switch locale {
 	case countryLocale:
-		fallback = name
+		return name
 	case "en":
-		fallback = ascii
+		return ascii
 	}
-	return strings.TrimSpace(domain.ChooseName(cands, locale, locale == countryLocale, fallback))
+	return ""
 }
 
 // validZone — таймзона известна встроенной базе (clock.In: пустая и Local — отказ).
@@ -428,7 +433,7 @@ func checkAdmin1Refs(set prepared) error {
 	}
 	gaps := map[string]bool{}
 	for _, p := range set.places {
-		if p.Admin1Code != "" && p.Admin1Code != admin1Unknown && !known[p.Admin1Code] {
+		if admin1Known(p.Admin1Code) && !known[p.Admin1Code] {
 			gaps[p.Admin1Code] = true
 		}
 	}
@@ -525,6 +530,13 @@ func writeSource(ctx context.Context, q *geodb.Queries, run importRun, set prepa
 func (im *Importer) reconcile(ctx context.Context, tx pgx.Tx, run importRun) (Reconciled, error) {
 	q := geodb.New(tx)
 	rec := Reconciled{Linked: []LinkedCity{}, Ambiguous: []UnmatchedCity{}, NotFound: []UnmatchedCity{}, Conflict: []UnmatchedCity{}}
+	// Сверка страны исключает её активации (ревью G5 I1-r1): эксклюзивный advisory-замок страны (countryLockKey) — ждёт
+	// идущие активации и не пускает новые до коммита импорта. Активация (Activate) берёт тот же ключ разделяемым
+	// первым замком; без этого привязки нескольких городов страны и активация брали бы город и регион встречно (40P01).
+	class, key := countryLockKey(run.country)
+	if err := q.ImportReconcileLock(ctx, geodb.ImportReconcileLockParams{Class: class, Country: key}); err != nil {
+		return rec, fmt.Errorf("geo: замок страны сверки: %w", err)
+	}
 	cities, err := q.ImportUnlinkedCities(ctx, run.country)
 	if err != nil {
 		return rec, fmt.Errorf("geo: сверка: %w", err)
@@ -576,8 +588,8 @@ func (im *Importer) reconcile(ctx context.Context, tx pgx.Tx, run importRun) (Re
 
 // linkSavepoint — привязка во вложенной транзакции (SAVEPOINT). Гонка с админом — откатывается
 // только эта привязка, taken = true, импорт продолжается (R35): место успели отдать другому
-// городу (23505 cities_geoname_id_key) или сам город успели привязать (ImportLinkCity без строки:
-// geoname_id уже не NULL, единственный источник ErrNoRows в link). Прочие ошибки — ошибка импорта.
+// городу (23505 cities_geoname_id_key) или сам город успели привязать (errCityLinkedMeanwhile: ImportLinkCity без
+// строки — geoname_id уже не NULL). Прочие ошибки — ошибка импорта.
 // События и аудит пишутся в tx из ctx — на том же соединении, поэтому откат до savepoint
 // снимает и событие geo.city_linked.
 func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.ImportUnlinkedCitiesRow,
@@ -586,7 +598,7 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 	if err != nil {
 		return false, fmt.Errorf("geo: savepoint привязки %s: %w", c.Slug, err)
 	}
-	if err := link(ctx, geodb.New(sp), run, c, p); err != nil {
+	if err := link(ctx, sp, run, c, p); err != nil {
 		if rerr := sp.Rollback(ctx); rerr != nil {
 			return false, errors.Join(err, fmt.Errorf("geo: откат привязки %s: %w", c.Slug, rerr))
 		}
@@ -594,7 +606,7 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 			pgErr.ConstraintName == cityGeonameKey {
 			return true, nil
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, errCityLinkedMeanwhile) {
 			return true, nil
 		}
 		return false, err
@@ -605,28 +617,17 @@ func linkSavepoint(ctx context.Context, tx pgx.Tx, run importRun, c geodb.Import
 	return false, nil
 }
 
-// link — город получает geoname_id, version + 1, недостающие переводы; регион — код admin1 и
-// недостающие переводы; событие geo.city_linked. centroid и population города не меняются.
-func link(ctx context.Context, q *geodb.Queries, run importRun, c geodb.ImportUnlinkedCitiesRow, p geodb.ImportCityCandidatesRow) error {
-	version, err := q.ImportLinkCity(ctx, geodb.ImportLinkCityParams{ID: c.ID, GeonameID: p.GeonameID})
+// link — привязка города сверки к месту: общая linkCity (R14, та же у ручной привязки linkGeoCity).
+// Замки: город (geoname_id), затем регион (страна, admin1) — у каждого города сверки, в одной транзакции на все
+// города страны, поэтому общий порядок задаёт slug городов, а не правило. Активацию и ручную привязку городов этой
+// страны исключает эксклюзивный advisory-замок страны в начале reconcile (ревью G5 I1-r1), а не порядок замков.
+func link(ctx context.Context, tx pgx.Tx, run importRun, c geodb.ImportUnlinkedCitiesRow, p geodb.ImportCityCandidatesRow) error {
+	_, err := linkCity(ctx, tx, linkInput{CityID: c.ID, RegionID: c.RegionID, GeonameID: p.GeonameID, Admin1: p.Admin1Code,
+		Country: run.country, CountryLocale: run.locale})
 	if err != nil {
 		return fmt.Errorf("geo: привязка %s: %w", c.Slug, err)
 	}
-	if _, err := q.ImportCityNamesFromPlace(ctx, geodb.ImportCityNamesFromPlaceParams{
-		CityID: c.ID, GeonameID: p.GeonameID, CountryLocale: run.locale}); err != nil {
-		return fmt.Errorf("geo: переводы %s: %w", c.Slug, err)
-	}
-	if c.RegionID != nil && p.Admin1Code != nil {
-		if _, err := q.ImportLinkRegion(ctx, geodb.ImportLinkRegionParams{ID: *c.RegionID, Admin1Code: *p.Admin1Code}); err != nil {
-			return fmt.Errorf("geo: код региона %s: %w", c.Slug, err)
-		}
-		if _, err := q.ImportRegionNamesFromAdmin1(ctx, geodb.ImportRegionNamesFromAdmin1Params{
-			RegionID: *c.RegionID, CountryCode: run.country, Admin1Code: *p.Admin1Code, CountryLocale: run.locale}); err != nil {
-			return fmt.Errorf("geo: переводы региона %s: %w", c.Slug, err)
-		}
-	}
-	_, err = events.Publish(ctx, geo.CityLinkedEvent(c.ID, version, p.GeonameID))
-	return err
+	return nil
 }
 
 type journalFile struct {
@@ -713,13 +714,41 @@ func (im *Importer) fail(ctx context.Context, run importRun, files []source.File
 	})
 }
 
-// writeAudit — команда оператора: роль operator без автора; задача River: сотрудник, роль admin
-// (импорт ставит только admin, §5.2).
+// writeAudit — итог импорта в аудит (ответ пользователя Q1, R3): задача River — от system (воркер действует сам; «кто
+// поставил» — запись geo.import_requested admin-api), id сотрудника — after.started_by; команда оператора — operator.
+// Автора (ActorUserID, ActorStaffID) нет никогда: сотрудник не игрок, а воркер не видит учёток сотрудников.
 func writeAudit(ctx context.Context, run importRun, after map[string]any) error {
-	actor, role := uuid.Nil, "operator"
+	role := "operator"
 	if run.startedBy != nil {
-		actor, role = *run.startedBy, "admin"
+		role = "system"
+		after = maps.Clone(after)
+		after["started_by"] = run.startedBy.String()
 	}
-	return audit.Write(ctx, audit.Entry{ActorUserID: actor, ActorRole: role, Action: auditAction,
+	return audit.Write(ctx, audit.Entry{ActorRole: role, ActorLabel: role, Action: auditAction,
 		ObjectType: geo.AggregateGeonamesImport, ObjectID: run.id, After: after})
 }
+
+// OperatorClock — часы команды оператора по базе (ревью G7 m9, m1 ревью G5): base + (now() базы − base.Now()),
+// смещение замеряется один раз при старте команды. Оператор запускает импорт со своей машины, её часы могут
+// расходиться со стендом на минуты: started_at его строки и сверка «зависшей» строки в begin (StaleAfter) иначе
+// шли бы по ноутбуку — отставание больше ~10 мин делало живой импорт зависшим для admin-api (второй импорт страны),
+// спешка — закрывала чужую живую строку. По часам базы журнал оператора согласован со строками воркера и
+// записями аудита (тоже время стенда). Погрешность — время одного запроса; импорт короче ImportTimeout, дрейф
+// за это время пренебрежим.
+// Ограничение (принято, ревью уборки m3): сдвиг замерен один раз и прибавляется к стенным часам процесса — скачок
+// часов посреди импорта (сон ноутбука, шаг NTP) сдвигает finished_at и missing_since на величину скачка.
+func OperatorClock(ctx context.Context, pool *pgxpool.Pool, base clock.Clock) (clock.Clock, error) {
+	dbNow, err := geodb.New(pool).ImportDBNow(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("geo: время базы: %w", err)
+	}
+	return offsetClock{base: base, d: dbNow.Sub(base.Now())}, nil
+}
+
+// offsetClock — base со сдвигом d.
+type offsetClock struct {
+	base clock.Clock
+	d    time.Duration
+}
+
+func (c offsetClock) Now() time.Time { return c.base.Now().Add(c.d).UTC() }

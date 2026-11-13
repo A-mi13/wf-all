@@ -58,6 +58,7 @@ func (e *env) all(st *auth.Staff, box, status string, limit int) []uuid.UUID {
 // Входящие: не свои, не о себе, право запроса не deny, scoped — только город запроса из своих;
 // исходящие (mine) — только свои. Новые сверху.
 func TestListBoxes(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	cityA, cityB := id.New(), id.New()
 	owner, owner2, admin := e.member(perm.Owner), e.member(perm.Owner), e.member(perm.Admin)
@@ -120,6 +121,7 @@ func must(items []approvals.Approval, _ string) []approvals.Approval { return it
 // Keyset на одинаковом requested_at: страницы без дублей и пропусков, порядок id DESC; невидимые
 // смотрящему запросы между видимыми не «худят» страницу.
 func TestListKeysetTies(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	owner, owner2 := e.member(perm.Owner), e.member(perm.Owner)
 	admin := e.member(perm.Admin)
@@ -146,6 +148,7 @@ func TestListKeysetTies(t *testing.T) {
 
 // Негодные box, status, курсор — 400; сессия не active — ErrForbidden; лимит — page.Limit.
 func TestListValidation(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	owner := e.member(perm.Owner)
 	_, _, err := e.svc.List(context.Background(), owner, "outbox", "", "", 10)
@@ -176,6 +179,7 @@ func TestListValidation(t *testing.T) {
 
 // Состояния пакета (фильтр status списка) совпадают с перечислением approval_status из 0020.
 func TestStatusesMatchEnum(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	var got []string
 	if err := e.owner.QueryRow(context.Background(), `SELECT enum_range(NULL::approval_status)::text[]`).Scan(&got); err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/approvals"
@@ -118,6 +119,7 @@ func sameJSON(t *testing.T, a, b *httpRec) bool {
 // executed с решившим; повтор тем же ключом — сохранённый 200, исполнитель не зовётся (учётка одна);
 // новым ключом — 409 closed. Аудит решения — с IP (подсеть) и User-Agent запроса.
 func TestInviteApproveFlow(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -180,6 +182,7 @@ func TestInviteApproveFlow(t *testing.T) {
 // Свой запрос не подтвердить (409 self); без тела approve — допустимо (комментарий необязателен); чужой
 // запрос не отменить (404 — существование не раскрывается); несуществующий — 404.
 func TestApprovalDecisionRules(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -203,6 +206,7 @@ func TestApprovalDecisionRules(t *testing.T) {
 // Отклонение и отмена: 200 с итогом; повтор тем же ключом — сохранённый ответ (второго решения нет).
 // Аудит решения — с IP и User-Agent запроса (ревью 10b m1).
 func TestRejectCancelReplay(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -253,6 +257,7 @@ func TestRejectCancelReplay(t *testing.T) {
 // Ровно в момент истечения (now = requested_at + 24 ч): expired от системы коммитится, ответ 409 closed;
 // повтор тем же ключом — тот же сохранённый 409.
 func TestApproveAtExpiry(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -283,6 +288,7 @@ func TestApproveAtExpiry(t *testing.T) {
 // Два подтверждающих одновременно (барьер: оба прошли конвейер до решения) — один 200 executed, другой 409
 // closed; учётка одна.
 func TestApproveConcurrent(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(3)
 	id := e.accepted(e.inviteReq(o[0].token, "", "ivan.p@wf.example", "support"))
@@ -326,6 +332,7 @@ func TestApproveConcurrent(t *testing.T) {
 // Подтверждающий выключен или сменил роль между загрузкой сессии и решением: подпись решившего перечитывает
 // учётку и сессию — 401 / 403, запрос остаётся pending, решений в журнале нет (approve и reject).
 func TestDecisionByChangedApprover(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(3)
 	e.v = apitest.New(t, oapi.GetSpec)
@@ -377,6 +384,7 @@ func TestDecisionByChangedApprover(t *testing.T) {
 // Сессию погасили между конвейером и решением: подпись решившего (Label) перечитывает сессию — 401 и
 // стирание cookie, как у операций staff (ревью 10b m3); запрос остаётся pending. approve, reject и cancel.
 func TestDecisionRevokedSessionClearsCookie(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -406,6 +414,7 @@ func TestDecisionRevokedSessionClearsCookie(t *testing.T) {
 // занята к моменту подтверждения (второе приглашение на ту же почту) → 409 staff.email_taken; повтор тем
 // же ключом — сохранённый 409.
 func TestApproveEmailTakenFailed(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -428,6 +437,7 @@ func TestApproveEmailTakenFailed(t *testing.T) {
 
 // Город модератора удалён после запроса — 422 staff.city_not_found, failed с этим кодом.
 func TestApproveCityNotFoundFailed(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	e.v = apitest.New(t, oapi.GetSpec)
@@ -443,6 +453,7 @@ func TestApproveCityNotFoundFailed(t *testing.T) {
 // Инициатор изменился после запроса (версия учётки) — 409 platform.approval_stale, failed с причиной
 // initiator_changed.
 func TestApproveInitiatorChanged(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	e.v = apitest.New(t, oapi.GetSpec)
@@ -459,6 +470,7 @@ func TestApproveInitiatorChanged(t *testing.T) {
 // владельцы). Код вне x-error-codes approve (staff.not_found) и отказ без кода — 500 internal, запрос всё
 // равно failed; сбой без Fail — 500, запрос pending.
 func TestApproveStaffCodesAreCommittedFailed(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -478,6 +490,12 @@ func TestApproveStaffCodesAreCommittedFailed(t *testing.T) {
 		{"test.not_found", approvals.Fail(staff.ErrNotFound), http.StatusInternalServerError, httpx.CodeInternal, approvals.StatusFailed, staff.CodeNotFound},
 		{"test.no_code", approvals.Fail(errBoom), http.StatusInternalServerError, httpx.CodeInternal, approvals.StatusFailed, approvals.ErrorExecutionFailed},
 		{"test.crash", errBoom, http.StatusInternalServerError, httpx.CodeInternal, approvals.StatusPending, ""},
+		// ⚠️ ревью G4 (Task 13): отказ исполнителя модуля не из staff с кодом (geo.*) — x-error-codes approve не
+		// растёт (R4): наружу 409 platform.approval_stale, причина — код модуля в error запроса
+		{"test.geo_exists", approvals.Fail(httpx.NewError(http.StatusConflict, geo.CodeCountryExists)), http.StatusConflict,
+			httpx.CodeApprovalStale, approvals.StatusFailed, geo.CodeCountryExists},
+		{"test.geo_not_found", approvals.Fail(httpx.NewError(http.StatusNotFound, geo.CodeCountryNotFound)), http.StatusConflict,
+			httpx.CodeApprovalStale, approvals.StatusFailed, geo.CodeCountryNotFound},
 	}
 	for _, c := range cases {
 		e.reg.Register(approvals.Action{Name: c.action, Permission: "staff.roles.grant",
@@ -532,6 +550,7 @@ func (e *staffEnv) request(m member, action string) uuid.UUID {
 // Коды staff.* у approve (approveStaffCodes) — ровно staff.* из x-error-codes approveApproval: новый
 // бизнес-отказ исполнителя без строки в контракте (или наоборот) — падение. staff.not_found в нём нет.
 func TestApproveCodesMatchContract(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)

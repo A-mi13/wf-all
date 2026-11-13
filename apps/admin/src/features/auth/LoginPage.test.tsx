@@ -96,8 +96,8 @@ describe('шаг 1 → шаг 2 → раздел', () => {
     ]);
 
     await enterCode(user, '492817');
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
     expect(seen.mfa).toHaveLength(1);
     expect(seen.mfa[0]!.body).toEqual({ code: '492817' });
     expect(seen.mfa[0]!.key).toBeTruthy();
@@ -252,7 +252,7 @@ describe('шаг 2', () => {
     act(() => vi.advanceTimersByTime(31_000));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     paste('492817');
-    await page('Журнал действий');
+    await page('Главная');
     expect(asked).toBe(2);
   });
 
@@ -324,7 +324,7 @@ describe('шаг 2', () => {
     expect(screen.queryByRole('group', { name: CODE })).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Резервный код'), 'k7m2q-x9p4t');
     await user.click(screen.getByRole('button', { name: 'Войти' }));
-    await page('Журнал действий');
+    await page('Главная');
     expect(seen.mfa.map((m) => m.body)).toEqual([{ recovery_code: 'k7m2q-x9p4t' }]);
     expect(storageDump()).not.toContain('k7m2q-x9p4t');
   });
@@ -342,5 +342,55 @@ describe('шаг 2', () => {
     expect(await screen.findByLabelText('Пароль')).toBeInTheDocument();
     expect(screen.getByText(/Время на код из приложения вышло/)).toBeInTheDocument();
     expect(app.at()).toBe('/login?return=%2Faudit');
+  });
+});
+
+// Тема и язык до входа (спека §4.12, поправка 10.11): свойства устройства, не сотрудника, поэтому
+// переключатели есть и на экранах входа (AuthLayout — справа от бренда: язык, затем тема), вне карточки формы.
+describe('тема и язык на экране входа', () => {
+  afterEach(() => {
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+    document.documentElement.lang = '';
+    server.events.removeAllListeners('request:start');
+  });
+
+  test('язык до входа: переключение меняет тексты сразу, без запроса к серверу; выбор — на устройстве', async () => {
+    const seen: string[] = [];
+    server.events.on('request:start', ({ request }) =>
+      seen.push(`${request.method} ${request.url}`),
+    );
+    renderApp('/login');
+    await page('Вход администратора');
+    const locale = screen.getByRole('group', { name: 'Язык интерфейса' });
+    const theme = screen.getByRole('group', { name: 'Тема' });
+    // язык, затем тема; оба — до заголовка и вне формы
+    expect(locale.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(locale.closest('form')).toBeNull();
+    seen.length = 0;
+    await userEvent.setup().click(within(locale).getByRole('button', { name: /^EN/ }));
+    expect(await page('Admin sign-in')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Theme' })).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe('en');
+    expect(localStorage.getItem('wf.locale')).toBe('en');
+    expect(seen).toEqual([]); // PATCH /v1/staff/me/locale до входа нет (и ничего другого)
+  });
+
+  test('язык устройства переживает перезагрузку экрана входа', async () => {
+    localStorage.setItem('wf.locale', 'en');
+    renderApp('/login');
+    expect(await page('Admin sign-in')).toBeInTheDocument();
+  });
+
+  test('переключатель темы в углу страницы, вне формы; выбор применяется до входа', async () => {
+    renderApp('/login');
+    await page('Вход администратора');
+    const theme = screen.getByRole('group', { name: 'Тема' });
+    const heading = screen.getByRole('heading', { level: 1 });
+    expect(theme.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(theme.closest('form')).toBeNull();
+    await userEvent.setup().click(within(theme).getByRole('button', { name: 'Светлая' }));
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(localStorage.getItem('wf.theme')).toBe('light');
   });
 });

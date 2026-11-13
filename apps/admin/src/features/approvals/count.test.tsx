@@ -8,6 +8,7 @@ import { renderApp } from '../../test/app';
 import { meOwner } from '../../test/me';
 import { http, server } from '../../test/server';
 import { account, approval, staffServer, TEAM } from '../../test/staff';
+import { pick } from '../../test/pick';
 
 // Счётчик «Подтверждения» в меню (спека §9.3, D10): GET /v1/approvals?box=incoming&status=pending
 // фоном (X-WF-Background: 1 — опрос не продлевает бездействие), раз в минуту и при возврате во
@@ -100,7 +101,7 @@ describe('счётчик в меню', () => {
     const dialog = screen.getByRole('dialog', { name: 'Приглашение сотрудника' });
     await user.type(within(dialog).getByLabelText('Рабочая почта'), 'ivan.p@wf.example');
     await user.type(within(dialog).getByLabelText('Имя'), 'Иван П.');
-    await user.selectOptions(within(dialog).getByLabelText('Роль'), 'support');
+    await pick(user, within(dialog).getByLabelText('Роль'), 'support');
     const before = counts(seen);
     await user.click(within(dialog).getByRole('button', { name: 'Отправить на подтверждение' }));
     await within(dialog).findByText('Отправлено на подтверждение');
@@ -126,7 +127,7 @@ describe('счётчик в меню', () => {
     await user.click(await within(table).findByRole('button', { name: 'Управлять: Мария К.' }));
     const panel = screen.getByRole('dialog', { name: 'Мария К.' });
     const block = within(panel).getByRole('region', { name: 'Роль и города' });
-    await user.selectOptions(within(block).getByLabelText('Роль'), 'support');
+    await pick(user, within(block).getByLabelText('Роль'), 'support');
     const before = counts(seen);
     await user.click(within(block).getByRole('button', { name: 'Отправить на подтверждение' }));
     await within(panel).findByText('Отправлено на подтверждение');

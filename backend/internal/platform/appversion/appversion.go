@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Platform — платформа нативного приложения.
@@ -80,7 +81,7 @@ func Compare(a, b string) (int, error) {
 // Коды нарушений FieldError — по смыслу правил схемы контракта.
 const (
 	CodeEnum    = "enum"    // неизвестная платформа
-	CodeFormat  = "format"  // не MAJOR.MINOR.PATCH; store_url не https-URL с хостом
+	CodeFormat  = "format"  // не MAJOR.MINOR.PATCH; store_url не https-URL с хостом или с пробельным/управляющим символом
 	CodeMinimum = "minimum" // recommended_version ниже min_version
 	CodeHost    = "host"    // хост store_url не стор этой платформы
 )
@@ -138,10 +139,16 @@ func Validate(v Versions) error {
 // (apps.apple.com.evil.example), порт и userinfo (apps.apple.com@evil.example) не проходят.
 // Неизвестная платформа — хост не проверяется (её нарушение уже в platform).
 func storeURLViolation(raw, host string, known bool) string {
-	// Схема — по исходной строке: url.Parse приводит её к нижнему регистру, а CHECK базы
-	// (store_url ~ '^https://') регистр различает (HTTPS:// база отвергнет).
+	// Пробельные и управляющие — нигде в строке (CHECK 0021: '^https://[^[:space:][:cntrl:]]+$'),
+	// включая не-ASCII (U+00A0, U+0085, C1): регулярка PostgreSQL ловить их не обязана, а url.Parse
+	// пробел в пути и хосте принимает. Схема — по исходной строке: url.Parse приводит её к нижнему
+	// регистру, а CHECK базы регистр различает (HTTPS:// база отвергнет); отдельной сверки u.Scheme
+	// не нужно — HasPrefix строже.
+	if strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return CodeFormat
+	}
 	u, err := url.Parse(raw)
-	if err != nil || !strings.HasPrefix(raw, "https://") || u.Scheme != "https" || u.User != nil || u.Opaque != "" || u.Host == "" {
+	if err != nil || !strings.HasPrefix(raw, "https://") || u.User != nil || u.Opaque != "" || u.Host == "" {
 		return CodeFormat
 	}
 	if known && u.Host != host {

@@ -1,0 +1,122 @@
+/* Календарь DateField (спека UI-фундамента §4.17): шапка «‹ месяц год ›» и сетка 7 столбцов. Поле и
+   кнопка — Field.module.css (.withAction, .action). */
+
+.popover {
+  padding: var(--wf-space-3);
+}
+
+/* В пузыре — своя ширина: сетка width 100% (table-layout fixed) в пузыре position: fixed растянулась бы на
+   всё окно; в шторке телефона — во всю ширину шторки */
+.popover .calendar {
+  inline-size: calc(var(--wf-size-touch-min) * 7);
+}
+
+.calendar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  min-inline-size: calc(var(--wf-size-touch-min) * 7);
+  font-family: var(--wf-font-body);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
+.title {
+  flex: 1;
+  text-align: center;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+}
+
+.nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-touch-min);
+  height: var(--wf-size-touch-min);
+  padding: 0;
+  border: 0;
+  border-radius: var(--wf-radius-md);
+  background: none;
+  color: var(--wf-color-text-muted);
+  cursor: pointer;
+}
+
+.nav:hover {
+  color: var(--wf-color-text);
+}
+
+.nav:focus-visible,
+.day:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: -2px;
+}
+
+/* Стрелка «вниз» из набора, повёрнутая влево и вправо */
+.prev {
+  rotate: 90deg;
+}
+
+.next {
+  rotate: -90deg;
+}
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.weekday {
+  padding: var(--wf-space-1) 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 700;
+  text-align: center;
+}
+
+.day,
+.pad {
+  height: var(--wf-size-touch-min);
+  padding: 0;
+  text-align: center;
+}
+
+.day {
+  border-radius: var(--wf-radius-md);
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.day:hover {
+  background: var(--wf-color-surface-sunken);
+  color: var(--wf-color-text);
+}
+
+/* Сегодня — рамкой, выбранный — заливкой акцента; метрики шрифта не меняются */
+.day[aria-current='date'] {
+  box-shadow: inset 0 0 0 1px var(--wf-color-border-strong);
+}
+
+.day[aria-selected='true'] {
+  background: var(--wf-color-accent);
+  color: var(--wf-color-text-inverse);
+}
+
+.day[aria-disabled='true'] {
+  color: var(--wf-color-text-ghost);
+  cursor: not-allowed;
+}
+
+.day[aria-disabled='true']:hover {
+  background: none;
+}

@@ -10,11 +10,11 @@
   min-width: 0;
   height: calc(var(--wf-size-control) + var(--wf-space-1));
   padding: 0;
-  border: 1px solid var(--wf-color-border);
+  border: 1px solid var(--wf-color-border-control);
   border-radius: var(--wf-radius-md);
   background: var(--wf-color-surface-sunken);
   color: var(--wf-color-text);
-  caret-color: var(--wf-color-accent);
+  caret-color: var(--wf-color-accent-ink);
   font-family: var(--wf-font-display);
   font-size: var(--wf-text-2xl);
   font-weight: 600;
@@ -23,12 +23,12 @@
 }
 
 .filled {
-  border-color: var(--wf-color-border-strong);
+  border-color: var(--wf-color-text-subtle);
 }
 
 .cell:focus {
   outline: none;
-  border-color: var(--wf-color-accent);
+  border-color: var(--wf-color-accent-ink);
 }
 
 .cell:disabled {

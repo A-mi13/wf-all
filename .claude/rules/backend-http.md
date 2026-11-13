@@ -14,7 +14,7 @@ paths:
 # HTTP-слой
 
 - Сгенерированные типы API — `internal/httpapi/{public,admin}/oapi`; `httpapi/{public,admin}.Server` встраивает хендлеры модулей; операции платформы (тег `platform`) реализует сам. Тег операции в контракте = модуль-реализатор (`apitest.TagViolations`).
-- Ошибки клиенту — `httpx.WriteProblem` с кодом `<модуль>.<ошибка>`; клиенты переводят по `code`, `title` — техническая сводка, не для показа. Код ошибки платформы — константа в `internal/platform/httpx/codes.go` (и в `PlatformCodes`) вместе с контрактом и локалями (`.claude/rules/contracts.md`); литерал кода ловит `TestProblemCodesAreConstants` — он обходит все пакеты `internal/platform/*`; вне httpx код ошибки — только константа `httpx.Code…`. Коды модуля (`<модуль>.<ошибка>`) — константы в корневом пакете модуля (`internal/geo/codes.go`: `Code…` и список `Codes`), перечисляются в `x-error-codes` его операций; сверка в обе стороны — `TestGeoCodesDocumented` (`internal/httpapi/public`), следующий модуль добавляет такой же тест. Проверка хендлера сверх схемы (`q` из одних знаков, явная проверка точки до PostGIS) — `httpx.NewFieldError(поле, правило)`: 400 `validation.failed` с полем, как у валидатора.
+- Ошибки клиенту — `httpx.WriteProblem` с кодом `<модуль>.<ошибка>`; клиенты переводят по `code`, `title` — техническая сводка, не для показа. Код ошибки платформы — константа в `internal/platform/httpx/codes.go` (и в `PlatformCodes`) вместе с контрактом и локалями (`.claude/rules/contracts.md`); литерал кода ловит `TestProblemCodesAreConstants` — он обходит все пакеты `internal/platform/*`; вне httpx код ошибки — только константа `httpx.Code…`. Коды модуля (`<модуль>.<ошибка>`) — константы в корневом пакете модуля (`internal/geo/codes.go`: `Code…` и списки `PublicCodes`, `AdminCodes`), перечисляются в `x-error-codes` его операций; сверка в обе стороны — `TestGeoCodesDocumented` (`internal/httpapi/public`) и `TestGeoAdminCodesDocumented` (`internal/httpapi/admin`), следующий модуль добавляет такой же тест и свой префикс в `TestAdminCodePrefixesKnown`. Проверка хендлера сверх схемы (`q` из одних знаков, явная проверка точки до PostGIS) — `httpx.NewFieldError(поле, правило)`: 400 `validation.failed` с полем, как у валидатора.
 - Swagger UI — `internal/platform/apidocs` на `/docs` (контракт — `/docs/openapi.json`), включается `API_DOCS_ENABLED` / `ADMIN_DOCS_ENABLED` (`config.HTTP.DocsEnabled`, по умолчанию выкл.); `/docs` вне контракта — валидатор пропускает его к роутеру. Swagger UI грузится с jsDelivr; версия и SRI-хэши — в `apidocs.go`, обновлять вместе.
 - Пробы — `/healthz`, `/readyz` (`platform/health`) вне контракта; в admin-api они стоят до IP-аллоулиста намеренно (health-check хостинга ходит не из сетей админки). `/v1/health` удалён из обоих контрактов (public — спека `geo` §4.4, admin — план сотрудников R13; исключения — `contracts/oasdiff-err-ignore-{public,admin}.txt`). Проверка связи клиентов — запрос контракта (веб — `listCities` с `limit=1`, админка — `GET /v1/staff/me`).
 
@@ -76,29 +76,41 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
-  собранных staff, geo и подтверждениях отвечает не 501); нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
+  собранных staff, geo и подтверждениях отвечает не 501; временный список `pendingOps` плана B удалён в Task 16);
+  нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
   `501 http.not_implemented` без паники. Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод
   ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`)
-  и `requestMeta` (внешний: `approvals.Meta{IP: peer, UserAgent: httpx.UserAgent(r)}` — UA не длиннее 512 байт,
-  страж `TestDecisionHugeUserAgent` — в ctx операций платформы, `meta` staff их не видит; `auth.ErrSessionInvalid`
+  и `requestMeta` (внешний: `approvals.WithMeta(ctx, approvals.Meta{IP: peer, UserAgent: httpx.UserAgent(r)})` — UA
+  не длиннее 512 байт, страж `TestDecisionHugeUserAgent` — в ctx операций платформы и geo: geo читает
+  `approvals.MetaFrom`, страж `TestGeoOperationsCarryMeta`; `meta` staff их не видит; `auth.ErrSessionInvalid`
   операции — 401 и стирание cookie `clearSessionCookie`, как у Middleware staff, стражи
   `TestDecisionRevokedSessionClearsCookie`, `TestApproveSessionRevokedUnderLockClearsCookie`); операция — метод вида `(ctx, oapi.<Операция>RequestObject) (ответ, error)` (`staffadmin.IsOperation`:
   служебные методы той же формы, `Label`, — не операции). Cookie собранного хендлера staff (`CookieConfig`) обязана
   совпасть с `CookieName(CookieSecure)`/`CookieSecure` конвейера — иначе отказ старта (`TestNewHandlerCookieMismatch`).
+- **Сборка geo** (`cmd/admin-api`, `assemble`, Task 16 плана B): `geoadmin.New(geo.New(pool), geoadmin.Deps{Pool, Clock,
+  River, Log})` — `River` тот же клиент вставки, что `staff.Deps.River`; `geoH.RegisterApprovals(reg, svc)` — в тот же
+  реестр и сервис, что staff, до `reg.Validate()` (действия geo — `LockActors`: без хука staff отказ старта). Стражи на
+  настоящей сборке — `TestAssembleRegistersGeoActions` (без хука staff `assemble` вернул бы ошибку `Validate`), `TestStartupWiring`
+  (`cmd/admin-api`); инвариант «`LockActors` без хука — отказ `Validate`» — `approvals/actor_lock_test.go`. Тест прав по всем операциям идёт на настоящем хендлере geo (`liveGeo`): модератор чужого города
+  на `updateGeoCity` — 403 сценария.
 - **Операции платформы** (`server.go`, Task 10b): `Options.Approvals` (`ApprovalService` — `*approvals.Service`)
   задаётся ровно вместе с собранным `Options.Staff` (иначе отказ старта, `TestNewHandlerApprovalsWiring`); подпись
   решившего — `Staff.Label` (перечитывает учётку и сессию: выключен или сессия погашена — 401 со стиранием cookie,
   роль сменилась — 403, до записей).
   approve — `200` только `executed`; неудача исполнения — ошибка с кодом при закоммиченном `failed`: `ErrStale` (и
   `ErrInitiatorChanged`) — 409 `platform.approval_stale`, бизнес-отказ — код из `approveStaffCodes` (= `staff.*`
-  `x-error-codes` approve, `TestApproveCodesMatchContract`), иной `staff.*` и отказ без кода — 500. Приглашение,
+  `x-error-codes` approve, `TestApproveCodesMatchContract`), иной `staff.*` и отказ без кода — 500; отказ с кодом
+  исполнителя модуля не из staff (`geo.*`: код — в `error` запроса) — 409 `platform.approval_stale` (`approveProblem`,
+  R4 плана B: бизнес-кодов модулей у approve нет, `TestApproveStaffCodesAreCommittedFailed`). Приглашение,
   чьи почта или имя к подтверждению не проходят текущие правила, — тоже `ErrStale` (`failed`, переподать;
   `TestApproveInviteInvalidPayloadFails`). Ошибки решений (approve, reject, cancel) — только `decisionProblem`
   (approve — через `approveProblem`): `auth.ErrSessionInvalid` уходит обёрнутой к `requestMeta` (401 со стиранием),
   остальное — `staffadmin.Problem`; `auth.ErrSessionReplaced` (подпись решившего или `checkActor` под замком
   исполнителя) — 401 **без** стирания cookie, запрос `pending` (стражи `TestDecisionReplacedSessionKeepsCookie`,
   `TestApproveSessionReplacedUnderLockKeepsCookie`). Журнал: скоуп модератора по `GrantScoped` (не-nil копия `CityIDs` + `OwnStaffID`), `from ≥ to`
-  — 400 `query.from` `range`; `action_prefix` — по сегментам (`backend-platform.md`).
+  — 400 `query.from` `range`; `action_prefix` — по сегментам (`backend-platform.md`). Версии приложения и флаги
+  (`versions.go`, `flags.go`, план B Task 15): одна `db.InTx` под ключом — запись, событие, аудит сотрудника
+  (`st.Label` сессии); без изменений — 200 без события и аудита; несуществующий город флага — 422 до транзакции.
 - Тесты: cookie в запросе ставится руками (`net/http/cookiejar` не шлёт Secure-cookie по http, P24); проход конвейера
   — 501 нулевых хендлеров (журнал — 200); `{cityId}` — на подменённом контракте (`admin.Permissions` в
   `export_test.go`); в тесте всех операций модератор своего и чужого города — по ручной таблице `cityRows` (операция с

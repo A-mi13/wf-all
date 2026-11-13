@@ -24,9 +24,28 @@
   max-width: 600px;
 }
 
+/* Бренд и переключатели (язык, тема) — одной строкой над заголовком, переключатели в правом углу колонки.
+   Не помещаются (390 px в EN: ~348–368 px при колонке 326) — переключатели целиком уходят своей строкой,
+   прижатые вправо; без @media — по содержимому (поправка 10.11). */
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+}
+
+.switches {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--wf-space-2);
+  margin-left: auto;
+}
+
 .brand {
   margin: 0;
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
   font-family: var(--wf-font-display);
   font-size: var(--wf-text-xs);
   line-height: var(--wf-text-xs-line);
@@ -130,7 +149,7 @@
   min-width: 140px;
   padding: var(--wf-space-2);
   border-radius: var(--wf-radius-md);
-  background: var(--wf-color-text);
+  background: var(--wf-color-qr-paper);
 }
 
 .secretBlock {

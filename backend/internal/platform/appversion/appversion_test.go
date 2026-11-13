@@ -10,6 +10,7 @@ import (
 )
 
 func TestCompare(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		a, b string
 		want int
@@ -32,6 +33,7 @@ func TestCompare(t *testing.T) {
 }
 
 func TestCompareRejects(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []string{
 		"", "1.2", "1.2.3.4", "1.2.3+45", "1.2.3-beta", "v1.2.3", " 1.2.3", "1.2.3 ", "1..3",
 		"01.2.3", "1.02.3", "1.2.03", "1.2.x", "-1.2.3", "+1.2.3", "١.٢.٣", "18446744073709551616.0.0",
@@ -54,6 +56,7 @@ func valid(p appversion.Platform) appversion.Versions {
 }
 
 func TestValidateAccepts(t *testing.T) {
+	t.Parallel()
 	for _, v := range []appversion.Versions{
 		valid(appversion.IOS),
 		valid(appversion.Android),
@@ -66,6 +69,7 @@ func TestValidateAccepts(t *testing.T) {
 }
 
 func TestValidateRejects(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		edit  func(v *appversion.Versions)
@@ -87,6 +91,16 @@ func TestValidateRejects(t *testing.T) {
 		{"суффикс хоста", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com.evil.example/x" }, "store_url", appversion.CodeHost},
 		{"хост в пути", func(v *appversion.Versions) { v.StoreURL = "https://evil.example/apps.apple.com" }, "store_url", appversion.CodeHost},
 		{"порт", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com:8443/app/id1" }, "store_url", appversion.CodeHost},
+		// пробельные и управляющие — нигде в строке (спека сотрудников §6.3 п.6; CHECK 0021 — защита в глубину,
+		// U+00A0 и U+0085 регулярка PostgreSQL ловить не обязана); url.Parse пробел в пути принимает
+		{"пробел в пути", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com/app/id1 x" }, "store_url", appversion.CodeFormat},
+		{"TAB", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com/\tapp" }, "store_url", appversion.CodeFormat},
+		{"перевод строки в конце", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com/app/id1\n" }, "store_url", appversion.CodeFormat},
+		{"NEL U+0085", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com/app/id1\u0085" }, "store_url", appversion.CodeFormat},
+		{"NBSP U+00A0", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com/app/\u00a0id1" }, "store_url", appversion.CodeFormat},
+		// управляющий C1 не из пробельных: его ловит только IsControl (url.Parse не-ASCII не проверяет)
+		{"CSI U+009B", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com/app/\u009bid1" }, "store_url", appversion.CodeFormat},
+		{"пробел в хосте", func(v *appversion.Versions) { v.StoreURL = "https://apps.apple.com /app/id1" }, "store_url", appversion.CodeFormat},
 	}
 	for _, c := range cases {
 		v := valid(appversion.IOS)
@@ -114,7 +128,11 @@ func TestValidateRejects(t *testing.T) {
 	v = valid(appversion.IOS)
 	v.Min, v.StoreURL = "1.2", "http://x"
 	ve, ok := errors.AsType[appversion.ValidationError](appversion.Validate(v))
-	if !ok || len(ve) != 2 {
-		t.Fatalf("два нарушения: %v", ve)
+	want := appversion.ValidationError{
+		{Field: "min_version", Code: appversion.CodeFormat},
+		{Field: "store_url", Code: appversion.CodeFormat},
+	}
+	if !ok || !slices.Equal(ve, want) {
+		t.Fatalf("все нарушения сразу: %v, нужно %v", ve, want)
 	}
 }

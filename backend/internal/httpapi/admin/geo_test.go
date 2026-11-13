@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/geo"
 	geoadmin "wf/backend/internal/geo/admin"
@@ -27,6 +28,7 @@ import (
 
 type geoEnv struct {
 	h         http.Handler
+	owner     *pgxpool.Pool // подготовка данных теста
 	v         *apitest.Validator
 	stav, mih uuid.UUID
 }
@@ -34,7 +36,7 @@ type geoEnv struct {
 func newGeoEnv(t *testing.T, sessions map[string]*auth.Staff) geoEnv {
 	t.Helper()
 	pools := dbtest.NewPoolsAs(t, "admin")
-	e := geoEnv{v: apitest.New(t, oapi.GetSpec)}
+	e := geoEnv{v: apitest.New(t, oapi.GetSpec), owner: pools.Owner}
 	for slug, dst := range map[string]*uuid.UUID{"stavropol": &e.stav, "mihaylovsk": &e.mih} {
 		if err := pools.Owner.QueryRow(context.Background(), `SELECT id FROM cities WHERE slug = $1`, slug).Scan(dst); err != nil {
 			t.Fatalf("город %s: %v", slug, err)
@@ -49,7 +51,7 @@ func newGeoEnv(t *testing.T, sessions map[string]*auth.Staff) geoEnv {
 	}
 	o := testOptions(t)
 	o.DB = pools.As
-	o.Geo = geoadmin.New(geo.New(pools.As))
+	o.Geo = geoadmin.New(geo.New(pools.As), geoadmin.Deps{Pool: pools.As, Clock: o.Clock})
 	o.Sessions = &fakeSessions{staff: all}
 	e.h = newHandler(t, o)
 	return e
@@ -93,6 +95,7 @@ func idsQuery(ids ...uuid.UUID) url.Values {
 // чужого списка фильтр не снимает; модератор без городов (CityIDs nil) — пусто, а не весь справочник.
 // Владелец и поддержка видят все города, ids сужает.
 func TestGeoCitiesModeratorScope(t *testing.T) {
+	t.Parallel()
 	stavMod := staffOf(perm.Moderator, auth.StageActive, false)
 	mihMod := staffOf(perm.Moderator, auth.StageActive, false)
 	noCities := staffOf(perm.Moderator, auth.StageActive, false)
@@ -137,6 +140,7 @@ func TestGeoCitiesModeratorScope(t *testing.T) {
 // Content-Language — согласованный язык; без поддерживаемого языка — канонические названия без
 // Content-Language.
 func TestGeoCitiesHeadersAndLanguage(t *testing.T) {
+	t.Parallel()
 	e := newGeoEnv(t, nil)
 	rec, _, _ := e.cities(t, "owner", idsQuery(e.stav), "Accept-Language", "en-GB, ru;q=0.5")
 	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "private, no-store" ||
@@ -156,6 +160,7 @@ func TestGeoCitiesHeadersAndLanguage(t *testing.T) {
 // Ввод сверх схемы и границы: q из одних знаков — 400 query.q minLength; 101 id — 400 query.ids (валидатор);
 // 100 id — 200; негодный курсор — 400 query.cursor.
 func TestGeoCitiesValidation(t *testing.T) {
+	t.Parallel()
 	e := newGeoEnv(t, nil)
 	wantField := func(rec *httpRec, field string) {
 		t.Helper()

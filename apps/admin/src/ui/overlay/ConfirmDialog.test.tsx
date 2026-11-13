@@ -66,7 +66,7 @@ test('подтверждение почтой: Enter не срабатывает
   expect(onConfirm).toHaveBeenCalledTimes(1);
 });
 
-test('Esc и «Отмена» закрывают без подтверждения; при новом открытии поле пустое', async () => {
+test('Esc и «Отменить» закрывают без подтверждения; при новом открытии поле пустое', async () => {
   const { user, onConfirm } = await open('СБРОСИТЬ');
   await user.type(screen.getByLabelText(/Введите/), 'СБРОСИТЬ');
   await user.keyboard('{Escape}');
@@ -75,7 +75,7 @@ test('Esc и «Отмена» закрывают без подтверждени
 
   await user.click(screen.getByRole('button', { name: 'Сбросить доступ' }));
   expect(screen.getByLabelText(/Введите/)).toHaveValue('');
-  await user.click(screen.getByRole('button', { name: 'Отмена' }));
+  await user.click(screen.getByRole('button', { name: 'Отменить' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(onConfirm).not.toHaveBeenCalled();
 });

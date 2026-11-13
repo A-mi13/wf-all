@@ -1,0 +1,197 @@
+/* «Справочники» (план B): «Города и запуск» — карточки по макету 07, активация и страница города —
+   панели и карточки в той же стилистике (*). Разделы открыты и на телефоне. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-6);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+}
+
+/* Панель окна на шаге поиска: во всю высоту тела окна (Drawer) — список мест прокручивается сам */
+.fillPanel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+  height: 100%;
+}
+
+/* Шаг «найти место» в панели: заполняет высоту тела окна, прокручивается только список мест */
+.searchStep {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+}
+
+.searchStepBounded {
+  height: min(480px, 60dvh);
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.optionHead {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
+.text {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
+.muted {
+  color: var(--wf-color-text-subtle);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+}
+
+.place {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  min-width: 0;
+}
+
+.name {
+  color: var(--wf-color-text);
+  font-weight: 700;
+}
+
+.chosen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-surface-sunken);
+}
+
+.label {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  min-width: 0;
+  max-width: 760px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* Сведения о городе — плитки «подпись / значение» */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--wf-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  min-width: 0;
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-bg-elevated);
+}
+
+.factValue {
+  overflow-wrap: anywhere;
+  color: var(--wf-color-text);
+  font-weight: 700;
+}
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.historyItem {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wf-space-2);
+}
+
+.nameRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--wf-space-3);
+}
+
+.nameRow > :first-child {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.names {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  margin: 0;
+}
+
+.nameItem {
+  display: flex;
+  gap: var(--wf-space-2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--wf-space-2);
+}

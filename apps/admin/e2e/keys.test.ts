@@ -33,7 +33,7 @@ describe('ключи локалей e2e', () => {
         'staff.invite.email',
         'staff.invite.name',
         'staff.invite.role',
-        'staff.invite.submit',
+        'actions.submitForApproval',
         'roles.admin',
         'approvals.tabs.incoming',
         'approvals.approve',
@@ -41,9 +41,39 @@ describe('ключи локалей e2e', () => {
     );
   });
 
+  it('стартовая и палитра (UF4.7): «Главная» и «Искать везде» входят в список', () => {
+    expect(KEYS).toEqual(
+      expect.arrayContaining(['nav.home', 'palette.open', 'palette.title', 'palette.input']),
+    );
+  });
+
+  it('импорт и активация (план B, Task 23): подписи сценария geo.spec входят в список', () => {
+    expect(KEYS).toEqual(
+      expect.arrayContaining([
+        'nav.imports',
+        'geo.imports.start',
+        'geo.imports.job.states.completed',
+        'geo.imports.statuses.succeeded',
+        'geo.imports.report.groups.conflict',
+        'geo.activate.open',
+        'geo.activate.places_label',
+        'audit.actions.geo.import_requested',
+        'audit.actions.geo.import',
+        'audit.actions.geo.city_activated',
+        'audit.actor.system',
+      ]),
+    );
+  });
+
   it('t — текст ru по ключу', () => {
     expect(t('auth.login.submit')).toBe(ru.auth.login.submit);
     expect(t('roles.admin')).toBe(ru.roles.admin);
+  });
+
+  it('t — текст en по ключу (сценарий принятия на EN)', () => {
+    expect(t('auth.accept.submit', 'en')).toBe(en.auth.accept.submit);
+    expect(t('auth.setup.code', 'en')).toBe(en.auth.setup.code);
+    expect(t('auth.accept.submit', 'en')).not.toBe(t('auth.accept.submit'));
   });
 
   it('t — ключ не из списка — ошибка (e2e не ищет по тексту мимо стража)', () => {

@@ -5,7 +5,7 @@
 
 -- name: LockAccountByEmail :one
 -- Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор.
-SELECT a.id, a.status::text AS status, a.display_name, a.version, r.role::text AS role
+SELECT a.id, a.status::text AS status, a.display_name, a.locale, a.version, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.email = sqlc.arg(email)::citext
@@ -106,9 +106,12 @@ WHERE a.id = sqlc.arg(id);
 SELECT display_name FROM staff_accounts WHERE id = sqlc.arg(id);
 
 -- name: InsertInvitedAccount :one
--- Новая учётка в статусе invited; почта занята (любой статус) — нет строки.
-INSERT INTO staff_accounts (id, email, display_name, status, created_at, created_by)
-VALUES (sqlc.arg(id), sqlc.arg(email)::citext, sqlc.arg(display_name), 'invited', sqlc.arg(now), sqlc.narg(created_by))
+-- Новая учётка в статусе invited; почта занята (любой статус) — нет строки. Язык — выбранный приглашающим (IL2);
+-- NULL (запрос до IL2, оператор) — 'ru', то же значение, что DEFAULT колонки (0020_staff.sql): DEFAULT в COALESCE
+-- не пишется.
+INSERT INTO staff_accounts (id, email, display_name, status, created_at, created_by, locale)
+VALUES (sqlc.arg(id), sqlc.arg(email)::citext, sqlc.arg(display_name), 'invited', sqlc.arg(now), sqlc.narg(created_by),
+        COALESCE(sqlc.narg(locale)::text, 'ru'))
 ON CONFLICT ON CONSTRAINT staff_accounts_email_key DO NOTHING
 RETURNING version;
 

@@ -11,7 +11,9 @@ import { AppProviders } from './providers';
 import { createQueryClient } from './query';
 import { reauthBus } from './reauth';
 import { AppRouter } from './router';
+import { stubMedia } from '../test/media';
 import { sectionsServer } from '../test/sections';
+import { renderApp } from '../test/app';
 
 // стартовая и возврат приводят в разделы каркаса — их первые запросы описаны (src/test/sections.ts)
 beforeEach(() => sectionsServer());
@@ -34,6 +36,11 @@ const citiesHandler = () =>
         status: 'live' as const,
         country_code: 'RU',
         region_name: null,
+        region_id: null,
+        country_enabled: true,
+        geoname_id: null,
+        population: 0,
+        districts_count: 0,
       })),
       next_cursor: null,
     });
@@ -100,34 +107,42 @@ describe('без сессии', () => {
     const app = mount('/login?return=%2F%2Fevil.example%2Fx', null);
     await page('Вход администратора');
     await app.login(meOwner);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
   });
 });
 
-describe('стартовая страница — первый разрешённый раздел меню', () => {
-  test('с журналом — журнал', async () => {
+// Спека UI-фундамента §4.13, план UF4.1: стартовая после входа — главная для всех ролей; ?return= важнее.
+describe('стартовая страница — главная', () => {
+  test('владелец: корень — главная внутри каркаса, без редиректа', async () => {
     const app = mount('/', meOwner);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
+    expect(screen.getByRole('navigation', { name: 'Разделы' })).toHaveTextContent('Главная');
   });
 
-  test('без права на журнал — следующий раздел', async () => {
+  test('без права на журнал — тоже главная', async () => {
     const app = mount('/', { ...meModerator, permissions: { 'staff.roles.read': 'allow' } });
+    await page('Главная');
+    expect(app.at()).toBe('/');
+  });
+
+  test('модератор — главная', async () => {
+    const app = mount('/', meModerator);
+    await page('Главная');
+    expect(app.at()).toBe('/');
+  });
+
+  test('вход без return — главная', async () => {
+    const app = mount('/login', meOwner);
+    await page('Главная');
+    expect(app.at()).toBe('/');
+  });
+
+  test('вход с return — указанный экран, а не главная', async () => {
+    const app = mount('/login?return=%2Fstaff', meOwner);
     await page('Роли и доступ');
     expect(app.at()).toBe('/staff');
-  });
-
-  test('scoped-право открывает раздел (модератор и журнал своих городов)', async () => {
-    const app = mount('/', meModerator);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
-  });
-
-  test('вход без return — стартовая', async () => {
-    const app = mount('/login', meOwner);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
   });
 });
 
@@ -144,12 +159,12 @@ describe('стадии', () => {
     expect(app.at()).toBe('/setup-2fa');
   });
 
-  test('после настройки 2FA — стартовая', async () => {
+  test('после настройки 2FA — стартовая (главная)', async () => {
     const app = mount('/setup-2fa', meSetup);
     await page('Настройка двухфакторной защиты');
     await app.login(meOwner);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
   });
 
   test('без сессии /setup-2fa — вход', async () => {
@@ -184,6 +199,86 @@ describe('права разделов', () => {
   test('неизвестный адрес — «не найдено» из локалей', async () => {
     mount('/nope', meOwner);
     await page('Страница не найдена');
+  });
+});
+
+// «Справочники» (план B, Task 17): пять разделов, каждый со своим правом чтения; страница города —
+// вложенный адрес раздела «Города и запуск» (его право).
+describe('«Справочники»', () => {
+  const meModeratorGeo: Me = {
+    ...meModerator,
+    permissions: {
+      ...meModerator.permissions,
+      'geo.countries.read': 'allow',
+      'platform.versions.read': 'allow',
+      'platform.flags.read': 'allow',
+    },
+  };
+  const meAllDirectories: Me = {
+    ...meOwner,
+    permissions: {
+      ...meOwner.permissions,
+      'geo.countries.read': 'allow',
+      'geo.imports.read': 'allow',
+      'platform.versions.read': 'allow',
+      'platform.flags.read': 'allow',
+    },
+  };
+
+  test('модератор: группа в меню без «Импорта»; прямой адрес импорта — ForbiddenState', async () => {
+    const app = mount('/geo/imports', meModeratorGeo);
+    await page('Нет доступа к разделу');
+    expect(app.at()).toBe('/geo/imports');
+    const nav = screen.getByRole('navigation', { name: 'Разделы' });
+    expect(nav).toHaveTextContent('Справочники');
+    expect(nav).toHaveTextContent('Города и запуск');
+    expect(nav).toHaveTextContent('Страны');
+    expect(nav).toHaveTextContent('Версии приложения');
+    expect(nav).toHaveTextContent('Флаги функций');
+    expect(nav).not.toHaveTextContent('Импорт GeoNames');
+  });
+
+  test('страница города без geo.cities.read — ForbiddenState (вложенный адрес раздела)', async () => {
+    mount(`/geo/cities/${CITY_OWN}`, { ...meOwner, permissions: { 'audit.log.read': 'allow' } });
+    await page('Нет доступа к разделу');
+  });
+
+  test.each([
+    ['/geo/cities', 'Города и запуск'],
+    ['/geo/countries', 'Страны'],
+    ['/geo/imports', 'Импорт GeoNames'],
+    ['/app/versions', 'Версии приложения'],
+    ['/flags', 'Флаги функций'],
+  ])('%s с правом — раздел открыт (моки по умолчанию — sectionsServer)', async (path, title) => {
+    const app = mount(path, meAllDirectories);
+    await page(title);
+    expect(app.at()).toBe(path);
+  });
+
+  // Спека UI-фундамента §3.1: все разделы открыты на любой ширине и устройстве (тест G8
+  // «телефон — DesktopOnlyState» переписан): «только с компьютера» — действия, а не разделы.
+  test.each([
+    ['/audit', 'Журнал действий'],
+    ['/staff', 'Роли и доступ'],
+    ['/approvals', 'Подтверждения'],
+    ['/me', 'Мой доступ'],
+    ['/geo/cities', 'Города и запуск'],
+    ['/geo/countries', 'Страны'],
+    ['/geo/imports', 'Импорт GeoNames'],
+    ['/app/versions', 'Версии приложения'],
+    ['/flags', 'Флаги функций'],
+  ])('телефон (390 + палец): %s — раздел открыт', async (path, title) => {
+    stubMedia({ width: 390, pointer: 'coarse' });
+    const app = mount(path, meAllDirectories);
+    await page(title);
+    expect(app.at()).toBe(path);
+    expect(screen.queryByText('Только с компьютера')).toBeNull();
+  });
+
+  test('стартовая страница — главная', async () => {
+    const app = mount('/', meAllDirectories);
+    await page('Главная');
+    expect(app.at()).toBe('/');
   });
 });
 
@@ -284,6 +379,19 @@ describe('каркас AppShell', () => {
     expect(await screen.findByText('модератор · Ставрополь')).toBeInTheDocument();
   });
 
+  test('карточка сотрудника: почта (логин) из getStaffMe', async () => {
+    mount('/audit', meOwner);
+    await page('Журнал действий');
+    expect(screen.getByText(meOwner.email ?? '')).toHaveAttribute('title', meOwner.email);
+  });
+
+  test('без отображаемого имени почта — вместо имени и не дублируется', async () => {
+    const noName: Me = { ...meOwner, display_name: undefined };
+    mount('/audit', noName);
+    await page('Журнал действий');
+    expect(screen.getAllByText(meOwner.email ?? '')).toHaveLength(1);
+  });
+
   test('без права на города — их число вместо названий', async () => {
     mount('/audit', { ...meModerator, permissions: { 'audit.log.read': 'scoped' } });
     await page('Журнал действий');
@@ -336,11 +444,18 @@ describe('каркас AppShell', () => {
     // явный выход — без return: следующий сотрудник не попадёт в чужой раздел
     await waitFor(() => expect(app.at()).toBe('/login'));
 
-    // новый вход — стартовая страница, а не раздел прежнего сотрудника
+    // новый вход — стартовая страница (главная), а не раздел прежнего сотрудника
     ctl.signedIn = true;
     await app.refetchMe();
+    await page('Главная');
+    expect(app.at()).toBe('/');
+    // в раздел (корень в return не попадает — safeReturn): возврат после истечения отличим от явного выхода
+    await userEvent.setup().click(
+      within(screen.getByRole('navigation', { name: 'Разделы' })).getByRole('link', {
+        name: 'Журнал действий',
+      }),
+    );
     await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
 
     // сессия нового входа истекла — вход с возвратом (флаг выхода не залипает)
     ctl.signedIn = false;
@@ -359,20 +474,105 @@ describe('каркас AppShell', () => {
     expect(screen.queryByText('Войдите в аккаунт заново')).not.toBeInTheDocument();
   });
 
-  test('телефон: desktopOnly-раздел — «только с компьютера», таббар с «Ещё»', async () => {
-    vi.stubGlobal(
-      'matchMedia',
-      vi.fn((query: string) => ({
-        matches: true,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      })),
-    );
+  test('телефон: «Мой доступ» открыт; таббар — первые 4 разрешённых раздела и «Ещё»', async () => {
+    stubMedia({ width: 390, pointer: 'coarse' });
     mount('/me', meOwner);
-    await page('Только с компьютера');
+    await page('Мой доступ');
     const tabbar = screen.getByRole('navigation', { name: 'Разделы' });
+    expect(
+      within(tabbar)
+        .getAllByRole('link')
+        .map((l) => l.textContent),
+    ).toEqual(['Главная', 'Журнал действий', 'Роли и доступ', 'Подтверждения']);
     expect(within(tabbar).getByRole('button', { name: 'Ещё' })).toBeInTheDocument();
-    expect(within(tabbar).queryByRole('link', { name: 'Мой доступ' })).not.toBeInTheDocument();
+  });
+});
+
+// BackLink каркаса (ревью V1 m6): только на вложенном адресе раздела; память «Назад» — сотрудника этой вкладки.
+describe('«Назад» каркаса', () => {
+  const back = () => screen.queryByRole('link', { name: /^Назад/ });
+
+  test('на странице раздела (/audit) ссылки «Назад» нет', async () => {
+    renderApp('/audit', { me: meOwner });
+    await page('Журнал действий');
+    expect(back()).toBeNull();
+  });
+
+  test('память «Назад» не переходит к другому сотруднику (провайдер под key={me.id})', async () => {
+    const app = renderApp('/geo/cities?country=RU', { me: meOwner });
+    await page('Города и запуск');
+    const city = async () => {
+      act(() => void app.history.push(`/geo/cities/${CITY_OWN}`));
+      return screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    };
+    // свой фильтр — свой «Назад»
+    expect(await city()).toHaveAttribute('href', '/geo/cities?country=RU');
+    act(() => void app.history.push('/audit'));
+    await page('Журнал действий');
+
+    // в другой вкладке вошёл другой сотрудник (вкладка — в журнале): его «Назад» — без фильтров прежнего
+    app.me.current = { ...meOwner, id: '0192f1c4-2222-7b21-9c5d-0000000000b2' };
+    await app.refetchMe();
+    await page('Журнал действий');
+    expect(await city()).toHaveAttribute('href', '/geo/cities');
+  });
+});
+
+// Ленивые разделы (спека UI-фундамента §4.15, план UF2b.9): экраны разделов — свои куски (lazyRouteComponent),
+// экраны входа и каркас — в основном. Страж по исходнику: статического импорта экрана раздела в routes.tsx нет.
+describe('ленивые разделы', () => {
+  // Ревью UF2b/II-B, m7: по графу статических импортов от точки входа (main.tsx), а не по строкам routes.tsx —
+  // статический импорт модуля, который сам тянет экран раздела, склеил бы кусок с основным. import type и import()
+  // в граф не входят (типы стираются, import() — граница куска).
+  test('экраны разделов не достижимы статическими импортами от main.tsx; в routes.tsx — import()', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { dirname, join, resolve } = await import('node:path');
+    const src = join(import.meta.dirname, '..');
+    const resolveFile = (from: string, spec: string) => {
+      const base = resolve(dirname(from), spec);
+      return ['', '.ts', '.tsx', '/index.ts', '/index.tsx']
+        .map((ext) => base + ext)
+        .find((p) => existsSync(p) && /\.tsx?$/.test(p));
+    };
+    const STATIC = /^(?:import|export)\s+(?!type\b)(?:[^'";]*?\sfrom\s+)?'(\.{1,2}\/[^']+)'/gm;
+    const seen = new Set<string>();
+    const queue = [join(src, 'main.tsx')];
+    while (queue.length > 0) {
+      const file = queue.pop() ?? '';
+      if (seen.has(file)) continue;
+      seen.add(file);
+      for (const m of readFileSync(file, 'utf8').matchAll(STATIC)) {
+        const next = resolveFile(file, m[1] ?? '');
+        if (next) queue.push(next);
+      }
+    }
+    const reached = [...seen].map((p) => p.slice(src.length + 1).replaceAll('\\', '/'));
+    // стражу есть что обходить: каркас, роутер и экраны входа — в основном куске
+    expect(reached).toEqual(
+      expect.arrayContaining([
+        'app/routes.tsx',
+        'ui/shell/AppShell.tsx',
+        'features/auth/LoginPage.tsx',
+      ]),
+    );
+    const pages = [
+      'audit/AuditPage',
+      'staff/StaffPage',
+      'approvals/ApprovalsPage',
+      'me/MyAccessPage',
+      'geo/CitiesPage',
+      'geo/CityPage',
+      'home/HomePage',
+    ];
+    expect(reached.filter((p) => pages.some((page) => p === `features/${page}.tsx`))).toEqual([]);
+    const router = readFileSync(join(src, 'app/routes.tsx'), 'utf8');
+    for (const page of pages) expect(router).toContain(`import('../features/${page}')`);
+  });
+
+  test('раздел открывается: кусок загружен, скелетон сменился экраном', async () => {
+    renderApp('/me', { me: meOwner });
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Мой доступ' }),
+    ).toBeInTheDocument();
   });
 });

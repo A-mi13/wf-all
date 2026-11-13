@@ -1,0 +1,40 @@
+/* Раскладка историй витрины (не компонентов): ряд и столбец образцов с отступами из токенов. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+  max-inline-size: 28rem;
+}
+
+/* узкая колонка — проверка переноса длинного текста */
+.narrow {
+  max-inline-size: 12rem;
+}
+
+/* узкий контейнер запросов (как область страницы телефона): @container компонентов срабатывают в истории */
+.phone {
+  container-type: inline-size;
+  inline-size: 22rem;
+  max-inline-size: 100%;
+}
+
+/* область под таблицу или каркас: таблица заполняет высоту родителя */
+.frame {
+  display: flex;
+  flex-direction: column;
+  block-size: 32rem;
+}
+
+/* сетка карточек */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--wf-space-4);
+}

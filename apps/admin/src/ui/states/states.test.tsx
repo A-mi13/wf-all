@@ -4,7 +4,7 @@ import { ApiError } from '../../api/client';
 import { renderWithIntl } from '../../test/render';
 import {
   ConnectionErrorState,
-  DesktopOnlyState,
+  DesktopOnlyNotice,
   EmptyState,
   ErrorState,
   ForbiddenState,
@@ -130,13 +130,29 @@ test('LoadingRows: скелетон строк с подписью для чит
   expect(status.querySelectorAll('[data-skeleton-row]')).toHaveLength(4);
 });
 
-test('ForbiddenState и DesktopOnlyState — заголовок страницы', () => {
-  const { unmount } = renderWithIntl(<ForbiddenState />);
+test('ForbiddenState — заголовок страницы', () => {
+  renderWithIntl(<ForbiddenState />);
   expect(screen.getByRole('heading', { level: 1, name: 'Нет доступа к разделу' })).toBeVisible();
+});
+
+test('ForbiddenState scope="block" — в карточке: без заголовка, «к этим данным»', () => {
+  renderWithIntl(<ForbiddenState scope="block" />);
+  expect(screen.getByText('Нет доступа к этим данным')).toBeVisible();
+  expect(screen.queryByRole('heading')).toBeNull();
+});
+
+// Пометка вместо действия на карманном устройстве (спека UI-фундамента §3.2): текст, не кнопка;
+// блок — заголовок и пояснение, compact — одна строка с иконкой.
+test('DesktopOnlyNotice — блок и одна строка, без кнопок и заголовков страницы', () => {
+  const { unmount } = renderWithIntl(<DesktopOnlyNotice />);
+  expect(screen.getByText('Выдача и снятие прав — только с компьютера')).toBeVisible();
+  expect(screen.getByText(/откройте админку на компьютере/i)).toBeVisible();
+  expect(screen.queryByRole('heading')).toBeNull();
+  expect(screen.queryByRole('button')).toBeNull();
   unmount();
-  renderWithIntl(<DesktopOnlyState />);
-  expect(screen.getByRole('heading', { level: 1, name: 'Только с компьютера' })).toBeVisible();
-  expect(screen.getByText(/открывается только с компьютера/)).toBeInTheDocument();
+  renderWithIntl(<DesktopOnlyNotice compact />);
+  expect(screen.getByText('Выдача и снятие прав — только с компьютера')).toBeVisible();
+  expect(screen.queryByText(/откройте админку на компьютере/i)).toBeNull();
 });
 
 test('PendingApprovalNotice — после 202: отправлено на подтверждение', () => {

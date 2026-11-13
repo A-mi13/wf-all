@@ -1,6 +1,7 @@
 // Контракт admin плана A (спека сотрудников §4.3–4.9, §5.3, §6, §8; план — R8, R13–R15, P8, P28;
-// сверка reconcile §7–8): пути, права, анонимность, форма ответов, cookie и заголовки — на собранном
-// бандле. После Task 9a контракт заморожен (P16): фронт и бэкенд работают по нему.
+// сверка reconcile §7–8) и плана B (geo 2/2, Task 7 — Приложения 1–3): пути, права, анонимность,
+// форма ответов, cookie и заголовки — на собранном бандле. После Task 9a плана A и Task 7 плана B
+// контракт заморожен: фронт и бэкенд работают по нему.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
@@ -22,6 +23,7 @@ const DUAL = [
   'staff.roles.revoke_owner',
   'staff.access.reset_elevated',
   'staff.access.reset',
+  'geo.countries.rules',
 ];
 const expected = {
   staffLogin: ['post', '/v1/staff/auth/login', 'staff', 'anonymous'],
@@ -90,12 +92,51 @@ const expected = {
   approveApproval: ['post', '/v1/approvals/{approvalId}/approve', 'platform', 'handler', DUAL],
   rejectApproval: ['post', '/v1/approvals/{approvalId}/reject', 'platform', 'handler', DUAL],
   listGeoCities: ['get', '/v1/geo/cities', 'geo', 'geo.cities.read'],
+  // план B (geo 2/2), Приложение 1
+  listGeoPlaces: ['get', '/v1/geo/places', 'geo', 'geo.places.search'],
+  getGeoCity: ['get', '/v1/geo/cities/{cityId}', 'geo', 'geo.cities.read'],
+  activateGeoCity: ['post', '/v1/geo/cities', 'geo', 'geo.cities.activate'],
+  updateGeoCity: [
+    'patch',
+    '/v1/geo/cities/{cityId}',
+    'geo',
+    'handler',
+    ['geo.cities.manage', 'geo.cities.rename'],
+  ],
+  linkGeoCity: ['post', '/v1/geo/cities/{cityId}/link', 'geo', 'geo.cities.manage'],
+  listGeoDistricts: ['get', '/v1/geo/cities/{cityId}/districts', 'geo', 'geo.cities.read'],
+  createGeoDistrict: ['post', '/v1/geo/cities/{cityId}/districts', 'geo', 'geo.districts.manage'],
+  updateGeoDistrict: [
+    'patch',
+    '/v1/geo/cities/{cityId}/districts/{districtId}',
+    'geo',
+    'geo.districts.manage',
+  ],
+  listGeoCountries: ['get', '/v1/geo/countries', 'geo', 'geo.countries.read'],
+  createGeoCountry: ['post', '/v1/geo/countries', 'geo', 'geo.countries.rules'],
+  updateGeoCountry: [
+    'patch',
+    '/v1/geo/countries/{code}',
+    'geo',
+    'handler',
+    ['geo.countries.manage', 'geo.countries.rules'],
+  ],
+  listGeoRegions: ['get', '/v1/geo/countries/{code}/regions', 'geo', 'geo.cities.read'],
+  startGeoImport: ['post', '/v1/geo/imports', 'geo', 'geo.imports.run'],
+  listGeoImports: ['get', '/v1/geo/imports', 'geo', 'geo.imports.read'],
+  getGeoImport: ['get', '/v1/geo/imports/{importId}', 'geo', 'geo.imports.read'],
+  getGeoImportJob: ['get', '/v1/geo/imports/jobs/{jobId}', 'geo', 'geo.imports.read'],
+  cancelGeoImportJob: ['post', '/v1/geo/imports/jobs/{jobId}/cancel', 'geo', 'geo.imports.run'],
+  listAppVersions: ['get', '/v1/app/versions', 'platform', 'platform.versions.read'],
+  putAppVersions: ['put', '/v1/app/versions/{platform}', 'platform', 'platform.versions.manage'],
+  listFeatureFlags: ['get', '/v1/flags', 'platform', 'platform.flags.read'],
+  updateFeatureFlag: ['patch', '/v1/flags/{key}', 'platform', 'platform.flags.manage'],
 };
 
-test('33 операции плана A — и только они', () => {
-  assert.equal(Object.keys(expected).length, 33);
+test('54 операции: 33 плана A и 21 плана B — и только они', () => {
+  assert.equal(Object.keys(expected).length, 54);
   assert.deepEqual([...ops.keys()].sort(), Object.keys(expected).sort());
-  assert.equal(Object.keys(doc.paths).length, 33);
+  assert.equal(operations(doc).length, 54);
 });
 
 for (const [id, [verb, path, tag, perm, any]] of Object.entries(expected)) {
@@ -324,6 +365,8 @@ test('StaffSession.user_agent, Approval.action — enum, AuditRecord с actor_la
     'staff.role_change',
     'staff.access_reset',
     'staff.revoke_owner',
+    'geo.country_rules',
+    'geo.country_create',
   ]);
   assert.equal(refName(schema('Approval').properties.action), 'ApprovalAction');
   const audit = schema('AuditRecord').properties;
@@ -367,4 +410,291 @@ test('listApprovals: box incoming|mine обязателен, status и cursor', 
 test('updateStaffMeLocale — PATCH /v1/staff/me/locale (R14)', () => {
   const { verb, path } = ops.get('updateStaffMeLocale');
   assert.deepEqual([verb, path], ['patch', '/v1/staff/me/locale']);
+});
+
+// ---- План B (geo 2/2), Task 7: Приложения 1–3 ----
+
+const paramsOf = (op) =>
+  Object.fromEntries(
+    (op.parameters ?? []).map((p) => resolve(p, 'parameters')).map((p) => [p.name, p]),
+  );
+
+// operationId → [коды операции (Приложение 1, 3), успешные ответы: статус → схема тела]
+const planB = {
+  listGeoPlaces: [[], { 200: 'GeoPlacePage' }],
+  listGeoCities: [[], { 200: 'GeoCityPage' }],
+  getGeoCity: [['geo.city_not_found'], { 200: 'GeoCityDetails' }],
+  activateGeoCity: [
+    [
+      'geo.city_already_active',
+      'geo.country_not_enabled',
+      'geo.place_not_found',
+      'geo.region_not_found',
+    ],
+    { 200: 'GeoCityDetails' },
+  ],
+  updateGeoCity: [['geo.city_not_found', 'geo.slug_taken'], { 200: 'GeoCityDetails' }],
+  linkGeoCity: [
+    [
+      'geo.city_already_active',
+      'geo.city_already_linked',
+      'geo.city_not_found',
+      'geo.place_not_found',
+    ],
+    { 200: 'GeoCityDetails' },
+  ],
+  listGeoDistricts: [['geo.city_not_found'], { 200: 'GeoDistrictList' }],
+  createGeoDistrict: [['geo.city_not_found', 'geo.district_name_taken'], { 200: 'GeoDistrict' }],
+  updateGeoDistrict: [
+    ['geo.district_name_taken', 'geo.district_not_found'],
+    { 200: 'GeoDistrict' },
+  ],
+  listGeoCountries: [[], { 200: 'GeoCountryList' }],
+  createGeoCountry: [['geo.country_exists'], { 202: 'ApprovalAccepted' }],
+  updateGeoCountry: [['geo.country_not_found'], { 200: 'GeoCountry', 202: 'ApprovalAccepted' }],
+  listGeoRegions: [['geo.country_not_found'], { 200: 'GeoRegionList' }],
+  startGeoImport: [
+    ['geo.country_not_found', 'geo.import_in_progress'],
+    { 202: 'GeoImportStarted' },
+  ],
+  listGeoImports: [[], { 200: 'GeoImportPage' }],
+  getGeoImport: [['geo.import_not_found'], { 200: 'GeoImportReport' }],
+  getGeoImportJob: [['geo.import_job_not_found'], { 200: 'GeoImportJob' }],
+  cancelGeoImportJob: [
+    ['geo.import_job_not_cancellable', 'geo.import_job_not_found'],
+    { 200: 'GeoImportJob' },
+  ],
+  listAppVersions: [[], { 200: 'AppVersionsList' }],
+  putAppVersions: [[], { 200: 'AppVersions' }],
+  listFeatureFlags: [[], { 200: 'FeatureFlagList' }],
+  updateFeatureFlag: [
+    ['platform.flag_city_not_found', 'platform.flag_not_found', 'platform.flag_stale'],
+    { 200: 'FeatureFlag' },
+  ],
+};
+
+for (const [id, [codes, ok]] of Object.entries(planB)) {
+  test(`план B ${id}: коды ${codes.join(', ') || '—'}; ответы ${Object.keys(ok).join(', ')}`, () => {
+    const { op } = ops.get(id);
+    assert.deepEqual([...op['x-error-codes']].sort(), codes);
+    const statuses = Object.keys(ok);
+    assert.deepEqual(
+      successes(op)
+        .filter((s) => s < '400')
+        .sort(),
+      statuses,
+    );
+    for (const s of statuses) assert.equal(refName(body(op, s)?.schema), ok[s], `${id} ${s}`);
+    // создание отвечает объектом, без 201 и Location (план, Task 7)
+    assert.equal(op.responses['201'], undefined);
+  });
+}
+
+test('план B: чтения — Cache-Control private, no-store; названия — Accept-Language, Vary, Content-Language', () => {
+  const localized = new Set([
+    'listGeoPlaces',
+    'listGeoCities',
+    'getGeoCity',
+    'activateGeoCity',
+    'updateGeoCity',
+    'linkGeoCity',
+    'listGeoCountries',
+    'updateGeoCountry',
+    'listGeoRegions',
+    'getGeoImport',
+  ]);
+  for (const id of Object.keys(planB)) {
+    const { verb, op } = ops.get(id);
+    const status = successes(op).find((s) => s < '300');
+    const headers = op.responses[status].headers ?? {};
+    const h = (name) => resolve(headers[name], 'headers');
+    if (verb === 'get') {
+      assert.equal(h('Cache-Control')?.example, 'private, no-store', `${id}: Cache-Control`);
+      assert.equal(h('Cache-Control').required, true, id);
+    }
+    const lang = localized.has(id);
+    assert.equal(h('Vary')?.required === true, lang, `${id}: Vary`);
+    assert.equal(Boolean(h('Content-Language')), lang, `${id}: Content-Language`);
+    assert.equal(Boolean(paramsOf(op)['Accept-Language']), lang, `${id}: Accept-Language`);
+  }
+});
+
+test('план B: параметры путей — uuid, код страны, jobId ≥ 1, платформа, ключ флага строкой (R6, I5)', () => {
+  const p = (id, name) => paramsOf(ops.get(id).op)[name];
+  for (const [id, name] of [
+    ['getGeoCity', 'cityId'],
+    ['updateGeoDistrict', 'districtId'],
+    ['getGeoImport', 'importId'],
+  ]) {
+    assert.equal(p(id, name).in, 'path', `${id}.${name}`);
+    assert.equal(p(id, name).schema.format, 'uuid', `${id}.${name}`);
+  }
+  assert.equal(p('updateGeoCountry', 'code').schema.pattern, '^[A-Z]{2}$');
+  const job = p('cancelGeoImportJob', 'jobId').schema;
+  assert.deepEqual([job.type, job.format, job.minimum], ['integer', 'int64', 1]);
+  const platform = resolve(p('putAppVersions', 'platform').schema, 'schemas');
+  assert.deepEqual(platform.enum, ['ios', 'android']);
+  assert.equal(platform['x-extensible-enum'], true);
+  // ключ флага в пути — не enum: иначе 404 platform.flag_not_found недостижим (валидатор отвечает 400)
+  const key = p('updateFeatureFlag', 'key').schema;
+  assert.equal(key.$ref, undefined);
+  assert.equal(key.enum, undefined);
+  assert.deepEqual([key.type, key.pattern, key.maxLength], ['string', '^[a-z][a-z0-9_]*$', 64]);
+});
+
+test('план B: listGeoCities расширен — status (массив, form, explode), country, region_id', () => {
+  const p = paramsOf(ops.get('listGeoCities').op);
+  assert.deepEqual(
+    [p.status.style, p.status.explode, p.status.schema.type],
+    ['form', true, 'array'],
+  );
+  assert.equal(refName(p.status.schema.items), 'CityStatus');
+  assert.equal(p.country.schema.pattern, '^[A-Z]{2}$');
+  assert.equal(p.region_id.schema.format, 'uuid');
+  for (const name of ['q', 'ids', 'cursor', 'limit']) assert.ok(p[name], name);
+  for (const name of ['status', 'country', 'region_id']) assert.equal(p[name].required, false);
+  const city = schema('GeoCity');
+  for (const f of ['region_id', 'country_enabled', 'geoname_id', 'population', 'districts_count']) {
+    assert.ok(city.properties[f], `GeoCity.${f}`);
+  }
+  assert.equal(city.properties.region_id.nullable, true);
+  assert.equal(city.properties.geoname_id.nullable, true);
+});
+
+test('план B: listGeoImports — country и job_id; listGeoPlaces — q и country', () => {
+  const imports = paramsOf(ops.get('listGeoImports').op);
+  assert.equal(imports.country.schema.pattern, '^[A-Z]{2}$');
+  assert.deepEqual(
+    [imports.job_id.schema.type, imports.job_id.schema.format],
+    ['integer', 'int64'],
+  );
+  assert.ok(imports.cursor && imports.limit);
+  const places = paramsOf(ops.get('listGeoPlaces').op);
+  assert.ok(places.q && places.country && places.cursor && places.limit);
+});
+
+test('план B: FeatureFlagKey — открытый enum ключей сида 0010, только в ответе (R6)', () => {
+  const key = schema('FeatureFlagKey');
+  assert.deepEqual(key.enum, [
+    'subscriptions',
+    'economy',
+    'lootboxes',
+    'predictions',
+    'competitions',
+    'city_tables',
+    'challenges',
+    'match_comments',
+    'payment_flags',
+    'ads',
+    'gk_rotation',
+  ]);
+  assert.equal(key['x-extensible-enum'], true);
+  assert.equal(refName(schema('FeatureFlag').properties.key), 'FeatureFlagKey');
+  // в запросах ключа нет: путь — строка, тело правки — без key
+  assert.equal(schema('FeatureFlagPatch').properties.key, undefined);
+  assert.ok(!JSON.stringify(ops.get('updateFeatureFlag').op.parameters).includes('FeatureFlagKey'));
+});
+
+test('план B: FeatureFlagPatch — version обязательна, города до 1000; 409 platform.flag_stale в описании', () => {
+  const patch = schema('FeatureFlagPatch');
+  assert.deepEqual(patch.required, ['version']);
+  assert.equal(patch.additionalProperties, false);
+  assert.equal(patch.properties.enabled_city_ids.maxItems, 1000);
+  assert.equal(patch.properties.enabled_city_ids.items.format, 'uuid');
+  assert.match(ops.get('updateFeatureFlag').op.description, /platform\.flag_stale/);
+});
+
+test('план B: тела правок — minProperties 1 без лишних полей; страна без default_locale и code', () => {
+  for (const name of ['GeoCityPatch', 'GeoDistrictPatch', 'GeoCountryPatch']) {
+    const s = schema(name);
+    assert.equal(s.minProperties, 1, name);
+    assert.equal(s.additionalProperties, false, name);
+  }
+  const country = schema('GeoCountryPatch').properties;
+  assert.equal(country.default_locale, undefined);
+  assert.equal(country.code, undefined);
+  const create = schema('GeoCountryCreate');
+  for (const f of [
+    'code',
+    'currency',
+    'default_locale',
+    'phone_prefix',
+    'week_starts_on',
+    'min_signup_age',
+    'age_of_majority',
+    'names',
+  ]) {
+    assert.ok(create.required.includes(f), `GeoCountryCreate.${f}`);
+  }
+  assert.ok(!create.required.includes('is_enabled'));
+  assert.deepEqual(schema('GeoCityActivateRequest').required, ['geoname_id']);
+  assert.deepEqual(schema('GeoImportStartRequest').required, ['country']);
+  assert.equal(schema('GeoImportStartRequest').properties.country.pattern, '^[A-Z]{2}$');
+});
+
+test('план B: AppVersionsPut — store_url ^https://, версии MAJOR.MINOR.PATCH', () => {
+  const put = schema('AppVersionsPut');
+  assert.deepEqual(put.required.sort(), ['min_version', 'recommended_version', 'store_url']);
+  assert.equal(put.properties.store_url.pattern, '^https://');
+  assert.match(put.properties.store_url.description, /нижнем регистре/);
+  assert.match(put.properties.min_version.pattern, /^\^\(0\|\[1-9\]/);
+});
+
+test('план B: GeoImportJob.state и GeoImport.status — открытые enum', () => {
+  const job = schema('GeoImportJob').properties.state;
+  assert.deepEqual(resolve(job, 'schemas').enum, [
+    'queued',
+    'running',
+    'completed',
+    'failed',
+    'cancelled',
+  ]);
+  const st = resolve(schema('GeoImport').properties.status, 'schemas');
+  assert.deepEqual(st.enum, ['running', 'succeeded', 'failed']);
+  assert.equal(schema('GeoImport').properties.started_by_label.nullable, true);
+});
+
+test('план B: Problem.job_id — необязательное int64; 409 startGeoImport с примером job_id (R26)', () => {
+  const p = schema('Problem');
+  assert.deepEqual([p.properties.job_id?.type, p.properties.job_id?.format], ['integer', 'int64']);
+  assert.ok(!p.required.includes('job_id'));
+  const conflict = ops.get('startGeoImport').op.responses['409'];
+  const media = resolve(conflict, 'responses').content['application/problem+json'];
+  assert.equal(refName(media.schema), 'Problem');
+  assert.equal(media.example.code, 'geo.import_in_progress');
+  assert.equal(typeof media.example.job_id, 'number');
+});
+
+test('план B: описания фиксируют поведение, на которое опираются экраны', () => {
+  const d = (id) => ops.get(id).op.description;
+  assert.match(d('updateGeoCountry'), /вдвоём/);
+  assert.match(d('updateGeoCountry'), /202/);
+  assert.match(d('createGeoCountry'), /второй сотрудник/i);
+  assert.match(d('updateGeoCity'), /403/);
+  assert.match(d('updateGeoCity'), /последняя запись выигрывает/i);
+  assert.match(d('startGeoImport'), /в очереди/);
+  assert.match(d('cancelGeoImportJob'), /воркер/);
+  assert.match(d('listGeoImports'), /started_by_label/);
+  // K6 (раунд 1 ревью G4): повторная отмена уже отменённой задачи — 200 без второй записи журнала
+  assert.match(d('cancelGeoImportJob'), /уже отменённ[а-я]* задач[а-я]* — 200/);
+  assert.match(d('cancelGeoImportJob'), /второй записи журнала нет/);
+});
+
+// Ревью G3 (⚠️): approve описывает отказ исполнителей geo — наружу только platform.approval_stale (R4,
+// Task 13): бизнес-кодов geo.* у approve нет, x-error-codes не растёт.
+test('approveApproval: отказ исполнителей geo.country_rules и geo.country_create — 409 approval_stale', () => {
+  const { op } = ops.get('approveApproval');
+  // пункты списка кодов — по «- » в начале строки (пункт занимает несколько строк)
+  const lines = op.description
+    .split(/\n\s*- /)
+    .filter((l) => /geo\.country_(rules|create)/.test(l));
+  assert.ok(lines.length > 0, 'описание не называет действия geo');
+  assert.ok(
+    lines.some((l) => l.includes('platform.approval_stale')),
+    'отказ исполнителя geo — 409 platform.approval_stale',
+  );
+  assert.ok(
+    !op['x-error-codes'].some((c) => c.startsWith('geo.')),
+    'бизнес-кодов geo у approve нет',
+  );
 });

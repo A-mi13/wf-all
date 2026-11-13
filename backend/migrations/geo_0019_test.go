@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -49,6 +50,7 @@ func wantPgError(t *testing.T, db *sql.DB, query, code, constraint string) {
 // городов, региона и страны, код admin1 региона; centroid обязателен; city_settings заменено
 // geo_read_city_settings с колонками §3.7 в этом порядке.
 func TestGeo0019SeedFilled(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 
@@ -171,6 +173,7 @@ func TestGeo0019SeedFilled(t *testing.T) {
 // архивного района свободно, один импорт страны за раз, коды admin1 уникальны в стране,
 // форматы локали, slug и версий приложения.
 func TestGeo0019Constraints(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 
 	// тёзка в той же стране и регионе (Михайловск 70 и 71, Заречный ×5) — не ошибка
@@ -222,10 +225,278 @@ func TestGeo0019Constraints(t *testing.T) {
 		VALUES ('web', '1.2.0', '1.2.0', 'https://example.org')`, "23514", "app_versions_platform_check")
 }
 
+// r13Guard — гарантия R13 плана geo 1: check возвращает nil, пока гарантия держится. plant — DDL,
+// снимающий ровно это ограничение: на схеме без него check обязан вернуть ошибку (страж не вакуумен).
+type r13Guard struct {
+	name  string
+	setup string // подготовка в той же транзакции; "" — не нужна
+	check func(ctx context.Context, tx *sql.Tx) error
+	plant string
+}
+
+// violates — оператор падает с кодом code на ограничении constraint; у NOT NULL (23502) PostgreSQL
+// называет колонку, а не ограничение, — тогда сверяется column.
+func violates(query, code, constraint, column string) func(context.Context, *sql.Tx) error {
+	return func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "SAVEPOINT probe"); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, query)
+		if _, rbErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT probe"); rbErr != nil {
+			return rbErr
+		}
+		if err == nil {
+			return fmt.Errorf("%s: ждали %s на %q/%q, оператор прошёл", query, code, constraint, column)
+		}
+		var pg *pgconn.PgError
+		if !errors.As(err, &pg) || pg.Code != code || pg.ConstraintName != constraint || pg.ColumnName != column {
+			return fmt.Errorf("%s: ждали %s на %q/%q, получили: %w", query, code, constraint, column, err)
+		}
+		return nil
+	}
+}
+
+// cascades — удаление родителя (deleteSQL) снимает строки, которые считает countSQL.
+func cascades(deleteSQL, countSQL string) func(context.Context, *sql.Tx) error {
+	return func(ctx context.Context, tx *sql.Tx) error {
+		var before int
+		if err := tx.QueryRowContext(ctx, countSQL).Scan(&before); err != nil {
+			return err
+		}
+		if before == 0 {
+			return fmt.Errorf("%s: до удаления строк нет — каскад нечем проверить", countSQL)
+		}
+		if _, err := tx.ExecContext(ctx, deleteSQL); err != nil {
+			return fmt.Errorf("%s: %w", deleteSQL, err)
+		}
+		var after int
+		if err := tx.QueryRowContext(ctx, countSQL).Scan(&after); err != nil {
+			return err
+		}
+		if after != 0 {
+			return fmt.Errorf("%s: после удаления родителя осталось %d строк", countSQL, after)
+		}
+		return nil
+	}
+}
+
+// rolledBack исполняет fn в транзакции клона и откатывает её: случаи не влияют друг на друга.
+func rolledBack(t *testing.T, db *sql.DB, fn func(ctx context.Context, tx *sql.Tx) error) error {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	return fn(ctx, tx)
+}
+
+// runGuards — каждый страж дважды в откатываемой транзакции: на схеме как есть check проходит, после
+// plant (ограничение снято) — обязан упасть.
+func runGuards(t *testing.T, db *sql.DB, guards []r13Guard) {
+	t.Helper()
+	for _, g := range guards {
+		t.Run(g.name, func(t *testing.T) {
+			run := func(plant string) error {
+				return rolledBack(t, db, func(ctx context.Context, tx *sql.Tx) error {
+					for _, q := range []string{plant, g.setup} {
+						if q == "" {
+							continue
+						}
+						if _, err := tx.ExecContext(ctx, q); err != nil {
+							t.Fatalf("%s: %v", q, err)
+						}
+					}
+					return g.check(ctx, tx)
+				})
+			}
+			if err := run(""); err != nil {
+				t.Fatalf("гарантия не держится: %v", err)
+			}
+			if g.plant == "" {
+				t.Fatal("у стража нет подсадки — нечем доказать, что он не вакуумен")
+			}
+			if err := run(g.plant); err == nil {
+				t.Fatalf("без ограничения (%s) случай всё равно проходит — страж вакуумен", g.plant)
+			}
+		})
+	}
+}
+
+const (
+	// место GeoNames с переводом и регион admin1 с переводом — для случаев источника
+	geonamesSetup = `
+		INSERT INTO geonames_imports (id, country_code, status, started_at)
+		VALUES ('00000000-0000-0000-0000-0000000000a1', 'RU', 'succeeded', now());
+		INSERT INTO geonames_places (geoname_id, country_code, admin1_code, name, ascii_name, feature_code,
+		                             population, location, timezone, import_id)
+		VALUES (487846, 'RU', '70', 'Ставрополь', 'Stavropol', 'PPLA', 433931,
+		        'SRID=4326;POINT(41.9642 45.03442)'::geography, 'Europe/Moscow', '00000000-0000-0000-0000-0000000000a1');
+		INSERT INTO geonames_place_names (geoname_id, locale, name) VALUES (487846, 'ru', 'Ставрополь');
+		INSERT INTO geonames_admin1 (country_code, admin1_code, geoname_id, ascii_name)
+		VALUES ('RU', '70', 500777, 'Stavropol Kray');
+		INSERT INTO geonames_admin1_names (country_code, admin1_code, locale, name)
+		VALUES ('RU', '70', 'ru', 'Ставропольский край');`
+	// страна, регион и город без внешних ссылок — их можно удалить владельцем схемы
+	probeGeoSetup = `
+		INSERT INTO countries (id, code, name, currency, default_locale, phone_prefix, min_signup_age, age_of_majority)
+		VALUES ('00000000-0000-0000-0000-0000000000c1', 'KZ', 'Казахстан', 'KZT', 'ru', '+7', 14, 18);
+		INSERT INTO country_names (country_id, locale, name) VALUES ('00000000-0000-0000-0000-0000000000c1', 'ru', 'Казахстан');
+		INSERT INTO regions (id, country_id, name) VALUES ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000c1', 'Пробная область');
+		INSERT INTO region_names (region_id, locale, name) VALUES ('00000000-0000-0000-0000-0000000000b1', 'ru', 'Пробная область');
+		INSERT INTO cities (id, country_id, name, slug, timezone, centroid)
+		VALUES ('00000000-0000-0000-0000-0000000000d1', '00000000-0000-0000-0000-0000000000c1', 'Проба', 'probe-city',
+		        'Asia/Almaty', 'SRID=4326;POINT(76.9 43.2)'::geography);
+		INSERT INTO city_names (city_id, locale, name) VALUES ('00000000-0000-0000-0000-0000000000d1', 'ru', 'Проба');
+		INSERT INTO city_slug_history (slug, city_id, replaced_at) VALUES ('probe-old', '00000000-0000-0000-0000-0000000000d1', now());`
+)
+
+// Гарантии R13 плана geo 1 (спека geo §3.2, абзац «Сверх этого»; спека сотрудников §6.3 п.1): у каждого
+// ограничения 0019 свой случай, и каждый случай доказывает, что без своего ограничения он падает —
+// ограничение снимается DDL в транзакции клона (откатывается). Уникальности 23505 и cities_slug_format —
+// в TestGeo0019Constraints. Каскады проверяются от имени владельца схемы: у admin нет DELETE на cities.
+func TestGeo0019R13Guards(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+
+	guards := []r13Guard{
+		// история slug: формат как у cities.slug, время — только из часов записывающего (DEFAULT нет)
+		{name: "city_slug_history: пробел и заглавные", check: violates(`INSERT INTO city_slug_history (slug, city_id, replaced_at)
+			SELECT 'Bad Slug', id, now() FROM cities WHERE slug = 'stavropol'`, "23514", "city_slug_history_slug_format", ""),
+			plant: `ALTER TABLE city_slug_history DROP CONSTRAINT city_slug_history_slug_format`},
+		{name: "city_slug_history: двойной дефис", check: violates(`INSERT INTO city_slug_history (slug, city_id, replaced_at)
+			SELECT 'a--b', id, now() FROM cities WHERE slug = 'stavropol'`, "23514", "city_slug_history_slug_format", ""),
+			plant: `ALTER TABLE city_slug_history DROP CONSTRAINT city_slug_history_slug_format`},
+		{name: "city_slug_history: ведущий дефис", check: violates(`INSERT INTO city_slug_history (slug, city_id, replaced_at)
+			SELECT '-a', id, now() FROM cities WHERE slug = 'stavropol'`, "23514", "city_slug_history_slug_format", ""),
+			plant: `ALTER TABLE city_slug_history DROP CONSTRAINT city_slug_history_slug_format`},
+		{name: "city_slug_history: хвостовой дефис", check: violates(`INSERT INTO city_slug_history (slug, city_id, replaced_at)
+			SELECT 'a-', id, now() FROM cities WHERE slug = 'stavropol'`, "23514", "city_slug_history_slug_format", ""),
+			plant: `ALTER TABLE city_slug_history DROP CONSTRAINT city_slug_history_slug_format`},
+		{name: "city_slug_history: длиннее 100", check: violates(`INSERT INTO city_slug_history (slug, city_id, replaced_at)
+			SELECT repeat('a', 101), id, now() FROM cities WHERE slug = 'stavropol'`, "23514", "city_slug_history_slug_format", ""),
+			plant: `ALTER TABLE city_slug_history DROP CONSTRAINT city_slug_history_slug_format`},
+		{name: "city_slug_history: replaced_at без умолчания", check: violates(`INSERT INTO city_slug_history (slug, city_id)
+			SELECT 'stavropol-old', id FROM cities WHERE slug = 'stavropol'`, "23502", "", "replaced_at"),
+			plant: `ALTER TABLE city_slug_history ALTER COLUMN replaced_at DROP NOT NULL`},
+
+		// *_names удаляются каскадом вместе с владельцем
+		{name: "каскад: город снимает city_names", setup: probeGeoSetup,
+			check: cascades(`DELETE FROM cities WHERE id = '00000000-0000-0000-0000-0000000000d1'`,
+				`SELECT count(*) FROM city_names WHERE city_id = '00000000-0000-0000-0000-0000000000d1'`),
+			plant: `ALTER TABLE city_names DROP CONSTRAINT city_names_city_id_fkey`},
+		{name: "каскад: город снимает city_slug_history", setup: probeGeoSetup,
+			check: cascades(`DELETE FROM cities WHERE id = '00000000-0000-0000-0000-0000000000d1'`,
+				`SELECT count(*) FROM city_slug_history WHERE city_id = '00000000-0000-0000-0000-0000000000d1'`),
+			plant: `ALTER TABLE city_slug_history DROP CONSTRAINT city_slug_history_city_id_fkey`},
+		{name: "каскад: регион снимает region_names", setup: probeGeoSetup,
+			check: cascades(`DELETE FROM regions WHERE id = '00000000-0000-0000-0000-0000000000b1'`,
+				`SELECT count(*) FROM region_names WHERE region_id = '00000000-0000-0000-0000-0000000000b1'`),
+			plant: `ALTER TABLE region_names DROP CONSTRAINT region_names_region_id_fkey`},
+		{name: "каскад: страна снимает country_names", setup: probeGeoSetup + `
+			DELETE FROM cities WHERE country_id = '00000000-0000-0000-0000-0000000000c1';
+			DELETE FROM regions WHERE country_id = '00000000-0000-0000-0000-0000000000c1';`,
+			check: cascades(`DELETE FROM countries WHERE id = '00000000-0000-0000-0000-0000000000c1'`,
+				`SELECT count(*) FROM country_names WHERE country_id = '00000000-0000-0000-0000-0000000000c1'`),
+			plant: `ALTER TABLE country_names DROP CONSTRAINT country_names_country_id_fkey`},
+		{name: "каскад: место снимает geonames_place_names", setup: geonamesSetup,
+			check: cascades(`DELETE FROM geonames_places WHERE geoname_id = 487846`,
+				`SELECT count(*) FROM geonames_place_names WHERE geoname_id = 487846`),
+			plant: `ALTER TABLE geonames_place_names DROP CONSTRAINT geonames_place_names_geoname_id_fkey`},
+		{name: "каскад: admin1 снимает geonames_admin1_names", setup: geonamesSetup,
+			check: cascades(`DELETE FROM geonames_admin1 WHERE country_code = 'RU' AND admin1_code = '70'`,
+				`SELECT count(*) FROM geonames_admin1_names WHERE country_code = 'RU' AND admin1_code = '70'`),
+			plant: `ALTER TABLE geonames_admin1_names DROP CONSTRAINT geonames_admin1_names_country_code_admin1_code_fkey`},
+
+		// population >= 0
+		{name: "cities.population < 0", check: violates(`UPDATE cities SET population = -1 WHERE slug = 'stavropol'`,
+			"23514", "cities_population_check", ""),
+			plant: `ALTER TABLE cities DROP CONSTRAINT cities_population_check`},
+		{name: "geonames_places.population < 0", setup: geonamesSetup,
+			check: violates(`UPDATE geonames_places SET population = -1 WHERE geoname_id = 487846`,
+				"23514", "geonames_places_population_check", ""),
+			plant: `ALTER TABLE geonames_places DROP CONSTRAINT geonames_places_population_check`},
+
+		// version > 0
+		{name: "cities.version = 0", check: violates(`UPDATE cities SET version = 0 WHERE slug = 'stavropol'`,
+			"23514", "cities_version_check", ""),
+			plant: `ALTER TABLE cities DROP CONSTRAINT cities_version_check`},
+		{name: "countries.version = 0", check: violates(`UPDATE countries SET version = 0 WHERE code = 'RU'`,
+			"23514", "countries_version_check", ""),
+			plant: `ALTER TABLE countries DROP CONSTRAINT countries_version_check`},
+		{name: "districts.version = 0", check: violates(`INSERT INTO districts (city_id, name, version)
+			SELECT id, 'Центр', 0 FROM cities WHERE slug = 'stavropol'`, "23514", "districts_version_check", ""),
+			plant: `ALTER TABLE districts DROP CONSTRAINT districts_version_check`},
+		{name: "app_versions.version = 0", check: violates(`INSERT INTO app_versions (platform, min_version, recommended_version, store_url, version)
+			VALUES ('ios', '1.0.0', '1.0.0', 'https://apps.apple.com/app/id1', 0)`, "23514", "app_versions_version_check", ""),
+			plant: `ALTER TABLE app_versions DROP CONSTRAINT app_versions_version_check`},
+
+		// country_code источника — две заглавные латинские (char(2): три буквы дали бы 22001 раньше CHECK)
+		{name: "geonames_imports.country_code с цифрой", check: violates(`INSERT INTO geonames_imports (country_code, status, started_at)
+			VALUES ('R1', 'failed', now())`, "23514", "geonames_imports_country_code_check", ""),
+			plant: `ALTER TABLE geonames_imports DROP CONSTRAINT geonames_imports_country_code_check`},
+		{name: "geonames_places.country_code строчными", setup: geonamesSetup,
+			check: violates(`UPDATE geonames_places SET country_code = 'ru' WHERE geoname_id = 487846`,
+				"23514", "geonames_places_country_code_check", ""),
+			plant: `ALTER TABLE geonames_places DROP CONSTRAINT geonames_places_country_code_check`},
+		{name: "geonames_places.country_code с цифрой", setup: geonamesSetup,
+			check: violates(`UPDATE geonames_places SET country_code = 'R1' WHERE geoname_id = 487846`,
+				"23514", "geonames_places_country_code_check", ""),
+			plant: `ALTER TABLE geonames_places DROP CONSTRAINT geonames_places_country_code_check`},
+		{name: "geonames_admin1.country_code строчными", check: violates(`INSERT INTO geonames_admin1 (country_code, admin1_code, geoname_id, ascii_name)
+			VALUES ('ru', '70', 1, 'x')`, "23514", "geonames_admin1_country_code_check", ""),
+			plant: `ALTER TABLE geonames_admin1 DROP CONSTRAINT geonames_admin1_country_code_check`},
+		{name: "geonames_admin1.country_code с цифрой", check: violates(`INSERT INTO geonames_admin1 (country_code, admin1_code, geoname_id, ascii_name)
+			VALUES ('R1', '70', 1, 'x')`, "23514", "geonames_admin1_country_code_check", ""),
+			plant: `ALTER TABLE geonames_admin1 DROP CONSTRAINT geonames_admin1_country_code_check`},
+
+		// locale переводов источника — две строчные латинские
+		{name: "geonames_place_names.locale заглавными", setup: geonamesSetup,
+			check: violates(`INSERT INTO geonames_place_names (geoname_id, locale, name) VALUES (487846, 'RU', 'x')`,
+				"23514", "geonames_place_names_locale_check", ""),
+			plant: `ALTER TABLE geonames_place_names DROP CONSTRAINT geonames_place_names_locale_check`},
+		{name: "geonames_place_names.locale с цифрой", setup: geonamesSetup,
+			check: violates(`INSERT INTO geonames_place_names (geoname_id, locale, name) VALUES (487846, 'r1', 'x')`,
+				"23514", "geonames_place_names_locale_check", ""),
+			plant: `ALTER TABLE geonames_place_names DROP CONSTRAINT geonames_place_names_locale_check`},
+		{name: "geonames_admin1_names.locale заглавными", setup: geonamesSetup,
+			check: violates(`INSERT INTO geonames_admin1_names (country_code, admin1_code, locale, name) VALUES ('RU', '70', 'RU', 'x')`,
+				"23514", "geonames_admin1_names_locale_check", ""),
+			plant: `ALTER TABLE geonames_admin1_names DROP CONSTRAINT geonames_admin1_names_locale_check`},
+		{name: "geonames_admin1_names.locale с цифрой", setup: geonamesSetup,
+			check: violates(`INSERT INTO geonames_admin1_names (country_code, admin1_code, locale, name) VALUES ('RU', '70', 'r1', 'x')`,
+				"23514", "geonames_admin1_names_locale_check", ""),
+			plant: `ALTER TABLE geonames_admin1_names DROP CONSTRAINT geonames_admin1_names_locale_check`},
+
+		// названия справочника непустые после btrim
+		{name: "country_names.name из пробелов", check: violates(`INSERT INTO country_names (country_id, locale, name)
+			SELECT id, 'de', '   ' FROM countries WHERE code = 'RU'`, "23514", "country_names_name_check", ""),
+			plant: `ALTER TABLE country_names DROP CONSTRAINT country_names_name_check`},
+		{name: "region_names.name из пробелов", check: violates(`INSERT INTO region_names (region_id, locale, name)
+			SELECT id, 'de', '   ' FROM regions WHERE geoname_admin1_code = '70'`, "23514", "region_names_name_check", ""),
+			plant: `ALTER TABLE region_names DROP CONSTRAINT region_names_name_check`},
+		{name: "city_names.name из пробелов", check: violates(`INSERT INTO city_names (city_id, locale, name)
+			SELECT id, 'de', '   ' FROM cities WHERE slug = 'stavropol'`, "23514", "city_names_name_check", ""),
+			plant: `ALTER TABLE city_names DROP CONSTRAINT city_names_name_check`},
+	}
+	runGuards(t, db, guards)
+
+	// допустимое значение истории slug — тот же формат, что у cities.slug
+	if err := rolledBack(t, db, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO city_slug_history (slug, city_id, replaced_at)
+			SELECT 'stavropol-2', id, now() FROM cities WHERE slug = 'stavropol'`)
+		return err
+	}); err != nil {
+		t.Errorf("slug 'stavropol-2' в истории: %v", err)
+	}
+}
+
 // Поиск места по префиксу ascii-названия в админке (спека geo §3.1): индекс по генерируемой
 // колонке ascii_name_normalized — индекс по выражению с normalize_text с PG17 не строится
 // (CREATE INDEX идёт с search_path = pg_catalog, pg_temp).
 func TestGeo0019PlaceAsciiSearch(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 
@@ -328,6 +599,7 @@ func missingFrom(a, b []string) []string {
 // никогда, совпадает со снимком после up+down — city_settings, cities_country_name_key,
 // districts_city_name_key на месте, новых таблиц и колонок нет. Затем повторный up проходит.
 func TestGeo0019DownRestoresSchema(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)
@@ -371,6 +643,7 @@ func TestGeo0019DownRestoresSchema(t *testing.T) {
 // а не общим «column contains null values»; в списке только он — сид получил точки раньше
 // проверки. Транзакция миграции откатывается целиком: версия 18, новых таблиц нет.
 func TestGeo0019RefusesCityWithoutCentroid(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	p := newProvider(t, db)

@@ -1,17 +1,18 @@
-import type { NavIcon } from './icons';
+import type { IconName } from '@wf/icons';
 
 // Пункт меню админки (спека §9.3–9.4, D22–D23).
 // - permission — право, без которого пункта нет в меню, а прямой адрес даёт ForbiddenState;
 //   null — своё (`self`): доступно любому активному сотруднику;
-// - desktopOnly — на телефоне раздел закрыт: в таббар не попадает, в «Ещё» есть, открывается
-//   DesktopOnlyState;
+// - desktopOnly — задел (спека UI-фундамента §3.1: модерация может снова закрыть раздел целиком);
+//   сейчас его нет ни у одного пункта (страж app/nav.test.ts), и каркас его не читает — «только с
+//   компьютера» решают действия (ActionGate). Вернуть закрытие раздела — вместе с каркасом и тестом;
 // - countLabelKey — подпись счётчика для читалки экрана ({count}), число даёт AppShell.counts.
 export type NavItem = {
   path: string;
   labelKey: string;
   permission: string | null;
   desktopOnly?: boolean;
-  icon?: NavIcon;
+  icon?: IconName;
   countLabelKey?: string;
 };
 

@@ -186,19 +186,23 @@ func funcName(e ast.Expr) string {
 // Спека сотрудников §5.1, §7 (D18): коды конвейера admin-api и подтверждений — отдельный список,
 // в публичный контракт они не попадают (PlatformCodes их не содержит). Общие коды admin
 // (x-error-codes-common контракта admin вместе с PlatformCodes) — AdminCommonCodes, коды операций
-// подтверждений — AdminApprovalCodes.
+// подтверждений — AdminApprovalCodes, коды операций флагов (план B, Task 7) — AdminFlagCodes.
 func TestAdminPlatformCodes(t *testing.T) {
 	common := []string{"auth.forbidden", "auth.csrf_failed", "auth.ip_not_allowed",
 		"auth.reauth_required", "auth.setup_required", "http.not_implemented"}
 	approvals := []string{"platform.approval_not_found", "platform.approval_self",
 		"platform.approval_stale", "platform.approval_closed"}
+	flags := []string{"platform.flag_not_found", "platform.flag_stale", "platform.flag_city_not_found"}
 	if !slices.Equal(AdminCommonCodes, common) {
 		t.Errorf("AdminCommonCodes = %v, want %v", AdminCommonCodes, common)
 	}
 	if !slices.Equal(AdminApprovalCodes, approvals) {
 		t.Errorf("AdminApprovalCodes = %v, want %v", AdminApprovalCodes, approvals)
 	}
-	if want := slices.Concat(common, approvals); !slices.Equal(AdminPlatformCodes, want) {
+	if !slices.Equal(AdminFlagCodes, flags) {
+		t.Errorf("AdminFlagCodes = %v, want %v", AdminFlagCodes, flags)
+	}
+	if want := slices.Concat(common, approvals, flags); !slices.Equal(AdminPlatformCodes, want) {
 		t.Errorf("AdminPlatformCodes = %v, want %v", AdminPlatformCodes, want)
 	}
 	seen := map[string]bool{}

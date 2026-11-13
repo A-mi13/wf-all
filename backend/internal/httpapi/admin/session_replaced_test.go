@@ -13,6 +13,7 @@ import (
 // невалиден»: ответ тот же 401 auth.unauthenticated, но cookie не стирается (иначе браузер
 // потеряет уже новую), отказ не считается в IP-лимите staff_auth и не кладётся в негативный кэш.
 func TestReplacedTokenKeepsCookie(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	lim := &recLimiter{}
 	o.Limiter = lim

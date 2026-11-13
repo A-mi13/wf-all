@@ -19,6 +19,7 @@ import (
 // уже продлённая на 24 ч, удалилась бы после снятия блокировки — и повтор исполнил бы действие
 // второй раз. Обе таблицы ключей: игроков и admin-api.
 func TestDeleteExpiredKeepsKeyReclaimedConcurrently(t *testing.T) {
+	t.Parallel()
 	claims := map[idempotency.Table]func(ctx context.Context, tx pgx.Tx, user uuid.UUID) error{
 		idempotency.Players: func(ctx context.Context, tx pgx.Tx, user uuid.UUID) error {
 			_, err := idempotencydb.New(tx).Claim(ctx, idempotencydb.ClaimParams{UserID: user, Key: "k", Endpoint: "/new", RequestHash: "new"})

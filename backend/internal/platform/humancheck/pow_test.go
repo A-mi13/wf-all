@@ -55,6 +55,7 @@ func solve(t *testing.T, ch humancheck.Challenge) string {
 // Совместимость с протоколом ALTCHA в обе стороны: задачу решает библиотека, а наше решение
 // принимает её проверка (закрывает §14 спеки).
 func TestPoWCompatibleWithALTCHA(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "api")
 	key := newKey(t)
@@ -78,6 +79,7 @@ func TestPoWCompatibleWithALTCHA(t *testing.T) {
 
 // Review Focus 5.
 func TestPoWRejects(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "api")
 	c := clocktest.New(start)
@@ -151,6 +153,7 @@ func TestPoWRejects(t *testing.T) {
 // Граница срока: в секунду expires решение уже не принимается. Иначе чистка (expires_at < now)
 // может стереть отметку о расходе, пока решение ещё живо, — и повтор пройдёт.
 func TestPoWExpiresAtBoundary(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pools := dbtest.NewPoolsAs(t, "api")
 	c := clocktest.New(start)
@@ -171,6 +174,7 @@ func TestPoWExpiresAtBoundary(t *testing.T) {
 }
 
 func TestNewPoWValidatesConfig(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "api")
 	c := clocktest.New(start)
 	short := base64.StdEncoding.EncodeToString([]byte("short"))
@@ -198,6 +202,7 @@ func TestNewPoWValidatesConfig(t *testing.T) {
 
 // Ключи HMAC проверяются без базы: cmd/api зовёт ParseKeys до подключения к ней.
 func TestParseKeys(t *testing.T) {
+	t.Parallel()
 	short := base64.StdEncoding.EncodeToString([]byte("short"))
 	for name, list := range map[string][]string{
 		"нет ключей":    nil,

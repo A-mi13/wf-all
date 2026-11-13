@@ -13,6 +13,7 @@ func tokenHash(i int) [32]byte { return sha256.Sum256([]byte("tok-" + strconv.It
 
 // Негативный кэш (R9): запись живёт ttl; больше max записей не бывает — вытесняются самые старые.
 func TestNegCache(t *testing.T) {
+	t.Parallel()
 	clk := clocktest.New(time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC))
 	c := newNegCache(clk, 5*time.Second, 3)
 	c.put(tokenHash(1))
@@ -61,6 +62,7 @@ func TestNegCache(t *testing.T) {
 
 // Предел и срок по умолчанию — из R9: 5 с и 10 000 записей.
 func TestNegCacheDefaults(t *testing.T) {
+	t.Parallel()
 	if negCacheTTL != 5*time.Second || negCacheMax != 10_000 {
 		t.Fatalf("ttl %v, max %d", negCacheTTL, negCacheMax)
 	}

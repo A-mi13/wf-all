@@ -39,6 +39,7 @@ func rows(t *testing.T, pool *pgxpool.Pool) int {
 }
 
 func TestWriteInTransactionMasksAndPersists(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	e := entry()
 	if err := db.InTx(context.Background(), pool, func(ctx context.Context, _ pgx.Tx) error {
@@ -65,6 +66,7 @@ func TestWriteInTransactionMasksAndPersists(t *testing.T) {
 // Каждый вид автора записывается (CHECK audit_log из 0020 их пропускает): игрок, сотрудник, оператор,
 // система, аноним.
 func TestWriteActorKinds(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	for name, e := range map[string]audit.Entry{
 		"игрок":     {ActorUserID: id.New(), ActorRole: "captain"},
@@ -86,6 +88,7 @@ func TestWriteActorKinds(t *testing.T) {
 // Entry.ID задан — запись получает его (письмо о действии ссылается на запись журнала заранее);
 // пуст — id выдаёт аудит.
 func TestWriteKeepsGivenID(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	given := id.New()
 	e := entry()
@@ -107,6 +110,7 @@ func TestWriteKeepsGivenID(t *testing.T) {
 }
 
 func TestWriteNeedsTransactionAndRollsBackWithIt(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	if err := audit.Write(context.Background(), entry()); !errors.Is(err, db.ErrNoTx) {
 		t.Fatalf("вне транзакции: %v", err)
@@ -124,6 +128,7 @@ func TestWriteNeedsTransactionAndRollsBackWithIt(t *testing.T) {
 
 // Аудит чтения чувствительного (почта, связанные аккаунты) — без транзакции действия.
 func TestWriteReadWithoutTransaction(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	e := entry()
 	e.Action, e.Before, e.After = "identity.email_viewed", nil, nil
@@ -138,6 +143,7 @@ func TestWriteReadWithoutTransaction(t *testing.T) {
 // Правила автора повторяют CHECK audit_log (0020): нарушение — ErrInvalidEntry до SQL, а не сырой
 // 23514 базы.
 func TestWriteRejectsInvalidEntry(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	for name, mutate := range map[string]func(*audit.Entry){
 		"действие без модуля": func(e *audit.Entry) { e.Action = "banned" },
@@ -178,6 +184,7 @@ func TestWriteRejectsInvalidEntry(t *testing.T) {
 // Системное действие (воркер, миграция): нулевые значения пишутся как NULL, а не как пустые строки.
 // Роль у записи без автора обязательна (0020, CHECK audit_log_service_actor) — system.
 func TestWriteSystemEntryStoresNulls(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	e := audit.Entry{ActorRole: "system", Action: "worker.cleanup_done", ObjectType: "session", ObjectID: uuid.Nil}
 	if err := audit.WriteRead(context.Background(), pool, e); err != nil {

@@ -12,18 +12,19 @@ import { useSession, useStaffSwitched } from '../../app/session';
 import {
   Button,
   CheckboxField,
+  CopyButton,
+  DataState,
   ErrorState,
   Form,
   FormError,
-  LoadingRows,
   OtpInput,
   type OtpInputHandle,
   QrCode,
+  Skeleton,
   useErrorText,
 } from '../../ui';
 import styles from './Auth.module.css';
 import { AuthLayout } from './AuthLayout';
-import { useCopy } from './copy';
 import { RecoveryCodesPanel } from './RecoveryCodesPanel';
 
 // Выпуск секрета: POST, но читается как запрос — один раз на экран. Ключ кэша свой; gcTime 0 —
@@ -156,7 +157,7 @@ function ScanStep({
   const t = useTranslations('auth.setup');
   const errorText = useErrorText();
   const api = useApi();
-  const copy = useCopy();
+  const queryClient = useQueryClient();
   const errorId = useId();
   const otp = useRef<OtpInputHandle>(null);
   const [code, setCode] = useState('');
@@ -209,7 +210,9 @@ function ScanStep({
     onRestart();
     confirm.reset();
     otp.current?.reset();
-    void secret.refetch();
+    // прежний секрет сгорел — сначала стереть его, потом выпуск: упадёт перевыпуск — DataState покажет
+    // ошибку с «Повторить», а не старый QR (refetch поверх данных оставил бы их при ошибке; ревью I1)
+    void queryClient.resetQueries({ queryKey: SETUP_KEY, exact: true });
   };
   const replay =
     isApiError(secret.error, 'idempotency.replay_unavailable') ||
@@ -225,10 +228,6 @@ function ScanStep({
         </Button>
       </>
     );
-  if (alreadyConfirmed || secret.isPending || secret.isFetching) return <LoadingRows rows={3} />;
-  if (secret.isError)
-    return <ErrorState error={secret.error} onRetry={() => void secret.refetch()} />;
-
   const sendCode = (c: string) => {
     if (confirm.isPending) return;
     confirm.mutate({ code: c });
@@ -240,54 +239,80 @@ function ScanStep({
       ? t('invalid')
       : errorText(failure);
 
+  // Загрузка, ошибка и «уже подтверждён» / перевыпуск (прежний секрет на экране оставлять нельзя: его QR
+  // сгорел) — DataState: скелетон по форме шага, ошибка с кодом и «Повторить».
+  // 403 выпуска — только конвейер (сеть, CSRF), не право: ошибка с кодом, а не ForbiddenState (ревью m7)
+  if (isApiError(secret.error) && secret.error.status === 403 && !secret.isFetching)
+    return <ErrorState error={secret.error} onRetry={() => void secret.refetch()} />;
+  return (
+    <DataState
+      query={secret}
+      skeleton={<ScanSkeleton />}
+      pending={alreadyConfirmed || secret.isFetching}
+      scope="block"
+    >
+      {(data) => (
+        <>
+          <div className={styles.scan}>
+            <div className={styles.qr}>
+              <QrCode value={data.otpauth_uri} label={t('qr')} />
+            </div>
+            <div className={styles.secretBlock}>
+              <p className={styles.fieldLabel}>{t('secret')}</p>
+              <p className={styles.secret}>{grouped(data.secret)}</p>
+              <div className={styles.row}>
+                {/* копируется без пробелов; при отказе буфера — поле «вручную» в DOM, не в storage */}
+                <CopyButton value={data.secret} label={t('copy_secret')} display="text" />
+              </div>
+            </div>
+          </div>
+          <div className={styles.factor}>
+            <p aria-hidden="true" className={styles.fieldLabel}>
+              {t('code')}
+            </p>
+            <OtpInput
+              ref={otp}
+              label={t('code')}
+              onComplete={sendCode}
+              onChange={setCode}
+              invalid={Boolean(failure)}
+              busy={confirm.isPending}
+              describedBy={message ? errorId : undefined}
+            />
+            {message && (
+              <p role="alert" id={errorId} className={styles.error}>
+                {message}
+              </p>
+            )}
+          </div>
+          <Button
+            size="lg"
+            block
+            loading={confirm.isPending}
+            disabled={code.length < 6}
+            onClick={() => sendCode(code)}
+          >
+            {t('confirm')}
+          </Button>
+        </>
+      )}
+    </DataState>
+  );
+}
+
+// Скелетон шага сканирования по форме: QR и секрет рядом, поле кода, кнопка.
+function ScanSkeleton() {
   return (
     <>
       <div className={styles.scan}>
         <div className={styles.qr}>
-          <QrCode value={secret.data.otpauth_uri} label={t('qr')} />
+          <Skeleton.Block height="xl" />
         </div>
         <div className={styles.secretBlock}>
-          <p className={styles.fieldLabel}>{t('secret')}</p>
-          <p className={styles.secret}>{grouped(secret.data.secret)}</p>
-          <div className={styles.row}>
-            <Button
-              variant="secondary"
-              aria-label={t('copy_secret')}
-              onClick={() => void copy(secret.data.secret)}
-            >
-              {t('copy')}
-            </Button>
-          </div>
+          <Skeleton.Text lines={3} width="long" />
         </div>
       </div>
-      <div className={styles.factor}>
-        <p aria-hidden="true" className={styles.fieldLabel}>
-          {t('code')}
-        </p>
-        <OtpInput
-          ref={otp}
-          label={t('code')}
-          onComplete={sendCode}
-          onChange={setCode}
-          invalid={Boolean(failure)}
-          busy={confirm.isPending}
-          describedBy={message ? errorId : undefined}
-        />
-        {message && (
-          <p role="alert" id={errorId} className={styles.error}>
-            {message}
-          </p>
-        )}
-      </div>
-      <Button
-        size="lg"
-        block
-        loading={confirm.isPending}
-        disabled={code.length < 6}
-        onClick={() => sendCode(code)}
-      >
-        {t('confirm')}
-      </Button>
+      <Skeleton.Form fields={1} />
     </>
   );
 }

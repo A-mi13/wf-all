@@ -1,4 +1,5 @@
-# Операции платформы админки (спека сотрудников §4.8, §5.3): журнал действий и подтверждения вдвоём.
+# Операции платформы админки (спека сотрудников §4.8, §5.3, §6.1): журнал действий, подтверждения вдвоём,
+# версии приложения и флаги функций (план B, Task 7).
 # Не модуль — их реализует internal/httpapi/admin.Server напрямую (тег platform).
 audit:
   get:
@@ -134,6 +135,7 @@ approval-approve:
       - staff.roles.revoke_owner
       - staff.access.reset_elevated
       - staff.access.reset
+      - geo.countries.rules
     x-error-codes:
       - platform.approval_not_found
       - platform.approval_self
@@ -162,6 +164,12 @@ approval-approve:
         приглашение нужно подать заново.
       - Отказ исполнения — код действия (запрос помечен `failed`): 409 `staff.last_owner`,
         409 `staff.email_taken`, 422 `staff.city_not_found`.
+      - Правила и создание страны (`geo.country_rules`, `geo.country_create`) своих кодов у подтверждения не
+        имеют: отказ исполнителя — 409 `platform.approval_stale`, запрос помечен `failed`. Так бывает, если
+        страну правили после запроса (версия не совпала) или её уже нет, правила из запроса больше не
+        проходят проверку (например, валюта перестала быть действующей), страну с этим кодом успели завести
+        (второй из двух запросов на один код), инициатор изменился (`initiator_changed`). Запрос нужно
+        подать заново.
     parameters:
       - $ref: '../root.yaml#/components/parameters/ApprovalId'
       - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
@@ -193,6 +201,7 @@ approval-reject:
       - staff.roles.revoke_owner
       - staff.access.reset_elevated
       - staff.access.reset
+      - geo.countries.rules
     x-error-codes:
       - platform.approval_not_found
       - platform.approval_self
@@ -252,5 +261,139 @@ approval-cancel:
           application/json:
             schema:
               $ref: '../root.yaml#/components/schemas/Approval'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+app-versions:
+  get:
+    operationId: listAppVersions
+    tags: [platform]
+    x-permission: platform.versions.read
+    x-error-codes: []
+    summary: Версии приложения
+    description: |
+      Минимальная и рекомендуемая версии нативного приложения и ссылка на магазин — для обеих
+      платформ, всегда два элемента (`ios`, затем `android`). Платформа без заведённых версий —
+      элемент с `null` в версиях, ссылке, `version` и `updated_at` (как у публичного
+      `getAppMinVersion`: приложение работает без проверки).
+    responses:
+      '200':
+        description: Версии обеих платформ
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AppVersionsList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+app-version:
+  put:
+    operationId: putAppVersions
+    tags: [platform]
+    x-permission: platform.versions.manage
+    x-error-codes: []
+    summary: Задать версии приложения
+    description: |
+      Заводит или заменяет версии платформы целиком: минимальную (ниже неё приложение требует
+      обновиться), рекомендуемую (ниже неё — предлагает) и ссылку на магазин. Приложения узнают
+      новые значения из публичного `getAppMinVersion` не позже чем через минуту. Версия записи
+      растёт; в той же транзакции — запись журнала `platform.app_versions_changed` и событие.
+      Версии в теле нет: последняя запись выигрывает.
+
+      Проверки — все нарушения сразу, 400 `validation.failed` с полями: формат `MAJOR.MINOR.PATCH`
+      (`body.min_version`, `body.recommended_version` — `pattern` схемы или `format`),
+      `recommended_version` не ниже `min_version` (`body.recommended_version`, `minimum`), ссылка —
+      `https://` в нижнем регистре, без пробелов и управляющих символов (`body.store_url`, `format`)
+      и хост магазина платформы — `apps.apple.com` у ios, `play.google.com` у android
+      (`body.store_url`, `host`). Незнакомая платформа в пути — 400 `validation.failed` по
+      `path.platform`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/AppPlatformPath'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Версии и ссылка на магазин
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/AppVersionsPut'
+    responses:
+      '200':
+        description: Версии платформы после записи
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AppVersions'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+flags:
+  get:
+    operationId: listFeatureFlags
+    tags: [platform]
+    x-permission: platform.flags.read
+    x-error-codes: []
+    summary: Флаги функций
+    description: |
+      Все флаги функций по ключу: включён ли везде, в каких городах включён, версия и время
+      правки. Подпись флага — в локалях админки (`flags.<ключ>.title` и `.note`); незнакомый ключ
+      (флаг новее админки) экран показывает самим ключом. Функция выключенного флага отвечает 403
+      `feature.disabled`.
+    responses:
+      '200':
+        description: Флаги функций
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/FeatureFlagList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+flag:
+  patch:
+    operationId: updateFeatureFlag
+    tags: [platform]
+    x-permission: platform.flags.manage
+    x-error-codes:
+      - platform.flag_not_found
+      - platform.flag_stale
+      - platform.flag_city_not_found
+    summary: Переключить флаг
+    description: |
+      Включает или выключает флаг везде (`enabled_globally`) и задаёт города, где он включён
+      (`enabled_city_ids` — список целиком, повторы схлопываются; без поля — города не меняются).
+      `version` — версия флага, которую видел экран: правка проходит, только если флаг с тех пор не
+      меняли (две вкладки не затирают друг друга). Ничего не изменилось — 200 без записи в журнал,
+      версия не растёт; иначе версия растёт, в той же транзакции — запись журнала
+      `platform.flag_changed` и событие.
+
+      Коды ошибок:
+      - 404 `platform.flag_not_found` — флага с таким ключом нет.
+      - 409 `platform.flag_stale` — флаг изменили после того, как экран его прочитал (`version` не
+        совпала): перечитайте флаг и повторите.
+      - 422 `platform.flag_city_not_found` — в `enabled_city_ids` есть несуществующий город (город
+        выключенной страны допустим).
+      - 400 `validation.failed` — ключ в пути не по шаблону (`path.key`), больше 1000 городов.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/FlagKey'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Версия флага и новые значения
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/FeatureFlagPatch'
+    responses:
+      '200':
+        description: Флаг после правки
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/FeatureFlag'
       default:
         $ref: '../root.yaml#/components/responses/Problem'

@@ -1,4 +1,4 @@
-import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type InfiniteData, queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { background, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
@@ -24,8 +24,25 @@ const COUNT_LIMIT = 100;
 // открывает то же окно разблокировки, что и любой запрос (клиент API). Раз в минуту, пока вкладка
 // видна (refetchIntervalInBackground: false), и сразу при возврате во вкладку.
 export function useIncomingApprovalsCount(): number | undefined {
-  const api = useApi();
   const q = useQuery({
+    ...useIncomingPendingOptions(),
+    refetchInterval: COUNT_POLL_MS,
+    refetchIntervalInBackground: false,
+    select: (page) => page.items.length,
+  });
+  return q.data;
+}
+
+// Та же страница входящих ожидающих (ключ счётчика, фоновый запрос) целиком — главная (спека UI-фундамента §4.13):
+// число, next_cursor («99+») и действия (решения staff.* на карманном устройстве — «решать с компьютера»). Опрос
+// раз в минуту ведёт счётчик каркаса; здесь — без своего интервала, при открытии и возврате во вкладку.
+export function useIncomingApprovals() {
+  return useQuery(useIncomingPendingOptions());
+}
+
+function useIncomingPendingOptions() {
+  const api = useApi();
+  return queryOptions({
     queryKey: COUNT_KEY,
     queryFn: () =>
       unwrap(
@@ -34,12 +51,8 @@ export function useIncomingApprovalsCount(): number | undefined {
           ...background(),
         }),
       ),
-    refetchInterval: COUNT_POLL_MS,
-    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
-    select: (page) => page.items.length,
   });
-  return q.data;
 }
 
 // Итог решения на экране списка box (ревью Task 15, I2). Ответ есть (200: решён) — строка остаётся

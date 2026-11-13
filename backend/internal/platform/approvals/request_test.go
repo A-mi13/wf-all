@@ -16,6 +16,7 @@ import (
 
 // Запрос: право по Permit, срок now+TTL, снимок имени, цель и город; аудит без payload.
 func TestRequestCreatesPending(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	owner := e.member(perm.Owner)
 	tg := id.New()
@@ -47,6 +48,7 @@ func TestRequestCreatesPending(t *testing.T) {
 // Без права запроса (deny), повышенное право не по роли, scoped вне своих городов, сессия не
 // active — ErrForbidden, строки нет.
 func TestRequestForbidden(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	cityA, cityB := id.New(), id.New()
 	mod := e.member(perm.Moderator, cityA)
@@ -86,6 +88,7 @@ func TestRequestForbidden(t *testing.T) {
 // payload — JSON-объект с целым v ≥ 1; иначе ошибка до SQL (а не 500 от CHECK); неизвестное
 // действие и право Permit не из каталога — ошибка; пустая метка — ошибка.
 func TestRequestPayload(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	owner := e.member(perm.Owner)
 	e.reg.Register(approvals.Action{Name: "test.badperm", Permission: "staff.roles.grant", Exec: e.run,
@@ -133,6 +136,7 @@ func TestRequestPayload(t *testing.T) {
 
 // Запрос живёт в транзакции модуля: виден после её коммита, откат модуля откатывает и запрос.
 func TestRequestInModuleTx(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	owner := e.member(perm.Owner)
 	err := db.InTx(context.Background(), e.pool, func(ctx context.Context, tx pgx.Tx) error {

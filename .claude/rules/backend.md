@@ -20,6 +20,26 @@ paths:
   платный матч без суммы и бесплатный с суммой; прогнозы только за заработанные очки, не за купленные;
   больше трёх снятых броней позиции у игрока в команде; изменение записи аудит-лога.
 - Цикл TDD — `./task backend:test:watch`; `./task backend:test` всегда прогоняет заново.
-- Тесты с БД — `internal/platform/testkit/dbtest` (клон базы на тест); HTTP — `testkit/apitest` (проверка по контракту).
+- Тесты с БД — `internal/platform/testkit/dbtest`; HTTP — `testkit/apitest` (проверка по контракту). Чтения сценариев
+  (без HTTP-конвейера) — `dbtest.SharedAs(t, роль, посев)`: один засеянный клон на пакет под ролью прода
+  (`api`/`admin`/`worker`), только на чтение, пул владельца тесту не отдаётся; посев — одна функция верхнего уровня
+  на пакет и роль (замыкание и значение метода — Fatalf: посев узнаётся по коду функции), ожидания списков учитывают
+  весь посев; пакету нужен `func TestMain(m *testing.M) { os.Exit(dbtest.Main(m)) }` (уборка клона — при любом исходе
+  тестов; падение по `-timeout` или панике оставляет клон). HTTP-конвейер (пишет лимиты, `last_seen_at`, ключи идемпотентности и на `GET`) и запись —
+  `dbtest.New*` (клон на тест).
+- Тесты пакетов с базой (каталог, где `*_test.go` импортирует `dbtest`) — параллельные: каждая `Test*` первой строкой
+  зовёт `t.Parallel()`, нельзя (пишет переменную пакета вроде порции чистки, `t.Setenv`, порог реального времени) —
+  комментарий `// serial: <причина>` над функцией; табличный подтест со своим окружением — тоже `t.Parallel()`. Пакет
+  объявляет `func TestMain(m *testing.M) { os.Exit(dbtest.Main(m)) }`. Страж — `archtest.TestDBTestsAreParallel`.
+  Сколько разом: `dbtest.Main` ставит `-parallel` = `dbtest.DefaultParallel` (4), если флаг не задан явно (умолчание
+  go — GOMAXPROCS = 24: клоны и DROP DATABASE душат Postgres, пакет вдвое медленнее последовательного);
+  `./task backend:test` и `test:watch` — явно `-p 4 -parallel 1 -timeout 20m` (предел пакета: `httpapi/admin` идёт ~10 мин; job CI — 30 мин): весь набор упирается в CREATE/DROP DATABASE
+  (запись клона ~21 МБ, checkpoint и барьер каждого DROP) — параллельность полному набору выигрыша не даёт (S1,
+  03.11, одиночные прогоны: 359 с у `-parallel 1` против 686 с у `-parallel 8`). Несколько пакетов одной командой
+  (`go test ./...`, IDE, список пакетов) — только с `-p 4`: без него GOMAXPROCS (24) пакетов × 4 = до 96 тестов разом
+  и `53300 too many clients`. Соединения: тест ≤ 14 (до трёх пулов по `PoolMaxConns` + служебные pgtestdb и grants),
+  процесс + общий клон 4–8; `backend:test` ≤ 4×14 + 4×8 = 88 < `max_connections` 100 (локально и в CI); замер пика —
+  43 соединения при 32 тестах разом (пулы ленивые). Не хватает — `ALTER SYSTEM SET max_connections = 200` и
+  `bash scripts/pg.sh stop` + `start`.
 - Кодогенерация бэкенда — `./task backend:gen` (sqlc + oapi-codegen).
 - `go tool -modfile=...` запускать с cwd внутри `backend/`, иначе `cannot find main module`.

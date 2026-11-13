@@ -36,6 +36,7 @@ func mustPanic(t *testing.T, name, want string, f func()) {
 // Ошибки сборки реестра — паника: имя не по формату CHECK approvals_action_format, нет
 // исполнителя, право не из каталога или черновое, дубль имени, вторая проверка инициатора.
 func TestRegistryPanics(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"", "staff", "Staff.invite", "staff.invite.x", "staff.", ".invite", "staff.in-vite", "1staff.invite"} {
 		mustPanic(t, "имя "+name, "не по формату", func() {
 			approvals.NewRegistry().Register(approvals.Action{Name: name, Permission: "staff.roles.grant", Exec: noop})
@@ -62,6 +63,7 @@ func TestRegistryPanics(t *testing.T) {
 
 // Actions — имена по алфавиту (страж подписей approvals.actions.<действие>, D21) и копия.
 func TestRegistryActionsSorted(t *testing.T) {
+	t.Parallel()
 	r := approvals.NewRegistry()
 	for _, n := range []string{"staff.role_change", "staff.access_reset", "staff.revoke_owner", "staff.invite"} {
 		r.Register(approvals.Action{Name: n, Permission: "staff.roles.grant", Exec: noop})
@@ -79,6 +81,7 @@ func TestRegistryActionsSorted(t *testing.T) {
 
 // Validate — действия без проверки инициатора не готовы: сборка 10c зовёт до старта сервера.
 func TestRegistryValidate(t *testing.T) {
+	t.Parallel()
 	r := approvals.NewRegistry()
 	if err := r.Validate(); err != nil {
 		t.Fatalf("пустой реестр: %v", err)

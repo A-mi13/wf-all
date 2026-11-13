@@ -31,6 +31,7 @@ var errBiz error = bizErr{}
 // Подтверждение: исполнитель вызван с подтверждающим, executed, решивший и комментарий в строке,
 // аудит от решившего с комментарием в reason, одно событие platform.approval_decided.
 func TestApproveExecutes(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	tg := id.New()
@@ -46,7 +47,9 @@ func TestApproveExecutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != b || !strings.Contains(gotPayload, tg.String()) {
+	// R21: исполнитель получает копию принципала с подписью решения (Label = decided_by_label)
+	if got == nil || got == b || got.StaffID != b.StaffID || got.SessionID != b.SessionID || got.Role != b.Role ||
+		got.Label != "Борис" || !strings.Contains(gotPayload, tg.String()) {
 		t.Fatalf("исполнитель: approver=%v payload=%s", got, gotPayload)
 	}
 	if res.Status != approvals.StatusExecuted || res.DecidedBy != b.StaffID || res.DecidedByLabel != "Борис" ||
@@ -79,6 +82,7 @@ func TestApproveExecutes(t *testing.T) {
 
 // Правило двух рук: инициатор и цель не решают (ErrSelf), ничего не пишется.
 func TestApproveSelf(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, tgt := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1, Target: &tgt.StaffID})
@@ -97,6 +101,7 @@ func TestApproveSelf(t *testing.T) {
 
 // Без права запроса, чужой город модератора, сессия не active — ErrForbidden; свой город — можно.
 func TestApproveForbidden(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	cityA, cityB := id.New(), id.New()
 	a := e.member(perm.Owner)
@@ -139,6 +144,7 @@ func TestApproveForbidden(t *testing.T) {
 // текущему payload: админ не подтверждает запрос на выдачу роли владельца (grant_elevated), даже
 // если payload в строке поправили, а «обычный» запрос подтверждает.
 func TestApproveUsesStoredPermission(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, admin := e.member(perm.Owner), e.member(perm.Admin)
 	elevated := e.request(a, actGrant, payload{V: 1, Elevated: true})
@@ -158,6 +164,7 @@ func TestApproveUsesStoredPermission(t *testing.T) {
 // Срок вышел: строка expired от системы коммитится (D8), наружу ErrClosed, исполнителя нет. Граница —
 // ровно expires_at: за микросекунду до неё ещё можно.
 func TestApproveExpired(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	late := e.request(a, actGrant, payload{V: 1})
@@ -200,6 +207,7 @@ func TestApproveExpired(t *testing.T) {
 
 // Решённый запрос не решается второй раз: ErrClosed, исполнитель — один раз.
 func TestApproveTwiceClosed(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b, c := e.member(perm.Owner), e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -229,6 +237,7 @@ func TestApproveTwiceClosed(t *testing.T) {
 // Инициатор выключен или лишился права: failed с причиной initiator_changed коммитится, наружу
 // ErrStale, исполнителя нет; аудит failed от подтверждающего и событие.
 func TestApproveInitiatorChanged(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	off := e.request(a, actGrant, payload{V: 1})
@@ -260,6 +269,7 @@ func TestApproveInitiatorChanged(t *testing.T) {
 // Бизнес-отказ исполнителя (Fail) после его записей и ошибки SQL: savepoint откатывает изменения
 // модуля, failed с кодом ошибки коммитится, наружу — исходная ошибка. То же — ErrStale исполнителя.
 func TestApproveExecutorFail(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -314,6 +324,7 @@ func TestApproveExecutorFail(t *testing.T) {
 // Подтест «через Fail» (ревью уборки №6, Minor 2): исполнитель, вопреки совету, вернул
 // Fail(ErrInitiatorChanged) — причина та же (initiator_changed, а не код ErrStale), наружу ErrStale.
 func TestApproveExecutorInitiatorChanged(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		err  error
@@ -322,6 +333,7 @@ func TestApproveExecutorInitiatorChanged(t *testing.T) {
 		{"через Fail", approvals.Fail(approvals.ErrInitiatorChanged)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			e := newEnv(t)
 			a, b := e.member(perm.Owner), e.member(perm.Owner)
 			ap := e.request(a, actGrant, payload{V: 1})
@@ -354,6 +366,7 @@ func TestApproveExecutorInitiatorChanged(t *testing.T) {
 // Прочая ошибка или паника исполнителя, ошибка проверки инициатора — сбой: откат всего, запрос
 // остаётся pending, ни аудита решения, ни события.
 func TestApproveFailureRollsBack(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -410,6 +423,7 @@ func assertUntouched(t *testing.T, e *env, apID uuid.UUID) {
 
 // Без зарегистрированной проверки инициатора подтверждение не исполняется (fail-closed).
 func TestApproveWithoutInitiatorCheck(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	reg := approvals.NewRegistry()
 	reg.Register(approvals.Action{Name: actGrant, Permission: "staff.roles.grant", Exec: e.run})
@@ -428,6 +442,7 @@ func TestApproveWithoutInitiatorCheck(t *testing.T) {
 
 // Комментарий подтверждения: пробелы — без комментария; длиннее 500 символов — 400 по body.comment.
 func TestApproveComment(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -462,5 +477,30 @@ func assertField(t *testing.T, err error, field, code string) {
 	p := pe.Problem()
 	if p.Code != httpx.CodeValidationFailed || len(p.Errors) != 1 || p.Errors[0].Field != field || p.Errors[0].Code != code {
 		t.Fatalf("ошибка поля: %+v", p)
+	}
+}
+
+// Task 13 плана B: исполнитель видит id исполняемого запроса в ctx (ApprovalIDFrom) — модуль пишет его в свой аудит
+// (approval_id); вне исполнителя — нет.
+func TestApproveExecutorSeesApprovalID(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a, b := e.member(perm.Owner), e.member(perm.Owner)
+	tg := id.New()
+	ap := e.request(a, actGrant, payload{V: 1, Target: &tg})
+	var got uuid.UUID
+	var ok bool
+	e.setExec(func(ctx context.Context, _ pgx.Tx, _ json.RawMessage, _ *auth.Staff) error {
+		got, ok = approvals.ApprovalIDFrom(ctx)
+		return nil
+	})
+	if _, err := e.svc.Approve(context.Background(), b, "Борис", metaWeb, ap.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got != ap.ID {
+		t.Fatalf("id в исполнителе: %s %v, ждали %s", got, ok, ap.ID)
+	}
+	if _, ok := approvals.ApprovalIDFrom(context.Background()); ok {
+		t.Fatal("id вне исполнителя")
 	}
 }

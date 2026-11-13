@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,21 +42,36 @@ func main() {
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Environ(), os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "worker:", err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 
-// geoHTTPClient — HTTP-клиент загрузки GeoNames; nil — клиент по умолчанию. Тест команды
-// подставляет клиент TLS-сервера httptest (его сертификат системе не известен).
-var geoHTTPClient *http.Client
+// host — что процесс берёт у машины, где запущен: часы (команда geo import — машина оператора; журнал идёт по ним со
+// сдвигом к времени базы, geojobs.OperatorClock) и HTTP-клиент загрузки GeoNames (nil — по умолчанию). Параметром, а
+// не переменными пакета: тест команды подставляет отстающие часы и клиент TLS-сервера httptest, а параллельные тесты
+// пакета читали бы ту же переменную (ревью уборки m4, гонка данных).
+type host struct {
+	clock      clock.Clock
+	httpClient *http.Client
+}
 
-// run без аргументов — воркер; с аргументами — разовая команда (command).
+// run без аргументов — воркер; с аргументами — разовая команда (command). Часы и клиент — настоящие.
 func run(ctx context.Context, args, environ []string, out, logOut io.Writer) error {
+	return runOn(ctx, host{clock: clock.System}, args, environ, out, logOut)
+}
+
+// runOn — run на машине h.
+func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.Writer) error {
 	cfg, err := config.Load[config.Worker]("WORKER_", environ)
 	if err != nil {
 		return err
 	}
 	if err := errors.Join(validateRelay(cfg.Relay), validateGeoNames(cfg.GeoNames)); err != nil {
+		return err
+	}
+	// клиент источника GeoNames — до базы: битый WORKER_GEONAMES_CA_FILE — отказ старта, а не x509 на первом импорте
+	geoClient, err := geoNamesClient(h.httpClient, cfg.GeoNames)
+	if err != nil {
 		return err
 	}
 	// почта нужна только воркеру, не разовым командам; проверяется до подключения к базе:
@@ -84,9 +100,9 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		return err
 	}
 	geo := geojobs.Config{BaseURL: cfg.GeoNames.BaseURL, MaxCompressed: cfg.GeoNames.MaxCompressed,
-		MaxUncompressed: cfg.GeoNames.MaxUncompressed, HTTPClient: geoHTTPClient}
+		MaxUncompressed: cfg.GeoNames.MaxUncompressed, HTTPClient: geoClient}
 	if len(args) > 0 {
-		return command(ctx, args, pool, reg, geo, out, log)
+		return command(ctx, args, pool, reg, geo, h.clock, out, log)
 	}
 	workers := allWorkers(pool, reg, geo, log, sender)
 	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig(cfg.Queues, workers, log))
@@ -114,17 +130,31 @@ const softStopTimeout = 25 * time.Second
 const usage = "без аргументов — воркер; events replay --type <модуль>.<факт> --subscriber <модуль>.<имя> --since <RFC 3339>; " +
 	"geo import --country <ISO 3166-1 alpha-2>"
 
+// errUsage — неверная разовая команда (неизвестная, лишние аргументы, неизвестный или недостающий флаг): код
+// выхода 2 и usage в тексте ошибки, как у admin-api (geo 1 Task 11 M4).
+var errUsage = errors.New("неверная команда")
+
+func usageError(msg string) error { return fmt.Errorf("%w: %s: %s", errUsage, msg, usage) }
+
+// exitCode — 2 для ошибки использования, 1 для остальных.
+func exitCode(err error) int {
+	if errors.Is(err, errUsage) {
+		return 2
+	}
+	return 1
+}
+
 // command — разовые команды воркера: реестр подписчиков знает только воркер, импорт GeoNames
 // оператор запускает со своей машины под ролью worker.
 func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config,
-	out io.Writer, log *slog.Logger) error {
+	clk clock.Clock, out io.Writer, log *slog.Logger) error {
 	switch {
 	case len(args) >= 2 && args[0] == "events" && args[1] == "replay":
 		return replay(ctx, args[2:], pool, reg, out, log)
 	case len(args) >= 2 && args[0] == "geo" && args[1] == "import":
-		return geoImport(ctx, args[2:], pool, geo, out, log)
+		return geoImport(ctx, args[2:], pool, geo, clk, out, log)
 	}
-	return fmt.Errorf("неизвестная команда %q: %s", strings.Join(args, " "), usage)
+	return usageError(fmt.Sprintf("неизвестная команда %q", strings.Join(args, " ")))
 }
 
 func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, out io.Writer, log *slog.Logger) error {
@@ -134,10 +164,13 @@ func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.
 	subscriber := fs.String("subscriber", "", "подписчик")
 	sinceRaw := fs.String("since", "", "с какого момента, RFC 3339")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %s", err, usage)
+		return usageError(fmt.Sprintf("events replay: %v", err))
+	}
+	if fs.NArg() > 0 {
+		return usageError(fmt.Sprintf("events replay: лишние аргументы %q", strings.Join(fs.Args(), " ")))
 	}
 	if *eventType == "" || *subscriber == "" || *sinceRaw == "" {
-		return fmt.Errorf("нужны --type, --subscriber и --since: %s", usage)
+		return usageError("events replay: нужны --type, --subscriber и --since")
 	}
 	since, err := time.Parse(time.RFC3339, *sinceRaw)
 	if err != nil {
@@ -158,18 +191,27 @@ func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.
 
 // geoImport — импорт GeoNames оператором (спека geo §5.4): синхронно в этом процессе, под ролью
 // worker (WORKER_DATABASE_URL); задачу River не ставит. Журнал — started_by = NULL, аудит — operator.
-func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojobs.Config, out io.Writer, log *slog.Logger) error {
+func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojobs.Config, base clock.Clock, out io.Writer,
+	log *slog.Logger) error {
 	fs := flag.NewFlagSet("geo import", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	country := fs.String("country", "", "страна, ISO 3166-1 alpha-2")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %s", err, usage)
+		return usageError(fmt.Sprintf("geo import: %v", err))
+	}
+	if fs.NArg() > 0 {
+		return usageError(fmt.Sprintf("geo import: лишние аргументы %q", strings.Join(fs.Args(), " ")))
 	}
 	if *country == "" {
-		return fmt.Errorf("нужен --country: %s", usage)
+		return usageError("geo import: нужен --country")
 	}
 	cc := strings.ToUpper(*country)
-	s, err := geojobs.NewImportWorker(pool, clock.System, geo, log).RunNow(ctx, cc)
+	// время журнала — по базе, а не по часам машины оператора (ревью G7 m9)
+	clk, err := geojobs.OperatorClock(ctx, pool, base)
+	if err != nil {
+		return err
+	}
+	s, err := geojobs.NewImportWorker(pool, clk, geo, log).RunNow(ctx, cc)
 	if err != nil {
 		if s.ImportID != uuid.Nil {
 			fmt.Fprintf(out, "импорт %s не удался, журнал geonames_imports %s\n", cc, s.ImportID)
@@ -212,6 +254,26 @@ func validateGeoNames(g config.GeoNames) error {
 		errs = append(errs, fmt.Errorf("WORKER_GEONAMES_MAX_UNCOMPRESSED = %d: нужно больше нуля", g.MaxUncompressed))
 	}
 	return errors.Join(errs...)
+}
+
+// geoNamesTimeout — предел одного запроса к источнику, как у клиента по умолчанию пакета source (15 мин): копию клиента
+// с нулевым Timeout source не ограничивает.
+const geoNamesTimeout = 15 * time.Minute
+
+// geoNamesClient — HTTP-клиент загрузки GeoNames: подставленный хостом (тесты) — как есть; без WORKER_GEONAMES_CA_FILE —
+// nil (клиент по умолчанию source, системные корни); с ним — системные корни плюс корень из файла (HTTPS-фикстура
+// живого e2e, зеркало с собственным CA; Task 23).
+func geoNamesClient(given *http.Client, g config.GeoNames) (*http.Client, error) {
+	if given != nil {
+		return given, nil
+	}
+	pool, err := g.RootCAs()
+	if err != nil || pool == nil {
+		return nil, err
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone() //nolint:forcetypeassert // DefaultTransport — *http.Transport
+	tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	return &http.Client{Transport: tr, Timeout: geoNamesTimeout}, nil
 }
 
 // validateRelay — до подключения к базе: пачка меньше 1 зациклила бы Drain, неположительный

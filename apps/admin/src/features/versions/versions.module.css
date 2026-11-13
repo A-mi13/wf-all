@@ -1,0 +1,67 @@
+/* «Версии приложения» (план B, Task 21; дорисовано *): две карточки платформ в стилистике «Справочников». Область
+   страницы — контейнер: на узкой — карточки друг под другом. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-6);
+  container-type: inline-size;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--wf-space-4);
+}
+
+@container (min-width: 720px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+  min-width: 0;
+  padding: var(--wf-space-5);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-bg-elevated);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+}
+
+.title {
+  margin: 0;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-lg);
+  line-height: var(--wf-text-lg-line);
+  font-weight: 800;
+}
+
+.muted {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+}

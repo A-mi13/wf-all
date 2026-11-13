@@ -9,9 +9,17 @@ import (
 )
 
 type Querier interface {
+	// Строка флага до правки (без замка): «было» и сверка версии; гонку правок решает UpdateFlag (WHERE version).
+	FlagByKey(ctx context.Context, key string) (FlagByKeyRow, error)
 	GetFlag(ctx context.Context, key string) (GetFlagRow, error)
 	// Включён ли флаг в городе: глобально или город в списке. 0 строк — флага нет.
 	IsEnabled(ctx context.Context, arg IsEnabledParams) (bool, error)
+	// Флаги для админки (план B, Task 15): все, по ключу.
+	ListFlags(ctx context.Context) ([]ListFlagsRow, error)
+	// Правка флага с оптимистичной версией: параллельная правка той же версии ждёт замок строки, после коммита первой
+	// условие version уже ложно — 0 строк (409 platform.flag_stale). updated_at ставит триггер set_updated_at (время
+	// базы); источник порядка — version.
+	UpdateFlag(ctx context.Context, arg UpdateFlagParams) (UpdateFlagRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

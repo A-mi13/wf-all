@@ -16,6 +16,7 @@ import (
 // сверяется с контрактом), maxItems — больше 100 (валидатор схемы); body.email: minLength / maxLength — короче 3 или
 // длиннее 320 символов (валидатор, до формата). Запросы вне схемы шлются без сверки e.v (она отвергла бы сам запрос).
 func TestStaffFieldCodesMatchContract(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	a := e.owners(1)[0]
 	c := e.city("vremensk")

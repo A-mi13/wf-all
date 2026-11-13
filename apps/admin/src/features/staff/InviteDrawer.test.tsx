@@ -3,11 +3,12 @@ import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 import { reauthBus } from '../../app/reauth';
 import { renderApp, storageDump } from '../../test/app';
-import { auditServer } from '../../test/audit';
 import { CITY_OTHER, meAdmin, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
+import { sectionsServer } from '../../test/sections';
 import { http, server } from '../../test/server';
 import { approval, staffServer, TEAM } from '../../test/staff';
+import { openOptions, pick, pickMany, selectedText } from '../../test/pick';
 
 // «Пригласить» (спека §9.4 п. 5, §9.3, §4.9): роли — только выдаваемые, города модератора — поиск
 // на сервере и обязательны, 202 → «Отправлено на подтверждение», ошибки — по полям; черновик формы
@@ -38,16 +39,17 @@ async function openInvite(user: UserEvent) {
   return screen.getByRole('dialog', { name: 'Приглашение сотрудника' });
 }
 
-const roleOptions = (dialog: HTMLElement) =>
-  within(within(dialog).getByLabelText('Роль'))
-    .getAllByRole('option')
-    .filter((o) => !(o as HTMLOptionElement).disabled)
-    .map((o) => (o as HTMLOptionElement).value);
+// выдаваемые роли: открыть список, взять доступные опции, закрыть (Esc закрывает только список)
+async function roleOptions(user: UserEvent, dialog: HTMLElement) {
+  const options = await openOptions(user, within(dialog).getByLabelText('Роль'));
+  await user.keyboard('{Escape}');
+  return options.filter((o) => !o.disabled).map((o) => o.value);
+}
 
 async function fill(user: UserEvent, dialog: HTMLElement, role: string) {
   await user.type(within(dialog).getByLabelText('Рабочая почта'), 'ivan.p@wf.example');
   await user.type(within(dialog).getByLabelText('Имя'), 'Иван П.');
-  await user.selectOptions(within(dialog).getByLabelText('Роль'), role);
+  await pick(user, within(dialog).getByLabelText('Роль'), role);
 }
 
 describe('форма приглашения', () => {
@@ -56,13 +58,14 @@ describe('форма приглашения', () => {
     renderApp('/staff', { me: meAdmin });
     const user = userEvent.setup();
     const dialog = await openInvite(user);
-    expect(roleOptions(dialog)).toEqual(['moderator', 'support']);
+    expect(await roleOptions(user, dialog)).toEqual(['moderator', 'support']);
     cleanup();
 
     staffServer({ accounts: TEAM });
     renderApp('/staff', { me: meOwner });
-    const owner = await openInvite(userEvent.setup());
-    expect(roleOptions(owner)).toEqual(['owner', 'admin', 'moderator', 'support']);
+    const ownerUser = userEvent.setup();
+    const owner = await openInvite(ownerUser);
+    expect(await roleOptions(ownerUser, owner)).toEqual(['owner', 'admin', 'moderator', 'support']);
   });
 
   test('модератор без городов — ошибка поля на клиенте, запрос не уходит', async () => {
@@ -84,13 +87,18 @@ describe('форма приглашения', () => {
     const user = userEvent.setup();
     const dialog = await openInvite(user);
     await fill(user, dialog, 'moderator');
-    await user.type(within(dialog).getByRole('searchbox', { name: /Города модератора/ }), 'Пят');
+    const cities = within(dialog).getByRole('combobox', { name: /Города модератора/ });
+    await user.type(cities, 'Пят');
     await waitFor(() => expect(seen.cities.some((q) => q.get('q') === 'Пят')).toBe(true));
     // локально не фильтруем: варианты — ответ сервера на q
+    // список открыт — иначе отрицательная проверка ниже прошла бы и без опций (ревью UF2a/II-A, m5)
+    expect(cities).toHaveAttribute('aria-expanded', 'true');
     await waitFor(() =>
-      expect(within(dialog).queryByLabelText('Ставрополь, Ставропольский край')).toBeNull(),
+      expect(
+        within(dialog).queryByRole('option', { name: 'Ставрополь, Ставропольский край' }),
+      ).toBeNull(),
     );
-    await user.click(within(dialog).getByLabelText('Пятигорск, Ставропольский край'));
+    await pickMany(user, cities, ['Пятигорск, Ставропольский край']);
     await user.click(within(dialog).getByRole('button', { name: 'Отправить на подтверждение' }));
     await within(dialog).findByText('Отправлено на подтверждение');
     expect(sent.map((s) => s.body)).toEqual([
@@ -99,8 +107,27 @@ describe('форма приглашения', () => {
         display_name: 'Иван П.',
         role: 'moderator',
         city_ids: [CITY_OTHER],
+        locale: 'ru',
       },
     ]);
+  });
+
+  // Финальное ревью m1: поиск городов из одной пунктуации сервер отверг бы (400 query.q) — запроса с q нет, в
+  // списке «Ничего не нашлось».
+  test('поиск городов из одной пунктуации — запроса с q нет, «Ничего не нашлось»', async () => {
+    const { seen } = staffServer({ accounts: TEAM });
+    inviteServer();
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const dialog = await openInvite(user);
+    await fill(user, dialog, 'moderator');
+    const cities = within(dialog).getByRole('combobox', { name: /Города модератора/ });
+    await user.type(cities, '-');
+    expect(cities).toHaveAttribute('aria-expanded', 'true');
+    expect(await within(dialog).findByText('Ничего не нашлось')).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400)); // пауза поиска прошла — запрос ушёл бы
+    expect(seen.cities.some((q) => q.has('q'))).toBe(false);
+    expect(within(dialog).queryByRole('alert')).toBeNull();
   });
 
   test('202 — «Отправлено на подтверждение», ключ идемпотентности, черновик стёрт', async () => {
@@ -118,7 +145,12 @@ describe('форма приглашения', () => {
     // не модератор — поля городов в запросе нет
     expect(sent).toEqual([
       {
-        body: { email: 'ivan.p@wf.example', display_name: 'Иван П.', role: 'support' },
+        body: {
+          email: 'ivan.p@wf.example',
+          display_name: 'Иван П.',
+          role: 'support',
+          locale: 'ru',
+        },
         key: expect.any(String),
       },
     ]);
@@ -126,6 +158,62 @@ describe('форма приглашения', () => {
     // «Пригласить ещё» — пустая форма
     await user.click(within(dialog).getByRole('button', { name: 'Пригласить ещё' }));
     expect(within(dialog).getByLabelText('Рабочая почта')).toHaveValue('');
+  });
+
+  // IL2 (решение пользователя 10.11, спека §4.3): язык новичка задаёт приглашающий — по умолчанию язык его
+  // админки, показан явно и уходит всегда (без поля сервер подставил бы язык инициатора молча).
+  test('язык сотрудника: умолчание — язык админки приглашающего; выбранный — в теле', async () => {
+    staffServer({ accounts: TEAM });
+    const sent = inviteServer();
+    renderApp('/staff', { me: { ...meOwner, locale: 'en' } });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Invite staff member' }));
+    const dialog = screen.getByRole('dialog', { name: 'Invite a staff member' });
+    expect(selectedText(within(dialog).getByLabelText('Staff member language'))).toBe('English');
+    await user.type(within(dialog).getByLabelText('Work email'), 'ivan.p@wf.example');
+    await user.type(within(dialog).getByLabelText('Name'), 'Ivan P.');
+    await pick(user, within(dialog).getByLabelText('Role'), 'support');
+    await user.click(within(dialog).getByRole('button', { name: 'Send for confirmation' }));
+    await within(dialog).findByText('Sent for approval');
+    expect(sent.map((s) => s.body)).toMatchObject([{ locale: 'en' }]);
+
+    await user.click(within(dialog).getByRole('button', { name: 'Invite another' }));
+    // «Пригласить ещё» — язык снова умолчание, а не пусто
+    expect(selectedText(within(dialog).getByLabelText('Staff member language'))).toBe('English');
+    await user.type(within(dialog).getByLabelText('Work email'), 'olga@wf.example');
+    await user.type(within(dialog).getByLabelText('Name'), 'Olga');
+    await pick(user, within(dialog).getByLabelText('Role'), 'support');
+    await pick(user, within(dialog).getByLabelText('Staff member language'), 'ru');
+    await user.click(within(dialog).getByRole('button', { name: 'Send for confirmation' }));
+    await within(dialog).findByText('Sent for approval');
+    expect(sent.map((s) => s.body)).toMatchObject([{ locale: 'en' }, { locale: 'ru' }]);
+  });
+
+  test('язык в черновике: выбранный вернулся после перезагрузки, мусор — умолчание', async () => {
+    staffServer({ accounts: TEAM });
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const dialog = await openInvite(user);
+    expect(selectedText(within(dialog).getByLabelText('Язык сотрудника'))).toBe('Русский');
+    await pick(user, within(dialog).getByLabelText('Язык сотрудника'), 'en');
+    cleanup();
+
+    staffServer({ accounts: TEAM });
+    renderApp('/staff', { me: meOwner });
+    const again = await openInvite(userEvent.setup());
+    expect(selectedText(within(again).getByLabelText('Язык сотрудника'))).toBe('English');
+    cleanup();
+
+    // черновик с незнакомым языком (старая вкладка, ручная правка) — не подставляется
+    const key = Object.keys(sessionStorage).find((k) => k.includes(':invite'));
+    expect(key).toBeDefined();
+    const raw = sessionStorage.getItem(key!) ?? '';
+    expect(raw).toContain('"locale":"en"');
+    sessionStorage.setItem(key!, raw.replace('"locale":"en"', '"locale":"de"'));
+    staffServer({ accounts: TEAM });
+    renderApp('/staff', { me: meOwner });
+    const third = await openInvite(userEvent.setup());
+    expect(selectedText(within(third).getByLabelText('Язык сотрудника'))).toBe('Русский');
   });
 
   test('409 staff.email_taken — на поле почты; 422 city_not_found — на поле городов', async () => {
@@ -138,7 +226,9 @@ describe('форма приглашения', () => {
     const user = userEvent.setup();
     const dialog = await openInvite(user);
     await fill(user, dialog, 'moderator');
-    await user.click(await within(dialog).findByLabelText('Ставрополь, Ставропольский край'));
+    await pickMany(user, within(dialog).getByRole('combobox', { name: /Города модератора/ }), [
+      'Ставрополь, Ставропольский край',
+    ]);
     await user.click(within(dialog).getByRole('button', { name: 'Отправить на подтверждение' }));
     const email = within(dialog).getByLabelText('Рабочая почта');
     await waitFor(() =>
@@ -204,7 +294,9 @@ describe('черновик приглашения', () => {
     const user = userEvent.setup();
     const dialog = await openInvite(user);
     await fill(user, dialog, 'moderator');
-    await user.click(await within(dialog).findByLabelText('Пятигорск, Ставропольский край'));
+    await pickMany(user, within(dialog).getByRole('combobox', { name: /Города модератора/ }), [
+      'Пятигорск, Ставропольский край',
+    ]);
     cleanup(); // «перезагрузка»: sessionStorage остаётся
 
     staffServer({ accounts: TEAM });
@@ -212,7 +304,7 @@ describe('черновик приглашения', () => {
     const again = await openInvite(userEvent.setup());
     expect(within(again).getByLabelText('Рабочая почта')).toHaveValue('ivan.p@wf.example');
     expect(within(again).getByLabelText('Имя')).toHaveValue('Иван П.');
-    expect(within(again).getByLabelText('Роль')).toHaveValue('moderator');
+    expect(selectedText(within(again).getByLabelText('Роль'))).toBe('модератор');
     // подпись выбранного города — по ids, хотя поиск его не показывал
     expect(
       await within(again).findByRole('button', { name: 'Убрать «Пятигорск, Ставропольский край»' }),
@@ -240,12 +332,16 @@ describe('черновик приглашения', () => {
     const reauth = await screen.findByRole('dialog', { name: 'Подтвердите вход' });
     expect(screen.getByRole('dialog', { name: 'Приглашение сотрудника' })).toBeInTheDocument();
     await user.click(within(reauth).getByRole('button', { name: 'Выйти' }));
+    // введённое не отправлено — «Выйти» спрашивает до POST (useLogout, §4.11 m8; форма под useLeaveGuard — UF2b.8)
+    const question = await screen.findByRole('dialog', { name: 'Уйти без сохранения?' });
+    await user.click(within(question).getByRole('button', { name: 'Уйти' }));
     await screen.findByRole('heading', { level: 1, name: 'Вход администратора' });
     await waitFor(() => expect(storageDump()).not.toContain('ivan.p@wf.example'));
     expect(storageDump()).not.toContain('Иван П.');
 
-    // следующий сотрудник за этим компьютером (его стартовая — журнал)
-    auditServer({ records: [] });
+    // следующий сотрудник за этим компьютером (его стартовая — главная: её чтения — sectionsServer)
+    sectionsServer();
+    staffServer({ accounts: TEAM });
     app.me.current = meAdmin;
     await app.refetchMe();
     await user.click(await screen.findByRole('link', { name: 'Роли и доступ' }));
@@ -294,7 +390,7 @@ describe('черновик приглашения — по сотруднику'
     const again = await openInvite(user);
     expect(within(again).getByLabelText('Рабочая почта')).toHaveValue('ivan.p@wf.example');
     expect(within(again).getByLabelText('Имя')).toHaveValue('Иван П.');
-    expect(within(again).getByLabelText('Роль')).toHaveValue('support');
+    expect(selectedText(within(again).getByLabelText('Роль'))).toBe('поддержка');
   });
 });
 

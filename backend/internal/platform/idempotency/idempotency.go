@@ -45,8 +45,10 @@ const (
 	codeLockTimeout    = "55P03" // lock_not_available
 )
 
-// сохраняемые заголовки ответа: повтор отдаёт тот же тип, адрес созданного и версию
-var savedHeaders = []string{"Content-Type", "Location", "ETag"}
+// сохраняемые заголовки ответа: повтор отдаёт тот же тип, адрес созданного, версию и заголовки языка, объявленные
+// контрактом у ответов с названиями (Vary, Content-Language — admin activateGeoCity, updateGeoCity …): без них повтор
+// нарушал бы контракт. Content-Language — язык исходного запроса (тело повтора — его же)
+var savedHeaders = []string{"Content-Type", "Location", "ETag", "Vary", "Content-Language"}
 
 var errSecondTx = errors.New("idempotency: вторая транзакция в идемпотентном запросе — нужна одна (спека §6.4)")
 

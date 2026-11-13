@@ -4,4 +4,9 @@ export interface PermissionCatalog {
 }
 export function permissionKeys(catalog: PermissionCatalog): string[];
 export function approvalActions(doc: unknown): string[];
-export function loadLabelCatalog(): Promise<{ permissions: string[]; approvalActions: string[] }>;
+export function flagKeys(doc: unknown): string[];
+export function loadLabelCatalog(): Promise<{
+  permissions: string[];
+  approvalActions: string[];
+  flags: string[];
+}>;

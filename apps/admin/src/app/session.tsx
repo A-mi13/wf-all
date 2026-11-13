@@ -15,6 +15,7 @@ import { claimDrafts, clearDrafts } from './draft';
 import { can, decide, type Decision, type Me } from './permissions';
 import { isMeKey, isOneShot, ME_KEY } from './query';
 import { reauthBus } from './reauth';
+import { claimRecent } from './recent';
 
 // Сессия на клиенте (спека сотрудников §9.3, R15, P20) — из GET /v1/staff/me; он же проверка
 // связи с admin-api (R13).
@@ -89,7 +90,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // id сессии, завершённой выходом. Флаг держится, пока me — 401; любая другая сессия (новый
   // вход) его снимает, и истёкшая потом сессия снова ведёт на вход с возвратом.
   const [ended, setEnded] = useState<string | null>(null);
-  const base = stateOf(q.data, q.error);
+  // Перепроверка me без учётки (возврат во вкладку, сеть вернулась, 401 другого запроса): query-core на
+  // перечитывании без data сбрасывает error и status в pending (query-core fetchState) — сессия на время запроса
+  // стала бы loading, AppRouter снял бы роутер, и экран (/accept, /login) смонтировался бы заново без введённого.
+  // Последний 401 держится, пока нет данных: без учётки — anonymous, пока сервер не ответит иначе.
+  const [held, setHeld] = useState<Error | null>(null);
+  const settled = q.error
+    ? isApiError(q.error, 'auth.unauthenticated')
+      ? q.error
+      : null
+    : q.data
+      ? null
+      : held;
+  if (settled !== held) setHeld(settled);
+  const error = q.error ?? (q.data ? null : held);
+  const base = stateOf(q.data, error);
   const sid = base.status !== 'anonymous' && q.data ? (q.data.session?.id ?? '') : null;
   if (ended !== null && sid !== null && sid !== ended) setEnded(null);
   const signedOut = base.status === 'anonymous' && ended !== null;
@@ -99,18 +114,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await refresh();
   }, [current, refresh]);
   const value = useMemo<Session>(() => {
-    const state = stateOf(q.data, q.error);
+    const state = stateOf(q.data, error);
     return state.status === 'anonymous' && signedOut
       ? { ...state, signedOut: true, refresh, afterLogout }
       : { ...state, refresh, afterLogout };
-  }, [q.data, q.error, signedOut, refresh, afterLogout]);
+  }, [q.data, error, signedOut, refresh, afterLogout]);
   const reauthRequired = value.status === 'active' && value.reauthRequired;
 
   // Сессия сотрудника известна (setup, active): черновики других сотрудников этой вкладки стираются
-  // (⚠️ Task 14: после истечения сессии за компьютер мог сесть другой).
+  // (⚠️ Task 14: после истечения сессии за компьютер мог сесть другой); так же — недавнее палитры
+  // (localStorage, спека UI-фундамента §4.1, m14).
   const staffId = value.status === 'active' || value.status === 'setup' ? value.me.id : undefined;
   useEffect(() => {
-    if (staffId) claimDrafts(staffId);
+    if (!staffId) return;
+    claimDrafts(staffId);
+    claimRecent(staffId);
   }, [staffId]);
 
   // Без сессии (401: истекла, вышли): данные прошлого сотрудника — из кэша запросов и мутаций (в
@@ -130,7 +148,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // успел бы показать B список A на кадр): кэш запросов, кроме me (активные сбрасываются и
   // перечитываются уже под B), кэш мутаций (ПД в переменных), черновики вкладки (почта A на шаге 2
   // входа), ждущая разблокировка (клон запроса A не уйдёт под cookie B). Каркас размонтирует экраны
-  // A сам (key по me.id в router.tsx). Тот же сотрудник (язык, права) ничего не стирает; после 401
+  // A сам (key по me.id в Shell.tsx). Тот же сотрудник (язык, права) ничего не стирает; после 401
   // данные уже стёрты выше — вход в этой же вкладке (mfa_pending, active) ничего не стирает.
   const owner = useRef<string | null | undefined>(undefined);
   // кто пришёл сменой без 401 (доделка W5-front): вход после 401 и новый монтаж его снимают

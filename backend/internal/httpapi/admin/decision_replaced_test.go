@@ -21,6 +21,7 @@ import (
 // TestDecisionRevokedSessionClearsCookie). Запрос остаётся pending, решений в журнале нет. approve, reject и
 // cancel.
 func TestDecisionReplacedSessionKeepsCookie(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -54,6 +55,7 @@ func TestDecisionReplacedSessionKeepsCookie(t *testing.T) {
 // решения откатилась целиком: запрос pending, решений в журнале нет. Шов — как у
 // TestApproveSessionRevokedUnderLockClearsCookie: первый ManageShareAccount заменяет сессию с другого соединения.
 func TestApproveSessionReplacedUnderLockKeepsCookie(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]

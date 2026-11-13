@@ -1,0 +1,380 @@
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, onTestFinished, test, vi } from 'vitest';
+import type { Me } from '../../app/permissions';
+import { renderApp } from '../../test/app';
+import { GEO_CITIES, geoServer, REGION_STAV } from '../../test/geo';
+import { CITY_OWN, meModerator, meOwner } from '../../test/me';
+import { problem } from '../../test/problem';
+import { http, server } from '../../test/server';
+import { city } from '../../test/staff';
+import { pick, selectedText } from '../../test/pick';
+import { stubMedia } from '../../test/media';
+
+// «Города и запуск» (спека §9.4 п. 8, макет 07): карточки городов — название, чип статуса, регион,
+// население, районы, «страна выключена»; фильтры — search-параметры (q, status[], country,
+// region_id; replace); «Показать ещё», «Показано N», «Сбросить фильтры»; пусто, ошибка, скелетон;
+// «Активировать город» — только с geo.cities.activate.
+
+const meActivator: Me = {
+  ...meOwner,
+  permissions: {
+    ...meOwner.permissions,
+    'geo.cities.activate': 'allow',
+    'geo.places.search': 'allow',
+  },
+};
+
+afterEach(() => sessionStorage.clear());
+
+const page = () => screen.findByRole('heading', { level: 1, name: 'Города и запуск' });
+const list = () => screen.findByRole('list', { name: 'Города' });
+const cards = async () => within(await list()).getAllByRole('article');
+const card = (name: string) => screen.findByRole('article', { name });
+const searchOf = (at: string) => new URLSearchParams(at.split('?')[1] ?? '');
+
+describe('карточки', () => {
+  test('название, чип статуса, регион, население, районы; страна выключена — пометка', async () => {
+    geoServer({
+      cities: [
+        ...GEO_CITIES,
+        city({
+          id: '0192f1c4-2222-7b21-9c5d-000000000003',
+          slug: 'almaty',
+          name: 'Алматы',
+          status: 'waitlist',
+          country_code: 'KZ',
+          region_name: null,
+          region_id: null,
+          country_enabled: false,
+          population: 2000000,
+        }),
+      ],
+    });
+    renderApp('/geo/cities', { me: meOwner });
+    await page();
+    expect((await cards()).map((c) => within(c).getByRole('heading').textContent)).toEqual([
+      'Ставрополь',
+      'Пятигорск',
+      'Алматы',
+    ]);
+    const stav = await card('Ставрополь');
+    expect(within(stav).getByText('живой')).toBeInTheDocument();
+    expect(stav).toHaveTextContent('Ставропольский край');
+    expect(stav).toHaveTextContent('450 680');
+    expect(stav).toHaveTextContent('4района');
+    expect(stav).not.toHaveTextContent('страна выключена');
+    expect(within(await card('Пятигорск')).getByText('пилот')).toBeInTheDocument();
+    const almaty = await card('Алматы');
+    expect(within(almaty).getByText('ожидание')).toBeInTheDocument();
+    expect(almaty).toHaveTextContent('страна выключена');
+    expect(almaty).toHaveTextContent('регион не задан');
+    expect(screen.getByText('Показано 3')).toBeInTheDocument();
+  });
+
+  // Ревью G8, m11: «Открыть» — ссылка на страницу города (новая вкладка — браузером), имя — с городом.
+  test('«Открыть: <город>» — ссылка на страницу города', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities', { me: meOwner });
+    const stav = await card('Ставрополь');
+    const open = within(stav).getByRole('link', { name: 'Открыть: Ставрополь' });
+    expect(open).toHaveAttribute('href', `/geo/cities/${CITY_OWN}`);
+    await userEvent.setup().click(open);
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+  });
+
+  // V1 m6: BackLink — только у вложенного экрана, у страницы раздела его нет.
+  test('страница раздела — без «Назад»', async () => {
+    geoServer();
+    renderApp('/geo/cities', { me: meOwner });
+    await card('Ставрополь');
+    expect(screen.queryByRole('link', { name: /^Назад/ })).toBeNull();
+  });
+
+  // V1 п. 7: у вложенного экрана — возврат к родителю общим BackLink, фильтры родителя — из адреса.
+  test('город из отфильтрованного списка → «Назад: Города и запуск» — список с теми же фильтрами', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities?country=RU', { me: meOwner });
+    const user = userEvent.setup();
+    await user.click(
+      within(await card('Ставрополь')).getByRole('link', { name: 'Открыть: Ставрополь' }),
+    );
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+    const back = await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    expect(back).toHaveAttribute('href', '/geo/cities?country=RU');
+    await user.click(back);
+    await page();
+    expect(app.at()).toBe('/geo/cities?country=RU');
+    expect(await card('Ставрополь')).toBeInTheDocument();
+  });
+
+  test('браузерная «Назад» со страницы города — список с фильтрами', async () => {
+    geoServer();
+    const app = renderApp('/geo/cities?country=RU', { me: meOwner });
+    await userEvent
+      .setup()
+      .click(within(await card('Ставрополь')).getByRole('link', { name: 'Открыть: Ставрополь' }));
+    await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    app.back();
+    await page();
+    expect(app.at()).toBe('/geo/cities?country=RU');
+  });
+
+  test('город по прямой ссылке — возврат на список без фильтров', async () => {
+    geoServer();
+    renderApp(`/geo/cities/${CITY_OWN}`, { me: meOwner });
+    expect(await screen.findByRole('link', { name: 'Назад: Города и запуск' })).toHaveAttribute(
+      'href',
+      '/geo/cities',
+    );
+  });
+});
+
+describe('фильтры', () => {
+  test('чип статуса — в адрес (replace) и в запрос повторённым параметром', async () => {
+    const { seen } = geoServer();
+    const app = renderApp('/geo/cities', { me: meOwner });
+    await cards();
+    expect(seen.cities.at(-1)?.getAll('status')).toEqual([]);
+    await userEvent.setup().click(
+      within(screen.getByRole('group', { name: 'Статус' })).getByRole('button', {
+        name: 'Пилот',
+      }),
+    );
+    await waitFor(() => expect(seen.cities.at(-1)?.getAll('status')).toEqual(['pilot']));
+    expect(JSON.parse(searchOf(app.at()).get('status') ?? 'null')).toEqual(['pilot']);
+    expect((await cards()).map((c) => within(c).getByRole('heading').textContent)).toEqual([
+      'Пятигорск',
+    ]);
+    expect(screen.getByRole('button', { name: 'Пилот' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('из адреса: статусы, страна, регион, поиск — в запрос; мусор отброшен', async () => {
+    const { seen } = geoServer();
+    const status = encodeURIComponent(JSON.stringify(['pilot', 'live', 'archived']));
+    renderApp(`/geo/cities?status=${status}&country=RU&region_id=${REGION_STAV}&q=%D0%BF`, {
+      me: meOwner,
+    });
+    await page();
+    await waitFor(() => expect(seen.cities.length).toBeGreaterThan(0));
+    const q = seen.cities.at(-1);
+    expect(q?.getAll('status')).toEqual(['pilot', 'live']);
+    expect(q?.get('country')).toBe('RU');
+    expect(q?.get('region_id')).toBe(REGION_STAV);
+    expect(q?.get('q')).toBe('п');
+    expect(screen.getByRole('searchbox', { name: 'Поиск' })).toHaveValue('п');
+  });
+
+  test('мусор в адресе — в запрос не уходит', async () => {
+    const { seen } = geoServer();
+    renderApp('/geo/cities?country=ru&region_id=x&status=%22gone%22', { me: meOwner });
+    await cards();
+    const q = seen.cities.at(-1);
+    expect(q?.has('country')).toBe(false);
+    expect(q?.has('region_id')).toBe(false);
+    expect(q?.has('status')).toBe(false);
+  });
+
+  test('страна — в «Ещё фильтры», выбор — в адрес; «Сбросить фильтры» — всё сначала', async () => {
+    const { seen } = geoServer();
+    const app = renderApp('/geo/cities?country=RU', { me: meOwner });
+    await cards();
+    const more = screen.getByRole('button', { name: 'Ещё фильтры, задано: 1' });
+    const user = userEvent.setup();
+    await user.click(more);
+    const country = screen.getByRole('combobox', { name: 'Страна' });
+    expect(selectedText(country)).toBe('Россия');
+    await pick(user, country, 'KZ');
+    await waitFor(() => expect(seen.cities.at(-1)?.get('country')).toBe('KZ'));
+    expect(searchOf(app.at()).get('country')).toBe('KZ');
+    await user.click(screen.getAllByRole('button', { name: 'Сбросить фильтры' })[0]!);
+    await waitFor(() => expect(app.at()).toBe('/geo/cities'));
+    await waitFor(() => expect(seen.cities.at(-1)?.has('country')).toBe(false));
+  });
+
+  // Ревью G8, m9: «Все» — статуса в адресе нет вовсе (пустой массив — не значение).
+  test('чип «Все» убирает status из адреса', async () => {
+    const { seen } = geoServer();
+    const app = renderApp('/geo/cities?status=%5B%22pilot%22%5D&country=RU', { me: meOwner });
+    await cards();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Все' }));
+    await waitFor(() => expect(searchOf(app.at()).has('status')).toBe(false));
+    expect(searchOf(app.at()).get('country')).toBe('RU');
+    await waitFor(() => expect(seen.cities.at(-1)?.getAll('status')).toEqual([]));
+  });
+
+  test('пусто с фильтрами — «Ничего не нашлось» и сброс', async () => {
+    geoServer();
+    renderApp('/geo/cities?q=%D1%8F', { me: meOwner });
+    await page();
+    expect(await screen.findByText(/Ничего не нашлось/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Сбросить фильтры' }).length).toBeGreaterThan(0);
+  });
+
+  // Финальное ревью m1: q из одной пунктуации сервер отверг бы (400 query.q) — запрос не уходит, экран — «Ничего не
+  // нашлось», как палитра, а не ошибка с «Повторить».
+  test('поиск из одной пунктуации — «Ничего не нашлось», запроса с q нет', async () => {
+    const { seen } = geoServer();
+    renderApp('/geo/cities?q=-', { me: meOwner });
+    await page();
+    expect(await screen.findByText(/Ничего не нашлось/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(seen.cities.some((q) => q.has('q'))).toBe(false);
+  });
+});
+
+describe('состояния', () => {
+  test('пусто без фильтров — своё пустое', async () => {
+    geoServer({ cities: [] });
+    renderApp('/geo/cities', { me: meOwner });
+    expect(await screen.findByText('Городов пока нет')).toBeInTheDocument();
+  });
+
+  // UF2a.10: пустое — иллюстрация (поле) и следующий шаг; с правом активации — «Активировать город».
+  test('пусто без фильтров — иллюстрация и «Активировать город» в пустом', async () => {
+    geoServer({ cities: [] });
+    renderApp('/geo/cities', { me: meActivator });
+    const title = await screen.findByText('Городов пока нет');
+    const block = title.parentElement!.parentElement!;
+    expect(block.querySelector('svg[width="64"]')).not.toBeNull();
+    // одна кнопка — в пустом состоянии; в шапке дубля нет (раунд 1, minor 5)
+    const open = screen.getByRole('button', { name: 'Активировать город' });
+    expect(block.contains(open)).toBe(true);
+    await userEvent.setup().click(open);
+    expect(await screen.findByRole('dialog', { name: 'Активировать город' })).toBeInTheDocument();
+  });
+
+  // Ревью UF2a/III-G, раунд 1, minor 2: пока список без фильтров грузится, кнопки в шапке нет — иначе на пустом
+  // списке она мелькала бы и уезжала в пустое состояние.
+  test('пока список грузится, «Активировать город» в шапке не мелькает', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    geoServer({ cities: [] });
+    server.use(
+      http.get('/v1/geo/cities', async () => {
+        await gate;
+        return undefined;
+      }),
+    );
+    renderApp('/geo/cities', { me: meActivator });
+    await page();
+    expect(screen.queryByRole('button', { name: 'Активировать город' })).toBeNull();
+    release();
+    await screen.findByText('Городов пока нет');
+    expect(screen.getAllByRole('button', { name: 'Активировать город' })).toHaveLength(1);
+  });
+
+  test('ошибка — код и «Повторить», повтор загружает', async () => {
+    geoServer();
+    let fail = true;
+    server.use(
+      http.get('/v1/geo/cities', ({ response }) =>
+        fail
+          ? response.untyped(problem(503, 'internal'))
+          : response(200).json({ items: [city()], next_cursor: null }),
+      ),
+    );
+    renderApp('/geo/cities', { me: meOwner });
+    const retry = await screen.findByRole('button', { name: 'Повторить' });
+    expect(screen.getByText(/503/)).toBeInTheDocument();
+    fail = false;
+    await userEvent.setup().click(retry);
+    expect(await card('Ставрополь')).toBeInTheDocument();
+  });
+
+  test('«Показать ещё» — следующая страница по курсору', async () => {
+    const { seen } = geoServer({ pageSize: 1 });
+    renderApp('/geo/cities', { me: meOwner });
+    expect(await cards()).toHaveLength(1);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Показать ещё' }));
+    await waitFor(async () => expect(await cards()).toHaveLength(2));
+    expect(seen.cities.at(-1)?.get('cursor')).toBe('1');
+  });
+});
+
+describe('права', () => {
+  test('с geo.cities.activate — «Активировать город»', async () => {
+    geoServer();
+    renderApp('/geo/cities', { me: meActivator });
+    await page();
+    // кнопка шапки — после ответа списка (без фильтров пустой список увёл бы её в пустое состояние)
+    expect(await screen.findByRole('button', { name: 'Активировать город' })).toBeInTheDocument();
+  });
+
+  // Ревью G8, m13: активация начинается с поиска места — без geo.places.search панель упёрлась бы в отказ.
+  test('без geo.places.search — «Активировать город» нет', async () => {
+    geoServer();
+    const permissions = Object.fromEntries(
+      Object.entries(meActivator.permissions).filter(([k]) => k !== 'geo.places.search'),
+    );
+    renderApp('/geo/cities', { me: { ...meActivator, permissions } });
+    await card('Ставрополь');
+    expect(screen.queryByRole('button', { name: 'Активировать город' })).toBeNull();
+  });
+
+  test('модератор — без «Активировать город», город — свой (сужает сервер)', async () => {
+    geoServer({ cities: [city()] });
+    renderApp('/geo/cities', { me: meModerator });
+    await card('Ставрополь');
+    expect(screen.queryByRole('button', { name: 'Активировать город' })).toBeNull();
+    expect(screen.queryByRole('article', { name: 'Пятигорск' })).toBeNull();
+  });
+});
+
+// Переход «список → карточка» (спека UI-фундамента §4.15, план UF2b.9): View Transition навигации TanStack Router;
+// общий элемент — одно статическое имя wf-entity у нажатой карточки (.vtSource) и заголовка города. Нет API —
+// мгновенно; «уменьшить движение» — без перехода.
+describe('переход список → карточка', () => {
+  function stubViewTransition() {
+    const sources: number[] = [];
+    const start = vi.fn((arg: (() => Promise<void>) | { update: () => Promise<void> }) => {
+      sources.push(document.querySelectorAll('[class*="vtSource"]').length);
+      const done = Promise.resolve((typeof arg === 'function' ? arg : arg.update)());
+      return { updateCallbackDone: done, finished: done, ready: done, skipTransition() {} };
+    });
+    Object.defineProperty(document, 'startViewTransition', { configurable: true, value: start });
+    onTestFinished(() => {
+      Reflect.deleteProperty(document, 'startViewTransition');
+    });
+    return { start, sources };
+  }
+
+  test('есть API — переход с viewTransition, нажатая карточка — источник', async () => {
+    geoServer();
+    const { start, sources } = stubViewTransition();
+    const app = renderApp('/geo/cities', { me: meOwner });
+    await userEvent
+      .setup()
+      .click(within(await card('Ставрополь')).getByRole('link', { name: 'Открыть: Ставрополь' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+    // загрузка маршрута (кусок страницы города) закончена — переход уже начат или нет
+    await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(sources).toEqual([1]);
+  });
+
+  test('«уменьшить движение» — навигация без viewTransition', async () => {
+    geoServer();
+    stubMedia({ width: 1440, pointer: 'fine', reducedMotion: true });
+    const { start } = stubViewTransition();
+    const app = renderApp('/geo/cities', { me: meOwner });
+    await userEvent
+      .setup()
+      .click(within(await card('Ставрополь')).getByRole('link', { name: 'Открыть: Ставрополь' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+    // загрузка маршрута (кусок страницы города) закончена — переход уже начат или нет
+    await screen.findByRole('link', { name: 'Назад: Города и запуск' });
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  test('нет document.startViewTransition — переход мгновенный, без ошибки', async () => {
+    geoServer();
+    expect('startViewTransition' in document).toBe(false);
+    const app = renderApp('/geo/cities', { me: meOwner });
+    await userEvent
+      .setup()
+      .click(within(await card('Ставрополь')).getByRole('link', { name: 'Открыть: Ставрополь' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${CITY_OWN}`));
+    expect(await screen.findByRole('link', { name: 'Назад: Города и запуск' })).toBeInTheDocument();
+  });
+});

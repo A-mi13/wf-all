@@ -99,6 +99,7 @@ func sameIDs(got, want []uuid.UUID) bool {
 // Новые сверху; при равном времени — по id убыванию; курсор проходит все записи без пропусков и
 // повторов, последняя страница — без next.
 func TestListOrderAndCursor(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	// b и c — в одну микросекунду: между ними решает id (больший — раньше)
 	a, b, c, d, e := id.New(), id.New(), id.New(), id.New(), id.New()
@@ -137,6 +138,7 @@ func TestListOrderAndCursor(t *testing.T) {
 }
 
 func TestListFilters(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	anna, ivan, city, obj := id.New(), id.New(), id.New(), id.New()
 	r1, r2, r3, r4 := id.New(), id.New(), id.New(), id.New()
@@ -185,6 +187,7 @@ func TestListFilters(t *testing.T) {
 // Журнал модератора (спека §5.3): записи его городов и его собственные; чужие города, записи без
 // города чужих авторов и системные — нет.
 func TestListModeratorScope(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	mod, other, moscow, spb := id.New(), id.New(), id.New(), id.New()
 	inCity, own, ownElsewhere, foreign, global := id.New(), id.New(), id.New(), id.New(), id.New()
@@ -212,6 +215,7 @@ func TestListModeratorScope(t *testing.T) {
 
 // IP наружу — только подсеть: /24 у IPv4 (и IPv4 внутри IPv6), /48 у IPv6; NULL — пусто.
 func TestListMasksIP(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	v4, v6, mapped, none := id.New(), id.New(), id.New(), id.New()
 	seed(t, pools.Owner,
@@ -234,6 +238,7 @@ func TestListMasksIP(t *testing.T) {
 
 // Поля записи доходят как есть: снимок имени, роль, город, было/стало (уже маскированные при записи).
 func TestListRecordFields(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	staff, city, obj := id.New(), id.New(), id.New()
 	seed(t, pools.Owner, row{staff: staff, label: "Мария К.", action: "geo.city_updated", object: obj, city: city, at: t0})
@@ -250,6 +255,7 @@ func TestListRecordFields(t *testing.T) {
 }
 
 func TestListLimitAndBadCursor(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	if _, err := pools.Owner.Exec(context.Background(), `INSERT INTO audit_log (actor_role, action, object_type, created_at)
 		SELECT 'system', 'geo.city_updated', 'city', $1::timestamptz + make_interval(secs => g)
@@ -272,6 +278,7 @@ func TestListLimitAndBadCursor(t *testing.T) {
 }
 
 func TestMaskIP(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"203.0.113.7": "203.0.113.0/24", "::ffff:203.0.113.7": "203.0.113.0/24",
 		"2001:db8:abcd:1234::1": "2001:db8:abcd::/48", "::1": "::/48",
@@ -288,6 +295,7 @@ func TestMaskIP(t *testing.T) {
 // Get — одна запись по id (письмо о выключении админа читает её на пуле admin-api): поля как в
 // List, IP маскирован; нет записи — ok = false без ошибки.
 func TestGet(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	staff, city, obj, v4, v6 := id.New(), id.New(), id.New(), id.New(), id.New()
 	seed(t, pools.Owner,
@@ -319,5 +327,38 @@ func TestGet(t *testing.T) {
 	got, ok, err := audit.Get(context.Background(), pools.As, id.New())
 	if err != nil || ok || !reflect.DeepEqual(got, audit.Record{}) {
 		t.Fatalf("нет записи: %+v ok=%v err=%v", got, ok, err)
+	}
+}
+
+// R3: фильтр «объект из списка» (ObjectIDs) — одним запросом, вместе с типом объекта; nil — без фильтра,
+// пустой не-nil — ни одной записи (как CityIDs).
+func TestAuditListObjectIDs(t *testing.T) {
+	t.Parallel()
+	pools := dbtest.NewPoolsAs(t, "admin")
+	o1, o2, o3 := id.New(), id.New(), id.New()
+	r1, r2, r3, r4 := id.New(), id.New(), id.New(), id.New()
+	seed(t, pools.Owner,
+		row{id: r1, action: "geo.import_requested", objectType: "geonames_import_job", object: o1, at: t0},
+		row{id: r2, action: "geo.import_requested", objectType: "geonames_import_job", object: o2, at: t0.Add(time.Minute)},
+		row{id: r3, action: "geo.import_requested", objectType: "geonames_import_job", object: o3, at: t0.Add(2 * time.Minute)},
+		// тот же id объекта у другого типа — не попадает при фильтре по типу
+		row{id: r4, action: "geo.city_updated", objectType: "city", object: o1, at: t0.Add(3 * time.Minute)},
+	)
+	for _, c := range []struct {
+		name string
+		p    audit.ListParams
+		want []uuid.UUID
+	}{
+		{"два из трёх", audit.ListParams{ObjectType: "geonames_import_job", ObjectIDs: []uuid.UUID{o1, o2}}, []uuid.UUID{r2, r1}},
+		{"без типа — любой тип", audit.ListParams{ObjectIDs: []uuid.UUID{o1}}, []uuid.UUID{r4, r1}},
+		{"нет таких", audit.ListParams{ObjectIDs: []uuid.UUID{id.New()}}, nil},
+		// пустой, но не nil — «ни один объект» (как CityIDs): страница без задач не получает весь журнал
+		{"пустой не-nil — ничего", audit.ListParams{ObjectType: "geonames_import_job", ObjectIDs: []uuid.UUID{}}, nil},
+		{"nil — без фильтра", audit.ListParams{ObjectType: "geonames_import_job"}, []uuid.UUID{r3, r2, r1}},
+	} {
+		items, _ := list(t, pools, c.p)
+		if !sameIDs(ids(items), c.want) {
+			t.Errorf("%s: %v, нужно %v", c.name, ids(items), c.want)
+		}
 	}
 }

@@ -1,0 +1,137 @@
+/* «Импорт GeoNames» (план B, Task 20; дорисовано * в стилистике макета 07): строка задачи над журналом, журнал
+   (на телефоне — карточки DataTable), раскрытый отчёт сверки — группы <details>. Цвета — только токены. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-5);
+}
+
+.jobRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  padding: var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-surface-sunken);
+}
+
+.jobHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
+.jobBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+}
+
+.name {
+  color: var(--wf-color-text);
+  font-weight: 700;
+}
+
+.text {
+  margin: 0;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.muted {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
+.notice {
+  margin: 0;
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  min-width: 0;
+}
+
+.time {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  margin-top: var(--wf-space-2);
+  padding: var(--wf-space-3);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-surface-sunken);
+}
+
+.title {
+  margin: 0;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-lg);
+  line-height: var(--wf-text-lg-line);
+  font-weight: 700;
+}
+
+.group summary {
+  cursor: pointer;
+  color: var(--wf-color-text);
+  font-weight: 700;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.group summary:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  margin: var(--wf-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-2);
+}

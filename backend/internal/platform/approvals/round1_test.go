@@ -22,6 +22,7 @@ import (
 // подтверждение не исполняет запрос: InitiatorCheck получает запрос целиком (payload с версией учётки
 // инициатора) и отказывает — failed + ErrStale.
 func TestSkippedCancelFailsAfterReactivation(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Admin), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1, InitVer: e.version(a.StaffID)})
@@ -57,6 +58,7 @@ func TestSkippedCancelFailsAfterReactivation(t *testing.T) {
 // m5: проверка инициатора видит город запроса — модератор-инициатор scoped-действия своего города не
 // получает failed.
 func TestInitiatorCheckSeesCity(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	city := id.New()
 	mod, owner := e.member(perm.Moderator, city), e.member(perm.Owner)
@@ -69,6 +71,7 @@ func TestInitiatorCheckSeesCity(t *testing.T) {
 
 // I2: IP и User-Agent решившего и инициатора — в аудите запроса и решений; у решений системы — пусто.
 func TestAuditMeta(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	executed := e.request(a, actGrant, payload{V: 1})
@@ -115,6 +118,7 @@ func TestAuditMeta(t *testing.T) {
 // m1: ожидающий с вышедшим сроком (ExpireDue ещё не дошёл) — не во «Входящих · pending» и не в счётчике;
 // в expired и без фильтра — со статусом expired, в обоих ящиках.
 func TestListExpiredPending(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -151,6 +155,7 @@ func TestListExpiredPending(t *testing.T) {
 // m2: сотрудник без права запроса получает 403 раньше любых других ответов и ничего не меняет:
 // просроченный запрос не переводится его кликом в expired, состояние решённого не раскрывается.
 func TestForbiddenBeforeState(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	owner, owner2, admin := e.member(perm.Owner), e.member(perm.Owner), e.member(perm.Admin)
 	stale := e.request(owner, actGrant, payload{V: 1, Elevated: true})
@@ -176,6 +181,7 @@ func TestForbiddenBeforeState(t *testing.T) {
 // m3: отказ исполнителя без кода клиента — в error и аудите общий execution_failed, не текст ошибки
 // (в нём могут быть ПД, а error видят «Входящие»).
 func TestFailedWithoutCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})

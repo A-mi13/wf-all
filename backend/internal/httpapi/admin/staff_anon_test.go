@@ -26,6 +26,7 @@ const anonKeyRows = `SELECT (SELECT count(*) FROM staff_idempotency_keys WHERE e
 // вход и принятие с ключом и cookie не оставляют строк ключей (ни в staff_idempotency_keys, ни в idempotency_keys). Сотрудник старой cookie в
 // ctx остаётся — D9 у входа работает.
 func TestStaffAnonymousNoIdempotency(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	e.invite("new@wf.example", string(perm.Support))
@@ -58,6 +59,7 @@ func TestStaffAnonymousNoIdempotency(t *testing.T) {
 // неудачи в журнале (вторая транзакция acceptFailed), а не 500 «вторая транзакция в идемпотентном
 // запросе». Барьер — ожидание замка в pg_locks, перевыпуск — в транзакции, держащей замок.
 func TestStaffAcceptReissuedWhileWaitingWithKey(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	staffID := e.invite("new@wf.example", string(perm.Support))

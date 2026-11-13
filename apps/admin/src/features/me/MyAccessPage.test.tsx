@@ -208,7 +208,9 @@ describe('перевыпуск резервных кодов', () => {
     ).toEqual(NEW_CODES);
     expect(seen.regen).toEqual([{ code: '492817' }]);
     expect(seen.keys[0]).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: 'Скопировать коды' })).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', { name: 'Копировать: резервные коды' }),
+    ).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Скачать .txt' })).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('button', { name: 'Готово' }));
@@ -788,4 +790,32 @@ test('StrictMode: статус и сеансы — по одному запро�
   await screen.findByText('8 из 10 не использованы');
   await screen.findByRole('list', { name: 'Сеансы' });
   expect([seen.mfa, seen.sessions]).toEqual([1, 1]);
+});
+
+// План UF2a.10: «Мой доступ» на DataState (скелетон карточек), время сеансов — RelativeTime (<time dateTime>).
+describe('время сеансов и загрузка', () => {
+  test('сеанс — <time dateTime> входа и активности из ответа', async () => {
+    accessServer();
+    renderApp('/me', { me: meOwner });
+    const list = await screen.findByRole('list', { name: 'Сеансы' });
+    const first = within(list).getAllByRole('listitem')[0]!;
+    expect(
+      [...first.querySelectorAll('time[datetime]')].map((t) => t.getAttribute('datetime')),
+    ).toEqual([SESSIONS[0]!.created_at, SESSIONS[0]!.last_seen_at]);
+  });
+
+  test('403 карточки — «нет доступа к этим данным» без второго h1', async () => {
+    accessServer();
+    server.use(
+      http.get('/v1/staff/me/sessions', ({ response }) =>
+        response.untyped(problem(403, 'auth.forbidden')),
+      ),
+    );
+    renderApp('/me', { me: meOwner });
+    await page();
+    expect(
+      await within(card('Активные сеансы')).findByText('Нет доступа к этим данным'),
+    ).toBeVisible();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
 });

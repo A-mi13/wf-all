@@ -15,6 +15,7 @@ import (
 // поддержки; без права — 403; над собой — self_action; почта не совпала — mismatch; выключенная —
 // 403 (вернуть её — приглашением).
 func TestResetAccessRequest(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	c := e.city("kazan")
@@ -56,6 +57,7 @@ func TestResetAccessRequest(t *testing.T) {
 // (access_reset), версия +1, ожидающие запросы сотрудника погашены, новое приглашение access_reset с
 // письмом, аудит и событие staff.access_reset; новый код принимается.
 func TestResetAccessExecute(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	owner := e.as(e.addMember("owner@wf.example", memberOpts{Role: "owner"}))
@@ -99,6 +101,7 @@ func TestResetAccessExecute(t *testing.T) {
 // Последний активный владелец: сброс доступа и выключение оператором — staff.last_owner; оператору
 // сброс доступа единственному владельцу разрешён (выход из тупика, §4.2).
 func TestOperatorLastOwner(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	o := e.addMember("owner@wf.example", memberOpts{Role: "owner"})

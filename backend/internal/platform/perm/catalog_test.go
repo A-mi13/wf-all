@@ -39,6 +39,7 @@ var spec25 = []struct{ key, owner, admin, moderator, support string }{
 	{"geo.districts.manage", "allow", "allow", "scoped", "deny"},
 	{"geo.countries.read", "allow", "allow", "allow", "allow"},
 	{"geo.countries.manage", "allow", "allow", "deny", "deny"},
+	{"geo.countries.rules", "dual", "dual", "deny", "deny"},
 	{"geo.imports.read", "allow", "allow", "deny", "allow"},
 	{"geo.imports.run", "allow", "allow", "deny", "deny"},
 	{"platform.versions.read", "allow", "allow", "allow", "allow"},

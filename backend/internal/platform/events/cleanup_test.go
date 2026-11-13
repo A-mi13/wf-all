@@ -17,6 +17,7 @@ import (
 // Спека §6.5: опубликованный outbox и inbox старше 30 дней удаляются; неопубликованное —
 // никогда, даже старое (relay ещё должен его разложить).
 func TestCleanupRemovesOnlyOldProcessed(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	ctx := context.Background()
 	oldPublished := publish(t, pool, joined(id.New(), 1))
@@ -59,6 +60,8 @@ func TestCleanupRemovesOnlyOldProcessed(t *testing.T) {
 }
 
 // Старого больше, чем пачка: чистка идёт пачками, пока не вычистит всё, а не одну пачку за запуск.
+//
+// serial: SetCleanupBatch меняет переменную пакета cleanupBatch.
 func TestCleanupDeletesInBatchesUntilDone(t *testing.T) {
 	events.SetCleanupBatch(t, 2)
 	pool := dbtest.NewPool(t)
@@ -85,6 +88,7 @@ func TestCleanupDeletesInBatchesUntilDone(t *testing.T) {
 }
 
 func TestCleanupJobConventions(t *testing.T) {
+	t.Parallel()
 	opts := (events.CleanupArgs{}).InsertOpts()
 	if (events.CleanupArgs{}).Kind() != "events.cleanup" || opts.Queue != queue.Maintenance || opts.UniqueOpts.ByPeriod == 0 ||
 		opts.MaxAttempts != 5 {

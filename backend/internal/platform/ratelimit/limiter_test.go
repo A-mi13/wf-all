@@ -22,7 +22,7 @@ func limiter(t *testing.T) (*ratelimit.PG, *clocktest.Fake, dbtest.Pools) {
 	t.Helper()
 	pools := dbtest.NewPoolsAs(t, "api") // права прода: api считает лимиты
 	c := clocktest.New(start)
-	return ratelimit.NewPG(pools.As, c), c, pools
+	return ratelimit.NewPG(pools.As, c, ratelimit.Players), c, pools
 }
 
 // allow — Allow без проглатывания ошибки.
@@ -46,6 +46,7 @@ func over(t *testing.T, l ratelimit.Limiter, key string, p ratelimit.Policy) boo
 }
 
 func TestAllowBurstThenRate(t *testing.T) {
+	t.Parallel()
 	l, c, _ := limiter(t)
 	p := ratelimit.Policy{Limit: 60, Period: time.Minute, Burst: 3} // 1 в секунду, всплеск 3
 	for i := range 3 {
@@ -72,6 +73,7 @@ func TestAllowBurstThenRate(t *testing.T) {
 
 // Всплеск 1: первый запрос по свежему ключу проходит (окно = интервал), второй подряд — нет.
 func TestAllowBurstOne(t *testing.T) {
+	t.Parallel()
 	l, c, _ := limiter(t)
 	p := ratelimit.Policy{Limit: 6, Period: time.Minute, Burst: 1}
 	if r := allow(t, l, "k", p); !r.Allowed {
@@ -93,6 +95,7 @@ func TestAllowBurstOne(t *testing.T) {
 // Интервал не кратен микросекунде (60 с / 7): база округляет интервал и окно до мкс каждое
 // отдельно — всплеск обязан пропустить ровно Limit запросов, не меньше.
 func TestAllowIntervalNotMicrosecondMultiple(t *testing.T) {
+	t.Parallel()
 	l, _, _ := limiter(t)
 	for _, p := range []ratelimit.Policy{
 		{Limit: 7, Period: time.Minute},
@@ -113,6 +116,7 @@ func TestAllowIntervalNotMicrosecondMultiple(t *testing.T) {
 
 // Отказ не сдвигает tat: долбить в закрытую дверь не продлевает блокировку.
 func TestDeniedDoesNotExtend(t *testing.T) {
+	t.Parallel()
 	l, c, _ := limiter(t)
 	p := ratelimit.Policy{Limit: 1, Period: 10 * time.Second}
 	if r := allow(t, l, "k", p); !r.Allowed {
@@ -131,6 +135,7 @@ func TestDeniedDoesNotExtend(t *testing.T) {
 
 // Гонка: 20 параллельных запросов при всплеске 5 — проходят ровно 5.
 func TestAllowConcurrent(t *testing.T) {
+	t.Parallel()
 	l, _, _ := limiter(t)
 	p := ratelimit.Policy{Limit: 5, Period: time.Hour}
 	var ok atomic.Int32
@@ -154,6 +159,7 @@ func TestAllowConcurrent(t *testing.T) {
 
 // Счётчик сигнала риска: Add расходует всегда, Over — порог без расхода.
 func TestAddAndOver(t *testing.T) {
+	t.Parallel()
 	l, c, _ := limiter(t)
 	ctx := context.Background()
 	p := ratelimit.Policy{Limit: 5, Period: 15 * time.Minute}
@@ -178,6 +184,7 @@ func TestAddAndOver(t *testing.T) {
 }
 
 func TestPolicyValidate(t *testing.T) {
+	t.Parallel()
 	for _, p := range []ratelimit.Policy{
 		{Limit: -1, Period: time.Second},
 		{Limit: 1},
@@ -209,7 +216,8 @@ func TestPolicyValidate(t *testing.T) {
 
 // Невалидная политика до базы не доходит: ошибка, а не случайный пропуск или блокировка.
 func TestInvalidPolicyRejected(t *testing.T) {
-	l := ratelimit.NewPG(nil, clocktest.New(start)) // база не нужна: проверка раньше
+	t.Parallel()
+	l := ratelimit.NewPG(nil, clocktest.New(start), ratelimit.Players) // база не нужна: проверка раньше
 	ctx := context.Background()
 	p := ratelimit.Policy{Limit: 1, Period: time.Second, Burst: -1}
 	if _, err := l.Allow(ctx, "k", p); err == nil {
@@ -239,7 +247,8 @@ func (noRow) Scan(...any) error { return pgx.ErrNoRows }
 
 // Строку удалили между отказом и чтением tat — отказ с повтором через интервал, не ошибка.
 func TestAllowDeniedRowGone(t *testing.T) {
-	l := ratelimit.NewPG(noRows{}, clocktest.New(start))
+	t.Parallel()
+	l := ratelimit.NewPG(noRows{}, clocktest.New(start), ratelimit.Players)
 	r, err := l.Allow(context.Background(), "k", ratelimit.Policy{Limit: 6, Period: time.Minute})
 	if err != nil {
 		t.Fatal(err)

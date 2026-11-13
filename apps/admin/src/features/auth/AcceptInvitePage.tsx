@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRouterState } from '@tanstack/react-router';
+import { useLayoutEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslations } from 'use-intl';
 import { type ApiError, unwrap } from '../../api/client';
@@ -7,6 +8,9 @@ import { useAdminMutation } from '../../api/mutation';
 import { useDraft } from '../../app/draft';
 import { paths } from '../../app/paths';
 import { useSession } from '../../app/session';
+import { linkLocale, setLinkLocale } from '../../i18n/deviceLocale';
+import { useLocale } from '../../i18n/locale';
+import type { Locale } from '../../i18n/messages';
 import { Button, Form, FormError, PasswordField, TextField, useCountdown } from '../../ui';
 import styles from './Auth.module.css';
 import { AuthLayout } from './AuthLayout';
@@ -23,12 +27,19 @@ type AcceptDraft = { email: string };
 // вводится руками: в ссылке из письма её нет, и из адреса она не читается. Пароль дважды
 // (несовпадение — ошибка поля на клиенте), требования — подсказкой; правила пароля проверяет
 // сервер (validation.failed по body.password раскладывает Form). Успех — стадия setup: me
-// перечитывается, роутер уводит на /setup-2fa.
+// перечитывается, роутер уводит на /setup-2fa. Язык, на котором показан экран (выбор устройства или язык
+// браузера), уходит в теле всегда — «что видишь, то и сохраняется» (locale; решение пользователя 10.11, раунд 2
+// IL): сервер пишет его в учётку вместе с паролем, me.locale стадии setup совпадает — /setup-2fa на том же
+// языке, без мигания. Сброс доступа сотруднику с en на устройстве ru: экран на RU с переключателем рядом —
+// что выбрано на экране в момент принятия, то и пишется (принято осознанно). Ссылка письма — /accept?lang=<язык
+// учётки> (IL2): без явного выбора на устройстве экран на этом языке (useLinkLocale), переключатель главнее.
 export function AcceptInvitePage() {
+  useLinkLocale();
   const t = useTranslations('auth.accept');
   const tp = useTranslations('pages');
   const api = useApi();
   const session = useSession();
+  const locale = useLocale();
   const [draft, saveDraft] = useDraft<AcceptDraft>(paths.accept);
   const form = useForm<Values>({
     defaultValues: { email: draft?.email ?? '', password: '', passwordRepeat: '', code: '' },
@@ -38,7 +49,7 @@ export function AcceptInvitePage() {
   const submitWait = useCountdown();
   const [limit, setLimit] = useState<ApiError | null>(null);
   const accept = useAdminMutation(
-    (v: { email: string; code: string; password: string }) =>
+    (v: { email: string; code: string; password: string; locale: Locale }) =>
       unwrap(api.POST('/v1/staff/auth/invite/accept', { body: v })),
     // gcTime 0: пароль и код в переменных мутации не остаются в кэше после экрана
     { gcTime: 0, onSuccess: () => session.refresh() },
@@ -74,7 +85,12 @@ export function AcceptInvitePage() {
         onSubmit={(v) => {
           if (limited) return;
           saveDraft({ email: v.email });
-          return accept.mutateAsync({ email: v.email, code: v.code, password: v.password });
+          return accept.mutateAsync({
+            email: v.email,
+            code: v.code,
+            password: v.password,
+            locale,
+          });
         }}
         onError={(e) => {
           if (e.code !== 'ratelimit.exceeded') return false;
@@ -149,4 +165,15 @@ export function AcceptInvitePage() {
       </Form>
     </AuthLayout>
   );
+}
+
+// Язык ссылки письма (?lang, IL2) — пока экран открыт: до первой отрисовки (useLayoutEffect — без мигания языка
+// браузера), уход с экрана его снимает (вход, /setup-2fa — там уже me.locale). StrictMode: снят и поставлен снова.
+function useLinkLocale() {
+  const search = useRouterState({ select: (s) => s.location.searchStr });
+  const lang = linkLocale(search);
+  useLayoutEffect(() => {
+    setLinkLocale(lang);
+    return () => setLinkLocale(null);
+  }, [lang]);
 }

@@ -6,22 +6,30 @@
 #   0. замок прогона .tools/e2e/run.lock (ревью Task 16, M4): второй прогон, стартовавший одновременно,
 #      прошёл бы проверку портов и пересоздал бы базу и exe под первым; замок держится до конца прогона,
 #      брошенный (процесс с его PID умер) — забирается;
-#   1. порты e2e свободны (свои, чтобы не задеть ./task dev: Vite 5174/5175, admin-api 18181/18182,
-#      Mailpit 18026/11026);
+#   1. порты e2e свободны (свои, чтобы не задеть ./task dev: Vite 5174/5175, admin-api 18181/18182/18183,
+#      Mailpit 18026/11026, фикстура GeoNames 18190);
 #   2. база wf_e2e на том же кластере пересоздана (DROP … WITH (FORCE)): чистка и истечение подтверждений
-#      идут по реальным часам — общие данные dev не трогаем;
+#      идут по реальным часам — общие данные dev не трогаем; каждый прогон — с чистой базы, поэтому повторный прогон
+#      сценария geo (импорт RU, активация места 526815) не встречает «уже импортировано» и «город уже активен»;
 #   3. миграции и права ролей (cmd/migrate up → grants.sql);
-#   4. admin-api собран в .tools/e2e/;
-#   5. одноразовый ключ сотрудников ADMIN_STAFF_SECRET_KEYS (base64url, только в окружении прогона, не выводится).
-# Dev-значения ADMIN_* (корневой Taskfile грузит backend/.env) из окружения убираются: admin-api получает
-# только окружение e2e (apps/admin/e2e/env.ts).
+#   4. admin-api, воркер и HTTPS-фикстура GeoNames (план B, Task 23) собраны в .tools/e2e/: импорт и активация идут
+#      через настоящий воркер (webServer Playwright, база wf_e2e под ролью worker, Mailpit e2e), источник — фикстура
+#      cmd/geofixture на 127.0.0.1:18190 (выдержки testdata, корень TLS — PEM для WORKER_GEONAMES_CA_FILE): внешней сети
+#      прогон не трогает. Порты, адрес и путь PEM — apps/admin/e2e/env.ts;
+#   5. одноразовый ключ сотрудников ADMIN_STAFF_SECRET_KEYS (base64url, только в окружении прогона, не выводится);
+#   6. проект prod (план UI-фундамента UF1b.7) — собранная админка: vite build (без tsc; шаг стенда, не «сборка
+#      по просьбе») и проверка dist (scripts/check-admin-dist.mjs: light-dark( есть, полифила и MSW нет) —
+#      каждый прогон, чтобы прод-проект не проверял сборку старого дерева.
+# Dev-значения ADMIN_* и WORKER_* (корневой Taskfile грузит backend/.env: база dev, настоящий GeoNames) из окружения
+# убираются: admin-api и воркер получают только окружение e2e (apps/admin/e2e/env.ts).
 #
 # Кластер: локально — scripts/pg.sh (127.0.0.1:WF_PG_PORT, суперпользователь postgres без пароля); в CI —
 # сервис postgis/postgis:18-3.6 с ролями и расширениями из deploy/dev/initdb/20_wf.sql
 # (WF_E2E_PG_SUPERUSER_URL=postgres://postgres:postgres@localhost:15432/postgres).
 # Адреса ролей migrator и admin — с того же хоста и порта, что WF_E2E_PG_SUPERUSER_URL (ревью Task 16, M6).
-# Проекты браузеров — WF_E2E_PROJECTS (по умолчанию chromium,webkit; CI — chromium).
-# Две пары admin-api (Chromium и WebKit) работают на одной базе и обе исполняют очередь staff (River):
+# Проекты — WF_E2E_PROJECTS (по умолчанию chromium,webkit,prod — то же умолчание у apps/admin/e2e/env.ts,
+# страж env.test.ts; CI — chromium,prod). prod — admin-api отдаёт собранную админку с настоящим staticCSP.
+# Пары admin-api (Chromium, WebKit, prod) работают на одной базе и все исполняют очередь staff (River):
 # письмо приглашения может уйти из пары другого браузера, и ссылка в нём — на чужой origin. Сценарии
 # берут из письма только код, не ссылку (ревью Task 16, M5); сценарий по ссылке — только с одной парой
 # (WF_E2E_PROJECTS=chromium) или своей базой на пару.
@@ -40,7 +48,7 @@ read -r PG_HOST PG_PORT < <(node -e '
 `);
 ' "$SUPER_URL") || die "WF_E2E_PG_SUPERUSER_URL — не адрес postgres://"
 DB=wf_e2e
-PROJECTS="${WF_E2E_PROJECTS:-chromium,webkit}"
+PROJECTS="${WF_E2E_PROJECTS:-chromium,webkit,prod}"
 
 exe=
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
@@ -56,7 +64,9 @@ command -v "$PSQL" >/dev/null || die "нет psql (локально — bash scr
 # второй прогон между mkdir и записью PID видел пустой замок, считал его брошенным и забирал. Держатель жив —
 # отказ; умер (брошенный замок после kill) — замок уводится в сторону переименованием (из двух забирающих
 # успевает один) и берётся заново. Снимается при любом выходе (trap), поэтому без exec ниже.
-LOCK=.tools/e2e/run.lock
+# Путь — абсолютный (ревью UF1b/II): перед Playwright скрипт переходит в apps/admin, и trap EXIT с относительным
+# путём искал бы apps/admin/.tools/e2e/run.lock — замок оставался после каждого прогона («брошен … забираю»).
+LOCK="$PWD/.tools/e2e/run.lock"
 mkdir -p .tools/e2e
 take_lock() {
   local fresh="$LOCK.new.$$"
@@ -89,9 +99,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # 1. Порты: занятый — понятная ошибка до сборки (чужие процессы не трогаем)
-ports="18026 11026"
+ports="18026 11026 18190"
 case ",$PROJECTS," in *,chromium,*) ports="$ports 5174 18181" ;; esac
 case ",$PROJECTS," in *,webkit,*) ports="$ports 5175 18182" ;; esac
+case ",$PROJECTS," in *,prod,*) ports="$ports 18183" ;; esac
 # shellcheck disable=SC2086
 node -e '
   const net = require("node:net");
@@ -120,12 +131,35 @@ if ! out=$(cd backend && MIGRATOR_DATABASE_URL="postgres://migrator:migrator@${P
   die "миграции wf_e2e не прошли"
 fi
 
-# 4. admin-api
+# 3a. Города для матрицы флагов (G9-F): прод-сценарий проверяет виртуализацию столбцов под настоящей CSP — городов
+# больше порога (MATRIX_VIRTUALIZE_FROM × 3; число — E2E_FLAG_CITIES в apps/admin/e2e/env.ts, страж env.test.ts).
+# Страна — из сида (RU), статус — ожидание; названия «Флагтест NNN» не совпадают с поиском других сценариев.
+FLAG_CITIES=150
+E2E_URL=$(node -e '
+  const u = new URL(process.argv[1]);
+  u.pathname = "/" + process.argv[2];
+  process.stdout.write(u.href);
+' "$SUPER_URL" "$DB")
+"$PSQL" "$E2E_URL" -v ON_ERROR_STOP=1 -q <<SQL || die "засев городов wf_e2e не прошёл"
+INSERT INTO cities (country_id, name, slug, timezone, centroid, status)
+SELECT co.id, format('Флагтест %s', lpad(n::text, 3, '0')), format('flagtest-%s', n), 'Europe/Moscow',
+       ST_SetSRID(ST_MakePoint(42 + n / 1000.0, 45), 4326)::geography, 'waitlist'
+  FROM countries co, generate_series(1, $FLAG_CITIES) AS n
+ WHERE co.code = 'RU';
+INSERT INTO city_names (city_id, locale, name)
+SELECT c.id, 'ru', c.name FROM cities c WHERE c.slug LIKE 'flagtest-%';
+SQL
+
+# 4. admin-api, воркер и фикстура GeoNames
 (cd backend && go build -o "../.tools/e2e/admin-api$exe" ./cmd/admin-api)
+(cd backend && go build -o "../.tools/e2e/worker$exe" ./cmd/worker)
+(cd backend && go build -o "../.tools/e2e/geofixture$exe" ./cmd/geofixture)
+# PEM прошлого прогона не должен сойти за свежий: фикстура пишет новый корень при старте
+rm -f .tools/e2e/geofixture-ca.pem
 
 # 5. Окружение прогона: без dev-настроек админки, с базой и одноразовым ключом e2e
 for k in $(compgen -e); do
-  case "$k" in ADMIN_* | WF_ADMIN_API_ORIGIN) unset "$k" ;; esac
+  case "$k" in ADMIN_* | WORKER_* | WF_ADMIN_API_ORIGIN) unset "$k" ;; esac
 done
 # Ключ — base64url (ревью 27.10, Minor 1): Git Bash (MSYS), запуская не-MSYS программу (pnpm → node →
 # admin-api), переписывает значение окружения с ведущим «/» в путь Windows («C:/Program Files/Git/…») —
@@ -135,8 +169,17 @@ done
 WF_E2E_STAFF_SECRET_KEYS=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
 export WF_E2E_STAFF_SECRET_KEYS
 export WF_E2E_ADMIN_DATABASE_URL="postgres://admin:admin@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
+export WF_E2E_WORKER_DATABASE_URL="postgres://worker:worker@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
 export WF_E2E_PROJECTS="$PROJECTS"
-export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
+export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_WORKER_DATABASE_URL;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
+
+# 6. Прод-проект: свежая сборка админки и её проверка (dist — apps/admin/dist, ADMIN_STATIC_DIR пары prod)
+case ",$PROJECTS," in
+  *,prod,*)
+    (cd apps/admin && node_modules/.bin/vite build --logLevel warn) || die "сборка админки для проекта prod не прошла"
+    node scripts/check-admin-dist.mjs || die "сборка админки не прошла проверку dist"
+    ;;
+esac
 
 cd apps/admin
 # не exec: замок снимает trap EXIT этого процесса после конца прогона

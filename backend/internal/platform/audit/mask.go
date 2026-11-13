@@ -62,8 +62,13 @@ func words(key string) []string {
 	})
 }
 
+// Ключи-исключения целиком (слова через «_»): справочное значение, хотя слово ключа чувствительное. phone_prefix —
+// префикс телефона страны («+7», правила страны geo), код страны, а не ПД (m7 ревью G6, решение пользователя
+// 03.11.2026). Узко: только ключ ровно из этих слов — phone, contact_phone, contact_phone_prefix маскируются.
+var publicKey = map[string]bool{"phone_prefix": true}
+
 func isSensitive(ws []string) bool {
-	if len(ws) == 0 || safeLast[ws[len(ws)-1]] {
+	if len(ws) == 0 || safeLast[ws[len(ws)-1]] || publicKey[strings.Join(ws, "_")] {
 		return false
 	}
 	for i, w := range ws {

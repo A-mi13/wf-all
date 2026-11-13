@@ -15,10 +15,13 @@
   flex-direction: column;
 }
 
+/* Область страницы — контейнер: таблицы, сетки карточек и формы раскладываются по её ширине, а не окна
+   (спека UI-фундамента §3.4, принцип 6) — сайдбар, полоса и панель справа их не ломают. */
 .main {
   flex-grow: 1;
   min-width: 0;
   padding: var(--wf-space-5) var(--wf-space-6);
+  container-type: inline-size;
 }
 
 /* ---------- сайдбар ---------- */
@@ -30,7 +33,7 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  width: 236px;
+  width: var(--wf-size-sidebar);
   height: 100dvh;
   padding: var(--wf-space-5) var(--wf-space-3);
   overflow-y: auto;
@@ -44,7 +47,7 @@
 
 .brandName {
   margin: 0;
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
   font-family: var(--wf-font-display);
   font-size: var(--wf-text-xs);
   line-height: var(--wf-text-xs-line);
@@ -124,7 +127,7 @@
 }
 
 .active .mark {
-  background: var(--wf-color-accent);
+  background: var(--wf-color-accent-ink);
 }
 
 .linkLabel {
@@ -134,7 +137,7 @@
 
 .link:focus-visible,
 .tab:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 
@@ -146,12 +149,29 @@
   background: var(--wf-color-bg-elevated);
 }
 
+.accountText {
+  flex-grow: 1;
+  min-width: 0;
+}
+
 .accountName {
   margin: 0;
   color: var(--wf-color-text);
   font-size: var(--wf-text-sm);
   line-height: var(--wf-text-sm-line);
   font-weight: 800;
+}
+
+/* Почта-логин: одна строка, длинная — многоточием (полная — в title) */
+.accountEmail {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--wf-color-text-muted);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .accountDetails {
@@ -162,14 +182,48 @@
   font-weight: 500;
 }
 
-.profileMenu {
+/* Под именем — строками: язык, тема, «Выйти» во всю ширину (спека UI-фундамента §4.12, ревью V1 m3): язык
+   (82 px) и тема (≥ 98 px) с зазором в одну строку колонки сайдбара (186 px) не помещаются, а «Sign out»
+   рядом с языком был на грани. Одна колонка, сегменты — по содержимому от начала строки (фиксированной
+   ширины: смена выбора и языка их не двигает, пользователь, 28.10). Меню профиля раскрыто в сетку
+   (display: contents): ошибка смены языка — своей строкой под переключателем. */
+.accountActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: var(--wf-space-2);
   margin-top: var(--wf-space-3);
 }
 
+.profileMenu {
+  display: contents;
+}
+
+.accountActions .logout {
+  justify-self: stretch;
+  margin-top: var(--wf-space-1);
+  white-space: nowrap;
+}
+
+/* в шторке «Ещё» язык и тема — строками над «Выйти» */
+.sheetSettings {
+  display: grid;
+  justify-items: start;
+  gap: var(--wf-space-2);
+  margin: var(--wf-space-3) 0;
+}
+
 .logout {
-  margin-top: var(--wf-space-3);
-  color: var(--wf-color-text-muted);
+  min-height: 36px;
+  padding: 0 var(--wf-space-2);
   font-size: var(--wf-text-xs);
+}
+
+/* сенсорный экран — цель касания не меньше touch-min */
+@media (pointer: coarse) {
+  .logout {
+    min-height: var(--wf-size-touch-min);
+  }
 }
 
 /* ---------- телефон ---------- */
@@ -180,6 +234,25 @@
 
 .mobile .main {
   padding: var(--wf-space-4) var(--wf-space-4) calc(var(--wf-size-control) * 2);
+}
+
+/* Фокус не закрыт таббаром (WCAG 2.4.11, спека UI-фундамента §4.5): прокручивается документ — отступ прокрутки
+   корня = высота таббара, пока на экране тост с «Отменить» (корень с data-toast-open, ставит UF2b.6) — + тост.
+   Порог — breakpoint.mobile, как у useIsMobile (таббар). */
+@media (max-width: 767.98px) {
+  :global(:root) {
+    scroll-padding-block-end: var(--wf-size-tabbar);
+  }
+
+  :global(:root[data-toast-open]) {
+    scroll-padding-block-end: calc(var(--wf-size-tabbar) + var(--wf-size-toast));
+  }
+
+  /* scroll-padding не добавляет места прокрутки: последнюю строку поднять над тостом можно, только если под ней
+     есть запас — нижний отступ страницы не меньше таббара и тоста (без тоста — .mobile .main: 2 × size.control) */
+  :global(:root[data-toast-open]) .mobile .main {
+    padding-block-end: calc(var(--wf-size-tabbar) + var(--wf-size-toast) + var(--wf-space-4));
+  }
 }
 
 .tabbar {
@@ -214,7 +287,7 @@
 }
 
 .tab.active {
-  color: var(--wf-color-accent);
+  color: var(--wf-color-accent-ink);
 }
 
 .tabIcon {
@@ -251,14 +324,6 @@
   left: calc(50% + 6px);
 }
 
-.icon {
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 .moreAccount {
   display: flex;
   align-items: center;
@@ -271,4 +336,153 @@
 
 .moreAccount + .nav {
   margin: var(--wf-space-2) 0 var(--wf-space-3);
+}
+
+/* ---------- полоса 768–1023 (спека UI-фундамента §3.4) ---------- */
+
+.rail {
+  position: sticky;
+  top: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: var(--wf-size-rail);
+  height: 100dvh;
+  padding: var(--wf-space-4) 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--wf-color-slot-empty);
+  background: var(--wf-color-surface-sunken);
+}
+
+.railNav {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+}
+
+.railItems {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--wf-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.railGroup + .railGroup {
+  padding-top: var(--wf-space-3);
+  border-top: 1px solid var(--wf-color-slot-empty);
+}
+
+.railLink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-touch-min);
+  height: var(--wf-size-touch-min);
+  border-radius: var(--wf-radius-sm);
+  color: var(--wf-color-text-muted);
+}
+
+.railLink:hover {
+  color: var(--wf-color-text);
+}
+
+.railLink.active {
+  background: var(--wf-color-pitch);
+  color: var(--wf-color-text);
+}
+
+.railLink:focus-visible,
+.railAccount:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}
+
+/* счётчик — точкой на значке; число — в имени ссылки для читалки */
+.railDot {
+  position: absolute;
+  top: var(--wf-space-2);
+  right: var(--wf-space-2);
+  width: var(--wf-space-2);
+  height: var(--wf-space-2);
+  border: 2px solid var(--wf-color-surface-sunken);
+  border-radius: var(--wf-radius-full);
+  background: var(--wf-color-accent);
+}
+
+.railAccount {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-touch-min);
+  height: var(--wf-size-touch-min);
+  margin-top: var(--wf-space-4);
+  padding: 0;
+  border: 0;
+  border-radius: var(--wf-radius-full);
+  background: none;
+  cursor: pointer;
+}
+
+/* ---------- «Искать везде» (палитра, спека UI-фундамента §4.1) ---------- */
+
+.sidebar .search {
+  margin-top: var(--wf-space-4);
+}
+
+.search {
+  justify-content: flex-start;
+  gap: var(--wf-space-2);
+}
+
+.searchLabel {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+}
+
+.searchKey {
+  flex-shrink: 0;
+  padding: 0 var(--wf-space-1);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-sm);
+  color: var(--wf-color-text-muted);
+  font-family: var(--wf-font-body);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+}
+
+.railSearch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--wf-size-touch-min);
+  height: var(--wf-size-touch-min);
+  margin-bottom: var(--wf-space-3);
+  padding: 0;
+  border: 0;
+  border-radius: var(--wf-radius-sm);
+  background: none;
+  color: var(--wf-color-text-muted);
+  cursor: pointer;
+}
+
+.railSearch:hover {
+  color: var(--wf-color-text);
+}
+
+.railSearch:focus-visible {
+  outline: 2px solid var(--wf-color-focus);
+  outline-offset: 2px;
+}
+
+.search + .moreAccount {
+  margin-top: var(--wf-space-2);
 }

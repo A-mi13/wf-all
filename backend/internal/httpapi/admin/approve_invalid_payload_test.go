@@ -19,6 +19,7 @@ import (
 // (поля в approve нет), запрос висел pending до истечения. Повтор тем же ключом — сохранённый 409. Оба пути
 // исполнителя: новая учётка и повторное приглашение выключенной (existing_id: имя пишется сбросом доступа).
 func TestApproveInviteInvalidPayloadFails(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -36,6 +37,9 @@ func TestApproveInviteInvalidPayloadFails(t *testing.T) {
 		{"имя, новая учётка", "ivan.p@wf.example", "display_name", joined},
 		{"почта, новая учётка", "petr.s@wf.example", "email", "petr..s@wf.example"},
 		{"имя, выключенная учётка", "gone@wf.example", "display_name", joined},
+		// IL2: язык payload — как прочие поля (иначе 500 от CHECK staff_accounts_locale_check и pending)
+		{"язык, новая учётка", "olga.v@wf.example", "locale", "de"},
+		{"язык, выключенная учётка", "gone@wf.example", "locale", "de"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			id := e.accepted(e.inviteReq(a.token, "", c.email, "support"))

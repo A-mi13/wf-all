@@ -22,6 +22,12 @@
   white-space: nowrap;
 }
 
+/* «Кто»: длинное имя (снимок actor_label) переносится внутри столбца, а не раздвигает его; по левому
+   краю, как заголовок (кнопка-ссылка — text-align: start в Button) — V1 п. 5 */
+.actor {
+  overflow-wrap: anywhere;
+}
+
 .code {
   color: var(--wf-color-text-subtle);
   font-size: var(--wf-text-xs);
@@ -102,6 +108,7 @@
 .json {
   margin: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   color: var(--wf-color-text);
   font-size: var(--wf-text-xs);
   line-height: var(--wf-text-xs-line);
@@ -124,4 +131,11 @@
 .filterActions {
   display: flex;
   justify-content: flex-end;
+}
+
+/* короткий id и кнопка копирования полного — одной строкой */
+.idCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wf-space-1);
 }

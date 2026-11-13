@@ -39,6 +39,7 @@ func runService(t *testing.T, build func(*slog.Logger, *pgxpool.Pool) (server.Se
 // (запрос мог поставить письмо); затем отмена фона и ожидание его остановки — пул в это время открыт
 // (River пишет состояние задач); пул закрывается последним.
 func TestRunServiceStopOrder(t *testing.T) {
+	t.Parallel()
 	inFlight := make(chan struct{})  // запрос дошёл до хендлера
 	release := make(chan struct{})   // отпустить запрос
 	bgStopped := make(chan error, 1) // фон увидел отмену: ошибка пинга пула в этот момент
@@ -107,6 +108,7 @@ func TestRunServiceStopOrder(t *testing.T) {
 // Фон упал (River не стартовал) — сервис не продолжает отвечать без писем и чистки: HTTP
 // останавливается, RunService возвращает ошибку фона.
 func TestRunServiceBackgroundFailureStopsService(t *testing.T) {
+	t.Parallel()
 	errBg := errors.New("river не стартовал")
 	fail := make(chan struct{})
 	addr, _, done := runService(t, func(*slog.Logger, *pgxpool.Pool) (server.Service, error) {
@@ -133,6 +135,7 @@ func TestRunServiceBackgroundFailureStopsService(t *testing.T) {
 // Фон вернулся без ошибки до остановки сервиса — тоже отказ: тихо остановившийся фон — сервис без
 // писем и чистки.
 func TestRunServiceBackgroundEarlyNil(t *testing.T) {
+	t.Parallel()
 	addr, _, done := runService(t, func(*slog.Logger, *pgxpool.Pool) (server.Service, error) {
 		return server.Service{
 			Handler:    http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
@@ -152,6 +155,7 @@ func TestRunServiceBackgroundEarlyNil(t *testing.T) {
 
 // Сборка не удалась — фон не запускается, ошибка сборки наружу.
 func TestRunServiceBuildFailsWithoutBackground(t *testing.T) {
+	t.Parallel()
 	errBuild := errors.New("реестр подтверждений невалиден")
 	started := make(chan struct{}, 1)
 	_, _, done := runService(t, func(*slog.Logger, *pgxpool.Pool) (server.Service, error) {
@@ -174,6 +178,7 @@ func TestRunServiceBuildFailsWithoutBackground(t *testing.T) {
 
 // Без фона (Background nil) — как прежний RunHTTP.
 func TestRunServiceWithoutBackground(t *testing.T) {
+	t.Parallel()
 	addr, cancel, done := runService(t, func(*slog.Logger, *pgxpool.Pool) (server.Service, error) {
 		return server.Service{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}, nil
 	})

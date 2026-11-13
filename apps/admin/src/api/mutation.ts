@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query';
 import { useCallback, useRef } from 'react';
 import { type ApiError, isUnknownOutcome } from './client';
+import { newIdempotencyKey } from './idempotency';
 
 // Мутация админки (спека сотрудников §9.1, M6): ключ идемпотентности создаётся здесь — один на
 // действие пользователя. mutate()/mutateAsync() — новое действие, новый ключ; retry() — повтор
@@ -44,8 +45,6 @@ export type AdminMutationResult<TData, TVars, TCtx = unknown> = UseMutationResul
   // Повторить последнее действие с тем же ключом; без действия — ничего.
   retry(): void;
 };
-
-const newKey = () => crypto.randomUUID();
 
 // Колбэки снаружи видят исходные переменные, внутри мутация несёт { vars, key }.
 function unwrap<TData, TVars, TCtx>(
@@ -90,7 +89,7 @@ export function useAdminMutation<TVars, TData, TCtx = unknown>(
   // Новое действие или повтор прежнего с неизвестным исходом (те же значения — тот же ключ).
   const action = useCallback((vars: TVars): Keyed<TVars> => {
     const prev = last.current;
-    const key = prev?.unknown && sameVars(prev.vars, vars) ? prev.key : newKey();
+    const key = prev?.unknown && sameVars(prev.vars, vars) ? prev.key : newIdempotencyKey();
     last.current = { vars, key };
     return last.current;
   }, []);

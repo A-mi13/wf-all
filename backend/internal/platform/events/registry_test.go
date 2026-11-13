@@ -17,6 +17,7 @@ func sub(name, typ string, d events.Delivery) events.Subscription {
 }
 
 func TestRegistryRoutesByType(t *testing.T) {
+	t.Parallel()
 	r, err := events.NewRegistry(
 		sub("stats.count_members", "teams.member_joined", events.EveryEvent),
 		sub("notify.roster", "teams.member_joined", events.LatestState),
@@ -41,6 +42,7 @@ func TestRegistryRoutesByType(t *testing.T) {
 
 // Подсадка ошибок регистрации: каждая ловится своим правилом.
 func TestRegistryRejectsInvalid(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		subs []events.Subscription
 		want string

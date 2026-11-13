@@ -44,6 +44,7 @@ func pwBody(t *testing.T, current, code, recovery, next string) string {
 // фактора); слабый новый — validation.failed по body.new_password; оба фактора сразу — по body.code;
 // успех (резервным кодом) — 204, другие сессии погашены, текущая жива, вход — новым паролем.
 func TestStaffChangePassword(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	other := e.signIn(m)
@@ -64,6 +65,7 @@ func TestStaffChangePassword(t *testing.T) {
 // Перевыпуск резервных кодов (§4.7, M9): неверный TOTP — attempts_left; верный — 10 новых кодов с
 // no-store, прежние больше не действуют, новые — да.
 func TestStaffRegenerateRecoveryCodes(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	wantAttempts(t, e.post(pathRegenerate, m.token, jsonOf(t, map[string]string{"code": e.wrongCode(m)})), staff.CodeMFAInvalid, 4)
@@ -85,6 +87,7 @@ func TestStaffRegenerateRecoveryCodes(t *testing.T) {
 // несуществующий id — staff.session_not_found; своя другая — 204; «все другие» — число; текущая — 204
 // без Set-Cookie, следующий запрос — 401 со стиранием от конвейера.
 func TestStaffMySessions(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	rec := e.send(http.MethodPost, pathLogin, "", "", e.creds(m.email, staffPassword), "User-Agent", browserUA)
@@ -141,6 +144,7 @@ func TestStaffMySessions(t *testing.T) {
 
 // Язык (R14): PATCH — 204 без тела, новый язык — в me; незнакомый — validation.failed по body.locale.
 func TestStaffLocale(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	rec := e.send(http.MethodPatch, pathLocale, m.token, uuid.NewString(), `{"locale":"en"}`)
@@ -159,6 +163,7 @@ func TestStaffLocale(t *testing.T) {
 // idempotency.replay_unavailable с no-store. Строка ключа есть (статус), но ни секрета, ни кодов в
 // таблице нет.
 func TestStaffSecretsNotReplayed(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	e.invite("olga.v@wf.example", string(perm.Admin))
 	setup := newToken(t, e.anon(pathAccept, "", jsonOf(t, map[string]string{"email": "olga.v@wf.example", "code": inviteCode, "password": staffPassword})))
@@ -218,6 +223,7 @@ func TestStaffSecretsNotReplayed(t *testing.T) {
 // Повтор второго фактора с тем же ключом после обрыва: Set-Cookie (новый токен) в staff_idempotency_keys не
 // сохраняется; прежний токен уже заменён — 401 без стирания cookie (новую повтор не вернёт: вход заново).
 func TestStaffReplayAfterNewToken(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	pending := e.login(m)
@@ -241,6 +247,7 @@ func TestStaffReplayAfterNewToken(t *testing.T) {
 // Повтор неудачного кода с тем же ключом — сохранённый 400 с тем же attempts_left, неудача не
 // засчитывается второй раз.
 func TestStaffFactorFailureReplay(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	pending := e.login(m)
@@ -263,6 +270,7 @@ func TestStaffFactorFailureReplay(t *testing.T) {
 // 202 без письма (429 выдал бы существование почты); после паузы — 202 и задача staff.mail; сразу
 // снова — без письма; несуществующая почта — 202.
 func TestStaffResendInviteSelf(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	e.invite("new@wf.example", string(perm.Support))
 	body := jsonOf(t, map[string]string{"email": "new@wf.example"})
@@ -283,12 +291,13 @@ func TestStaffResendInviteSelf(t *testing.T) {
 
 // Перебор самоотправки с одного адреса — 429 ratelimit.exceeded с Retry-After (IP-лимит staff_auth).
 func TestStaffResendInviteSelfIPLimit(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t, func(o *admin.Options) {
 		rules := ratelimit.DefaultRules()
 		r := rules["staff_auth"]
 		r.IP = ratelimit.Policy{Limit: 1, Period: time.Minute, Burst: 1}
 		rules["staff_auth"] = r
-		o.RateRules, o.Limiter = rules, ratelimit.NewPG(o.DB, o.Clock)
+		o.RateRules, o.Limiter = rules, ratelimit.NewPG(o.DB, o.Clock, ratelimit.Staff)
 	})
 	body := jsonOf(t, map[string]string{"email": "new@wf.example"})
 	wantStatus(t, e.anon(pathResend, "", body), http.StatusAccepted)
@@ -302,6 +311,7 @@ func TestStaffResendInviteSelfIPLimit(t *testing.T) {
 // Мутации «своё» (x-permission self) не доходят до сценариев не в стадии active (⚠️ 6b): setup — 403
 // setup_required, mfa_pending — 401 unauthenticated, Reauth — 401 reauth_required.
 func TestStaffSelfMutationsByStage(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	m := e.firstLogin("ivan.p@wf.example", string(perm.Owner))
 	e.invite("new@wf.example", string(perm.Support))

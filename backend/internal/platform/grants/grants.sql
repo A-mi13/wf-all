@@ -35,9 +35,12 @@ BEGIN
         WHEN r.name = 'goose_db_version' THEN NULL
         -- аудит только дописывается; читает — только админка
         WHEN r.name = 'audit_log' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT' ELSE 'INSERT' END
-        -- вход сотрудников и ключи идемпотентности admin-api (staff_idempotency_keys: ответы с ПД) —
-        -- только admin-api
+        -- вход сотрудников, ключи идемпотентности admin-api (staff_idempotency_keys: ответы с ПД) и его
+        -- лимиты (staff_rate_limits: счётчики перебора входа) — только admin-api
         WHEN r.name LIKE 'staff\_%' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END
+        -- лимиты игроков: API считает, воркер чистит; admin-api ходит только в staff_rate_limits (ветка
+        -- выше, план B R2) — у admin ничего
+        WHEN r.name = 'rate_limits' THEN CASE who WHEN 'admin' THEN NULL ELSE 'SELECT, INSERT, UPDATE, DELETE' END
         -- ключи идемпотентности игроков: API ведёт, воркер чистит; admin-api ходит только в
         -- staff_idempotency_keys (ветка выше) — у admin ничего
         WHEN r.name = 'idempotency_keys' THEN CASE who WHEN 'admin' THEN NULL ELSE 'SELECT, INSERT, UPDATE, DELETE' END
@@ -58,11 +61,13 @@ BEGIN
         WHEN r.name LIKE 'river\_%' THEN CASE who WHEN 'api' THEN NULL
                                                   ELSE 'SELECT, INSERT, UPDATE, DELETE' END
         -- справочник geo (спека geo §3.8): API только читает; админка правит, но не удаляет —
-        -- районы архивируются, города и страны остаются; воркер (сверка импорта, §5.4) обновляет
-        -- города и регионы, страны только читает
+        -- районы архивируются, города и страны остаются; исключение — строка истории slug: возврат
+        -- города к своему старому slug удаляет её (спека сотрудников §3.3); воркер (сверка импорта,
+        -- §5.4) обновляет города и регионы, страны только читает
         WHEN r.name IN ('countries', 'regions', 'cities', 'districts', 'city_slug_history') THEN CASE who
           WHEN 'api' THEN 'SELECT'
-          WHEN 'admin' THEN 'SELECT, INSERT, UPDATE'
+          WHEN 'admin' THEN CASE r.name WHEN 'city_slug_history' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                        ELSE 'SELECT, INSERT, UPDATE' END
           WHEN 'worker' THEN CASE WHEN r.name IN ('cities', 'regions') THEN 'SELECT, UPDATE'
                                   WHEN r.name = 'countries' THEN 'SELECT' END
         END

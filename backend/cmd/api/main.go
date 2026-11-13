@@ -79,7 +79,7 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 				Tokens:         token.NewIssuer(jwtKeys, clock.System),
 				// сессий нет до спеки identity: любой токен — 401; identity подставит свой загрузчик
 				Sessions:    auth.NewCachedLoader(auth.NoSessions, 5*time.Second, clock.System, 100_000),
-				Limiter:     ratelimit.NewPG(pool, clock.System),
+				Limiter:     ratelimit.NewPG(pool, clock.System, ratelimit.Players),
 				RateRules:   rules,
 				Geo:         geo.New(pool),
 				AppVersions: appversion.NewReader(pool),

@@ -10,8 +10,27 @@ tasks:
   dev: { desc: Dev-сервер админки (:5173), cmds: ['pnpm dev'] }
   test: { desc: Тесты админки, cmds: ['pnpm test'] }
   e2e:
-    desc: Живой e2e (Playwright + admin-api + Postgres wf_e2e + Mailpit; порты 5174/5175, 18181/18182, 18026/11026)
+    desc: Живой e2e (Playwright + admin-api + воркер + HTTPS-фикстура GeoNames + Postgres wf_e2e + Mailpit; порты 5174/5175, 18181/18182/18183, 18190, 18026/11026)
     cmds: ['bash ../../scripts/e2e-admin.sh {{.CLI_ARGS}}']
+  shots:
+    desc: Снимки экранов для ревьюера (Vite в режиме shots с моками MSW в браузере, порт 5176, + Playwright) — ./task admin:shots -- <пути> --out <каталог>
+    # --out — от места запуска task; снимки временные (.superpowers/sdd/<сессия>/shots/…), не коммитятся
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds: ['node "{{.TASKFILE_DIR}}/../../scripts/admin-shots.mjs" {{.CLI_ARGS}}']
+  stories:
+    desc: Витрина компонентов src/ui — Ladle (http://localhost:61000; тема — кнопкой Ладла, язык — RU · EN над историей)
+    cmds: ['pnpm exec ladle serve']
+  stories:build:
+    desc: Статика витрины в dist-stories и список историй для снимков (dist-stories/stories.json) — для визуальных тестов CI
+    cmds:
+      - pnpm exec ladle build
+      - pnpm exec node .ladle/stories-json.mjs dist-stories
+  shots:build:
+    desc: Сборка админки режима shots (моки MSW в браузере) в dist-shots — экраны визуальных тестов CI
+    cmds: ['pnpm exec vite build --mode shots']
+  visual:
+    desc: Визуальное сравнение (спека UI-фундамента §5.3) — только Linux-CI (admin-visual.yml), локально тесты пропускаются; нужны stories:build и shots:build
+    cmds: ['pnpm exec playwright test -c visual/playwright.visual.config.ts']
   lint: { cmds: ['pnpm lint'] }
   typecheck: { cmds: ['pnpm typecheck'] }
   build: { cmds: ['pnpm build'] }
@@ -23,3 +42,5 @@ tasks:
       - task: lint
       - task: test
       - task: build
+      # прод-CSS = dev-CSS (light-dark() без полифила) и нет моков MSW в сборке — сразу после build (UF1b.4)
+      - node "{{.TASKFILE_DIR}}/../../scripts/check-admin-dist.mjs"

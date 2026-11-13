@@ -3,20 +3,133 @@
     "title": "Administration",
     "brand": "WHEREFOOTBALL"
   },
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "back": "Back",
+    "retry": "Retry",
+    "reload": "Reload page",
+    "archive": "Archive",
+    "restore": "Restore",
+    "delete": "Delete",
+    "undo": "Undo",
+    "copy": "Copy",
+    "showMore": "Show more",
+    "resetFilters": "Reset filters",
+    "submitForApproval": "Send for confirmation"
+  },
+  "palette": {
+    "title": "Search everywhere",
+    "open": "Search everywhere",
+    "key_mac": "⌘K",
+    "key_other": "Ctrl K",
+    "input": "Section, action, city or staff member",
+    "groups": {
+      "recent": "Recent",
+      "sections": "Sections",
+      "actions": "Actions",
+      "cities": "Cities",
+      "staff": "Staff",
+      "countries": "Countries"
+    },
+    "searching": "Searching…",
+    "error": "Search failed: {text}",
+    "needs_approval": "needs approval",
+    "empty": "Nothing found",
+    "count": "{count, plural, =0 {Nothing found} one {# result} other {# results}}",
+    "commands": {
+      "theme_system": "Theme: system",
+      "theme_light": "Theme: light",
+      "theme_dark": "Theme: dark",
+      "locale_ru": "Language: русский",
+      "locale_en": "Language: English",
+      "density_compact": "Table density: compact",
+      "density_normal": "Table density: normal",
+      "shortcuts": "Keyboard shortcuts"
+    },
+    "keywords": {
+      "home": "start dashboard overview",
+      "theme": "appearance colour color dark light",
+      "locale": "language russian english",
+      "density": "table rows compact",
+      "shortcuts": "keyboard hotkeys keys",
+      "logout": "logout sign out exit",
+      "audit": "log history journal",
+      "staff": "roles access team",
+      "approvals": "two-person pending",
+      "me": "profile password sessions",
+      "cities": "city launch",
+      "countries": "country",
+      "imports": "import geonames",
+      "versions": "app release update",
+      "flags": "feature toggles",
+      "invite": "new staff member",
+      "activate": "launch new city",
+      "add_country": "new country add create"
+    },
+    "offline": "No connection — search unavailable"
+  },
+  "time": {
+    "just_now": "just now"
+  },
   "nav": {
     "groups": {
-      "security": "Security"
+      "overview": "Overview",
+      "security": "Security",
+      "directories": "Directories"
     },
+    "home": "Home",
     "audit": "Audit log",
     "staff": "Roles and access",
     "approvals": "Approvals",
     "me": "My access",
     "label": "Sections",
     "more": "More",
+    "back": "Back to",
     "more_title": "Sections and access",
     "logout": "Sign out",
     "counts": {
       "approvals": "{count, plural, one {# request awaits a decision} other {# requests await a decision}}"
+    },
+    "cities": "Cities and launch",
+    "countries": "Countries",
+    "imports": "GeoNames import",
+    "versions": "App versions",
+    "flags": "Feature flags",
+    "account": "Profile and settings",
+    "account_open": "Profile and settings: {name}"
+  },
+  "home": {
+    "subtitle": "What needs attention",
+    "tiles_label": "Indicators",
+    "todo_title": "To do",
+    "incoming": {
+      "title": "Awaiting your decision",
+      "desktop": "Decide on a computer"
+    },
+    "mine": {
+      "title": "My requests",
+      "nearest": "Nearest deadline <time></time>"
+    },
+    "imports": {
+      "title": "GeoNames import failures",
+      "scope": "Across the last 5 runs",
+      "failed": "Import {country} failed <time></time>",
+      "stuck": "Import {country} running over 30 min, started <time></time>"
+    },
+    "waitlist": {
+      "title": "Cities on the waitlist"
+    },
+    "todo": {
+      "incoming": "{count, plural, one {Review # request} other {Review # requests}}",
+      "incoming_many": "Review requests: more than 99",
+      "mine": "{count, plural, one {# request awaits a second staff member} other {# requests await a second staff member}}",
+      "mine_many": "More than 99 requests await a second staff member",
+      "import_failed": "Open import {country}: last run failed",
+      "import_stuck": "Open import {country}: running over 30 min",
+      "waitlist": "View cities on the waitlist",
+      "codes": "{count, plural, one {# recovery code left} other {# recovery codes left}}"
     }
   },
   "pages": {
@@ -81,16 +194,13 @@
       "lead": "Scan the QR code in Google Authenticator, 1Password or any other authenticator app and enter the six digits. Until the second factor is set up, the admin opens only this screen.",
       "qr": "QR code for the authenticator app",
       "secret": "Can't scan? Enter the secret manually",
-      "copy": "Copy",
-      "copy_secret": "Copy the secret",
-      "copied": "Copied",
-      "copy_failed": "Couldn't copy — select the text and copy it manually",
+      "copy_secret": "Copy: secret",
       "code": "Authenticator app code",
       "confirm": "Confirm",
       "invalid": "The code didn't work. Make sure the time on your phone is set automatically and enter a new code.",
       "codes_title": "Recovery codes",
       "codes_text": "Each code works once instead of the app code. We show them exactly once — later you can only regenerate them in My access, and the old ones stop working at once.",
-      "copy_codes": "Copy codes",
+      "copy_codes": "Copy: recovery codes",
       "download": "Download .txt",
       "file_name": "admin-recovery-codes.txt",
       "file_header": "Admin recovery codes. Each code works once.",
@@ -110,12 +220,13 @@
     "connection": {
       "title": "No connection to the server",
       "refused_title": "The server refused access to the admin panel",
-      "retry": "Retry",
       "text": "The admin panel got no response from the server. Check your connection and retry."
     },
     "forbidden": {
       "title": "No access to this section",
-      "text": "This section needs a permission your role doesn't have. An owner or admin can grant access."
+      "text": "This section needs a permission your role doesn't have. An owner or admin can grant access.",
+      "block_title": "No access to this data",
+      "block_text": "Seeing it needs a permission your role doesn't have. An owner or admin can grant access."
     },
     "not_found": {
       "title": "Page not found"
@@ -126,22 +237,24 @@
     },
     "error": {
       "title": "Could not load",
-      "code": "Error code: {status} · {code}",
-      "retry": "Retry"
+      "code": "Error code: {status} · {code}"
+    },
+    "no_network": {
+      "title": "No connection",
+      "text": "We will show it as soon as it is back."
     },
     "offline": {
       "text": "No network. Decisions will not be sent; showing the last loaded data."
     },
     "desktop_only": {
-      "title": "Desktop only",
-      "text": "This section opens only on a computer: it changes access and settings that cannot be undone from a phone on the go."
+      "notice": "Granting and revoking access — desktop only",
+      "hint": "You can view it here; to change it, open the admin panel on a computer."
     },
     "rate_limited": {
       "title": "Too many requests",
       "text": "The server slowed requests down to protect data. You can retry in {seconds} s.",
       "ready": "You can retry now.",
-      "wait": "Wait {seconds} s",
-      "retry": "Retry"
+      "wait": "Wait {seconds} s"
     },
     "pending_approval": {
       "title": "Sent for approval",
@@ -151,10 +264,19 @@
   "locale": {
     "label": "Interface language",
     "ru": "Русский",
-    "en": "English"
+    "en": "English",
+    "short": {
+      "ru": "RU",
+      "en": "EN"
+    },
+    "option": "{code} — {name}"
   },
   "ui": {
-    "close": "Close",
+    "home": {
+      "tile_error": "Didn't load",
+      "calm_title": "All quiet",
+      "calm_text": "Nothing needs your attention"
+    },
     "password": {
       "show": "Show password",
       "hide": "Hide password"
@@ -165,15 +287,42 @@
     "multiselect": {
       "search": "{label}: search",
       "remove": "Remove “{label}”",
+      "empty": "Nothing found",
+      "choose": "Choose",
+      "selected": "Selected: {count}"
+    },
+    "select": {
+      "search": "Search the list",
       "empty": "Nothing found"
     },
+    "date": {
+      "open": "{label}: open calendar",
+      "dialog": "{label}: pick a date",
+      "prev_month": "Previous month",
+      "next_month": "Next month",
+      "format": "MM/DD/YYYY"
+    },
     "confirm": {
-      "prompt": "Type “{word}” to confirm",
-      "cancel": "Cancel"
+      "prompt": "Type “{word}” to confirm"
     },
     "toast": {
       "region": "Notifications",
-      "close": "Dismiss notification"
+      "close": "Dismiss notification",
+      "undone": "Undone",
+      "not_undone": "Not undone: the action still stands",
+      "stale": "Already changed — data refreshed, nothing undone"
+    },
+    "leave": {
+      "title": "Leave without saving?",
+      "text": "What you entered will be lost",
+      "stay": "Stay",
+      "leave": "Leave"
+    },
+    "theme": {
+      "label": "Theme",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
     },
     "field_errors": {
       "invalid": "Check this value",
@@ -196,7 +345,25 @@
       "too_long": "Password is too long",
       "common": "This password is too common — choose another one",
       "mismatch": "Does not match",
-      "range": "Invalid period"
+      "range": "Invalid period",
+      "host": "Not this platform's store link"
+    },
+    "term": {
+      "more": "What does this mean?"
+    },
+    "copy": {
+      "done": "Copied",
+      "manual": "Copy it manually"
+    },
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "help": "Shortcut cheat sheet",
+      "escape": "Close the top window",
+      "then": "then",
+      "single": "Single-key shortcuts",
+      "single_hint": "Turn off if keys fire by accident (for example, with a screen reader). {mod}+K always works.",
+      "off": "off",
+      "search": "Search on the page"
     }
   },
   "permissions": {
@@ -243,7 +410,8 @@
       },
       "countries": {
         "read": "Countries and their rules",
-        "manage": "Country rules and enabling a country"
+        "manage": "Enabling a country and its other fields (phone code, week, names)",
+        "rules": "Creating a country, currency, age thresholds and disabling a country"
       },
       "imports": {
         "read": "GeoNames import log",
@@ -268,6 +436,10 @@
         "role_change": "Role or cities change",
         "access_reset": "Access reset",
         "revoke_owner": "Disabling an owner"
+      },
+      "geo": {
+        "country_rules": "Country rules",
+        "country_create": "New country"
       }
     },
     "subtitle": "Two-person actions are carried out by a second staff member with the permission. A request lives for 24 hours.",
@@ -286,9 +458,11 @@
         "decision": "Decision"
       }
     },
-    "requested": "{name} · {time}",
-    "expires": "until {time}",
-    "decided": "{name} · {time}",
+    "requested": "{name} · <time></time>",
+    "expires": "expires <time></time>",
+    "expired": "expired <time></time>",
+    "decided": "{name} · <time></time>",
+    "copy_id": "Copy: request id",
     "system": "system",
     "comment": "Comment: {text}",
     "failure_reason": "Reason: {text}",
@@ -312,7 +486,41 @@
       "reason": "Reason",
       "comment": "Comment",
       "target": "staff member {id}",
-      "none": "—"
+      "none": "—",
+      "locale": "Language",
+      "country": "Country",
+      "geo": {
+        "rules": "{code}: {changes}",
+        "currency": "currency {from} → {to}",
+        "min_signup_age": "signup age {from} → {to}",
+        "age_of_majority": "age of majority {from} → {to}",
+        "is_enabled": "{from} → {to}",
+        "create": "new country {code}: {details}",
+        "ages": "{min}/{majority}",
+        "week": {
+          "1": "week starts Mon",
+          "2": "week starts Tue",
+          "3": "week starts Wed",
+          "4": "week starts Thu",
+          "5": "week starts Fri",
+          "6": "week starts Sat",
+          "7": "week starts Sun"
+        },
+        "phone_prefix": "phone code {from} → {to}",
+        "week_starts_on": "week start {from} → {to}",
+        "names": "name ({locale}) {from} → {to}",
+        "none": "—",
+        "others": "{count, plural, one {and # more field} other {and # more fields}}: {keys}",
+        "weekday": {
+          "1": "Mon",
+          "2": "Tue",
+          "3": "Wed",
+          "4": "Thu",
+          "5": "Fri",
+          "6": "Sat",
+          "7": "Sun"
+        }
+      }
     },
     "failure": {
       "initiator_changed": "The requester changed after the request: disabled, access reset or role changed",
@@ -321,8 +529,6 @@
     },
     "approve": "Approve",
     "reject": "Reject",
-    "cancel": "Cancel",
-    "desktop_only": "Granting access — desktop only",
     "done": {
       "executed": "Approved and carried out.",
       "rejected": "Request rejected.",
@@ -383,7 +589,10 @@
       "approval_not_found": "Approval request not found",
       "approval_self": "You can't decide your own request or a request about you",
       "approval_stale": "The data changed after the request — create it again",
-      "approval_closed": "The request is already decided, cancelled or expired"
+      "approval_closed": "The request is already decided, cancelled or expired",
+      "flag_not_found": "Flag not found",
+      "flag_stale": "The flag was changed while you were editing it. Refresh the page",
+      "flag_city_not_found": "One of the selected cities does not exist"
     },
     "staff": {
       "invalid_credentials": "Wrong email or password",
@@ -397,6 +606,23 @@
       "city_not_found": "City not found",
       "last_owner": "The platform can't be left without an owner",
       "self_action": "You can't do this to yourself — use My access"
+    },
+    "geo": {
+      "city_not_found": "City not found",
+      "district_not_found": "District not found",
+      "place_not_found": "Place not found in GeoNames or removed from the source",
+      "country_not_found": "Country not found",
+      "import_not_found": "Import not found",
+      "import_job_not_found": "Import job not found",
+      "city_already_active": "There is already a city at this place",
+      "city_already_linked": "The city is already linked to a GeoNames place",
+      "slug_taken": "This address is already taken by another city",
+      "country_exists": "This country already exists",
+      "import_in_progress": "An import of this country is already queued or running",
+      "import_job_not_cancellable": "The job is already running or finished and cannot be cancelled",
+      "district_name_taken": "A district with this name already exists",
+      "country_not_enabled": "The country is not in the directory or is disabled",
+      "region_not_found": "The region is not from this country"
     }
   },
   "roles": {
@@ -414,10 +640,40 @@
     "clear_search": "Clear search",
     "more_filters": "More filters",
     "shown": "Showing {count}",
-    "reset": "Reset filters",
-    "load_more": "Show more",
     "load_more_failed": "Could not load more. Try again",
-    "more_filters_active": "More filters, set: {count}"
+    "more_filters_active": "More filters, set: {count}",
+    "bulk": {
+      "region": "Bulk actions",
+      "selected": "{count} selected",
+      "clear": "Clear selection",
+      "skip_part": "{count} more without your permission for this action: they will be skipped.",
+      "progress": "In progress: {done} of {total}",
+      "executed": "Done {count}",
+      "pending": "sent for approval {count}",
+      "failed": "failed {count}",
+      "unknown": "outcome unknown {count}",
+      "skipped": "skipped {count}",
+      "cancelled": "not started {count}",
+      "row_failed": "{name}: {error}",
+      "row_unknown": "{name}: outcome unknown — retry sends the same request",
+      "retry_failed": "Retry unsuccessful",
+      "paused": "Paused {seconds} s — the server asks to wait",
+      "dual_part": "{count, plural, one {# of them goes} other {# of them go}} to a second staff member for approval.",
+      "select_all": "Select visible",
+      "select_row": "Select: {name}",
+      "row_denied": "You have no permission for any action on this row",
+      "select_none": "No rows available to select"
+    },
+    "columns": {
+      "button": "Columns",
+      "hidden_by_width": "hidden at this width",
+      "details": "Details"
+    },
+    "density": {
+      "label": "Density",
+      "compact": "Compact",
+      "normal": "Comfortable"
+    }
   },
   "me": {
     "subtitle": "Second factor, recovery codes and active sessions",
@@ -447,7 +703,6 @@
       "submit": "Issue codes",
       "wait": "Wait {seconds} s",
       "done": "Done",
-      "issued": "Recovery codes reissued. The old ones no longer work.",
       "unknown": "No response arrived — the codes may have been reissued. If the counter below shows “10 of 10”, the old codes no longer work: issue new ones again and save them."
     },
     "sessions": {
@@ -459,7 +714,7 @@
       "revoke_others": "End all other sessions",
       "device": "{browser} · {os}",
       "unknown_device": "Unknown device",
-      "details": "Network {ip} · signed in {created} · active {seen}",
+      "details": "Network {ip} · signed in <created></created> · active <seen></seen>",
       "revoked": "Session ended. That device will need to sign in again.",
       "revoked_others": "{count, plural, =0 {There were no other sessions} one {# session ended} other {# sessions ended}}",
       "empty": "No active sessions",
@@ -565,13 +820,16 @@
       "cities": "Moderator cities",
       "cities_search": "Find a city",
       "cities_hint": "A moderator needs at least one city.",
-      "submit": "Send for confirmation",
-      "again": "Invite another",
-      "close": "Close"
+      "locale": "Staff member language",
+      "locale_hint": "The invitation email and the interface use it; the staff member can change it later.",
+      "again": "Invite another"
     },
     "drawer": {
       "title": "Staff member",
+      "not_found_title": "Staff member not found",
+      "not_found_text": "They do not exist or the link is out of date.",
       "email": "Email",
+      "copy_email": "Copy: email",
       "role": "Role",
       "status": "Status",
       "cities": "Cities",
@@ -595,8 +853,6 @@
         "title": "Role and cities",
         "role": "Role",
         "cities": "Moderator cities",
-        "save": "Save",
-        "request": "Send for confirmation",
         "saved": "Role and cities saved.",
         "denied": "You cannot make this change."
       },
@@ -619,8 +875,7 @@
           "secrets": "Password, second factor and recovery codes stop working",
           "sessions": "All the staff member’s sessions end",
           "invite": "A new invitation is sent to the work email"
-        },
-        "confirm": "Send for confirmation"
+        }
       },
       "disable": {
         "title": "Disable account",
@@ -634,7 +889,6 @@
           "history": "History and the audit log are kept"
         },
         "confirm_now": "Disable",
-        "confirm_request": "Send for confirmation",
         "done": "Account disabled."
       }
     }
@@ -653,10 +907,12 @@
       "staff": "Staff",
       "approvals": "Approvals",
       "directories": "Directories",
-      "flags": "Flags"
+      "flags": "Flags",
+      "versions": "Versions"
     },
     "table": {
       "label": "Log records",
+      "copy_id": "Copy: record id",
       "columns": {
         "time": "Time",
         "who": "Who",
@@ -678,7 +934,8 @@
       "approvals": "approval",
       "directories": "directory",
       "flags": "flag",
-      "other": "system"
+      "other": "system",
+      "versions": "versions"
     },
     "actions": {
       "staff": {
@@ -709,10 +966,21 @@
         "approval_rejected": "Request rejected",
         "approval_cancelled": "Request cancelled",
         "approval_expired": "Request expired",
-        "approval_failed": "Request approved but not carried out"
+        "approval_failed": "Request approved but not carried out",
+        "flag_changed": "Feature flag changed",
+        "app_versions_changed": "App versions changed"
       },
       "geo": {
-        "import": "GeoNames import"
+        "import": "GeoNames import",
+        "import_requested": "GeoNames import queued",
+        "import_cancelled": "GeoNames import job cancelled",
+        "city_activated": "City activated",
+        "city_updated": "City changed",
+        "city_linked": "City linked to GeoNames",
+        "district_created": "District added",
+        "district_updated": "District changed",
+        "country_created": "Country created",
+        "country_updated": "Country changed"
       }
     },
     "objects": {
@@ -720,7 +988,12 @@
       "approval": "approval request",
       "geonames_import": "GeoNames import",
       "city": "city",
-      "staff_keys": "staff keys"
+      "staff_keys": "staff keys",
+      "geonames_import_job": "GeoNames import job",
+      "country": "country",
+      "district": "district",
+      "feature_flag": "feature flag",
+      "app_versions": "app versions"
     },
     "details": {
       "show": "Details",
@@ -746,5 +1019,449 @@
       "period_hint": "Dates use your local time, both days inclusive.",
       "apply": "Apply"
     }
+  },
+  "flags": {
+    "subscriptions": {
+      "title": "Subscriptions",
+      "note": "Paid plans for players and captains"
+    },
+    "economy": {
+      "title": "Economy",
+      "note": "Points, credits, cosmetics"
+    },
+    "lootboxes": {
+      "title": "Loot boxes",
+      "note": "Loot boxes as a quest reward"
+    },
+    "predictions": {
+      "title": "Predictions",
+      "note": "Match predictions for points"
+    },
+    "competitions": {
+      "title": "Tournaments",
+      "note": "Tournaments between teams"
+    },
+    "city_tables": {
+      "title": "City tables",
+      "note": "City tables and rankings"
+    },
+    "challenges": {
+      "title": "Challenges",
+      "note": "Challenges between teams"
+    },
+    "match_comments": {
+      "title": "Comments",
+      "note": "Comments under a match"
+    },
+    "payment_flags": {
+      "title": "Payment flags",
+      "note": "Flags for disputed rent settlements"
+    },
+    "ads": {
+      "title": "Ads",
+      "note": "Ad placements"
+    },
+    "gk_rotation": {
+      "title": "Rotating goalkeeper",
+      "note": "The goalkeeper changes during the match"
+    }
+  },
+  "flagsPage": {
+    "subtitle": "A feature is turned on for a whole city",
+    "search": "City",
+    "status": "City status",
+    "statuses": {
+      "all": "All",
+      "live": "Live",
+      "pilot": "Pilot",
+      "waitlist": "Waitlist"
+    },
+    "label": "Feature flags by city",
+    "corner": "Feature",
+    "everywhere": "Everywhere",
+    "everywhere_label": "{flag}: everywhere",
+    "city_label": "{flag}: {city}",
+    "no_title": "no label",
+    "on_everywhere": "on everywhere",
+    "limit": "over 1000 cities — turn it on everywhere",
+    "cities_count": "Cities: {count}",
+    "capped": "Showing the first {count} cities — narrow the search",
+    "no_cities": "No cities match the filter",
+    "note": "A flag turns a feature on for a city, not for a percentage of users: everyone in a city plays by the same rules, otherwise a captain and a player would see different things and argue.",
+    "empty_title": "No flags",
+    "empty_text": "Flags appear together with server features",
+    "stale": "The flag was changed — data refreshed",
+    "toast": {
+      "city_on": "“{flag}” on: {city}",
+      "city_off": "“{flag}” off: {city}",
+      "all_on": "“{flag}” on everywhere",
+      "all_off": "“{flag}” off everywhere"
+    },
+    "confirm": {
+      "city_on": "Turn on “{flag}”: {city}?",
+      "city_off": "Turn off “{flag}”: {city}?",
+      "all_on": "Turn on “{flag}” everywhere?",
+      "all_off": "Turn off “{flag}” everywhere?",
+      "text": "Players in the city will see the change right away.",
+      "on": "Turn on",
+      "off": "Turn off"
+    },
+    "state": {
+      "everywhere": "Everywhere",
+      "cities": "{count, plural, one {In # city} other {In # cities}}",
+      "off": "Off"
+    },
+    "cities": "Cities: {flag}",
+    "open_cities": "Cities"
+  },
+  "geo": {
+    "status": {
+      "waitlist": "waitlist",
+      "pilot": "pilot",
+      "live": "live",
+      "unknown": "—"
+    },
+    "countries": {
+      "enabled": "enabled",
+      "disabled": "disabled",
+      "subtitle": "Country rules: currency, language, phone code, week and age thresholds. A country's cities are visible in the apps when it is enabled.",
+      "table_label": "Countries",
+      "columns": {
+        "code": "Code",
+        "name": "Name",
+        "currency": "Currency",
+        "locale": "Language",
+        "prefix": "Phone code",
+        "week": "Week starts",
+        "ages": "Ages",
+        "enabled": "Enabled",
+        "open_cities": "Open cities",
+        "actions": "Actions"
+      },
+      "ages_value": "{min} / {majority}",
+      "switch_label": "{name}: enabled",
+      "add": "Add country",
+      "edit": "Edit",
+      "edit_label": "Edit: {name}",
+      "open": "Open",
+      "open_label": "Open: {name}",
+      "empty_title": "No countries yet",
+      "empty_text": "Add the first country — a second staff member will check its rules.",
+      "enabled_toast": "Country “{name}” enabled",
+      "disabled_toast": "Country “{name}” disabled",
+      "unknown": "—",
+      "weekday": {
+        "1": "Monday",
+        "2": "Tuesday",
+        "3": "Wednesday",
+        "4": "Thursday",
+        "5": "Friday",
+        "6": "Saturday",
+        "7": "Sunday"
+      },
+      "disable": {
+        "title": "Disable {name}?",
+        "text": "The country's cities will disappear from the app. A second staff member confirms disabling; until then the country stays enabled.",
+        "open_cities": "Open cities in the country: {count}",
+        "confirm": "Disable",
+        "requested": "Disabling “{name}” sent for approval"
+      },
+      "drawer": {
+        "title_new": "New country",
+        "title_edit": "{name} ({code})",
+        "not_found": "Country not found",
+        "not_found_text": "There is no country with code {code} in the directory.",
+        "text_new": "A second staff member will approve the new country after checking the currency and ages. It will appear in the table once approved.",
+        "text_edit": "Phone code, week and names change immediately. If the edit touches the currency or ages, all of it goes for approval.",
+        "code": "Country code (ISO 3166-1)",
+        "code_hint": "Two Latin letters, e.g. KZ",
+        "name_ru": "Name in Russian",
+        "name_en": "Name in English",
+        "locale": "Country language",
+        "locale_hint": "Canonical city names are in it. Set on creation and never changed.",
+        "locale_fixed": "Country language: {locale} — set on creation.",
+        "prefix": "Phone code",
+        "prefix_hint": "“+” and 1–4 digits, e.g. +7",
+        "week": "First day of the week",
+        "rules_title": "Country rules",
+        "source_hint": "A person enters the thresholds and currency, checking the country's law.",
+        "dual": "Change requires two people",
+        "currency": "Currency (ISO 4217)",
+        "currency_placeholder": "Choose a currency",
+        "min_age": "Minimum sign-up age",
+        "majority": "Age of majority",
+        "enable_now": "Enable the country right after approval",
+        "saved": "Country “{name}” saved"
+      }
+    },
+    "cities": {
+      "subtitle": "Waitlist, pilot and live cities",
+      "label": "Cities",
+      "search": "City name",
+      "status_filter": "Status",
+      "status_all": "All",
+      "statuses": {
+        "live": "Live",
+        "pilot": "Pilot",
+        "waitlist": "Waitlist"
+      },
+      "country_filter": "Country",
+      "country_all": "All countries",
+      "region_filter": "Region",
+      "region_all": "All regions",
+      "population": "residents",
+      "districts": "{count, plural, one {district} other {districts}}",
+      "country_disabled": "country disabled",
+      "no_region": "no region",
+      "open": "Open",
+      "open_label": "Open: {name}",
+      "empty_title": "No cities yet",
+      "empty_text": "Activate the first city from the GeoNames directory."
+    },
+    "activate": {
+      "open": "Activate city",
+      "title": "Activate city",
+      "text": "Find a place in the GeoNames directory, check the country and region and choose a status. The city appears in the apps once its country is enabled.",
+      "places_label": "GeoNames places",
+      "search": "Place name",
+      "place_country": "Place country",
+      "place_country_all": "All countries",
+      "prompt": "Type a place name",
+      "prompt_text": "Search matches the start of the name in Russian, English or Latin script.",
+      "choose": "Choose",
+      "choose_label": "Choose {name}",
+      "already": "already added",
+      "open_city": "Open city",
+      "open_city_label": "Open city {name}",
+      "place": "Place",
+      "place_value": "{name} · {region} · {country}",
+      "place_value_no_region": "{name} · {country}",
+      "change_place": "Another place",
+      "country": "City country",
+      "country_hint": "Defaults to the place country. Only enabled countries are listed.",
+      "country_off": "{name} (disabled)",
+      "region": "Region",
+      "region_default": "From GeoNames: {region}",
+      "region_default_unknown": "From GeoNames",
+      "region_none": "No region",
+      "region_hint": "The GeoNames region is created automatically if it does not exist yet.",
+      "region_hint_override": "Country changed: the place region does not belong to it. Without a choice the city has no region.",
+      "status": "Status",
+      "submit": "Activate",
+      "success": "City “{name}” activated",
+      "find_city": "Find the city in the list"
+    },
+    "city": {
+      "not_found_title": "City not found",
+      "not_found_text": "It is not in the directory or the address is outdated.",
+      "facts": {
+        "label": "City details",
+        "country": "Country",
+        "country_value": "{name} ({code})",
+        "country_disabled": "disabled",
+        "region": "Region",
+        "no_region": "not set",
+        "population": "Population",
+        "geoname": "GeoNames",
+        "not_linked": "not linked",
+        "timezone": "Time zone",
+        "slug": "Address",
+        "copy_slug": "Copy: address",
+        "copy_geoname": "Copy: GeoNames ID"
+      },
+      "link_open": "Link to GeoNames",
+      "status": {
+        "title": "Status",
+        "label": "City status",
+        "saved": "Status saved",
+        "unknown_error": "This admin version does not know the status — choose one from the list"
+      },
+      "slug": {
+        "title": "Web address",
+        "label": "Address (slug)",
+        "hint": "Lowercase Latin letters, digits, hyphens between parts, up to 100 characters. The old address keeps working.",
+        "saved": "Address saved",
+        "history": "Previous addresses",
+        "replaced": "replaced {when}",
+        "history_empty": "The address has not changed"
+      },
+      "names": {
+        "title": "Names",
+        "canonical": "primary",
+        "empty": "no translation",
+        "saved": "Names saved",
+        "delete": "Delete translation",
+        "delete_label": "Delete translation: {locale}",
+        "confirm_title": "Delete the translation “{name}”?",
+        "confirm_text": "Apps in this language will show the name in the country language.",
+        "confirm_word": "DELETE",
+        "deleted": "Translation deleted",
+        "delete_hint": "An empty name is not saved. To delete the translation, use “Delete translation”.",
+        "locales": {
+          "ru": "Русский",
+          "en": "English"
+        }
+      }
+    },
+    "districts": {
+      "title": "Districts",
+      "label": "City districts",
+      "columns": {
+        "name": "District",
+        "state": "State",
+        "actions": "Actions"
+      },
+      "active": "active",
+      "archived": "archived",
+      "add_name": "New district",
+      "add": "Add district",
+      "added": "District “{name}” added",
+      "rename": "Rename",
+      "rename_label": "Rename: {name}",
+      "rename_title": "Rename district",
+      "rename_name": "Name",
+      "renamed": "District renamed",
+      "archive_label": "Archive: {name}",
+      "restore_label": "Restore: {name}",
+      "archived_toast": "District “{name}” archived",
+      "restored_toast": "District “{name}” restored",
+      "empty_title": "No districts",
+      "empty_text": "Districts help players find matches nearby."
+    },
+    "link": {
+      "title": "Link to GeoNames",
+      "text": "Find the city place in the GeoNames directory. Linking adds missing name translations; population and coordinates do not change.",
+      "chosen": "Place",
+      "submit": "Link",
+      "linked": "City linked to GeoNames"
+    },
+    "imports": {
+      "subtitle": "GeoNames places by country: run, job progress and city reconciliation",
+      "start": "Run import",
+      "keywords": "загрузка обновить справочник места run start import geonames",
+      "label": "Import log",
+      "columns": {
+        "country": "Country",
+        "status": "Status",
+        "who": "Started by",
+        "started": "Started",
+        "duration": "Duration",
+        "counts": "Result",
+        "report": "Report"
+      },
+      "statuses": {
+        "running": "running",
+        "succeeded": "succeeded",
+        "failed": "failed",
+        "unknown": "—"
+      },
+      "who": {
+        "operator": "server operator",
+        "staff": "staff member"
+      },
+      "counts": "places: {places} · names: {names}",
+      "counts_removed": "removed: {removed} · missing: {missing}",
+      "running": "running",
+      "report_show": "Report",
+      "country_filter": "Country",
+      "country_all": "All countries",
+      "empty_title": "No imports yet",
+      "empty_text": "A country import adds GeoNames places for activating cities.",
+      "busy_operator": "An import of {country} is already running — started by the server operator. Its row is highlighted in the log.",
+      "dialog": {
+        "title": "Run GeoNames import",
+        "text": "The import refreshes the country’s places and names and reconciles existing cities. It runs in the background for up to 30 minutes; progress is shown in the job row.",
+        "country": "Country",
+        "country_placeholder": "Choose a country",
+        "country_off": "{name} (disabled)",
+        "submit": "Run"
+      },
+      "started": "Import of {country} queued",
+      "already": "Import of {country} is already queued — showing its job",
+      "job": {
+        "label": "Import job",
+        "title": "Job {id}",
+        "copy": "Copy: job id",
+        "states": {
+          "queued": "queued",
+          "running": "running",
+          "completed": "completed",
+          "failed": "discarded",
+          "cancelled": "cancelled",
+          "unknown": "—"
+        },
+        "created": "Queued <time></time>",
+        "attempt": "Attempt {attempt} of {max}",
+        "polling": "Status updates automatically",
+        "waiting_worker": "The job is waiting for a worker — if there is none (dev stand), the import will not start.",
+        "stalled": "The job status has not changed for a while — polling stopped.",
+        "stale": "The job status did not update — we will try again.",
+        "check": "Check again",
+        "cancel_label": "Cancel job {id}",
+        "cancelled": "Import job cancelled",
+        "not_cancellable": "The job is already running or finished — it cannot be cancelled. Status refreshed.",
+        "not_found": "The job is gone — it finished and was removed from the queue. Log refreshed.",
+        "open_report": "Open report",
+        "hide": "Hide job"
+      },
+      "report": {
+        "title": "Import report {country}",
+        "label": "City reconciliation",
+        "none": "No reconciliation report: the import is running or failed before reconciling.",
+        "error": "Reason: {error}",
+        "groups": {
+          "linked": "Linked automatically",
+          "ambiguous": "Several matching places",
+          "conflict": "Conflict — check manually",
+          "not_found": "No matching place",
+          "missing": "Places gone from the source"
+        },
+        "empty_group": "None",
+        "skipped": "Places skipped without a time zone: {count}",
+        "linked_item": "{slug} → GeoNames {geoname}",
+        "candidate": "{name} · {region}",
+        "no_region": "region unknown",
+        "population": "population: {population}",
+        "no_candidates": "No matching places",
+        "link": "Link",
+        "link_label": "Link {city} to place {place}",
+        "linked_mark": "linked",
+        "open_city": "Open city {slug}"
+      }
+    }
+  },
+  "versions": {
+    "subtitle": "Minimum and recommended versions of the native app and the store link. Apps pick up new values within a minute.",
+    "platforms": {
+      "ios": "iOS",
+      "android": "Android"
+    },
+    "not_set": "not set",
+    "updated": "Changed <time></time>",
+    "min": "Minimum version",
+    "min_hint": "MAJOR.MINOR.PATCH, e.g. 1.4.0. Below it the app requires an update.",
+    "recommended": "Recommended version",
+    "recommended_hint": "Not lower than the minimum. Below it the app suggests an update.",
+    "store": "Store link",
+    "store_hint": {
+      "ios": "App Store page: https://apps.apple.com/…",
+      "android": "Google Play page: https://play.google.com/…"
+    },
+    "saved": "{platform} versions saved",
+    "no_changes": "No changes",
+    "raise": {
+      "title": "Raise the {platform} minimum version to {version}?",
+      "text": "Clients below {version} will be required to update: the app cannot be used without updating.",
+      "confirm": "Raise"
+    }
+  },
+  "glossary": {
+    "dual_approval": "The action runs only after a second staff member with the same permission approves it: one person cannot do it alone.",
+    "scoped": "The permission applies only to the cities assigned to the staff member: a moderator sees and changes their own cities.",
+    "city_status": "“Waitlist” — no games in the city yet, players are invited to become a captain; “pilot” and “live” — cities with games.",
+    "geonames": "An open gazetteer of places worldwide: a city is created from its data — name, coordinates, population, time zone.",
+    "slug": "The part of the city page link on the website: lowercase Latin letters, digits and hyphens only.",
+    "recovery_codes": "One-time sign-in codes for when the authenticator app is not at hand: each works once.",
+    "feature_flag": "A switch that turns a feature on everywhere or in selected cities without releasing a new app version."
   }
 }

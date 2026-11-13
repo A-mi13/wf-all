@@ -45,11 +45,13 @@ var Schema = map[string]Object{
 	// ключи идемпотентности admin-api: права только admin (I-1)
 	"staff_idempotency_keys": table("platform"),
 	"rate_limits":            table("platform"),
-	"humancheck_spent":       table("platform"),
-	"feature_flags":          table("platform"),
-	"app_versions":           table("platform"),
-	"approvals":              table("platform"), // подтверждение вдвоём (D2)
-	"goose_db_version":       table("platform"),
+	// лимиты admin-api: права только admin (план B, R2)
+	"staff_rate_limits": table("platform"),
+	"humancheck_spent":  table("platform"),
+	"feature_flags":     table("platform"),
+	"app_versions":      table("platform"),
+	"approvals":         table("platform"), // подтверждение вдвоём (D2)
+	"goose_db_version":  table("platform"),
 
 	"normalize_text":           {Function, "platform", true},
 	"immutable_unaccent":       {Function, "platform", true},

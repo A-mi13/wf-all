@@ -26,6 +26,9 @@ export class ApiError extends Error {
   readonly fields?: FieldError[];
   readonly retryAfter?: number;
   readonly attemptsLeft?: number;
+  // Только у 409 geo.import_in_progress: id задачи импорта страны, что уже в очереди или идёт (план B, Task 20, I-2) —
+  // экран показывает её строку и «Отменить» без памяти клиента.
+  readonly jobId?: number;
   // 401 auth.reauth_required запроса с noReplay(): разблокировка ПРОШЛА, но запрос не повторён —
   // экран просит новый код («Вход подтверждён…»). Без метки (разблокировку отклонили: выход,
   // блокировка) экран молчит — страница уходит на вход.
@@ -37,6 +40,7 @@ export class ApiError extends Error {
     fields?: FieldError[];
     retryAfter?: number;
     attemptsLeft?: number;
+    jobId?: number;
     replaySkipped?: boolean;
   }) {
     super(`${init.status} ${init.code}`);
@@ -46,6 +50,7 @@ export class ApiError extends Error {
     if (init.fields) this.fields = init.fields;
     if (init.retryAfter !== undefined) this.retryAfter = init.retryAfter;
     if (init.attemptsLeft !== undefined) this.attemptsLeft = init.attemptsLeft;
+    if (init.jobId !== undefined) this.jobId = init.jobId;
     if (init.replaySkipped) this.replaySkipped = true;
   }
 }
@@ -95,6 +100,9 @@ export function noReplay(): { headers: Record<string, string> } {
 
 const nonNegative = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
+// id задачи очереди (int64): только безопасное положительное целое — иначе адрес ?job= и ключ кэша разошлись бы
+const jobIdOf = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : undefined;
 
 async function readProblem(res: Response): Promise<Partial<Problem> | null> {
   try {
@@ -121,6 +129,7 @@ async function toApiError(res: Response, replaySkipped = false): Promise<ApiErro
     fields,
     retryAfter: nonNegative(header),
     attemptsLeft: nonNegative(p?.attempts_left),
+    jobId: jobIdOf(p?.job_id),
     replaySkipped,
   });
 }

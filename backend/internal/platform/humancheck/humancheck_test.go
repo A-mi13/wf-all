@@ -14,6 +14,7 @@ import (
 )
 
 func TestRequire(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pow := newPoW(t, dbtest.NewPoolsAs(t, "api"), clocktest.New(start), newKey(t))
 
@@ -42,6 +43,7 @@ func TestRequire(t *testing.T) {
 }
 
 func TestMiddlewareCarriesSolution(t *testing.T) {
+	t.Parallel()
 	pow := newPoW(t, dbtest.NewPoolsAs(t, "api"), clocktest.New(start), newKey(t))
 	ch, _ := pow.NewChallenge(context.Background())
 	s := solve(t, ch)

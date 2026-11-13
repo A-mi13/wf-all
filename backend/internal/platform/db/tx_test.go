@@ -44,6 +44,7 @@ func noLeakedConns(t *testing.T, pool *pgxpool.Pool) {
 }
 
 func TestInTxCommitsAndExposesTx(t *testing.T) {
+	t.Parallel()
 	ctx, pool, rows := probe(t)
 	err := db.InTx(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
 		got, ok := db.TxFrom(ctx)
@@ -59,6 +60,7 @@ func TestInTxCommitsAndExposesTx(t *testing.T) {
 }
 
 func TestInTxRollsBackOnError(t *testing.T) {
+	t.Parallel()
 	ctx, pool, rows := probe(t)
 	boom := errors.New("boom")
 	err := db.InTx(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
@@ -74,6 +76,7 @@ func TestInTxRollsBackOnError(t *testing.T) {
 }
 
 func TestInTxRollsBackOnPanicAndRepanics(t *testing.T) {
+	t.Parallel()
 	ctx, pool, rows := probe(t)
 	func() {
 		defer func() {
@@ -97,6 +100,7 @@ func TestInTxRollsBackOnPanicAndRepanics(t *testing.T) {
 // Спека §4.4: вложенный вызов не присоединяется к транзакции из ctx, а открывает свою —
 // её откат не трогает внешнюю, и TxFrom внутри видит внутреннюю.
 func TestNestedInTxOpensOwnTransaction(t *testing.T) {
+	t.Parallel()
 	ctx, pool, rows := probe(t)
 	errInner := errors.New("откатить внутреннюю")
 	err := db.InTx(ctx, pool, func(ctx context.Context, outer pgx.Tx) error {
@@ -122,6 +126,7 @@ func TestNestedInTxOpensOwnTransaction(t *testing.T) {
 
 // Отменённый ctx не должен оставлять транзакцию висеть: откат идёт и после отмены.
 func TestInTxRollsBackWhenContextCancelled(t *testing.T) {
+	t.Parallel()
 	_, pool, rows := probe(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	err := db.InTx(ctx, pool, func(ctx context.Context, tx pgx.Tx) error {
@@ -140,6 +145,7 @@ func TestInTxRollsBackWhenContextCancelled(t *testing.T) {
 // runtime.Goexit в колбэке (t.FailNow в тесте) — не паника и не возврат: транзакцию всё равно
 // нужно откатить, иначе соединение остаётся занятым навсегда.
 func TestInTxRollsBackOnGoexit(t *testing.T) {
+	t.Parallel()
 	ctx, pool, rows := probe(t)
 	done := make(chan struct{})
 	go func() {
@@ -160,6 +166,7 @@ func TestInTxRollsBackOnGoexit(t *testing.T) {
 }
 
 func TestTxFromEmptyContext(t *testing.T) {
+	t.Parallel()
 	if _, ok := db.TxFrom(context.Background()); ok {
 		t.Fatal("в пустом ctx нашлась транзакция")
 	}
@@ -167,6 +174,7 @@ func TestTxFromEmptyContext(t *testing.T) {
 
 // Хук идемпотентности исполняется в той же транзакции до fn: его запись живёт и умирает с ней.
 func TestInTxRunsHookFirstInSameTx(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := dbtest.NewPool(t)
 	if _, err := pool.Exec(ctx, "CREATE TABLE hook_probe (v int)"); err != nil {
@@ -207,6 +215,7 @@ func TestInTxRunsHookFirstInSameTx(t *testing.T) {
 }
 
 func TestInTxHookErrorSkipsFn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := dbtest.NewPool(t)
 	errHook := errors.New("ключ занят")
@@ -222,6 +231,7 @@ func TestInTxHookErrorSkipsFn(t *testing.T) {
 // after хука сообщает исход транзакции: true — только после успешного Commit (запись уже видна
 // другим соединениям), иначе false — ровно один вызов на транзакцию при любом исходе.
 func TestInTxHookAfterReportsOutcome(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("boom")
 	cases := []struct {
 		name    string

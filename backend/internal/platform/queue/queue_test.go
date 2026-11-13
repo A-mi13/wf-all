@@ -19,6 +19,7 @@ import (
 // Спека §9.1: семь очередей, конкурентность каждой — из конфига; очереди default нет —
 // задача без очереди не должна молча повиснуть в никем не обслуживаемой default.
 func TestConfigHasSpecQueues(t *testing.T) {
+	t.Parallel()
 	c := config.Queues{Events: 1, Lifecycle: 2, Notify: 3, Mail: 4, Stats: 5, Media: 6, Maintenance: 7}
 	got := queue.Config(c)
 	want := map[string]int{
@@ -36,6 +37,7 @@ func TestConfigHasSpecQueues(t *testing.T) {
 }
 
 func TestPingGoesToMaintenance(t *testing.T) {
+	t.Parallel()
 	if q := (queue.PingArgs{}).InsertOpts().Queue; q != queue.Maintenance {
 		t.Fatalf("ping в очереди %q", q)
 	}
@@ -43,6 +45,7 @@ func TestPingGoesToMaintenance(t *testing.T) {
 
 // Сквозная проверка: задача ставится в очередь в Postgres и выполняется воркером.
 func TestPingJobIsProcessed(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t) // клон базы под нагрузкой небыстр — не в счёт бюджета задачи
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -133,6 +136,7 @@ func startHolding(t *testing.T, holdMS int) (*river.Client[pgx.Tx], *holdWorker)
 
 // Мягкая остановка (SIGTERM воркера): идущая задача доделывается, её ctx не отменяется.
 func TestStopLetsRunningJobFinish(t *testing.T) {
+	t.Parallel()
 	client, w := startHolding(t, 400)
 	if err := queue.Stop(context.Background(), client, 10*time.Second); err != nil {
 		t.Fatalf("мягкая остановка: %v", err)
@@ -146,6 +150,7 @@ func TestStopLetsRunningJobFinish(t *testing.T) {
 // Задача не уложилась в мягкий срок — её ctx отменяется, Stop возвращается в пределах срока
 // жёсткой остановки и сообщает, что мягкая не удалась.
 func TestStopCancelsJobAfterTimeout(t *testing.T) {
+	t.Parallel()
 	client, w := startHolding(t, 0)
 	began := time.Now()
 	err := queue.Stop(context.Background(), client, 200*time.Millisecond)

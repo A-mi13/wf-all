@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -41,6 +42,9 @@ type Problem struct {
 	// или текущий пароль (admin-api, спека сотрудников §7). Указатель: 0 — вход закрыт, поле
 	// уходит; nil — поля нет.
 	AttemptsLeft *int `json:"attempts_left,omitempty"`
+	// JobID — id задачи импорта, которая уже стоит в очереди или выполняется (409 geo.import_in_progress админки,
+	// R26 плана B): экран находит её и предлагает отменить без памяти клиента. nil — поля нет.
+	JobID *int64 `json:"job_id,omitempty"`
 }
 
 func WriteProblem(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
@@ -82,11 +86,24 @@ func NewFieldError(field, code string) *Error {
 		Errors: []FieldError{{Field: field, Code: code}}}}
 }
 
+// NewFieldErrors — 400 validation.failed со всеми нарушенными полями сразу (правила записи сверх схемы, например
+// appversion.Validate: админка подсвечивает каждое поле). Пустой список — тоже 400 без полей.
+func NewFieldErrors(errs []FieldError) *Error {
+	return &Error{p: Problem{Status: http.StatusBadRequest, Code: CodeValidationFailed, Errors: slices.Clone(errs)}}
+}
+
 // WithAttemptsLeft — та же ошибка с attempts_left = n (неверный код или пароль): новая *Error,
 // исходная не меняется — общие переменные ошибок не получают чужой счётчик.
 func (e *Error) WithAttemptsLeft(n int) *Error {
 	p := e.p
 	p.AttemptsLeft = &n
+	return &Error{p: p}
+}
+
+// WithJobID — та же ошибка с job_id = id (R26): новая *Error, исходная не меняется.
+func (e *Error) WithJobID(id int64) *Error {
+	p := e.p
+	p.JobID = &id
 	return &Error{p: p}
 }
 

@@ -13,7 +13,9 @@ import (
 
 const cleanupBatch = 1000
 
-// CleanupArgs — чистка строк rate_limits с tat в прошлом (спека §9.3): они ничего не ограничивают.
+// CleanupArgs — чистка строк rate_limits с tat в прошлом (спека §9.3): они ничего не ограничивают. Лимиты
+// admin-api (staff_rate_limits) чистит не воркер, а тикер admin-api — DeleteExpired(…, Staff): у воркера на
+// них прав нет.
 type CleanupArgs struct {
 	V int `json:"v"`
 }
@@ -26,27 +28,20 @@ func (CleanupArgs) InsertOpts() river.InsertOpts {
 
 type CleanupWorker struct {
 	river.WorkerDefaults[CleanupArgs]
-	q     *ratelimitdb.Queries
+	db    ratelimitdb.DBTX
 	clock clock.Clock
 }
 
 func NewCleanupWorker(db ratelimitdb.DBTX, c clock.Clock) *CleanupWorker {
-	return &CleanupWorker{q: ratelimitdb.New(db), clock: c}
+	return &CleanupWorker{db: db, clock: c}
 }
 
 func (*CleanupWorker) Timeout(*river.Job[CleanupArgs]) time.Duration { return 5 * time.Minute }
 
 // Work удаляет пачками, пока пачка полная: каждая — своя короткая транзакция.
 func (w *CleanupWorker) Work(ctx context.Context, _ *river.Job[CleanupArgs]) error {
-	for {
-		n, err := w.q.DeleteExpired(ctx, ratelimitdb.DeleteExpiredParams{Now: w.clock.Now(), Batch: cleanupBatch})
-		if err != nil {
-			return err
-		}
-		if n < cleanupBatch {
-			return nil
-		}
-	}
+	_, err := DeleteExpired(ctx, w.db, w.clock, Players)
+	return err
 }
 
 // CleanupJob — каждые 10 минут и при старте воркера.

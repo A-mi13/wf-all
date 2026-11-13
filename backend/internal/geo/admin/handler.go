@@ -1,26 +1,23 @@
 // Package admin — операции модуля geo в админке (тег geo контракта admin). План A — список городов
-// для выбора городов модератора (D24, P28, M10); план B расширяет.
+// для выбора городов модератора (D24, P28, M10); план B — чтения (read.go, places.go, imports_read.go) и
+// сценарии записи (activate.go, city.go, district.go, country.go, imports.go).
 package admin
 
 import (
-	"context"
 	"errors"
+	"log/slog"
 	"net/http"
-	"slices"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/geo"
-	"wf/backend/internal/httpapi/admin/oapi"
-	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/geo/internal/app"
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/i18n"
 )
 
-// permCitiesRead — право чтения городов (perm, §2.5): модератору — scoped, только его города.
-const permCitiesRead = "geo.cities.read"
-
-// Заголовки ответа списка (контракт listGeoCities).
+// Заголовки ответов чтения (контракт: CachePrivate, Vary, ContentLanguage).
 const (
 	cachePrivate = "private, no-store" // ответ зависит от сотрудника и его городов
 	varyLanguage = "Accept-Language"   // названия зависят от языка запроса
@@ -28,82 +25,98 @@ const (
 
 // Handler — операции тега geo; встраивается в internal/httpapi/admin.Server указателем. Собирается New;
 // нулевой Handler (тесты конвейера; cmd/admin-api собирает настоящий) отвечает 501 http.not_implemented.
-type Handler struct{ svc geo.Service }
+type Handler struct {
+	read  *app.AdminReader // чтения админки (план B, Task 9); nil — 501
+	admin *app.Admin       // сценарии с записью (Task 10–14); nil — 501
+}
 
-// New — хендлер поверх чтения справочника (geo.New на пуле admin-api).
-func New(svc geo.Service) *Handler { return &Handler{svc: svc} }
+// Deps — зависимости сценариев админки geo на пуле admin-api (план B): пул, часы, клиент River для импорта
+// (Task 14; активации не нужен) и журнал. Task 16 собирает их в cmd/admin-api.
+type Deps struct {
+	Pool  *pgxpool.Pool
+	Clock clock.Clock
+	River app.RiverInserter
+	Log   *slog.Logger
+}
+
+// New — хендлер сценариев админки на d.Pool. Первый параметр — сервис чтения справочника по сигнатуре сборки
+// плана B (Task 16: New(svc, Deps)); с Task 9 чтения админки идут через AdminReader, сервис не используется (ревью G5
+// m6 — поле убрано). Без пула операции плана B отвечают 501, без часов — 501 операции с записью (как нулевой Handler).
+func New(_ geo.Service, d Deps) *Handler {
+	h := &Handler{}
+	if d.Pool != nil {
+		h.read = app.NewAdminReader(d.Pool)
+		if d.Clock != nil {
+			h.admin = app.NewAdmin(app.AdminDeps{Pool: d.Pool, Clock: d.Clock, River: d.River, Log: d.Log})
+		}
+	}
+	return h
+}
+
+// writer — сценарии с записью; nil — хендлер без пула или часов: 501.
+func (h *Handler) writer() (*app.Admin, error) {
+	if h == nil || h.admin == nil {
+		return nil, errNotImplemented
+	}
+	return h.admin, nil
+}
 
 var (
 	errNotImplemented  = httpx.NewError(http.StatusNotImplemented, httpx.CodeNotImplemented)
 	errUnauthenticated = httpx.NewError(http.StatusUnauthorized, httpx.CodeUnauthenticated)
 	errForbidden       = httpx.NewError(http.StatusForbidden, httpx.CodeForbidden)
+	errBadQuery        = httpx.NewFieldError("query.q", "minLength")
+	errNoBody          = httpx.NewFieldError("body", "required") // тело обязательно — валидатор отверг бы раньше
 )
 
-// ListGeoCities — GET /v1/geo/cities: города всех статусов; q — начало названия, ids — только эти (P28).
-// Модератору (право scoped) — только его города: ids пересекаются с ними, без ids — они сами; скоуп — по
-// GrantScoped, а не по len(CityIDs): модератор без городов получает пустой список, не весь справочник (M10).
-func (h *Handler) ListGeoCities(ctx context.Context, req oapi.ListGeoCitiesRequestObject) (oapi.ListGeoCitiesResponseObject, error) {
-	if h == nil || h.svc == nil { // нулевой хендлер или сервер без geo (Server{})
+// reader — чтения админки; nil — хендлер не собран (нулевой или без Deps.Pool): 501.
+func (h *Handler) reader() (*app.AdminReader, error) {
+	if h == nil || h.read == nil {
 		return nil, errNotImplemented
 	}
-	s, ok := auth.StaffFrom(ctx)
-	if !ok {
-		// без сессии до хендлера не доходят (валидатор), это защита в глубину
-		return nil, errUnauthenticated
-	}
-	locale, lang := negotiate(req.Params.AcceptLanguage)
-	p := geo.ListParams{Limit: req.Params.Limit, Locale: locale}
-	if req.Params.Q != nil {
-		p.Q = *req.Params.Q
-	}
-	if req.Params.Cursor != nil {
-		p.Cursor = *req.Params.Cursor
-	}
-	if req.Params.Ids != nil {
-		p.IDs = append(make([]uuid.UUID, 0, len(*req.Params.Ids)), *req.Params.Ids...)
-	}
-	switch s.Grant(permCitiesRead) {
-	case auth.GrantDeny:
-		return nil, errForbidden
-	case auth.GrantScoped:
-		p.IDs = scope(p.IDs, s.CityIDs)
-	}
-	pg, err := h.svc.ListCities(ctx, p)
-	if errors.Is(err, geo.ErrBadQuery) {
-		// q прошёл схему (1–100 символов), но после normalize_text пуст: «!!!», одни пробелы
-		return nil, httpx.NewFieldError("query.q", "minLength")
-	}
-	if err != nil {
-		return nil, err // в том числе page.ErrBadCursor — 400 по query.cursor
-	}
-	body := oapi.GeoCityPage{Items: make([]oapi.GeoCity, 0, len(pg.Items))}
-	for _, c := range pg.Items {
-		out := oapi.GeoCity{Id: c.ID, Slug: c.Slug, Name: c.Name, Status: oapi.CityStatus(c.Status), CountryCode: c.Country.Code}
-		if c.Region != nil {
-			name := c.Region.Name
-			out.RegionName = &name
-		}
-		body.Items = append(body.Items, out)
-	}
-	if pg.Next != "" {
-		next := pg.Next
-		body.NextCursor = &next
-	}
-	return oapi.ListGeoCities200JSONResponse{Body: body, Headers: oapi.ListGeoCities200ResponseHeaders{
-		CacheControl: cachePrivate, Vary: varyLanguage, ContentLanguage: lang,
-	}}, nil
+	return h.read, nil
 }
 
-// scope — города модератора как фильтр списка: без запрошенных — все его города, с запрошенными — их
-// пересечение с его городами. Всегда не nil (пустой — ни одного города).
-func scope(requested, own []uuid.UUID) []uuid.UUID {
-	out := make([]uuid.UUID, 0, len(own))
-	for _, c := range own {
-		if requested == nil || slices.Contains(requested, c) {
-			out = append(out, c)
+// problems — ошибки модуля и их ответы (план B, Приложение 3; коды — geo/codes.go).
+var problems = []struct {
+	err    error
+	status int
+	code   string
+}{
+	{geo.ErrCityNotFound, http.StatusNotFound, geo.CodeCityNotFound},
+	{geo.ErrDistrictNotFound, http.StatusNotFound, geo.CodeDistrictNotFound},
+	{geo.ErrPlaceNotFound, http.StatusNotFound, geo.CodePlaceNotFound},
+	{geo.ErrCountryNotFound, http.StatusNotFound, geo.CodeCountryNotFound},
+	{geo.ErrImportNotFound, http.StatusNotFound, geo.CodeImportNotFound},
+	{geo.ErrImportJobNotFound, http.StatusNotFound, geo.CodeImportJobNotFound},
+	{geo.ErrCityAlreadyActive, http.StatusConflict, geo.CodeCityAlreadyActive},
+	{geo.ErrCityAlreadyLinked, http.StatusConflict, geo.CodeCityAlreadyLinked},
+	{geo.ErrSlugTaken, http.StatusConflict, geo.CodeSlugTaken},
+	{geo.ErrCountryExists, http.StatusConflict, geo.CodeCountryExists},
+	{geo.ErrImportInProgress, http.StatusConflict, geo.CodeImportInProgress},
+	{geo.ErrImportJobNotCancellable, http.StatusConflict, geo.CodeImportJobNotCancellable},
+	{geo.ErrDistrictNameTaken, http.StatusConflict, geo.CodeDistrictNameTaken},
+	{geo.ErrCountryNotEnabled, http.StatusUnprocessableEntity, geo.CodeCountryNotEnabled},
+	{geo.ErrRegionNotFound, http.StatusUnprocessableEntity, geo.CodeRegionNotFound},
+}
+
+// Problem — ответ на ошибку сценария geo: ошибка модуля — её код (Приложение 3), q пуст после нормализации —
+// 400 query.q minLength; прочее (page.ErrBadCursor и другие ProblemError, сбои) — как есть: WriteError ответит
+// их Problem или 500.
+func Problem(err error) error {
+	if errors.Is(err, geo.ErrBadQuery) {
+		return errBadQuery
+	}
+	// 409 geo.import_in_progress с задачей (R26): job_id — в тело Problem; импорт оператора — без него (ниже)
+	if ipe, ok := errors.AsType[*geo.ImportInProgressError](err); ok && ipe.JobID != nil {
+		return httpx.NewError(http.StatusConflict, geo.CodeImportInProgress).WithJobID(*ipe.JobID)
+	}
+	for _, p := range problems {
+		if errors.Is(err, p.err) {
+			return httpx.NewError(p.status, p.code)
 		}
 	}
-	return out
+	return err
 }
 
 // negotiate — язык ответа по Accept-Language (строки заголовка склеены конвейером, httpx.CombineHeaders).

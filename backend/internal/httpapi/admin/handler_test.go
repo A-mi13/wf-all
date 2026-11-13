@@ -15,6 +15,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
+	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/approvals"
@@ -44,6 +45,7 @@ func loginRequest() *http.Request {
 // Task 9a: контракт заморожен раньше сценариев — операция без хендлера проходит весь конвейер и
 // отвечает 501 http.not_implemented в формате Problem, как его описывает контракт.
 func TestStubAnswersNotImplementedThroughPipeline(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
@@ -55,12 +57,13 @@ func TestStubAnswersNotImplementedThroughPipeline(t *testing.T) {
 	}
 }
 
-// Все 33 операции плана A собраны в Server (операции platform — свои, staff и geo — встроенные
+// Все 54 операции (33 плана A и 21 плана B) собраны в Server (операции platform — свои, staff и geo — встроенные
 // хендлеры модулей). У нулевого Server{} (нулевые хендлеры — тесты конвейера; cmd/admin-api собирает
 // настоящие) каждая — через strict-middleware модуля staff, который подключает NewHandler, — отвечает 501
 // http.not_implemented: операции staff — из Middleware нулевого хендлера (Task 10a), остальные — проверка
 // нулевого хендлера geo и операций платформы.
 func TestServerStubsNotImplemented(t *testing.T) {
+	t.Parallel()
 	mw := (&staffadmin.Handler{}).Middleware()
 	v := reflect.ValueOf(admin.Server{})
 	n := 0
@@ -83,13 +86,14 @@ func TestServerStubsNotImplemented(t *testing.T) {
 			t.Errorf("%s: ответ %v, ошибка %v — ждали 501 http.not_implemented", m.Name, resp, err)
 		}
 	}
-	if n != 33 {
-		t.Fatalf("операций сервера %d, ждали 33", n)
+	if n != 54 {
+		t.Fatalf("операций сервера %d, ждали 54", n)
 	}
 }
 
 // Операция с сессией без входа — 401 auth.unauthenticated от валидатора, до хендлера.
 func TestSessionOperationRequiresLogin(t *testing.T) {
+	t.Parallel()
 	v := apitest.New(t, oapi.GetSpec)
 	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
@@ -103,6 +107,7 @@ func TestSessionOperationRequiresLogin(t *testing.T) {
 
 // Страж спеки §12.4: операцию с тегом <модуль> реализует хендлер этого модуля.
 func TestOperationsImplementedByTaggedModule(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +127,7 @@ func TestOperationsImplementedByTaggedModule(t *testing.T) {
 
 // Валидатор пропускает маршрут не из контракта — 404 отвечает роутер в формате Problem.
 func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
+	t.Parallel()
 	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
@@ -136,6 +142,7 @@ func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
 // Страж проводки: лимит тела и валидатор стоят в цепочке хендлера — тело больше
 // httpx.MaxBodyBytes отвергается до strict-хендлера, даже у операции без тела.
 func TestOversizedBodyIsRejected(t *testing.T) {
+	t.Parallel()
 	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +159,7 @@ func TestOversizedBodyIsRejected(t *testing.T) {
 // конвейера admin-api (httpx.AdminCommonCodes, спека сотрудников §5.1) и x-error-codes-common
 // контракта admin совпадают в обе стороны.
 func TestPlatformCodesDocumented(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -165,10 +173,42 @@ func TestPlatformCodesDocumented(t *testing.T) {
 	}
 }
 
-// Спека сотрудников §7: коды подтверждений (httpx.AdminApprovalCodes) и коды platform.* в
-// x-error-codes операций контракта admin совпадают в обе стороны — ни кода без документа, ни
-// документа без кода.
-func TestAdminApprovalCodesDocumented(t *testing.T) {
+// Спека сотрудников §7, план B (Task 7): коды platform.* в x-error-codes операций контракта admin —
+// ровно коды подтверждений и флагов (httpx.AdminApprovalCodes ∪ httpx.AdminFlagCodes), в обе стороны:
+// ни кода без документа, ни документа без кода.
+func TestAdminPlatformCodesDocumented(t *testing.T) {
+	t.Parallel()
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documented := documentedWithPrefix(t, spec, "platform.")
+	want := slices.Sorted(slices.Values(slices.Concat(httpx.AdminApprovalCodes, httpx.AdminFlagCodes)))
+	if !slices.Equal(documented, want) {
+		t.Fatalf("коды platform.* операций %v, httpx.AdminApprovalCodes ∪ AdminFlagCodes %v", documented, want)
+	}
+}
+
+// План B (Task 7, спека сотрудников §6.3 п.7): коды geo.* в x-error-codes операций контракта admin и
+// geo.AdminCodes совпадают в обе стороны.
+func TestGeoAdminCodesDocumented(t *testing.T) {
+	t.Parallel()
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documented := documentedWithPrefix(t, spec, "geo.")
+	if want := slices.Sorted(slices.Values(geo.AdminCodes)); !slices.Equal(documented, want) {
+		t.Fatalf("коды geo.* операций %v, geo.AdminCodes %v", documented, want)
+	}
+}
+
+// Спека сотрудников §6.3 п.7: у каждого кода x-error-codes операций контракта admin — префикс модуля,
+// у которого есть свой список кодов и страж сверки (staff. — TestStaffCodesDocumented, geo. —
+// TestGeoAdminCodesDocumented, platform. — TestAdminPlatformCodesDocumented), либо это общий код
+// платформы или конвейера. Код нового модуля без своего списка и стража сюда не пройдёт.
+func TestAdminCodePrefixesKnown(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -177,25 +217,59 @@ func TestAdminApprovalCodesDocumented(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if bad := unknownCodePrefixes(byOp); len(bad) != 0 {
+		t.Fatalf("коды без списка модуля и стража: %v", bad)
+	}
+	// страж не вакуумен: код чужого модуля и код без модуля ловятся, известные — нет
+	probe := map[string][]string{"x": {"teams.not_found", "oops", "geo.slug_taken", "staff.not_found", "platform.flag_stale", "auth.forbidden"}}
+	if bad := unknownCodePrefixes(probe); !slices.Equal(bad, []string{"x: oops", "x: teams.not_found"}) {
+		t.Fatalf("подсадка: %v", bad)
+	}
+}
+
+// adminCodePrefixes — модули, у которых есть список кодов и страж сверки с контрактом admin.
+var adminCodePrefixes = []string{"staff.", "geo.", "platform."}
+
+// unknownCodePrefixes — «операция: код» для кодов без известного префикса и вне общих кодов.
+func unknownCodePrefixes(byOp map[string][]string) []string {
+	common := slices.Concat(httpx.PlatformCodes, httpx.AdminCommonCodes)
+	var bad []string
+	for op, codes := range byOp {
+		for _, c := range codes {
+			if slices.Contains(common, c) || slices.ContainsFunc(adminCodePrefixes, func(p string) bool { return strings.HasPrefix(c, p) }) {
+				continue
+			}
+			bad = append(bad, op+": "+c)
+		}
+	}
+	slices.Sort(bad)
+	return bad
+}
+
+// documentedWithPrefix — коды x-error-codes всех операций контракта с этим префиксом, по порядку без повторов.
+func documentedWithPrefix(t *testing.T, spec *openapi3.T, prefix string) []string {
+	t.Helper()
+	byOp, err := apitest.OperationCodes(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var documented []string
 	for _, codes := range byOp {
 		for _, c := range codes {
-			if strings.HasPrefix(c, "platform.") {
+			if strings.HasPrefix(c, prefix) {
 				documented = append(documented, c)
 			}
 		}
 	}
 	slices.Sort(documented)
-	documented = slices.Compact(documented)
-	if want := slices.Sorted(slices.Values(httpx.AdminApprovalCodes)); !slices.Equal(documented, want) {
-		t.Fatalf("коды platform.* операций %v, httpx.AdminApprovalCodes %v", documented, want)
-	}
+	return slices.Compact(documented)
 }
 
 // Решение подтверждения (approveApproval, rejectApproval) доступно по любому праву «вдвоём»:
 // x-permission-any — ровно нечерновые права, у которых хоть одна роль в матрице — dual (R8).
 // Новое право «вдвоём» без правки контракта сюда не попадёт — страж это ловит.
 func TestApprovalDecisionPermissionsAreDual(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -251,6 +325,7 @@ func operation(t *testing.T, spec *openapi3.T, id string) *openapi3.Operation {
 // Swagger (/docs) — только по флагу: без него маршрута нет, ответ — обычный 404 Problem.
 // С флагом контракт отдаётся ровно тот, что вшит в бинарник.
 func TestDocsOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
 	get := func(h http.Handler, path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
@@ -283,6 +358,7 @@ func TestDocsOnlyWhenEnabled(t *testing.T) {
 
 // Без зависимостей хендлер не собирается: забытый в main лимитер — отказ старта.
 func TestNewHandlerRequiresDependencies(t *testing.T) {
+	t.Parallel()
 	full := testOptions(t)
 	for name, mutate := range map[string]func(*admin.Options){
 		"без базы":     func(o *admin.Options) { o.DB = nil },
@@ -321,6 +397,7 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 // читалась бы конвейером (вход по кругу), а стирание и D9 у принятия молча не работали бы. Нулевой
 // хендлер (тесты конвейера) сверку пропускает; согласованный собирается.
 func TestNewHandlerCookieMismatch(t *testing.T) {
+	t.Parallel()
 	for name, c := range map[string]staffadmin.Cookie{
 		"dev-имя при Secure": {Name: admin.CookieName(false), Secure: true},
 		"без Secure":         {Name: admin.CookieName(true), Secure: false},
@@ -350,6 +427,7 @@ func TestNewHandlerCookieMismatch(t *testing.T) {
 // них молча отвечал бы 501 на решения в проде (забыли в сборке 10c), подтверждения без staff некому
 // подписать (Staff.Label). Оба нулевые (тесты конвейера) и оба заданные — собирается.
 func TestNewHandlerApprovalsWiring(t *testing.T) {
+	t.Parallel()
 	built := func() *staffadmin.Handler {
 		return staffadmin.New(staff.Deps{}, staffadmin.Cookie{Name: admin.CookieName(true), Secure: true})
 	}
@@ -376,6 +454,7 @@ func TestNewHandlerApprovalsWiring(t *testing.T) {
 // Опечатка класса в ADMIN_RATE_LIMITS (atuh вместо auth) — отказ старта с именем класса, а не
 // переопределение, которое молча ни на что не действует.
 func TestNewHandlerRejectsStrayRateClass(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	r, err := ratelimit.ParseRules("atuh.ip=30/1m:10", ratelimit.DefaultRules())
 	if err != nil {
@@ -391,6 +470,7 @@ func TestNewHandlerRejectsStrayRateClass(t *testing.T) {
 // в админку, спека сотрудников §4.6). Контракт без x-rate-limit — ошибка: страж проверял бы
 // вхолостую.
 func TestRateLimitClassesKnown(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -406,6 +486,7 @@ func TestRateLimitClassesKnown(t *testing.T) {
 
 // Конвейер собран: rate limit подключён и стоит до хендлера (вход — класс staff_auth).
 func TestPipelineWired(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Limiter = denyAll{}
 	h, err := admin.NewHandler(slog.New(slog.DiscardHandler), o)

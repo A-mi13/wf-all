@@ -58,6 +58,7 @@ func testOptions(t *testing.T) public.Options {
 
 // Страж спеки §12.4: операцию с тегом <модуль> реализует хендлер этого модуля.
 func TestOperationsImplementedByTaggedModule(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +78,7 @@ func TestOperationsImplementedByTaggedModule(t *testing.T) {
 
 // Валидатор пропускает маршрут не из контракта — 404 отвечает роутер в формате Problem.
 func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
+	t.Parallel()
 	h, err := public.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +93,7 @@ func TestUnknownRouteIsProblemThroughValidator(t *testing.T) {
 // Страж проводки: лимит тела и валидатор стоят в цепочке хендлера — тело больше
 // httpx.MaxBodyBytes отвергается до strict-хендлера, даже у операции без тела.
 func TestOversizedBodyIsRejected(t *testing.T) {
+	t.Parallel()
 	h, err := public.NewHandler(slog.New(slog.DiscardHandler), testOptions(t))
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +109,7 @@ func TestOversizedBodyIsRejected(t *testing.T) {
 // Страж спеки §12.4 «коды ошибок задокументированы»: коды платформы (httpx.PlatformCodes)
 // и x-error-codes-common контракта совпадают в обе стороны.
 func TestPlatformCodesDocumented(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +126,7 @@ func TestPlatformCodesDocumented(t *testing.T) {
 // Спека сотрудников §5.1 (D18): коды конвейера admin-api и подтверждений (httpx.AdminPlatformCodes)
 // в публичный контракт не попадают — ни в общие коды, ни в коды операций.
 func TestAdminCodesNotInPublic(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -148,10 +153,11 @@ func TestAdminCodesNotInPublic(t *testing.T) {
 	}
 }
 
-// Страж «коды модуля задокументированы» (.claude/rules/backend-http.md): geo.Codes и x-error-codes
-// операций с тегом geo совпадают в обе стороны. Админские операции geo (этап 2) добавят свой
-// контракт в сверку.
+// Страж «коды модуля задокументированы» (.claude/rules/backend-http.md): geo.PublicCodes и x-error-codes
+// операций с тегом geo публичного контракта совпадают в обе стороны. Админские коды geo сверяет
+// TestGeoAdminCodesDocumented (internal/httpapi/admin) с geo.AdminCodes.
 func TestGeoCodesDocumented(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -180,15 +186,16 @@ func TestGeoCodesDocumented(t *testing.T) {
 	}
 	slices.Sort(documented)
 	documented = slices.Compact(documented)
-	want := slices.Sorted(slices.Values(geo.Codes))
+	want := slices.Sorted(slices.Values(geo.PublicCodes))
 	if !slices.Equal(documented, want) {
-		t.Fatalf("x-error-codes операций geo %v, geo.Codes %v", documented, want)
+		t.Fatalf("x-error-codes операций geo %v, geo.PublicCodes %v", documented, want)
 	}
 }
 
 // Swagger (/docs) — только по флагу: без него маршрута нет, ответ — обычный 404 Problem.
 // С флагом контракт отдаётся ровно тот, что вшит в бинарник.
 func TestDocsOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
 	get := func(h http.Handler, path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
@@ -222,6 +229,7 @@ func TestDocsOnlyWhenEnabled(t *testing.T) {
 // Конвейер собран: на анонимной операции Authorization не читается (битый токен — запрос идёт
 // анонимно), rate limit — до хендлера; на операции с bearer аутентификация стоит до rate limit.
 func TestPipelineWired(t *testing.T) {
+	t.Parallel()
 	get := func(h http.Handler, authz string) *httptest.ResponseRecorder {
 		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, minVersionPath, nil)
 		if authz != "" {
@@ -280,12 +288,13 @@ func TestPipelineWired(t *testing.T) {
 // лимит по IP; второй запрос того же клиента — 429 (лимит действительно считается по адресу из
 // заголовка).
 func TestRateLimitByClientIPHeader(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	o.Peer = peer.Config{
 		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 		ClientIPHeader: "CF-Connecting-IP",
 	}
-	o.Limiter = ratelimit.NewPG(o.DB, clock.System)
+	o.Limiter = ratelimit.NewPG(o.DB, clock.System, ratelimit.Players)
 	o.RateRules = ratelimit.DefaultRules()
 	d := o.RateRules[ratelimit.DefaultClass]
 	d.IP = ratelimit.Policy{Limit: 1, Period: time.Hour}
@@ -324,6 +333,7 @@ func (denyAll) Over(context.Context, string, ratelimit.Policy) (bool, error) { r
 
 // Без зависимостей хендлер не собирается: забытый в main лимитер, токены, geo или версии — отказ старта.
 func TestNewHandlerRequiresDependencies(t *testing.T) {
+	t.Parallel()
 	full := testOptions(t)
 	for name, mutate := range map[string]func(*public.Options){
 		"без базы":     func(o *public.Options) { o.DB = nil },
@@ -355,6 +365,7 @@ func TestNewHandlerRequiresDependencies(t *testing.T) {
 // Опечатка класса в API_RATE_LIMITS (atuh вместо auth) — отказ старта с именем класса, а не
 // переопределение, которое молча ни на что не действует.
 func TestNewHandlerRejectsStrayRateClass(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	r, err := ratelimit.ParseRules("atuh.ip=30/1m:10", ratelimit.DefaultRules())
 	if err != nil {
@@ -370,6 +381,7 @@ func TestNewHandlerRejectsStrayRateClass(t *testing.T) {
 // стартует). С findNearestCity (geo_nearest) x-rate-limit в контракте есть — пустой список значит,
 // что страж проверяет вхолостую.
 func TestRateLimitClassesKnown(t *testing.T) {
+	t.Parallel()
 	spec, err := oapi.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -390,6 +402,7 @@ func TestRateLimitClassesKnown(t *testing.T) {
 // httpx.RequireRoute интеграционно на текущем контракте не воспроизвести — его стережёт юнит-тест
 // httpx.TestRequireRoute.
 func TestEmptyPathParamNeverReachesHandler(t *testing.T) {
+	t.Parallel()
 	o := testOptions(t)
 	geoFake := &fakeGeo{}
 	o.Geo = geoFake

@@ -1,7 +1,7 @@
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 import { origin, PAIRS } from './env';
 import { t } from './keys';
-import { expectMailCountStable, mailIds, mailList } from './mailpit';
+import { expectMailCountStable, INVITE_CODE, mailIds, mailList, waitForMail } from './mailpit';
 import {
   acceptAndSetup,
   api,
@@ -122,17 +122,35 @@ test('4. A приглашает админа (202) → B подтверждае�
   const drawer = pageA.getByRole('dialog');
   await drawer.getByLabel(t('staff.invite.email'), { exact: true }).fill(admin.email);
   await drawer.getByLabel(t('staff.invite.name'), { exact: true }).fill(admin.name);
-  await drawer
-    .getByLabel(t('staff.invite.role'), { exact: true })
-    .selectOption({ label: t('roles.admin') });
+  // роль — свой список (combobox + option, спека UI-фундамента §4.16). Мышью сначала значение не по
+  // умолчанию (модератор), затем нужное (админ): браузерный страж R4-1 — mousedown по опции не уводит
+  // фокус и не закрывает список до click (jsdom выбор мышью по координатам не проверяет).
+  const role = drawer.getByRole('combobox', { name: t('staff.invite.role'), exact: true });
+  await role.click();
+  await drawer.getByRole('option', { name: t('roles.moderator'), exact: true }).click();
+  await expect(role).toHaveText(t('roles.moderator'));
+  await expect(role).toBeFocused();
+  await role.click();
+  await drawer.getByRole('option', { name: t('roles.admin'), exact: true }).click();
+  await expect(role).toHaveText(t('roles.admin'));
+  await expect(drawer.getByRole('listbox')).toHaveCount(0);
+  // язык новичка (IL2): по умолчанию — язык админки A (RU), выбран EN — на нём письмо и ссылка /accept?lang=en
+  const locale = drawer.getByRole('combobox', { name: t('staff.invite.locale'), exact: true });
+  await locale.click();
+  await drawer.getByRole('option', { name: t('locale.en'), exact: true }).click();
+  await expect(locale).toHaveText(t('locale.en'));
   const created = pageA.waitForResponse(
     (r) => r.request().method() === 'POST' && r.url().endsWith('/v1/staff/invites'),
   );
-  await drawer.getByRole('button', { name: t('staff.invite.submit') }).click();
+  await drawer.getByRole('button', { name: t('actions.submitForApproval') }).click();
   const res = await created;
   expect(res.status()).toBe(202);
   const approval = ((await res.json()) as { approval: Approval }).approval;
-  expect(approval).toMatchObject({ status: 'pending', action: 'staff.invite' });
+  expect(approval).toMatchObject({
+    status: 'pending',
+    action: 'staff.invite',
+    payload: expect.objectContaining({ locale: 'en' }),
+  });
   approvalId = approval.id;
   // до подтверждения писем приглашённому нет; сразу после 202 это ещё ничего не доказывает (фон River мог
   // не успеть) — доказывает «письмо одно» после принятия ниже (ревью Task 16, M1)
@@ -171,27 +189,40 @@ test('4. A приглашает админа (202) → B подтверждае�
 });
 
 test('5. админ принимает приглашение, настраивает 2FA и видит свой раздел', async () => {
+  // ссылка письма — /accept?lang=en (язык, выбранный приглашающим): экран открывается на EN без выбора на
+  // устройстве. Origin ссылки может быть чужой пары (обе исполняют очередь staff) — берётся путь с параметрами.
+  const mail = await waitForMail(admin.email, { match: INVITE_CODE });
+  const link = /\/accept\?lang=[^\s,]+/.exec(mail.text)?.[0];
+  expect(link).toBe('/accept?lang=en');
+  await pageAdmin.goto(link!);
+  await expect(
+    pageAdmin.getByRole('heading', { level: 1, name: t('pages.accept.title', 'en') }),
+  ).toBeVisible();
+  await expect(pageAdmin.locator('html')).toHaveAttribute('lang', 'en');
+  // дальше — без ссылки: /accept на языке браузера (RU), принятие пишет его в учётку
   await acceptAndSetup(pageAdmin, admin);
   const me = await api<Me>(pageAdmin, 'GET', '/v1/staff/me');
   expect(me.body).toMatchObject({ stage: 'active', role: 'admin', email: admin.email });
   adminId = me.body.id ?? '';
   expect(adminId).not.toBe('');
 
-  // стартовая — первый разрешённый раздел меню (журнал)
-  await expect(pageAdmin).toHaveURL(/\/audit$/);
-  await expect(pageAdmin.getByRole('heading', { level: 1, name: t('nav.audit') })).toBeVisible();
+  // стартовая — «Главная» (спека UI-фундамента §4.13): корень, а не первый раздел меню; «Выйти» видна на 1280
+  await expect(pageAdmin).toHaveURL(/^[^?#]+\/$/);
+  await expect(pageAdmin.getByRole('heading', { level: 1, name: t('nav.home') })).toBeVisible();
+  await expect(pageAdmin.getByRole('button', { name: t('nav.logout') })).toBeVisible();
 
   // права админа: выдаёт только модератора и поддержку — владельца и админа в списке нет
   await pageAdmin.goto('/staff');
   await pageAdmin.getByRole('button', { name: t('staff.invite.open') }).click();
-  const options = await pageAdmin
-    .getByRole('dialog')
-    .getByLabel(t('staff.invite.role'), { exact: true })
-    .locator('option')
-    .allTextContents();
+  const adminDrawer = pageAdmin.getByRole('dialog');
+  await adminDrawer.getByRole('combobox', { name: t('staff.invite.role'), exact: true }).click();
+  const options = await adminDrawer.getByRole('option').allTextContents();
   expect(options).toContain(t('roles.support'));
   expect(options).not.toContain(t('roles.admin'));
   expect(options).not.toContain(t('roles.owner'));
+  // первый Esc закрывает список, второй — панель
+  await pageAdmin.keyboard.press('Escape');
+  await expect(adminDrawer.getByRole('listbox')).toHaveCount(0);
   await pageAdmin.keyboard.press('Escape');
   await expect(pageAdmin.getByRole('dialog')).toHaveCount(0);
 
@@ -301,4 +332,44 @@ test('7. журнал: bootstrap от оператора, запрос и реш
   const accepted = await list(`object_id=${adminId}&action_prefix=staff.invite_accepted`);
   expect(accepted).toHaveLength(1);
   expect(accepted[0]).toMatchObject({ action: 'staff.invite_accepted', object_id: adminId });
+});
+
+// Язык с экрана приглашения (решение пользователя 10.11): браузер на ru-RU, на /accept выбран EN — сервер
+// сохраняет его в учётку вместе с паролем, настройка 2FA (стадия setup, язык — me.locale) идёт на EN.
+test('8. принятие на EN: язык экрана приглашения уходит в учётку, 2FA на EN', async ({
+  browser,
+}) => {
+  const s = newStaff('owner-en');
+  const run = await bootstrap(pair, s);
+  expect(run.code, run.stderr).toBe(0);
+  await receiveInvite(s);
+  const ctx = await browser.newContext({
+    baseURL: origin(pair),
+    locale: 'ru-RU',
+    viewport: { width: 1280, height: 800 },
+  });
+  ctx.setDefaultTimeout(20_000);
+  ctx.setDefaultNavigationTimeout(30_000);
+  try {
+    const page = await ctx.newPage();
+    await page.goto('/accept');
+    await page
+      .getByRole('button', { name: new RegExp(`^${escape(t('locale.short.en'))}\\b`) })
+      .click();
+    const field = (key: Parameters<typeof t>[0]) => page.getByLabel(t(key, 'en'), { exact: true });
+    await field('auth.accept.email').fill(s.email);
+    await field('auth.accept.password').fill(s.password);
+    await field('auth.accept.passwordRepeat').fill(s.password);
+    await field('auth.accept.code').fill(s.inviteCode!);
+    await page.getByRole('button', { name: t('auth.accept.submit', 'en') }).click();
+    await page.waitForURL('**/setup-2fa');
+    await expect(
+      page.getByRole('group', { name: t('auth.setup.code', 'en'), exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    const me = await api<Me & { locale?: string }>(page, 'GET', '/v1/staff/me');
+    expect(me.body).toMatchObject({ stage: 'setup', email: s.email, locale: 'en' });
+  } finally {
+    await ctx.close();
+  }
 });

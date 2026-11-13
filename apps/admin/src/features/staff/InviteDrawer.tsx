@@ -6,8 +6,11 @@ import { type ApiError, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import { useAdminMutation } from '../../api/mutation';
 import { useDraft } from '../../app/draft';
+import { useLeaveGuard } from '../../app/leaveGuard';
 import { paths } from '../../app/paths';
 import type { Me } from '../../app/permissions';
+import { useLocale } from '../../i18n/locale';
+import type { Locale } from '../../i18n/messages';
 import {
   Button,
   Drawer,
@@ -23,11 +26,26 @@ import { useRoleLabel } from './queries';
 import { grantableRoles, ROLES } from './roles';
 import styles from './staff.module.css';
 
-type Values = { email: string; display_name: string; role: string; city_ids: string[] };
+type Values = {
+  email: string;
+  display_name: string;
+  role: string;
+  city_ids: string[];
+  locale: Locale;
+};
 
-const EMPTY: Values = { email: '', display_name: '', role: '', city_ids: [] };
+const LOCALES: readonly Locale[] = ['ru', 'en'];
 
-// Черновик формы приглашения (P19): почта, имя, роль, города — секретов в форме нет. Пишется
+// Пустая форма: язык новичка — язык админки приглашающего (IL2, §4.3), показан в поле явно.
+const empty = (locale: Locale): Values => ({
+  email: '',
+  display_name: '',
+  role: '',
+  city_ids: [],
+  locale,
+});
+
+// Черновик формы приглашения (P19): почта, имя, роль, города, язык — секретов в форме нет. Пишется
 // ТОЛЬКО по вводу (событие change), не при размонтировании: иначе форма, закрытая выходом, вернула
 // бы черновик в sessionStorage уже после clearDrafts() — следующему сотруднику за этим компьютером.
 export const INVITE_DRAFT = `${paths.staff}:invite`;
@@ -37,7 +55,9 @@ const INVITE_KEY = ['staff', 'invite'] as const;
 // «Пригласить» (спека §9.4 п. 5, §9.3, §4.9; форма в панели — *): почта, имя, роль — только
 // выдаваемые (grant / grant_elevated из me.permissions), города модератора — поиск по
 // listGeoCities, обязательны для модератора (проверка на клиенте до запроса). Приглашение всегда
-// подтверждает второй сотрудник: 202 → «Отправлено на подтверждение», черновик стёрт.
+// подтверждает второй сотрудник: 202 → «Отправлено на подтверждение», черновик стёрт. Язык сотрудника (IL2,
+// решение пользователя 10.11): RU/EN, по умолчанию — язык админки приглашающего; уходит в теле всегда — на нём
+// учётка, письмо-приглашение и ссылка /accept?lang= (без поля сервер молча взял бы язык инициатора).
 // 409 staff.email_taken — на поле почты, 422 staff.city_not_found — на поле городов,
 // validation.failed — по полям, остальное — общим текстом.
 export function InviteDrawer({
@@ -52,31 +72,53 @@ export function InviteDrawer({
   const t = useTranslations('staff.invite');
   // Пока запрос идёт, панель не закрывается: ответ 202 должен дойти до экрана.
   const busy = useIsMutating({ mutationKey: INVITE_KEY }) > 0;
+  // Введённое не отправлено (спека UI-фундамента §4.11): закрытие панели спрашивает Overlay.dirty, уход мимо панели
+  // (браузерная «Назад», меню) — useLeaveGuard формы; закрытие после «Уйти» — навигация с ignoreBlocker (usePanelParam).
+  const [dirty, setDirty] = useState(false);
   return (
-    <Drawer open={open} onClose={onClose} title={t('title')} dismissible={!busy}>
-      <InviteBody me={me} onClose={onClose} />
+    <Drawer open={open} onClose={onClose} title={t('title')} dismissible={!busy} dirty={dirty}>
+      <InviteBody me={me} onClose={onClose} onDirty={setDirty} />
     </Drawer>
   );
 }
 
-function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
+function InviteBody({
+  me,
+  onClose,
+  onDirty,
+}: {
+  me: Me;
+  onClose: () => void;
+  onDirty: (dirty: boolean) => void;
+}) {
   const t = useTranslations('staff.invite');
+  const ta = useTranslations('actions');
+  const tl = useTranslations('locale');
   const api = useApi();
   const errorText = useErrorText();
   const roleLabel = useRoleLabel();
   // черновик — этого сотрудника: после истечения сессии другой за компьютером его не увидит
   const [draft, saveDraft, clearDraft] = useDraft<Partial<Values>>(INVITE_DRAFT, me.id ?? '');
   const roles = grantableRoles(me);
-  // Роль из черновика, которую сотрудник больше выдать не может (права сменились), не подставляется.
+  const locale = useLocale();
+  // Роль из черновика, которую сотрудник больше выдать не может (права сменились), не подставляется; язык — только
+  // знакомый, иначе умолчание.
   const [initial] = useState<Values>(() => ({
-    ...EMPTY,
+    ...empty(locale),
     ...draft,
     role: roles.find((r) => r === draft?.role) ?? '',
+    locale: LOCALES.find((l) => l === draft?.locale) ?? locale,
   }));
   const form = useForm<Values>({ defaultValues: initial });
   const role = useWatch({ control: form.control, name: 'role' });
   const [sent, setSent] = useState(false);
   const invalidateApprovals = useInvalidateApprovals();
+  // черновик, поднятый из storage, — не ввод этого открытия (он и так сохранён); отправленное — не потеря
+  const dirty = form.formState.isDirty && !sent;
+  useLeaveGuard(dirty);
+  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  // панель закрыта — снять признак (Drawer размонтирует тело)
+  useEffect(() => () => onDirty(false), [onDirty]);
 
   // Только ввод сотрудника (type === 'change'): ни монтирование, ни reset, ни размонтирование.
   useEffect(
@@ -103,6 +145,7 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
             role: r,
             // города — только у модератора; у остальных ролей поля нет
             ...(r === 'moderator' ? { city_ids: body.city_ids } : {}),
+            locale: body.locale,
           },
         }),
       );
@@ -138,13 +181,13 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
           <Button
             variant="secondary"
             onClick={() => {
-              form.reset(EMPTY);
+              form.reset(empty(locale));
               setSent(false);
             }}
           >
             {t('again')}
           </Button>
-          <Button onClick={onClose}>{t('close')}</Button>
+          <Button onClick={onClose}>{ta('close')}</Button>
         </div>
       </div>
     );
@@ -192,8 +235,15 @@ function InviteBody({ me, onClose }: { me: Me; onClose: () => void }) {
             }}
           />
         )}
+        <SelectField
+          name="locale"
+          label={t('locale')}
+          hint={t('locale_hint')}
+          options={LOCALES.map((l) => ({ value: l, label: tl(l) }))}
+          rules={{ required: true }}
+        />
         <Button type="submit" loading={invite.isPending}>
-          {t('submit')}
+          {ta('submitForApproval')}
         </Button>
       </Form>
     </div>

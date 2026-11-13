@@ -181,11 +181,17 @@ WHERE r.id = sqlc.arg(id)::uuid
                     AND r2.geoname_admin1_code = sqlc.arg(admin1_code)::text);
 
 -- name: ImportRegionNamesFromAdmin1 :execrows
+-- Недостающие переводы региона из admin1 — только если у региона именно этот код (ревью G6 I1): код
+-- выставлен этой транзакцией (ImportLinkRegion) или уже совпадал. Другой код или код, отданный другому
+-- региону, — 0 строк.
 INSERT INTO region_names (region_id, locale, name)
-SELECT sqlc.arg(region_id)::uuid, an.locale, an.name
-FROM geonames_admin1_names an
-WHERE an.country_code = sqlc.arg(country_code)
-  AND an.admin1_code = sqlc.arg(admin1_code)::text
+SELECT r.id, an.locale, an.name
+FROM regions r
+JOIN countries co ON co.id = r.country_id
+JOIN geonames_admin1_names an ON an.country_code = co.code AND an.admin1_code = r.geoname_admin1_code
+WHERE r.id = sqlc.arg(region_id)::uuid
+  AND co.code = sqlc.arg(country_code)
+  AND r.geoname_admin1_code = sqlc.arg(admin1_code)::text
   AND an.locale <> sqlc.arg(country_locale)::text
   AND btrim(an.name) <> ''
 ON CONFLICT DO NOTHING;
@@ -205,3 +211,36 @@ UPDATE geonames_imports
 SET status = 'failed', finished_at = sqlc.arg(now)::timestamptz, error = sqlc.arg(reason)::text,
     source_files = COALESCE(sqlc.narg(source_files)::jsonb, source_files)
 WHERE id = sqlc.arg(id)::uuid AND status = 'running';
+
+-- name: ImportReconcileLock :exec
+-- Сверка страны исключает активации городов этой страны (ревью G5 I1-r1): эксклюзивный advisory-замок транзакции
+-- (класс, страна) — ключ app.countryLockKey; активация берёт тот же ключ разделяемым (ActivateCountryLock).
+SELECT pg_advisory_xact_lock(sqlc.arg(class)::int, sqlc.arg(country)::int);
+
+-- Постановка и отмена импорта из админки (план B, Task 14; роль admin).
+
+-- name: ImportRunningJob :one
+-- Свежая строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+-- оператора, job_id в ответе нет). Зависшая (started_at < stale_before — граница ImportFailStale) не в счёт (ревью G7
+-- I1): процесс убит без итога, её закроет begin воркера поставленной задачи.
+SELECT river_job_id FROM geonames_imports
+WHERE country_code = sqlc.arg(country_code)::text AND status = 'running'
+  AND started_at >= sqlc.arg(stale_before)::timestamptz;
+
+-- name: ImportLatestByJob :one
+-- Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id,
+-- начатые не раньше not_before (created_at задачи − допуск часов, ревью G7 m5): после сброса последовательности River
+-- id повторяется, и строка прежней задачи с тем же id карточке новой не достаётся.
+SELECT id FROM geonames_imports
+WHERE river_job_id = sqlc.arg(river_job_id)::bigint AND started_at >= sqlc.arg(not_before)::timestamptz
+ORDER BY started_at DESC, id DESC
+LIMIT 1;
+
+-- name: ImportDBNow :one
+-- Время базы (now() транзакции) — опора часов команды оператора (app.OperatorClock, ревью G7 m9).
+SELECT now()::timestamptz AS now;
+
+-- name: ImportJobCancelLock :exec
+-- Отмены одной задачи импорта сериализуются (K6): эксклюзивный advisory-замок транзакции (класс, id задачи по
+-- модулю 2^31 − 1 — совпадение ключей двух задач только заставит отмены подождать друг друга).
+SELECT pg_advisory_xact_lock(sqlc.arg(class)::int, (sqlc.arg(job_id)::bigint % 2147483647)::int);

@@ -5,10 +5,11 @@ import { useApi } from '../api/context';
 import { useLocale } from '../i18n/locale';
 import { can, type Me } from './permissions';
 
-// Карточка сотрудника в AppShell (макет 07): «Мария К.», «модератор · Ставрополь». Названия
+// Карточка сотрудника в AppShell (макет 07): «Мария К.», почта-логин, «модератор · Ставрополь». Названия
 // городов — GET /v1/geo/cities?ids=… на языке интерфейса (P28); без права geo.cities.read или пока
-// ответа нет — число городов. У владельца, админа и поддержки городов нет — только роль.
-export function useAccountCard(me: Me): { name: string; details: string } {
+// ответа нет — число городов. У владельца, админа и поддержки городов нет — только роль. Без
+// отображаемого имени на его месте почта — второй раз её не показываем.
+export function useAccountCard(me: Me): { name: string; email?: string; details: string } {
   const t = useTranslations();
   const api = useApi();
   const locale = useLocale();
@@ -35,6 +36,7 @@ export function useAccountCard(me: Me): { name: string; details: string } {
   const cities = ids.length === 0 ? '' : names.data || t('account.cities', { count: ids.length });
   return {
     name: me.display_name ?? me.email ?? '',
+    email: me.display_name ? me.email : undefined,
     details: [role, cities].filter(Boolean).join(' · '),
   };
 }

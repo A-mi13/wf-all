@@ -1,0 +1,61 @@
+/* Иконки и иллюстрации из @wf/icons (спека UI-фундамента §4.9, U7, U25): цвет — только классами ролей,
+   не атрибутами (тема меняет цвет сама, CSP не задета). Толщина, прозрачность и окончание линии —
+   атрибутами SVG (данные пакета). Слой рисует либо обводку (.stroke), либо заливку (.fill). */
+.svg {
+  flex: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* предмет иконки — цвет текста вокруг (пункт меню, кнопка красят иконку сами) */
+.object.stroke {
+  stroke: currentcolor;
+}
+.object.fill {
+  fill: currentcolor;
+}
+
+/* предмет иллюстрации — приглушённый */
+.illustrationObject.stroke {
+  stroke: var(--wf-color-text-muted);
+}
+.illustrationObject.fill {
+  fill: var(--wf-color-text-muted);
+}
+
+.detail.stroke {
+  stroke: var(--wf-color-text-subtle);
+}
+.detail.fill {
+  fill: var(--wf-color-text-subtle);
+}
+
+.accent.stroke {
+  stroke: var(--wf-color-accent-ink);
+}
+.accent.fill {
+  fill: var(--wf-color-accent-ink);
+}
+
+/* тень акцента: токен accent-detail — темнее акцента в обеих темах (видна и поверх акцентной заливки,
+   у прозрачности нет); смесь с bg в светлой теме дала бы блик светлее акцента (ревью UF1a) */
+.accentDetail.stroke {
+  stroke: var(--wf-color-accent-detail);
+}
+.accentDetail.fill {
+  fill: var(--wf-color-accent-detail);
+}
+
+/* вырез по фону: цвет поверхности (карточки, меню, панели); поверх акцента — text-inverse */
+.knockout.stroke {
+  stroke: var(--wf-color-bg-elevated);
+}
+.knockout.fill {
+  fill: var(--wf-color-bg-elevated);
+}
+.knockout.onAccent.stroke {
+  stroke: var(--wf-color-text-inverse);
+}
+.knockout.onAccent.fill {
+  fill: var(--wf-color-text-inverse);
+}

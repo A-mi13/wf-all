@@ -1,5 +1,5 @@
 /* «Роли и доступ» по макету 07: матрица прав и «Правило двух рук», ниже — «Кто имеет доступ»;
-   панели справа — приглашение и строка сотрудника (*). Раздел только с компьютера (desktopOnly). */
+   панели справа — приглашение и строка сотрудника (*). Раздел открыт и на телефоне (просмотр). */
 
 .page {
   display: flex;
@@ -46,6 +46,13 @@
   border-radius: var(--wf-radius-md);
   background: var(--wf-color-warning-bg);
   font-family: var(--wf-font-body);
+}
+
+/* заголовок и кнопка подсказки термина рядом */
+.twoHandsHead {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-1);
 }
 
 .twoHandsTitle {
@@ -159,6 +166,14 @@
 .facts dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* значение с кнопкой копирования рядом (почта) */
+.facts .copyable {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-1);
+  min-width: 0;
 }
 
 .block {

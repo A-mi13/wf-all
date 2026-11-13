@@ -23,6 +23,7 @@ const inviteAuditCap = 20
 // истекло, неверный код. Пути «нет приглашения» и «неверный код» пишут одинаково — по журналу
 // существование почты не отличить.
 func TestAcceptInviteFailureAuditedAlways(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -37,7 +38,7 @@ func TestAcceptInviteFailureAuditedAlways(t *testing.T) {
 		{"неверный код", m.Email, otherCode(code)},
 	}
 	for i, c := range cases {
-		if _, err := e.app.AcceptInvite(ctx, c.email, c.code, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+		if _, err := e.app.AcceptInvite(ctx, c.email, c.code, newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		rows := e.audits("staff.invite_accept_failed")
@@ -59,11 +60,12 @@ func TestAcceptInviteFailureAuditedAlways(t *testing.T) {
 // засыпать), ответ тот же; верный код после них всё равно принимается (потолок — только на запись).
 // Через час потолок восстанавливается.
 func TestAcceptInviteFailureAuditCap(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
 	for i := range 100 {
-		if _, err := e.app.AcceptInvite(ctx, m.Email, otherCode(code), newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+		if _, err := e.app.AcceptInvite(ctx, m.Email, otherCode(code), newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 			t.Fatalf("попытка %d: %v", i+1, err)
 		}
 	}
@@ -72,7 +74,7 @@ func TestAcceptInviteFailureAuditCap(t *testing.T) {
 	}
 	e.accept(m, code)
 	e.clock.Advance(time.Hour)
-	if _, err := e.app.AcceptInvite(ctx, m.Email, otherCode(code), newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+	if _, err := e.app.AcceptInvite(ctx, m.Email, otherCode(code), newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 		t.Fatal(err)
 	}
 	if n := len(e.audits("staff.invite_accept_failed")); n != inviteAuditCap+1 {
@@ -94,6 +96,7 @@ func (e *env) logApp(ring *keys.Ring) (*app.App, *bytes.Buffer) {
 // задача с повторами). Журнал сервера без кода: письмо — WARN (одно на задачу), анонимное принятие —
 // только DEBUG (раунд 2: кто угодно, знающий почту, иначе засыпал бы журнал предупреждениями).
 func TestInviteUnreadableCode(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, code := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -101,7 +104,7 @@ func TestInviteUnreadableCode(t *testing.T) {
 	onlyNew, _ := newRing(t)
 	a, logs := e.logApp(onlyNew)
 
-	if _, err := a.AcceptInvite(ctx, m.Email, code, newPassword, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
+	if _, err := a.AcceptInvite(ctx, m.Email, code, newPassword, nil, "", metaWeb); !errors.Is(err, staff.ErrInviteInvalid) {
 		t.Fatalf("принятие с нечитаемым кодом: %v", err)
 	}
 	if n := len(e.audits("staff.invite_accept_failed")); n != 1 {

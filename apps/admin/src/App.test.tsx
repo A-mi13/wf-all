@@ -58,7 +58,10 @@ test('me.reauth_required — окно разблокировки поверх р
   const user = userEvent.setup();
   mount();
   const dialog = await screen.findByRole('dialog', { name: 'Подтвердите вход' });
-  expect(screen.getByRole('heading', { level: 1, name: 'Роли и доступ' })).toBeInTheDocument();
+  // раздел — ленивый кусок (UF2b.9): заголовок — после его загрузки, а не в один кадр с окном
+  expect(
+    await screen.findByRole('heading', { level: 1, name: 'Роли и доступ' }),
+  ).toBeInTheDocument();
   const group = within(dialog).getByRole('group', { name: 'Код из приложения-аутентификатора' });
   await user.click(within(group).getAllByRole('textbox')[0]!);
   await user.keyboard('492817');

@@ -84,6 +84,7 @@ func account(t *testing.T, rec *httpRec) oapi.StaffAccount {
 
 // Список (фильтры), карточка (города, приглашение), 404 на несуществующего, матрица ролей.
 func TestManageAccountsRead(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	a := e.owners(1)[0]
 	e.v = apitest.New(t, oapi.GetSpec)
@@ -168,6 +169,7 @@ func TestManageAccountsRead(t *testing.T) {
 // карточку — 403; завершить сессии владельца — 403, поддержки — 200 с числом; свои — 409 self_action;
 // несуществующий — 404.
 func TestAccountSessionsAdminScope(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	a := e.owners(1)[0]
 	adm := e.firstLogin("adm@wf.example", string(perm.Admin))
@@ -208,6 +210,7 @@ func TestAccountSessionsAdminScope(t *testing.T) {
 // wrong_stage; владелец — 202 staff.revoke_owner; себя — 409. Выключенную цель сменить или сбросить — 403
 // (⚠️ журнал: wrong_stage в контракте нет). Сброс доступа — 202 staff.access_reset; свой — 409.
 func TestManageChangeRoleDisableReset(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]
@@ -265,6 +268,7 @@ func TestManageChangeRoleDisableReset(t *testing.T) {
 // replay_unavailable. Шов — трассировщик пула сценариев (commitTracer): COMMIT транзакции с ключом
 // идемпотентности отменяет ctx запроса.
 func TestImmediateActionAnswersAfterCancel(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	a := e.owners(1)[0]
 	e.v = apitest.New(t, oapi.GetSpec)
@@ -306,6 +310,7 @@ func TestImmediateActionAnswersAfterCancel(t *testing.T) {
 // Приглашение: модератор без городов — 400 body.city_ids; несуществующий город — 422; почта действующей
 // учётки — 409 email_taken; админ приглашает админа — 403 (право grant_elevated только у владельца).
 func TestManageInviteErrors(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	a := e.owners(1)[0]
 	adm := e.firstLogin("adm@wf.example", string(perm.Admin))
@@ -328,6 +333,7 @@ func TestManageInviteErrors(t *testing.T) {
 // Повторная отправка приглашения: пауза 60 с от выпуска — 429 с Retry-After; после паузы — 204; вход уже
 // настроен — 409 wrong_stage; себе — 409 self_action; нет учётки — 404.
 func TestManageResendInvite(t *testing.T) {
+	t.Parallel()
 	e := newStaffEnv(t)
 	o := e.owners(2)
 	a, b := o[0], o[1]

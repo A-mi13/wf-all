@@ -13,9 +13,10 @@ import (
 )
 
 func TestAssessor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c := clocktest.New(time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))
-	l := ratelimit.NewPG(dbtest.NewPoolsAs(t, "api").As, c)
+	l := ratelimit.NewPG(dbtest.NewPoolsAs(t, "api").As, c, ratelimit.Players)
 	a, err := risk.NewAssessor(l, map[risk.Signal]ratelimit.Policy{
 		risk.LoginFailed: {Limit: 3, Period: 15 * time.Minute},
 	})
@@ -50,6 +51,7 @@ func TestAssessor(t *testing.T) {
 }
 
 func TestDefaultPolicies(t *testing.T) {
+	t.Parallel()
 	p := risk.DefaultPolicies()
 	for _, s := range []risk.Signal{risk.LoginFailed, risk.Signup, risk.NewDevice, risk.Activity} {
 		if p[s].Limit == 0 {
@@ -65,6 +67,7 @@ func TestDefaultPolicies(t *testing.T) {
 }
 
 func TestSubnet(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"203.0.113.77":         "203.0.113.0/24",
 		"2001:db8:1:2:3:4:5:6": "2001:db8:1:2::/64",

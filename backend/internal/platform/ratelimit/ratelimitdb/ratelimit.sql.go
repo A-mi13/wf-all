@@ -62,6 +62,87 @@ func (q *Queries) GetTAT(ctx context.Context, key string) (time.Time, error) {
 	return tat, err
 }
 
+const staffAdd = `-- name: StaffAdd :exec
+INSERT INTO staff_rate_limits AS r (key, tat)
+VALUES ($1, $2::timestamptz + make_interval(secs => $3::float8))
+ON CONFLICT (key) DO UPDATE
+SET tat = greatest(r.tat, $2::timestamptz) + make_interval(secs => $3::float8)
+`
+
+type StaffAddParams struct {
+	Key       string
+	Now       time.Time
+	IntervalS float64
+}
+
+func (q *Queries) StaffAdd(ctx context.Context, arg StaffAddParams) error {
+	_, err := q.db.Exec(ctx, staffAdd, arg.Key, arg.Now, arg.IntervalS)
+	return err
+}
+
+const staffDeleteExpired = `-- name: StaffDeleteExpired :execrows
+DELETE FROM staff_rate_limits
+WHERE tat < $1::timestamptz
+  AND key IN (SELECT key FROM staff_rate_limits WHERE tat < $1::timestamptz LIMIT $2)
+`
+
+type StaffDeleteExpiredParams struct {
+	Now   time.Time
+	Batch int32
+}
+
+func (q *Queries) StaffDeleteExpired(ctx context.Context, arg StaffDeleteExpiredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, staffDeleteExpired, arg.Now, arg.Batch)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const staffGetTAT = `-- name: StaffGetTAT :one
+SELECT tat FROM staff_rate_limits WHERE key = $1
+`
+
+func (q *Queries) StaffGetTAT(ctx context.Context, key string) (time.Time, error) {
+	row := q.db.QueryRow(ctx, staffGetTAT, key)
+	var tat time.Time
+	err := row.Scan(&tat)
+	return tat, err
+}
+
+const staffTake = `-- name: StaffTake :one
+
+INSERT INTO staff_rate_limits AS r (key, tat)
+VALUES ($1, $2::timestamptz + make_interval(secs => $3::float8))
+ON CONFLICT (key) DO UPDATE
+SET tat = greatest(r.tat, $2::timestamptz) + make_interval(secs => $3::float8)
+WHERE greatest(r.tat, $2::timestamptz) + make_interval(secs => $3::float8)
+      <= $2::timestamptz + make_interval(secs => $4::float8)
+RETURNING tat
+`
+
+type StaffTakeParams struct {
+	Key       string
+	Now       time.Time
+	IntervalS float64
+	WindowS   float64
+}
+
+// Пары StaffX — те же запросы над staff_rate_limits (лимиты admin-api, план B R2): sqlc не параметризует
+// имя таблицы. Текст пары после замены имени таблицы обязан совпасть с оригиналом (страж
+// TestStaffQueriesMirrorPublic, testkit/sqlmirror).
+func (q *Queries) StaffTake(ctx context.Context, arg StaffTakeParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, staffTake,
+		arg.Key,
+		arg.Now,
+		arg.IntervalS,
+		arg.WindowS,
+	)
+	var tat time.Time
+	err := row.Scan(&tat)
+	return tat, err
+}
+
 const take = `-- name: Take :one
 
 INSERT INTO rate_limits AS r (key, tat)

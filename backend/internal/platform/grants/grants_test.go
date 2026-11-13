@@ -20,6 +20,7 @@ import (
 // всем ролям всё на проверяемые объекты — так отказы доказывают, что Apply права отзывает, а не просто
 // не выдаёт (свежий кластер широких умолчаний не имеет).
 func TestRolePrivileges(t *testing.T) {
+	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	for _, ddl := range []string{
@@ -32,7 +33,8 @@ func TestRolePrivileges(t *testing.T) {
 			"geonames_imports, geonames_places, geonames_place_names, geonames_admin1, geonames_admin1_names, app_versions " +
 			"TO api, admin, worker",
 		"GRANT ALL ON staff_accounts, staff_roles, staff_role_cities, staff_mfa, staff_recovery_codes, staff_invites, " +
-			"staff_sessions, staff_idempotency_keys, approvals TO api, admin, worker",
+			"staff_sessions, staff_idempotency_keys, staff_rate_limits, approvals TO api, admin, worker",
+		"GRANT ALL ON rate_limits, humancheck_spent TO api, admin, worker",
 		"GRANT ALL ON SEQUENCE staff_probe_seq, approvals_probe_seq TO api, admin, worker",
 	} {
 		if _, err := db.ExecContext(ctx, ddl); err != nil {
@@ -86,8 +88,25 @@ func TestRolePrivileges(t *testing.T) {
 		{"worker", "DELETE FROM rate_limits WHERE tat < now()", true},
 		{"worker", "DELETE FROM humancheck_spent WHERE expires_at < now()", true},
 		{"worker", "DELETE FROM idempotency_keys WHERE expires_at < now()", true},
-		// admin-api — тоже край: лимиты входа сотрудников
-		{"admin", "INSERT INTO rate_limits (key, tat) VALUES ('probe', now()) ON CONFLICT (key) DO UPDATE SET tat = excluded.tat", true},
+		{"api", "DELETE FROM rate_limits WHERE tat < now()", true},
+		{"worker", "INSERT INTO rate_limits (key, tat) VALUES ('probe', now()) ON CONFLICT (key) DO UPDATE SET tat = excluded.tat", true},
+		// лимиты admin-api — своя таблица (план B, R2): api с DML на них стирал бы счётчики перебора входа
+		// сотрудника (email:<hmac>, staff_auth) или закрывал вход всем большим tat; у admin на rate_limits
+		// ничего (admin-api туда не ходит; периодику ratelimit.cleanup лидер только ставит в river_job)
+		{"admin", "INSERT INTO staff_rate_limits (key, tat) VALUES ('probe', now()) ON CONFLICT (key) DO UPDATE SET tat = excluded.tat", true},
+		{"admin", "SELECT tat FROM staff_rate_limits WHERE key = 'probe'", true},
+		{"admin", "UPDATE staff_rate_limits SET tat = tat WHERE false", true},
+		{"admin", "DELETE FROM staff_rate_limits WHERE tat < now()", true},
+		{"api", "SELECT 1 FROM staff_rate_limits", false},
+		{"api", "INSERT INTO staff_rate_limits (key, tat) VALUES ('probe', now())", false},
+		{"api", "UPDATE staff_rate_limits SET tat = tat WHERE false", false},
+		{"api", "DELETE FROM staff_rate_limits WHERE false", false},
+		{"worker", "SELECT 1 FROM staff_rate_limits", false},
+		{"worker", "DELETE FROM staff_rate_limits WHERE tat < now()", false},
+		{"admin", "SELECT 1 FROM rate_limits", false},
+		{"admin", "INSERT INTO rate_limits (key, tat) VALUES ('probe', now()) ON CONFLICT (key) DO UPDATE SET tat = excluded.tat", false},
+		{"admin", "UPDATE rate_limits SET tat = tat WHERE false", false},
+		{"admin", "DELETE FROM rate_limits WHERE tat < now()", false},
 		// ключи идемпотентности admin-api — своя таблица (финальное ревью I-1): ответы сотрудников с ПД
 		// читает, пишет и чистит только admin; api и worker — ничего (api иначе читал бы почты и имена,
 		// подменял сохранённый ответ и снимал ключ)
@@ -110,6 +129,9 @@ func TestRolePrivileges(t *testing.T) {
 		// справочник geo (спека geo §3.8): API только читает справочник, источник без журнала и
 		// версии приложения
 		{"api", "SELECT 1 FROM countries", true},
+		{"api", "SELECT 1 FROM regions", true},
+		{"api", "SELECT 1 FROM region_names", true},
+		{"api", "INSERT INTO regions (country_id, name) SELECT id, 'Проба' FROM countries WHERE code = 'RU'", false},
 		{"api", "SELECT 1 FROM cities", true},
 		{"api", "SELECT 1 FROM districts", true},
 		{"api", "SELECT 1 FROM country_names", true},
@@ -128,9 +150,18 @@ func TestRolePrivileges(t *testing.T) {
 		{"api", "DELETE FROM geonames_places WHERE false", false},
 		{"api", "UPDATE app_versions SET version = version WHERE false", false},
 		// админка: читает всё, включая журнал импорта; правит справочник и версии; удаляет только
-		// переводы (районы архивируются, города и страны не удаляются); источник пишет только воркер
+		// переводы и строки истории slug (районы архивируются, города и страны не удаляются); источник
+		// пишет только воркер
 		{"admin", "SELECT 1 FROM geonames_imports", true},
 		{"admin", "SELECT 1 FROM geonames_place_names", true},
+		{"admin", "SELECT 1 FROM geonames_places", true},
+		{"admin", "SELECT 1 FROM geonames_admin1", true},
+		// создание страны и правила страны (geo 2/2), регион при активации города
+		{"admin", "INSERT INTO countries (code, name, currency, default_locale, phone_prefix, min_signup_age, age_of_majority) " +
+			"VALUES ('KZ', 'Казахстан', 'KZT', 'ru', '+7', 14, 18)", true},
+		{"admin", "UPDATE countries SET is_enabled = is_enabled WHERE false", true},
+		{"admin", "INSERT INTO regions (country_id, name) SELECT id, 'Проба' FROM countries WHERE code = 'RU'", true},
+		{"admin", "UPDATE regions SET name = name WHERE false", true},
 		{"admin", "INSERT INTO geonames_imports (country_code, status, started_at) VALUES ('RU', 'running', now())", false},
 		{"admin", "UPDATE geonames_places SET population = population WHERE false", false},
 		{"admin", "INSERT INTO cities (country_id, name, slug, timezone, centroid) " +
@@ -143,7 +174,10 @@ func TestRolePrivileges(t *testing.T) {
 		{"admin", "DELETE FROM cities WHERE false", false},
 		{"admin", "DELETE FROM districts WHERE false", false},
 		{"admin", "DELETE FROM countries WHERE false", false},
-		{"admin", "DELETE FROM city_slug_history WHERE false", false},
+		// возврат к своему старому slug удаляет его из истории (спека сотрудников §3.3, план B)
+		{"admin", "DELETE FROM city_slug_history WHERE false", true},
+		{"api", "DELETE FROM city_slug_history WHERE false", false},
+		{"worker", "DELETE FROM city_slug_history WHERE false", false},
 		{"admin", "INSERT INTO app_versions (platform, min_version, recommended_version, store_url) " +
 			"VALUES ('ios', '1.0.0', '1.1.0', 'https://apps.apple.com/app/id1') " +
 			"ON CONFLICT (platform) DO UPDATE SET min_version = excluded.min_version, version = app_versions.version + 1", true},
@@ -155,6 +189,7 @@ func TestRolePrivileges(t *testing.T) {
 		{"worker", "DELETE FROM geonames_places WHERE false", true},
 		{"worker", "UPDATE geonames_admin1 SET ascii_name = ascii_name WHERE false", true},
 		{"worker", "DELETE FROM geonames_admin1_names WHERE false", true},
+		{"worker", "INSERT INTO geonames_place_names (geoname_id, locale, name) SELECT geoname_id, 'ru', 'Проба' FROM geonames_places LIMIT 1", true},
 		{"worker", "UPDATE cities SET geoname_id = geoname_id, version = version + 1 WHERE false", true},
 		{"worker", "UPDATE regions SET geoname_admin1_code = geoname_admin1_code WHERE false", true},
 		{"worker", "INSERT INTO city_names (city_id, locale, name) SELECT id, 'de', 'Stawropol' FROM cities WHERE slug = 'stavropol' ON CONFLICT DO NOTHING", true},

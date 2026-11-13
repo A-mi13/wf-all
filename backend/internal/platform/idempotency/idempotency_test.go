@@ -105,6 +105,9 @@ func (p *probe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Location", "/v1/things/1")
+	w.Header().Set("Vary", "Accept-Language")
+	w.Header().Set("Content-Language", "en")
+	w.Header().Set("X-Not-Saved", "1")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write([]byte(`{"id": 1, "name": "x"}`))
@@ -260,6 +263,7 @@ var key = strings.Repeat("k", 20)
 // Повтор отдаёт сохранённый ответ; ключ и ответ — только в таблице своего конвейера: ключи admin-api не
 // попадают в idempotency_keys, ключи публичного API — в staff_idempotency_keys.
 func TestReplaySameRequest(t *testing.T) {
+	t.Parallel()
 	eachTable(t, func(t *testing.T, tc tableCase) {
 		e := setupOn(t, 200*time.Millisecond, tc)
 		first := e.do(http.MethodPost, "/v1/things?x=1", key, `{"name":"x"}`)
@@ -270,6 +274,12 @@ func TestReplaySameRequest(t *testing.T) {
 		if again.Code != http.StatusCreated || again.Header().Get("Location") != "/v1/things/1" ||
 			again.Header().Get("Content-Type") != "application/json" || again.Header().Get("Idempotency-Replayed") != "true" {
 			t.Fatalf("повтор: %d %v", again.Code, again.Header())
+		}
+		// заголовки ответа контракта (Vary, Content-Language — admin activateGeoCity) повтор отдаёт те же;
+		// несохраняемые — нет (список явный, не «все заголовки»)
+		if again.Header().Get("Vary") != "Accept-Language" || again.Header().Get("Content-Language") != "en" ||
+			again.Header().Get("X-Not-Saved") != "" {
+			t.Fatalf("заголовки повтора: %v", again.Header())
 		}
 		var a, b map[string]any
 		_ = json.Unmarshal(first.Body.Bytes(), &a)
@@ -287,6 +297,7 @@ func TestReplaySameRequest(t *testing.T) {
 }
 
 func TestKeyReusedWithOtherRequest(t *testing.T) {
+	t.Parallel()
 	eachTable(t, func(t *testing.T, tc tableCase) {
 		e := setupOn(t, 200*time.Millisecond, tc)
 		e.do(http.MethodPost, "/v1/things", key, `{"name":"x"}`)
@@ -307,6 +318,7 @@ func TestKeyReusedWithOtherRequest(t *testing.T) {
 
 // Бизнес-ошибка откатывает ключ вместе с транзакцией — повтор исполняется заново (§6.4).
 func TestBusinessErrorRollsBackKey(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	e.probe.fail.Store(true)
 	if rec := e.do(http.MethodPost, "/v1/things", key, `{}`); rec.Code != http.StatusUnprocessableEntity {
@@ -324,6 +336,7 @@ func TestBusinessErrorRollsBackKey(t *testing.T) {
 // Review Focus 2: дубль, пока первый в транзакции, — 409 in_progress; после коммита — повтор.
 // LockTimeout меньше 1 мс не превращается в "0ms" (ждать без конца).
 func TestParallelDuplicate(t *testing.T) {
+	t.Parallel()
 	eachTable(t, func(t *testing.T, tbl tableCase) { parallelDuplicate(t, tbl) })
 }
 
@@ -373,6 +386,7 @@ func parallelDuplicate(t *testing.T, tbl tableCase) {
 // коммитится раньше, чем A дошёл до сохранения ответа. Ответ A (откаченный ключ) не должен
 // попасть в ключ B — иначе все повторы B получат чужой 422.
 func TestRolledBackRequestDoesNotSaveIntoWinnerKey(t *testing.T) {
+	t.Parallel()
 	eachTable(t, rolledBackDoesNotSaveIntoWinnerKey)
 }
 
@@ -430,6 +444,7 @@ func rolledBackDoesNotSaveIntoWinnerKey(t *testing.T, tbl tableCase) {
 // ждал на индексе): тот же запрос — 409 in_progress, другой — 422 key_reused; действие не
 // исполнено.
 func TestClaimAfterConcurrentCommit(t *testing.T) {
+	t.Parallel()
 	eachTable(t, claimAfterConcurrentCommit)
 }
 
@@ -474,6 +489,7 @@ func claimAfterConcurrentCommit(t *testing.T, tbl tableCase) {
 // Откат транзакции снимает ключ: ручка, повторившая транзакцию (40001), вставляет его заново,
 // и ответ сохраняется.
 func TestRetryAfterRollbackReclaimsKey(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	e.probe.retryOnce.Store(true)
 	if rec := e.do(http.MethodPost, "/v1/things", key, `{}`); rec.Code != http.StatusCreated {
@@ -489,6 +505,7 @@ func TestRetryAfterRollbackReclaimsKey(t *testing.T) {
 
 // Закоммичено, а ответ не сохранился (обрыв между коммитом и записью ответа).
 func TestReplayUnavailable(t *testing.T) {
+	t.Parallel()
 	eachTable(t, func(t *testing.T, tbl tableCase) {
 		e := setupOn(t, 200*time.Millisecond, tbl)
 		hash := idempotency.RequestHash(http.MethodPost, "/v1/things", []byte(`{}`))
@@ -509,6 +526,7 @@ func TestReplayUnavailable(t *testing.T) {
 
 // Просроченный ключ (24 ч) переиспользуется.
 func TestExpiredKeyReclaimed(t *testing.T) {
+	t.Parallel()
 	eachTable(t, func(t *testing.T, tbl tableCase) {
 		e := setupOn(t, 200*time.Millisecond, tbl)
 		if _, err := e.pools.Owner.Exec(context.Background(),
@@ -527,6 +545,7 @@ func TestExpiredKeyReclaimed(t *testing.T) {
 
 // Ручка, требующая идемпотентности, обязана выполняться в одной транзакции (§6.4).
 func TestHandlerContractViolations(t *testing.T) {
+	t.Parallel()
 	t.Run("успех без транзакции — 500", func(t *testing.T) {
 		e := setup(t)
 		e.probe.noTx = true
@@ -551,6 +570,7 @@ func TestHandlerContractViolations(t *testing.T) {
 }
 
 func TestPassthrough(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	// GET, без ключа, без пользователя — механизм не включается
 	if rec := e.do(http.MethodGet, "/v1/things", key, ""); rec.Code != http.StatusCreated {
@@ -576,6 +596,7 @@ func TestPassthrough(t *testing.T) {
 // Сотрудник admin-api — субъект идемпотентности (остаток фундамента 3/3: без Principal механизм
 // в админке был молча выключен). Ключ строки — id сотрудника в user_id (D19).
 func TestStaffSubjectReplays(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	staff := uuid.New()
 	if rec := e.doAs(asStaff(staff), http.MethodPost, "/v1/things", key, `{}`); rec.Code != http.StatusCreated {
@@ -600,6 +621,7 @@ func TestStaffSubjectReplays(t *testing.T) {
 // Одна строка Idempotency-Key у игрока и сотрудника — два разных ключа: второй запрос исполняется
 // (не 422 key_reused и не чужой повтор).
 func TestUserAndStaffKeysIndependent(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	if rec := e.do(http.MethodPost, "/v1/things", key, `{"name":"x"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("игрок: %d %s", rec.Code, rec.Body.String())
@@ -641,6 +663,7 @@ func withRoutes(t *testing.T, h http.Handler) http.Handler {
 // запроса — 409 replay_unavailable, а не секрет из базы (решение D14). Обычная операция за тем же
 // конвейером повторяется как прежде.
 func TestNoStoreKeepsOnlyStatus(t *testing.T) {
+	t.Parallel()
 	eachTable(t, noStoreKeepsOnlyStatus)
 }
 
@@ -682,6 +705,7 @@ func noStoreKeepsOnlyStatus(t *testing.T, tbl tableCase) {
 
 // Неизвестная таблица ключей — отказ сборки (паника при старте), а не запись «куда-то».
 func TestUnknownTablePanics(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if recover() == nil {
 			t.Fatal("Middleware с неизвестной таблицей собран")

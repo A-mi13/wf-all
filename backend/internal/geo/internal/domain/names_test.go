@@ -50,7 +50,7 @@ func TestChooseName(t *testing.T) {
 	}{
 		// реальные данные (спека §3.4, «Проверено на данных 02.10.2026»)
 		{"Ставрополь ru: шаг 3 — не краткое кириллицей", stavropol487846, "ru", true, "Stavropol", "Ставрополь"},
-		{"Ставрополь en: шаг 4 — предпочтительное краткое", stavropol487846, "en", false, "Stavropol", "Stavropol"},
+		{"Ставрополь en: единственный кандидат — предпочтительное краткое латиницей (шаг 4; его выбрал бы и шаг 5)", stavropol487846, "en", false, "Stavropol", "Stavropol"},
 		{"Михайловск ru: шаг 2 — предпочтительное", mikhaylovsk493702, "ru", true, "Mikhaylovsk", "Михайловск"},
 		{"Михайловск en: шаг 2 — предпочтительное", mikhaylovsk493702, "en", false, "Mikhaylovsk", "Mikhaylovsk"},
 		{"Ставропольский край ru: шаг 3 вместо краткого предпочтительного", stavropolKrai, "ru", true, "Stavropol Kray", "Ставропольский Край"},
@@ -138,7 +138,16 @@ func TestScriptOf(t *testing.T) {
 }
 
 func TestSupportedLocales(t *testing.T) {
-	if !slices.Equal(domain.SupportedLocales, []string{"ru", "en"}) {
-		t.Fatalf("SupportedLocales = %q, ждали [ru en] (спека §3.3)", domain.SupportedLocales)
+	if !slices.Equal(domain.SupportedLocales(), []string{"ru", "en"}) {
+		t.Fatalf("SupportedLocales() = %q, ждали [ru en] (спека §3.3)", domain.SupportedLocales())
+	}
+}
+
+// TestSupportedLocalesIsCopy — правка полученного среза не меняет языки справочника (geo 1, Task 4 M1).
+func TestSupportedLocalesIsCopy(t *testing.T) {
+	l := domain.SupportedLocales()
+	l[0] = "de"
+	if got := domain.SupportedLocales(); !slices.Equal(got, []string{"ru", "en"}) {
+		t.Fatalf("после правки снаружи SupportedLocales() = %q", got)
 	}
 }

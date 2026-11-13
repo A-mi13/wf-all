@@ -23,12 +23,16 @@
 | react-hook-form | 7.91.0 | `apps/admin/package.json` |
 | uqr | 0.1.3 | `apps/admin/package.json` (QR секрета 2FA — SVG на клиенте, без сети и зависимостей; R11) |
 | @fontsource/oswald / @fontsource/manrope | 5.3.0 / 5.3.0 | `apps/admin/package.json` (шрифты админки без внешних запросов, `src/app/fonts.ts`) |
+| @tanstack/react-virtual | 3.14.26 | `apps/admin/package.json`; обёртка — `src/ui/virtual` (`useVirtualRows`, `VirtualList`) |
+| Ladle (витрина компонентов) | 5.1.1 (внутри — свой Vite 6.4.5, @vitejs/plugin-react-swc) | `apps/admin/package.json` (devDependencies), конфиг — `apps/admin/.ladle/`; в сборку админки не входит; исключение ниже |
 | GitHub Actions: checkout / setup-go / pnpm action-setup | 7.0.1 / 7.0.0 / 6.1.0 | полный SHA в `.github/workflows/*.yml`; плавающий тег `pnpm/action-setup@v6` указывал на 6.0.10 без поддержки pnpm 12 |
+| GitHub Actions: upload-artifact / download-artifact | 7.0.2 / 8.0.2 | полный SHA в `.github/workflows/admin-visual.yml` (эталон и отчёт визуального сравнения); у upload-artifact v8 не выпущен (проверено 10.11.2026) |
+| Образ Playwright в CI | `mcr.microsoft.com/playwright:v1.64.1-noble` | тег — из версии `@playwright/test` админки (`scripts/visual-baseline.mjs`, job `snapshots` в `admin-visual.yml`); меняется вместе с Playwright |
 | Flutter / Dart | фиксируется в wf-native | в репо wf-native проекта Flutter пока нет — версии появятся с мобильной спекой |
 | chi / pgx | 5.5.0 / 5.11.0 | `backend/go.mod` |
 | oapi-codegen / sqlc | 2.8.1 / 1.31.1 | `backend/tools/go.mod` |
 | oapi-codegen runtime | 1.8.0 | `backend/go.mod` (биндинг параметров запроса в сгенерированном коде `internal/httpapi/*/oapi`) |
-| River | 0.49.0 | `backend/go.mod` (рантайм-библиотека воркера и admin-api), CLI — `backend/tools/go.mod`; почему не 0.50.0 — в исключениях |
+| River | 0.50.0 | `backend/go.mod` (рантайм-библиотека воркера и admin-api; `river`, `riverpgxv5`, `rivertype`, `rivershared`, `riverdriver` — одной версией), CLI — `backend/tools/go.mod`; схема — линия v1–v8, v8 (`job_id_autoincrement`) для Postgres пустая (`SELECT 1`) и не накатывается: goose-миграции `0011–0016` = v2–v7 |
 | goose / pgtestdb / kin-openapi | 3.29.0 / 0.1.1 / 0.152.0 | `backend/go.mod` |
 | google/uuid | 1.6.0 | `backend/go.mod` (UUIDv7 — `internal/platform/id`) |
 | golang-jwt/jwt | 5.3.1 | `backend/go.mod` (access-токены, EdDSA — `internal/platform/token`) |
@@ -51,8 +55,8 @@
 | --- | --- | --- | --- | --- |
 | TypeScript (приложения) | 6.0.3 | 7.0.2 | typescript-eslint 8.72 поддерживает TS < 6.1 (проверено 27.10.2026); у 7.x нет классического JS API | когда typescript-eslint и eslint-config-next объявят поддержку TS 7 |
 | TypeScript (генератор) | 5.9.3 | 7.0.2 | openapi-typescript 7.13 требует `typescript ^5.x` | когда openapi-typescript поднимет peer |
-| River | 0.49.0 | 0.50.0 | 0.50.0 опубликована 27.10.2026 00:53 UTC — моложе суток на момент подъёма Go-зависимостей ветки (27.10.2026; та же защита, что `minimumReleaseAge` у pnpm); 0.x — минорный подъём River может ломать API, а заглушки чужих видов (`queue.AddForeign`) опираются на его внутренности | после 28.10.2026 01:00 UTC — поднять River, riverpgxv5, rivertype и CLI до последней 0.x, прогнать `go test ./cmd/... ./internal/platform/queue/...` и тесты рескьюера |
 | ESLint | 9.39.5 | 10.13.0 | eslint-config-next 16.4.3 тянет eslint-plugin-react 7.37.5 (peer ESLint ≤ 9.7; проверено 27.10.2026) | когда eslint-config-next перейдёт на ESLint 10 |
+| Vite внутри Ladle | 6.4.5 | 8.3.5 | Ladle 5.1.1 — последний выпуск (`latest`, проверено 10.11.2026); поддержка Vite 8 влита в main (tajo/ladle#635, #636, #639), но не выпущена. Только витрина: свой `.ladle/vite.config.ts`, свой кэш `node_modules/.vite-ladle` | с выходом Ladle 5.2/6.0 на Vite 8 |
 
 ## Ловушки
 

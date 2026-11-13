@@ -16,6 +16,7 @@ import (
 // ComposeInvite (§4.3, §4.12): письма staff.invite и staff.access_reset на языке учётки — имя, код,
 // ссылка ADMIN_ORIGIN/accept без почты в адресе, срок кода.
 func TestComposeInvite(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	ru, ruCode := e.invitee("ivan.p@wf.example", memberOpts{Role: "support", Name: "Иван П."}, purposeInvite)
@@ -36,15 +37,17 @@ func TestComposeInvite(t *testing.T) {
 	for _, c := range []struct {
 		msg        mail.Message
 		code, name string
-		lang       string
-	}{{inv, ruCode, "Иван П.", "Приглашение"}, {reset, enCode, "Nina K.", "access reset"}} {
+		lang, loc  string
+	}{{inv, ruCode, "Иван П.", "Приглашение", "ru"}, {reset, enCode, "Nina K.", "access reset", "en"}} {
 		txt := c.msg.Subject + "\n" + c.msg.Text
-		for _, want := range []string{c.code, c.name, testOrigin + "/accept", "2026-10-14 12:00 UTC", c.lang} {
+		// IL2: ссылка открывает /accept на языке учётки (?lang=), почты в адресе нет
+		link := testOrigin + "/accept?lang=" + c.loc + ","
+		for _, want := range []string{c.code, c.name, link, "2026-10-14 12:00 UTC", c.lang} {
 			if !strings.Contains(txt, want) {
 				t.Errorf("в письме нет %q:\n%s", want, txt)
 			}
 		}
-		if strings.Contains(txt, "/accept?") || strings.Contains(txt, "accept/") {
+		if strings.Count(txt, "/accept") != 1 || strings.Contains(txt, "accept/") || strings.Contains(txt, "email=") {
 			t.Errorf("в ссылке лишнее:\n%s", txt)
 		}
 	}
@@ -53,6 +56,7 @@ func TestComposeInvite(t *testing.T) {
 // ComposeInvite отменяет письмо (mail.ErrSkip): не тот получатель, не тот вид, погашено (новым
 // приглашением), срок истёк, приглашение принято-и-закрыто, нет приглашения.
 func TestComposeInviteSkips(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	m, _ := e.invitee("ivan.p@wf.example", memberOpts{Role: "support"}, purposeInvite)
@@ -97,6 +101,7 @@ func TestComposeInviteSkips(t *testing.T) {
 // получателя; получатель — активный владелец, ref — учётка владельца, созданная оператором, иначе
 // mail.ErrSkip.
 func TestComposeBootstrapped(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	ctx := context.Background()
 	ruOwner := e.addMember("owner@wf.example", memberOpts{Role: "owner"})

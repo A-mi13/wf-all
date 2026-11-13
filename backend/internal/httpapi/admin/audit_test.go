@@ -78,6 +78,7 @@ func (e auditEnv) list(t *testing.T, token string, q url.Values) (*httpRec, []uu
 }
 
 func TestAuditList(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	t1 := time.Date(2026, 10, 13, 21, 0, 0, 0, time.UTC)
 	stav, mih := uuid.New(), uuid.New()

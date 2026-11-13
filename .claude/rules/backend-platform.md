@@ -21,23 +21,26 @@ paths:
   `409 idempotency.replay_unavailable`; `Cache-Control: no-store` ставит хендлер.
 - События — только id и непрофильные значения, без персональных данных; у агрегата `version`, подписчик в режиме `LatestState` отбрасывает устаревшие версии (§6.5).
 - Подписчик события — `events.Subscription` с явным `Delivery` (`EveryEvent` | `LatestState`), регистрируется в `subscriptions()` в `cmd/worker/main.go`; обработчик идемпотентен по `event_inbox` сам собой, пишет только в своей транзакции `tx`. Доставка на подписку, которой нет в реестре этого воркера (воркер другого релиза при выкатке), — обычная ошибка с повтором, а затем «мёртвая» задача (видна, переигрывается), не отмена; отменяется только задача на событие, уже удалённое чисткой. Переигровка — `worker events replay --type T --subscriber S --since RFC3339`.
-  Импорт городов оператором — `worker geo import --country RU`: синхронно в процессе, без задачи River, под ролью `worker`; задача `geo.import` ставится только через `jobs.NewImportArgs`.
+  Импорт городов оператором — `worker geo import --country RU`: синхронно в процессе, без задачи River, под ролью `worker`; время журнала — часы машины оператора со сдвигом к `now()` базы (`geojobs.OperatorClock`), не `clock.System` ноутбука; задача `geo.import` ставится только через `jobs.NewImportArgs`.
 - Задача River объявляет очередь из `platform/queue` (`events`, `lifecycle`, `notify`, `mail`, `stats`, `media`, `maintenance`) в `InsertOpts`; очереди `default` нет. Аргументы — с полем версии `V`, без ПД, уникальность — `UniqueOpts`. River в воркере работает на неотменяемом ctx: по SIGTERM сначала останавливается relay, затем `queue.Stop` — мягкая остановка (25 с) и, не уложившись, `StopAndCancel` (5 с): сумма укладывается в 30 с между SIGTERM и SIGKILL. `WORKER_RELAY_BATCH` ≥ 1 и `WORKER_RELAY_POLL` > 0 проверяются на старте воркера.
 - Периодика платформы — только `platform/periodic.Jobs()` (новый срез и новые задачи на вызов): её подключают и воркер, и
   admin-api — лидер River один на схему и ставит периодику по своему списку (P27), исполняет воркер (River не проверяет
   исполнителя у периодической вставки; страж `TestLeaderWithoutWorkersEnqueuesPlatformJobs` под ролью `admin`). Новая
   чистка платформы — в `Jobs()`, не в `cmd/worker`. Чистки, которым нужны права `admin` (`staff_*`, `approvals`,
-  `staff_idempotency_keys`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +
-  `ExpireDue` + `PurgeDecided` + `idempotency.DeleteExpired(…, Staff)`).
+  `staff_idempotency_keys`, `staff_rate_limits`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +
+  `ExpireDue` + `PurgeDecided` + `idempotency.DeleteExpired(…, Staff)` + `ratelimit.DeleteExpired(…, Staff)`).
   Исполняющий клиент River — только `queue.ClientConfig(очереди, исполнители, периодика, журнал)` у обоих бинарников
   (`riverConfig` в `cmd/worker` и `cmd/admin-api`), клиент только для вставки — `queue.InsertConfig(журнал)`; свой
   `river.Config{…}` вне `platform/queue` (литерал, `new`, переменная типа) не собирать — страж
   `archtest.TestRiverConfigOnlyInQueue` (тесты `*_test.go` — исключение): общая часть —
   `queue.MaintenanceConfig` (сроки чистки выполненных, отменённых и «мёртвых» задач, порог рескьюера — умолчания River
-  v0.47–v0.49, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
-  `TestMaintenanceConfig`, `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance`
-  (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
-  сверить умолчания с константами `queue/maintenance.go`.
+  v0.47–v0.50, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
+  `TestMaintenanceConfig`, `TestMaintenanceMatchesRiverDefaults` (сверка с `WithDefaults` River),
+  `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance` (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
+  changelog (`JobSnooze`, `UniqueOpts`, рескьюер, `AddWorkerArgs`) и линия миграций `riverpgxv5`; разошедшееся умолчание
+  красит `TestMaintenanceMatchesRiverDefaults`, миграцию схемы линии без нашего `00NN_river_vK.sql` —
+  `TestRiverMigrationLineCovered` (`queue`; через `rivermigrate.AllVersions`; v1 — таблица версий River `river_migration`, у нас её нет: версии ведёт goose;
+  пустая для Postgres версия — `SELECT 1;`, как v8, — файла не требует); исполняемый SQL наших файлов (без строк-комментариев) равен SQL линии текущего River — `TestRiverMigrationTextMatchesRiver` (River поправил SQL выпущенной версии — новая миграция goose, слитый файл не править).
 - HTTP-бинарник с фоном — `server.RunService(ctx, name, cfg, logOut, build)`: `build(log, pool)` → `Service{Handler,
   Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
   фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены
@@ -62,7 +65,8 @@ paths:
   (копия `append(make([]uuid.UUID, 0, len(s.CityIDs)), s.CityIDs...)`), скоуп выбирается по `GrantScoped`, а не по
   `len`: модератор без городов видит только свои записи, а не весь журнал. IP
   наружу — подсетью `audit.MaskIP` (/24, /48). Слово `code` в ключе — секрет, кроме кода-справочника
-  (`country_code`, `error_code`: список `publicCode`).
+  (`country_code`, `error_code`: список `publicCode`). Ключ целиком из `publicKey` не маскируется: `phone_prefix`
+  (префикс телефона страны «+7» — код страны, не ПД; m7 ревью G6); узко — `phone`, `contact_phone_prefix` как раньше.
   Роль обязательна всегда; `insert` повторяет CHECK `audit_log` из 0020 (роль из списка, служебная ⇔ нет автора, у
   сотрудника — роль сотрудника и `ActorLabel` 1–120 символов) и отвергает нарушение `ErrInvalidEntry` до SQL: поменял
   CHECK — поменяй списки ролей в `audit/audit.go`; расхождение списков и CHECK ловит `TestActorRolesMatchCheck`
@@ -104,8 +108,18 @@ paths:
   подтеги (`ru`, `en`)); свой разбор заголовка модули не пишут. «Нет языка» (`ok=false`) решает вызывающий: `i18n.Default` не подставляется.
 - Версии нативного приложения — пакет `appversion`: чтение `Reader.Get` (нет строки — `ok=false`, не ошибка),
   сравнение только `appversion.Compare` (semver `MAJOR.MINOR.PATCH`, строкой версии не сравнивать), перед записью —
-  `appversion.Validate` (формат, `min ≤ recommended`, `https` и точный хост стора платформы); нарушения —
-  `ValidationError` с полями контракта, ручка переводит их в 400 `validation.failed`.
+  `appversion.Validate` (формат, `min ≤ recommended`, `https://` в нижнем регистре без пробельных и управляющих
+  символов в любом месте — в том числе U+00A0, U+0085, C1, — и точный хост стора платформы; CHECK `0021` — защита в
+  глубину); нарушения —
+  `ValidationError` с полями контракта, ручка переводит их в 400 `validation.failed` (все сразу —
+  `httpx.NewFieldErrors`). Запись из админки — `appversion.Put(ctx, tx, v, now)` в транзакции вызывающего (строка
+  под `FOR UPDATE` — «было», те же значения — без записи, иначе правка с `version + 1`; не заведена — вставка `ON CONFLICT DO NOTHING`, опередила параллельная — перечитать под `FOR UPDATE` и править с её «было»), список — `appversion.List`;
+  событие — `appversion.ChangedEvent` (агрегат `app_versions`, `id.Named`), его и аудит пишет ручка в той же tx.
+- Флаги функций — `flags.Store`: чтение модулями `Enabled`/`Require`; админка — `List` и `Update(ctx, tx, key,
+  version, globally, cities)` (оптимистичная `version`: не та — `ErrStale`, и при неизменных значениях; параллельная
+  правка той же версии — 0 строк `UPDATE … WHERE version` → `ErrStale`; города — множество `flags.CitySet`; ничего не
+  меняется — без записи); событие — `flags.ChangedEvent` (агрегат `feature_flag`, `flags.FlagID`). Города флага
+  проверяет `httpapi/admin` через `geo.Service.ExistingCityIDs` (R19): `platform` модули не импортирует.
 - `*auth.Principal` из `auth.From(ctx)` — общий для всех запросов сессии (кэш отдаёт один указатель): срезы
   `Roles` и `Restrictions` не изменять (append, sort, запись по индексу).
 - Сотрудник admin-api — `*auth.Staff` из `auth.StaffFrom(ctx)` (`Grants`, `CityIDs` только читать). Право —
@@ -116,6 +130,13 @@ paths:
 - Ключ лимита — только `ratelimit.IPKey` / `SubjectKey` / `SessionDeviceKey` / `BFFDeviceKey` / `EmailKey`
   (`<вид>:<класс>:<значение>`; виды `ip`, `user`, `staff`, `device`, `email`): счётчик, который сценарий ведёт
   сам через `Limiter`, попадает в то же пространство, что и `ratelimit.Middleware`.
+  Таблица счётчиков — параметр `ratelimit.NewPG(db, clock, ratelimit.Table)` (план B, R2), как у идемпотентности:
+  `Players` — `rate_limits` публичного API (`cmd/api`, чистит воркер `CleanupWorker`), `Staff` — `staff_rate_limits`
+  admin-api (`assemble` в `cmd/admin-api` — один лимитер на сценарии, конвейер и команды оператора; права только у
+  `admin`, у `admin` на `rate_limits` — ничего; чистит тикер `staff/jobs.Cleaner` через
+  `ratelimit.DeleteExpired(ctx, pool, clock, Staff)`); неизвестная — паника при сборке. Запросы — пары `X`/`StaffX` в
+  `queries/ratelimit.sql`, равные текстом после замены имени таблицы (страж `TestStaffQueriesMirrorPublic` на
+  `testkit/sqlmirror`, общий с идемпотентностью). Тесты лимитов admin-api — `ratelimit.Staff` под ролью `admin`.
 - В логи — только строки и ошибки: `logx` маскирует ПД (почту, телефоны) только в них; структуры, `Stringer`
   и срезы не маскируются — с ПД их в лог не класть.
 - Права сотрудников — каталог и матрица `platform/perm` (`docs/05-ролевая-модель.md`): ключ
@@ -165,6 +186,20 @@ paths:
   (`errors.Is(err, staff.ErrLastOwner)`). Ошибка без `Fail` или паника — откат всего, запрос `pending` (500).
   `approvals.ErrInitiatorChanged` (обёртка `ErrStale`) — отказ исполнителя из-за изменившегося инициатора:
   наружу `ErrStale`, у `failed` — `error = initiator_changed`; голый `ErrStale` — `platform.approval_stale`.
+- **Действие модуля не из `staff`** (R5, R21): payload — `v` + встроенный `approvals.Initiator` (`InitiatorOf(s)`:
+  `init_id`, `init_ver` из `auth.Staff.Version`), `Action.LockActors: true`. Платформа после замка строки и проверки
+  инициатора, до savepoint зовёт хук `Registry.SetActorLock` (один, регистрирует `staff`): `FOR SHARE` учёток
+  инициатора и подтверждающего по id; `Fail(ErrInitiatorChanged)` — `failed` (`initiator_changed`), иная ошибка —
+  откат, `pending`. `LockActors` без хука — отказ `Validate`, в `Approve` — сбой (fail-closed). Исполнитель (и хук)
+  получает копию принципала подтверждающего с `Label` = `decided_by_label` (подпись решения из `Approve`, не загрузки
+  сессии) — ей и подписывать аудит модуля; id исполняемого запроса — `approvals.ApprovalIDFrom(ctx)` (в аудит
+  модуля как `approval_id`). Стражи — `approvals/actor_lock_test.go`, гонка с выключением инициатора — `staff` и
+  `httpapi/admin` `TestCountryRulesInitiatorDisabledConcurrently` (второй — на настоящем `geo.country_rules`).
+  Действия geo (`geo.country_rules`, `geo.country_create`, право `geo.countries.rules`) регистрирует
+  `geo/admin.Handler.RegisterApprovals(reg, svc)` — в сборке до `reg.Validate()`.
+- Детерминированный uuid сущности без своей строки (агрегат флага, версий приложения, объект задачи импорта) —
+  `id.Named(space, name)` (UUIDv5, R18; golden — `TestNamedUUIDGolden`). Журнал по списку объектов —
+  `audit.ListParams.ObjectIDs` (nil — без фильтра, пустой не-nil — ни одной записи).
 - **Каждое решение** — аудит `platform.approval_<status>` (`executed|rejected|cancelled|expired|failed`; актор —
   решивший, у просрочки и гашения — `system`, комментарий — в `Reason`) и событие `platform.approval_decided`
   (агрегат `approval`, версия 1) в той же транзакции.

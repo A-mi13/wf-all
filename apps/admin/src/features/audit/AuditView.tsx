@@ -1,11 +1,19 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import { useTimeZone, useTranslations } from 'use-intl';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
-import { useDateTime } from '../../i18n/format';
-import { Button, type Column, DataTable, infiniteTableProps, StatusChip } from '../../ui';
+import { usePanelParam } from '../../app/panels';
+import {
+  Button,
+  type Column,
+  CopyButton,
+  DataTable,
+  infiniteTableProps,
+  RelativeTime,
+  StatusChip,
+} from '../../ui';
 import { AuditFilters } from './AuditFilters';
 import { sectionOf, tagTone, useAuditLabels } from './labels';
 import { type AuditSearch, toAuditQuery } from './search';
@@ -34,9 +42,11 @@ export function AuditView({
   const t = useTranslations('audit');
   const api = useApi();
   const timeZone = useTimeZone() ?? 'UTC';
-  const dateTime = useDateTime();
   const labels = useAuditLabels();
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  // Раскрытая запись — в адресе (?entry=<id>, спека UI-фундамента §4.6): F5 и пересланная ссылка её не теряют,
+  // «Назад» сворачивает. Раскрыта одна; записи нет среди загруженных — ничего не раскрыто. Право на журнал
+  // проверил каркас.
+  const entry = usePanelParam('entry', { allowed: true });
   const query = toAuditQuery(search, timeZone);
   const list = useInfiniteQuery({
     queryKey: [...AUDIT_KEY, query],
@@ -46,19 +56,21 @@ export function AuditView({
     getNextPageParam: (p) => p.next_cursor ?? undefined,
   });
 
-  const toggle = (id: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  // раскрыта другая — switch (replace): одна запись истории на раскрытие, «Назад» и «Свернуть» ведут на список,
+  // а не на прежнюю запись
+  const toggle = (id: string) => (entry.value === id ? entry.close() : entry.switch(id));
 
   const columns: Column<AuditRecord>[] = [
     {
       id: 'time',
       header: t('table.columns.time'),
       width: 'md',
-      cell: (r) => <span className={styles.time}>{dateTime(r.created_at)}</span>,
+      // относительное («5 мин назад»), точное — скрытым текстом и подсказкой по наведению и фокусу строки
+      cell: (r) => (
+        <span className={styles.time}>
+          <RelativeTime value={r.created_at} />
+        </span>
+      ),
     },
     {
       id: 'who',
@@ -79,12 +91,16 @@ export function AuditView({
     {
       id: 'action',
       header: t('table.columns.action'),
-      cell: (r) => <ActionCell record={r} open={open.has(r.id)} onToggle={() => toggle(r.id)} />,
+      cell: (r) => (
+        <ActionCell record={r} open={entry.value === r.id} onToggle={() => toggle(r.id)} />
+      ),
     },
     {
       id: 'object',
       header: t('table.columns.object'),
       width: 'md',
+      // второстепенные (вид объекта и id есть в «Подробнее»): на 768–1023 скрыты, пока не включены в «Столбцах»
+      priority: 'low',
       cell: (r) => (
         <span className={styles.stack}>
           <span>{labels.object(r.object_type)}</span>
@@ -96,7 +112,14 @@ export function AuditView({
       id: 'id',
       header: t('table.columns.id'),
       width: 'sm',
-      cell: (r) => <span className={styles.code}>{r.id.slice(0, 8)}</span>,
+      priority: 'low',
+      // короткий id на виду, копируется полный (поддержке и подтверждениям; план UF2a.10)
+      cell: (r) => (
+        <span className={styles.idCell}>
+          <span className={styles.code}>{r.id.slice(0, 8)}</span>
+          <CopyButton value={r.id} label={t('table.copy_id')} />
+        </span>
+      ),
     },
   ];
 
@@ -104,8 +127,11 @@ export function AuditView({
   return (
     <DataTable
       label={t('table.label')}
+      // меню «Столбцы» и плотность (выбор — в localStorage браузера)
+      tableId="audit"
       columns={columns}
       rowKey={(r) => r.id}
+      activeRowKey={entry.value}
       {...infiniteTableProps(list)}
       filters={{
         active,
@@ -134,12 +160,17 @@ function Actor({ record: r, onFilter }: { record: AuditRecord; onFilter: (id: st
   if (r.actor_staff_id && label) {
     const id = r.actor_staff_id;
     return (
-      <Button variant="link" aria-label={t('filter', { name: label })} onClick={() => onFilter(id)}>
+      <Button
+        variant="link"
+        className={styles.actor}
+        aria-label={t('filter', { name: label })}
+        onClick={() => onFilter(id)}
+      >
         {label}
       </Button>
     );
   }
-  if (label) return <span>{label}</span>;
+  if (label) return <span className={styles.actor}>{label}</span>;
   return <span>{r.actor_role === 'anonymous' ? t('anonymous') : t('unknown')}</span>;
 }
 

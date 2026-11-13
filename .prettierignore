@@ -6,6 +6,7 @@ contracts/openapi/admin.yaml
 contracts/openapi/admin/permissions.json
 packages/tokens/tokens.css
 packages/tokens/tokens.ts
+packages/icons/icons.json
 **/.next/**
 **/dist/**
 design/

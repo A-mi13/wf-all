@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,6 +56,9 @@ type invitePayload struct {
 	CityIDs         []uuid.UUID `json:"city_ids"`
 	ExistingID      *uuid.UUID  `json:"existing_id,omitempty"`
 	ExistingVersion int64       `json:"existing_version,omitempty"`
+	// Locale — язык учётки и писем (IL2): выбранный приглашающим или его язык на момент запроса. nil — запрос
+	// подан до IL2 (поля нет): новая учётка — язык по умолчанию базы, выключенная — язык прежний.
+	Locale *string `json:"locale,omitempty"`
 }
 
 // rolePayload — staff.role_change: цель и её версия, было (право запроса по D16 считается из пары) и
@@ -79,6 +84,9 @@ type targetPayload struct {
 	Comment  string    `json:"comment,omitempty"`
 }
 
+// errPayloadVersion — payload действия другой версии формата (сбой исполнителя, запрос pending).
+var errPayloadVersion = errors.New("staff: версия формата payload не поддерживается")
+
 // decode — payload действия формата payloadVersion. Иное — сбой (500, запрос pending): payload пишет
 // только сам модуль.
 func decode[T any](raw json.RawMessage, base func(*T) *payloadBase) (T, error) {
@@ -87,7 +95,7 @@ func decode[T any](raw json.RawMessage, base func(*T) *payloadBase) (T, error) {
 		return p, fmt.Errorf("staff: payload: %w", err)
 	}
 	if v := base(&p).V; v != payloadVersion {
-		return p, fmt.Errorf("staff: payload v = %d, ждали %d", v, payloadVersion)
+		return p, fmt.Errorf("staff: payload v = %d, ждали %d: %w", v, payloadVersion, errPayloadVersion)
 	}
 	return p, nil
 }
@@ -96,7 +104,7 @@ func (p *invitePayload) b() *payloadBase { return &p.payloadBase }
 func (p *rolePayload) b() *payloadBase   { return &p.payloadBase }
 func (p *targetPayload) b() *payloadBase { return &p.payloadBase }
 
-// RegisterApprovals — действия staff.* и проверка инициатора в реестре платформы (сборка admin-api,
+// RegisterApprovals — действия staff.*, проверка инициатора и хук замка акторов в реестре платформы (сборка admin-api,
 // 10c: approvals.New → RegisterApprovals → Registry.Validate). svc — сервис подтверждений для запросов и
 // гашения (CancelByInitiator).
 func (a *App) RegisterApprovals(r *approvals.Registry, svc *approvals.Service) {
@@ -145,6 +153,8 @@ func (a *App) RegisterApprovals(r *approvals.Registry, svc *approvals.Service) {
 		Name: ActionRevokeOwner, Permission: permRevokeOwner, Exec: a.execRevokeOwner, Target: targetOf,
 	})
 	r.SetInitiatorCheck(a.checkInitiator)
+	// хук замка акторов — для действий модулей не из staff (R21): staff.* его не зовут (LockActors = false)
+	r.SetActorLock(a.lockActors)
 }
 
 func targetOf(raw json.RawMessage) (uuid.UUID, uuid.UUID) {
@@ -183,6 +193,35 @@ func (a *App) checkInitiator(ctx context.Context, tx pgx.Tx, ap approvals.Approv
 	}
 	if !initiatorValid(st.Status, st.Role, st.Version, st.LockedUntil, p, ap.Permission, ap.ScopeCityID, a.clock.Now()) {
 		return approvals.Fail(approvals.ErrStale)
+	}
+	return nil
+}
+
+// lockActors — approvals.ActorLock для действий модулей не из staff (R21; у staff.* LockActors = false): та же
+// перепроверка, что execLocks, без замка владельцев. Платформа зовёт его после замка строки запроса — порядок
+// «строка approvals → учётки по возрастанию id» тот же, что у staff. Учётки инициатора и подтверждающего —
+// FOR SHARE; подтверждающий — checkActor (выключен, сессия погашена или заменена, роль сменилась — обычная
+// ошибка: откат всего, запрос pending); инициатор — init_id из payload (approvals.Initiator) = requested_by и
+// initiatorValid по праву и городу запроса, иначе Fail(ErrInitiatorChanged): failed (initiator_changed), 409.
+func (a *App) lockActors(ctx context.Context, tx pgx.Tx, ap approvals.Approval, approver *auth.Staff) error {
+	var in approvals.Initiator
+	if err := json.Unmarshal(ap.Payload, &in); err != nil {
+		return fmt.Errorf("staff: payload запроса %s не разбирается", ap.ID)
+	}
+	q := staffdb.New(tx)
+	locked, err := lockAccounts(ctx, q, uuid.Nil, in.ID, approver.StaffID)
+	if err != nil {
+		return err
+	}
+	now := a.clock.Now()
+	if _, err := checkActor(ctx, q, approver, locked, now); err != nil {
+		return err
+	}
+	init, ok := locked[in.ID]
+	p := payloadBase{V: payloadVersion, InitID: in.ID, InitVer: in.Ver}
+	if in.ID != ap.RequestedBy || !ok ||
+		!initiatorValid(init.status, init.role, init.version, init.lockedUntil, p, ap.Permission, ap.ScopeCityID, now) {
+		return approvals.Fail(approvals.ErrInitiatorChanged)
 	}
 	return nil
 }
@@ -240,11 +279,17 @@ func business(err error) error {
 // и granted_by — подтвердивший), приглашение invite (письмо), аудит и событие staff.invited; почта занята
 // (гонка двух приглашений) — Fail(staff.email_taken), ничего не создано. Почта выключенной учётки
 // (existing_id, версия та же) — та же учётка снова: новое имя, роль и города, сброс доступа, приглашение
-// invite.
+// invite. Роль и города payload — до execLocks тем же предикатом, что сценарий (invitePayloadShaped).
 func (a *App) execInvite(ctx context.Context, tx pgx.Tx, raw json.RawMessage, approver *auth.Staff) error {
 	p, err := decode(raw, (*invitePayload).b)
 	if err != nil {
 		return err
+	}
+	// Как у staff.role_change (W5-back, M1 ревью G3): нарушение формы — бизнес-отказ (failed, 409
+	// platform.approval_stale), а не 500 от enum, CHECK или PK базы; отказ не ждёт замков учёток; payload в текст
+	// не попадает.
+	if !invitePayloadShaped(p) {
+		return approvals.Fail(approvals.ErrStale)
 	}
 	q := staffdb.New(tx)
 	target := uuid.Nil
@@ -278,17 +323,29 @@ func (a *App) execInvite(ctx context.Context, tx pgx.Tx, raw json.RawMessage, ap
 		return business(a.reinvite(ctx, tx, q, t, p, by, after))
 	}
 	now := a.clock.Now()
-	c, err := a.createInvited(ctx, q, newAccount{email: p.Email, name: p.DisplayName, role: p.Role, cities: cities, by: by.staffID}, now)
+	c, err := a.createInvited(ctx, q, newAccount{email: p.Email, name: p.DisplayName, role: p.Role, cities: cities, by: by.staffID, locale: p.Locale}, now)
 	if err != nil {
 		return business(err)
 	}
 	if _, err := a.IssueInvite(ctx, tx, c.id, purposeInvite); err != nil {
 		return err
 	}
+	// язык новой учётки — в записи (m1 ревью IL2): после PurgeDecided payload запроса удалён, след выбора — здесь;
+	// запрос до IL2 (nil) — без ключа
+	if p.Locale != nil {
+		after["locale"] = *p.Locale
+	}
 	if err := audit.Write(ctx, by.entry(actionInvited, c.id, nil, after, staff.Meta{})); err != nil {
 		return err
 	}
 	return publishInvited(ctx, c, p.Role)
+}
+
+// invitePayloadShaped — роль приглашения из perm.Roles и её города проходят roleShape и уже в его нормальной форме
+// (по возрастанию, без повторов — так их пишет Invite); язык, если есть, — ru | en (checkLocale, как сценарий).
+func invitePayloadShaped(p invitePayload) bool {
+	cities, err := roleShape(p.Role, p.CityIDs)
+	return err == nil && slices.Equal(cities, p.CityIDs) && (p.Locale == nil || checkLocale(*p.Locale) == nil)
 }
 
 // reinvite — почта выключенной учётки t приглашена снова (§2.6): роль и города из запроса, затем сброс
@@ -307,20 +364,35 @@ func (a *App) reinvite(ctx context.Context, tx pgx.Tx, q *staffdb.Queries, t acc
 		}
 	}
 	after["reinvited"] = true
+	// язык — выбранный приглашающим (IL2); сменился — было/стало в записи staff.invited
+	var before map[string]any
+	if p.Locale != nil && *p.Locale != t.locale {
+		if err := q.SetLocale(ctx, staffdb.SetLocaleParams{Locale: *p.Locale, ID: t.id}); err != nil {
+			return err
+		}
+		before, after["locale"] = map[string]any{"locale": t.locale}, *p.Locale
+	}
 	name := p.DisplayName
 	_, err := a.resetAccess(ctx, tx, q, t, resetSpec{
-		by: by, action: actionInvited, after: after, purpose: purposeInvite, name: &name,
+		by: by, action: actionInvited, before: before, after: after, purpose: purposeInvite, name: &name,
 		event: func(v int64) events.Event { return staff.InvitedEvent(t.id, v, p.Role) },
 	})
 	return err
 }
 
-// execRoleChange — исполнитель staff.role_change (D16): цель той же версии, что при запросе (иначе
-// ErrStale), страж последнего владельца при понижении, applyRole от подтвердившего.
+// execRoleChange — исполнитель staff.role_change (D16): форма роли и городов из payload (rolePayloadShaped),
+// цель той же версии, что при запросе (иначе ErrStale), страж последнего владельца при понижении, applyRole от
+// подтвердившего.
 func (a *App) execRoleChange(ctx context.Context, tx pgx.Tx, raw json.RawMessage, approver *auth.Staff) error {
 	p, err := decode(raw, (*rolePayload).b)
 	if err != nil {
 		return err
+	}
+	// Исполнитель — последняя граница перед записью роли (W5-back): payload пишет только сценарий, но
+	// проверка — тем же предикатом и ДО execLocks (отказ не держит замок владельцев). Нарушение — бизнес-отказ
+	// (failed, 409 platform.approval_stale), а не 500 от enum или CHECK базы; payload в текст не попадает.
+	if !rolePayloadShaped(p) {
+		return approvals.Fail(approvals.ErrStale)
 	}
 	permission, changed := rolePermission(p.FromRole, p.FromCityIDs, p.Role, p.CityIDs)
 	if !changed {
@@ -339,11 +411,37 @@ func (a *App) execRoleChange(ctx context.Context, tx pgx.Tx, raw json.RawMessage
 	if err != nil {
 		return err
 	}
+	// «Было» payload — снимок базы при запросе, а версия цели та же (lockedTarget): расхождение с базой под замком
+	// значит «payload не от сценария» (m1 ревью U1) — право посчитано по подложному «было». Без payload в тексте.
+	if t.role != p.FromRole || !slices.Equal(from, p.FromCityIDs) {
+		return approvals.Fail(approvals.ErrStale)
+	}
 	cities := p.CityIDs
 	if cities == nil {
 		cities = []uuid.UUID{}
 	}
 	return business(a.applyRole(ctx, tx, q, t, from, p.Role, cities, by, p.InitID, staff.Meta{}, a.clock.Now()))
+}
+
+// rolePayloadShaped — роль «стало» и её города проходят roleShape и уже в его нормальной форме (по
+// возрастанию, без повторов — так их пишет ChangeRole), роль «было» — из perm.Roles, города «было» — по
+// возрастанию без повторов (их снимок из базы, citiesOf; M2 ревью G3: иначе rolePermission увидит изменение там,
+// где его нет). Пару «роль было — её города» не сверяем: это снимок базы на момент запроса, а не ввод;
+// исполнитель читает города заново под замком (citiesOf).
+func rolePayloadShaped(p rolePayload) bool {
+	cities, err := roleShape(p.Role, p.CityIDs)
+	return err == nil && slices.Equal(cities, p.CityIDs) && validRole(p.FromRole, fieldRole) == nil &&
+		strictlyAscending(p.FromCityIDs)
+}
+
+// strictlyAscending — id по возрастанию байтов и без повторов (нормальная форма normCities и citiesOf).
+func strictlyAscending(ids []uuid.UUID) bool {
+	for i := 1; i < len(ids); i++ {
+		if bytes.Compare(ids[i-1][:], ids[i][:]) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // execAccessReset — исполнитель staff.access_reset (§4.9): цель той же версии, страж последнего

@@ -10,6 +10,7 @@ import (
 	"wf/backend/internal/platform/testkit/dbtest"
 )
 
+// serial: t.Setenv — переменные окружения процесса (go test запрещает t.Setenv в параллельном тесте).
 func TestConfigFromEnvDefaults(t *testing.T) {
 	t.Setenv("WF_TEST_PG_PORT", "")
 	t.Setenv("WF_PG_PORT", "")
@@ -19,6 +20,7 @@ func TestConfigFromEnvDefaults(t *testing.T) {
 	}
 }
 
+// serial: t.Setenv — переменные окружения процесса (go test запрещает t.Setenv в параллельном тесте).
 func TestConfigFromEnvOverride(t *testing.T) {
 	t.Setenv("WF_TEST_PG_PORT", "25432")
 	t.Setenv("WF_PG_PORT", "25433")
@@ -29,6 +31,8 @@ func TestConfigFromEnvOverride(t *testing.T) {
 
 // Порт dev-базы из deploy/dev/.env (WF_PG_PORT) — порт тестов по умолчанию:
 // меняешь порт в одном месте, тесты идут туда же.
+//
+// serial: t.Setenv — переменные окружения процесса (go test запрещает t.Setenv в параллельном тесте).
 func TestConfigFallsBackToDevPort(t *testing.T) {
 	t.Setenv("WF_TEST_PG_PORT", "")
 	t.Setenv("WF_PG_PORT", "25433")
@@ -39,6 +43,7 @@ func TestConfigFallsBackToDevPort(t *testing.T) {
 
 // Код платформы проверяется с правами прода: пул As работает под ролью, Owner — для подготовки.
 func TestNewPoolsAsRunsUnderRole(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	p := dbtest.NewPoolsAs(t, "api")
 	var who string

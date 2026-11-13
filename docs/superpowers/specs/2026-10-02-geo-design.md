@@ -23,7 +23,8 @@
    включена — источник на продукт не влияет.
 4. Минимальная версия приложения — в базе, меняется ручкой admin-api с аудитом, без деплоя.
 5. Админские ручки `geo` пишутся сразу и правильно — вход сотрудника, право из ролей,
-   идемпотентность, аудит; до спеки `identity` они отвечают 401. Временных обходов нет.
+   идемпотентность, аудит. Вход сотрудников — модуль `staff` (спека сотрудников, план A), а не
+   `identity`: ручки работают с сессией сотрудника, без неё — 401 (§5.1). Временных обходов нет.
 6. `/v1/health` удаляется из публичного контракта сейчас: правило «ломать public только в `/v2`»
    уточняется — до первого тега `contracts-v1.0.0` осознанные ломающие правки public допустимы
    через явный файл исключений (§4.4).
@@ -212,7 +213,7 @@ centroid: <slug…> — заполните точки (см. спеку geo §3.
 | Роль | Права |
 | --- | --- |
 | `api` | SELECT: `countries`, `regions`, `cities`, `districts`, `*_names`, `city_slug_history`, `geonames_places`, `geonames_place_names`, `geonames_admin1*`, `app_versions` |
-| `admin` | SELECT на всё перечисленное и `geonames_imports`; INSERT/UPDATE: `countries`, `regions`, `cities`, `districts`, `*_names`, `city_slug_history`, `app_versions`; DELETE: `country_names`, `region_names`, `city_names` |
+| `admin` | SELECT на всё перечисленное и `geonames_imports`; INSERT/UPDATE: `countries`, `regions`, `cities`, `districts`, `*_names`, `city_slug_history`, `app_versions`; DELETE: `country_names`, `region_names`, `city_names`, `city_slug_history` (возврат города к своему старому `slug` удаляет строку истории, §5.2; план B, `0021`) |
 | `worker` | DML: `geonames_*`; SELECT/UPDATE: `cities`, `regions` (сверка §5.4); SELECT/INSERT: `city_names`, `region_names` (только отсутствующие переводы); SELECT: `countries`, `country_names` |
 
 Каждое отличие от «DML всем» — ветка CASE в `grants.sql` и случай в `grants_test.go`.
@@ -323,52 +324,108 @@ ip, background) (*auth.Staff, error)` загружает сотрудника п
 
 ### 5.2. Операции и матрица прав
 
-| Операция | Кто | Что делает |
-| --- | --- | --- |
-| `GET /v1/geo/places?q=&country=&cursor=` | `admin` | Поиск по источнику (префикс на любом языке и по `ascii_name`); порядок — `population` по убыванию, `geoname_id`; у места — `city_id`, если заведено. |
-| `GET /v1/geo/cities?status=&country=&q=&cursor=`, `GET /v1/geo/cities/{cityId}` | `admin` — все; `city_moderator` — только свои города | Все статусы и страны (в том числе выключенные), с `geoname_id`, `population`, названиями по всем локалям. |
-| `GET /v1/geo/cities/{cityId}/districts` | `admin`, `city_moderator` этого города | Районы, включая архивные (`archived_at`). |
-| `GET /v1/geo/countries` | `admin` | Все страны с правилами и названиями. |
-| `POST /v1/geo/cities` `{geoname_id, status?, country_code?, region_id?}` | `admin` | Активация (§5.3). |
-| `PATCH /v1/geo/cities/{cityId}` `{status?, slug?, names?}` | `admin`; `city_moderator` этого города — кроме `status` и `slug` | Статус — любой переход; `slug` занят в `cities` или в истории другого города — 409 `geo.slug_taken`; старый — в `city_slug_history`; возврат к своему старому `slug` удаляет его из истории; названия по локалям (§3.3). |
-| `POST /v1/geo/cities/{cityId}/districts`, `PATCH …/districts/{districtId}` (`name?`, `archived?`) | `admin`, `city_moderator` этого города | Районы; архивирование вместо удаления (§3.2). |
-| `POST /v1/geo/countries`, `PATCH /v1/geo/countries/{code}` | `admin` | Страна и её правила (`currency`, `default_locale`, `phone_prefix`, `week_starts_on`, `min_signup_age`, `age_of_majority`, `is_enabled`, названия). Значения вносит человек, сверяя с законом; из GeoNames не берутся. |
-| `POST /v1/geo/imports` `{country}`, `GET /v1/geo/imports` | `admin` | Поставить импорт (§5.4): 202 и `{job_id}`; River отбросил как дубль — 409 `geo.import_in_progress`; страны нет в `countries` — 404 `geo.country_not_found`. Журнал. |
-| `PUT /v1/app/versions/{platform}` (тег `platform`) | `admin` | Версии и `store_url`; нарушение `min ≤ recommended` или хоста — 400 `validation.failed` с полем. |
+Право — ключ матрицы `platform/perm` (`x-permission` операции; значения по ролям — спека сотрудников
+§2.5, `docs/05-ролевая-модель.md`); `handler` — право решает сценарий по присланным полям.
 
-`city_moderator` в чужом городе и без роли — 403 `geo.forbidden` (спека бэкенда §6.3:
-`<модуль>.forbidden`); у операций версий — `platform.forbidden`. Тест прав на каждую операцию:
-`admin`, модератор своего города, модератор чужого, без роли, без сессии.
+| Операция | Право | Что делает |
+| --- | --- | --- |
+| `GET /v1/geo/places?q=&country=&cursor=` (`listGeoPlaces`) | `geo.places.search` | Поиск по источнику (префикс на любом языке и по `ascii_name`); порядок — `population` по убыванию, `geoname_id`; у места — `city_id`, если заведено. |
+| `GET /v1/geo/cities?status=&country=&region_id=&q=&ids=&cursor=` (`listGeoCities`), `GET /v1/geo/cities/{cityId}` (`getGeoCity`) | `geo.cities.read` (модератор — `scoped`: только свои города) | Все статусы и страны (в том числе выключенные), с `geoname_id`, `population`, названиями по всем локалям. |
+| `GET /v1/geo/cities/{cityId}/districts` (`listGeoDistricts`) | `geo.cities.read` | Районы, включая архивные (`archived_at`). |
+| `GET /v1/geo/countries` (`listGeoCountries`) | `geo.countries.read` (`allow` у всех ролей, R9) | Все страны с правилами, названиями и числом открытых (`pilot`, `live`) городов. |
+| `GET /v1/geo/countries/{code}/regions` (`listGeoRegions`) | `geo.cities.read` (R9) | Регионы страны — выбор региона при активации; нет страны — 404 `geo.country_not_found`. |
+| `POST /v1/geo/cities` `{geoname_id, status?, country_code?, region_id?}` (`activateGeoCity`) | `geo.cities.activate` | Активация (§5.3). |
+| `PATCH /v1/geo/cities/{cityId}` `{status?, slug?, names?}` (`updateGeoCity`) | `handler`: `geo.cities.manage` (статус, `slug`), `geo.cities.rename` (названия) | Сценарий зовёт `Decide(право, cityID)` по каждому присланному полю; хоть одно `deny` — `403 auth.forbidden` на весь запрос, без частичного применения (R10). Статус — любой переход; `slug` занят в `cities` или в истории другого города — 409 `geo.slug_taken`; старый — в `city_slug_history`; возврат к своему старому `slug` удаляет его из истории; названия по локалям (§3.3). Правки — без оптимистичной версии: последняя запись выигрывает (R11). |
+| `POST /v1/geo/cities/{cityId}/link {geoname_id}` (`linkGeoCity`) | `geo.cities.manage` | Ручная привязка города без `geoname_id` к кандидату из отчёта сверки — та же функция, что сверка импорта (§5.4 шаг 5, R14). Место должно быть в источнике, не пропавшим (`missing_since`) и **той же страны, что город** (страна города, в том числе переопределённая), — иначе 404 `geo.place_not_found`: иначе региону ушёл бы код admin1 чужой страны. Город уже привязан — 409 `geo.city_already_linked`; место у другого города — 409 `geo.city_already_active`. |
+| `POST /v1/geo/cities/{cityId}/districts`, `PATCH …/districts/{districtId}` (`name?`, `archived?`) | `geo.districts.manage` | Районы; архивирование вместо удаления (§3.2); район чужого города — 404 `geo.district_not_found`. |
+| `POST /v1/geo/countries` (`createGeoCountry`) | `geo.countries.rules` | **Всегда `202 {approval}`** — действие `geo.country_create` (вдвоём, U7, R25): второй проверяет валюту и пороги; код уже в справочнике — 409 `geo.country_exists` до запроса, гонка двух запросов — второй `failed` при исполнении. |
+| `PATCH /v1/geo/countries/{code}` (`updateGeoCountry`) | `handler`: `geo.countries.rules`, `geo.countries.manage` | Смена валюты, возрастных порогов и **выключение** страны (сравнение с текущими значениями под замком строки, а не присутствие поля) — всегда `202 {approval}` действия `geo.country_rules` с patch целиком, страна до исполнения не меняется; при исполнении сверяется `version` страны (изменилась — `failed`, `platform.approval_stale`). Включение и прочие поля — сразу, `200`, по `geo.countries.manage`. `default_locale` задаётся только при создании (R12). Правила — вносит человек, сверяя с законом; из GeoNames не берутся. |
+| `POST /v1/geo/imports` `{country}` (`startGeoImport`), `GET /v1/geo/imports?country=&job_id=&cursor=` (`listGeoImports`), `GET /v1/geo/imports/{importId}` (`getGeoImport`) | `geo.imports.run` / `geo.imports.read` | Поставить импорт (§5.4): `202 {job_id}`; уже в очереди или идёт — 409 `geo.import_in_progress` с `job_id` существующей задачи (R26; у импорта оператора — без `job_id`); страны нет — 404 `geo.country_not_found`. Журнал с подписью «кто запустил» (`started_by_label`, §5.4) и отчёт сверки одного импорта (`ambiguous`, `conflict`). |
+| `GET /v1/geo/imports/jobs/{jobId}` (`getGeoImportJob`) | `geo.imports.read` | Состояние задачи импорта по `JobGet` клиента River (R7, без SQL по `river_job`): `queued` (ждущие состояния River), `running`, `completed`, `failed` (в том числе `discarded`), `cancelled`; незнакомое новое состояние River — `queued`; с последней строкой журнала задачи. Нет задачи или она другого вида — 404 `geo.import_job_not_found`. |
+| `POST /v1/geo/imports/jobs/{jobId}/cancel` (`cancelGeoImportJob`) | `geo.imports.run` | Отмена задачи «в очереди» (R22, §5.4); выполняется, выполнена или выброшена — 409 `geo.import_job_not_cancellable`; уже отменена — 200 без второй записи журнала. |
+| `GET /v1/app/versions` (`listAppVersions`), `PUT /v1/app/versions/{platform}` (`putAppVersions`; тег `platform`) | `platform.versions.read` / `platform.versions.manage` | Версии и `store_url`; нарушение `min ≤ recommended` или хоста — 400 `validation.failed` с полем. |
+
+Отказ по праву — `403 auth.forbidden` (спека сотрудников §2.4, §6.4): кодов `geo.forbidden` и
+`platform.forbidden` нет. Тест прав на каждую операцию — по субъектам спеки сотрудников §11 (роли,
+модератор своего и чужого города, без сессии).
 
 ### 5.3. Активация города
 
-По `geoname_id` (место должно быть в источнике, иначе 404 `geo.place_not_found`):
+По `geoname_id` (место должно быть в источнике и не пропавшим — без `missing_since`, иначе 404
+`geo.place_not_found`; R13). Место (здесь и в `linkGeoCity`) читается без замка строки: перенос места импортом другой
+страны или удаление выпавшего из выгрузки места без города (`ImportDeleteGone`: строка места удаляется, а не
+помечается пропавшим) до сверки — принятое окно: город остаётся с `geoname_id` без строки места, и следующие импорты
+его в «пропавшие» не дают (`ImportMarkMissing` перебирает только существующие места), пока место не вернётся в
+выгрузку; `FOR SHARE` не ставить — цикл замков со сверкой (ревью G6 m2; переоценка — финальное ревью backend-geo m1):
 
 1. Страна: `country_code` из запроса (переопределение, решение 3) или страна места; должна быть
    включена — иначе 422 `geo.country_not_enabled`.
-2. Регион: `region_id` из запроса (должен принадлежать стране) или регион из `geonames_admin1`
-   по `(страна места, admin1_code)` — существующий с этим `geoname_admin1_code` или новый с
-   названиями по §3.4. При переопределённой стране без `region_id` — регион не ставится (`NULL`).
+2. Регион: `region_id` из запроса (должен принадлежать стране, иначе 422 `geo.region_not_found`) или
+   регион из `geonames_admin1` по `(страна места, admin1_code)` — существующий с этим
+   `geoname_admin1_code` или новый с названиями по §3.4 (гонка двух активаций одного нового региона —
+   `ON CONFLICT DO NOTHING` и перечитывание). При переопределённой стране без `region_id`, а также при
+   admin1 `00` («неизвестно» в GeoNames) или пустом — регион не ставится (`NULL`, R13).
+   Регион без `geoname_admin1_code` (заведённый до импорта) по названию не ищется: активация заведёт
+   второй одноимённый регион с кодом, а сверка импорта код первому уже не даст — два региона с одним
+   названием (ревью G5 m4; слияние регионов этой спекой не предусмотрено — открытый вопрос).
 3. `name` и строки `city_names` — по §3.4 для языка страны и `en`; `centroid`, `timezone`
    (проверка `time.LoadLocation` со встроенной `time/tzdata`), `population` — из источника.
-4. `slug` — `ascii_name` в нижнем регистре, не `[a-z0-9]` → `-`, схлопнуть дефисы; занят (в
-   `cities` или `city_slug_history`) → `-<ascii_name региона>` → `-2`, `-3`…; гонка с уникальностью
-   — повтор со следующим суффиксом.
+4. `slug` (R13) — `ascii_name` в нижнем регистре, не `[a-z0-9]` → `-`, схлопнуть дефисы; пусто после
+   этого — `city-<geoname_id>`; кандидаты — база → `-<ascii_name региона>` → `-2`, `-3`…, под суффикс
+   обрезается **база** (кандидат ≤ 100 символов, без `--` и хвостового `-`); занятые (`cities` или
+   `city_slug_history`) пропускаются; вставка — под savepoint: гонка с уникальностью slug — следующий
+   кандидат, всего до 20 попыток.
 5. Статус по умолчанию `waitlist`. Нарушение `cities.geoname_id UNIQUE` (в том числе гонка двух
    активаций) — 409 `geo.city_already_active`.
+6. Аудит `geo.city_activated` (город записи — новый город) и событие — в той же транзакции; ответ —
+   карточка города, как `getGeoCity`.
 
 ### 5.4. Импорт GeoNames
 
 Логика — `internal/geo/internal/app` (`Import(ctx, country, startedBy, riverJobID)`), вызывается из двух мест:
 
-- **Задача River** `geo.import` (очередь `maintenance`): ставит её `POST /v1/geo/imports`; в
-  аргументах — страна и `started_by` (id сотрудника); аудит постановки — от сотрудника.
+- **Задача River** `geo.import` (очередь `maintenance`): ставит её `POST /v1/geo/imports`
+  (`startGeoImport`). В аргументах (`ImportArgs`, `v = 1`) — **только** страна и `started_by` (id
+  сотрудника), без имени и роли (ответ пользователя Q1, R3): `river_job` читает роль `api`, ПД
+  сотрудников видит только admin-api (страж `TestImportArgsNoPII`). Постановка — одна транзакция под
+  `Idempotency-Key`: `InsertTx` задачи и аудит `geo.import_requested` **от сотрудника** (объект
+  `geonames_import_job`, `object_id = id.Named("geonames_import_job", <job_id>)`, `after {country_code,
+  job_id}`, без города). Ответ — `202 {job_id}`: строку журнала создаёт сама задача (шаг 1), до неё
+  экран следит за задачей через `getGeoImportJob` (R7).
   `Timeout() = 30 мин`, `MaxAttempts = 3`, уникальность по стране в состояниях `available`,
   `pending`, `scheduled`, `running`, `retryable` (без `completed` — повторный импорт той же страны
   должен ставиться). Работает там, где запущен воркер (на стенде воркера нет — §11).
+  - **409 `geo.import_in_progress`** при постановке — дубль уникальности River (`job_id` существующей
+    задачи, R26) или **свежая** строка `running` страны (`started_at` не старше `StaleAfter` = 40 мин;
+    `job_id` — её `river_job_id`, у оператора — без `job_id`). Дубль River проверяется раньше строки
+    `running`: ждущая задача видна сотруднику и при импорте оператора. Зависшая строка `running`
+    постановке не мешает: её закроет `failed` (аудит `system`) шаг 1 поставленной задачи; если по часам
+    воркера строка ещё не зависшая — задача ждёт (ниже).
+  - Импорт страны уже идёт (у оператора) — задача уходит в `river.JobSnooze(1 мин)`: попытка не
+    тратится, в `discarded` не уходит; задача старше 2 ч от постановки не откладывается, а
+    отменяется (страховка от вечного ожидания, R8) — уникальность страны освобождается.
+  - Аудит итога импорта задачи — **от `system`** (`ActorLabel = "system"`, `after.started_by` — id
+    сотрудника); «кто запустил» в журнале импортов (`started_by_label` у `listGeoImports`) берётся из
+    записи постановки `geo.import_requested` запросом журнала по объектам всей страницы
+    (`audit.ListParams.ObjectIDs`): новейшая запись задачи с `created_at ≤ started_at` строки + 1 мин
+    допуска часов (защита от повтора `river_job.id` после сброса последовательности); у оператора и без
+    записи — подписи нет. Экрану не нужно право `audit.log.read`. Схема `geonames_imports` не меняется (`started_by` — uuid без FK).
+  - **Отмена** (`cancelGeoImportJob`, R22) — только задачи «в очереди»: без воркера (стенд)
+    поставленная задача держала бы уникальность страны вечно. Одна транзакция: advisory-замок задачи
+    (отмены одной задачи идут по очереди), строка River «до» (`JobGetTx`; нет или другой вид — 404
+    `geo.import_job_not_found`), `JobCancelTx`; итог не `cancelled` (уже `running` — River 0.x на
+    `running` не ошибается, а ставит метку отмены; `completed`, `discarded`) — откат вместе с меткой и
+    409 `geo.import_job_not_cancellable`; отменил этот вызов — аудит `geo.import_cancelled` от
+    сотрудника; «до» уже `cancelled` (повтор другим ключом, второй сотрудник) — 200 без второй записи.
+    Бегущий импорт не отменяется. Остаточное окно (принято, ревью G7 m1): задачу `available` между
+    `JobGetTx` и `JobCancelTx` может взять воркер и сам же отменить (страны нет, ожидание дольше 2 ч) —
+    тогда журнал запишет отмену от сотрудника; последствие — только подпись в журнале (строкой
+    `river_job` под `FOR UPDATE` не чинится: модуль не пишет SQL по таблицам River, R7).
 - **Команда оператора** `worker geo import --country RU` — выполняет импорт **синхронно в своём
   процессе** (не ставит задачу), под ролью `worker` (`WORKER_DATABASE_URL`); аудит —
-  `ActorRole = "operator"`, `started_by = NULL`.
+  `ActorRole = "operator"`, `ActorLabel = "operator"`, `started_by = NULL`. Время журнала оператора —
+  по часам базы (`OperatorClock`: сдвиг `now()` базы против часов машины оператора, замер один раз), а
+  не ноутбука: отставшие часы делали живой импорт оператора «зависшим» для admin-api (ревью G7 m9).
 
 Шаги `Import`:
 
@@ -432,9 +489,15 @@ https://creativecommons.org/licenses/by/4.0/, с изменениями: отб�
 | `geo.city_slug_changed` | `city` | `city_id`, `old_slug`, `new_slug` |
 | `geo.city_linked` | `city` | `city_id`, `geoname_id` (сверка импорта) |
 | `geo.district_created`, `geo.district_updated`, `geo.district_archived` | `district`, `districts.id`, `districts.version` | `district_id`, `city_id` |
+| `geo.country_created` (план B, R15) | `country`, `countries.id`, 1 | `country_code` |
 | `geo.country_updated` | `country`, `countries.id`, `countries.version` | `country_code`, `changed` (имена полей) |
 | `geo.import_finished` | `geonames_import`, `geonames_imports.id`, 1 | `import_id`, `country_code`, `status` |
-| `platform.app_versions_changed` | `app_versions`, детерминированный uuid платформы, `app_versions.version` | `platform` |
+| `platform.app_versions_changed` | `app_versions`, `id.Named("app_versions", <платформа>)`, `app_versions.version` | `platform` |
+| `platform.flag_changed` (спека сотрудников §6.1) | `feature_flag`, `id.Named("feature_flag", <ключ>)`, `feature_flags.version` | `key`, `enabled_globally`, `enabled_city_ids` |
+
+Одна правка — одно событие: архивирование района вместе с переименованием в одном `PATCH` даёт только
+`geo.district_archived` (переименование подписчику не видно — новое имя он читает из справочника; ревью
+G6 m6). События одной транзакции получают последовательные версии агрегата (R11).
 
 Подписчиков в этой спеке нет. На стенде без воркера outbox растёт (relay и чистка — в воркере):
 объём — единицы событий, допустимо.
@@ -454,24 +517,38 @@ https://creativecommons.org/licenses/by/4.0/, с изменениями: отб�
 Коды операций (`x-error-codes`); тексты — `errors.<код>` в `apps/web/messages/{ru,en}.json` (публичные)
 и `apps/admin/messages/{ru,en}.json` (админские) по правилу `.claude/rules/contracts.md`:
 
+Список модуля — `backend/internal/geo/codes.go`, делится на `geo.PublicCodes` (сверка с контрактом
+public) и `geo.AdminCodes` (сверка с admin и `apps/admin/messages`; спека сотрудников §6.3 п. 7). Коды
+плана B — его Приложение 3 (`docs/superpowers/plans/2026-10-27-staff-b-geo2.md`), R4.
+
 | Код | HTTP | Где |
 | --- | --- | --- |
 | `geo.city_not_found` | 404 | `getCity`, `getCityBySlug`, админские по `cityId` |
-| `geo.district_not_found` | 404 | админские по `districtId` |
-| `geo.place_not_found` | 404 | активация |
-| `geo.country_not_found` | 404 | `PATCH /v1/geo/countries/{code}` |
-| `geo.city_already_active` | 409 | активация |
-| `geo.slug_taken` | 409 | смена `slug` |
-| `geo.country_exists` | 409 | `POST /v1/geo/countries` |
-| `geo.import_in_progress` | 409 | импорт |
-| `geo.country_not_enabled` | 422 | активация |
-
-| `geo.forbidden` | 403 | админские операции `geo` без нужной роли (§5.2) |
+| `geo.district_not_found` | 404 | `updateGeoDistrict` (в том числе район чужого города) |
+| `geo.place_not_found` | 404 | `activateGeoCity`, `linkGeoCity` (нет места, пропало из источника, у привязки — другой страны, чем город) |
+| `geo.country_not_found` | 404 | `updateGeoCountry`, `listGeoRegions`, `startGeoImport` |
+| `geo.import_not_found` | 404 | `getGeoImport` |
+| `geo.import_job_not_found` | 404 | `getGeoImportJob`, `cancelGeoImportJob` (нет задачи или задача другого вида) |
+| `geo.city_already_active` | 409 | `activateGeoCity`, `linkGeoCity` (место у другого города) |
+| `geo.city_already_linked` | 409 | `linkGeoCity` |
+| `geo.slug_taken` | 409 | `updateGeoCity` (смена `slug`) |
+| `geo.country_exists` | 409 | `createGeoCountry` |
+| `geo.import_in_progress` | 409 | `startGeoImport` (с `job_id` существующей задачи, R26) |
+| `geo.import_job_not_cancellable` | 409 | `cancelGeoImportJob` (задача выполняется, выполнена или выброшена) |
 | `geo.district_name_taken` | 409 | создание, переименование, разархивирование района |
-| `platform.forbidden` | 403 | `PUT /v1/app/versions/{platform}` без роли `admin` |
+| `geo.country_not_enabled` | 422 | `activateGeoCity` |
+| `geo.region_not_found` | 422 | `activateGeoCity` (`region_id` не из страны города) |
+| `platform.flag_not_found` | 404 | `updateFeatureFlag` |
+| `platform.flag_stale` | 409 | `updateFeatureFlag` (`version` не та) |
+| `platform.flag_city_not_found` | 422 | `updateFeatureFlag` (города флага нет) |
+
+Кодов `geo.forbidden` и `platform.forbidden` нет: отказ по праву — `403 auth.forbidden` (§5.2).
+Исполнители подтверждений geo (`geo.country_create`, `geo.country_rules`) наружу отдают только
+`platform.approval_*`: нарушение данных запроса при исполнении — `failed` и `409 platform.approval_stale`.
 
 Общие: `validation.failed` (400: параметры, `NaN`, `q` из одних знаков, `min ≤ recommended`, хост
-`store_url`), `auth.unauthenticated`, `ratelimit.exceeded`, коды идемпотентности.
+`store_url`, правила страны), `auth.unauthenticated`, `auth.forbidden`, `ratelimit.exceeded`, коды
+идемпотентности.
 
 ## 9. Структура кода
 
@@ -529,8 +606,13 @@ backend/internal/platform/appversion/   таблица, semver, правила; 
    сразу (сид с точками). `here` требует импорта: оператор запускает `worker geo import --country RU`
    со своей машины против Neon под ролью `worker` — роли на Neon пока нет: `deploy-dev.md` получает
    шаги создания роли `worker` и повторного `migrate up` (применит `grants.sql`). Админская ручка
-   импорта на стенде без воркера не исполнится — это ожидаемо.
-2. **Этап 2 — админка:** админские ручки `geo` и версий, фронт admin — план B спеки сотрудников. Шов
+   импорта на стенде без воркера не исполнится — задача стоит в очереди (уникальность страны занята);
+   отменить её — кнопкой «Отменить» на экране импорта (`cancelGeoImportJob`, §5.4); не отменённую
+   исполнит первый запущенный воркер.
+2. **Этап 2 — админка (выполнен планом B в ветке `spec/geo2-render`, до мержа; `docs/superpowers/plans/2026-10-27-staff-b-geo2.md`):**
+   админские ручки `geo`, версий и флагов, фронт admin — план B спеки сотрудников. Живой e2e импорта и
+   активации идёт против HTTPS-фикстуры GeoNames (`backend/cmd/geofixture`, доверие воркера —
+   `WORKER_GEONAMES_CA_FILE`, R16), без внешней сети. Шов
    сессий admin-api, вход сотрудников, удаление `/v1/health` из admin и чтение городов
    `GET /v1/geo/cities` (выбор городов модератора) сделаны её планом A (модуль `staff`).
 

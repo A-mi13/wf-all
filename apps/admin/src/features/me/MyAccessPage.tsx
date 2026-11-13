@@ -6,8 +6,8 @@ import { MySessionsCard } from './MySessionsCard';
 import { useMyMfa } from './queries';
 import { SecondFactorCard } from './SecondFactorCard';
 
-// «Мой доступ» (спека §9.4 п. 4, макет 07; право self — любому активному сотруднику; только с
-// компьютера — desktopOnly в NAV): второй фактор и резервные коды, активные сеансы, смена пароля (*).
+// «Мой доступ» (спека §9.4 п. 4, макет 07; право self — любому активному сотруднику; открыт целиком
+// и на телефоне — спека UI-фундамента §3.1): второй фактор и резервные коды, активные сеансы, смена пароля (*).
 export function MyAccessPage() {
   const t = useTranslations();
   const mfa = useMyMfa();

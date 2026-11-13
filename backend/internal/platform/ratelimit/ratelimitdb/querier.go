@@ -17,6 +17,13 @@ type Querier interface {
 	// блокировки перепроверяется только WHERE внешнего оператора — иначе удалился бы свежий tat.
 	DeleteExpired(ctx context.Context, arg DeleteExpiredParams) (int64, error)
 	GetTAT(ctx context.Context, key string) (time.Time, error)
+	StaffAdd(ctx context.Context, arg StaffAddParams) error
+	StaffDeleteExpired(ctx context.Context, arg StaffDeleteExpiredParams) (int64, error)
+	StaffGetTAT(ctx context.Context, key string) (time.Time, error)
+	// Пары StaffX — те же запросы над staff_rate_limits (лимиты admin-api, план B R2): sqlc не параметризует
+	// имя таблицы. Текст пары после замены имени таблицы обязан совпасть с оригиналом (страж
+	// TestStaffQueriesMirrorPublic, testkit/sqlmirror).
+	StaffTake(ctx context.Context, arg StaffTakeParams) (time.Time, error)
 	// Rate limit по GCRA (спека бэкенда §6.6). Владелец rate_limits — platform. Время — из часов
 	// приложения (@now): тесты двигают их без ожидания.
 	// Перед «+» — sqlc.arg(now), не @now: «@» в PostgreSQL ещё и префиксный оператор с приоритетом

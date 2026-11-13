@@ -113,7 +113,7 @@ describe('настройка 2FA', () => {
     setupServer(app);
     const user = userEvent.setup();
     await screen.findByRole('img', { name: 'QR-код для приложения-аутентификатора' });
-    await user.click(screen.getByRole('button', { name: 'Скопировать секрет' }));
+    await user.click(screen.getByRole('button', { name: 'Копировать: секрет' }));
     expect(await navigator.clipboard.readText()).toBe(SECRET);
     expect(await screen.findByText('Скопировано')).toBeInTheDocument();
   });
@@ -155,8 +155,8 @@ describe('настройка 2FA', () => {
     );
 
     await user.click(done);
-    await page('Журнал действий');
-    expect(app.at()).toBe('/audit');
+    await page('Главная');
+    expect(app.at()).toBe('/');
     expect(ctl.ack).toBe(1);
     expect(ctl.setup).toHaveLength(1);
     // после ухода с экрана в кэше нет ни секрета, ни кодов (запросы и мутации)
@@ -171,6 +171,32 @@ describe('настройка 2FA', () => {
         .map((m) => m.state.data),
     ]);
     expect(cached).not.toContain(SECRET);
+    expect(cached).not.toContain(CODES[0]);
+  });
+
+  // UF2a.10: CopyButton при отказе буфера показывает значение в поле «вручную» — только в DOM экрана: ни в
+  // storage, ни в кэше запросов и мутаций (правило admin-staff.md, коды — только в памяти).
+  test('буфер недоступен — коды в поле «вручную», не в storage и не в кэше', async () => {
+    const app = renderApp('/setup-2fa', { me: meSetup });
+    setupServer(app);
+    const user = userEvent.setup();
+    await enterCode(user, '492817');
+    await screen.findByRole('list', { name: 'Резервные коды' });
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
+    await user.click(screen.getByRole('button', { name: 'Копировать: резервные коды' }));
+    const manual = await screen.findByRole('textbox', { name: 'Копировать: резервные коды' });
+    expect(manual).toHaveValue(CODES.join('\n'));
+    expect(storageDump()).not.toContain(CODES[0]);
+    const cached = JSON.stringify([
+      app.queryClient
+        .getQueryCache()
+        .getAll()
+        .map((q) => q.state.data),
+      app.queryClient
+        .getMutationCache()
+        .getAll()
+        .map((m) => [m.state.data, m.state.variables]),
+    ]);
     expect(cached).not.toContain(CODES[0]);
   });
 
@@ -193,7 +219,7 @@ describe('настройка 2FA', () => {
     await enterCode(user, '492817');
     await screen.findByRole('list', { name: 'Резервные коды' });
 
-    await user.click(screen.getByRole('button', { name: 'Скопировать коды' }));
+    await user.click(screen.getByRole('button', { name: 'Копировать: резервные коды' }));
     expect(await navigator.clipboard.readText()).toBe(CODES.join('\n'));
 
     await user.click(screen.getByRole('button', { name: 'Скачать .txt' }));
@@ -268,7 +294,7 @@ describe('перезагрузки и повторы', () => {
     expect(await screen.findByText('Второй фактор уже подтверждён')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: CODE })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Продолжить' }));
-    await page('Журнал действий');
+    await page('Главная');
     expect(ctl.ack).toBe(1);
   });
 
@@ -317,7 +343,7 @@ describe('перезагрузки и повторы', () => {
     });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Продолжить' }));
-    await page('Журнал действий');
+    await page('Главная');
     expect(ctl.ack).toBe(1);
   });
 
@@ -337,6 +363,47 @@ describe('перезагрузки и повторы', () => {
     expect(ctl.setup[1]).not.toBe(ctl.setup[0]);
     expect(await screen.findByRole('group', { name: CODE })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // Ревью UF2a/III-S I1: перевыпуск после «Начать заново» упал — прежний (сгоревший) секрет не показывается,
+  // ошибка с кодом и «Повторить», а не тупик со старым QR.
+  test('«Начать заново» → перевыпуск упал 500: старого секрета нет, ошибка с «Повторить»', async () => {
+    renderApp('/setup-2fa', { me: meSetup });
+    let n = 0;
+    server.use(
+      http.post('/v1/staff/me/mfa/setup', ({ response }) => {
+        n++;
+        if (n > 1) return response.untyped(problem(500, 'internal'));
+        return response(200).json({
+          secret: SECRET,
+          otpauth_uri: `otpauth://totp/x?secret=${SECRET}`,
+        });
+      }),
+      http.post('/v1/staff/me/mfa/confirm', ({ response }) =>
+        response.untyped(problem(409, 'idempotency.replay_unavailable')),
+      ),
+    );
+
+    const user = userEvent.setup();
+    await enterCode(user, '492817');
+    await user.click(await screen.findByRole('button', { name: 'Начать заново' }));
+    expect(await screen.findByRole('button', { name: 'Повторить' })).toBeInTheDocument();
+    expect(n).toBe(2);
+    expect(screen.queryByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')).toBeNull();
+  });
+
+  // Ревью UF2a/III-S m7: 403 выпуска (конвейер: сеть не в списке) — ошибка с кодом и «Повторить», а не «нет
+  // права… выдаёт владелец или админ» (в стадии setup это неправда).
+  test('setup → 403 auth.ip_not_allowed — ошибка с кодом, не «нет доступа»', async () => {
+    renderApp('/setup-2fa', { me: meSetup });
+    server.use(
+      http.post('/v1/staff/me/mfa/setup', ({ response }) =>
+        response.untyped(problem(403, 'auth.ip_not_allowed')),
+      ),
+    );
+    expect(await screen.findByText('Код ошибки: 403 · auth.ip_not_allowed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Повторить' })).toBeInTheDocument();
+    expect(screen.queryByText(/Нет доступа/)).toBeNull();
   });
 
   test('setup → idempotency.replay_unavailable — «Начать заново» выпускает секрет снова', async () => {

@@ -13,6 +13,7 @@ import (
 // ExpireDue или клика: список показывает истёкший pending со сроком, после тика и после клика время
 // не «прыгает». Часы — на час позже срока.
 func TestExpiredDecidedAtIsExpiresAt(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	byTick := e.request(a, actGrant, payload{V: 1})

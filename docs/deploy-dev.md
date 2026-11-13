@@ -216,13 +216,77 @@ WHERE actor_role IS NULL
 дописывается (триггер запрещает UPDATE и DELETE), исправить строки нельзя — не мержить, пока CHECK в 0020 не
 пересмотрены.
 
+Ветка geo 2/2 (план B; `0021_geo_admin.sql`, `0022_staff_rate_limits.sql`, `0023` — ниже) — только числа, без
+данных строк:
+
+```sql
+-- с какой версии начнётся накат (0020 должна быть уже накатана)
+SELECT max(version_id) AS goose_max FROM goose_db_version;
+-- 0021: строки, которые не пройдут новые CHECK форматов страны и store_url (23514 — откат 0021 целиком)
+SELECT count(*) AS bad_countries FROM countries
+WHERE NOT (code ~ '^[A-Z]{2}$' AND currency ~ '^[A-Z]{3}$' AND default_locale ~ '^[a-z]{2}$'
+       AND phone_prefix ~ '^\+[1-9][0-9]{0,3}$' AND min_signup_age BETWEEN 1 AND 120
+       AND age_of_majority BETWEEN 1 AND 120);
+SELECT count(*) AS bad_store_urls FROM app_versions WHERE store_url !~ '^https://[^[:space:][:cntrl:]]+$';
+-- 0022: имя таблицы свободно (ожидаемо NULL)
+SELECT to_regclass('public.staff_rate_limits') AS staff_rate_limits;
+-- регионы с admin1 «00» («неизвестно» в GeoNames): активация такой регион не заводит (регион города — NULL)
+SELECT count(*) AS regions_00 FROM regions WHERE geoname_admin1_code = '00';
+-- ждущие приглашения под ужесточённые правила имени и почты (admin-api на стенде не работал)
+SELECT count(*) AS pending_invites FROM approvals WHERE action = 'staff.invite' AND status = 'pending';
+-- живой импорт: 0023 во время импорта не деплоить (ниже)
+SELECT count(*) AS running_imports FROM geonames_imports WHERE status = 'running';
+```
+
+Ожидаемо `goose_max = 20` и `0` во всех остальных (`staff_rate_limits` — `NULL`). `bad_countries`/`bad_store_urls`
+> 0 — исправить строки до мержа; `pending_invites` > 0 — решить по списку у себя (отклонить или переподать), не в
+логе агента; `running_imports` > 0 — дождаться итога импорта; `regions_00` > 0 миграцию не роняет — информационно: код плана B регион с кодом
+`00` не создаёт и не выбирает (`admin1Known`, R13), такие строки — от прежних активаций. На Neon 13.11.2026 (MCP, только `SELECT`): `goose_max`
+20, все проверки `0` (включая столкновения `0023` ниже — `0`/`0`/`0`), `staff_rate_limits` свободно,
+`geonames_places` 5171, `geonames_place_names` 10342; локаль базы — провайдер `builtin`, `C.UTF-8`
+(`pg_database.datlocprovider`/`datcollate`); миграции схемы River в плане B нет.
+
+`0023_normalize_text_case.sql` (поиск и уникальность без учёта регистра) пересчитывает все `*_normalized`: значения,
+раньше различавшиеся регистром строчных `b h m t` или диакритикой («Tom» и «tom», «Café» и «CAFE»), совпадут, и
+перестройка уникального индекса уронит миграцию (`23505 could not create unique index "<имя>"`, откат целиком,
+версия остаётся `22`). Новое значение — `translate` старого, поэтому столкновения считаются заранее, на версии `22`
+(только числа — групп строк, которые совпадут; данных строк запрос не выводит):
+
+```sql
+SELECT 'users_nickname_key' AS idx, count(*) AS groups FROM (
+  SELECT 1 FROM users WHERE deleted_at IS NULL
+   GROUP BY translate(nickname_normalized, 'abcehkmoptxy', 'авсенкмортху') HAVING count(*) > 1) AS g
+UNION ALL
+SELECT 'teams_city_name_key', count(*) FROM (
+  SELECT 1 FROM teams WHERE deleted_at IS NULL
+   GROUP BY city_id, translate(name_normalized, 'abcehkmoptxy', 'авсенкмортху') HAVING count(*) > 1) AS g
+UNION ALL
+SELECT 'districts_city_name_active_key', count(*) FROM (
+  SELECT 1 FROM districts WHERE archived_at IS NULL
+   GROUP BY city_id, translate(name_normalized, 'abcehkmoptxy', 'авсенкмортху') HAVING count(*) > 1) AS g
+```
+
+Ожидаемо `0` по всем трём. Ненулевое — не мержить: решение по данным за пользователем (переименовать команду или
+район, сменить ник одному из игроков; кому — смотреть у себя, не в логе агента). Совпадения хранимых ников
+(`reserved_nicknames`, карантин `nickname_reservations`) конфликтов не дают: миграция добавляет новую форму рядом с
+прежней строкой. Тот же запрос — страж `Test0023ConflictCheckSQL` (`backend/migrations/platform_0023_test.go`): текст здесь и там совпадает дословно.
+Миграция переписывает таблицы с генерируемыми колонками (`ACCESS EXCLUSIVE` до конца наката), в том числе
+`geonames_places` и `geonames_place_names` — время наката растёт с их размером; объём — `SELECT count(*)` по ним.
+**Не деплоить `0023` во время импорта GeoNames** (раздел ниже; живая строка `running` в `geonames_imports`): накат
+(и откат) первым ждёт `geonames_*`, через `lock_timeout` 5 с падает `55P03 lock_not_available` и откатывается целиком
+(версия прежняя, остальные таблицы за время ожидания не заперты) — повторить после импорта. Может упасть и `40P01`
+(взаимная блокировка): ручная привязка города (`linkGeoCity`) берёт `cities`, затем `geonames_places` — встречно
+замкам миграции; откат тоже целиком, повторить; у привязки в этом случае 500, повтор сотрудника проходит.
+
 ## Импорт городов GeoNames
 
 Без импорта на стенде работают список городов, город и `nearest_open` (сид миграции `0019` — с
 точками), а `here` в `GET /v1/cities/nearest` всегда `null`: ему нужна таблица-источник
-`geonames_places`. Админская ручка импорта ставит задачу River, а воркера на стенде нет, — поэтому
-импорт запускает оператор командой воркера: она выполняет импорт синхронно в своём процессе (задачу
-не ставит) под ролью `worker` (спека `geo` §5.4).
+`geonames_places`. Админская ручка импорта ставит задачу River, а воркера на стенде нет: задача стоит
+в очереди (и занимает страну — повторная постановка получит `409`), отменить её — кнопкой «Отменить» на
+экране «Импорт GeoNames». Поэтому импорт запускает оператор командой воркера: она выполняет импорт
+синхронно в своём процессе (задачу не ставит) под ролью `worker` (спека `geo` §5.4); ждущая задача
+админки импорту оператора не мешает.
 
 Нужно: Go из `docs/versions.md`, checkout коммита, который задеплоен на стенд (схема базы и код
 импорта должны совпадать), роль `worker` (выше) с правами.
@@ -247,9 +311,10 @@ unset WORKER_DATABASE_URL
 | `WORKER_GEONAMES_BASE_URL` | `https://download.geonames.org` | откуда качать `export/dump/<CC>.zip`, `export/dump/alternatenames/<CC>.zip`, `export/dump/admin1CodesASCII.txt`; только HTTPS, редиректы — только на тот же хост |
 | `WORKER_GEONAMES_MAX_COMPRESSED` | 50 МБ | лимит сжатого файла; формат значения — `backend/.env.example` |
 | `WORKER_GEONAMES_MAX_UNCOMPRESSED` | 200 МБ | лимит распакованной записи zip; формат — там же |
+| `WORKER_GEONAMES_CA_FILE` | пусто (только системные корни) | путь к PEM дополнительного корня доверия для источника (системные корни остаются) — только для живого e2e (HTTPS-фикстура `geofixture`) и зеркал GeoNames со своим CA; на стенде не задаётся. Нужен потому, что на Windows Go берёт корни из системного хранилища и `SSL_CERT_FILE` не читает |
 
-Значения неверны (не https, лимит не больше нуля) — команда и воркер отказывают на старте, до подключения
-к базе.
+Значения неверны (не https, лимит не больше нуля, файла CA нет, в нём нет сертификата PEM или сертификат испорчен) — команда и
+воркер отказывают на старте, до подключения к базе.
 
 Для RU умолчаний хватает (`RU.zip` — 15,2 МБ, распакованный `RU.txt` — 61,8 МБ; спека `geo` §13).
 

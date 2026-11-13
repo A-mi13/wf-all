@@ -107,6 +107,11 @@
       "mutating": true
     },
     {
+      "key": "geo.countries.rules",
+      "draft": false,
+      "mutating": true
+    },
+    {
       "key": "geo.imports.read",
       "draft": false,
       "mutating": false

@@ -156,6 +156,10 @@ func problem(err error) error {
 	case errors.Is(err, geo.ErrBadQuery):
 		// q прошёл схему (1–100 символов), но после normalize_text пуст: «!!!», одни пробелы
 		return httpx.NewFieldError("query.q", "minLength")
+	case errors.Is(err, geo.ErrBadPoint):
+		// Защита в глубину: checkPoint отсекает точку раньше. Форма — как у валидатора контракта (одно поле,
+		// m5-3 ревью G2); какую координату отверг сценарий, он не сообщает — поле точки query.lat, правило format.
+		return httpx.NewFieldError("query.lat", "format")
 	}
 	return err
 }

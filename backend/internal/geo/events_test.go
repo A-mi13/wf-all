@@ -21,6 +21,7 @@ var (
 
 // Конверт и payload — контракт для подписчиков (спека §6): имена полей JSON не меняются.
 func TestEventShapes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		e                     events.Event
 		typ, aggType, payload string
@@ -29,6 +30,21 @@ func TestEventShapes(t *testing.T) {
 	}{
 		{geo.CityLinkedEvent(eventCity, 3, 487846), "geo.city_linked", "city",
 			`{"city_id":"01920000-0000-7000-8000-000000000001","geoname_id":487846}`, eventCity, 3},
+		{geo.CityActivatedEvent(eventCity, "RU", &eventImport, geo.StatusWaitlist, 526815), "geo.city_activated", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","country_code":"RU","region_id":"01920000-0000-7000-8000-000000000002","status":"waitlist","geoname_id":526815}`, eventCity, 1},
+		{geo.CityActivatedEvent(eventCity, "XB", nil, geo.StatusPilot, 1), "geo.city_activated", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","country_code":"XB","region_id":null,"status":"pilot","geoname_id":1}`, eventCity, 1},
+		{geo.CityStatusChangedEvent(eventCity, 4, geo.StatusPilot, geo.StatusLive), "geo.city_status_changed", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","from":"pilot","to":"live"}`, eventCity, 4},
+		{geo.CityRenamedEvent(eventCity, 5, []string{"en", "ru"}), "geo.city_renamed", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","locales":["en","ru"]}`, eventCity, 5},
+		{geo.CitySlugChangedEvent(eventCity, 6, "stavropol", "stav"), "geo.city_slug_changed", "city",
+			`{"city_id":"01920000-0000-7000-8000-000000000001","old_slug":"stavropol","new_slug":"stav"}`, eventCity, 6},
+		{geo.DistrictEvent(geo.EventDistrictArchived, eventImport, eventCity, 2), "geo.district_archived", "district",
+			`{"district_id":"01920000-0000-7000-8000-000000000002","city_id":"01920000-0000-7000-8000-000000000001"}`, eventImport, 2},
+		{geo.CountryCreatedEvent(eventImport, "KZ"), "geo.country_created", "country", `{"country_code":"KZ"}`, eventImport, 1},
+		{geo.CountryUpdatedEvent(eventImport, 7, "RU", []string{"currency", "names"}), "geo.country_updated", "country",
+			`{"country_code":"RU","changed":["currency","names"]}`, eventImport, 7},
 		{geo.ImportFinishedEvent(eventImport, "RU", "succeeded"), "geo.import_finished", "geonames_import",
 			`{"import_id":"01920000-0000-7000-8000-000000000002","country_code":"RU","status":"succeeded"}`, eventImport, 1},
 	}
@@ -47,6 +63,7 @@ func TestEventShapes(t *testing.T) {
 
 // События проходят проверку конверта платформы и пишутся в outbox.
 func TestEventsPublish(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.NewPool(t)
 	ctx := context.Background()
 	err := db.InTx(ctx, pool, func(ctx context.Context, _ pgx.Tx) error {

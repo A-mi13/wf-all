@@ -1,6 +1,5 @@
-import { focusManager } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { ApiError, unwrap } from '../api/client';
 import { useApi } from '../api/context';
 import {
@@ -33,9 +32,12 @@ function mockMe(body: Me | (() => Response)) {
 const session = () => renderHook(() => useSession(), { wrapper: providers({ me: null }) });
 
 describe('состояние сессии из GET /v1/staff/me', () => {
-  test('сначала loading', () => {
+  test('сначала loading', async () => {
     mockMe(meOwner);
-    expect(session().result.current.status).toBe('loading');
+    const { result } = session();
+    expect(result.current.status).toBe('loading');
+    // запрос me доводится до конца в своём тесте — иначе он доходит до мока следующего
+    await waitFor(() => expect(result.current.status).toBe('active'));
   });
 
   test('mfa_pending → шаг 2 входа, без учётки', async () => {
@@ -244,15 +246,31 @@ describe('общее устройство: сотрудник сменился �
 
   test('тот же сотрудник (me перечитан: язык, права) — кэш и черновики целы', async () => {
     sessionStorage.setItem(LOGIN_DRAFT, JSON.stringify({ email: meOwner.email }));
-    const { qc, mutations, refetchMe } = seeded();
+    const { qc, view, mutations, refetchMe } = seeded();
     const waiting = reauthBus.request();
     await refetchMe({ ...meOwner, locale: 'en', reauth_required: true });
     expect(qc.getQueryData(LIST_KEY)).toBeDefined();
     expect(mutations()).toContain('комментарий A');
     expect(reauthBus.pending()).toBe(true);
     expect(sessionStorage.getItem(LOGIN_DRAFT)).not.toBeNull();
+    // Флак «возврата во вкладку» (хвосты 11.11): кэш получил me раньше, чем React отрисовал его (TanStack
+    // оповещает через setTimeout), и под нагрузкой эффект P20 «разблокировка → перечитать me» успевал или нет
+    // до resolve(). Успевал — его GET me уходил после конца теста и попадал в мок следующего. Теперь тест
+    // ждёт отрисовку, а после разблокировки — само перечитывание до конца.
+    await waitFor(() => expect(view.result.current).toMatchObject({ reauthRequired: true }));
+    let reread = 0;
+    server.use(
+      http.get('/v1/staff/me', ({ response }) => {
+        reread++;
+        return response(200).json({ ...meOwner, locale: 'en' });
+      }),
+    );
     reauthBus.resolve();
     await waiting;
+    await waitFor(() => expect(view.result.current).toMatchObject({ reauthRequired: false }));
+    expect(reread).toBe(1);
+    expect(qc.isFetching({ queryKey: ME_KEY })).toBe(0);
+    expect(qc.getQueryData(LIST_KEY)).toBeDefined();
   });
 
   // Повторное ревью (27.10), Important 1: смена сотрудника в другой вкладке видна при возврате в эту, а не
@@ -267,17 +285,30 @@ describe('общее устройство: сотрудник сменился �
         return response(200).json(meAdmin);
       }),
     );
+    // Настоящее событие visibilitychange (как в браузере), а не focusManager.setFocused: возврат прежнего
+    // состояния setFocused(undefined) сам — «возврат во вкладку» (true → undefined, вкладка видима) и
+    // запускал лишний GET me после конца теста; под нагрузкой он доходил до MSW уже после resetHandlers.
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    const tab = (state: DocumentVisibilityState) => {
+      visibility.mockReturnValue(state);
+      act(() => document.dispatchEvent(new Event('visibilitychange', { bubbles: true })));
+    };
     try {
-      act(() => focusManager.setFocused(false));
+      tab('hidden');
       expect(meCalls).toBe(0);
-      act(() => focusManager.setFocused(true));
+      tab('visible');
       await waitFor(() => expect(view.result.current).toMatchObject({ me: meAdmin }));
       expect(meCalls).toBe(1);
       expect(qc.getQueryData(LIST_KEY)).toBeUndefined();
       expect(mutations()).not.toContain('комментарий A');
     } finally {
-      focusManager.setFocused(undefined);
+      visibility.mockRestore();
     }
+    // после теста me не перечитывается: запроса, переживающего тест, нет (QueryClient запускает перечитывание
+    // по возврату во вкладку после await — сначала микрозадачи)
+    await act(async () => {});
+    expect(qc.isFetching({ queryKey: ME_KEY })).toBe(0);
+    expect(meCalls).toBe(1);
   });
 
   test('сессия A истекла, вход B в этой вкладке (401 → mfa_pending → active): почта шага 2 цела', async () => {

@@ -851,7 +851,7 @@ River-клиент admin-api под ролью `admin` (5 исполнителе
 | Роль | Особенности |
 | --- | --- |
 | `api` | нет доступа к `staff_*` и `approvals` (и их последовательностям); `audit_log` — только `INSERT`; `SELECT, INSERT, UPDATE` на `river_job` (уникальная вставка River — `ON CONFLICT DO UPDATE … RETURNING`) — письма с кодами ставятся прямо из запроса; справочник `geo` и `app_versions` — только `SELECT` (спека `geo` §3.8) |
-| `admin` | `audit_log` — `INSERT` и `SELECT`; `staff_*` и `approvals` — `SELECT, INSERT, UPDATE, DELETE` (последовательности — только у неё); служебные таблицы River — как у `worker` (`river_job` с `MAINTAIN`): исполнение очереди `staff` и роль лидера River; `outbox` — `SELECT, INSERT`; `geo` и `app_versions` — по матрице спеки `geo` §3.8 (`geonames_imports` — только чтение, удаление — только `*_names`) |
+| `admin` | `audit_log` — `INSERT` и `SELECT`; `staff_*` и `approvals` — `SELECT, INSERT, UPDATE, DELETE` (последовательности — только у неё); служебные таблицы River — как у `worker` (`river_job` с `MAINTAIN`): исполнение очереди `staff` и роль лидера River; `outbox` — `SELECT, INSERT`; `geo` и `app_versions` — по матрице спеки `geo` §3.8 (`geonames_imports` — только чтение, удаление — только `*_names` и `city_slug_history`: возврат города к своему старому `slug`, план B); `staff_rate_limits` (лимиты admin-api, `0022`) — DML ветки `staff_*`; на `rate_limits` и `idempotency_keys` игроков — ничего (спека сотрудников §3.3) |
 | `worker` | `credentials` — `DELETE` и чтение только столбца `user_id` (условие удаления); хеш пароля недоступен; `audit_log` — только `INSERT`; `river_job` — в т. ч. `MAINTAIN` (ежедневная переиндексация River); `geonames_*` — DML (импорт), `cities`/`regions` — `SELECT, UPDATE`, `city_names`/`region_names` — `SELECT, INSERT` (сверка импорта), `countries`/`country_names` — `SELECT` (спека `geo` §3.8); к `staff_*` и `approvals` доступа нет |
 | все | `UPDATE`/`DELETE` на `audit_log` запрещены (плюс триггер) |
 
@@ -941,6 +941,25 @@ River-клиент admin-api под ролью `admin` (5 исполнителе
 
 Письма с кодами `identity` шлёт через `platform/mail`, от `notify` не зависит. Веб и
 Flutter — свои спеки поверх готовых модулей.
+
+**Порядок на 10.11.2026 (решение пользователя).** Пункты 0 и 1 и модуль `staff` сделаны. Сначала закрываем ветку
+geo 2/2: UI-фундамент админки (план `plans/2026-11-03-ui-foundation.md`) → экраны geo G9/G10 (план
+`plans/2026-10-27-staff-b-geo2.md`) → финальное ревью → PR. Затем стенд admin-api на Render (план
+`plans/2026-10-27-staff-c-render.md`). Сразу после него — `identity`, первый модуль, который видит игрок. Он
+разблокирует мобильное приложение.
+
+**Мобильный клиент (wf-native) не ждёт реализации: контракт первым.** Чтобы нативщик начал работу раньше кода:
+
+- **Уже сейчас** — на публичном API стенда: города (`listCities`, `findNearestCity`, `getCityBySlug`,
+  `getCity`) и проверка версии (`getAppMinVersion`). Плюс токены дизайна `contracts/tokens/tokens.json`: две темы,
+  формат нормы контраста — контракт с wf-native, `design/03-токены.md`. Из этого собираются каркас приложения,
+  темы, выбор города и экран обязательного обновления.
+- **`identity`** — спека и публичный контракт (регистрация, вход по почте и паролю, коды, сессии, устройства)
+  пишутся и замораживаются **до** реализации бэкенда. Нативщик строит экраны входа и регистрации на моках по
+  сгенерированным типам. Бэкенд реализует тот же контракт, и подмена мока на стенд не меняет клиент. Приём тот же,
+  что у админки в плане A (Task 9a — контракт заморожен до экранов).
+- **Дальше** так же по модулям `players` → `teams` → `matches` → `results`. В брейнштормингах этих спек закрываются
+  вопросы нативщика Б-01…Б-10 (`docs/WF_…_2026_10_19.md`, у пользователя).
 
 ## 14. Не проверено — проверить первыми шагами плана
 

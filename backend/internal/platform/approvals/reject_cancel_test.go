@@ -12,6 +12,7 @@ import (
 // Отклонение: комментарий обязателен (400 body.comment до транзакции); rejected с комментарием,
 // исполнителя и проверки инициатора нет (выключенный инициатор не мешает отклонить).
 func TestReject(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1})
@@ -47,6 +48,7 @@ func TestReject(t *testing.T) {
 // Отмена — только инициатор и только pending: чужой запрос (в том числе о себе) — ErrNotFound
 // (контракт cancelApproval: «нет или он не ваш»), решённый — ErrClosed.
 func TestCancel(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b, tgt := e.member(perm.Owner), e.member(perm.Owner), e.member(perm.Owner)
 	ap := e.request(a, actGrant, payload{V: 1, Target: &tgt.StaffID})

@@ -13,6 +13,7 @@ import (
 // riverConfig бинарника, а не место вызова: river.NewClient(…, &river.Config{…}) в cmd/* обошёл бы общую часть
 // обслуживания незаметно. Тесты (*_test.go) строят свои клиенты — их страж не трогает.
 func TestRiverConfigOnlyInQueue(t *testing.T) {
+	t.Parallel()
 	root := os.DirFS("../..") // корень модуля backend; пути fs — со слэшами
 	files := 0
 	var violations []string
@@ -58,6 +59,7 @@ func TestRiverConfigOnlyInQueue(t *testing.T) {
 // riverConfigViolations видит все способы собрать river.Config мимо queue: литерал (с & и без), new(river.Config),
 // объявление переменной этого типа, импорт под другим именем и точкой; тип в сигнатуре и указатель — не сборка.
 func TestRiverConfigViolations(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		src  string

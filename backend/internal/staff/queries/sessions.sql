@@ -22,10 +22,10 @@ UPDATE staff_sessions SET revoked_at = sqlc.arg(now)::timestamptz, revoked_reaso
 WHERE staff_id = sqlc.arg(staff_id) AND revoked_at IS NULL;
 
 -- name: LoadSession :one
--- Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка, роль и города модератора.
+-- Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка (версия и имя — R5), роль и города модератора.
 SELECT s.id, s.staff_id, s.stage::text AS stage, s.last_seen_at, s.expires_at, s.ip,
        s.revoked_at, s.revoked_reason,
-       a.status::text AS status, a.locked_until,
+       a.status::text AS status, a.locked_until, a.version, a.display_name,
        r.role::text AS role,
        coalesce((SELECT array_agg(c.city_id ORDER BY c.city_id) FROM staff_role_cities c
                  WHERE c.staff_id = s.staff_id), '{}')::uuid[] AS city_ids

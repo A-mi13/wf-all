@@ -14,7 +14,7 @@
 .backdrop {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--wf-color-bg) 74%, transparent);
+  background: var(--wf-color-scrim);
 }
 
 .panel {
@@ -27,8 +27,7 @@
   background: var(--wf-color-bg-elevated);
   color: var(--wf-color-text);
   font-family: var(--wf-font-body);
-  box-shadow: 0 var(--wf-space-6) var(--wf-space-16)
-    color-mix(in srgb, var(--wf-color-bg) 80%, transparent);
+  box-shadow: var(--wf-shadow-overlay);
 }
 
 .panel:focus {
@@ -59,6 +58,11 @@
   margin-top: auto;
   border-width: 1px 0 0;
   border-radius: var(--wf-radius-xl) var(--wf-radius-xl) 0 0;
+}
+
+/* Шторка во всю высоту предела (Sheet fill — палитра): тело (flex-grow) занимает остаток под шапкой */
+.bottom.fill {
+  height: 90%;
 }
 
 .danger {
@@ -118,7 +122,7 @@
 }
 
 .close:focus-visible {
-  outline: 2px solid var(--wf-color-accent);
+  outline: 2px solid var(--wf-color-focus);
   outline-offset: 2px;
 }
 
@@ -127,18 +131,58 @@
   cursor: not-allowed;
 }
 
-.icon {
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 2.4;
-  stroke-linecap: round;
-}
-
+/* Тело панели — контейнер: формы и сетки внутри раскладываются по ширине панели (спека UI-фундамента §3.4) */
 .body {
   flex-grow: 1;
   min-height: 0;
   overflow-y: auto;
+  container-type: inline-size;
   padding: var(--wf-space-3) var(--wf-space-6) var(--wf-space-6);
+}
+
+/* Фокус не закрыт тостом (WCAG 2.4.11, §4.5, ревью UF2b/I-Y): подвал — соседний flex-блок и тело не перекрывает,
+   а тост с «Отменить» (корень с data-toast-open) лежит поверх низа тела — над подвалом или у края окна. Отступ
+   прокрутки — под тост; запас снизу того же размера: scroll-padding места прокрутки не добавляет, последний элемент
+   иначе не поднять над тостом. Тост закрылся у конца прокрутки — браузер ограничит прокрутку, содержимое опустится
+   на освободившееся место (ничего не закрыто; постоянный запас под тост съел бы место у каждой панели). */
+/* Только у панелей, которые тост перекрывает (m3): справа и шторка; окно по центру на широком тост не задевает,
+   на телефоне — задевает (правило в @media ниже). */
+:global(:root[data-toast-open]) .right .body {
+  scroll-padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+  padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+}
+
+:global(:root[data-toast-open]) .bottom .body {
+  scroll-padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+  padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+}
+
+/* Широкий экран (r1-1): тост внизу по центру (bottom: space-6), а высокое окно по центру без подвала (ConfirmDialog —
+   кнопки в теле) доходит до края окна — тост ложился на кнопки. Пока виден тост с «Отменить», предел высоты окна
+   ниже: зазор под окном (поле корня space-4 + половина свободного места) ≥ space-6 + toast + space-2. Окно ниже
+   предела не меняется (m3: без скачка высоты). С подвалом — так же (r2-1): подвал окна по центру не у края экрана,
+   тосты над ним не встать — они на обычном месте, под окном (Toast.module.css, data-overlay-footer='center'). */
+@media (min-width: 768px) {
+  :global(:root[data-toast-open]) .center {
+    max-height: calc(
+      100% - 2 * (var(--wf-size-toast) + var(--wf-space-6) + var(--wf-space-2) - var(--wf-space-4))
+    );
+  }
+}
+
+@media (max-width: 767.98px) {
+  :global(:root[data-toast-open]) .center .body {
+    scroll-padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+    padding-block-end: calc(var(--wf-size-toast) + var(--wf-space-6));
+  }
+
+  /* Окно по центру с подвалом (r2-1): запас тела не спасает подвал — тост у края окна (space-2), а окно ниже
+     предела: зазор под ним (поле корня space-4 + половина свободного места) ≥ space-2 + toast + space-2 */
+  :global(:root[data-toast-open][data-overlay-footer='center']) .center {
+    max-height: calc(
+      100% - 2 * (var(--wf-size-toast) + var(--wf-space-2) + var(--wf-space-2) - var(--wf-space-4))
+    );
+  }
 }
 
 .description {
@@ -149,8 +193,12 @@
   color: var(--wf-color-text-secondary);
 }
 
+/* Подвал (n6, R2-m3): высота ряда кнопок — токен size.overlay-footer (по нему же область тостов встаёт над
+   подвалом); min, не фиксированная: не хватило ширины — кнопки переносятся рядом ниже, а не за край Drawer */
 .footer {
   flex-shrink: 0;
+  box-sizing: border-box;
+  min-block-size: var(--wf-size-overlay-footer);
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -200,7 +248,7 @@
   width: 100%;
   min-height: var(--wf-size-control);
   padding: 0 var(--wf-space-4);
-  border: 1px solid var(--wf-color-border);
+  border: 1px solid var(--wf-color-border-control);
   border-radius: var(--wf-radius-md);
   background: var(--wf-color-surface-sunken);
   color: var(--wf-color-text);
@@ -211,7 +259,7 @@
 
 .word:focus {
   outline: none;
-  border-color: var(--wf-color-danger-border);
+  border-color: var(--wf-color-danger);
 }
 
 .actions {

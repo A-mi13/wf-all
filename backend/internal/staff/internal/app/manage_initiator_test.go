@@ -20,6 +20,7 @@ import (
 
 // Предикат проверки инициатора: active, не закрыт, версия та же, право запроса по текущей роли.
 func TestInitiatorValid(t *testing.T) {
+	t.Parallel()
 	who := uuid.New()
 	later := t0.Add(time.Hour)
 	cases := []struct {
@@ -49,6 +50,7 @@ func TestInitiatorValid(t *testing.T) {
 // запрос после смены матрицы прав при выкатке или с чужим init_id): право запроса по ТЕКУЩЕЙ роли
 // инициатора — Deny, или init_id не совпадает с requested_by — failed, ничего не исполнено.
 func TestInitiatorCheckStoredRequest(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	b := e.as(e.addMember("owner.b@wf.example", memberOpts{Role: "owner"}))
 	x := e.addMember("admin@wf.example", memberOpts{Role: "admin"})
@@ -80,6 +82,7 @@ func TestInitiatorCheckStoredRequest(t *testing.T) {
 
 // Сессию автора погасили (учётка активна) между загрузкой и действием — auth.ErrSessionInvalid.
 func TestManageActorSessionRevoked(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	owner := e.as(e.addMember("owner@wf.example", memberOpts{Role: "owner"}))
@@ -101,6 +104,7 @@ func TestManageActorSessionRevoked(t *testing.T) {
 // подписью/замком — auth.ErrSessionReplaced (401 без стирания свежей cookie), как у конвейера и lockSelf;
 // погашенная иначе (выход, завершена, блокировка) — по-прежнему ErrSessionInvalid. Действие не исполняется.
 func TestManageActorSessionReplaced(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		reason string
 		want   error
@@ -112,6 +116,7 @@ func TestManageActorSessionReplaced(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.reason, func(t *testing.T) {
+			t.Parallel()
 			e := newManageEnv(t)
 			ctx := context.Background()
 			e.addMember("owner@wf.example", memberOpts{Role: "owner"})
@@ -135,6 +140,7 @@ func TestManageActorSessionReplaced(t *testing.T) {
 // стартуют вместе: учётки берутся по возрастанию id — без взаимной блокировки (40P01). Одно проходит,
 // второе видит погашенную сессию своего автора. -count=30.
 func TestCounterRevokeSessionsNoDeadlock(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	i := e.addMember("owner.i@wf.example", memberOpts{Role: "owner"})
 	tm := e.addMember("owner.t@wf.example", memberOpts{Role: "owner"})
@@ -162,6 +168,7 @@ func TestCounterRevokeSessionsNoDeadlock(t *testing.T) {
 // Учётка автора выключена или закрыта при живой сессии (состояние в обход сценариев: они гасят сессии
 // вместе со сменой статуса) — тоже auth.ErrSessionInvalid: проверка смотрит и учётку, а не только сессию.
 func TestManageActorAccountState(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	sup := e.addMember("sup@wf.example", memberOpts{Role: "support"})
@@ -202,6 +209,7 @@ func (e *menv) hold(sql string, args ...any) (release func()) {
 // замок учётки — после освобождения исполнители берут учётки по id: одно исполняется, второе — failed,
 // без 40P01.
 func TestCounterRequestsQueuedOnOwnersLock(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	ctx := context.Background()
 	i := e.addMember("owner.i@wf.example", memberOpts{Role: "owner"})
@@ -252,6 +260,7 @@ func TestCounterRequestsQueuedOnOwnersLock(t *testing.T) {
 // FOR SHARE — каждое действие берёт первый замок и ждёт второго. Учётки по возрастанию id — после
 // освобождения одно проходит, второе видит погашенную сессию автора; без 40P01.
 func TestCounterRevokeSessionsQueued(t *testing.T) {
+	t.Parallel()
 	e := newManageEnv(t)
 	i := e.addMember("owner.i@wf.example", memberOpts{Role: "owner"})
 	tm := e.addMember("owner.t@wf.example", memberOpts{Role: "owner"})

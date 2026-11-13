@@ -11,7 +11,7 @@ export type TextFieldProps = Omit<
   name: string;
   label: ReactNode;
   hint?: ReactNode;
-  type?: 'text' | 'email' | 'url' | 'tel' | 'number' | 'search' | 'date';
+  type?: 'text' | 'email' | 'url' | 'tel' | 'number' | 'search'; // дата — DateField
   rules?: RegisterOptions; // правила react-hook-form; текст — ui.field_errors.<правило> или message
 };
 

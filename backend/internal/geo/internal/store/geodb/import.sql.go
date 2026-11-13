@@ -125,6 +125,18 @@ func (q *Queries) ImportCountry(ctx context.Context, code string) (ImportCountry
 	return i, err
 }
 
+const importDBNow = `-- name: ImportDBNow :one
+SELECT now()::timestamptz AS now
+`
+
+// Время базы (now() транзакции) — опора часов команды оператора (app.OperatorClock, ревью G7 m9).
+func (q *Queries) ImportDBNow(ctx context.Context) (time.Time, error) {
+	row := q.db.QueryRow(ctx, importDBNow)
+	var now time.Time
+	err := row.Scan(&now)
+	return now, err
+}
+
 const importDeleteAdmin1Names = `-- name: ImportDeleteAdmin1Names :exec
 DELETE FROM geonames_admin1_names WHERE country_code = $1
 `
@@ -319,6 +331,22 @@ func (q *Queries) ImportInsertPlaceNames(ctx context.Context, arg ImportInsertPl
 	return result.RowsAffected(), nil
 }
 
+const importJobCancelLock = `-- name: ImportJobCancelLock :exec
+SELECT pg_advisory_xact_lock($1::int, ($2::bigint % 2147483647)::int)
+`
+
+type ImportJobCancelLockParams struct {
+	Class int32
+	JobID int64
+}
+
+// Отмены одной задачи импорта сериализуются (K6): эксклюзивный advisory-замок транзакции (класс, id задачи по
+// модулю 2^31 − 1 — совпадение ключей двух задач только заставит отмены подождать друг друга).
+func (q *Queries) ImportJobCancelLock(ctx context.Context, arg ImportJobCancelLockParams) error {
+	_, err := q.db.Exec(ctx, importJobCancelLock, arg.Class, arg.JobID)
+	return err
+}
+
 const importLastSucceededPlaces = `-- name: ImportLastSucceededPlaces :one
 SELECT COALESCE(places_upserted, 0)::int AS places
 FROM geonames_imports
@@ -333,6 +361,28 @@ func (q *Queries) ImportLastSucceededPlaces(ctx context.Context, countryCode str
 	var places int32
 	err := row.Scan(&places)
 	return places, err
+}
+
+const importLatestByJob = `-- name: ImportLatestByJob :one
+SELECT id FROM geonames_imports
+WHERE river_job_id = $1::bigint AND started_at >= $2::timestamptz
+ORDER BY started_at DESC, id DESC
+LIMIT 1
+`
+
+type ImportLatestByJobParams struct {
+	RiverJobID int64
+	NotBefore  time.Time
+}
+
+// Последняя строка журнала задачи River (getGeoImportJob.import_id): попытки задачи — строки с одним river_job_id,
+// начатые не раньше not_before (created_at задачи − допуск часов, ревью G7 m5): после сброса последовательности River
+// id повторяется, и строка прежней задачи с тем же id карточке новой не достаётся.
+func (q *Queries) ImportLatestByJob(ctx context.Context, arg ImportLatestByJobParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, importLatestByJob, arg.RiverJobID, arg.NotBefore)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const importLinkCity = `-- name: ImportLinkCity :one
@@ -415,12 +465,31 @@ func (q *Queries) ImportMarkMissing(ctx context.Context, arg ImportMarkMissingPa
 	return items, nil
 }
 
+const importReconcileLock = `-- name: ImportReconcileLock :exec
+SELECT pg_advisory_xact_lock($1::int, $2::int)
+`
+
+type ImportReconcileLockParams struct {
+	Class   int32
+	Country int32
+}
+
+// Сверка страны исключает активации городов этой страны (ревью G5 I1-r1): эксклюзивный advisory-замок транзакции
+// (класс, страна) — ключ app.countryLockKey; активация берёт тот же ключ разделяемым (ActivateCountryLock).
+func (q *Queries) ImportReconcileLock(ctx context.Context, arg ImportReconcileLockParams) error {
+	_, err := q.db.Exec(ctx, importReconcileLock, arg.Class, arg.Country)
+	return err
+}
+
 const importRegionNamesFromAdmin1 = `-- name: ImportRegionNamesFromAdmin1 :execrows
 INSERT INTO region_names (region_id, locale, name)
-SELECT $1::uuid, an.locale, an.name
-FROM geonames_admin1_names an
-WHERE an.country_code = $2
-  AND an.admin1_code = $3::text
+SELECT r.id, an.locale, an.name
+FROM regions r
+JOIN countries co ON co.id = r.country_id
+JOIN geonames_admin1_names an ON an.country_code = co.code AND an.admin1_code = r.geoname_admin1_code
+WHERE r.id = $1::uuid
+  AND co.code = $2
+  AND r.geoname_admin1_code = $3::text
   AND an.locale <> $4::text
   AND btrim(an.name) <> ''
 ON CONFLICT DO NOTHING
@@ -433,6 +502,9 @@ type ImportRegionNamesFromAdmin1Params struct {
 	CountryLocale string
 }
 
+// Недостающие переводы региона из admin1 — только если у региона именно этот код (ревью G6 I1): код
+// выставлен этой транзакцией (ImportLinkRegion) или уже совпадал. Другой код или код, отданный другому
+// региону, — 0 строк.
 func (q *Queries) ImportRegionNamesFromAdmin1(ctx context.Context, arg ImportRegionNamesFromAdmin1Params) (int64, error) {
 	result, err := q.db.Exec(ctx, importRegionNamesFromAdmin1,
 		arg.RegionID,
@@ -458,6 +530,29 @@ type ImportRestartParams struct {
 func (q *Queries) ImportRestart(ctx context.Context, arg ImportRestartParams) error {
 	_, err := q.db.Exec(ctx, importRestart, arg.StartedAt, arg.ID)
 	return err
+}
+
+const importRunningJob = `-- name: ImportRunningJob :one
+
+SELECT river_job_id FROM geonames_imports
+WHERE country_code = $1::text AND status = 'running'
+  AND started_at >= $2::timestamptz
+`
+
+type ImportRunningJobParams struct {
+	CountryCode string
+	StaleBefore time.Time
+}
+
+// Постановка и отмена импорта из админки (план B, Task 14; роль admin).
+// Свежая строка running страны: есть — 409 geo.import_in_progress; river_job_id — задача этой строки (NULL — импорт
+// оператора, job_id в ответе нет). Зависшая (started_at < stale_before — граница ImportFailStale) не в счёт (ревью G7
+// I1): процесс убит без итога, её закроет begin воркера поставленной задачи.
+func (q *Queries) ImportRunningJob(ctx context.Context, arg ImportRunningJobParams) (*int64, error) {
+	row := q.db.QueryRow(ctx, importRunningJob, arg.CountryCode, arg.StaleBefore)
+	var river_job_id *int64
+	err := row.Scan(&river_job_id)
+	return river_job_id, err
 }
 
 const importStart = `-- name: ImportStart :exec

@@ -19,6 +19,7 @@ import (
 // и навешивает на них свои id, общий срез двух клиентов (воркер и admin-api в одном тесте или процессе)
 // делил бы состояние.
 func TestJobs(t *testing.T) {
+	t.Parallel()
 	a, b := periodic.Jobs(), periodic.Jobs()
 	if len(a) != 4 || len(b) != 4 {
 		t.Fatalf("задач %d и %d, ждали 4", len(a), len(b))
@@ -40,6 +41,7 @@ func TestJobs(t *testing.T) {
 // исполнителя у периодической вставки; права роли admin на river_* даёт grants.sql. Ставятся ровно задачи
 // списка (RunOnStart) в очереди воркера — исполнит воркер.
 func TestLeaderWithoutWorkersEnqueuesPlatformJobs(t *testing.T) {
+	t.Parallel()
 	pools := dbtest.NewPoolsAs(t, "admin")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

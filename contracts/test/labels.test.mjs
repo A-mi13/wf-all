@@ -2,7 +2,7 @@
 // apps/admin/messages обязаны быть тексты ru и en. Страж локалей — в apps/admin/src/i18n.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { approvalActions, loadLabelCatalog, permissionKeys } from '../src/labels.mjs';
+import { approvalActions, flagKeys, loadLabelCatalog, permissionKeys } from '../src/labels.mjs';
 
 test('ключи прав — только не-draft, по порядку каталога', () => {
   const catalog = {
@@ -29,4 +29,18 @@ test('каталог собранного контракта admin', async () =>
   assert.ok(permissions.includes('staff.roles.grant'));
   assert.ok(!permissions.includes('teams.captains.approve'), 'draft-права не подписываются');
   assert.ok(actions.includes('staff.invite'));
+});
+
+test('ключи флагов — enum схемы FeatureFlagKey бандла (R6)', () => {
+  const doc = {
+    components: { schemas: { FeatureFlagKey: { type: 'string', enum: ['economy', 'ads'] } } },
+  };
+  assert.deepEqual(flagKeys(doc), ['ads', 'economy']);
+  assert.throws(() => flagKeys({ components: { schemas: {} } }), /FeatureFlagKey/);
+});
+
+test('каталог собранного контракта admin — ключи флагов', async () => {
+  const { flags } = await loadLabelCatalog();
+  assert.ok(flags.includes('subscriptions'));
+  assert.ok(flags.includes('gk_rotation'));
 });

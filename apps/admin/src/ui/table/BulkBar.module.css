@@ -1,0 +1,35 @@
+/* Панель массовых действий (BulkBar): «Выбрано N», действия, итог по видам. */
+.bar {
+  font-family: var(--wf-font-body);
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  padding: var(--wf-space-2) var(--wf-space-3);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-md);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
+.count {
+  margin-inline-end: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.report {
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.problems {
+  margin: 0;
+  padding-inline-start: var(--wf-space-4);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}

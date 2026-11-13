@@ -16,6 +16,7 @@ import (
 // initiator_changed, аудит и событие на каждый; решённые, чужие и запросы о нём не трогаются; в
 // транзакции модуля: откат модуля откатывает и гашение.
 func TestCancelByInitiator(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	a, b := e.member(perm.Owner), e.member(perm.Owner)
 	mine := []approvals.Approval{
@@ -75,6 +76,8 @@ func TestCancelByInitiator(t *testing.T) {
 
 // ExpireDue — просроченные ожидающие (expires_at <= now) → expired от системы порциями; живые и
 // решённые не трогаются; аудит и событие на каждый.
+//
+// serial: SetBatchForTest меняет переменную пакета batchSize.
 func TestExpireDue(t *testing.T) {
 	e := newEnv(t)
 	restore := approvals.SetBatchForTest(2)
@@ -113,6 +116,8 @@ func TestExpireDue(t *testing.T) {
 
 // PurgeDecided — удаляет решённые старше границы; ожидающие (даже очень старые) и свежие решённые
 // остаются; olderThan ≤ 0 — ошибка (не удаляет всё решённое разом).
+//
+// serial: SetBatchForTest меняет переменную пакета batchSize.
 func TestPurgeDecided(t *testing.T) {
 	e := newEnv(t)
 	restore := approvals.SetBatchForTest(2)

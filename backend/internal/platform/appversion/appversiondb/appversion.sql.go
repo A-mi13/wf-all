@@ -7,7 +7,30 @@ package appversiondb
 
 import (
 	"context"
+	"time"
 )
+
+const appVersionsForUpdate = `-- name: AppVersionsForUpdate :one
+SELECT platform, min_version, recommended_version, store_url, version, updated_at
+FROM app_versions
+WHERE platform = $1
+FOR UPDATE
+`
+
+// Строка платформы под замком записи: «было» для аудита и сравнение «ничего не меняется».
+func (q *Queries) AppVersionsForUpdate(ctx context.Context, platform string) (AppVersion, error) {
+	row := q.db.QueryRow(ctx, appVersionsForUpdate, platform)
+	var i AppVersion
+	err := row.Scan(
+		&i.Platform,
+		&i.MinVersion,
+		&i.RecommendedVersion,
+		&i.StoreUrl,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
 
 const getAppVersions = `-- name: GetAppVersions :one
 SELECT platform, min_version, recommended_version, store_url, version, updated_at
@@ -18,6 +41,114 @@ WHERE platform = $1
 // Версии приложения платформы; 0 строк — версии не заведены (публичная ручка отдаёт null-поля).
 func (q *Queries) GetAppVersions(ctx context.Context, platform string) (AppVersion, error) {
 	row := q.db.QueryRow(ctx, getAppVersions, platform)
+	var i AppVersion
+	err := row.Scan(
+		&i.Platform,
+		&i.MinVersion,
+		&i.RecommendedVersion,
+		&i.StoreUrl,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const insertAppVersions = `-- name: InsertAppVersions :one
+INSERT INTO app_versions (platform, min_version, recommended_version, store_url, updated_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (platform) DO NOTHING
+RETURNING platform, min_version, recommended_version, store_url, version, updated_at
+`
+
+type InsertAppVersionsParams struct {
+	Platform           string
+	MinVersion         string
+	RecommendedVersion string
+	StoreUrl           string
+	UpdatedAt          time.Time
+}
+
+// Заведение платформы: новая строка — version 1 и updated_at из часов записывающего. Строку параллельно завела другая
+// транзакция — ни одной строки (ждёт её коммита, ON CONFLICT DO NOTHING): вызывающий перечитывает её под FOR UPDATE как
+// «было» (ревью G7 m2) — иначе вторая правка шла бы как создание с before = null.
+func (q *Queries) InsertAppVersions(ctx context.Context, arg InsertAppVersionsParams) (AppVersion, error) {
+	row := q.db.QueryRow(ctx, insertAppVersions,
+		arg.Platform,
+		arg.MinVersion,
+		arg.RecommendedVersion,
+		arg.StoreUrl,
+		arg.UpdatedAt,
+	)
+	var i AppVersion
+	err := row.Scan(
+		&i.Platform,
+		&i.MinVersion,
+		&i.RecommendedVersion,
+		&i.StoreUrl,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listAppVersions = `-- name: ListAppVersions :many
+SELECT platform, min_version, recommended_version, store_url, version, updated_at
+FROM app_versions
+ORDER BY platform
+`
+
+// Заведённые платформы для админки (план B, Task 15), по имени; незаведённую ручка отдаёт null-полями.
+func (q *Queries) ListAppVersions(ctx context.Context) ([]AppVersion, error) {
+	rows, err := q.db.Query(ctx, listAppVersions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppVersion
+	for rows.Next() {
+		var i AppVersion
+		if err := rows.Scan(
+			&i.Platform,
+			&i.MinVersion,
+			&i.RecommendedVersion,
+			&i.StoreUrl,
+			&i.Version,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateAppVersions = `-- name: UpdateAppVersions :one
+UPDATE app_versions
+SET min_version = $1, recommended_version = $2, store_url = $3,
+    version = version + 1
+WHERE platform = $4
+RETURNING platform, min_version, recommended_version, store_url, version, updated_at
+`
+
+type UpdateAppVersionsParams struct {
+	MinVersion         string
+	RecommendedVersion string
+	StoreUrl           string
+	Platform           string
+}
+
+// Правка заведённой платформы (строка под FOR UPDATE): version + 1, updated_at ставит триггер set_updated_at (время
+// базы; порядок правок — version).
+func (q *Queries) UpdateAppVersions(ctx context.Context, arg UpdateAppVersionsParams) (AppVersion, error) {
+	row := q.db.QueryRow(ctx, updateAppVersions,
+		arg.MinVersion,
+		arg.RecommendedVersion,
+		arg.StoreUrl,
+		arg.Platform,
+	)
 	var i AppVersion
 	err := row.Scan(
 		&i.Platform,

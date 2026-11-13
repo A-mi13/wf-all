@@ -34,6 +34,7 @@ func (e *env) approval(expires, decided time.Time) uuid.UUID {
 // Один проход (P27): чистка staff (сессии и приглашения старше 30 суток), просрочка подтверждений
 // (ExpireDue) и удаление решённых старше 180 суток (PurgeDecided с DecidedRetention). Свежее не трогает.
 func TestCleanerTick(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	m := e.member("a@wf.example", "admin", "active", "ru")
 	e.clock.Advance(400 * 24 * time.Hour)
@@ -81,6 +82,7 @@ func TestCleanerTick(t *testing.T) {
 // прав на таблицу нет. Просроченный ключ удаляется, живой остаётся; ключи игроков (idempotency_keys) — не наши,
 // их чистит воркер. Итог — в строке журнала.
 func TestCleanerTickStaffIdempotencyKeys(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	staffKey := func(key, expires string) {
 		e.exec(`INSERT INTO staff_idempotency_keys (user_id, key, endpoint, request_hash, expires_at)
@@ -107,9 +109,79 @@ func TestCleanerTickStaffIdempotencyKeys(t *testing.T) {
 	}
 }
 
+// План B, Task 3 (R2): лимиты admin-api (staff_rate_limits) чистит этот тикер — у воркера прав на таблицу нет.
+// Строка с tat в прошлом (по часам сервиса, не базы) удаляется, будущая остаётся; лимиты игроков (rate_limits) —
+// не наши. Шаги независимы: сломанный шаг идемпотентности не мешает чистке лимитов, и наоборот — сбой лимитов
+// возвращается ошибкой, а остальные шаги сделаны.
+func TestCleanerDeletesStaffRateLimits(t *testing.T) {
+	t.Parallel()
+	seed := func(e *env) {
+		now := e.clock.Now()
+		e.exec(`INSERT INTO staff_rate_limits (key, tat) VALUES ('email:staff_login:old', $1), ('ip:staff_auth:203.0.113.7', $2)`,
+			now.Add(-time.Second), now.Add(time.Minute))
+		e.exec(`INSERT INTO rate_limits (key, tat) VALUES ('ip:auth:203.0.113.7', $1)`, now.Add(-time.Hour))
+		e.exec(`INSERT INTO staff_idempotency_keys (user_id, key, endpoint, request_hash, expires_at)
+			VALUES ($1, 'old', 'PUT /v1/staff/accounts/{staffId}/role', 'h', now() - interval '1 minute')`, id.New())
+	}
+	cleaned := func(e *env) {
+		e.t.Helper()
+		if n := e.count(`SELECT count(*) FROM staff_rate_limits WHERE key = 'email:staff_login:old'`); n != 0 {
+			e.t.Error("просроченная строка лимита admin-api не удалена")
+		}
+		if n := e.count(`SELECT count(*) FROM staff_rate_limits WHERE key = 'ip:staff_auth:203.0.113.7'`); n != 1 {
+			e.t.Error("живая строка лимита admin-api удалена")
+		}
+		if n := e.count(`SELECT count(*) FROM rate_limits`); n != 1 {
+			e.t.Error("лимит игрока удалён тикером admin-api")
+		}
+	}
+
+	t.Run("все шаги", func(t *testing.T) {
+		t.Parallel()
+		e := newEnv(t)
+		// часы сервиса далеко впереди базы: граница чистки — из clock.Clock, а не now() базы
+		e.clock.Advance(400 * 24 * time.Hour)
+		seed(e)
+		if err := jobs.NewCleaner(e.deps, e.svc).Tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		cleaned(e)
+		if out := e.log.String(); !strings.Contains(out, "rate_limits=1") {
+			t.Errorf("в журнале нет числа удалённых строк лимитов:\n%s", out)
+		}
+	})
+
+	t.Run("сбой соседнего шага", func(t *testing.T) {
+		t.Parallel()
+		e := newEnv(t)
+		seed(e)
+		e.exec(`ALTER TABLE staff_idempotency_keys RENAME TO staff_idempotency_keys_gone`)
+		err := jobs.NewCleaner(e.deps, e.svc).Tick(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "staff_idempotency_keys") {
+			t.Fatalf("сбой шага идемпотентности не вернулся ошибкой: %v", err)
+		}
+		cleaned(e)
+	})
+
+	t.Run("сбой шага лимитов", func(t *testing.T) {
+		t.Parallel()
+		e := newEnv(t)
+		seed(e)
+		e.exec(`ALTER TABLE staff_rate_limits RENAME TO staff_rate_limits_gone`)
+		err := jobs.NewCleaner(e.deps, e.svc).Tick(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "staff_rate_limits") {
+			t.Fatalf("сбой шага лимитов не вернулся ошибкой: %v", err)
+		}
+		if n := e.count(`SELECT count(*) FROM staff_idempotency_keys WHERE key = 'old'`); n != 0 {
+			t.Error("сбой лимитов отменил чистку ключей идемпотентности")
+		}
+	})
+}
+
 // Run: проход сразу при старте, затем на каждый тик; ошибка прохода — в журнал сервера, тикер живёт
 // дальше (сервис не падает); отмена ctx — Run возвращается.
 func TestCleanerRunLogsAndContinues(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	c := jobs.NewCleaner(e.deps, e.svc)
 	passes := make(chan int, 10)
@@ -154,6 +226,7 @@ func TestCleanerRunLogsAndContinues(t *testing.T) {
 // Отмена ctx во время прохода (SIGTERM): проход прерывается, Run возвращается без записи ошибки в
 // журнал (остановка — не сбой).
 func TestCleanerRunStopsOnCancel(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	c := jobs.NewCleaner(e.deps, e.svc)
 	inPass := make(chan struct{})
