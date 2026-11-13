@@ -211,7 +211,7 @@ func waitLockWithin(ctx context.Context, owner *pgxpool.Pool, done <-chan error,
 		}
 		select {
 		case err := <-done:
-			return fmt.Errorf("второе завершилось, не встав на замок: %v", err)
+			return fmt.Errorf("второе завершилось, не встав на замок: %w", err)
 		case <-wctx.Done():
 			return fmt.Errorf("второе не встало на замке за %s", d)
 		case <-tick.C:

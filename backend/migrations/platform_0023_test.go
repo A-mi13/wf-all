@@ -679,7 +679,7 @@ func waitAccessExclusive(ctx context.Context, db *sql.DB, done <-chan error, d t
 		}
 		select {
 		case err := <-done:
-			return fmt.Errorf("миграция завершилась, не встав в очередь за импортом: %v", err)
+			return fmt.Errorf("миграция завершилась, не встав в очередь за импортом: %w", err)
 		case <-wctx.Done():
 			return fmt.Errorf("миграция не ждёт geonames_places за %s", d)
 		case <-tick.C:
