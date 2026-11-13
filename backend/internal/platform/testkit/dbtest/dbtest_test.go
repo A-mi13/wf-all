@@ -53,14 +53,18 @@ func TestNewPoolsAsRunsUnderRole(t *testing.T) {
 	if who != "api" {
 		t.Fatalf("current_user = %q, нужен api", who)
 	}
-	// служебная таблица мигратора закрыта для api grants.sql — значит, права применены
-	_, err := p.As.Exec(ctx, "SELECT 1 FROM goose_db_version")
+	// таблицы сотрудников закрыты для api grants.sql — значит, права применены
+	_, err := p.As.Exec(ctx, "SELECT 1 FROM staff_accounts")
 	var pg *pgconn.PgError
 	if !errors.As(err, &pg) || pg.Code != "42501" {
-		t.Fatalf("api читает goose_db_version: %v, нужен отказ 42501", err)
+		t.Fatalf("api читает staff_accounts: %v, нужен отказ 42501", err)
 	}
-	if _, err := p.Owner.Exec(ctx, "SELECT 1 FROM goose_db_version"); err != nil {
+	if _, err := p.Owner.Exec(ctx, "SELECT 1 FROM staff_accounts"); err != nil {
 		t.Fatalf("Owner: %v", err)
+	}
+	// версию схемы читают все роли (ожидание схемы при старте, план C R3), пишет только мигратор
+	if _, err := p.As.Exec(ctx, "SELECT 1 FROM goose_db_version"); err != nil {
+		t.Fatalf("api читает goose_db_version: %v", err)
 	}
 	// разрешённое api по grants.sql — работает
 	if _, err := p.As.Exec(ctx, "SELECT 1 FROM feature_flags"); err != nil {
