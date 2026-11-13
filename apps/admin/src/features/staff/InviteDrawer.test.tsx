@@ -112,6 +112,24 @@ describe('форма приглашения', () => {
     ]);
   });
 
+  // Финальное ревью m1: поиск городов из одной пунктуации сервер отверг бы (400 query.q) — запроса с q нет, в
+  // списке «Ничего не нашлось».
+  test('поиск городов из одной пунктуации — запроса с q нет, «Ничего не нашлось»', async () => {
+    const { seen } = staffServer({ accounts: TEAM });
+    inviteServer();
+    renderApp('/staff', { me: meOwner });
+    const user = userEvent.setup();
+    const dialog = await openInvite(user);
+    await fill(user, dialog, 'moderator');
+    const cities = within(dialog).getByRole('combobox', { name: /Города модератора/ });
+    await user.type(cities, '-');
+    expect(cities).toHaveAttribute('aria-expanded', 'true');
+    expect(await within(dialog).findByText('Ничего не нашлось')).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400)); // пауза поиска прошла — запрос ушёл бы
+    expect(seen.cities.some((q) => q.has('q'))).toBe(false);
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+  });
+
   test('202 — «Отправлено на подтверждение», ключ идемпотентности, черновик стёрт', async () => {
     staffServer({ accounts: TEAM });
     const sent = inviteServer();

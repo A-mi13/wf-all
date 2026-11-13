@@ -7,6 +7,7 @@ import { renderApp } from '../../test/app';
 import { COUNTRIES, countryEditServer, meDirectoriesAdmin } from '../../test/geo';
 import { pick, selectedText } from '../../test/pick';
 import { problem } from '../../test/problem';
+import { http, server } from '../../test/server';
 import { geoKeys } from './queries';
 
 type GeoCountryList = components['schemas']['GeoCountryList'];
@@ -167,6 +168,32 @@ describe('правка', () => {
     await user.click(within(drawer).getByRole('button', { name: 'Сохранить' }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({ phone_prefix: '+8' });
+  });
+
+  // Финальное ревью m2: язык сменили в другой вкладке (me перечитан при возврате) — список стран на новом языке ещё
+  // грузится, а форма не размонтируется: ввод цел, как на странице города (G8 m18).
+  test('смена языка под открытой формой — ввод не стирается', async () => {
+    const { drawer, user, app } = await openEdit();
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/v1/geo/countries', async ({ request, response }) => {
+        if (request.headers.get('Accept-Language') === 'en') await gate;
+        return response(200).json({ items: COUNTRIES });
+      }),
+    );
+    const prefix = field(drawer, /Телефонный код/);
+    await retype(user, prefix, '+77');
+    app.me.current = { ...meDirectoriesAdmin, locale: 'en' };
+    await app.refetchMe();
+    await screen.findByRole('button', { name: 'Save' });
+    expect(screen.getByRole('textbox', { name: /Phone code/i })).toBe(prefix);
+    expect(prefix).toHaveValue('+77');
+    release();
+    await waitFor(() =>
+      expect(app.queryClient.getQueryData(geoKeys.countries('en'))).toBeDefined(),
+    );
+    expect(screen.getByRole('textbox', { name: /Phone code/i })).toHaveValue('+77');
   });
 
   test('ничего не изменилось — запроса нет, панель закрыта', async () => {

@@ -210,6 +210,17 @@ describe('фильтры', () => {
     expect(await screen.findByText(/Ничего не нашлось/)).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Сбросить фильтры' }).length).toBeGreaterThan(0);
   });
+
+  // Финальное ревью m1: q из одной пунктуации сервер отверг бы (400 query.q) — запрос не уходит, экран — «Ничего не
+  // нашлось», как палитра, а не ошибка с «Повторить».
+  test('поиск из одной пунктуации — «Ничего не нашлось», запроса с q нет', async () => {
+    const { seen } = geoServer();
+    renderApp('/geo/cities?q=-', { me: meOwner });
+    await page();
+    expect(await screen.findByText(/Ничего не нашлось/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(seen.cities.some((q) => q.has('q'))).toBe(false);
+  });
 });
 
 describe('состояния', () => {

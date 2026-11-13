@@ -90,6 +90,17 @@ describe('поиск места', () => {
     expect(seen.places.at(-1)?.get('q')).toBe('м');
   });
 
+  // Финальное ревью m1: поиск из одной пунктуации сервер отверг бы (400 query.q) — запроса нет, «Ничего не нашлось».
+  test('поиск из одной пунктуации — «Ничего не нашлось», запроса нет', async () => {
+    const { seen } = geoServer();
+    renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await user.type(within(drawer).getByRole('searchbox', { name: 'Поиск' }), '(');
+    expect(await within(drawer).findByText(/Ничего не нашлось/)).toBeInTheDocument();
+    expect(within(drawer).queryByRole('alert')).toBeNull();
+    expect(seen.places).toEqual([]);
+  });
+
   test('уже заведённое место — «уже заведён», ссылка на город, выбрать нельзя', async () => {
     geoServer();
     const app = renderApp('/geo/cities', { me: meActivator });

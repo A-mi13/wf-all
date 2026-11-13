@@ -149,8 +149,9 @@ func (a *Admin) UpdateCity(ctx context.Context, s *auth.Staff, id uuid.UUID, p C
 	if p.Status != nil || p.Slug != nil {
 		perms = append(perms, permCitiesManage)
 	}
-	// пустой names ({"names":{}}) — тоже правка названий: права решаются до формы, у чужого города — 403, а не 400
-	// minProperties (ревью G6 m3)
+	// пустой names — тоже правка названий: права решаются до формы сценария (у чужого города — 403, а не ошибка
+	// формы; ревью G6 m3). По HTTP {"names":{}} сюда не доходит: валидатор контракта (GeoNamesPatch minProperties: 1)
+	// отвечает 400 до хендлера одинаково для своего и чужого города — порядок важен для вызовов сценария не по HTTP
 	if p.Names != nil {
 		perms = append(perms, permCitiesRename)
 	}

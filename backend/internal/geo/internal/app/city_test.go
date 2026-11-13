@@ -284,10 +284,12 @@ func TestUpdateCityModeratorForeignCity(t *testing.T) {
 	// поддержка — без права на любое поле
 	_, err = update(e.admin(), staffAs(perm.Support), stav, app.CityPatch{Names: map[string]*string{"en": strp("Hacked")}})
 	wantForbidden(t, err)
-	// ревью G6 m3: пустой names ({"names":{}}) — тоже правка названий: права решаются до формы, 403, а не 400
+	// ревью G6 m3: пустой names — тоже правка названий: на уровне сценария права решаются до формы — 403, а не
+	// ошибка формы. По HTTP {"names":{}} до сценария не доходит: валидатор контракта (minProperties) отвечает 400 и
+	// своему, и чужому городу
 	_, err = update(e.admin(), staffAs(perm.Moderator, mih), stav, app.CityPatch{Names: map[string]*string{}})
 	wantForbidden(t, err)
-	// у модератора своего города тот же запрос — 400 body minProperties (форма после прав)
+	// у модератора своего города тот же вызов сценария — ошибка формы body minProperties (форма после прав)
 	_, err = update(e.admin(), staffAs(perm.Moderator, stav), stav, app.CityPatch{Names: map[string]*string{}})
 	wantField(t, err, "body", "minProperties")
 }

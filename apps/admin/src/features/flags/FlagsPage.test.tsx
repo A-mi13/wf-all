@@ -78,6 +78,21 @@ describe('состояния', () => {
     expect(await sw('Подписки: Ставрополь')).toBeInTheDocument();
   });
 
+  // Финальное ревью m1: q из одной пунктуации сервер отверг бы (400 query.q) — запроса нет, «По фильтру городов нет».
+  test('поиск из одной пунктуации — «По фильтру городов нет», без ошибки и запроса с q', async () => {
+    const seen: URLSearchParams[] = [];
+    setup(undefined, { path: '/flags?q=..' });
+    server.use(
+      http.get('/v1/geo/cities', ({ request }) => {
+        seen.push(new URL(request.url).searchParams);
+        return undefined;
+      }),
+    );
+    expect(await screen.findByText('По фильтру городов нет')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(seen.some((q) => q.has('q'))).toBe(false);
+  });
+
   test('статус города — в адресе и в запросе', async () => {
     const seen: URLSearchParams[] = [];
     const { app, user } = setup();

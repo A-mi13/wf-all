@@ -71,31 +71,28 @@ export function AppShell(props: AppShellProps) {
     );
   }
 
+  // Страница — ребёнок с ключом: при смене раскладки (поворот телефона, масштаб 200 % через breakpoint-mobile)
+  // React сопоставляет её по ключу, а не по позиции, и не пересоздаёт — несохранённый ввод, прокрутка, выбор и
+  // открытые панели остаются (финальное ревью I1). Порядок детей не выравниваем: на телефоне страница идёт до
+  // таббара и в DOM — порядок чтения и Tab (WCAG 1.3.2, 2.4.3); CSS order его бы не поменял. Обёртка — тот же
+  // div во всех раскладках (меняется только класс), иначе пересоздалось бы всё поддерево.
   const page = (
-    <div className={styles.page}>
+    <div key="page" className={styles.page}>
       <OfflineBanner />
       <main className={styles.main}>{content}</main>
     </div>
   );
+  const layout = { ...props, menu, current };
 
   return (
     <BackMemoryProvider>
-      {mobile ? (
-        <div className={cx(styles.shell, styles.mobile)}>
-          {page}
-          <TabBar {...props} menu={menu} current={current} />
-        </div>
-      ) : compact ? (
-        <div className={styles.shell}>
-          <Rail {...props} menu={menu} current={current} />
-          {page}
-        </div>
-      ) : (
-        <div className={styles.shell}>
-          <Sidebar {...props} menu={menu} current={current} />
-          {page}
-        </div>
-      )}
+      <div className={cx(styles.shell, mobile && styles.mobile)}>
+        {mobile
+          ? [page, <TabBar key="tabbar" {...layout} />]
+          : compact
+            ? [<Rail key="rail" {...layout} />, page]
+            : [<Sidebar key="sidebar" {...layout} />, page]}
+      </div>
     </BackMemoryProvider>
   );
 }

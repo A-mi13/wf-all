@@ -1,7 +1,7 @@
 import type { components } from '../api/gen/admin';
 import type { Me } from '../app/permissions';
 import { CITY_OTHER, CITY_OWN, meModerator, meOwner } from './me';
-import { problem } from './problem';
+import { emptyQueryProblem, problem } from './problem';
 import { http, server } from './server';
 import { approval, city } from './staff';
 
@@ -251,6 +251,8 @@ export function geoServer(
       const q = new URL(request.url).searchParams;
       seen.cities.push(q);
       seen.languages.push(request.headers.get('Accept-Language'));
+      const bad = emptyQueryProblem(q);
+      if (bad) return response.untyped(bad);
       const ids = q.getAll('ids');
       const statuses = q.getAll('status');
       const rows = state.cities.filter(
@@ -283,6 +285,8 @@ export function geoServer(
     http.get('/v1/geo/places', ({ request, response }) => {
       const q = new URL(request.url).searchParams;
       seen.places.push(q);
+      const bad = emptyQueryProblem(q);
+      if (bad) return response.untyped(bad);
       const rows = state.places.filter(
         (p) =>
           (!q.get('country') || p.country.code === q.get('country')) &&

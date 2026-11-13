@@ -8,6 +8,7 @@ import { flag, meDirectoriesAdmin } from '../../test/geo';
 import { CITY_OTHER, CITY_OWN } from '../../test/me';
 import { problem } from '../../test/problem';
 import { sectionsServer } from '../../test/sections';
+import { FLAGS_KEY } from '../geo/queries';
 import { server, http } from '../../test/server';
 
 // Матрица «функция × город» (план B, Task 22; спека UI-фундамента §6.2): переключение — PATCH с version флага и
@@ -149,6 +150,98 @@ describe('«Отменить» (§4.10)', () => {
     expect(calls[1]?.key).not.toBe(calls[0]?.key);
     await waitFor(() => expect(checked(cell)).toBe('false'));
   });
+
+  // Финальное ревью m3 (G9-F n3): своя правка Y того же флага между прямым X и его отменой — не «чужое изменение».
+  // «Отменить» X нажата, пока Y в полёте: обратное ждёт Y и берёт версию и список из своей цепочки ∓ X.
+  test('«Отменить» X после своей правки Y того же флага — «Отменено», не «уже изменили»', async () => {
+    const { calls, answers, user } = setup();
+    const own = await sw('Подписки: Ставрополь');
+    const other = await sw('Подписки: Пятигорск');
+    await user.click(own);
+    await screen.findByText('«Подписки» включено: Ставрополь');
+    await waitFor(() => expect(other).toBeEnabled());
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    answers.push(async () => {
+      await gate;
+      return undefined; // дальше — как сервер
+    });
+    await user.click(other);
+    await waitFor(() => expect(other).toHaveAttribute('aria-busy', 'true'));
+    await user.click(screen.getByRole('button', { name: 'Отменить' }));
+    release();
+    expect(await screen.findByText('Отменено')).toBeInTheDocument();
+    expect(screen.queryByText('Уже изменили — данные обновлены, отмены не было')).toBeNull();
+    expect(calls).toHaveLength(3);
+    expect(calls[2]?.body).toEqual({ version: 3, enabled_city_ids: [CITY_OTHER] });
+    await waitFor(() => expect(checked(own)).toBe('false'));
+    expect(checked(other)).toBe('true');
+  });
+
+  // Цепочка с чужой версией между прямым X и своей Y — не своя: обратное X идёт по ответу прямого → 409, «уже изменили».
+  test('чужая правка между X и своей Y — «Отменить» X отвечает «уже изменили»', async () => {
+    const { app, calls, answers, state, user } = setup();
+    const own = await sw('Подписки: Ставрополь');
+    const other = await sw('Подписки: Пятигорск');
+    await user.click(own);
+    await screen.findByText('«Подписки» включено: Ставрополь');
+    // другая вкладка или сотрудник: версия 3, ещё один город флага
+    const foreign = '0192f1c4-0000-7000-8000-00000000f00f';
+    state.flags = state.flags.map((f) => ({
+      ...f,
+      enabled_city_ids: [...f.enabled_city_ids, foreign].sort(),
+      version: f.version + 1,
+    }));
+    await app.queryClient.refetchQueries({ queryKey: FLAGS_KEY });
+    await waitFor(() => expect(other).toBeEnabled());
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    answers.push(async () => {
+      await gate;
+      return undefined;
+    });
+    await user.click(other);
+    await waitFor(() => expect(other).toHaveAttribute('aria-busy', 'true'));
+    await user.click(screen.getByRole('button', { name: 'Отменить' }));
+    release();
+    expect(
+      await screen.findByText('Уже изменили — данные обновлены, отмены не было'),
+    ).toBeInTheDocument();
+    expect(calls[2]?.body).toEqual({ version: 2, enabled_city_ids: [] });
+    await waitFor(() => expect(checked(other)).toBe('true'));
+    expect(checked(own)).toBe('true');
+  });
+});
+
+// G9-F m-1: перечитывание флагов, начатое до PATCH, приходит после него со старым состоянием — ответ PATCH не
+// затирается (putFlag отменяет запрос в полёте), следующий щелчок не получает 409 от своей правки.
+test('ответ PATCH не затирается перечитыванием, прочитанным до записи', async () => {
+  const { app, calls, state, user } = setup();
+  const cell = await sw('Подписки: Ставрополь');
+  let release = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  let reads = 0;
+  server.use(
+    http.get('/v1/flags', async ({ response }) => {
+      reads++;
+      const before = state.flags.map((f) => ({ ...f }));
+      await gate;
+      return response(200).json({ items: before });
+    }),
+  );
+  const refetch = app.queryClient.refetchQueries({ queryKey: FLAGS_KEY });
+  await user.click(cell);
+  await waitFor(() => expect(checked(cell)).toBe('true'));
+  release();
+  await refetch;
+  // отменённое перечитывание повторено после записи — список свежий, а не только флаг из ответа
+  await waitFor(() => expect(reads).toBe(2));
+  await new Promise((r) => setTimeout(r, 0));
+  expect(checked(cell)).toBe('true');
+  // следующий щелчок — с версией из ответа PATCH: без 409 от своей правки
+  await user.click(cell);
+  await waitFor(() => expect(checked(cell)).toBe('false'));
+  expect(calls[1]?.body).toEqual({ version: 2, enabled_city_ids: [] });
 });
 
 describe('ограничения клеток', () => {

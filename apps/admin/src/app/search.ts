@@ -20,3 +20,12 @@ export function parseKeys<K extends string, T extends OnlyKeys<T, K>>(
   }
   return out as T;
 }
+
+// Поиск на сервере (listGeoCities, listGeoPlaces) нормализует q и пустой после нормализации — без буквы и цифры
+// («-», «..», «(») — отвергает 400 validation.failed по query.q. Такой запрос не уходит: экран показывает «Ничего не
+// нашлось», как палитра (ревью UF4-P m2, финальное ревью m1). Одно правило на всех вызывателей.
+const MEANINGFUL = /[\p{L}\p{N}]/u;
+
+export function isMeaningfulQuery(text: string): boolean {
+  return MEANINGFUL.test(text);
+}

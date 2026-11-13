@@ -20,8 +20,8 @@ import (
 // cachePrivate — ответы чтения платформы зависят от сотрудника (контракт: CachePrivate).
 const cachePrivate = "private, no-store"
 
-// platforms — платформы списка версий: обе всегда, по имени.
-var platforms = []appversion.Platform{appversion.Android, appversion.IOS}
+// platforms — платформы списка версий: обе всегда; ios, затем android — порядок контракта listAppVersions.
+var platforms = []appversion.Platform{appversion.IOS, appversion.Android}
 
 // ListAppVersions — GET /v1/app/versions: обе платформы; незаведённая — элемент с null-полями (как публичный
 // min-version).

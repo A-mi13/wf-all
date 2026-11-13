@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
+import { isMeaningfulQuery } from '../../app/search';
 import { useLocale } from '../../i18n/locale';
 import { CITIES_KEY, type CitiesQuery } from '../geo/queries';
 
@@ -31,6 +32,8 @@ export function useAllCities(q: CitiesQuery, flagCityIds: readonly string[]) {
   const list = useQuery({
     queryKey: allCitiesKeys.list(locale, q),
     queryFn: async ({ signal }) => {
+      // q без буквы и цифры сервер отверг бы — «по фильтру городов нет» без запроса (isMeaningfulQuery)
+      if (q.q !== undefined && !isMeaningfulQuery(q.q)) return { items: [], capped: false };
       const items: GeoCity[] = [];
       let cursor: string | undefined;
       do {

@@ -52,7 +52,7 @@ jobs:
   # из .tools/bin (scripts/bootstrap.sh, без Docker-образа). Только Chromium: WebKit на раннере требует
   # системных библиотек через apt (минуты) — проверка cookie в WebKit идёт в локальном прогоне. Проект prod —
   # собранная админка (скрипт делает vite build и проверку dist) от admin-api под настоящим staticCSP (UF1b.7).
-  # Трейс упавшего теста не выгружается: actions/upload-artifact в репо ещё не закреплён по SHA.
+  # Трейс упавшего теста пока не выгружается (шаг upload-artifact, закреплённый по SHA, — как в admin-visual.yml).
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25

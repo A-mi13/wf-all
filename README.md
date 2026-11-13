@@ -12,7 +12,7 @@
 | `backend/` | Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc}` (`permdoc` — кодогенерация таблицы прав, в образ не входит), `internal/*`, `migrations/` |
 | `contracts/` | контракты OpenAPI и токены дизайна — источник истины для кода и фронтов |
 | `apps/` | `web` (Next.js) и `admin` (React + Vite) |
-| `packages/` | общий код фронтов: `@wf/config`, `@wf/tokens`, `@wf/i18n` |
+| `packages/` | общий код фронтов: `@wf/config`, `@wf/tokens`, `@wf/i18n`, `@wf/icons` |
 | `deploy/` | окружение для разработки (роли и расширения БД) |
 | `design/` | бриф, экраны, токены — дизайн-пакет, самодостаточен |
 | `docs/` | техспека: архитектура, версии, принципы, вынос в отдельный репозиторий |
@@ -77,6 +77,7 @@
 | admin-api (Chromium / WebKit) | 18181 / 18182 (у WebKit `ADMIN_COOKIE_SECURE=false`: `__Host-` на http он не принимает) |
 | admin-api проекта `prod` | 18183 — без Vite: сам отдаёт собранную админку (`apps/admin/dist`) с настоящей CSP |
 | Mailpit UI / SMTP | 18026 / 11026 (без `--database` — пустой ящик на прогон) |
+| фикстура GeoNames (HTTPS) | 18190 — `cmd/geofixture` для импорта в `geo.spec.ts`; воркер e2e доверяет её PEM через `WORKER_GEONAMES_CA_FILE` |
 | база | `wf_e2e` на том же кластере (пересоздаётся в начале прогона) |
 
 Скрипт `scripts/e2e-admin.sh` проверяет, что порты свободны, пересоздаёт базу, накатывает миграции и права,
@@ -143,7 +144,7 @@ CI поднимает свою базу на 15432 (`.github/workflows/backend.y
 | веб (Next.js) | 3000 | скрипты `dev` и `start` в `apps/web/package.json`; сервер e2e — `WF_WEB_PORT` в окружении процесса (`WF_WEB_PORT=3100 pnpm e2e`; по умолчанию 3000; `baseURL`, `webServer.url` и команда в `apps/web/playwright.config.ts` берут его оттуда) |
 | админка (Vite) | 5173 | `server.port` в `apps/admin/vite.config.ts` |
 | Mailpit UI / SMTP | 18025 / 11025 | литералы в задаче `mail` корневого `Taskfile.yml` |
-| e2e админки | 5174/5175, 18181/18182/18183, 18026/11026 | `PAIRS` и `MAILPIT` в `apps/admin/e2e/env.ts` **и** список `ports` в `scripts/e2e-admin.sh` |
+| e2e админки | 5174/5175, 18181/18182/18183, 18026/11026, 18190 | `PAIRS`, `MAILPIT` и `GEOFIXTURE` в `apps/admin/e2e/env.ts` **и** список `ports` в `scripts/e2e-admin.sh` |
 
 Порты в описаниях задач (`./task --list`) и в таблице адресов выше — справочные, их при
 смене порта править не обязательно.

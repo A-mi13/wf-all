@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components } from '../../api/gen/admin';
+import { isMeaningfulQuery } from '../../app/search';
 import { useLocale } from '../../i18n/locale';
 import { SEARCH_DEBOUNCE_MS } from '../../ui';
 
@@ -47,12 +48,15 @@ export function useCitySearch(text: string) {
   }, [text]);
   return useQuery({
     queryKey: ['geo', 'cities', 'search', locale, q],
+    // q без буквы и цифры сервер отверг бы — «Ничего не нашлось» без запроса (isMeaningfulQuery)
     queryFn: () =>
-      unwrap(
-        api.GET('/v1/geo/cities', {
-          params: { query: q ? { q } : {}, header: { 'Accept-Language': locale } },
-        }),
-      ),
+      q && !isMeaningfulQuery(q)
+        ? Promise.resolve({ items: [], next_cursor: null })
+        : unwrap(
+            api.GET('/v1/geo/cities', {
+              params: { query: q ? { q } : {}, header: { 'Accept-Language': locale } },
+            }),
+          ),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
   });

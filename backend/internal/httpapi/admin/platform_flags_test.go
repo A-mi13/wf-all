@@ -70,6 +70,15 @@ func TestPutAppVersions(t *testing.T) {
 	e := newGeoStaffEnv(t)
 	e.v = apitest.New(t, oapi.GetSpec)
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
+	// порядок элементов — контракт listAppVersions: «всегда два элемента (ios, затем android)» (финальное ревью I1)
+	ordered := e.get("/v1/app/versions", adm.token)
+	var raw oapi.AppVersionsList
+	if err := json.Unmarshal(ordered.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Items) != 2 || raw.Items[0].Platform != oapi.Ios || raw.Items[1].Platform != oapi.Android {
+		t.Fatalf("порядок платформ не ios, android: %s", ordered.Body.String())
+	}
 	list := versionsOf(t, e.get("/v1/app/versions", adm.token))
 	if len(list) != 2 || list[oapi.Ios].Version != nil || list[oapi.Android].MinVersion != nil {
 		t.Fatalf("до заведения: %+v", list)
@@ -114,6 +123,22 @@ func TestPutAppVersions(t *testing.T) {
 		t.Fatalf("пробел: %v", got)
 	}
 	if n := e.count(`SELECT count(*) FROM app_versions`); n != 1 {
+		t.Fatalf("строк %d", n)
+	}
+}
+
+// Незнакомая платформа в пути — 400 validation.failed по path.platform (контракт putAppVersions), без записи
+// (финальное ревью backend-platform m1).
+func TestPutAppVersionsUnknownPlatform(t *testing.T) {
+	t.Parallel()
+	e := newGeoStaffEnv(t) // без e.v: запрос намеренно вне контракта (enum платформы)
+	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
+	rec := e.send(http.MethodPut, "/v1/app/versions/windows", adm.token, uuid.NewString(), iosBody)
+	got := fieldErrors(t, rec)
+	if len(got) != 1 || got[0].Field != "path.platform" {
+		t.Fatalf("поля %v, ждали path.platform", got)
+	}
+	if n := e.count(`SELECT count(*) FROM app_versions`); n != 0 {
 		t.Fatalf("строк %d", n)
 	}
 }

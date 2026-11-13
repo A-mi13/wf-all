@@ -1,7 +1,8 @@
-import { type Query, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, type Query, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { type ApiError, background, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
 import type { components, operations } from '../../api/gen/admin';
+import { isMeaningfulQuery } from '../../app/search';
 import { useLocale } from '../../i18n/locale';
 
 // Чтения «Справочников» (план B, Task 17): города, карточка города, районы, страны, регионы, места
@@ -47,18 +48,24 @@ export const geoKeys = {
 
 const nextCursor = (p: { next_cursor: string | null }) => p.next_cursor ?? undefined;
 
+// Пустая страница списка — ответ без запроса на поиск, который сервер отверг бы.
+const EMPTY_PAGE = { items: [] as never[], next_cursor: null };
+
 // Города (listGeoCities) — курсор «Показать ещё». Модератору сервер отдаёт только его города.
 export function useGeoCities(q: CitiesQuery) {
   const api = useApi();
   const locale = useLocale();
   return useInfiniteQuery({
     queryKey: geoKeys.cities(locale, q),
+    // q без буквы и цифры сервер отверг бы — пусто без запроса (isMeaningfulQuery)
     queryFn: ({ pageParam }) =>
-      unwrap(
-        api.GET('/v1/geo/cities', {
-          params: { query: { ...q, cursor: pageParam }, header: { 'Accept-Language': locale } },
-        }),
-      ),
+      q.q !== undefined && !isMeaningfulQuery(q.q)
+        ? Promise.resolve(EMPTY_PAGE)
+        : unwrap(
+            api.GET('/v1/geo/cities', {
+              params: { query: { ...q, cursor: pageParam }, header: { 'Accept-Language': locale } },
+            }),
+          ),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: nextCursor,
   });
@@ -95,12 +102,15 @@ export function useGeoDistricts(cityId: string) {
 }
 
 // Все страны справочника (включённые и выключенные). enabled — палитра (src/app/paletteSearch.ts) спрашивает их
-// только с правом и от 2 символов запроса; кэш общий с экранами.
+// только с правом и от 2 символов запроса; кэш общий с экранами. Язык — в ключе: пока список перечитывается на новом
+// языке (сменили в другой вкладке), виден прежний — набор стран от языка не зависит, только подписи: панель страны не
+// размонтирует форму и ввод не стирается (финальное ревью m2, как useGeoCity — G8 m18).
 export function useGeoCountries(enabled = true) {
   const api = useApi();
   const locale = useLocale();
   return useQuery({
     queryKey: geoKeys.countries(locale),
+    placeholderData: keepPreviousData,
     queryFn: () =>
       unwrap(api.GET('/v1/geo/countries', { params: { header: { 'Accept-Language': locale } } })),
     staleTime: 60_000,
@@ -131,12 +141,15 @@ export function useGeoPlaces(q: PlacesQuery, enabled = true) {
   const locale = useLocale();
   return useInfiniteQuery({
     queryKey: geoKeys.places(locale, q),
+    // q без буквы и цифры сервер отверг бы — пусто без запроса (isMeaningfulQuery)
     queryFn: ({ pageParam }) =>
-      unwrap(
-        api.GET('/v1/geo/places', {
-          params: { query: { ...q, cursor: pageParam }, header: { 'Accept-Language': locale } },
-        }),
-      ),
+      q.q !== undefined && !isMeaningfulQuery(q.q)
+        ? Promise.resolve(EMPTY_PAGE)
+        : unwrap(
+            api.GET('/v1/geo/places', {
+              params: { query: { ...q, cursor: pageParam }, header: { 'Accept-Language': locale } },
+            }),
+          ),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: nextCursor,
     enabled,

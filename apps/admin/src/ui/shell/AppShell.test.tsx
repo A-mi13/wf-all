@@ -75,6 +75,12 @@ function mount(path: string, me: Me, opts: { counts?: Record<string, number> } =
       page('/approvals', 'Страница подтверждений'),
       page('/me', 'Страница доступа'),
       page('/geo/cities', 'Страница городов'),
+      // страница с несохранённым вводом — переживает смену раскладки (финальное ревью I1)
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: '/me/draft',
+        component: () => <input aria-label="Черновик" />,
+      }),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
   });
@@ -322,5 +328,28 @@ describe('узкая полоса 768–1023', () => {
     expect(
       screen.getByRole('button', { name: 'Профиль и настройки: Ольга В.' }),
     ).toBeInTheDocument();
+  });
+
+  // Финальное ревью I1: поворот телефона или масштаб 200 % пересекают breakpoint-mobile — страница не
+  // пересоздаётся (тот же DOM-узел, ввод на месте) во всех переходах раскладок.
+  test('смена раскладки не пересоздаёт страницу: ввод переживает 1440 → 390 → 900 → 1440', async () => {
+    const media = stubMedia({ width: 1440, pointer: 'fine' });
+    mount('/me/draft', meOwner);
+    const user = userEvent.setup();
+    const input = await screen.findByRole('textbox', { name: 'Черновик' });
+    await user.type(input, 'abc');
+    for (const at of [
+      { width: 390, pointer: 'coarse' as const },
+      { width: 900, pointer: 'coarse' as const },
+      { width: 390, pointer: 'coarse' as const },
+      { width: 1440, pointer: 'fine' as const },
+    ]) {
+      act(() => media.set(at));
+      const now = screen.getByRole('textbox', { name: 'Черновик' });
+      expect(now, `ширина ${at.width}`).toBe(input);
+      expect(now).toHaveValue('abc');
+      // узел и не переносится в DOM: перенос снял бы фокус с поля
+      expect(document.activeElement).toBe(input);
+    }
   });
 });

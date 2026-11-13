@@ -1,6 +1,6 @@
 import type { components } from '../api/gen/admin';
 import { CITY_OTHER, CITY_OWN, meAdmin, meOwner } from './me';
-import { problem } from './problem';
+import { emptyQueryProblem, problem } from './problem';
 import { http, server } from './server';
 
 // Данные «Ролей и доступа» и «Моего доступа» для моков — по схемам контракта admin.d.ts (урок 12b:
@@ -226,6 +226,8 @@ export function staffServer(
     http.get('/v1/geo/cities', ({ request, response }) => {
       const q = new URL(request.url).searchParams;
       seen.cities.push(q);
+      const bad = emptyQueryProblem(q);
+      if (bad) return response.untyped(bad);
       const ids = q.getAll('ids');
       const text = (q.get('q') ?? '').toLocaleLowerCase();
       const items = CITIES.filter(

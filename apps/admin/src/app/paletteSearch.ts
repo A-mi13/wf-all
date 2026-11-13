@@ -5,6 +5,7 @@ import { useGeoCountries } from '../features/geo/queries';
 import { useLocale } from '../i18n/locale';
 import { fuzzyRank } from '../ui/palette/fuzzy';
 import { paths } from './paths';
+import { isMeaningfulQuery } from './search';
 import { usePermissionCheck } from './session';
 
 // Сущности палитры (спека UI-фундамента §4.1, план UF4.5): города (listGeoCities?q=&limit=5, geo.cities.read),
@@ -46,15 +47,14 @@ const statusOf = (q: Q): EntityGroup['status'] =>
       : 'ready';
 
 // Сервер нормализует q (normalize_text) и на пустой после нормализации отвечает 400 validation.failed («--», «..»):
-// запрос уходит, только если в нём есть буква или цифра (ревью UF4-P m2).
-const MEANINGFUL = /[\p{L}\p{N}]/u;
+// запрос уходит, только если в нём есть буква или цифра (ревью UF4-P m2; правило — isMeaningfulQuery).
 
 export function useEntitySearch(term: string): EntityGroup[] {
   const api = useApi();
   const locale = useLocale();
   const can = usePermissionCheck();
   const long = term.length >= ENTITY_MIN_CHARS;
-  const remote = long && MEANINGFUL.test(term);
+  const remote = long && isMeaningfulQuery(term);
   const canCities = can('geo.cities.read');
   const canStaff = can('staff.accounts.read');
   const canCountries = can('geo.countries.read');
