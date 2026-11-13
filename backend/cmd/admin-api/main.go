@@ -36,6 +36,7 @@ import (
 	"wf/backend/internal/platform/keys"
 	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/mail"
+	"wf/backend/internal/platform/migrate"
 	"wf/backend/internal/platform/password"
 	"wf/backend/internal/platform/peer"
 	"wf/backend/internal/platform/periodic"
@@ -68,11 +69,10 @@ var wrapSender = func(s mail.Sender) mail.Sender { return s }
 const (
 	// staffMailWorkers — одновременных писем очереди staff: писем сотрудникам единицы в час.
 	staffMailWorkers = 5
-	// softStopTimeout — мягкая остановка River после дренажа HTTP (ADMIN_SHUTDOWN_TIMEOUT, по умолчанию 10 с):
-	// 10 + 12 + 5 с жёсткой (queue.Stop) = 27 с — с запасом в 30 с между SIGTERM и SIGKILL (Render). Не уложилось
-	// письмо — его ctx отменяется (SMTP обрывает соединение сразу, mail.SMTP), задача вернётся в повтор.
-	softStopTimeout = 12 * time.Second
 )
+
+// Остановка — дренаж HTTP (ADMIN_SHUTDOWN_TIMEOUT) + config.AdminRiverSoftStop + config.HardStop (queue.Stop) в пределах
+// config.StopBudget (план C, R4; TestAdminShutdownBudget): по умолчанию 10 + 10 + 5 = 25 с из окна Render 30 с.
 
 // run без аргументов — сервер; staff … — команда оператора. Ошибка использования (errUsage) — код выхода 2.
 func run(ctx context.Context, args, environ []string, out, logOut io.Writer) error {
@@ -126,7 +126,15 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		return err
 	}
 	send := wrapSender(sender)
-	return server.RunService(ctx, "admin-api", server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB}, logOut,
+	// бюджет остановки — предупреждение, не отказ: локально дренаж бывает и длиннее
+	if st := config.AdminStopTime(cfg.HTTP.ShutdownTimeout); st > config.StopBudget {
+		logx.New(logOut, cfg.Log).Warn("остановка admin-api может не уложиться в окно хостинга до SIGKILL",
+			"stop", st, "budget", config.StopBudget, "drain", cfg.HTTP.ShutdownTimeout)
+	}
+	return server.RunService(ctx, "admin-api", server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB,
+		Ready: func(ctx context.Context, log *slog.Logger, pool *pgxpool.Pool) error {
+			return waitSchema(ctx, pool, cfg.DB.SchemaWait, log)
+		}}, logOut,
 		func(log *slog.Logger, pool *pgxpool.Pool) (server.Service, error) {
 			a, err := assemble(log, pool, cfg, ring, cat)
 			if err != nil {
@@ -160,6 +168,19 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 			}
 			return server.Service{Handler: h, Background: bg}, nil
 		})
+}
+
+// schemaPoll — как часто admin-api опрашивает версию схемы при старте.
+const schemaPoll = time.Second
+
+// waitSchema — ждать, пока wf-api не накатит миграции релиза (план C, R3): сервер — до ADMIN_DB_SCHEMA_WAIT, не открывая
+// порт; команда оператора — одна проверка (timeout 0).
+func waitSchema(ctx context.Context, pool *pgxpool.Pool, timeout time.Duration, log *slog.Logger) error {
+	want, err := migrate.Latest()
+	if err != nil {
+		return err
+	}
+	return migrate.WaitSchema(ctx, pool, want, timeout, schemaPoll, clock.System, log)
 }
 
 // assembly — модули на пуле admin-api: зависимости staff, хендлеры staff и geo, реестр и сервис подтверждений, в
@@ -217,6 +238,7 @@ func background(log *slog.Logger, pool *pgxpool.Pool, a assembly, sender mail.Se
 	if err != nil {
 		return nil, err
 	}
+	queue.WarnPool(log, queue.Slots(staffQueues()), pool.Config().MaxConns)
 	cleaner := jobs.NewCleaner(a.deps, a.approvals)
 	return func(ctx context.Context) error {
 		return runBackground(ctx, client, cleaner, log)
@@ -232,7 +254,7 @@ func runBackground(ctx context.Context, client *river.Client[pgx.Tx], cleaner *j
 	log.Info("фон запущен", "queue", queue.Staff)
 	<-ctx.Done()
 	wg.Wait() // чистка остановлена — порция в полёте откатилась
-	return queue.Stop(context.Background(), client, softStopTimeout)
+	return queue.Stop(context.Background(), client, config.AdminRiverSoftStop)
 }
 
 // --- команды оператора ---
@@ -335,6 +357,10 @@ func runCommand(ctx context.Context, c command, cfg config.Admin, ring *keys.Rin
 		return err
 	}
 	defer pool.Close()
+	// команду запускают руками: схема отстала — ошибка сразу, без ожидания
+	if err := waitSchema(ctx, pool, 0, log); err != nil {
+		return err
+	}
 	a, err := assemble(log, pool, cfg, ring, cat)
 	if err != nil {
 		return err

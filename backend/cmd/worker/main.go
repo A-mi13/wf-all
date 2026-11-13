@@ -32,6 +32,7 @@ import (
 	"wf/backend/internal/platform/idempotency"
 	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/mail"
+	"wf/backend/internal/platform/migrate"
 	"wf/backend/internal/platform/periodic"
 	"wf/backend/internal/platform/queue"
 	"wf/backend/internal/platform/ratelimit"
@@ -104,28 +105,36 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 	if len(args) > 0 {
 		return command(ctx, args, pool, reg, geo, h.clock, out, log)
 	}
+	// River и relay — только на схеме своего релиза: миграции накатывает wf-api (план C, R3)
+	if err := waitSchema(ctx, pool, cfg.DB.SchemaWait, log); err != nil {
+		return err
+	}
 	workers := allWorkers(pool, reg, geo, log, sender)
 	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig(cfg.Queues, workers, log))
 	if err != nil {
 		return err
 	}
+	queue.WarnPool(log, queue.Slots(queue.Config(cfg.Queues)), cfg.DB.MaxConns)
 	// Отмена ctx Start в River — жёсткая остановка (ctx задач отменяется сразу); останавливаем
 	// сами: сначала relay, потом мягко River (queue.Stop).
 	if err := client.Start(context.WithoutCancel(ctx)); err != nil {
 		return err
 	}
-	relay := events.NewRelay(pool, client, reg, log, events.RelayConfig{Batch: cfg.Relay.Batch, Poll: cfg.Relay.Poll})
+	relay := events.NewRelay(pool, client, reg, log, events.RelayConfig{Batch: cfg.Relay.Batch, Poll: cfg.Relay.Poll,
+		StopTimeout: config.WorkerRelayStop})
 	var wg sync.WaitGroup
-	wg.Go(func() { _ = relay.Run(ctx) })
+	wg.Go(func() {
+		if err := relay.Run(ctx); err != nil {
+			// завис LISTEN или пачка — остановка River не ждёт их дольше срока (бюджет, план C R4)
+			log.Warn("events: relay", "err", err)
+		}
+	})
 	log.Info("воркер запущен", "queues", cfg.Queues)
 	<-ctx.Done()
-	wg.Wait() // relay больше не ставит задачи
-	return queue.Stop(context.Background(), client, softStopTimeout)
+	wg.Wait() // relay больше не ставит задачи (или не уложился в config.WorkerRelayStop)
+	// relay + мягкая River + жёсткая (queue.Stop) — в пределах config.StopBudget (TestWorkerShutdownBudget)
+	return queue.Stop(context.Background(), client, config.WorkerRiverSoftStop)
 }
-
-// softStopTimeout — мягкая остановка River; вместе с жёсткой (5 с в queue.Stop) укладывается в
-// 30 с между SIGTERM и SIGKILL (Render).
-const softStopTimeout = 25 * time.Second
 
 const usage = "без аргументов — воркер; events replay --type <модуль>.<факт> --subscriber <модуль>.<имя> --since <RFC 3339>; " +
 	"geo import --country <ISO 3166-1 alpha-2>"
@@ -148,13 +157,33 @@ func exitCode(err error) int {
 // оператор запускает со своей машины под ролью worker.
 func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config,
 	clk clock.Clock, out io.Writer, log *slog.Logger) error {
+	var do func() error
 	switch {
 	case len(args) >= 2 && args[0] == "events" && args[1] == "replay":
-		return replay(ctx, args[2:], pool, reg, out, log)
+		do = func() error { return replay(ctx, args[2:], pool, reg, out, log) }
 	case len(args) >= 2 && args[0] == "geo" && args[1] == "import":
-		return geoImport(ctx, args[2:], pool, geo, clk, out, log)
+		do = func() error { return geoImport(ctx, args[2:], pool, geo, clk, out, log) }
+	default:
+		return usageError(fmt.Sprintf("неизвестная команда %q", strings.Join(args, " ")))
 	}
-	return usageError(fmt.Sprintf("неизвестная команда %q", strings.Join(args, " ")))
+	// команду запускают руками: схема отстала — ошибка сразу, без ожидания
+	if err := waitSchema(ctx, pool, 0, log); err != nil {
+		return err
+	}
+	return do()
+}
+
+// schemaPoll — как часто воркер опрашивает версию схемы при старте.
+const schemaPoll = time.Second
+
+// waitSchema — ждать, пока wf-api не накатит миграции релиза (план C, R3): воркер — до WORKER_DB_SCHEMA_WAIT, разовая
+// команда — одна проверка (timeout 0).
+func waitSchema(ctx context.Context, pool *pgxpool.Pool, timeout time.Duration, log *slog.Logger) error {
+	want, err := migrate.Latest()
+	if err != nil {
+		return err
+	}
+	return migrate.WaitSchema(ctx, pool, want, timeout, schemaPoll, clock.System, log)
 }
 
 func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, out io.Writer, log *slog.Logger) error {

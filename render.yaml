@@ -9,7 +9,9 @@ services:
     region: frankfurt
     branch: main
     dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    # Контекст — корень: в образ входит собранная админка (стадия Node берёт воркспейс pnpm); что попадает в
+    # контекст — корневой .dockerignore. Статику отдаёт admin-api при ADMIN_STATIC_DIR=/app/admin (план C, R1)
+    dockerContext: .
     # На бесплатном тарифе нет preDeployCommand — миграции накатываются перед стартом API в том
     # же контейнере сценарием из образа (backend/Dockerfile). На сервере migrate — отдельный
     # разовый запуск перед обновлением.
@@ -18,9 +20,21 @@ services:
     # через 5 минут простоя — бесплатные часы). Готовность с базой — /readyz.
     healthCheckPath: /healthz
     autoDeployTrigger: checksPass
+    # Образ один на бэкенд и админку: деплой запускают и правки админки с её зависимостями по воркспейсу
+    # (страж TestRenderYAMLBuild)
     buildFilter:
       paths:
         - backend/**
+        - apps/admin/**
+        - apps/web/package.json
+        - packages/**
+        - contracts/package.json
+        - contracts/src/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+        - .dockerignore
+        - scripts/check-admin-dist.mjs
         - render.yaml
     envVars:
       - key: API_HTTP_ADDR

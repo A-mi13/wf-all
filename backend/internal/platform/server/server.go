@@ -26,6 +26,10 @@ type HTTPConfig struct {
 	Log  config.Log
 	HTTP config.HTTP
 	DB   config.DB
+	// Ready — ожидание готовности базы после подключения, до сборки и открытия порта (nil — без ожидания):
+	// admin-api ждёт схему своего релиза (migrate.WaitSchema). Пока он не вернулся, порт не слушается — хостинг
+	// не переключает трафик; ошибка — отказ старта.
+	Ready func(ctx context.Context, log *slog.Logger, pool *pgxpool.Pool) error
 }
 
 // Service — то, что собирает бинарник на открытом пуле: HTTP-хендлер и фон рядом с ним.
@@ -49,7 +53,7 @@ func RunHTTP(ctx context.Context, name string, c HTTPConfig, logOut io.Writer,
 // errBackgroundStopped — фон вернулся без ошибки до остановки сервиса.
 var errBackgroundStopped = errors.New("фон остановился раньше сервиса")
 
-// RunService — жизненный цикл HTTP-бинарника с фоном. Порядок: пул → сборка (отказ — до открытия порта и
+// RunService — жизненный цикл HTTP-бинарника с фоном. Порядок: пул → Ready → сборка (отказ — до открытия порта и
 // без фона) → порт → фон → HTTP до отмены ctx. Остановка: сначала дренаж HTTP (запрос в полёте может
 // поставить задачу фону), затем отмена фона и ожидание его остановки, последним — закрытие пула (фон пишет
 // в базу состояние задач до конца). Отказ фона гасит HTTP: сервис без писем и чистки не остаётся
@@ -64,6 +68,11 @@ func RunService(ctx context.Context, name string, c HTTPConfig, logOut io.Writer
 		return err
 	}
 	defer pool.Close()
+	if c.Ready != nil {
+		if err := c.Ready(ctx, log, pool); err != nil {
+			return err
+		}
+	}
 	// хендлер собирается до открытия порта: битый контракт — отказ старта, а не полуживой сервер
 	svc, err := build(log, pool)
 	if err != nil {

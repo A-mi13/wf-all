@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	netmail "net/mail"
+	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	gomail "github.com/wneessen/go-mail"
@@ -51,7 +54,29 @@ func NewSMTP(c SMTPConfig) (*SMTP, error) {
 	if !ok {
 		return nil, fmt.Errorf("mail: TLS %q — нужен mandatory, opportunistic или none", c.TLS)
 	}
+	// Без TLS — только Mailpit (план C, R8): петля и без учётных данных. Опечатка в переменной стенда не должна
+	// отправить ключ провайдера открытым текстом; логин на петле — тоже отказ (у Mailpit логина нет).
+	local := loopbackHost(host)
+	if policy == gomail.NoTLS && (!local || c.Username != "") {
+		return nil, fmt.Errorf("mail: TLS none допустим только для Mailpit — хост 127.0.0.1, ::1 или localhost "+
+			"без логина; хост %q — нужен mandatory", host)
+	}
+	if policy == gomail.TLSOpportunistic && !local {
+		// сервер без STARTTLS получил бы логин открытым текстом; на стенде — mandatory
+		slog.Default().Warn("mail: SMTP с TLS opportunistic на нелокальном хосте — без STARTTLS письмо и логин уйдут открытым текстом; нужен mandatory",
+			"host", host)
+	}
 	return &SMTP{host: host, port: port, from: c.From, user: c.Username, pass: c.Password, tls: policy}, nil
+}
+
+// loopbackHost — точный список локальных хостов: 127.0.0.1, ::1 (в любой записи) и localhost. «Похожие» имена
+// (localhost.example.com), прочие адреса 127/8 и ::ffff:127.0.0.1 — не локальные.
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && (ip == netip.AddrFrom4([4]byte{127, 0, 0, 1}) || ip == netip.IPv6Loopback())
 }
 
 // Send — одно соединение на письмо: транзакционных писем немного, пул соединений не нужен.

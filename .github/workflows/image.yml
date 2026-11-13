@@ -1,0 +1,127 @@
+name: image
+# Образ бэкенда (backend/Dockerfile) собирается и запускается так же, как на dev-стенде Render: миграции на чистую
+# базу, затем API, затем /healthz, /readyz, /docs и smoke публичных ручек (listCities, getAppMinVersion); затем
+# admin-api со статикой собранной админки (план C, Task 1). Локально Docker не работает — проверка здесь.
+# Отдельный workflow, а не job в backend.yml: образ собирает и админку, и правка админки должна запускать проверку
+# образа, но не Go-тесты бэкенда (до 30 мин). Пути — buildFilter сервисов render.yaml плюс то, что читает сама
+# проверка (initdb, этот файл); TestRenderYAMLBuild (config) сверяет, что все пути buildFilter здесь есть.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'backend/**'
+      - 'apps/admin/**'
+      - 'apps/web/package.json'
+      - 'packages/**'
+      - 'contracts/package.json'
+      - 'contracts/src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.dockerignore'
+      - 'scripts/check-admin-dist.mjs'
+      - 'render.yaml'
+      - 'deploy/dev/initdb/**'
+      - '.github/workflows/image.yml'
+  pull_request:
+    paths: *paths
+permissions:
+  contents: read
+# новый пуш в PR отменяет его устаревший прогон; на main прогоны не отменяются — по ним деплой
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    # 20: к сборке Go добавилась стадия админки (pnpm install + tsc + vite build)
+    timeout-minutes: 20
+    services:
+      db:
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: psql "postgresql://postgres:postgres@localhost:15432/postgres" -v ON_ERROR_STOP=1 -f deploy/dev/initdb/20_wf.sql
+      # контекст — корень, как dockerContext в render.yaml; время сборки и размер образа — в журнал (лимиты Render)
+      - name: docker build — контекст корня, как на Render
+        run: |
+          start=$(date +%s)
+          docker build -f backend/Dockerfile -t wf-backend .
+          echo "сборка: $(( $(date +%s) - start )) с; образ: $(docker image inspect -f '{{.Size}}' wf-backend) байт"
+      - name: migrate-then-api — та же команда, что в render.yaml
+        run: |
+          docker run -d --name wf-api --network host \
+            -e API_HTTP_ADDR=127.0.0.1:18080 \
+            -e API_DOCS_ENABLED=true \
+            -e API_JWT_SEEDS="$(openssl rand -base64 32)" \
+            -e API_HUMANCHECK_KEYS="$(openssl rand -base64 32)" \
+            -e API_DATABASE_URL='postgres://api:api@127.0.0.1:15432/wf?sslmode=disable' \
+            -e MIGRATOR_DATABASE_URL='postgres://migrator:migrator@127.0.0.1:15432/wf?sslmode=disable' \
+            wf-backend migrate-then-api
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/healthz; then
+              # готовность: API подключается к базе под своей ролью (пинг; права проверяют тесты grants)
+              curl -fsS http://127.0.0.1:18080/readyz || { docker logs wf-api; exit 1; }
+              # Swagger dev-стенда: контракт вшит в образ и отдаётся
+              curl -fsS -o /dev/null http://127.0.0.1:18080/docs/openapi.json || { docker logs wf-api; exit 1; }
+              # публичные ручки на настоящей базе под ролью api: сид городов 0019, права grants.sql,
+              # сборка cmd/api (geo.New, appversion.NewReader); Ставрополь — первый по населению
+              curl -fsS 'http://127.0.0.1:18080/v1/cities?limit=1' | grep -q '"slug":"stavropol"' || { docker logs wf-api; exit 1; }
+              curl -fsS 'http://127.0.0.1:18080/v1/app/min-version?platform=android' | grep -q '"platform":"android"' || { docker logs wf-api; exit 1; }
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs wf-api
+          exit 1
+      # admin-api со статикой из образа — как wf-admin-api стенда (план C, Task 1): схему накатил шаг выше. SMTP — на
+      # закрытый порт петли без TLS и без логина (Mailpit-режим, единственный допустимый для none — Task 6): старт
+      # соединение не проверяет, писем в проверке нет. Ключ сотрудников — одноразовый, base64url (R2).
+      - name: admin-api — статика админки, заголовки, конвейер
+        run: |
+          # журнал контейнера — при любом ненулевом выходе, в том числе когда bash -e оборвал шаг на curl
+          trap 'rc=$?; [ "$rc" -eq 0 ] || docker logs wf-admin-api || true; exit "$rc"' EXIT
+          fail() { echo "::error::admin-api: $1"; exit 1; }
+          docker run -d --name wf-admin-api --network host \
+            -e ADMIN_HTTP_ADDR=127.0.0.1:18081 \
+            -e ADMIN_DATABASE_URL='postgres://admin:admin@127.0.0.1:15432/wf?sslmode=disable' \
+            -e ADMIN_ORIGIN=http://127.0.0.1:18081 \
+            -e ADMIN_COOKIE_SECURE=true \
+            -e ADMIN_STAFF_SECRET_KEYS="$(openssl rand -base64 32 | tr '+/' '-_')" \
+            -e ADMIN_MAIL_SMTP_ADDR=127.0.0.1:1 \
+            -e ADMIN_MAIL_SMTP_TLS=none \
+            -e 'ADMIN_MAIL_FROM=WF <noreply@wf.local>' \
+            -e ADMIN_STATIC_DIR=/app/admin \
+            wf-backend admin-api
+          up=
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:18081/healthz; then up=1; break; fi
+            sleep 2
+          done
+          [ -n "$up" ] || fail "/healthz не ответил за 60 с"
+          curl -fsS -o /dev/null http://127.0.0.1:18081/readyz || fail "/readyz"
+          # index.html: SPA без кэша, CSP сборки, nosniff
+          h=$(curl -fsS -D - -o index.html http://127.0.0.1:18081/) || fail "GET / не 200 — dist не в образе?"
+          for want in '^content-type: text/html' '^cache-control: no-store' '^content-security-policy: ' \
+            '^x-content-type-options: nosniff'; do
+            grep -qi "$want" <<<"$h" || fail "GET /: нет заголовка $want"
+          done
+          # файл сборки из assets/ — с хэшем в имени, кэш навсегда
+          asset=$(grep -o '/assets/[^"]*\.js' index.html | head -n 1)
+          [ -n "$asset" ] || fail "в index.html нет /assets/*.js"
+          curl -fsS -D - -o /dev/null "http://127.0.0.1:18081$asset" | grep -qi '^cache-control: .*immutable' ||
+            fail "$asset без immutable"
+          # API за тем же origin: без сессии — 401 Problem, вход без Origin — 403 auth.csrf_failed;
+          # обрыв соединения — код 000, а не выход bash -e мимо fail
+          code=$(curl -sS -o me.json -w '%{http_code}' http://127.0.0.1:18081/v1/staff/me) || code=000
+          [ "$code" = 401 ] && grep -q '"status":401' me.json || fail "GET /v1/staff/me: $code $(cat me.json 2>/dev/null)"
+          code=$(curl -sS -o login.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' \
+            http://127.0.0.1:18081/v1/staff/auth/login) || code=000
+          [ "$code" = 403 ] && grep -q '"code":"auth.csrf_failed"' login.json ||
+            fail "POST /v1/staff/auth/login без Origin: $code $(cat login.json 2>/dev/null)"

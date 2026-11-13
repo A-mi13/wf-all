@@ -292,3 +292,23 @@ func TestWorkerHasNoStaffKeys(t *testing.T) {
 	}
 	walk(reflect.TypeFor[config.Worker]())
 }
+
+// Ожидание схемы при старте (план C, R3): по умолчанию 10 минут — меньше 15 минут, за которые Render ждёт
+// успешной проверки здоровья нового инстанса; переменная своя у каждого бинарника.
+func TestDBSchemaWait(t *testing.T) {
+	a, err := config.Load[config.Admin]("ADMIN_", []string{"ADMIN_HTTP_ADDR=:1", "ADMIN_DATABASE_URL=x",
+		"ADMIN_ORIGIN=http://127.0.0.1:5173", "ADMIN_STAFF_SECRET_KEYS=k", "ADMIN_MAIL_SMTP_ADDR=a:1", "ADMIN_MAIL_FROM=f"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.DB.SchemaWait != 10*time.Minute {
+		t.Fatalf("ADMIN_DB_SCHEMA_WAIT по умолчанию = %s", a.DB.SchemaWait)
+	}
+	w, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=x", "WORKER_DB_SCHEMA_WAIT=90s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.DB.SchemaWait != 90*time.Second {
+		t.Fatalf("WORKER_DB_SCHEMA_WAIT = %s", w.DB.SchemaWait)
+	}
+}

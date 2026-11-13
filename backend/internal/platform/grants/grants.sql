@@ -31,8 +31,9 @@ BEGIN
         WHEN r.kind = 'S' AND (r.name LIKE 'staff\_%' OR r.name LIKE 'approvals\_%') THEN
           CASE who WHEN 'admin' THEN 'USAGE, SELECT' END
         WHEN r.kind = 'S' THEN 'USAGE, SELECT'
-        -- служебное мигратора
-        WHEN r.name = 'goose_db_version' THEN NULL
+        -- служебное мигратора: пишет только он; читают все — admin-api и воркер ждут версию схемы при старте
+        -- (migrate.WaitSchema, план C R3); версия схемы не секрет
+        WHEN r.name = 'goose_db_version' THEN 'SELECT'
         -- аудит только дописывается; читает — только админка
         WHEN r.name = 'audit_log' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT' ELSE 'INSERT' END
         -- вход сотрудников, ключи идемпотентности admin-api (staff_idempotency_keys: ответы с ПД) и его

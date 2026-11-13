@@ -28,6 +28,11 @@ type HTTP struct {
 type DB struct {
 	URL      string `env:"DATABASE_URL,required"`
 	MaxConns int32  `env:"DB_MAX_CONNS" envDefault:"10"`
+	// SchemaWait — сколько admin-api и воркер ждут при старте, пока версия схемы не дорастёт до вшитой в бинарник
+	// (migrate.WaitSchema, план C R3): миграции накатывает только wf-api, сервисы одного коммита выкатываются
+	// независимо. 10 минут — меньше 15, за которые Render ждёт проверку здоровья нового инстанса. Команды
+	// оператора не ждут (одна проверка); api и мигратор переменную не читают.
+	SchemaWait time.Duration `env:"DB_SCHEMA_WAIT" envDefault:"10m"`
 }
 
 // Auth — access-токены публичного API (спека §6.2).
@@ -141,6 +146,30 @@ type Worker struct {
 	Relay    Relay
 	GeoNames GeoNames
 }
+
+// Остановка процессов (план C, R4) — единственное место бюджета: бинарники берут сроки отсюда, тесты бюджета и
+// конфигурации стенда (render.yaml) — тоже. Окно между SIGTERM и SIGKILL Render — 30 с (умолчание,
+// maxShutdownDelaySeconds не задаём); бюджет процесса — 25 с: 5 с запаса на закрытие пула и выход (pgxpool.Close срока
+// не имеет, но к нему HTTP и River уже остановлены и соединения возвращены).
+const (
+	StopWindow = 30 * time.Second
+	StopBudget = 25 * time.Second
+	// HardStop — жёсткая остановка River (queue.Stop): ждать задачи после отмены их ctx.
+	HardStop = 5 * time.Second
+	// AdminRiverSoftStop — мягкая остановка River admin-api после дренажа HTTP (ADMIN_SHUTDOWN_TIMEOUT): письмо в полёте
+	// доигрывается; не уложилось — ctx письма отменяется (SMTP обрывает соединение), задача вернётся в повтор.
+	AdminRiverSoftStop = 10 * time.Second
+	// WorkerRelayStop — срок остановки relay событий (LISTEN и пачка в полёте); не уложился — воркер идёт дальше.
+	WorkerRelayStop = 5 * time.Second
+	// WorkerRiverSoftStop — мягкая остановка River воркера после relay.
+	WorkerRiverSoftStop = 15 * time.Second
+)
+
+// AdminStopTime — худший срок остановки admin-api при дренаже HTTP drain (ADMIN_SHUTDOWN_TIMEOUT).
+func AdminStopTime(drain time.Duration) time.Duration { return drain + AdminRiverSoftStop + HardStop }
+
+// WorkerStopTime — худший срок остановки воркера.
+func WorkerStopTime() time.Duration { return WorkerRelayStop + WorkerRiverSoftStop + HardStop }
 
 type Migrator struct {
 	Log Log
