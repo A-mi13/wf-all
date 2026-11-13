@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { STORY_PENDING_ATTR } from '../src/showcase/pending';
 import {
   check,
   collectErrors,
@@ -52,6 +53,11 @@ for (const s of stories) {
         );
       });
       await page.evaluate(() => document.fonts.ready);
+      // история ещё устанавливается (прокрутка по таймеру и т. п.) — ждём, пока снимет метку
+      await page.waitForFunction(
+        (attr) => !document.documentElement.hasAttribute(attr),
+        STORY_PENDING_ATTR,
+      );
       expect(errors).toEqual([]);
       if (!s.visual) return;
       const portal = await page
