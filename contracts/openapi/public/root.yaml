@@ -5,10 +5,13 @@
 # Схема Problem продублирована в admin/root.yaml намеренно (контракты версионируются
 # независимо); тест бандлов в contracts/ падает после сборки, если копии разошлись.
 # Версии — теги contracts-vX.Y.Z.
+# После I-1 (план identity) контракт identity заморожен и сторожится contracts/test/identity-freeze.test.mjs:
+# правка — только через контроллера плана с записью в журнал изменений документа передачи нативщику; заранее
+# согласованная — enum FeatureFlagKey с миграцией флагов (R4).
 openapi: 3.0.3
 info:
   title: WF public API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Публичный API приложений (iOS, Android) и веба. Операции с замком требуют заголовок
     `Authorization: Bearer <access-токен>`; операции без замка — анонимные: заголовок

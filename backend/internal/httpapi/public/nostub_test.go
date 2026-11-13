@@ -2,6 +2,8 @@ package public_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -117,22 +119,23 @@ var pendingOps = []string{
 	"getMyCaptaincy", "listMyCaptainApplications", "submitCaptainApplication", "withdrawCaptainApplication",
 }
 
-// pendingOpsAtFreeze — замороженное множество (R2, R17): после заморозки контракта identity (Task 5 плана I-1) только
-// уменьшается; pendingOps — его подмножество, поэтому операция другого модуля или новая операция без хендлера в
-// список не прячется.
+// pendingOpsAtFreezeSHA256 — SHA-256 pendingOpsAtFreeze (TestPendingOpsExpire).
+const pendingOpsAtFreezeSHA256 = "e7325137ad6accfe367f7e23094a8c5eab0080f12a0c2bfbcfb8bda1cbd1251e"
+
+// pendingOpsAtFreeze — замороженное множество (R2, R17): после заморозки контракта identity (Task 5 плана I-1) не
+// меняется — его SHA-256 сверяется с константой; уменьшается только pendingOps, его подмножество, поэтому операция
+// другого модуля или новая операция без хендлера в список не прячется.
 var pendingOpsAtFreeze = []string{
-	// Task 2
-	"checkNickname", "startSignup", "confirmSignup", "resendAuthCode", "login", "completeMfa", "startPasswordReset",
-	"confirmPasswordReset", "refreshSession", "cancelDeletion", "getLegalDocuments", "createDeviceChallenge", "logout",
-	"getMe", "updateMe", "changeNickname", "listMySessions", "revokeMySession", "revokeOtherSessions", "changePassword",
-	"startEmailChange", "confirmEmailChange", "acceptDocuments", "deleteAccount",
-	// Task 3
-	"getAuthMethods", "startMfaPasskey", "createSocialNonce", "socialLogin", "completeSocialSignup", "startPasskeyLogin",
-	"passkeyLogin", "reauthenticate", "startReauthPasskey", "listMyAuthMethods", "linkIdentity", "unlinkIdentity",
-	"getMyMfa", "setupTotp", "confirmTotp", "disableTotp", "regenerateRecoveryCodes", "startPasskeyRegistration",
-	"registerPasskey", "renamePasskey", "deletePasskey", "cancelMyMfaReset",
-	// Task 4
-	"getMyCaptaincy", "listMyCaptainApplications", "submitCaptainApplication", "withdrawCaptainApplication",
+	// по алфавиту (TestPendingOpsExpire)
+	"acceptDocuments", "cancelDeletion", "cancelMyMfaReset", "changeNickname", "changePassword", "checkNickname",
+	"completeMfa", "completeSocialSignup", "confirmEmailChange", "confirmPasswordReset", "confirmSignup",
+	"confirmTotp", "createDeviceChallenge", "createSocialNonce", "deleteAccount", "deletePasskey", "disableTotp",
+	"getAuthMethods", "getLegalDocuments", "getMe", "getMyCaptaincy", "getMyMfa", "linkIdentity",
+	"listMyAuthMethods", "listMyCaptainApplications", "listMySessions", "login", "logout", "passkeyLogin",
+	"reauthenticate", "refreshSession", "regenerateRecoveryCodes", "registerPasskey", "renamePasskey",
+	"resendAuthCode", "revokeMySession", "revokeOtherSessions", "setupTotp", "socialLogin", "startEmailChange",
+	"startMfaPasskey", "startPasskeyLogin", "startPasskeyRegistration", "startPasswordReset", "startReauthPasskey",
+	"startSignup", "submitCaptainApplication", "unlinkIdentity", "updateMe", "withdrawCaptainApplication",
 }
 
 // Страж «без заглушек» (план I-1, R2): собранный public.Server (подделки geo, версий и сессий) на каждой операции
@@ -194,7 +197,8 @@ func TestNoStubOperations(t *testing.T) {
 }
 
 // Срок временного списка (R2): (а) каждое имя pendingOps есть в контракте; (б) у операции тег identity;
-// (в) список ⊆ pendingOpsAtFreeze. Пока списки пусты, проверка не вакуумна за счёт пробы на подставных списках.
+// (в) список ⊆ pendingOpsAtFreeze; (г) pendingOpsAtFreeze по алфавиту и его SHA-256 = константа (R17). Пока списки
+// пусты, проверка не вакуумна за счёт пробы на подставных списках.
 func TestPendingOpsExpire(t *testing.T) {
 	t.Parallel()
 	spec, err := oapi.GetSpec()
@@ -203,6 +207,15 @@ func TestPendingOpsExpire(t *testing.T) {
 	}
 	for _, v := range pendingViolations(spec, pendingOps, pendingOpsAtFreeze) {
 		t.Error(v)
+	}
+	// хэш замороженного множества (R17): вернуть операцию после отката реализации или дописать новую нельзя без
+	// правки константы — то есть без контроллера плана; уменьшение pendingOps хэш не трогает
+	if !slices.IsSorted(pendingOpsAtFreeze) {
+		t.Error("pendingOpsAtFreeze: не по алфавиту")
+	}
+	if got := frozenSHA256(pendingOpsAtFreeze); got != pendingOpsAtFreezeSHA256 {
+		t.Errorf("pendingOpsAtFreeze изменён (SHA-256 %s): замороженное множество правится только через контроллера плана "+
+			"identity вместе с pendingOpsAtFreezeSHA256 (план I-1, R2, R17)", got)
 	}
 	for _, id := range pendingOpsAtFreeze {
 		if !slices.Contains(opsIDs(spec), id) {
@@ -278,4 +291,10 @@ func opID(op *openapi3.Operation) string {
 		return id
 	}
 	return strings.ToLower(id[:1]) + id[1:]
+}
+
+// frozenSHA256 — SHA-256 списка, имена через перевод строки.
+func frozenSHA256(ids []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(ids, "\n")))
+	return hex.EncodeToString(sum[:])
 }

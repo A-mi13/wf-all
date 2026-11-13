@@ -1,6 +1,8 @@
 package admin_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"slices"
 	"strings"
@@ -91,12 +93,16 @@ var pendingOps = []string{
 	"putStaffPlayerLink", "deleteStaffPlayerLink",
 }
 
-// pendingOpsAtFreeze — замороженное множество (R2, R17): после заморозки контракта identity (Task 5 плана I-1) только
-// уменьшается; pendingOps — его подмножество.
+// pendingOpsAtFreezeSHA256 — SHA-256 pendingOpsAtFreeze (TestPendingOpsExpire).
+const pendingOpsAtFreezeSHA256 = "0f7a931752bda90d7f417c20d4780f855b5a49c8eff3d2ecf914a353881cef68"
+
+// pendingOpsAtFreeze — замороженное множество (R2, R17): после заморозки контракта identity (Task 5 плана I-1) не
+// меняется — его SHA-256 сверяется с константой; уменьшается только pendingOps, его подмножество.
 var pendingOpsAtFreeze = []string{
-	"listCaptainApplications", "getCaptainApplication", "getCaptainApplicationContact", "approveCaptainApplication",
-	"rejectCaptainApplication", "getAuthMethodsUsage", "findPlayerByEmail", "requestMfaReset", "cancelMfaReset",
-	"putStaffPlayerLink", "deleteStaffPlayerLink",
+	// по алфавиту (TestPendingOpsExpire)
+	"approveCaptainApplication", "cancelMfaReset", "deleteStaffPlayerLink", "findPlayerByEmail",
+	"getAuthMethodsUsage", "getCaptainApplication", "getCaptainApplicationContact", "listCaptainApplications",
+	"putStaffPlayerLink", "rejectCaptainApplication", "requestMfaReset",
 }
 
 // pendingStaffOps — операции тега staff, которым можно быть в pendingOps: связь «сотрудник → учётка игрока»
@@ -104,7 +110,8 @@ var pendingOpsAtFreeze = []string{
 var pendingStaffOps = []string{"putStaffPlayerLink", "deleteStaffPlayerLink"}
 
 // Срок временного списка (R2): (а) каждое имя pendingOps есть в контракте; (б) у операции тег identity, кроме ровно
-// pendingStaffOps тега staff; (в) список ⊆ pendingOpsAtFreeze. Пока списки пусты, проверка не вакуумна за счёт пробы.
+// pendingStaffOps тега staff; (в) список ⊆ pendingOpsAtFreeze; (г) pendingOpsAtFreeze по алфавиту и его SHA-256 =
+// константа (R17). Пока списки пусты, проверка не вакуумна за счёт пробы.
 func TestPendingOpsExpire(t *testing.T) {
 	t.Parallel()
 	spec, err := oapi.GetSpec()
@@ -114,6 +121,15 @@ func TestPendingOpsExpire(t *testing.T) {
 	tags := opTags(spec)
 	for _, v := range pendingViolations(tags, pendingOps, pendingOpsAtFreeze) {
 		t.Error(v)
+	}
+	// хэш замороженного множества (R17): вернуть операцию после отката реализации или дописать новую нельзя без
+	// правки константы — то есть без контроллера плана; уменьшение pendingOps хэш не трогает
+	if !slices.IsSorted(pendingOpsAtFreeze) {
+		t.Error("pendingOpsAtFreeze: не по алфавиту")
+	}
+	if got := frozenSHA256(pendingOpsAtFreeze); got != pendingOpsAtFreezeSHA256 {
+		t.Errorf("pendingOpsAtFreeze изменён (SHA-256 %s): замороженное множество правится только через контроллера плана "+
+			"identity вместе с pendingOpsAtFreezeSHA256 (план I-1, R2, R17)", got)
 	}
 	for _, id := range pendingOpsAtFreeze {
 		if _, ok := tags[id]; !ok {
@@ -168,4 +184,10 @@ func pendingViolations(tags map[string][]string, pending, frozen []string) []str
 	}
 	slices.Sort(out)
 	return out
+}
+
+// frozenSHA256 — SHA-256 списка, имена через перевод строки.
+func frozenSHA256(ids []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(ids, "\n")))
+	return hex.EncodeToString(sum[:])
 }
