@@ -156,6 +156,1401 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/nicknames/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Проверить ник
+         * @description Доступен ли ник — проверка при вводе на экране регистрации и смены ника (с задержкой после
+         *     ввода, не на каждую букву). Без аутентификации; ники публичны, ответ ничего не раскрывает.
+         *
+         *     Неверный формат — не ошибка, а `200 {available: false, reason: invalid}`. Исключение — ник
+         *     длиннее 64 символов: его отвергает проверка схемы — `400 validation.failed` по полю
+         *     `query.nickname` (поле ввода ограничьте 20 символами). Ответ — подсказка:
+         *     окончательно ник проверяют `startSignup`, `confirmSignup` и `changeNickname` (его могут занять
+         *     между проверкой и отправкой формы).
+         */
+        get: operations["checkNickname"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Начать регистрацию по почте
+         * @description Форма регистрации: почта, пароль, ник, дата рождения, город и согласие с текущими версиями
+         *     документов. Проверяет форму и отправляет 6-значный код на почту; аккаунт создаёт
+         *     `confirmSignup`. Анонимная операция: регистрация возможна только без сессии; от повторов
+         *     защищают одноразовый код, уникальность почты и ника и лимиты (`auth_send`).
+         *
+         *     Ответ `202 CodeSent` не зависит от того, есть ли аккаунт на эту почту: владельцу занятой почты
+         *     уходит письмо «у вас уже есть аккаунт», а в ответе разницы нет — переходите к вводу кода.
+         *
+         *     Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+         *     не передаёт, поле игнорируется. При подозрительной активности — `403 humancheck.required`:
+         *     решите задачу и повторите.
+         *
+         *     Почта, которая не проходит проверку формы (невидимые или управляющие символы, длиннее 254
+         *     байт после нормализации, не вида имя@домен), — `400 validation.failed` по полю `body.email`;
+         *     регистр и пробелы по краям не важны, домен на кириллице принимается. Дата рождения в будущем
+         *     или возраст больше 120 лет — `400 validation.failed` по полю `body.birth_date`.
+         *
+         *     Ошибки формы:
+         *     - `identity.documents_outdated` (422) — нет согласия с каким-то документом или версия не
+         *       текущая: перечитайте `getLegalDocuments` и покажите документы снова;
+         *     - `identity.too_young` (422) — возраст ниже порога страны города: вежливый отказ, ничего не
+         *       сохраняется;
+         *     - `identity.city_not_found` (422) — города нет или его страна выключена: выберите город заново;
+         *     - `identity.password_weak` (422) — причина в `reasons` (одно значение): `too_short`, `common`,
+         *       `too_long`;
+         *     - `identity.nickname_invalid` (422), `identity.nickname_taken` (409) — выберите другой ник;
+         *     - `identity.email_disposable` (422) — одноразовый почтовый домен;
+         *     - `identity.device_signup_limit` (403) — с устройства уже две регистрации: покажите причину и
+         *       ссылку на поддержку;
+         *     - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+         */
+        post: operations["startSignup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/signup/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Подтвердить регистрацию кодом
+         * @description Код из письма завершает регистрацию: создаётся аккаунт и сессия — `201 AuthResult` со
+         *     `status: authenticated` и `user.new_user: true`. Анонимная операция: вход возможен только без
+         *     сессии; от повторов защищает одноразовый код (погашенный код второй раз не сработает).
+         *
+         *     Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+         *     не передаёт, поле игнорируется.
+         *
+         *     - `identity.code_invalid` (400) — неверный код, в `attempts_left` — сколько попыток осталось;
+         *     - `identity.code_expired` (410) — код истёк, погашен или исчерпал 5 попыток: начните
+         *       регистрацию заново или запросите повтор `resendAuthCode`, если код ещё жив;
+         *     - `identity.nickname_taken` (409) — ник заняли, пока шёл код: код не тратится, повторите вызов
+         *       с новым `nickname`;
+         *     - `identity.email_taken` (409) — почту заняли параллельной регистрацией: войдите;
+         *     - `identity.device_signup_limit` (403) — лимит регистраций устройства.
+         */
+        post: operations["confirmSignup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/codes/{codeId}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отправить код повторно
+         * @description Повторная отправка того же кода (регистрация, сброс пароля, смена почты): попытки не
+         *     обнуляются, паузы растут 60 → 120 → 300 с, не больше 4 отправок. Анонимная операция: код
+         *     регистрации и сброса запрашивают без сессии; от повторов защищают паузы и лимиты.
+         *
+         *     Ответ `202 CodeSent` не зависит от того, есть ли аккаунт: для несуществующей почты паузы и
+         *     ответы те же.
+         *
+         *     - `identity.resend_too_soon` (429) — раньше паузы: заголовок `Retry-After` — через сколько
+         *       секунд; кнопку держите неактивной до `resend_available_at`;
+         *     - `identity.code_expired` (410) — код истёк, погашен или исчерпал отправки: начните заново.
+         */
+        post: operations["resendAuthCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Войти по почте и паролю
+         * @description Вход по почте и паролю. Ответ `200 AuthResult`: `authenticated` (сессия), `mfa_required`
+         *     (нужен второй фактор → `completeMfa`) или `deletion_pending` (аккаунт ждёт удаления →
+         *     `cancelDeletion`). Анонимная операция: вход возможен только без сессии; от перебора защищают
+         *     лимиты по IP, устройству и почте и антибот.
+         *
+         *     Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+         *     не передаёт, поле игнорируется. При подозрительной активности (неудачи по почте или с адреса) —
+         *     `403 humancheck.required`: решите задачу и повторите.
+         *
+         *     Почта, которая не проходит проверку формы (невидимые или управляющие символы, длиннее 254
+         *     байт после нормализации, не вида имя@домен), — `400 validation.failed` по полю `body.email`
+         *     (до поиска аккаунта: ответ ничего не раскрывает).
+         *
+         *     - `identity.invalid_credentials` (400) — почта или пароль неверны; ответ одинаков, если
+         *       аккаунта нет, у аккаунта нет пароля (вход только через Apple или Google) или пароль неверен:
+         *       предложите сброс пароля и соцвход;
+         *     - `identity.account_blocked` (403) — аккаунт заблокирован; `blocked_until` — до какого момента,
+         *       поля нет — бессрочно;
+         *     - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+         *
+         *     Вход с нового для аккаунта устройства отправляет владельцу письмо.
+         */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Второй фактор входа
+         * @description Второй шаг входа после `AuthResult.status = mfa_required`: `mfa_token` и ровно одно из `code`
+         *     (приложение-аутентификатор), `recovery_code` (резервный код, сгорает), `passkey` (ответ ключа
+         *     доступа на задачу `startMfaPasskey`); ни одного или больше одного — `400 validation.failed` по
+         *     полю `body`. Ответ — `200 AuthResult` (`authenticated` или `deletion_pending`). Вход со вторым
+         *     фактором отменяет назначенный через поддержку сброс 2FA. Анонимная операция: вход возможен
+         *     только без сессии; от перебора защищают одноразовый `mfa_token` (5 попыток), лимит неудач на
+         *     аккаунт и лимиты класса `auth`.
+         *
+         *     Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+         *     не передаёт, поле игнорируется.
+         *
+         *     - `identity.mfa_invalid` (400) — неверный код, в `attempts_left` — сколько попыток осталось у
+         *       этого `mfa_token`;
+         *     - `identity.mfa_expired` (410) — `mfa_token` истёк или исчерпан: начните вход заново;
+         *     - `identity.passkey_invalid` (400) — ключ доступа не прошёл проверку.
+         */
+        post: operations["completeMfa"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Начать сброс пароля
+         * @description Отправляет 6-значный код сброса на почту аккаунта. Анонимная операция: забывший пароль
+         *     сессии не имеет; от рассылок защищают лимиты по почте и IP и антибот.
+         *
+         *     Ответ `202 CodeSent` не зависит от того, есть ли аккаунт: на неизвестную почту письмо не
+         *     уходит, но ответ тот же — переходите к вводу кода. При подозрительной активности — `403
+         *     humancheck.required`: решите задачу и повторите.
+         *
+         *     Почта, которая не проходит проверку формы (невидимые или управляющие символы, длиннее 254
+         *     байт после нормализации, не вида имя@домен), — `400 validation.failed` по полю `body.email`
+         *     (до поиска аккаунта: ответ ничего не раскрывает).
+         */
+        post: operations["startPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Задать новый пароль по коду
+         * @description Новый пароль по коду из письма. Успех отзывает все сессии аккаунта и выдаёт новую на этом
+         *     устройстве — `200 AuthResult` (`authenticated`, либо `deletion_pending`, если аккаунт ждёт
+         *     удаления). Аккаунт без пароля (только соцвход) так получает пароль. Анонимная операция:
+         *     забывший пароль сессии не имеет; от повторов защищает одноразовый код.
+         *
+         *     Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+         *     не передаёт, поле игнорируется.
+         *
+         *     Аккаунт с 2FA: сброс по почте вторую ступень не обходит. Без `mfa` — `400
+         *     identity.mfa_required`, в `methods` — принимаемые факторы (`totp`, `recovery_code`; ключ доступа
+         *     здесь не принимается — войдите ключом и смените пароль в настройках); код при этом не тратится
+         *     и попытка не считается — повторите с `mfa`.
+         *
+         *     - `identity.code_invalid` (400, `attempts_left`), `identity.code_expired` (410) — как у
+         *       `confirmSignup`;
+         *     - `identity.password_weak` (422) — причина в `reasons`;
+         *     - `identity.mfa_invalid` (400, `attempts_left`) — неверный второй фактор.
+         */
+        post: operations["confirmPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Обновить токены
+         * @description Обмен refresh-токена на новую пару: каждый вызов выдаёт новый `refresh_token`, прежний больше
+         *     не действует (ротация), срок бездействия продлевается. Вызывайте при `401
+         *     auth.unauthenticated` один раз и повторяйте исходный запрос. Анонимная операция: access уже
+         *     истёк, сессию подтверждает сам refresh-токен (`Authorization` не читается); от повторов
+         *     защищает ротация.
+         *
+         *     Вызывайте последовательно, не параллельно, на одно устройство: повтор уже использованного
+         *     токена отзывает сессию. Исключение — окно гонки 15 секунд с того же устройства (`install_id`):
+         *     ответ тот же, что у первого вызова.
+         *
+         *     - `identity.refresh_invalid` (401) — токен неизвестен, истёк, отозван или повторён вне окна:
+         *       войдите заново.
+         */
+        post: operations["refreshSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/deletion/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отменить удаление аккаунта
+         * @description После входа с `AuthResult.status = deletion_pending` игрок подтверждает «Отменить удаление»:
+         *     аккаунт снова активен, выдаётся сессия — `200 AuthResult` (`authenticated`), владельцу уходит
+         *     письмо. Анонимная операция: сессии у аккаунта, ждущего удаления, нет; владельца подтверждает
+         *     одноразовый `restore_token` (10 минут), выданный только после входа.
+         *
+         *     Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+         *     не передаёт, поле игнорируется.
+         *
+         *     - `identity.restore_token_invalid` (410) — токен истёк или использован: войдите снова.
+         */
+        post: operations["cancelDeletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Выйти
+         * @description Отзывает текущую сессию (её refresh-токен больше не действует, access — в пределах 5 секунд).
+         *     Клиент удаляет токены у себя.
+         *
+         *     Повтор после обрыва сети может получить `401 auth.unauthenticated`, а не сохранённый `204`:
+         *     вход проверяется раньше ключа идемпотентности, а сессия уже отозвана. Считайте выход
+         *     выполненным: удалите токены, `refreshSession` не вызывайте.
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/legal/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Текущие версии документов
+         * @description Правила сервиса и политика конфиденциальности — текущие версии и ссылки на тексты. Экран
+         *     регистрации показывает их и передаёт принятые версии в `accepted_documents`; ответ
+         *     `422 identity.documents_outdated` — сигнал перечитать список. Без аутентификации; ответ
+         *     кэшируется до 5 минут.
+         */
+        get: operations["getLegalDocuments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/challenges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Задача проверки целостности приложения
+         * @description Одноразовая задача (5 минут) для App Attest (iOS) или Play Integrity (Android): приложение
+         *     подписывает её и передаёт результат в `device.integrity` регистрации или входа. Анонимная
+         *     операция: нужна до входа; от повторов защищает одноразовость задачи и лимиты класса `auth`.
+         *     Веб её не вызывает. Запрос без тела (переданное тело сервер не читает).
+         */
+        post: operations["createDeviceChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Мой аккаунт
+         * @description Аккаунт текущего игрока: почта, ник и когда его можно сменить, дата рождения, город, язык,
+         *     статус, ограничения, есть ли пароль и 2FA, согласие с документами. Приложение зовёт после входа
+         *     и на экране настроек; `documents_acceptance_required: true` — показать экран согласия.
+         */
+        get: operations["getMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Изменить настройки аккаунта
+         * @description Правка настроек аккаунта — сейчас язык (`locale`) интерфейса и писем. Хотя бы одно поле, иначе
+         *     `400 validation.failed`. Ответ — аккаунт целиком.
+         */
+        patch: operations["updateMe"];
+        trace?: never;
+    };
+    "/v1/me/nickname": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Сменить ник
+         * @description Новый ник — не чаще раза в 30 дней; прежний ник 90 дней никто не сможет взять. Ответ — аккаунт
+         *     с новым ником и `nickname_changeable_at`.
+         *
+         *     - `identity.nickname_invalid` (422), `identity.nickname_taken` (409) — выберите другой ник;
+         *     - `identity.nickname_change_too_soon` (409) — раньше срока; `available_at` — с какого момента.
+         */
+        patch: operations["changeNickname"];
+        trace?: never;
+    };
+    "/v1/me/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Где я вошёл
+         * @description Живые сессии аккаунта для экрана «Где вы вошли»: устройство или браузер, способ входа, город по
+         *     IP (сам IP не отдаётся), когда вошли и последняя активность; `current` — эта сессия. Без
+         *     страниц: живых сессий не больше 100.
+         */
+        get: operations["listMySessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Выйти везде, кроме этого устройства
+         * @description Отзывает все сессии аккаунта, кроме текущей; ответ — сколько отозвано (0 — других не было).
+         */
+        post: operations["revokeOtherSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Выйти на устройстве
+         * @description Отзывает свою сессию по id («выйти здесь»); текущая — клиент выходит. Отзыв действует на всех
+         *     операциях в пределах 5 секунд.
+         *
+         *     Отзыв текущей сессии: повтор после обрыва сети может получить `401 auth.unauthenticated`, а не
+         *     сохранённый `204` — вход проверяется раньше ключа идемпотентности, а сессия уже отозвана.
+         *     Считайте выход выполненным: удалите токены, `refreshSession` не вызывайте.
+         *
+         *     - `identity.session_not_found` (404) — сессии нет, она уже отозвана или чужая.
+         */
+        delete: operations["revokeMySession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Сменить или задать пароль
+         * @description Новый пароль; аккаунт без пароля (только соцвход) так его задаёт. Нужен свежий вход (≤ 10
+         *     минут, текущий пароль или второй фактор подтверждается там), иначе `403
+         *     identity.reauth_required`; получить — `reauthenticate`. Отзывает все другие сессии, владельцу
+         *     уходит письмо.
+         *
+         *     - `identity.password_weak` (422) — причина в `reasons`.
+         */
+        post: operations["changePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/email-change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Начать смену почты
+         * @description Отправляет 6-значный код на новую почту; почта меняется после `confirmEmailChange`. Нужен
+         *     свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+         *
+         *     Если новая почта занята другим аккаунтом, ответ тот же `202`: код не придёт, а на новый адрес
+         *     уйдёт письмо «на этот адрес уже есть аккаунт».
+         *
+         *     Почта, которая не проходит проверку формы (невидимые или управляющие символы, длиннее 254
+         *     байт после нормализации, не вида имя@домен), — `400 validation.failed` по полю
+         *     `body.new_email`.
+         *
+         *     - `identity.email_same` (422) — новая почта совпадает с текущей;
+         *     - `identity.email_disposable` (422) — одноразовый почтовый домен.
+         */
+        post: operations["startEmailChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/email-change/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Подтвердить новую почту
+         * @description Код с новой почты меняет почту аккаунта; на прежнюю уходит уведомление. Другие сессии не
+         *     отзываются, привязки Apple и Google не меняются. Ответ — аккаунт с новой почтой.
+         *
+         *     - `identity.code_invalid` (400, `attempts_left`), `identity.code_expired` (410) — как у
+         *       `confirmSignup`;
+         *     - `identity.email_taken` (409) — почту заняли, пока шёл код.
+         */
+        post: operations["confirmEmailChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Принять документы
+         * @description Согласие с новыми версиями правил сервиса и политики конфиденциальности — после экрана, который
+         *     клиент показывает при `documents_acceptance_required: true`. Ответ — аккаунт с обновлённым
+         *     согласием. Работу с устаревшим согласием сервер не блокирует — экран обязан показать клиент.
+         *
+         *     - `identity.documents_outdated` (422) — версия не текущая: перечитайте `getLegalDocuments`.
+         */
+        post: operations["acceptDocuments"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Удалить аккаунт
+         * @description Назначает удаление через 30 дней: аккаунт сразу скрыт от других игроков, все сессии отозваны,
+         *     открытая заявка в капитаны отозвана, владельцу уходит письмо. До `purge_at` любой вход
+         *     предлагает отменить удаление (`AuthResult.status = deletion_pending` → `cancelDeletion`); после —
+         *     аккаунт удаляется необратимо. Нужен свежий вход (≤ 10 минут), иначе `403
+         *     identity.reauth_required`; получить — `reauthenticate`.
+         *
+         *     Повтор после обрыва сети может получить `401 auth.unauthenticated`, а не сохранённый ответ:
+         *     вход проверяется раньше ключа идемпотентности, а все сессии уже отозваны. Считайте удаление
+         *     назначенным: удалите токены, `refreshSession` не вызывайте; следующий вход ответит
+         *     `deletion_pending` с `purge_at`.
+         *
+         *     - `identity.confirm_mismatch` (422) — введённый ник не совпал с ником аккаунта.
+         */
+        post: operations["deleteAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Способы входа
+         * @description Какие способы входа и регистрации сейчас включены — экран входа и регистрации и пункты
+         *     «Привязать Apple / Google», «Добавить ключ доступа» в настройках. Без аутентификации; ответ
+         *     одинаков для всех и кэшируется до минуты.
+         *
+         *     - `password` — всегда `true`: почта и пароль флагов не имеют (без них нет восстановления);
+         *     - `apple.signup`, `google.signup` — основной флаг провайдера (`auth_apple`, `auth_google`):
+         *       новая регистрация и привязка; показывайте кнопку на экране регистрации и пункт «Привязать»;
+         *     - `apple.login`, `google.login` — аварийный флаг (`auth_apple_login`, `auth_google_login`): вход
+         *       тех, у кого провайдер уже привязан; показывайте кнопку на экране входа;
+         *     - `passkeys.register` — `auth_passkeys`: пункт «Добавить ключ доступа»; `passkeys.login` —
+         *       `auth_passkeys_login`: вход ключом, ключ как второй фактор и для свежего входа.
+         *
+         *     Google считается выключенным, если выключен Apple (`google.signup` не бывает `true` при
+         *     `apple.signup: false`). Кнопка, которую ответ выключил, в момент нажатия всё равно может
+         *     получить `403 feature.disabled` (флаг сменился за минуту кэша) — покажите текст кода.
+         */
+        get: operations["getAuthMethods"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/mfa/passkey-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Задача WebAuthn для второго фактора
+         * @description Второй фактор входа ключом доступа: после `AuthResult.status = mfa_required` с `passkey` в
+         *     `mfa.methods` выдаёт задачу WebAuthn только с ключами этого аккаунта (`allowCredentials`).
+         *     `options` передайте платформенному API как есть, ответ — в `completeMfa` полем `passkey`
+         *     (`challenge_id` и `credential`). Задача одноразовая, живёт 5 минут. Анонимная операция:
+         *     сессии ещё нет, шаг подтверждает `mfa_token`; от повторов защищают его срок и лимиты класса
+         *     `auth`.
+         *
+         *     За аварийным флагом `auth_passkeys_login`: выключен — `403 feature.disabled` (ключ не годится
+         *     ни для входа, ни вторым фактором); выберите TOTP или резервный код.
+         *
+         *     - `identity.mfa_expired` (410) — `mfa_token` истёк или исчерпан: начните вход заново;
+         *     - `identity.passkey_none` (409) — у аккаунта нет ключей доступа: выберите другой фактор.
+         */
+        post: operations["startMfaPasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/social/nonces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nonce для входа через Apple или Google
+         * @description Первый шаг соцвхода, привязки и свежего входа соцвходом: одноразовый `nonce` (10 минут).
+         *     Apple получает от клиента `SHA-256(nonce)` в hex (так требует Apple), Google — `nonce` как
+         *     есть; затем `id_token` провайдера вместе с `nonce_id` уходит в `socialLogin`, `linkIdentity`
+         *     или `reauthenticate`. Повтор `id_token` без свежего nonce не проходит. Анонимная операция:
+         *     нужна до входа; от повторов защищают одноразовость nonce и лимиты класса `auth`.
+         *
+         *     Флаги провайдера: nonce выдаётся, если включён хотя бы один из флагов провайдера — основной
+         *     (`auth_apple`, `auth_google`: регистрация и привязка) или аварийный (`auth_apple_login`,
+         *     `auth_google_login`: вход привязанных); оба выключены — `403 feature.disabled`. Окончательно
+         *     флаг проверяет операция, которой передан nonce.
+         */
+        post: operations["createSocialNonce"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/social": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Войти через Apple или Google
+         * @description `id_token`, полученный нативным SDK провайдера (Sign in with Apple, Google Sign-In / Credential
+         *     Manager) или в вебе, с `nonce_id` из `createSocialNonce`. Сервер сам проверяет подпись и поля
+         *     токена по ключам провайдера (издатель, `aud`, срок, `nonce`). Анонимная операция: вход
+         *     возможен только без сессии; от повторов защищают одноразовый nonce и лимиты класса `auth`.
+         *
+         *     Ветки ответа `200 AuthResult`:
+         *     - учётка провайдера уже привязана → `authenticated`; у аккаунта 2FA → `mfa_required`
+         *       (соцвход второй фактор не обходит);
+         *     - не привязана, провайдер подтвердил почту, почта не скрытая Apple и есть аккаунт с этой
+         *       почтой → автопривязка вместе с входом (при 2FA — после второго фактора), владельцу письмо;
+         *     - не привязана и аккаунта с почтой нет (или почта — скрытый адрес Apple) → `signup_required`:
+         *       дорегистрация `completeSocialSignup` с `social_signup.signup_token`;
+         *     - аккаунт ждёт удаления → `deletion_pending` (`cancelDeletion`).
+         *
+         *     Флаги: вход привязанных — аварийный флаг (`auth_apple_login`, `auth_google_login`); новая
+         *     регистрация и автопривязка — основной (`auth_apple`, `auth_google`). Нужный флаг выключен —
+         *     `403 feature.disabled`. Мобильный клиент обязан передать `device`; без него — `422
+         *     identity.device_required`; веб (BFF) не передаёт, поле игнорируется. При подозрительной
+         *     активности — `403 humancheck.required`.
+         *
+         *     `apple.authorization_code` — при первом входе через Apple: сервер обменивает его на
+         *     refresh-токен Apple, чтобы отозвать вход при отвязке и удалении аккаунта (требование Apple).
+         *
+         *     - `identity.social_token_invalid` (400) — токен не прошёл проверку или nonce неверен,
+         *       истёк, использован: начните заново с `createSocialNonce`;
+         *     - `identity.social_email_unverified` (422) — провайдер не подтвердил почту: зарегистрируйтесь
+         *       по почте;
+         *     - `identity.social_email_missing` (422) — в токене нет почты (не дано разрешение на почту);
+         *     - `identity.account_blocked` (403) — `blocked_until`, поля нет — бессрочно;
+         *     - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+         */
+        post: operations["socialLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/social/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Дорегистрация после Apple или Google
+         * @description После `socialLogin` со `status: signup_required`: город, дата рождения, ник и согласие с
+         *     документами — создаётся аккаунт с привязкой провайдера и сессия, `201 AuthResult`
+         *     (`authenticated`, `user.new_user: true`). Пароля нет (задать можно позже —
+         *     `changePassword`), кода нет: почту подтвердил провайдер. Анонимная операция: регистрация
+         *     возможна только без сессии; от повторов защищают одноразовый `signup_token` (30 минут),
+         *     уникальность почты и ника и лимиты.
+         *
+         *     За основным флагом провайдера (`auth_apple`, `auth_google`): выключен —
+         *     `403 feature.disabled`. Мобильный клиент обязан передать `device`; без него — `422
+         *     identity.device_required`; веб (BFF) не передаёт, поле игнорируется. При подозрительной
+         *     активности — `403 humancheck.required`. Дата рождения в будущем или возраст больше 120 лет —
+         *     `400 validation.failed` по полю `body.birth_date`.
+         *
+         *     - `identity.signup_token_invalid` (410) — токен истёк или использован: начните вход заново;
+         *     - `identity.documents_outdated` (422) — перечитайте `getLegalDocuments`;
+         *     - `identity.too_young` (422), `identity.city_not_found` (422) — как у `startSignup`;
+         *     - `identity.nickname_invalid` (422), `identity.nickname_taken` (409) — выберите другой ник;
+         *     - `identity.email_taken` (409) — почту заняли, пока шла дорегистрация: войдите;
+         *     - `identity.device_signup_limit` (403) — лимит регистраций устройства;
+         *     - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+         */
+        post: operations["completeSocialSignup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/passkey/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Задача WebAuthn для входа ключом
+         * @description Вход ключом доступа: задача WebAuthn с пустым `allowCredentials` — ключ игрок выбирает на
+         *     устройстве. `options` передайте платформенному API как есть, ответ — в `passkeyLogin` вместе
+         *     с `challenge_id`. Задача одноразовая, живёт 5 минут. Запрос без тела (переданное тело сервер
+         *     не читает). Анонимная операция: нужна до входа; от повторов защищают одноразовость задачи и
+         *     лимиты класса `auth`.
+         *
+         *     За аварийным флагом `auth_passkeys_login`: выключен — `403 feature.disabled`; войдите другим
+         *     способом или через «Забыли пароль?».
+         */
+        post: operations["startPasskeyLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/passkey": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Войти ключом доступа
+         * @description Ответ платформенного API на задачу `startPasskeyLogin`. Ключ закрывает и второй фактор:
+         *     `mfa_required` после ключа не бывает. Ответ `200 AuthResult` — `authenticated` или
+         *     `deletion_pending` (`cancelDeletion`). Анонимная операция: вход возможен только без сессии;
+         *     от повторов защищают одноразовая задача и лимиты класса `auth`.
+         *
+         *     За аварийным флагом `auth_passkeys_login`: выключен — `403 feature.disabled`. Мобильный клиент
+         *     обязан передать `device`; без него — `422 identity.device_required`; веб (BFF) не передаёт,
+         *     поле игнорируется.
+         *
+         *     - `identity.passkey_invalid` (400) — ключ неизвестен, подпись, origin или rpId не прошли,
+         *       задача истекла или использована: начните заново;
+         *     - `identity.account_blocked` (403) — `blocked_until`, поля нет — бессрочно;
+         *     - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+         */
+        post: operations["passkeyLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/reauth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Подтвердить, что это я (свежий вход)
+         * @description Свежий вход на 10 минут для чувствительных операций (смена почты и пароля, 2FA, ключи доступа,
+         *     привязки, удаление): ответ `{reauth_until}`. Тело — ровно одно из `password`, `totp_code`,
+         *     `recovery_code`, `passkey` (ответ на задачу `startReauthPasskey`), `social` (`id_token` с
+         *     nonce из `createSocialNonce`); ни одного или больше одного — `400 validation.failed` по полю
+         *     `body`. Вход сам по себе тоже даёт свежий вход.
+         *
+         *     У аккаунта с 2FA годится только второй фактор (TOTP, резервный код, ключ доступа): пароль —
+         *     `422 identity.reauth_method_not_allowed`. Без 2FA — пароль, ключ доступа или соцвход
+         *     привязанного провайдера.
+         *
+         *     Флаги: ключом — аварийный `auth_passkeys_login`, соцвходом — `auth_apple_login` /
+         *     `auth_google_login`; выключен — `403 feature.disabled`.
+         *
+         *     - `identity.reauth_invalid` (400) — проверка не прошла, в `attempts_left` — сколько попыток
+         *       осталось; 5 неудач за 15 минут на сессию — затем `429 ratelimit.exceeded`;
+         *     - `identity.reauth_method_not_allowed` (422) — пароль при включённой 2FA.
+         */
+        post: operations["reauthenticate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/reauth/passkey-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Задача WebAuthn для свежего входа
+         * @description Свежий вход ключом доступа: задача WebAuthn только с ключами этого аккаунта. `options`
+         *     передайте платформенному API как есть, ответ — в `reauthenticate` полем `passkey`. Задача
+         *     одноразовая, живёт 5 минут. Запрос без тела.
+         *
+         *     За аварийным флагом `auth_passkeys_login`: выключен — `403 feature.disabled`.
+         *
+         *     - `identity.passkey_none` (409) — у аккаунта нет ключей доступа: выберите другой способ.
+         */
+        post: operations["startReauthPasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/auth-methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Мои способы входа
+         * @description Экран «Способы входа» в настройках: есть ли пароль, привязки Apple и Google (почта у
+         *     провайдера с пометкой скрытого адреса, дата), ключи доступа и состояние 2FA. Последний способ
+         *     входа отвязать или удалить нельзя (`409 identity.last_method`); пароль удалить нельзя вообще.
+         */
+        get: operations["listMyAuthMethods"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Привязать Apple или Google
+         * @description Привязка учётки провайдера к вошедшему аккаунту по `sub` токена — без требований к почте
+         *     (владелец уже вошёл). `id_token` и `nonce_id` — как у `socialLogin`; Apple —
+         *     `apple.authorization_code` для отзыва входа при отвязке. Владельцу уходит письмо.
+         *     Нужен свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить —
+         *     `reauthenticate`.
+         *
+         *     За основным флагом провайдера (`auth_apple`, `auth_google`): выключен —
+         *     `403 feature.disabled`.
+         *
+         *     - `identity.social_token_invalid` (400) — токен или nonce не прошли проверку;
+         *     - `identity.identity_taken` (409) — эта учётка провайдера привязана к другому аккаунту;
+         *     - `identity.identity_exists` (409) — у аккаунта уже есть привязка этого провайдера (одна на
+         *       провайдера).
+         */
+        post: operations["linkIdentity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/identities/{identityId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Отвязать Apple или Google
+         * @description Отвязка провайдера: вход Apple отзывается у Apple, владельцу уходит письмо.
+         *     Работает при любых флагах (уменьшает поверхность входа). Нужен свежий вход (≤ 10 минут),
+         *     иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+         *
+         *     - `identity.identity_not_found` (404) — привязки нет или она чужая;
+         *     - `identity.last_method` (409) — это последний способ входа: сначала задайте пароль или
+         *       добавьте ключ доступа.
+         */
+        delete: operations["unlinkIdentity"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Состояние 2FA
+         * @description Включена ли 2FA, когда подтверждена, сколько резервных кодов осталось и назначен ли сброс 2FA
+         *     через поддержку (`reset_scheduled_at`): тогда покажите предупреждение «через N дней 2FA будет
+         *     сброшена по запросу в поддержку» и кнопку «Отменить» (`cancelMyMfaReset`).
+         */
+        get: operations["getMyMfa"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/mfa/totp/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Начать включение 2FA
+         * @description Новый секрет TOTP и `otpauth_uri` для QR-кода приложения-аутентификатора; 2FA включает
+         *     `confirmTotp`. Повторный вызов до подтверждения выпускает новый секрет (прежний больше не
+         *     подойдёт). Нужен свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить —
+         *     `reauthenticate`.
+         *
+         *     Ответ с секретом не сохраняется ни в кэшах, ни в ключах идемпотентности: повтор с тем же
+         *     `Idempotency-Key` — `409 idempotency.replay_unavailable`, секрет второй раз не отдаётся;
+         *     вызовите заново с новым ключом.
+         *
+         *     - `identity.mfa_already_enabled` (409) — 2FA уже включена.
+         */
+        post: operations["setupTotp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/mfa/totp/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Подтвердить включение 2FA
+         * @description Код из приложения-аутентификатора включает 2FA сразу и выдаёт 10 резервных кодов —
+         *     покажите их до закрытия экрана: второй раз они не выдаются (новые — `regenerateRecoveryCodes`).
+         *     Владельцу уходит письмо; другие сессии не отзываются.
+         *
+         *     Ответ с кодами не сохраняется ни в кэшах, ни в ключах идемпотентности: повтор с тем же
+         *     `Idempotency-Key` — `409 idempotency.replay_unavailable`, коды второй раз не отдаются; 2FA уже
+         *     включена — выпустите новые коды `regenerateRecoveryCodes`.
+         *
+         *     - `identity.mfa_setup_missing` (409) — нет начатого включения: сначала `setupTotp`;
+         *     - `identity.mfa_invalid` (400) — неверный код: проверьте время на устройстве и повторите.
+         */
+        post: operations["confirmTotp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/mfa/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Выключить 2FA
+         * @description Удаляет секрет TOTP и резервные коды; владельцу уходит письмо. Нужен свежий вход (≤ 10 минут),
+         *     подтверждённый вторым фактором (TOTP, резервный код или ключ доступа — пароль не годится),
+         *     иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+         *
+         *     - `identity.mfa_not_enabled` (409) — 2FA и так выключена.
+         */
+        delete: operations["disableTotp"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/mfa/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Новые резервные коды
+         * @description Выпускает 10 новых резервных кодов, прежние больше не действуют. Покажите их до закрытия
+         *     экрана. Нужен свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить —
+         *     `reauthenticate`.
+         *
+         *     Ответ с кодами не сохраняется ни в кэшах, ни в ключах идемпотентности: повтор с тем же
+         *     `Idempotency-Key` — `409 idempotency.replay_unavailable`, коды второй раз не отдаются;
+         *     вызовите заново с новым ключом.
+         *
+         *     - `identity.mfa_not_enabled` (409) — 2FA выключена.
+         */
+        post: operations["regenerateRecoveryCodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/passkeys/registration-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Задача WebAuthn для нового ключа
+         * @description Добавление ключа доступа: задача WebAuthn (`PublicKeyCredentialCreationOptionsJSON`;
+         *     `excludeCredentials` — уже имеющиеся ключи, `user.id` — случайный идентификатор, не id
+         *     аккаунта). `options` передайте платформенному API как есть, ответ — в `registerPasskey` вместе
+         *     с `challenge_id`. Задача одноразовая, живёт 5 минут. Запрос без тела. Нужен свежий вход (≤ 10
+         *     минут), иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+         *
+         *     За основным флагом `auth_passkeys`: выключен — `403 feature.disabled` (новые ключи не
+         *     добавляются; вход имеющимися — по `auth_passkeys_login`).
+         *
+         *     - `identity.passkey_limit` (409) — у аккаунта уже 10 ключей: удалите ненужный.
+         */
+        post: operations["startPasskeyRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/passkeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Добавить ключ доступа
+         * @description Ответ платформенного API на задачу `startPasskeyRegistration` и необязательное имя ключа —
+         *     `201 Passkey`; владельцу уходит письмо. Свежий вход проверила задача.
+         *
+         *     За основным флагом `auth_passkeys`: выключен — `403 feature.disabled`.
+         *
+         *     - `identity.passkey_invalid` (400) — ответ ключа не прошёл проверку или задача истекла: начните
+         *       заново;
+         *     - `identity.passkey_exists` (409) — этот ключ уже зарегистрирован.
+         */
+        post: operations["registerPasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/passkeys/{passkeyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Удалить ключ доступа
+         * @description Удаляет ключ доступа; владельцу уходит письмо. Работает при любых флагах (уменьшает
+         *     поверхность входа). Нужен свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`;
+         *     получить — `reauthenticate`.
+         *
+         *     - `identity.passkey_not_found` (404) — ключа нет или он чужой;
+         *     - `identity.last_method` (409) — это последний способ входа: сначала задайте пароль или
+         *       привяжите Apple / Google.
+         */
+        delete: operations["deletePasskey"];
+        options?: never;
+        head?: never;
+        /**
+         * Переименовать ключ доступа
+         * @description Новое имя ключа для списка «Способы входа». Ответ — ключ с новым именем.
+         *
+         *     - `identity.passkey_not_found` (404) — ключа нет или он чужой.
+         */
+        patch: operations["renamePasskey"];
+        trace?: never;
+    };
+    "/v1/me/mfa-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Отменить сброс 2FA через поддержку
+         * @description Игрок отменяет назначенный по запросу в поддержку сброс 2FA (`MfaStatus.reset_scheduled_at`,
+         *     `AuthResult.mfa.reset_at`): «это не я». Ответ `204`, владельцу уходит письмо. Вход со вторым
+         *     фактором отменяет сброс сам: если сессия вошла с TOTP, резервным кодом или ключом, сброс уже
+         *     отменён — ответ тоже `204`.
+         *
+         *     - `identity.mfa_reset_not_found` (404) — назначенного сброса нет (выполнен или не
+         *       назначался) и эта сессия его не отменяла.
+         */
+        delete: operations["cancelMyMfaReset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/captaincy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Моё капитанство
+         * @description Экран «Стать капитаном»: допуски капитана по городам (`permits`, испытательный срок —
+         *     `probationary`), можно ли подать заявку в текущем городе игрока (`eligibility`: причины отказа
+         *     в `reasons`, `available_at` — когда закончится пауза после отказа) и открытая заявка, если она
+         *     есть. Кнопку «Подать заявку» показывайте при `eligibility.eligible: true`, иначе — причины.
+         */
+        get: operations["getMyCaptaincy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/captain-applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Мои заявки в капитаны
+         * @description История своих заявок, новые сверху: статус, решение, код причины отказа и комментарий
+         *     модератора. Страницы по курсору (`next_cursor` → `cursor`, `null` — страниц больше нет);
+         *     испорченный курсор — `400 validation.failed` по полю `query.cursor`.
+         */
+        get: operations["listMyCaptainApplications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/captain-applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Подать заявку в капитаны
+         * @description Заявка в капитаны; город — текущий город игрока (в теле не передаётся). Дальше её
+         *     рассматривает модератор города, решение приходит письмом и видно в
+         *     `listMyCaptainApplications`. Все поля формы необязательны; телефон — только контакт для
+         *     модератора, он не подтверждается и модератор видит его как неподтверждённый.
+         *
+         *     Условия: подтверждённая почта, возраст не ниже порога страны города, заполненный профиль, нет
+         *     ограничения `captain`, не капитан другой команды в этом городе, нет допуска в этом городе.
+         *     Пока модули профиля игрока и команд не запущены, проверить условия нельзя — отказ с причиной
+         *     `checks_unavailable` (заявку подать нельзя, это не обход правила).
+         *
+         *     - `identity.captain_ineligible` (409) — условия не выполнены, причины в `reasons` (значения
+         *       `CaptainIneligibility`: `too_young`, `restricted`, `profile_incomplete`,
+         *       `captain_elsewhere_in_city`, `already_permitted`, `checks_unavailable`);
+         *     - `identity.application_exists` (409) — открытая заявка в этом городе уже есть;
+         *     - `identity.application_cooldown` (409) — после отказа прошло меньше 7 дней; `available_at` —
+         *       с какого момента можно подать снова.
+         */
+        post: operations["submitCaptainApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/captain-applications/{applicationId}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отозвать заявку в капитаны
+         * @description Отзыв своей заявки, пока она ждёт решения; паузы перед новой заявкой отзыв не ставит. Ответ —
+         *     заявка со статусом `withdrawn`.
+         *
+         *     - `identity.application_not_found` (404) — заявки нет или она чужая;
+         *     - `identity.application_closed` (409) — заявка уже решена или отозвана.
+         */
+        post: operations["withdrawCaptainApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -210,6 +1605,33 @@ export interface components {
              * @example 3
              */
             attempts_left?: number;
+            /**
+             * @description Причины отказа машинными значениями — только у двух кодов. У identity.captain_ineligible — невыполненные условия заявки в капитаны (значения схемы CaptainIneligibility; ограничение captain — причина restricted). У identity.password_weak — ровно одно значение: too_short (короче 10 символов), common (из списка распространённых паролей) или too_long (длиннее потолка). Список открытый: незнакомое значение показывайте общим текстом кода
+             * @example [
+             *       "too_short"
+             *     ]
+             */
+            reasons?: string[];
+            /**
+             * @description Только у identity.mfa_required — вторые факторы аккаунта, которые принимает эта операция (значения схемы MfaMethod): totp, recovery_code, passkey. У confirmPasswordReset — только totp и recovery_code: ключ доступа при сбросе пароля не принимается. Клиент показывает выбор из этих способов и повторяет запрос со вторым фактором
+             * @example [
+             *       "totp",
+             *       "recovery_code"
+             *     ]
+             */
+            methods?: string[];
+            /**
+             * Format: date-time
+             * @description Когда действие станет доступно (UTC) — только у identity.nickname_change_too_soon (смена ника раньше 30 дней) и identity.application_cooldown (повторная заявка в капитаны раньше 7 дней после отказа)
+             * @example 2026-12-13T09:30:00Z
+             */
+            available_at?: string;
+            /**
+             * Format: date-time
+             * @description До какого момента (UTC) заблокирован аккаунт — только у identity.account_blocked. Поля нет у этого кода — блокировка бессрочная (null не приходит)
+             * @example 2026-11-20T00:00:00Z
+             */
+            blocked_until?: string;
             /**
              * Format: int64
              * @description Только у geo.import_in_progress админки — id задачи импорта страны, которая уже стоит в очереди или выполняется; её можно отменить cancelGeoImportJob
@@ -451,13 +1873,1314 @@ export interface components {
              */
             store_url: string | null;
         };
+        /**
+         * @description Исход входа: authenticated — сессия выдана (tokens, user); mfa_required — нужен второй фактор (mfa); signup_required — учётка провайдера новая, нужна дорегистрация (social_signup); deletion_pending — аккаунт ждёт удаления, сессии нет, можно отменить удаление (deletion)
+         * @enum {string}
+         */
+        AuthStatus: "authenticated" | "mfa_required" | "signup_required" | "deletion_pending";
+        /**
+         * @description Результат входа или регистрации. Клиент ветвится по `status`, поле ветки приходит только в ней:
+         *
+         *     - `authenticated` — `tokens` и `user`. Мобильный клиент кладёт `tokens.refresh_token` в
+         *       Keychain / Keystore; веб-BFF — в зашифрованную cookie. `user.documents_acceptance_required` —
+         *       показать экран «примите новую версию документов» → `acceptDocuments`;
+         *     - `mfa_required` — `mfa`: экран второго фактора → `completeMfa` с `mfa.mfa_token`
+         *       (ключом доступа — сначала `startMfaPasskey`); `mfa.reset_at` — назначен сброс 2FA через
+         *       поддержку, предупредить игрока;
+         *     - `signup_required` — `social_signup`: экран дорегистрации (город, дата рождения, ник,
+         *       документы) → `completeSocialSignup` с `social_signup.signup_token`;
+         *     - `deletion_pending` — `deletion`: экран «Аккаунт будет удалён `purge_at`. Отменить удаление?»
+         *       → `cancelDeletion` с `deletion.restore_token`. Сессия не выдана.
+         *
+         *     Незнакомый `status` (enum открытый) — показать общий текст ошибки и предложить обновить приложение.
+         */
+        AuthResult: {
+            status: components["schemas"]["AuthStatus"];
+            tokens?: components["schemas"]["TokenPair"];
+            user?: components["schemas"]["AuthUser"];
+            mfa?: components["schemas"]["MfaChallenge"];
+            social_signup?: components["schemas"]["SocialSignupPending"];
+            deletion?: components["schemas"]["DeletionPending"];
+        };
+        /** @description Токены сессии. access — короткий (10 минут), идёт в заголовке Authorization: Bearer; refresh — непрозрачный, меняется на каждом refreshSession (прежний после этого не действует) */
+        TokenPair: {
+            /**
+             * @description Access-токен (JWT EdDSA) — заголовок «Authorization — Bearer» у операций с замком
+             * @example eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+             */
+            access_token: string;
+            /**
+             * Format: date-time
+             * @description Когда access-токен истечёт (UTC); после — 401 auth.unauthenticated, обновите токен
+             * @example 2026-11-13T17:10:00Z
+             */
+            access_expires_at: string;
+            /**
+             * @description Refresh-токен (256 бит, base64url) — только для refreshSession; хранить в Keychain / Keystore, никуда больше не передавать
+             * @example Yx3kQp1bZt7Lm2Vb4Np8Rt1Zw6Yc0Hs5Ae9Df3Gh7Jk
+             */
+            refresh_token: string;
+            /**
+             * Format: date-time
+             * @description До какого момента refresh действует без использования (UTC); каждое обновление продлевает срок. Телефон — 90 дней, веб — 30 дней
+             * @example 2027-02-11T17:00:00Z
+             */
+            refresh_idle_expires_at: string;
+            /**
+             * Format: uuid
+             * @description Id сессии — совпадает с id в listMySessions (отметка «это устройство»)
+             * @example 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+             */
+            session_id: string;
+        };
+        /** @description Игрок, на которого выдана сессия */
+        AuthUser: {
+            /**
+             * Format: uuid
+             * @description Id игрока
+             * @example 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+             */
+            id: string;
+            /**
+             * @description Ник игрока
+             * @example kosta_10
+             */
+            nickname: string;
+            /**
+             * @description Аккаунт создан этим вызовом (регистрация) — клиент ведёт на шаг «Кто ты на поле»
+             * @example false
+             */
+            new_user: boolean;
+            /**
+             * @description Вышла новая версия правил сервиса или политики конфиденциальности, а игрок её ещё не принял — показать экран согласия и вызвать acceptDocuments
+             * @example false
+             */
+            documents_acceptance_required: boolean;
+        };
+        /**
+         * @description Второй фактор: totp — код из приложения-аутентификатора; recovery_code — резервный код; passkey — ключ доступа (WebAuthn)
+         * @enum {string}
+         */
+        MfaMethod: "totp" | "recovery_code" | "passkey";
+        /** @description Нужен второй фактор: mfa_token одноразовый, живёт 5 минут и выдерживает 5 неверных вводов — затем вход начинается заново */
+        MfaChallenge: {
+            /**
+             * @description Токен шага второго фактора (256 бит, base64url) — передайте в completeMfa
+             * @example Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1
+             */
+            mfa_token: string;
+            /**
+             * Format: date-time
+             * @description Когда mfa_token истечёт (UTC); после — 410 identity.mfa_expired
+             * @example 2026-11-13T17:05:00Z
+             */
+            expires_at: string;
+            /**
+             * @description Вторые факторы аккаунта, которые принимает этот шаг; passkey — только если у аккаунта есть ключ доступа и вход ключами включён
+             * @example [
+             *       "totp",
+             *       "recovery_code"
+             *     ]
+             */
+            methods: components["schemas"]["MfaMethod"][];
+            /**
+             * Format: date-time
+             * @description Назначенный через поддержку сброс 2FA (UTC) или null. Вход со вторым фактором отменяет сброс — предупредите игрока «через N дней 2FA будет сброшена»
+             * @example null
+             */
+            reset_at: string | null;
+        };
+        /** @description Учётка Apple или Google ещё не привязана ни к одному аккаунту — нужна дорегистрация completeSocialSignup */
+        SocialSignupPending: {
+            /**
+             * @description Токен дорегистрации (256 бит, base64url), одноразовый
+             * @example U2lnbnVwLXRva2VuLTI1Ni1iaXRzLWJhc2U2NHVybC14eXo
+             */
+            signup_token: string;
+            /**
+             * Format: date-time
+             * @description Когда signup_token истечёт (UTC); после — 410 identity.signup_token_invalid
+             * @example 2026-11-13T17:15:00Z
+             */
+            expires_at: string;
+            /**
+             * @description Подтверждённая провайдером почта — станет почтой аккаунта
+             * @example kosta.f@example.com
+             */
+            email: string;
+            /**
+             * @description Почта — скрытый адрес Apple (privaterelay.appleid.com); письма идут через Apple
+             * @example false
+             */
+            email_is_private_relay: boolean;
+        };
+        /** @description Аккаунт ждёт удаления: вход подтвердил владельца, но сессия не выдана. Отмена удаления — cancelDeletion с restore_token */
+        DeletionPending: {
+            /**
+             * @description Токен отмены удаления (256 бит, base64url), одноразовый, живёт 10 минут
+             * @example UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj
+             */
+            restore_token: string;
+            /**
+             * Format: date-time
+             * @description Когда restore_token истечёт (UTC); после — войдите снова
+             * @example 2026-11-13T17:10:00Z
+             */
+            expires_at: string;
+            /**
+             * Format: date-time
+             * @description Когда аккаунт будет удалён без возможности восстановления (UTC)
+             * @example 2026-12-10T09:00:00Z
+             */
+            purge_at: string;
+        };
+        /** @description Код отправлен (или нет — ответ одинаков, существование аккаунта не раскрывается): 6 цифр, живёт 15 минут, 5 неверных вводов гасят его */
+        CodeSent: {
+            /**
+             * Format: uuid
+             * @description Id кода — передайте в подтверждение и в resendAuthCode
+             * @example 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+             */
+            code_id: string;
+            /**
+             * Format: date-time
+             * @description Когда код истечёт (UTC)
+             * @example 2026-11-13T17:15:00Z
+             */
+            expires_at: string;
+            /**
+             * Format: date-time
+             * @description С какого момента можно отправить код повторно (UTC) — до него кнопка «Отправить снова» неактивна
+             * @example 2026-11-13T17:01:00Z
+             */
+            resend_available_at: string;
+        };
+        /** @description Устройство мобильного клиента. Вне BFF обязательно на входе и регистрации (иначе 422 identity.device_required); веб (BFF) поле не передаёт — устройство веба BFF ставит сам */
+        DeviceInfo: {
+            platform: components["schemas"]["AppPlatform"];
+            /**
+             * @description Идентификатор установки: iOS — UUID, сохранённый в Keychain; Android — ANDROID_ID. Сервер хранит только его HMAC
+             * @example 6F9619FF-8B86-4D01-B42D-00CF4FC964FF
+             */
+            install_id: string;
+            /**
+             * @description Модель устройства — для экрана «Где вы вошли»
+             * @example iPhone15,2
+             */
+            model: string;
+            /**
+             * @description Версия ОС
+             * @example 18.1
+             */
+            os_version: string;
+            /**
+             * @description Версия приложения MAJOR.MINOR.PATCH или MAJOR.MINOR (iOS CFBundleShortVersionString бывает из двух частей) — сервер читает 1.4 как 1.4.0
+             * @example 1.4.0
+             */
+            app_version: string;
+            /**
+             * @description Токен Apple DeviceCheck (base64) — только iOS, нужен на регистрации (счётчик регистраций устройства)
+             * @example AgAAAJ1xQw0eZr8ZfU1v7cQ3kNm2LpR9sT4uV6wX8yZ0aBcD
+             */
+            device_check_token?: string;
+            integrity?: components["schemas"]["DeviceIntegrity"];
+        };
+        /**
+         * @description Вид проверки целостности: app_attest_attestation — первая аттестация ключа App Attest (iOS); app_attest_assertion — утверждение тем же ключом; play_integrity — токен Play Integrity (Android)
+         * @enum {string}
+         */
+        DeviceIntegrityKind: "app_attest_attestation" | "app_attest_assertion" | "play_integrity";
+        /** @description Проверка целостности приложения по задаче createDeviceChallenge. Нет или не прошла — в режиме наблюдения запрос получает требование антибота (403 humancheck.required), в строгом — 403 identity.device_untrusted */
+        DeviceIntegrity: {
+            /**
+             * Format: uuid
+             * @description Id задачи из createDeviceChallenge (одноразовая, 5 минут)
+             * @example 0193a1c4-2a3b-7e41-b5c6-7d8e9f0a1b23
+             */
+            challenge_id: string;
+            kind: components["schemas"]["DeviceIntegrityKind"];
+            /**
+             * @description Id ключа App Attest (base64) — только у app_attest_*
+             * @example bXlLZXlJZEZyb21BcHBBdHRlc3Q9
+             */
+            key_id?: string;
+            /**
+             * @description Base64: объект аттестации App Attest, утверждение или токен Play Integrity (requestHash — base64url(SHA-256(challenge)))
+             * @example o2NmbXRvYXBwbGUtYXBwYXR0ZXN0Z2F0dFN0bXSiY3g1Y4JZAuQ
+             */
+            payload: string;
+        };
+        /** @description Задача проверки целостности приложения — одноразовая, живёт 5 минут */
+        DeviceChallenge: {
+            /**
+             * Format: uuid
+             * @description Id задачи — передайте в device.integrity.challenge_id
+             * @example 0193a1c4-2a3b-7e41-b5c6-7d8e9f0a1b23
+             */
+            challenge_id: string;
+            /**
+             * @description Случайное значение (base64url) — clientDataHash App Attest или основа requestHash Play Integrity
+             * @example c2VydmVyLWNoYWxsZW5nZS0zMi1ieXRlcy1iYXNlNjR1cmw
+             */
+            challenge: string;
+            /**
+             * Format: date-time
+             * @description Когда задача истечёт (UTC)
+             * @example 2026-11-13T17:05:00Z
+             */
+            expires_at: string;
+        };
+        /** @description Задача WebAuthn: options передайте платформенному API (iOS ASAuthorization, Android Credential Manager, браузер navigator.credentials), ответ — вместе с challenge_id */
+        WebAuthnOptions: {
+            /**
+             * Format: uuid
+             * @description Id задачи — вернуть вместе с ответом платформенного API
+             * @example 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+             */
+            challenge_id: string;
+            /**
+             * @description PublicKeyCredentialCreationOptionsJSON (регистрация ключа) или PublicKeyCredentialRequestOptionsJSON (вход) по W3C WebAuthn Level 3
+             * @example {
+             *       "challenge": "c2VydmVyLWNoYWxsZW5nZS0zMi1ieXRlcw",
+             *       "rpId": "wherefootball.example",
+             *       "timeout": 300000,
+             *       "userVerification": "required",
+             *       "allowCredentials": []
+             *     }
+             */
+            options: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * @description Ответ платформенного API как есть — RegistrationResponseJSON (регистрация ключа) или AuthenticationResponseJSON (вход) по W3C WebAuthn Level 3; разбирает сервер
+         * @example {
+         *       "id": "KbDl1lrv0Ue6hXXH3Z2E1g",
+         *       "rawId": "KbDl1lrv0Ue6hXXH3Z2E1g",
+         *       "type": "public-key",
+         *       "response": {
+         *         "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+         *         "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+         *         "signature": "MEUCIQDgYk0",
+         *         "userHandle": "dXNlci1oYW5kbGU"
+         *       }
+         *     }
+         */
+        WebAuthnCredential: {
+            [key: string]: unknown;
+        };
+        /** @description Ответ ключа доступа на задачу WebAuthn */
+        PasskeyAssertion: {
+            /**
+             * Format: uuid
+             * @description Id задачи из WebAuthnOptions
+             * @example 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+             */
+            challenge_id: string;
+            credential: components["schemas"]["WebAuthnCredential"];
+        };
+        /**
+         * @description Почему ник недоступен: invalid — не проходит формат (3–20 символов, буквы, цифры, «_», «.», «-»; не с знака и не на знак, без двух знаков подряд, не из одних цифр); taken — занят; reserved — зарезервирован или освободился недавно
+         * @enum {string}
+         */
+        NicknameUnavailableReason: "invalid" | "taken" | "reserved";
+        /** @description Доступность ника; проверка при вводе, окончательная — при регистрации */
+        NicknameAvailability: {
+            /**
+             * @description Ник можно взять
+             * @example false
+             */
+            available: boolean;
+            /** @description Почему нельзя (значения NicknameUnavailableReason: invalid, taken, reserved) или null, если ник доступен */
+            reason: (string & components["schemas"]["NicknameUnavailableReason"]) | null;
+        };
+        /**
+         * @description Юридический документ: terms — правила сервиса, privacy — политика конфиденциальности
+         * @enum {string}
+         */
+        LegalDocumentKind: "terms" | "privacy";
+        /** @description Текущая версия документа */
+        LegalDocument: {
+            document: components["schemas"]["LegalDocumentKind"];
+            /**
+             * @description Версия — дата YYYY-MM-DD или semver; сравнивается на равенство
+             * @example 2026-11-01
+             */
+            version: string;
+            /**
+             * Format: uri
+             * @description Где прочитать текст документа
+             * @example https://wherefootball.example/legal/terms/2026-11-01
+             */
+            url: string;
+        };
+        /** @description Текущие версии всех документов — каждую нужно принять при регистрации */
+        LegalDocumentList: {
+            /** @description Документы по одному на вид */
+            items: components["schemas"]["LegalDocument"][];
+        };
+        /** @description Принятая игроком версия документа */
+        AcceptedDocument: {
+            document: components["schemas"]["LegalDocumentKind"];
+            /**
+             * @description Версия из getLegalDocuments
+             * @example 2026-11-01
+             */
+            version: string;
+        };
+        /**
+         * @description Язык интерфейса и писем
+         * @enum {string}
+         */
+        Locale: "ru" | "en";
+        /**
+         * @description Статус аккаунта: active — обычный; suspended — часть возможностей закрыта ограничениями (restrictions); banned — заблокирован; pending_deletion — ждёт удаления (вход отменяет удаление); deleted — удалён
+         * @enum {string}
+         */
+        AccountStatus: "active" | "suspended" | "banned" | "pending_deletion" | "deleted";
+        /** @description Ограничение возможности санкцией модерации */
+        MeRestriction: {
+            /**
+             * @description Закрытая возможность (список ведёт модерация; незнакомое значение показывайте общим текстом): create_match, comment, captain…
+             * @example comment
+             */
+            capability: string;
+            /**
+             * Format: date-time
+             * @description До какого момента (UTC); null — бессрочно
+             * @example 2026-11-20T00:00:00Z
+             */
+            until: string | null;
+        };
+        /** @description Согласие игрока с документом */
+        MeDocument: {
+            document: components["schemas"]["LegalDocumentKind"];
+            /**
+             * @description Последняя принятая версия или null, если документ не принимался
+             * @example 2026-06-01
+             */
+            accepted_version: string | null;
+            /**
+             * @description Текущая версия документа
+             * @example 2026-11-01
+             */
+            current_version: string;
+            /**
+             * Format: uri
+             * @description Текст текущей версии
+             * @example https://wherefootball.example/legal/terms/2026-11-01
+             */
+            url: string;
+        };
+        /** @description Аккаунт текущего игрока — экран настроек и проверка состояния после входа */
+        Me: {
+            /**
+             * Format: uuid
+             * @description Id игрока
+             * @example 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+             */
+            id: string;
+            /**
+             * @description Почта аккаунта (подтверждена)
+             * @example kosta.f@example.com
+             */
+            email: string;
+            /**
+             * @description Ник
+             * @example kosta_10
+             */
+            nickname: string;
+            /**
+             * Format: date-time
+             * @description С какого момента ник можно сменить (UTC; раз в 30 дней); null — можно сейчас
+             * @example 2026-12-13T09:30:00Z
+             */
+            nickname_changeable_at: string | null;
+            /**
+             * Format: date
+             * @description Дата рождения — меняется только через поддержку
+             * @example 1998-04-17
+             */
+            birth_date: string;
+            /**
+             * Format: uuid
+             * @description Город игрока (справочник geo)
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            city_id: string;
+            locale: components["schemas"]["Locale"];
+            status: components["schemas"]["AccountStatus"];
+            /**
+             * Format: date-time
+             * @description Когда создан аккаунт (UTC)
+             * @example 2026-03-02T18:20:00Z
+             */
+            created_at: string;
+            /**
+             * @description У аккаунта есть пароль; false — входит только через Apple, Google или ключ доступа (changePassword задаст пароль)
+             * @example true
+             */
+            has_password: boolean;
+            /**
+             * @description Включена двухфакторная аутентификация
+             * @example false
+             */
+            mfa_enabled: boolean;
+            /** @description Действующие ограничения; пусто — ограничений нет */
+            restrictions: components["schemas"]["MeRestriction"][];
+            /** @description Согласие с каждым документом */
+            documents: components["schemas"]["MeDocument"][];
+            /**
+             * @description Есть непринятая текущая версия документа — показать экран согласия → acceptDocuments
+             * @example false
+             */
+            documents_acceptance_required: boolean;
+        };
+        /** @description Правка настроек аккаунта — хотя бы одно поле */
+        MeUpdate: {
+            locale?: components["schemas"]["Locale"];
+        };
+        /**
+         * @description Клиент сессии: mobile — приложение, web — сайт (через BFF)
+         * @enum {string}
+         */
+        ClientKind: "mobile" | "web";
+        /**
+         * @description Способ входа, которым создана сессия
+         * @enum {string}
+         */
+        AuthMethod: "password" | "apple" | "google" | "passkey";
+        /** @description Вход на устройстве — строка экрана «Где вы вошли» */
+        Session: {
+            /**
+             * Format: uuid
+             * @description Id сессии — для revokeMySession
+             * @example 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+             */
+            id: string;
+            /**
+             * @description Это сессия текущего запроса
+             * @example true
+             */
+            current: boolean;
+            client_kind: components["schemas"]["ClientKind"];
+            /** @description Платформа приложения (значения AppPlatform) или null у веба */
+            platform: (string & components["schemas"]["AppPlatform"]) | null;
+            /**
+             * @description Модель устройства или null у веба
+             * @example iPhone15,2
+             */
+            device_model: string | null;
+            /**
+             * @description Версия ОС или null
+             * @example 18.1
+             */
+            os_version: string | null;
+            /**
+             * @description Версия приложения или null у веба
+             * @example 1.4.0
+             */
+            app_version: string | null;
+            /**
+             * @description Браузер и ОС по User-Agent у веба или null у приложения
+             * @example Safari 18, macOS
+             */
+            browser: string | null;
+            auth_method: components["schemas"]["AuthMethod"];
+            /**
+             * @description Город по IP на языке аккаунта или null (не определён); сам IP не отдаётся
+             * @example Ставрополь
+             */
+            city: string | null;
+            /**
+             * Format: date-time
+             * @description Когда выполнен вход (UTC)
+             * @example 2026-11-01T08:15:00Z
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Последняя активность (UTC, точность — до 10 минут)
+             * @example 2026-11-13T16:50:00Z
+             */
+            last_seen_at: string;
+        };
+        /** @description Живые сессии аккаунта (не больше 100; при превышении старшие отзываются) */
+        SessionList: {
+            /** @description Сессии, новые сверху */
+            items: components["schemas"]["Session"][];
+        };
+        /** @description Итог «выйти везде, кроме этого» */
+        RevokedCount: {
+            /**
+             * @description Сколько сессий отозвано
+             * @example 3
+             */
+            revoked: number;
+        };
+        /** @description Форма регистрации по почте */
+        SignupStartRequest: {
+            /**
+             * @description Почта; регистр и пробелы по краям не важны, домен на кириллице принимается
+             * @example kosta.f@example.com
+             */
+            email: string;
+            /**
+             * @description Пароль как введён: не короче 10 символов, не из списка распространённых, не длиннее потолка — иначе 422 identity.password_weak с причиной в reasons
+             * @example Жёлтая карточка на 90-й
+             */
+            password: string;
+            /**
+             * @description Ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid. Длиннее 64 символов — 400 validation.failed по полю (проверка схемы, до сервера)
+             * @example kosta_10
+             */
+            nickname: string;
+            /**
+             * Format: date
+             * @description Дата рождения; младше порога страны города — 422 identity.too_young
+             * @example 1998-04-17
+             */
+            birth_date: string;
+            /**
+             * Format: uuid
+             * @description Город из listCities или findNearestCity
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            city_id: string;
+            /** @description Принятые версии всех текущих документов (getLegalDocuments); нет какого-то или версия не текущая — 422 identity.documents_outdated */
+            accepted_documents: components["schemas"]["AcceptedDocument"][];
+            locale?: components["schemas"]["Locale"];
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Подтверждение регистрации кодом из письма */
+        SignupConfirmRequest: {
+            /**
+             * Format: uuid
+             * @description Id кода из CodeSent
+             * @example 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+             */
+            code_id: string;
+            /**
+             * @description 6 цифр из письма
+             * @example 492817
+             */
+            code: string;
+            /**
+             * @description Новый ник — только если ответ был 409 identity.nickname_taken (ник заняли, пока шёл код); без него берётся ник из startSignup. Формат — 422 identity.nickname_invalid. Длиннее 64 символов — 400 validation.failed по полю (проверка схемы, до сервера)
+             * @example kosta_11
+             */
+            nickname?: string;
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Вход по почте и паролю */
+        LoginRequest: {
+            /**
+             * @description Почта аккаунта; регистр и пробелы по краям не важны
+             * @example kosta.f@example.com
+             */
+            email: string;
+            /**
+             * @description Пароль как введён
+             * @example Жёлтая карточка на 90-й
+             */
+            password: string;
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Второй фактор входа: mfa_token и ровно одно из code, recovery_code, passkey (ни одного или больше одного — 400 validation.failed по полю body). Ключом доступа — сначала startMfaPasskey */
+        MfaCompleteRequest: {
+            /**
+             * @description Токен из AuthResult.mfa
+             * @example Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1
+             */
+            mfa_token: string;
+            /**
+             * @description Код из приложения-аутентификатора — 6 цифр; пробелы между цифрами допустимы
+             * @example 492817
+             */
+            code?: string;
+            /**
+             * @description Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны; сгорает
+             * @example k7m2q-x9p4t
+             */
+            recovery_code?: string;
+            passkey?: components["schemas"]["PasskeyAssertion"];
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Запрос кода сброса пароля */
+        PasswordResetStartRequest: {
+            /**
+             * @description Почта аккаунта
+             * @example kosta.f@example.com
+             */
+            email: string;
+        };
+        /** @description Новый пароль по коду из письма. Аккаунт с 2FA — ещё второй фактор в mfa (без него — 400 identity.mfa_required, код при этом не тратится) */
+        PasswordResetConfirmRequest: {
+            /**
+             * Format: uuid
+             * @description Id кода из CodeSent
+             * @example 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+             */
+            code_id: string;
+            /**
+             * @description 6 цифр из письма
+             * @example 492817
+             */
+            code: string;
+            /**
+             * @description Новый пароль — та же политика, что при регистрации (identity.password_weak)
+             * @example Свисток на 46-й минуте
+             */
+            new_password: string;
+            /** @description Второй фактор — ровно одно из code и recovery_code (ни одного или оба — 400 validation.failed). Ключ доступа здесь не принимается: войдите ключом и смените пароль в настройках */
+            mfa?: {
+                /**
+                 * @description Код из приложения-аутентификатора — 6 цифр
+                 * @example 492817
+                 */
+                code?: string;
+                /**
+                 * @description Резервный код вида xxxxx-xxxxx; сгорает
+                 * @example k7m2q-x9p4t
+                 */
+                recovery_code?: string;
+            };
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Обмен refresh-токена на новую пару */
+        RefreshRequest: {
+            /**
+             * @description Текущий refresh-токен
+             * @example Yx3kQp1bZt7Lm2Vb4Np8Rt1Zw6Yc0Hs5Ae9Df3Gh7Jk
+             */
+            refresh_token: string;
+            /**
+             * @description install_id устройства (как в DeviceInfo) — по нему сервер узнаёт повтор с того же устройства в окне гонки; мобильный клиент передаёт всегда
+             * @example 6F9619FF-8B86-4D01-B42D-00CF4FC964FF
+             */
+            install_id?: string;
+        };
+        /** @description Отмена удаления аккаунта */
+        DeletionCancelRequest: {
+            /**
+             * @description Токен из AuthResult.deletion
+             * @example UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj
+             */
+            restore_token: string;
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Новый ник */
+        NicknameChangeRequest: {
+            /**
+             * @description Новый ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid. Длиннее 64 символов — 400 validation.failed по полю (проверка схемы, до сервера)
+             * @example kosta_11
+             */
+            nickname: string;
+        };
+        /** @description Новый пароль (текущий подтверждается свежим входом — reauthenticate) */
+        PasswordChangeRequest: {
+            /**
+             * @description Новый пароль — политика как при регистрации
+             * @example Свисток на 46-й минуте
+             */
+            new_password: string;
+        };
+        /** @description Новая почта — код придёт на неё */
+        EmailChangeStartRequest: {
+            /**
+             * @description Новая почта; регистр и пробелы по краям не важны
+             * @example kosta.new@example.com
+             */
+            new_email: string;
+        };
+        /** @description Подтверждение новой почты кодом */
+        EmailChangeConfirmRequest: {
+            /**
+             * Format: uuid
+             * @description Id кода из startEmailChange
+             * @example 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+             */
+            code_id: string;
+            /**
+             * @description 6 цифр из письма на новую почту
+             * @example 492817
+             */
+            code: string;
+        };
+        /** @description Согласие с текущими версиями документов */
+        DocumentsAcceptRequest: {
+            /** @description Принятые версии; версия не текущая или документа нет среди текущих — 422 identity.documents_outdated */
+            accepted_documents: components["schemas"]["AcceptedDocument"][];
+        };
+        /** @description Подтверждение удаления аккаунта ником */
+        DeletionRequest: {
+            /**
+             * @description Ник аккаунта, введённый игроком; не совпал — 422 identity.confirm_mismatch. Длиннее 64 символов — 400 validation.failed по полю (проверка схемы, до сервера)
+             * @example kosta_10
+             */
+            confirm_nickname: string;
+        };
+        /** @description Удаление назначено; все сессии отозваны */
+        DeletionScheduled: {
+            /**
+             * Format: date-time
+             * @description Когда аккаунт будет удалён без возможности восстановления (UTC, через 30 дней); до этого любой вход предложит отменить удаление
+             * @example 2026-12-13T09:00:00Z
+             */
+            purge_at: string;
+        };
+        /** @description Соцвход провайдера: signup — основной флаг (новая регистрация и привязка), login — аварийный (вход тех, у кого провайдер уже привязан) */
+        AuthMethodSwitch: {
+            /**
+             * @description Регистрация и привязка включены — кнопка на экране регистрации, пункт «Привязать»
+             * @example true
+             */
+            signup: boolean;
+            /**
+             * @description Вход привязанных включён — кнопка на экране входа
+             * @example true
+             */
+            login: boolean;
+        };
+        /** @description Ключи доступа: register — основной флаг auth_passkeys (добавление ключей), login — аварийный auth_passkeys_login (вход ключом, ключ вторым фактором и для свежего входа) */
+        PasskeyMethodSwitch: {
+            /**
+             * @description Добавление ключей включено — пункт «Добавить ключ доступа»
+             * @example false
+             */
+            register: boolean;
+            /**
+             * @description Вход ключом включён — кнопка «Войти ключом»
+             * @example true
+             */
+            login: boolean;
+        };
+        /** @description Включённые способы входа и регистрации (флаги §4). Google выключен, если выключен Apple */
+        AuthMethods: {
+            /**
+             * @description Почта и пароль — всегда true (флага нет, без них нет восстановления)
+             * @example true
+             */
+            password: boolean;
+            apple: components["schemas"]["AuthMethodSwitch"];
+            google: components["schemas"]["AuthMethodSwitch"];
+            passkeys: components["schemas"]["PasskeyMethodSwitch"];
+        };
+        /**
+         * @description Провайдер соцвхода. В запросе незнакомое значение отвергает проверка схемы (400 validation.failed); в ответе список открытый — незнакомое показывайте общим текстом
+         * @enum {string}
+         */
+        SocialProvider: "apple" | "google";
+        /** @description Запрос nonce соцвхода */
+        SocialNonceRequest: {
+            provider: components["schemas"]["SocialProvider"];
+        };
+        /** @description Одноразовый nonce соцвхода (10 минут). Apple передайте SHA-256(nonce) в hex, Google — nonce как есть */
+        SocialNonce: {
+            /**
+             * Format: uuid
+             * @description Id nonce — вернуть вместе с id_token
+             * @example 0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45
+             */
+            nonce_id: string;
+            /**
+             * @description Значение nonce (base64url) — передать SDK провайдера
+             * @example c29jaWFsLW5vbmNlLWV4YW1wbGUtdmFsdWU
+             */
+            nonce: string;
+            /**
+             * Format: date-time
+             * @description Когда nonce истечёт (UTC)
+             * @example 2026-11-13T17:10:00Z
+             */
+            expires_at: string;
+        };
+        /** @description Данные авторизации Apple — только у провайдера apple */
+        AppleAuthorization: {
+            /**
+             * @description Код авторизации Apple: сервер обменивает его на refresh-токен Apple для отзыва входа при отвязке и удалении аккаунта (требование Apple); не удался обмен — вход всё равно проходит
+             * @example c1a2b3d4e5f6.0.ab12.example-authorization-code
+             */
+            authorization_code: string;
+            /**
+             * @description Имя от Apple (приходит только при первом входе) — сервер его не сохраняет, можно не передавать
+             * @example Константин
+             */
+            given_name?: string;
+            /**
+             * @description Фамилия от Apple — сервер её не сохраняет, можно не передавать
+             * @example Фёдоров
+             */
+            family_name?: string;
+        };
+        /** @description Вход через Apple или Google */
+        SocialLoginRequest: {
+            provider: components["schemas"]["SocialProvider"];
+            /**
+             * Format: uuid
+             * @description Id nonce из createSocialNonce
+             * @example 0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45
+             */
+            nonce_id: string;
+            /**
+             * @description id_token провайдера (JWT) как его отдал SDK; проверяет сервер
+             * @example eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+             */
+            id_token: string;
+            apple?: components["schemas"]["AppleAuthorization"];
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Дорегистрация после соцвхода — без пароля и кода */
+        SocialSignupCompleteRequest: {
+            /**
+             * @description Токен из AuthResult.social_signup
+             * @example U2lnbnVwLXRva2VuLTI1Ni1iaXRzLWJhc2U2NHVybC14eXo
+             */
+            signup_token: string;
+            /**
+             * Format: uuid
+             * @description Город из listCities или findNearestCity
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            city_id: string;
+            /**
+             * Format: date
+             * @description Дата рождения; младше порога страны города — 422 identity.too_young
+             * @example 1998-04-17
+             */
+            birth_date: string;
+            /**
+             * @description Ник — формат как у checkNickname; не проходит — 422 identity.nickname_invalid. Длиннее 64 символов — 400 validation.failed по полю (проверка схемы, до сервера)
+             * @example kosta_10
+             */
+            nickname: string;
+            /** @description Принятые версии всех текущих документов (getLegalDocuments); нет какого-то или версия не текущая — 422 identity.documents_outdated */
+            accepted_documents: components["schemas"]["AcceptedDocument"][];
+            locale?: components["schemas"]["Locale"];
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Привязка Apple или Google к вошедшему аккаунту */
+        SocialLinkRequest: {
+            provider: components["schemas"]["SocialProvider"];
+            /**
+             * Format: uuid
+             * @description Id nonce из createSocialNonce
+             * @example 0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45
+             */
+            nonce_id: string;
+            /**
+             * @description id_token провайдера (JWT) как его отдал SDK
+             * @example eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+             */
+            id_token: string;
+            apple?: components["schemas"]["AppleAuthorization"];
+        };
+        /** @description Задача WebAuthn для второго фактора */
+        MfaPasskeyOptionsRequest: {
+            /**
+             * @description Токен из AuthResult.mfa
+             * @example Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1
+             */
+            mfa_token: string;
+        };
+        /** @description Вход ключом доступа — ответ ключа на задачу startPasskeyLogin и устройство */
+        PasskeyLoginRequest: {
+            /**
+             * Format: uuid
+             * @description Id задачи из startPasskeyLogin
+             * @example 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+             */
+            challenge_id: string;
+            credential: components["schemas"]["WebAuthnCredential"];
+            device?: components["schemas"]["DeviceInfo"];
+        };
+        /** @description Свежий вход через привязанного провайдера */
+        ReauthSocial: {
+            provider: components["schemas"]["SocialProvider"];
+            /**
+             * Format: uuid
+             * @description Id nonce из createSocialNonce
+             * @example 0193a1c6-4c5d-7a61-97e8-9f0a1b2c3d45
+             */
+            nonce_id: string;
+            /**
+             * @description id_token провайдера (JWT); его sub должен быть привязан к аккаунту
+             * @example eyJhbGciOiJFZERTQSIsImtpZCI6Ikh4M2s5UXBMIn0.eyJzdWIiOiIwMTkzMmYxYy03YTNlIn0.c2lnbmF0dXJl
+             */
+            id_token: string;
+        };
+        /** @description Подтверждение владельца — ровно одно из password, totp_code, recovery_code, passkey, social (ни одного или больше одного — 400 validation.failed по полю body). При 2FA пароль не годится */
+        ReauthRequest: {
+            /**
+             * @description Текущий пароль — только у аккаунта без 2FA
+             * @example Жёлтая карточка на 90-й
+             */
+            password?: string;
+            /**
+             * @description Код из приложения-аутентификатора — 6 цифр
+             * @example 492817
+             */
+            totp_code?: string;
+            /**
+             * @description Резервный код вида xxxxx-xxxxx; сгорает
+             * @example k7m2q-x9p4t
+             */
+            recovery_code?: string;
+            passkey?: components["schemas"]["PasskeyAssertion"];
+            social?: components["schemas"]["ReauthSocial"];
+        };
+        /** @description Свежий вход подтверждён */
+        ReauthResult: {
+            /**
+             * Format: date-time
+             * @description До какого момента (UTC) чувствительные операции не спросят подтверждения
+             * @example 2026-11-13T17:10:00Z
+             */
+            reauth_until: string;
+        };
+        /** @description Привязанная учётка Apple или Google */
+        LinkedIdentity: {
+            /**
+             * Format: uuid
+             * @description Id привязки — для unlinkIdentity
+             * @example 0193a1c7-5d6e-7b71-a8f9-0a1b2c3d4e56
+             */
+            id: string;
+            provider: components["schemas"]["SocialProvider"];
+            /**
+             * @description Почта у провайдера или null, если провайдер её не дал
+             * @example kosta.f@example.com
+             */
+            email: string | null;
+            /**
+             * @description Почта — скрытый адрес Apple (privaterelay.appleid.com)
+             * @example false
+             */
+            email_is_private_relay: boolean;
+            /**
+             * Format: date-time
+             * @description Когда привязана (UTC)
+             * @example 2026-10-02T12:00:00Z
+             */
+            linked_at: string;
+        };
+        /** @description Ключ доступа аккаунта */
+        Passkey: {
+            /**
+             * Format: uuid
+             * @description Id ключа — для renamePasskey и deletePasskey
+             * @example 0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67
+             */
+            id: string;
+            /**
+             * @description Имя ключа (задал игрок или по умолчанию — модель устройства)
+             * @example iPhone Кости
+             */
+            name: string;
+            /**
+             * Format: date-time
+             * @description Когда добавлен (UTC)
+             * @example 2026-10-05T19:40:00Z
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Последний вход этим ключом (UTC) или null
+             * @example 2026-11-12T08:05:00Z
+             */
+            last_used_at: string | null;
+            /**
+             * @description Ключ синхронизируется между устройствами (iCloud Keychain, Google Password Manager)
+             * @example true
+             */
+            backed_up: boolean;
+        };
+        /** @description Состояние двухфакторной аутентификации */
+        MfaStatus: {
+            /**
+             * @description 2FA (TOTP) включена
+             * @example true
+             */
+            totp_enabled: boolean;
+            /**
+             * Format: date-time
+             * @description Когда 2FA включена (UTC) или null
+             * @example 2026-09-20T10:15:00Z
+             */
+            confirmed_at: string | null;
+            /**
+             * @description Сколько резервных кодов осталось; 0 при выключенной 2FA
+             * @example 8
+             */
+            recovery_codes_left: number;
+            /**
+             * Format: date-time
+             * @description Когда будет выполнен сброс 2FA по запросу в поддержку (UTC) или null. Не null — предупредите игрока и предложите отменить (cancelMyMfaReset)
+             * @example null
+             */
+            reset_scheduled_at: string | null;
+        };
+        /** @description Способы входа аккаунта — экран «Способы входа» */
+        MyAuthMethods: {
+            /**
+             * @description У аккаунта есть пароль
+             * @example true
+             */
+            has_password: boolean;
+            /** @description Привязки Apple и Google (не больше одной на провайдера) */
+            identities: components["schemas"]["LinkedIdentity"][];
+            /** @description Ключи доступа (не больше 10) */
+            passkeys: components["schemas"]["Passkey"][];
+            mfa: components["schemas"]["MfaStatus"];
+        };
+        /** @description Секрет TOTP для приложения-аутентификатора; отдаётся один раз, не кэшируется и не сохраняется в ключах идемпотентности */
+        TotpSetup: {
+            /**
+             * @description Секрет TOTP в base32 — для ручного ввода в приложение
+             * @example JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+             */
+            secret: string;
+            /**
+             * @description URI для QR-кода (issuer — имя продукта, account — ник)
+             * @example otpauth://totp/WF:kosta_10?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=WF
+             */
+            otpauth_uri: string;
+        };
+        /** @description Код из приложения-аутентификатора для включения 2FA */
+        TotpConfirmRequest: {
+            /**
+             * @description 6 цифр; пробелы между цифрами допустимы
+             * @example 492817
+             */
+            code: string;
+        };
+        /** @description Резервные коды — показываются один раз; каждый годится один раз вместо кода TOTP */
+        RecoveryCodes: {
+            /**
+             * @description 10 кодов вида xxxxx-xxxxx
+             * @example [
+             *       "k7m2q-x9p4t",
+             *       "a3b5c-d7e2f",
+             *       "m4n6p-q8r3s",
+             *       "t5u7v-w9x2y",
+             *       "z3a5b-c7d2e",
+             *       "f4g6h-j8k3l",
+             *       "n5p7q-r9s2t",
+             *       "u3v5w-x7y2z",
+             *       "b4c6d-e8f3g",
+             *       "h5j7k-l9m2n"
+             *     ]
+             */
+            recovery_codes: string[];
+        };
+        /** @description Ответ ключа на задачу startPasskeyRegistration */
+        PasskeyRegisterRequest: {
+            /**
+             * Format: uuid
+             * @description Id задачи из startPasskeyRegistration
+             * @example 0193a1c5-3b4c-7f51-86d7-8e9f0a1b2c34
+             */
+            challenge_id: string;
+            credential: components["schemas"]["WebAuthnCredential"];
+            /**
+             * @description Имя ключа; нет — сервер возьмёт модель устройства
+             * @example iPhone Кости
+             */
+            name?: string;
+        };
+        /** @description Новое имя ключа доступа */
+        PasskeyRenameRequest: {
+            /**
+             * @description Новое имя
+             * @example Рабочий ноутбук
+             */
+            name: string;
+        };
+        /**
+         * @description Почему заявку подать нельзя: too_young — возраст ниже порога страны города; restricted — ограничение captain; profile_incomplete — не заполнен профиль игрока (основная позиция); captain_elsewhere_in_city — уже капитан другой команды в этом городе; already_permitted — допуск в городе уже есть; checks_unavailable — условия сейчас проверить нельзя (модули профиля или команд ещё не запущены). Незнакомое значение показывайте общим текстом
+         * @enum {string}
+         */
+        CaptainIneligibility: "too_young" | "restricted" | "profile_incomplete" | "captain_elsewhere_in_city" | "already_permitted" | "checks_unavailable";
+        /**
+         * @description Статус заявки: pending — ждёт решения модератора; approved — одобрена (допуск выдан); rejected — отклонена (код причины и комментарий); withdrawn — отозвана игроком или удалением аккаунта
+         * @enum {string}
+         */
+        CaptainApplicationStatus: "pending" | "approved" | "rejected" | "withdrawn";
+        /**
+         * @description Причина отказа: profile_incomplete — профиль не заполнен; insufficient_info — мало сведений о команде и поле; contact_unreachable — не удалось связаться; suspicious_activity — подозрение на мультиаккаунт или накрутку; duplicate_account — есть другой аккаунт-капитан; other — другое (подробности — в комментарии). Тексты для игрока — локали клиента
+         * @enum {string}
+         */
+        CaptainRejectionCode: "profile_incomplete" | "insufficient_info" | "contact_unreachable" | "suspicious_activity" | "duplicate_account" | "other";
+        /** @description Допуск капитана в городе */
+        CaptainPermit: {
+            /**
+             * Format: uuid
+             * @description Город допуска
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            city_id: string;
+            /**
+             * Format: date-time
+             * @description Когда допуск выдан (UTC)
+             * @example 2026-11-05T12:00:00Z
+             */
+            granted_at: string;
+            /**
+             * @description Испытательный срок — снимается после первых матчей команды
+             * @example true
+             */
+            probationary: boolean;
+        };
+        /** @description Можно ли подать заявку в текущем городе игрока */
+        CaptainEligibility: {
+            /**
+             * Format: uuid
+             * @description Текущий город игрока — город заявки
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            city_id: string;
+            /**
+             * @description Заявку можно подать сейчас
+             * @example false
+             */
+            eligible: boolean;
+            /**
+             * @description Почему нельзя; пусто, если можно
+             * @example [
+             *       "profile_incomplete"
+             *     ]
+             */
+            reasons: components["schemas"]["CaptainIneligibility"][];
+            /**
+             * Format: date-time
+             * @description Когда закончится пауза после отказа (UTC) или null, если паузы нет
+             * @example null
+             */
+            available_at: string | null;
+        };
+        /** @description Заявка в капитаны — как её видит заявитель */
+        CaptainApplication: {
+            /**
+             * Format: uuid
+             * @description Id заявки
+             * @example 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Город заявки — текущий город игрока на момент подачи
+             * @example 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+             */
+            city_id: string;
+            status: components["schemas"]["CaptainApplicationStatus"];
+            /**
+             * @description Формат игры, который игрок хочет собирать, или null
+             * @example 6×6 по средам
+             */
+            proposed_format: string | null;
+            /**
+             * @description Поле, где игрок планирует играть, или null
+             * @example Динамо, искусственное поле
+             */
+            proposed_pitch: string | null;
+            /**
+             * @description Как часто игрок собирает игры, или null
+             * @example раз в неделю
+             */
+            play_frequency: string | null;
+            /**
+             * @description Ссылка для связи (https) или null
+             * @example https://t.me/kosta_10
+             */
+            contact_link: string | null;
+            /**
+             * @description Свободный текст игрока или null
+             * @example Собираю ребят с работы третий год
+             */
+            note: string | null;
+            /**
+             * @description Телефон указан (сам номер игроку не возвращается)
+             * @example true
+             */
+            has_phone: boolean;
+            /**
+             * Format: date-time
+             * @description Когда подана (UTC)
+             * @example 2026-11-13T09:00:00Z
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Когда решена или отозвана (UTC) или null
+             * @example null
+             */
+            decided_at: string | null;
+            /** @description Код причины отказа (значения CaptainRejectionCode) или null */
+            rejection_code: (string & components["schemas"]["CaptainRejectionCode"]) | null;
+            /**
+             * @description Комментарий модератора к решению или null
+             * @example null
+             */
+            comment: string | null;
+        };
+        /** @description Капитанство игрока — экран «Стать капитаном» */
+        Captaincy: {
+            /** @description Допуски капитана по городам; пусто — допусков нет */
+            permits: components["schemas"]["CaptainPermit"][];
+            eligibility: components["schemas"]["CaptainEligibility"];
+            /** @description Заявка, ждущая решения, или null */
+            open_application: components["schemas"]["CaptainApplication"] | null;
+        };
+        /** @description Страница своих заявок, новые сверху */
+        CaptainApplicationPage: {
+            /** @description Заявки страницы */
+            items: components["schemas"]["CaptainApplication"][];
+            /**
+             * @description Курсор следующей страницы; null — страниц больше нет
+             * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTEtMTNUMDk6MDA6MDBaIl19
+             */
+            next_cursor: string | null;
+        };
+        /** @description Форма заявки в капитаны — все поля необязательны */
+        CaptainApplicationSubmitRequest: {
+            /**
+             * @description Какие игры собирать (формат, дни)
+             * @example 6×6 по средам
+             */
+            proposed_format?: string;
+            /**
+             * @description Где играть
+             * @example Динамо, искусственное поле
+             */
+            proposed_pitch?: string;
+            /**
+             * @description Как часто
+             * @example раз в неделю
+             */
+            play_frequency?: string;
+            /**
+             * @description Ссылка для связи — только https
+             * @example https://t.me/kosta_10
+             */
+            contact_link?: string;
+            /**
+             * @description Свободный текст для модератора
+             * @example Собираю ребят с работы третий год
+             */
+            note?: string;
+            /**
+             * @description Телефон в формате E.164 — контакт для модератора, не подтверждается
+             * @example +79181234567
+             */
+            phone?: string;
+        };
     };
     responses: {
         /** @description Ошибка в формате RFC 9457 */
         Problem: {
             headers: {
                 /**
-                 * @description Через сколько секунд повторить — только у 429 ratelimit.exceeded
+                 * @description Через сколько секунд повторить — только у 429 ratelimit.exceeded и 429 identity.resend_too_soon (повтор отправки кода раньше паузы)
                  * @example 30
                  */
                 "Retry-After"?: number;
@@ -479,9 +3202,54 @@ export interface components {
          * @example ru-RU,ru;q=0.9,en;q=0.8
          */
         AcceptLanguage: string;
+        /**
+         * @description Id кода из письма — code_id ответа CodeSent
+         * @example 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+         */
+        CodeId: string;
+        /**
+         * @description Id своей сессии из listMySessions
+         * @example 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+         */
+        SessionId: string;
+        /**
+         * @description Id привязки Apple или Google из listMyAuthMethods
+         * @example 0193a1c7-5d6e-7b71-a8f9-0a1b2c3d4e56
+         */
+        IdentityId: string;
+        /**
+         * @description Id ключа доступа из listMyAuthMethods
+         * @example 0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67
+         */
+        PasskeyId: string;
+        /**
+         * @description Id своей заявки в капитаны из listMyCaptainApplications или getMyCaptaincy
+         * @example 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+         */
+        ApplicationId: string;
+        /**
+         * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+         * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTEtMTNUMDk6MDA6MDBaIl19
+         */
+        Cursor: string;
+        /**
+         * @description Размер страницы, от 1 до 100; без параметра — 20
+         * @example 20
+         */
+        Limit: number;
     };
     requestBodies: never;
     headers: {
+        /**
+         * @description Ответ с токенами или секретом — не кэшируется нигде, в том числе браузером
+         * @example no-store
+         */
+        CacheNoStore: string;
+        /**
+         * @description Ответ зависит от игрока — общим кэшам и браузеру его не хранить
+         * @example private, no-store
+         */
+        CachePrivate: string;
         /**
          * @description Всегда Accept-Language — ответ зависит от языка, кэши хранят языки раздельно
          * @example Accept-Language
@@ -712,6 +3480,1557 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AppMinVersion"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    checkNickname: {
+        parameters: {
+            query: {
+                /**
+                 * @description Ник, как его ввёл игрок
+                 * @example kosta_10
+                 */
+                nickname: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Доступность ника */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NicknameAvailability"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startSignup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Форма регистрации */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignupStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Код отправлен (ответ одинаков при занятой почте) */
+            202: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeSent"];
+                };
+            };
+            /** @description Форма не прошла проверку. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`idempotency.key_reused` и др. — info.description), не только коды операции */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    confirmSignup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код и при необходимости новый ник */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignupConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Аккаунт создан, сессия выдана */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            /** @description Неверный код. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    resendAuthCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description Id кода из письма — code_id ответа CodeSent
+                 * @example 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+                 */
+                codeId: components["parameters"]["CodeId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Код отправлен повторно */
+            202: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeSent"];
+                };
+            };
+            /** @description Повтор раньше паузы. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`ratelimit.exceeded` и др. — info.description), не только коды операции */
+            429: {
+                headers: {
+                    /**
+                     * @description Через сколько секунд отправить снова
+                     * @example 45
+                     */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Почта, пароль и устройство */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Результат входа */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            /** @description Аккаунт заблокирован или устройство не прошло проверку. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`humancheck.required`, `feature.disabled` и др. — info.description), не только коды операции */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    completeMfa: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Токен шага и второй фактор */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Результат входа */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            /** @description Неверный второй фактор. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Почта аккаунта */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Код отправлен (ответ одинаков для неизвестной почты) */
+            202: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeSent"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    confirmPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код, новый пароль и при 2FA — второй фактор */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Пароль сменён, сессия выдана */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            /** @description Неверный код, нужен или неверен второй фактор. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Пароль не подходит. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`idempotency.key_reused` и др. — info.description), не только коды операции */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    refreshSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Refresh-токен и устройство */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Новая пара токенов */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPair"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    cancelDeletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Токен отмены удаления */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletionCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Удаление отменено, сессия выдана */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сессия отозвана */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getLegalDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Текущие документы */
+            200: {
+                headers: {
+                    /**
+                     * @description Справочник — общие кэши хранят до 5 минут
+                     * @example public, max-age=300
+                     */
+                    "Cache-Control": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalDocumentList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createDeviceChallenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Задача выдана */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceChallenge"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Аккаунт */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateMe: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Изменяемые поля */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeUpdate"];
+            };
+        };
+        responses: {
+            /** @description Аккаунт после правки */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    changeNickname: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Новый ник */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NicknameChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Аккаунт с новым ником */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            /** @description Ник занят или менять его ещё рано. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`idempotency.in_progress`, `idempotency.replay_unavailable` и др. — info.description), не только коды операции */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listMySessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сессии */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionList"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeOtherSessions: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сессии отозваны */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokedCount"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeMySession: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /**
+                 * @description Id своей сессии из listMySessions
+                 * @example 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+                 */
+                sessionId: components["parameters"]["SessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сессия отозвана */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    changePassword: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Новый пароль */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Пароль сменён */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Пароль не подходит. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`idempotency.key_reused` и др. — info.description), не только коды операции */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startEmailChange: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Новая почта */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailChangeStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Код отправлен на новую почту */
+            202: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeSent"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    confirmEmailChange: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код с новой почты */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailChangeConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Почта изменена */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            /** @description Неверный код. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    acceptDocuments: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Принятые версии */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentsAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description Согласие сохранено */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Подтверждение ником */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Удаление назначено */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletionScheduled"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getAuthMethods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Включённые способы */
+            200: {
+                headers: {
+                    /**
+                     * @description Ответ одинаков для всех — общие кэши хранят до минуты
+                     * @example public, max-age=60
+                     */
+                    "Cache-Control": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthMethods"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startMfaPasskey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Токен шага второго фактора */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaPasskeyOptionsRequest"];
+            };
+        };
+        responses: {
+            /** @description Задача WebAuthn */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebAuthnOptions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createSocialNonce: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Провайдер */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialNonceRequest"];
+            };
+        };
+        responses: {
+            /** @description Nonce выдан */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialNonce"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    socialLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Токен провайдера, nonce и устройство */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Результат входа */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            /** @description Аккаунт заблокирован, устройство не прошло проверку или способ выключен. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`humancheck.required`, `feature.disabled` и др. — info.description), не только коды операции */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    completeSocialSignup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Форма дорегистрации */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialSignupCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Аккаунт создан, сессия выдана */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startPasskeyLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Задача WebAuthn */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebAuthnOptions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    passkeyLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Ответ ключа и устройство */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeyLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Результат входа */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResult"];
+                };
+            };
+            /** @description Аккаунт заблокирован, устройство не прошло проверку или способ выключен. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`humancheck.required`, `feature.disabled` и др. — info.description), не только коды операции */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    reauthenticate: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Один способ подтверждения */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReauthRequest"];
+            };
+        };
+        responses: {
+            /** @description Свежий вход подтверждён */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReauthResult"];
+                };
+            };
+            /** @description Подтверждение не прошло. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startReauthPasskey: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Задача WebAuthn */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebAuthnOptions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listMyAuthMethods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Способы входа */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyAuthMethods"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    linkIdentity: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Токен провайдера и nonce */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Привязка создана */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedIdentity"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    unlinkIdentity: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /**
+                 * @description Id привязки Apple или Google из listMyAuthMethods
+                 * @example 0193a1c7-5d6e-7b71-a8f9-0a1b2c3d4e56
+                 */
+                identityId: components["parameters"]["IdentityId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Привязка удалена */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getMyMfa: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Состояние 2FA */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setupTotp: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Секрет TOTP */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TotpSetup"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    confirmTotp: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Код из приложения-аутентификатора */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description 2FA включена, резервные коды */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryCodes"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    disableTotp: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 2FA выключена */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    regenerateRecoveryCodes: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Новые резервные коды */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryCodes"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    startPasskeyRegistration: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Задача WebAuthn */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebAuthnOptions"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    registerPasskey: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Ответ ключа и имя */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeyRegisterRequest"];
+            };
+        };
+        responses: {
+            /** @description Ключ добавлен */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Passkey"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    deletePasskey: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /**
+                 * @description Id ключа доступа из listMyAuthMethods
+                 * @example 0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67
+                 */
+                passkeyId: components["parameters"]["PasskeyId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ключ удалён */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    renamePasskey: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /**
+                 * @description Id ключа доступа из listMyAuthMethods
+                 * @example 0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67
+                 */
+                passkeyId: components["parameters"]["PasskeyId"];
+            };
+            cookie?: never;
+        };
+        /** @description Новое имя */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeyRenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Ключ переименован */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Passkey"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    cancelMyMfaReset: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сброс отменён */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getMyCaptaincy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Капитанство игрока */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Captaincy"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listMyCaptainApplications: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+                 * @example eyJ2IjoxLCJrIjpbIjIwMjYtMTEtMTNUMDk6MDA6MDBaIl19
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Размер страницы, от 1 до 100; без параметра — 20
+                 * @example 20
+                 */
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница заявок */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptainApplicationPage"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    submitCaptainApplication: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Форма заявки */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptainApplicationSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Заявка подана */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptainApplication"];
+                };
+            };
+            /** @description Заявку подать нельзя. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`idempotency.in_progress`, `idempotency.replay_unavailable` и др. — info.description), не только коды операции */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    withdrawCaptainApplication: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Ключ одного действия пользователя; повтор с тем же ключом не исполняется дважды
+                 * @example 7f3c9a52-2d4e-4b8a-9c11-5e0d6f8b2a47
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /**
+                 * @description Id своей заявки в капитаны из listMyCaptainApplications или getMyCaptaincy
+                 * @example 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+                 */
+                applicationId: components["parameters"]["ApplicationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Заявка отозвана */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CachePrivate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptainApplication"];
                 };
             };
             default: components["responses"]["Problem"];

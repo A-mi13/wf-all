@@ -80,7 +80,9 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		timeout = defaultRequestTimeout
 	}
 	requestErr := httpx.RequestErrorHandler(log)
-	strict := oapi.NewStrictHandlerWithOptions(Server{Handler: geohttp.New(o.Geo), versions: o.AppVersions}, nil, oapi.StrictHTTPServerOptions{
+	// identity — нулевой хендлер: 501 на каждую операцию до реализации (план I-1, R2; pendingOps в nostub_test.go)
+	srv := Server{Handler: geohttp.New(o.Geo), identityHandler: identityHandler{}, versions: o.AppVersions}
+	strict := oapi.NewStrictHandlerWithOptions(srv, nil, oapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  requestErr,
 		ResponseErrorHandlerFunc: httpx.ResponseErrorHandler(log),
 	})

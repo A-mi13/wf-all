@@ -1,5 +1,6 @@
 // Контракт admin плана A (спека сотрудников §4.3–4.9, §5.3, §6, §8; план — R8, R13–R15, P8, P28;
-// сверка reconcile §7–8) и плана B (geo 2/2, Task 7 — Приложения 1–3): пути, права, анонимность,
+// сверка reconcile §7–8), плана B (geo 2/2, Task 7 — Приложения 1–3) и плана I-1 (identity, Task 4 — Приложение 1,
+// R13–R15, R19): пути, права, анонимность,
 // форма ответов, cookie и заголовки — на собранном бандле. После Task 9a плана A и Task 7 плана B
 // контракт заморожен: фронт и бэкенд работают по нему.
 import assert from 'node:assert/strict';
@@ -24,6 +25,7 @@ const DUAL = [
   'staff.access.reset_elevated',
   'staff.access.reset',
   'geo.countries.rules',
+  'identity.mfa.reset',
 ];
 const expected = {
   staffLogin: ['post', '/v1/staff/auth/login', 'staff', 'anonymous'],
@@ -131,12 +133,74 @@ const expected = {
   putAppVersions: ['put', '/v1/app/versions/{platform}', 'platform', 'platform.versions.manage'],
   listFeatureFlags: ['get', '/v1/flags', 'platform', 'platform.flags.read'],
   updateFeatureFlag: ['patch', '/v1/flags/{key}', 'platform', 'platform.flags.manage'],
+  // план I-1 (identity), Task 4 — Приложение 1
+  listCaptainApplications: [
+    'get',
+    '/v1/identity/captain-applications',
+    'identity',
+    'identity.captain_applications.read',
+  ],
+  getCaptainApplication: [
+    'get',
+    '/v1/identity/captain-applications/{applicationId}',
+    'identity',
+    'identity.captain_applications.read',
+  ],
+  getCaptainApplicationContact: [
+    'get',
+    '/v1/identity/captain-applications/{applicationId}/contact',
+    'identity',
+    'identity.pii.read',
+  ],
+  approveCaptainApplication: [
+    'post',
+    '/v1/identity/captain-applications/{applicationId}/approve',
+    'identity',
+    'identity.captain_applications.decide',
+  ],
+  rejectCaptainApplication: [
+    'post',
+    '/v1/identity/captain-applications/{applicationId}/reject',
+    'identity',
+    'identity.captain_applications.decide',
+  ],
+  getAuthMethodsUsage: [
+    'get',
+    '/v1/identity/auth-methods/usage',
+    'identity',
+    'platform.flags.read',
+  ],
+  findPlayerByEmail: ['get', '/v1/identity/users/lookup', 'identity', 'identity.pii.read'],
+  requestMfaReset: [
+    'post',
+    '/v1/identity/users/{userId}/mfa-reset',
+    'identity',
+    'identity.mfa.reset',
+  ],
+  cancelMfaReset: [
+    'post',
+    '/v1/identity/mfa-resets/{resetId}/cancel',
+    'identity',
+    'identity.mfa.reset',
+  ],
+  putStaffPlayerLink: [
+    'put',
+    '/v1/staff/accounts/{staffId}/player-link',
+    'staff',
+    'staff.player_links.manage',
+  ],
+  deleteStaffPlayerLink: [
+    'delete',
+    '/v1/staff/accounts/{staffId}/player-link',
+    'staff',
+    'staff.player_links.manage',
+  ],
 };
 
-test('54 операции: 33 плана A и 21 плана B — и только они', () => {
-  assert.equal(Object.keys(expected).length, 54);
+test('65 операций: 33 плана A, 21 плана B, 11 identity I-1 — и только они', () => {
+  assert.equal(Object.keys(expected).length, 65);
   assert.deepEqual([...ops.keys()].sort(), Object.keys(expected).sort());
-  assert.equal(operations(doc).length, 54);
+  assert.equal(operations(doc).length, 65);
 });
 
 for (const [id, [verb, path, tag, perm, any]] of Object.entries(expected)) {
@@ -367,6 +431,7 @@ test('StaffSession.user_agent, Approval.action — enum, AuditRecord с actor_la
     'staff.revoke_owner',
     'geo.country_rules',
     'geo.country_create',
+    'identity.mfa_reset',
   ]);
   assert.equal(refName(schema('Approval').properties.action), 'ApprovalAction');
   const audit = schema('AuditRecord').properties;
@@ -468,7 +533,13 @@ const planB = {
   putAppVersions: [[], { 200: 'AppVersions' }],
   listFeatureFlags: [[], { 200: 'FeatureFlagList' }],
   updateFeatureFlag: [
-    ['platform.flag_city_not_found', 'platform.flag_not_found', 'platform.flag_stale'],
+    [
+      'platform.flag_city_not_found',
+      'platform.flag_global_only',
+      'platform.flag_not_found',
+      'platform.flag_requires',
+      'platform.flag_stale',
+    ],
     { 200: 'FeatureFlag' },
   ],
 };
@@ -696,5 +767,244 @@ test('approveApproval: отказ исполнителей geo.country_rules и 
   assert.ok(
     !op['x-error-codes'].some((c) => c.startsWith('geo.')),
     'бизнес-кодов geo у approve нет',
+  );
+});
+
+// ---- План I-1 (identity), Task 4: Приложение 1, R13–R15, R18, R19 ----
+
+// operationId → [коды операции, успешные ответы: статус → схема тела (null — без тела)]
+const planI1 = {
+  listCaptainApplications: [[], { 200: 'IdentityCaptainApplicationPage' }],
+  getCaptainApplication: [
+    ['identity.application_not_found'],
+    { 200: 'IdentityCaptainApplicationCard' },
+  ],
+  getCaptainApplicationContact: [
+    ['identity.application_not_found'],
+    { 200: 'IdentityApplicantContact' },
+  ],
+  approveCaptainApplication: [
+    [
+      'identity.application_closed',
+      'identity.application_not_found',
+      'identity.captain_ineligible',
+      'identity.self_action',
+    ],
+    { 200: 'IdentityCaptainApplication' },
+  ],
+  rejectCaptainApplication: [
+    ['identity.application_closed', 'identity.application_not_found', 'identity.self_action'],
+    { 200: 'IdentityCaptainApplication' },
+  ],
+  getAuthMethodsUsage: [[], { 200: 'IdentityAuthMethodsUsage' }],
+  findPlayerByEmail: [['identity.user_not_found'], { 200: 'IdentityPlayerLookup' }],
+  requestMfaReset: [
+    [
+      'identity.mfa_not_enabled',
+      'identity.mfa_reset_pending',
+      'identity.self_action',
+      'identity.user_not_found',
+    ],
+    { 202: 'ApprovalAccepted' },
+  ],
+  cancelMfaReset: [
+    ['identity.mfa_reset_not_found', 'identity.self_action'],
+    { 200: 'IdentityMfaResetCancelled' },
+  ],
+  putStaffPlayerLink: [
+    ['staff.not_found', 'staff.player_link_taken', 'staff.player_not_found'],
+    { 200: 'StaffPlayerLink' },
+  ],
+  deleteStaffPlayerLink: [['staff.not_found'], { 204: null }],
+};
+
+for (const [id, [codes, ok]] of Object.entries(planI1)) {
+  test(`I-1 ${id}: коды ${codes.join(', ') || '—'}; ответы ${Object.keys(ok).join(', ')}`, () => {
+    const { verb, op } = ops.get(id);
+    assert.deepEqual([...op['x-error-codes']].sort(), codes);
+    assert.deepEqual(successes(op).sort(), Object.keys(ok));
+    for (const [s, name] of Object.entries(ok)) {
+      assert.equal(refName(body(op, s)?.schema) ?? null, name, `${id} ${s}`);
+    }
+    assert.equal(op['x-rate-limit'], undefined, `${id}: класс default admin-api`);
+    if (verb === 'get') {
+      const h = resolve(op.responses['200'].headers?.['Cache-Control'], 'headers');
+      assert.equal(h?.example, 'private, no-store', `${id}: Cache-Control`);
+      assert.equal(h.required, true, id);
+    }
+  });
+}
+
+test('I-1: операций тега identity — 9, связь сотрудника — 2 операции тега staff', () => {
+  const tagged = [...ops.values()].filter((o) => o.op.tags.includes('identity'));
+  assert.equal(tagged.length, 9);
+  const tag = doc.tags.find((t) => t.name === 'identity');
+  assert.ok(tag?.description, 'тег identity в корне admin');
+});
+
+// R19 (CWE-598): почта и причина — заголовки, не query.
+test('I-1 R19: findPlayerByEmail и getCaptainApplicationContact — ПД и причина в заголовках', () => {
+  const want = {
+    findPlayerByEmail: ['X-WF-Access-Reason', 'X-WF-Lookup-Email'],
+    getCaptainApplicationContact: ['X-WF-Access-Reason'],
+  };
+  for (const [id, names] of Object.entries(want)) {
+    const params = Object.values(paramsOf(ops.get(id).op));
+    const headers = params
+      .filter((p) => p.in === 'header')
+      .map((p) => p.name)
+      .sort();
+    assert.deepEqual(headers, names, id);
+    for (const p of params.filter((x) => x.in === 'header')) assert.equal(p.required, true, p.name);
+    const query = params.filter((p) => p.in === 'query').map((p) => p.name);
+    for (const q of ['email', 'reason']) assert.ok(!query.includes(q), `${id}: ${q} в query`);
+    assert.match(ops.get(id).op.description, /журнал/, `${id}: чтение пишется в журнал`);
+  }
+});
+
+// I4: значения заголовков — UTF-8 в percent-encoding (Fetch не пропускает кириллицу в заголовке).
+test('I-1 I4: LookupEmail и AccessReason — percent-encoding UTF-8, pattern без кириллицы и пробела', () => {
+  const max = { AccessReason: 2400, LookupEmail: 3048 };
+  for (const [name, limit] of Object.entries(max)) {
+    const p = doc.components.parameters[name];
+    assert.equal(p.in, 'header', name);
+    assert.equal(p.required, true, name);
+    assert.match(p.description, /percent-encoding UTF-8/, name);
+    assert.match(p.description, /CWE-598/, name);
+    assert.equal(p.schema.maxLength, limit, name);
+    const re = new RegExp(p.schema.pattern);
+    assert.ok(re.test(p.example), `${name}: пример проходит pattern`);
+    for (const bad of ['обращение', 'a b', 'ivan@mail.example']) {
+      assert.ok(!re.test(bad), `${name}: pattern пропускает «${bad}»`);
+    }
+  }
+  assert.equal(
+    decodeURIComponent(doc.components.parameters.AccessReason.example),
+    'обращение 4812',
+  );
+});
+
+test('I-1: self_action (К3) — у решений по заявке и сброса 2FA, описание называет связь сотрудника', () => {
+  for (const id of [
+    'approveCaptainApplication',
+    'rejectCaptainApplication',
+    'requestMfaReset',
+    'cancelMfaReset',
+  ]) {
+    const { op } = ops.get(id);
+    assert.ok(op['x-error-codes'].includes('identity.self_action'), id);
+    assert.match(op.description, /identity\.self_action/, id);
+    assert.match(op.description, /сотрудник → игрок/, id);
+  }
+});
+
+test('I-1: скоуп модератора — чужой город = 404 application_not_found, в списке нет', () => {
+  for (const id of [
+    'listCaptainApplications',
+    'getCaptainApplication',
+    'getCaptainApplicationContact',
+    'approveCaptainApplication',
+    'rejectCaptainApplication',
+  ]) {
+    assert.match(ops.get(id).op.description, /модератор/i, id);
+  }
+  assert.match(ops.get('findPlayerByEmail').op.description, /модератор/i);
+});
+
+test('I-1: requestMfaReset — 202 запрос «вдвоём», 7 дней ожидания; ApprovalAction — identity.mfa_reset', () => {
+  const d = ops.get('requestMfaReset').op.description;
+  assert.match(d, /7 дней/);
+  assert.match(d, /identity\.mfa_reset/);
+  assert.match(schema('ApprovalAction').description, /identity\.mfa_reset/);
+  const approve = ops.get('approveApproval').op;
+  const lines = approve.description
+    .split(/\n\s*- /)
+    .filter((l) => l.includes('identity.mfa_reset'));
+  assert.ok(
+    lines.some((l) => l.includes('platform.approval_stale')),
+    'отказ исполнителя identity.mfa_reset — 409 platform.approval_stale',
+  );
+  assert.ok(
+    !approve['x-error-codes'].some((c) => c.startsWith('identity.')),
+    'x-error-codes approve не растёт',
+  );
+});
+
+test('I-1: rejectCaptainApplication — comment обязателен при other (422 validation.failed по body.comment)', () => {
+  const d = ops.get('rejectCaptainApplication').op.description;
+  assert.match(d, /other/);
+  assert.match(d, /body\.comment/);
+  const r = schema('IdentityCaptainReject');
+  assert.deepEqual(r.required, ['rejection_code']);
+  assert.equal(refName(r.properties.rejection_code), 'IdentityCaptainRejectionCode');
+  assert.equal(r.properties.comment.maxLength, 1000);
+});
+
+test('I-1: перечисления admin identity — копии public и R18, открытые', () => {
+  const enums = {
+    IdentityCaptainApplicationStatus: ['pending', 'approved', 'rejected', 'withdrawn'],
+    IdentityCaptainRejectionCode: [
+      'profile_incomplete',
+      'insufficient_info',
+      'contact_unreachable',
+      'suspicious_activity',
+      'duplicate_account',
+      'other',
+    ],
+    IdentityAuthMethodKind: ['apple', 'google', 'passkeys'],
+    IdentityCaptainCheck: ['age', 'restrictions', 'profile', 'captaincy'],
+    IdentityCheckState: ['ok', 'failed', 'unavailable'],
+  };
+  for (const [name, values] of Object.entries(enums)) {
+    assert.deepEqual(schema(name).enum, values, name);
+    assert.equal(schema(name)['x-extensible-enum'], true, name);
+  }
+});
+
+test('I-1 R15: StaffAccount.player_link — необязательное поле StaffPlayerLink; связь — описания побочных эффектов', () => {
+  const a = schema('StaffAccount');
+  assert.equal(refName(a.properties.player_link), 'StaffPlayerLink');
+  assert.ok(!a.required.includes('player_link'));
+  assert.match(schema('StaffPlayerLink').description, /staff\.player_links\.manage/);
+  for (const id of ['putStaffPlayerLink', 'deleteStaffPlayerLink']) {
+    const d = ops.get(id).op.description;
+    assert.match(d, /журнал/, id);
+    assert.match(d, /письмо/, id);
+  }
+  assert.match(ops.get('deleteStaffPlayerLink').op.description, /тоже 204/);
+});
+
+test('I-1 §7.5: updateFeatureFlag описывает flag_global_only и flag_requires', () => {
+  const d = ops.get('updateFeatureFlag').op.description;
+  assert.match(d, /422 `platform\.flag_global_only`/);
+  assert.match(d, /409 `platform\.flag_requires`/);
+  assert.match(d, /auth_google/);
+});
+
+// Ревью Б I1: очередь (§7.4) показывает возраст и стаж — поля строки, имена как у карточки (applicant).
+test('I-1 §7.4: строка очереди заявок — возраст в годах и стаж аккаунта в днях', () => {
+  const row = schema('IdentityCaptainApplication');
+  const card = schema('IdentityCaptainApplicationCard').properties.applicant;
+  for (const f of ['age_years', 'account_age_days']) {
+    assert.ok(row.required.includes(f), f);
+    assert.equal(row.properties[f].type, 'integer', f);
+    assert.equal(row.properties[f].minimum, 0, f);
+    assert.equal(typeof row.properties[f].example, 'number', f);
+    assert.ok(card.required.includes(f), `карточка: ${f}`);
+  }
+  assert.match(ops.get('listCaptainApplications').op.description, /возраст/);
+});
+
+// Ревью Б m2: операции «ники связанных аккаунтов» в контракте нет — описание на неё не ссылается.
+test('I-1: linked_accounts не ссылается на несуществующее чтение ников', () => {
+  const d = schema('IdentityCaptainApplicationCard').properties.linked_accounts.description;
+  assert.doesNotMatch(d, /отдельным чтением/);
+});
+
+// Ревью Б m3: почта, не прошедшая нормализацию §5.7, — исход назван.
+test('I-1: X-WF-Lookup-Email — почта, не прошедшая нормализацию, — 422 validation.failed', () => {
+  assert.match(
+    doc.components.parameters.LookupEmail.description,
+    /нормализац[^.]*тоже 422 validation\.failed\s+по полю header\.X-WF-Lookup-Email, а не 404/,
   );
 });

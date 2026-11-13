@@ -6,12 +6,15 @@
 # Каждая операция объявляет право x-permission (страж contracts/src/permissions.mjs по каталогу
 # admin/permissions.json — его генерирует ./task gen из backend/internal/platform/perm).
 # После Task 9a плана A (P16) и Task 7 плана B контракт заморожен: правка — только через контроллера плана.
+# После I-1 (план identity) контракт identity заморожен и сторожится contracts/test/identity-freeze.test.mjs:
+# правка — только через контроллера плана с записью в журнал изменений документа передачи нативщику; заранее
+# согласованная — enum FeatureFlagKey с миграцией флагов (R4).
 # Схема Problem и ответ Problem продублированы в public/root.yaml намеренно (контракты версионируются
 # независимо); тест бандлов в contracts/ падает после сборки, если копии разошлись.
 openapi: 3.0.3
 info:
   title: WF admin API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     API админки (admin-api); потребитель — только apps/admin, с того же origin, что и сам API.
 
@@ -49,8 +52,9 @@ info:
       `auth.csrf_failed` (403 — запрос не со страницы админки: нет `Origin` админки или заголовка
       `X-WF-Admin`), `auth.ip_not_allowed` (403 — вход в админку с этого адреса закрыт),
       `auth.reauth_required` (401 — подтвердите вход вторым фактором, `staffUnlock`),
-      `auth.setup_required` (403 — сначала завершите настройку 2FA), `http.not_implemented`
-      (501 — операция описана в контракте, но сервер её ещё не исполняет).
+      `auth.setup_required` (403 — сначала завершите настройку 2FA). Общий с публичным API код
+      `http.not_implemented` (501 — операция описана в контракте, но сервер её ещё не исполняет:
+      этапы выкатываются по очереди; это не ошибка клиента).
     - **X-WF-Admin: 1** — обязательный заголовок каждого изменяющего запроса (POST, PUT, PATCH,
       DELETE) вместе с `Origin` админки — защита от подделки запроса с чужого сайта.
     - **X-WF-Background: 1** — необязательный заголовок фоновых запросов клиента (опрос счётчика
@@ -81,6 +85,10 @@ tags:
       Справочник geo в админке — города (активация из GeoNames, правка, привязка), районы, страны и
       их правила, регионы, импорт GeoNames; выбор городов модератора
 
+  - name: identity
+    description: >-
+      Игроки в админке — заявки в капитаны, поиск игрока по почте для поддержки, сброс 2FA игрока
+      через поддержку, статистика способов входа для экрана флагов
   - name: platform
     description: >-
       Механизмы платформы админки — журнал действий, подтверждения вдвоём, версии нативного
@@ -89,7 +97,7 @@ tags:
 security:
   - session: []
 # Коды ошибок платформы — их может вернуть любая операция; у операций — свои x-error-codes.
-# Первые 13 — httpx.PlatformCodes (общие с public), остальные — коды конвейера admin-api
+# Первые 14 — httpx.PlatformCodes (общие с public), остальные — коды конвейера admin-api
 # (httpx.AdminCommonCodes, только в этом контракте); сверка — TestPlatformCodesDocumented.
 x-error-codes-common:
   - internal
@@ -105,12 +113,12 @@ x-error-codes-common:
   - idempotency.in_progress
   - idempotency.replay_unavailable
   - feature.disabled
+  - http.not_implemented
   - auth.forbidden
   - auth.csrf_failed
   - auth.ip_not_allowed
   - auth.reauth_required
   - auth.setup_required
-  - http.not_implemented
 # Анонимные мутирующие операции — закрытый список operationId: ровно операции с security: [] (D15).
 # Остальные мутации, включая второй фактор и разблокировку, требуют сессию и Idempotency-Key.
 x-anonymous-mutations:
@@ -172,6 +180,8 @@ paths:
     $ref: './staff/paths.yaml#/account-sessions-revoke-all'
   /v1/staff/roles:
     $ref: './staff/paths.yaml#/roles'
+  /v1/staff/accounts/{staffId}/player-link:
+    $ref: './staff/paths.yaml#/account-player-link'
   /v1/geo/places:
     $ref: './geo/paths.yaml#/places'
   /v1/geo/cities:
@@ -216,6 +226,24 @@ paths:
     $ref: './platform/paths.yaml#/flags'
   /v1/flags/{key}:
     $ref: './platform/paths.yaml#/flag'
+  /v1/identity/captain-applications:
+    $ref: './identity/paths.yaml#/captain-applications'
+  /v1/identity/captain-applications/{applicationId}:
+    $ref: './identity/paths.yaml#/captain-application'
+  /v1/identity/captain-applications/{applicationId}/contact:
+    $ref: './identity/paths.yaml#/captain-application-contact'
+  /v1/identity/captain-applications/{applicationId}/approve:
+    $ref: './identity/paths.yaml#/captain-application-approve'
+  /v1/identity/captain-applications/{applicationId}/reject:
+    $ref: './identity/paths.yaml#/captain-application-reject'
+  /v1/identity/auth-methods/usage:
+    $ref: './identity/paths.yaml#/auth-methods-usage'
+  /v1/identity/users/lookup:
+    $ref: './identity/paths.yaml#/users-lookup'
+  /v1/identity/users/{userId}/mfa-reset:
+    $ref: './identity/paths.yaml#/user-mfa-reset'
+  /v1/identity/mfa-resets/{resetId}/cancel:
+    $ref: './identity/paths.yaml#/mfa-reset-cancel'
 components:
   securitySchemes:
     session:
@@ -372,6 +400,65 @@ components:
         maximum: 100
         default: 20
       example: 20
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      description: Id заявки в капитаны
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: Id учётки игрока — из findPlayerByEmail
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+    ResetId:
+      name: resetId
+      in: path
+      required: true
+      description: Id назначенного сброса 2FA — mfa_reset.id из findPlayerByEmail
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1ca-8091-7ea1-9b2c-3d4e5f6a7b89
+    AccessReason:
+      name: X-WF-Access-Reason
+      in: header
+      required: true
+      description: >-
+        Причина чтения персональных данных игрока — пишется в журнал. Значение — percent-encoding
+        UTF-8 по RFC 3986 (encodeURIComponent: значение заголовка в Fetch — байтовая строка, кириллица
+        без кодирования не уходит из браузера); после декодирования — 3–200 символов (иначе 422
+        validation.failed по полю header.X-WF-Access-Reason), битая кодировка — 400. Заголовок, а не
+        query: URL и журналы прокси не должны нести свободный текст сотрудника (CWE-598)
+      schema:
+        type: string
+        maxLength: 2400
+        pattern: "^[A-Za-z0-9%._~!*()'-]+$"
+      example: '%D0%BE%D0%B1%D1%80%D0%B0%D1%89%D0%B5%D0%BD%D0%B8%D0%B5%204812'
+    LookupEmail:
+      name: X-WF-Lookup-Email
+      in: header
+      required: true
+      description: >-
+        Почта игрока для точного поиска. Значение — percent-encoding UTF-8 по RFC 3986
+        (encodeURIComponent: «@» — %40, кириллический домен тоже кодируется); после декодирования — не
+        длиннее 254 байт (иначе 422 validation.failed по полю header.X-WF-Lookup-Email), битая
+        кодировка — 400. Почта, не прошедшая нормализацию (NFKC, нижний регистр, dot-atom, IDN по белому
+        списку, без невидимых символов — те же правила, что у почты сотрудников), — тоже 422 validation.failed
+        по полю header.X-WF-Lookup-Email, а не 404: такой почты не может быть ни у одного игрока. Заголовок, а не query: персональные данные не попадают в URL и журналы прокси
+        (CWE-598)
+      schema:
+        type: string
+        maxLength: 3048
+        pattern: "^[A-Za-z0-9%._~!*()'-]+$"
+      example: 'ivan.petrov%40mail.example'
   headers:
     SetSessionCookie:
       description: >-
@@ -418,7 +505,9 @@ components:
       description: Ошибка в формате RFC 9457
       headers:
         Retry-After:
-          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded
+          description: >-
+            Через сколько секунд повторить — только у 429 ratelimit.exceeded и 429
+            identity.resend_too_soon (повтор отправки кода раньше паузы)
           schema:
             type: integer
             minimum: 1
@@ -480,6 +569,46 @@ components:
             Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после
             которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
           example: 3
+        reasons:
+          type: array
+          description: >-
+            Причины отказа машинными значениями — только у двух кодов. У identity.captain_ineligible —
+            невыполненные условия заявки в капитаны (значения схемы CaptainIneligibility; ограничение
+            captain — причина restricted). У identity.password_weak — ровно одно значение: too_short
+            (короче 10 символов), common (из списка распространённых паролей) или too_long (длиннее
+            потолка). Список открытый: незнакомое значение показывайте общим текстом кода
+          items:
+            type: string
+            description: Машинное значение причины
+            example: too_short
+          example: [too_short]
+        methods:
+          type: array
+          description: >-
+            Только у identity.mfa_required — вторые факторы аккаунта, которые принимает эта операция
+            (значения схемы MfaMethod): totp, recovery_code, passkey. У confirmPasswordReset — только
+            totp и recovery_code: ключ доступа при сбросе пароля не принимается. Клиент показывает
+            выбор из этих способов и повторяет запрос со вторым фактором
+          items:
+            type: string
+            description: Способ второго фактора (MfaMethod)
+            example: totp
+          example: [totp, recovery_code]
+        available_at:
+          type: string
+          format: date-time
+          description: >-
+            Когда действие станет доступно (UTC) — только у identity.nickname_change_too_soon (смена
+            ника раньше 30 дней) и identity.application_cooldown (повторная заявка в капитаны раньше
+            7 дней после отказа)
+          example: '2026-12-13T09:30:00Z'
+        blocked_until:
+          type: string
+          format: date-time
+          description: >-
+            До какого момента (UTC) заблокирован аккаунт — только у identity.account_blocked. Поля нет
+            у этого кода — блокировка бессрочная (null не приходит)
+          example: '2026-11-20T00:00:00Z'
         job_id:
           type: integer
           format: int64
@@ -581,6 +710,10 @@ components:
       $ref: './staff/schemas.yaml#/RoleGrants'
     RolePermission:
       $ref: './staff/schemas.yaml#/RolePermission'
+    StaffPlayerLinkPut:
+      $ref: './staff/schemas.yaml#/StaffPlayerLinkPut'
+    StaffPlayerLink:
+      $ref: './staff/schemas.yaml#/StaffPlayerLink'
     StaffRoles:
       $ref: './staff/schemas.yaml#/StaffRoles'
     # geo
@@ -699,3 +832,34 @@ components:
       $ref: './platform/schemas.yaml#/FeatureFlagList'
     FeatureFlagPatch:
       $ref: './platform/schemas.yaml#/FeatureFlagPatch'
+    # identity
+    IdentityCaptainApplicationStatus:
+      $ref: './identity/schemas.yaml#/IdentityCaptainApplicationStatus'
+    IdentityCaptainRejectionCode:
+      $ref: './identity/schemas.yaml#/IdentityCaptainRejectionCode'
+    IdentityCaptainCheck:
+      $ref: './identity/schemas.yaml#/IdentityCaptainCheck'
+    IdentityCheckState:
+      $ref: './identity/schemas.yaml#/IdentityCheckState'
+    IdentityAuthMethodKind:
+      $ref: './identity/schemas.yaml#/IdentityAuthMethodKind'
+    IdentityCaptainApplication:
+      $ref: './identity/schemas.yaml#/IdentityCaptainApplication'
+    IdentityCaptainApplicationPage:
+      $ref: './identity/schemas.yaml#/IdentityCaptainApplicationPage'
+    IdentityCaptainApplicationCard:
+      $ref: './identity/schemas.yaml#/IdentityCaptainApplicationCard'
+    IdentityApplicantContact:
+      $ref: './identity/schemas.yaml#/IdentityApplicantContact'
+    IdentityCaptainApprove:
+      $ref: './identity/schemas.yaml#/IdentityCaptainApprove'
+    IdentityCaptainReject:
+      $ref: './identity/schemas.yaml#/IdentityCaptainReject'
+    IdentityAuthMethodsUsage:
+      $ref: './identity/schemas.yaml#/IdentityAuthMethodsUsage'
+    IdentityPlayerLookup:
+      $ref: './identity/schemas.yaml#/IdentityPlayerLookup'
+    IdentityMfaResetRequest:
+      $ref: './identity/schemas.yaml#/IdentityMfaResetRequest'
+    IdentityMfaResetCancelled:
+      $ref: './identity/schemas.yaml#/IdentityMfaResetCancelled'

@@ -18,6 +18,7 @@ import (
 	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/public"
 	"wf/backend/internal/httpapi/public/oapi"
+	"wf/backend/internal/identity"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
@@ -418,4 +419,80 @@ func TestEmptyPathParamNeverReachesHandler(t *testing.T) {
 	if len(geoFake.calls) != 0 {
 		t.Fatalf("хендлер вызван: %v", geoFake.calls)
 	}
+}
+
+// Страж «коды модуля задокументированы» для identity (спека identity §6.5, план I-1): коды identity.* в x-error-codes
+// операций с тегом identity публичного контракта и identity.PublicCodes совпадают в обе стороны. Админские коды —
+// TestIdentityAdminCodesDocumented (internal/httpapi/admin), коды для операций других модулей — CrossModuleCodes
+// (TestCrossModuleCodesNotInIdentityOps).
+func TestIdentityCodesDocumented(t *testing.T) {
+	t.Parallel()
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := apitest.Operations(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, op := range ops {
+		if op.Tag == "identity" {
+			n++
+		}
+	}
+	if n == 0 {
+		t.Fatal("в контракте нет операций тега identity — страж проверяет вхолостую")
+	}
+	var documented []string
+	for _, c := range tagCodes(t, spec, "identity") {
+		if strings.HasPrefix(c, "identity.") {
+			documented = append(documented, c)
+		}
+	}
+	if want := slices.Sorted(slices.Values(identity.PublicCodes)); !slices.Equal(documented, want) {
+		t.Fatalf("коды identity.* операций identity %v, identity.PublicCodes %v", documented, want)
+	}
+}
+
+// План I-1, R9: коды identity.CrossModuleCodes (identity.restricted) отдают операции других модулей; у операций тега
+// identity их нет — ограничение captain в заявке приходит причиной restricted в reasons (спека §6.6).
+func TestCrossModuleCodesNotInIdentityOps(t *testing.T) {
+	t.Parallel()
+	if len(identity.CrossModuleCodes) == 0 {
+		t.Fatal("identity.CrossModuleCodes пуст — страж проверяет вхолостую")
+	}
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range tagCodes(t, spec, "identity") {
+		if slices.Contains(identity.CrossModuleCodes, c) {
+			t.Errorf("код других модулей %s в x-error-codes операции identity", c)
+		}
+	}
+}
+
+// tagCodes — коды x-error-codes всех операций контракта с этим тегом, по алфавиту без повторов.
+func tagCodes(t *testing.T, spec *openapi3.T, tag string) []string {
+	t.Helper()
+	var out []string
+	for _, item := range spec.Paths.Map() {
+		for _, op := range item.Operations() {
+			if !slices.Equal(op.Tags, []string{tag}) {
+				continue
+			}
+			b, err := json.Marshal(op.Extensions["x-error-codes"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var codes []string
+			if err := json.Unmarshal(b, &codes); err != nil {
+				t.Fatalf("%s: x-error-codes — не список строк: %v", op.OperationID, err)
+			}
+			out = append(out, codes...)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }

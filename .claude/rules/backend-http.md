@@ -76,7 +76,13 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
-  собранных staff, geo и подтверждениях отвечает не 501; временный список `pendingOps` плана B удалён в Task 16);
+  собранных staff, geo и подтверждениях отвечает не 501; список `pendingOps` плана B удалён в Task 16), кроме операций
+  identity: `public.Server` и `admin.Server` встраивают `identity/httpapi.Handler` / `identity/admin.Handler` значением
+  через псевдоним `identityHandler` — нулевой отвечает `501 http.not_implemented`; временные `pendingOps` и
+  `pendingOpsAtFreeze` с хэшем в `nostub_test.go` обоих пакетов, страж истечения `TestPendingOpsExpire` (план identity
+  I-1, R2, R17); список уменьшается этапами реализации, удаляет его последний план identity. Тест прав admin передаёт
+  обязательные заголовки операций (`opsHeaders`: `X-WF-Lookup-Email`, `X-WF-Access-Reason` — иначе валидатор отвечает 400
+  до права); кодировку заголовков стережёт `TestLookupHeadersEncoding`.
   нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
   `501 http.not_implemented` без паники. Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод
   ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`)

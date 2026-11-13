@@ -18,6 +18,7 @@ import (
 	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
+	"wf/backend/internal/identity"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/httpx"
@@ -86,8 +87,8 @@ func TestServerStubsNotImplemented(t *testing.T) {
 			t.Errorf("%s: ответ %v, ошибка %v — ждали 501 http.not_implemented", m.Name, resp, err)
 		}
 	}
-	if n != 54 {
-		t.Fatalf("операций сервера %d, ждали 54", n)
+	if n != 65 { // 33 плана A, 21 плана B, 11 identity плана I-1
+		t.Fatalf("операций сервера %d, ждали 65", n)
 	}
 }
 
@@ -205,7 +206,8 @@ func TestGeoAdminCodesDocumented(t *testing.T) {
 
 // Спека сотрудников §6.3 п.7: у каждого кода x-error-codes операций контракта admin — префикс модуля,
 // у которого есть свой список кодов и страж сверки (staff. — TestStaffCodesDocumented, geo. —
-// TestGeoAdminCodesDocumented, platform. — TestAdminPlatformCodesDocumented), либо это общий код
+// TestGeoAdminCodesDocumented, identity. — TestIdentityAdminCodesDocumented, platform. —
+// TestAdminPlatformCodesDocumented), либо это общий код
 // платформы или конвейера. Код нового модуля без своего списка и стража сюда не пройдёт.
 func TestAdminCodePrefixesKnown(t *testing.T) {
 	t.Parallel()
@@ -228,7 +230,7 @@ func TestAdminCodePrefixesKnown(t *testing.T) {
 }
 
 // adminCodePrefixes — модули, у которых есть список кодов и страж сверки с контрактом admin.
-var adminCodePrefixes = []string{"staff.", "geo.", "platform."}
+var adminCodePrefixes = []string{"staff.", "geo.", "identity.", "platform."}
 
 // unknownCodePrefixes — «операция: код» для кодов без известного префикса и вне общих кодов.
 func unknownCodePrefixes(byOp map[string][]string) []string {
@@ -507,3 +509,20 @@ func (denyAll) Allow(context.Context, string, ratelimit.Policy) (ratelimit.Resul
 }
 func (denyAll) Add(context.Context, string, ratelimit.Policy) error          { return nil }
 func (denyAll) Over(context.Context, string, ratelimit.Policy) (bool, error) { return true, nil }
+
+// Спека identity §6.5, план I-1: коды identity.* в x-error-codes операций контракта admin и identity.AdminCodes
+// совпадают в обе стороны.
+func TestIdentityAdminCodesDocumented(t *testing.T) {
+	t.Parallel()
+	spec, err := oapi.GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	documented := documentedWithPrefix(t, spec, "identity.")
+	if len(documented) == 0 {
+		t.Fatal("в контракте admin нет кодов identity.* — страж вхолостую (план I-1, Task 4)")
+	}
+	if want := slices.Sorted(slices.Values(identity.AdminCodes)); !slices.Equal(documented, want) {
+		t.Fatalf("коды identity.* операций %v, identity.AdminCodes %v", documented, want)
+	}
+}

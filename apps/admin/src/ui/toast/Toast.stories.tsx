@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useTranslations } from 'use-intl';
 import type { Story, StoryMeta } from '../../showcase/csf';
+import { STORY_PENDING_ATTR } from '../../showcase/pending';
 import { Button } from '../Button';
 import { ConfirmDialog } from '../overlay/ConfirmDialog';
 import { Drawer } from '../overlay/Drawer';
@@ -115,11 +116,17 @@ export const OverTallConfirm: Story = () => {
   useOnce(() => {
     toast.success(t('staff.drawer.disable.done'), { undo: async () => undefined });
   });
+  useLayoutEffect(() => {
+    // снимок ждёт, пока метки нет (visual/stories.visual.spec.ts): ставим до первого кадра, снимаем после прокрутки
+    document.documentElement.setAttribute(STORY_PENDING_ATTR, '');
+    return () => document.documentElement.removeAttribute(STORY_PENDING_ATTR);
+  }, []);
   useEffect(() => {
     // после применения предела высоты (атрибут тоста ставит эффект провайдера)
     const timer = setTimeout(() => {
       for (const el of document.querySelectorAll('[role="dialog"] *'))
         if (el.scrollHeight > el.clientHeight) el.scrollTop = el.scrollHeight;
+      document.documentElement.removeAttribute(STORY_PENDING_ATTR);
     }, 100);
     return () => clearTimeout(timer);
   });

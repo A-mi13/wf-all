@@ -902,6 +902,12 @@ Task 1 → Task 2 → Task 3 → Task 4 → Task 5      (строго по оч�
   `maxLength` закодированной формы (2400 / 3048), пример закодированный; сервер декодирует, битая кодировка → `400
   validation.failed` по полю заголовка; пределы после декодирования (причина 3–200, почта ≤ 254) — сценарий. Спека
   §7.1 поправлена при ревью плана.
+- **R20. `linkIdentity` → `201 LinkedIdentity`; тело `passkeyLogin` — `PasskeyLoginRequest`** (ревью группы Б,
+  решение контроллера 13.11). Спека §6.3 пишет `201 {identity}`; контракт отдаёт саму привязку схемой
+  `LinkedIdentity` — как `registerPasskey → 201 Passkey`, экрану «Способы входа» не нужна обёртка.
+  `PasskeyAssertion` закрыт `additionalProperties: false`, а `passkeyLogin` несёт и `device` (§6.2.3) — тело
+  операции — новая схема `PasskeyLoginRequest` (`challenge_id`, `credential`, `device?`). Обе — в Приложении 2;
+  спеку (§6.3, реестр схем) правит Task 5.
 - **Ревью плана:** minor m1–m17 приняты и внесены (m16 — в виде R19, а не POST); раунд 2 — I3 и n1–n3 внесены.
 
 ## Решения пользователя
@@ -925,6 +931,7 @@ Task 1 → Task 2 → Task 3 → Task 4 → Task 5      (строго по оч�
 | Тексты причин отказа и неподходящести (`CaptainRejectionCode`, `CaptainIneligibility`) для игрока и админки | этап 9 (экраны) |
 | Поля `reasons`/`methods`/`available_at`/`blocked_until` в `httpx.Problem` и хелперы `With…` | этап «Платформа» (m5) |
 | Декодирование `X-WF-Lookup-Email`/`X-WF-Access-Reason`: битая кодировка → `400`, пределы после декодирования → `422` (тесты сценария) | этап 9 (R19) |
+| Нормализация `DeviceInfo.app_version` вида `MAJOR.MINOR` в `MAJOR.MINOR.0` при сохранении устройства: `appversion.Compare` — строгий semver, иначе сравнение с min-version упадёт (ревью группы Б) | этап 4 |
 | Сквозной тест `x-idempotency: no-store` в конвейере public (повтор `setupTotp` → `409 replay_unavailable`) | этап 5 (m15) |
 | Решение о стражах `identity-freeze` и `pendingOpsAtFreeze` после реализации | последняя задача последнего плана identity (R17) |
 | Хвосты документов §16: спека бэкенда (§2, §4.1, §4.4, §4.6, §6.2, §7.1, §7.6, §11, §13), `docs/01`, `backend/migrations/README.md`, `.claude/rules/{backend-identity,backend-staff,backend-http}.md`, `docs/deploy-dev.md`, `docs/versions.md`, `NOTICE` | этапы 2–10 по месту изменения (I-1 правит только `contracts.md`, `docs/05` и спеку) |
@@ -971,7 +978,8 @@ Task 1 → Task 2 → Task 3 → Task 4 → Task 5      (строго по оч�
 `AppleAuthorization`, `SocialSignupCompleteRequest`, `SocialLinkRequest` — §6.3; `MfaPasskeyOptionsRequest`;
 `ReauthRequest`, `ReauthSocial`, `ReauthResult` — §6.3, §3.13; `MyAuthMethods`, `LinkedIdentity`, `Passkey`,
 `MfaStatus`, `TotpSetup`, `TotpConfirmRequest`, `RecoveryCodes` — §6.2.4; `PasskeyRegisterRequest`,
-`PasskeyRenameRequest` — §6.3.
+`PasskeyRenameRequest` — §6.3; `PasskeyLoginRequest` (`challenge_id`, `credential`, `device?` — тело
+`passkeyLogin`), `LinkedIdentity` — также ответ `201` у `linkIdentity` (R20).
 
 **Public, Task 4.** `Captaincy`, `CaptainPermit`, `CaptainEligibility`, `CaptainIneligibility` — §3.12 п.1–3;
 `CaptainApplicationStatus`, `CaptainApplication`, `CaptainApplicationPage`, `CaptainApplicationSubmitRequest`
@@ -979,7 +987,8 @@ Task 1 → Task 2 → Task 3 → Task 4 → Task 5      (строго по оч�
 `CaptainRejectionCode` — §7.3.
 
 **Admin, Task 4.** `IdentityCaptainApplicationStatus`, `IdentityCaptainRejectionCode` (копии enum public: контракты
-независимы), `IdentityCaptainApplication`, `IdentityCaptainApplicationPage`, `IdentityCaptainApplicationCard`
+независимы), `IdentityCaptainApplication` (строка очереди и решённая заявка; с `age_years` и `account_age_days`
+заявителя — §7.4, ревью группы Б), `IdentityCaptainApplicationPage`, `IdentityCaptainApplicationCard`
 (заявка; заявитель: ник, город, возраст в годах, стаж в днях; условия сейчас — `[{check, state: ok | failed |
 unavailable}]`; прошлые заявки; число связанных аккаунтов — §7.4), `IdentityApplicantContact` (`email`, `phone` или
 `null`), `IdentityCaptainApprove` (`comment?`), `IdentityCaptainReject` (`rejection_code`, `comment?` ≤ 1000),

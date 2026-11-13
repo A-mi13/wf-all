@@ -5,10 +5,13 @@
 # Схема Problem продублирована в admin/root.yaml намеренно (контракты версионируются
 # независимо); тест бандлов в contracts/ падает после сборки, если копии разошлись.
 # Версии — теги contracts-vX.Y.Z.
+# После I-1 (план identity) контракт identity заморожен и сторожится contracts/test/identity-freeze.test.mjs:
+# правка — только через контроллера плана с записью в журнал изменений документа передачи нативщику; заранее
+# согласованная — enum FeatureFlagKey с миграцией флагов (R4).
 openapi: 3.0.3
 info:
   title: WF public API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Публичный API приложений (iOS, Android) и веба. Операции с замком требуют заголовок
     `Authorization: Bearer <access-токен>`; операции без замка — анонимные: заголовок
@@ -29,7 +32,9 @@ info:
       решением в заголовке `X-WF-Humancheck`), `idempotency.key_reused` (422 — ключ уже
       использован с другим запросом), `idempotency.in_progress` (409 — запрос с этим ключом ещё
       выполняется), `idempotency.replay_unavailable` (409 — действие выполнено, перечитайте
-      состояние), `feature.disabled` (403 — функция выключена в вашем городе).
+      состояние), `feature.disabled` (403 — функция выключена в вашем городе),
+      `http.not_implemented` (501 — операция описана в контракте, но сервер её ещё не исполняет:
+      этапы выкатываются по очереди; это не ошибка клиента).
     - **Idempotency-Key** — обязательный заголовок мутирующих операций: новый ключ (UUID) на
       каждое действие пользователя, тот же ключ при повторе после обрыва сети — действие не
       выполнится дважды: повтор отдаёт сохранённый ответ с заголовком `Idempotency-Replayed: true`.
@@ -45,7 +50,32 @@ info:
     - **Кэш** — значение `Cache-Control` каждой операции описано в её ответе 200.
     - **Тело запроса** — не больше 1 МиБ.
     - Поле `request_id` в ошибке — назовите его, сообщая о проблеме: по нему находится запрос в логах.
+    - `identity.restricted` (403) — возможность закрыта санкцией модерации (например, создание
+      матча или комментарии); его отдают операции разных модулей. Срок — в `restrictions` из
+      `getMe`.
+
+    **Вход и токены.** Вход (`login`, `completeMfa`, регистрация `confirmSignup`, отмена удаления
+    `cancelDeletion`, сброс пароля `confirmPasswordReset`) отвечает `AuthResult`; при
+    `status: authenticated` в нём пара токенов `TokenPair`:
+
+    - **access** — JWT на 10 минут, заголовок `Authorization: Bearer <access>` у операций с замком;
+    - **refresh** — непрозрачная строка: мобильный клиент хранит её в Keychain (iOS) или Keystore
+      (Android) и никуда, кроме `refreshSession`, не передаёт. Каждый `refreshSession` выдаёт новую
+      пару, прежний refresh больше не действует; срок бездействия — 90 дней на телефоне, 30 в вебе;
+    - на `401 auth.unauthenticated` — один `refreshSession` и повтор запроса; `401
+      identity.refresh_invalid` — войти заново. Обновление — последовательно, не параллельно, на одно
+      устройство;
+    - **веб** ходит через свой сервер (BFF): токены лежат в зашифрованной cookie, браузер их не видит;
+    - **`device`** — мобильный клиент обязан передать объект `device` (`DeviceInfo`) в теле
+      регистрации, входа, второго фактора, сброса пароля и отмены удаления; без него — `422
+      identity.device_required`. Веб (BFF) поле не передаёт — устройство веба сервер узнаёт сам;
+    - ответы с токенами — `Cache-Control: no-store`; выход — `logout`, сессии — `listMySessions`.
 tags:
+  - name: identity
+    description: >-
+      Игрок и его вход — регистрация и вход по почте, коды из письма, токены и сессии, аккаунт,
+      двухфакторная аутентификация, ключи доступа, вход через Apple и Google, согласие с документами,
+      удаление аккаунта, заявка в капитаны
   - name: geo
     description: >-
       Справочник городов и автоопределение города по геопозиции — выбор города, экран города,
@@ -70,9 +100,26 @@ x-error-codes-common:
   - idempotency.in_progress
   - idempotency.replay_unavailable
   - feature.disabled
+  - http.not_implemented
 # Анонимные мутирующие операции (регистрация, вход, коды) — закрытый список operationId;
 # каждая — с обоснованием в description операции. Остальные мутирующие требуют Idempotency-Key.
-x-anonymous-mutations: []
+x-anonymous-mutations:
+  - startSignup
+  - confirmSignup
+  - resendAuthCode
+  - login
+  - completeMfa
+  - startPasswordReset
+  - confirmPasswordReset
+  - refreshSession
+  - cancelDeletion
+  - createDeviceChallenge
+  - startMfaPasskey
+  - createSocialNonce
+  - socialLogin
+  - completeSocialSignup
+  - startPasskeyLogin
+  - passkeyLogin
 paths:
   /v1/cities:
     $ref: './geo/paths.yaml#/cities'
@@ -84,6 +131,102 @@ paths:
     $ref: './geo/paths.yaml#/city'
   /v1/app/min-version:
     $ref: './platform/paths.yaml#/app-min-version'
+  /v1/nicknames/availability:
+    $ref: './identity/paths.yaml#/nicknames-availability'
+  /v1/auth/signup:
+    $ref: './identity/paths.yaml#/auth-signup'
+  /v1/auth/signup/confirm:
+    $ref: './identity/paths.yaml#/auth-signup-confirm'
+  /v1/auth/codes/{codeId}/resend:
+    $ref: './identity/paths.yaml#/auth-code-resend'
+  /v1/auth/login:
+    $ref: './identity/paths.yaml#/auth-login'
+  /v1/auth/mfa:
+    $ref: './identity/paths.yaml#/auth-mfa'
+  /v1/auth/password-reset:
+    $ref: './identity/paths.yaml#/auth-password-reset'
+  /v1/auth/password-reset/confirm:
+    $ref: './identity/paths.yaml#/auth-password-reset-confirm'
+  /v1/auth/refresh:
+    $ref: './identity/paths.yaml#/auth-refresh'
+  /v1/auth/deletion/cancel:
+    $ref: './identity/paths.yaml#/auth-deletion-cancel'
+  /v1/auth/logout:
+    $ref: './identity/paths.yaml#/auth-logout'
+  /v1/legal/documents:
+    $ref: './identity/paths.yaml#/legal-documents'
+  /v1/devices/challenges:
+    $ref: './identity/paths.yaml#/device-challenges'
+  /v1/me:
+    $ref: './identity/paths.yaml#/me'
+  /v1/me/nickname:
+    $ref: './identity/paths.yaml#/me-nickname'
+  /v1/me/sessions:
+    $ref: './identity/paths.yaml#/me-sessions'
+  /v1/me/sessions/revoke-others:
+    $ref: './identity/paths.yaml#/me-sessions-revoke-others'
+  /v1/me/sessions/{sessionId}:
+    $ref: './identity/paths.yaml#/me-session'
+  /v1/me/password:
+    $ref: './identity/paths.yaml#/me-password'
+  /v1/me/email-change:
+    $ref: './identity/paths.yaml#/me-email-change'
+  /v1/me/email-change/confirm:
+    $ref: './identity/paths.yaml#/me-email-change-confirm'
+  /v1/me/documents:
+    $ref: './identity/paths.yaml#/me-documents'
+  /v1/me/delete:
+    $ref: './identity/paths.yaml#/me-delete'
+  /v1/auth/methods:
+    $ref: './identity/paths.yaml#/auth-methods'
+  /v1/auth/mfa/passkey-options:
+    $ref: './identity/paths.yaml#/auth-mfa-passkey-options'
+  /v1/auth/social/nonces:
+    $ref: './identity/paths.yaml#/auth-social-nonces'
+  /v1/auth/social:
+    $ref: './identity/paths.yaml#/auth-social'
+  /v1/auth/social/signup:
+    $ref: './identity/paths.yaml#/auth-social-signup'
+  /v1/auth/passkey/options:
+    $ref: './identity/paths.yaml#/auth-passkey-options'
+  /v1/auth/passkey:
+    $ref: './identity/paths.yaml#/auth-passkey'
+  /v1/me/reauth:
+    $ref: './identity/paths.yaml#/me-reauth'
+  /v1/me/reauth/passkey-options:
+    $ref: './identity/paths.yaml#/me-reauth-passkey-options'
+  /v1/me/auth-methods:
+    $ref: './identity/paths.yaml#/me-auth-methods'
+  /v1/me/identities:
+    $ref: './identity/paths.yaml#/me-identities'
+  /v1/me/identities/{identityId}:
+    $ref: './identity/paths.yaml#/me-identity'
+  /v1/me/mfa:
+    $ref: './identity/paths.yaml#/me-mfa'
+  /v1/me/mfa/totp/setup:
+    $ref: './identity/paths.yaml#/me-mfa-totp-setup'
+  /v1/me/mfa/totp/confirm:
+    $ref: './identity/paths.yaml#/me-mfa-totp-confirm'
+  /v1/me/mfa/totp:
+    $ref: './identity/paths.yaml#/me-mfa-totp'
+  /v1/me/mfa/recovery-codes:
+    $ref: './identity/paths.yaml#/me-mfa-recovery-codes'
+  /v1/me/passkeys/registration-options:
+    $ref: './identity/paths.yaml#/me-passkeys-registration-options'
+  /v1/me/passkeys:
+    $ref: './identity/paths.yaml#/me-passkeys'
+  /v1/me/passkeys/{passkeyId}:
+    $ref: './identity/paths.yaml#/me-passkey'
+  /v1/me/mfa-reset:
+    $ref: './identity/paths.yaml#/me-mfa-reset'
+  /v1/me/captaincy:
+    $ref: './identity/paths.yaml#/me-captaincy'
+  /v1/me/captain-applications:
+    $ref: './identity/paths.yaml#/me-captain-applications'
+  /v1/captain-applications:
+    $ref: './identity/paths.yaml#/captain-applications'
+  /v1/captain-applications/{applicationId}/withdraw:
+    $ref: './identity/paths.yaml#/captain-application-withdraw'
 components:
   securitySchemes:
     bearer:
@@ -113,7 +256,84 @@ components:
       schema:
         type: string
       example: 'ru-RU,ru;q=0.9,en;q=0.8'
+    CodeId:
+      name: codeId
+      in: path
+      required: true
+      description: Id кода из письма — code_id ответа CodeSent
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: Id своей сессии из listMySessions
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c2-7b3e-7c21-9d5e-3e8f1a2b4c70
+    IdentityId:
+      name: identityId
+      in: path
+      required: true
+      description: Id привязки Apple или Google из listMyAuthMethods
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c7-5d6e-7b71-a8f9-0a1b2c3d4e56
+    PasskeyId:
+      name: passkeyId
+      in: path
+      required: true
+      description: Id ключа доступа из listMyAuthMethods
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c8-6e7f-7c81-b90a-1b2c3d4e5f67
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      description: Id своей заявки в капитаны из listMyCaptainApplications или getMyCaptaincy
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Курсор следующей страницы — next_cursor из предыдущего ответа; без него — первая страница
+      schema:
+        type: string
+        maxLength: 1024
+      example: eyJ2IjoxLCJrIjpbIjIwMjYtMTEtMTNUMDk6MDA6MDBaIl19
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Размер страницы, от 1 до 100; без параметра — 20
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      example: 20
   headers:
+    CacheNoStore:
+      description: Ответ с токенами или секретом — не кэшируется нигде, в том числе браузером
+      required: true
+      schema:
+        type: string
+      example: no-store
+    CachePrivate:
+      description: Ответ зависит от игрока — общим кэшам и браузеру его не хранить
+      required: true
+      schema:
+        type: string
+      example: 'private, no-store'
     Vary:
       description: Всегда Accept-Language — ответ зависит от языка, кэши хранят языки раздельно
       required: true
@@ -133,7 +353,9 @@ components:
       description: Ошибка в формате RFC 9457
       headers:
         Retry-After:
-          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded
+          description: >-
+            Через сколько секунд повторить — только у 429 ratelimit.exceeded и 429
+            identity.resend_too_soon (повтор отправки кода раньше паузы)
           schema:
             type: integer
             minimum: 1
@@ -195,6 +417,46 @@ components:
             Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после
             которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
           example: 3
+        reasons:
+          type: array
+          description: >-
+            Причины отказа машинными значениями — только у двух кодов. У identity.captain_ineligible —
+            невыполненные условия заявки в капитаны (значения схемы CaptainIneligibility; ограничение
+            captain — причина restricted). У identity.password_weak — ровно одно значение: too_short
+            (короче 10 символов), common (из списка распространённых паролей) или too_long (длиннее
+            потолка). Список открытый: незнакомое значение показывайте общим текстом кода
+          items:
+            type: string
+            description: Машинное значение причины
+            example: too_short
+          example: [too_short]
+        methods:
+          type: array
+          description: >-
+            Только у identity.mfa_required — вторые факторы аккаунта, которые принимает эта операция
+            (значения схемы MfaMethod): totp, recovery_code, passkey. У confirmPasswordReset — только
+            totp и recovery_code: ключ доступа при сбросе пароля не принимается. Клиент показывает
+            выбор из этих способов и повторяет запрос со вторым фактором
+          items:
+            type: string
+            description: Способ второго фактора (MfaMethod)
+            example: totp
+          example: [totp, recovery_code]
+        available_at:
+          type: string
+          format: date-time
+          description: >-
+            Когда действие станет доступно (UTC) — только у identity.nickname_change_too_soon (смена
+            ника раньше 30 дней) и identity.application_cooldown (повторная заявка в капитаны раньше
+            7 дней после отказа)
+          example: '2026-12-13T09:30:00Z'
+        blocked_until:
+          type: string
+          format: date-time
+          description: >-
+            До какого момента (UTC) заблокирован аккаунт — только у identity.account_blocked. Поля нет
+            у этого кода — блокировка бессрочная (null не приходит)
+          example: '2026-11-20T00:00:00Z'
         job_id:
           type: integer
           format: int64
@@ -259,3 +521,165 @@ components:
       $ref: './platform/schemas.yaml#/AppPlatform'
     AppMinVersion:
       $ref: './platform/schemas.yaml#/AppMinVersion'
+    AuthStatus:
+      $ref: './identity/schemas.yaml#/AuthStatus'
+    AuthResult:
+      $ref: './identity/schemas.yaml#/AuthResult'
+    TokenPair:
+      $ref: './identity/schemas.yaml#/TokenPair'
+    AuthUser:
+      $ref: './identity/schemas.yaml#/AuthUser'
+    MfaMethod:
+      $ref: './identity/schemas.yaml#/MfaMethod'
+    MfaChallenge:
+      $ref: './identity/schemas.yaml#/MfaChallenge'
+    SocialSignupPending:
+      $ref: './identity/schemas.yaml#/SocialSignupPending'
+    DeletionPending:
+      $ref: './identity/schemas.yaml#/DeletionPending'
+    CodeSent:
+      $ref: './identity/schemas.yaml#/CodeSent'
+    DeviceInfo:
+      $ref: './identity/schemas.yaml#/DeviceInfo'
+    DeviceIntegrityKind:
+      $ref: './identity/schemas.yaml#/DeviceIntegrityKind'
+    DeviceIntegrity:
+      $ref: './identity/schemas.yaml#/DeviceIntegrity'
+    DeviceChallenge:
+      $ref: './identity/schemas.yaml#/DeviceChallenge'
+    WebAuthnOptions:
+      $ref: './identity/schemas.yaml#/WebAuthnOptions'
+    WebAuthnCredential:
+      $ref: './identity/schemas.yaml#/WebAuthnCredential'
+    PasskeyAssertion:
+      $ref: './identity/schemas.yaml#/PasskeyAssertion'
+    NicknameUnavailableReason:
+      $ref: './identity/schemas.yaml#/NicknameUnavailableReason'
+    NicknameAvailability:
+      $ref: './identity/schemas.yaml#/NicknameAvailability'
+    LegalDocumentKind:
+      $ref: './identity/schemas.yaml#/LegalDocumentKind'
+    LegalDocument:
+      $ref: './identity/schemas.yaml#/LegalDocument'
+    LegalDocumentList:
+      $ref: './identity/schemas.yaml#/LegalDocumentList'
+    AcceptedDocument:
+      $ref: './identity/schemas.yaml#/AcceptedDocument'
+    Locale:
+      $ref: './identity/schemas.yaml#/Locale'
+    AccountStatus:
+      $ref: './identity/schemas.yaml#/AccountStatus'
+    MeRestriction:
+      $ref: './identity/schemas.yaml#/MeRestriction'
+    MeDocument:
+      $ref: './identity/schemas.yaml#/MeDocument'
+    Me:
+      $ref: './identity/schemas.yaml#/Me'
+    MeUpdate:
+      $ref: './identity/schemas.yaml#/MeUpdate'
+    ClientKind:
+      $ref: './identity/schemas.yaml#/ClientKind'
+    AuthMethod:
+      $ref: './identity/schemas.yaml#/AuthMethod'
+    Session:
+      $ref: './identity/schemas.yaml#/Session'
+    SessionList:
+      $ref: './identity/schemas.yaml#/SessionList'
+    RevokedCount:
+      $ref: './identity/schemas.yaml#/RevokedCount'
+    SignupStartRequest:
+      $ref: './identity/schemas.yaml#/SignupStartRequest'
+    SignupConfirmRequest:
+      $ref: './identity/schemas.yaml#/SignupConfirmRequest'
+    LoginRequest:
+      $ref: './identity/schemas.yaml#/LoginRequest'
+    MfaCompleteRequest:
+      $ref: './identity/schemas.yaml#/MfaCompleteRequest'
+    PasswordResetStartRequest:
+      $ref: './identity/schemas.yaml#/PasswordResetStartRequest'
+    PasswordResetConfirmRequest:
+      $ref: './identity/schemas.yaml#/PasswordResetConfirmRequest'
+    RefreshRequest:
+      $ref: './identity/schemas.yaml#/RefreshRequest'
+    DeletionCancelRequest:
+      $ref: './identity/schemas.yaml#/DeletionCancelRequest'
+    NicknameChangeRequest:
+      $ref: './identity/schemas.yaml#/NicknameChangeRequest'
+    PasswordChangeRequest:
+      $ref: './identity/schemas.yaml#/PasswordChangeRequest'
+    EmailChangeStartRequest:
+      $ref: './identity/schemas.yaml#/EmailChangeStartRequest'
+    EmailChangeConfirmRequest:
+      $ref: './identity/schemas.yaml#/EmailChangeConfirmRequest'
+    DocumentsAcceptRequest:
+      $ref: './identity/schemas.yaml#/DocumentsAcceptRequest'
+    DeletionRequest:
+      $ref: './identity/schemas.yaml#/DeletionRequest'
+    DeletionScheduled:
+      $ref: './identity/schemas.yaml#/DeletionScheduled'
+    AuthMethodSwitch:
+      $ref: './identity/schemas.yaml#/AuthMethodSwitch'
+    PasskeyMethodSwitch:
+      $ref: './identity/schemas.yaml#/PasskeyMethodSwitch'
+    AuthMethods:
+      $ref: './identity/schemas.yaml#/AuthMethods'
+    SocialProvider:
+      $ref: './identity/schemas.yaml#/SocialProvider'
+    SocialNonceRequest:
+      $ref: './identity/schemas.yaml#/SocialNonceRequest'
+    SocialNonce:
+      $ref: './identity/schemas.yaml#/SocialNonce'
+    AppleAuthorization:
+      $ref: './identity/schemas.yaml#/AppleAuthorization'
+    SocialLoginRequest:
+      $ref: './identity/schemas.yaml#/SocialLoginRequest'
+    SocialSignupCompleteRequest:
+      $ref: './identity/schemas.yaml#/SocialSignupCompleteRequest'
+    SocialLinkRequest:
+      $ref: './identity/schemas.yaml#/SocialLinkRequest'
+    MfaPasskeyOptionsRequest:
+      $ref: './identity/schemas.yaml#/MfaPasskeyOptionsRequest'
+    PasskeyLoginRequest:
+      $ref: './identity/schemas.yaml#/PasskeyLoginRequest'
+    ReauthSocial:
+      $ref: './identity/schemas.yaml#/ReauthSocial'
+    ReauthRequest:
+      $ref: './identity/schemas.yaml#/ReauthRequest'
+    ReauthResult:
+      $ref: './identity/schemas.yaml#/ReauthResult'
+    LinkedIdentity:
+      $ref: './identity/schemas.yaml#/LinkedIdentity'
+    Passkey:
+      $ref: './identity/schemas.yaml#/Passkey'
+    MfaStatus:
+      $ref: './identity/schemas.yaml#/MfaStatus'
+    MyAuthMethods:
+      $ref: './identity/schemas.yaml#/MyAuthMethods'
+    TotpSetup:
+      $ref: './identity/schemas.yaml#/TotpSetup'
+    TotpConfirmRequest:
+      $ref: './identity/schemas.yaml#/TotpConfirmRequest'
+    RecoveryCodes:
+      $ref: './identity/schemas.yaml#/RecoveryCodes'
+    PasskeyRegisterRequest:
+      $ref: './identity/schemas.yaml#/PasskeyRegisterRequest'
+    PasskeyRenameRequest:
+      $ref: './identity/schemas.yaml#/PasskeyRenameRequest'
+    CaptainIneligibility:
+      $ref: './identity/schemas.yaml#/CaptainIneligibility'
+    CaptainApplicationStatus:
+      $ref: './identity/schemas.yaml#/CaptainApplicationStatus'
+    CaptainRejectionCode:
+      $ref: './identity/schemas.yaml#/CaptainRejectionCode'
+    CaptainPermit:
+      $ref: './identity/schemas.yaml#/CaptainPermit'
+    CaptainEligibility:
+      $ref: './identity/schemas.yaml#/CaptainEligibility'
+    CaptainApplication:
+      $ref: './identity/schemas.yaml#/CaptainApplication'
+    Captaincy:
+      $ref: './identity/schemas.yaml#/Captaincy'
+    CaptainApplicationPage:
+      $ref: './identity/schemas.yaml#/CaptainApplicationPage'
+    CaptainApplicationSubmitRequest:
+      $ref: './identity/schemas.yaml#/CaptainApplicationSubmitRequest'

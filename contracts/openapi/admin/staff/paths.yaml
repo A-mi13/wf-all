@@ -894,3 +894,62 @@ roles:
               $ref: '../root.yaml#/components/schemas/StaffRoles'
       default:
         $ref: '../root.yaml#/components/responses/Problem'
+account-player-link:
+  put:
+    operationId: putStaffPlayerLink
+    tags: [staff]
+    x-permission: staff.player_links.manage
+    x-error-codes: [staff.not_found, staff.player_link_taken, staff.player_not_found]
+    summary: Связать сотрудника с его учёткой игрока
+    description: |
+      Карточка сотрудника, только владелец: связь «сотрудник → учётка игрока». Входа она не даёт —
+      служит запретом действий над собой: сотрудник не решает заявку в капитаны своей учётки и не
+      запрашивает, не подтверждает и не отменяет сброс её 2FA (409 `identity.self_action`).
+      Учётку игрока находят по почте (`findPlayerByEmail`). Сразу, без второго сотрудника: запись в
+      журнал, сотруднику уходит письмо. Повтор с той же учёткой — 200 без изменений; другая учётка —
+      связь заменяется.
+
+      Коды ошибок:
+      - 404 `staff.not_found` — сотрудника нет.
+      - 409 `staff.player_link_taken` — эта учётка игрока уже связана с другим сотрудником.
+      - 422 `staff.player_not_found` — игрока с `user_id` нет.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    requestBody:
+      description: Учётка игрока
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/StaffPlayerLinkPut'
+    responses:
+      '200':
+        description: Связь установлена
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/StaffPlayerLink'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+  delete:
+    operationId: deleteStaffPlayerLink
+    tags: [staff]
+    x-permission: staff.player_links.manage
+    x-error-codes: [staff.not_found]
+    summary: Снять связь сотрудника с учёткой игрока
+    description: |
+      Карточка сотрудника, только владелец: снимает связь «сотрудник → учётка игрока». Сразу: запись
+      в журнал, сотруднику уходит письмо. Связи не было — тоже 204, без записи и письма.
+
+      Коды ошибок: 404 `staff.not_found` — сотрудника нет.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/StaffId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+      - $ref: '../root.yaml#/components/parameters/AdminHeader'
+    responses:
+      '204':
+        description: Связи нет
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'

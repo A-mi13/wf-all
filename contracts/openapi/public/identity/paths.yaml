@@ -1,0 +1,2134 @@
+# Операции модуля identity публичного контракта (спека identity §6.3): вход и регистрация, коды из письма,
+# токены и сессии, аккаунт. Тег identity — реализует internal/identity/httpapi (встроен в
+# internal/httpapi/public.Server); до реализации этапа операция отвечает 501 http.not_implemented.
+# Анонимные мутации — в x-anonymous-mutations корня. Cache-Control — у каждого 2xx с телом (план I-1, R5).
+
+nicknames-availability:
+  get:
+    operationId: checkNickname
+    tags: [identity]
+    security: []
+    x-rate-limit: auth_check
+    x-error-codes: []
+    summary: Проверить ник
+    description: |
+      Доступен ли ник — проверка при вводе на экране регистрации и смены ника (с задержкой после
+      ввода, не на каждую букву). Без аутентификации; ники публичны, ответ ничего не раскрывает.
+
+      Неверный формат — не ошибка, а `200 {available: false, reason: invalid}`. Исключение — ник
+      длиннее 64 символов: его отвергает проверка схемы — `400 validation.failed` по полю
+      `query.nickname` (поле ввода ограничьте 20 символами). Ответ — подсказка:
+      окончательно ник проверяют `startSignup`, `confirmSignup` и `changeNickname` (его могут занять
+      между проверкой и отправкой формы).
+    parameters:
+      - name: nickname
+        in: query
+        required: true
+        description: Ник, как его ввёл игрок
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+        example: kosta_10
+    responses:
+      '200':
+        description: Доступность ника
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/NicknameAvailability'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-signup:
+  post:
+    operationId: startSignup
+    tags: [identity]
+    security: []
+    x-rate-limit: auth_send
+    x-error-codes:
+      - identity.documents_outdated
+      - identity.device_required
+      - identity.too_young
+      - identity.city_not_found
+      - identity.password_weak
+      - identity.nickname_invalid
+      - identity.nickname_taken
+      - identity.email_disposable
+      - identity.device_signup_limit
+      - identity.device_untrusted
+    summary: Начать регистрацию по почте
+    description: |
+      Форма регистрации: почта, пароль, ник, дата рождения, город и согласие с текущими версиями
+      документов. Проверяет форму и отправляет 6-значный код на почту; аккаунт создаёт
+      `confirmSignup`. Анонимная операция: регистрация возможна только без сессии; от повторов
+      защищают одноразовый код, уникальность почты и ника и лимиты (`auth_send`).
+
+      Ответ `202 CodeSent` не зависит от того, есть ли аккаунт на эту почту: владельцу занятой почты
+      уходит письмо «у вас уже есть аккаунт», а в ответе разницы нет — переходите к вводу кода.
+
+      Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+      не передаёт, поле игнорируется. При подозрительной активности — `403 humancheck.required`:
+      решите задачу и повторите.
+
+      Почта, которая не проходит проверку формы (невидимые или управляющие символы, длиннее 254
+      байт после нормализации, не вида имя@домен), — `400 validation.failed` по полю `body.email`;
+      регистр и пробелы по краям не важны, домен на кириллице принимается. Дата рождения в будущем
+      или возраст больше 120 лет — `400 validation.failed` по полю `body.birth_date`.
+
+      Ошибки формы:
+      - `identity.documents_outdated` (422) — нет согласия с каким-то документом или версия не
+        текущая: перечитайте `getLegalDocuments` и покажите документы снова;
+      - `identity.too_young` (422) — возраст ниже порога страны города: вежливый отказ, ничего не
+        сохраняется;
+      - `identity.city_not_found` (422) — города нет или его страна выключена: выберите город заново;
+      - `identity.password_weak` (422) — причина в `reasons` (одно значение): `too_short`, `common`,
+        `too_long`;
+      - `identity.nickname_invalid` (422), `identity.nickname_taken` (409) — выберите другой ник;
+      - `identity.email_disposable` (422) — одноразовый почтовый домен;
+      - `identity.device_signup_limit` (403) — с устройства уже две регистрации: покажите причину и
+        ссылку на поддержку;
+      - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+    requestBody:
+      required: true
+      description: Форма регистрации
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/SignupStartRequest'
+    responses:
+      '202':
+        description: Код отправлен (ответ одинаков при занятой почте)
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/CodeSent'
+      '422':
+        description: >-
+          Форма не прошла проверку. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`idempotency.key_reused` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              password_weak:
+                summary: Пароль короче 10 символов
+                value:
+                  type: about:blank
+                  title: Unprocessable Entity
+                  status: 422
+                  code: identity.password_weak
+                  reasons: [too_short]
+              too_young:
+                summary: Возраст ниже порога страны города
+                value:
+                  type: about:blank
+                  title: Unprocessable Entity
+                  status: 422
+                  code: identity.too_young
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-signup-confirm:
+  post:
+    operationId: confirmSignup
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.code_invalid
+      - identity.code_expired
+      - identity.nickname_taken
+      - identity.email_taken
+      - identity.device_signup_limit
+      - identity.device_required
+    summary: Подтвердить регистрацию кодом
+    description: |
+      Код из письма завершает регистрацию: создаётся аккаунт и сессия — `201 AuthResult` со
+      `status: authenticated` и `user.new_user: true`. Анонимная операция: вход возможен только без
+      сессии; от повторов защищает одноразовый код (погашенный код второй раз не сработает).
+
+      Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+      не передаёт, поле игнорируется.
+
+      - `identity.code_invalid` (400) — неверный код, в `attempts_left` — сколько попыток осталось;
+      - `identity.code_expired` (410) — код истёк, погашен или исчерпал 5 попыток: начните
+        регистрацию заново или запросите повтор `resendAuthCode`, если код ещё жив;
+      - `identity.nickname_taken` (409) — ник заняли, пока шёл код: код не тратится, повторите вызов
+        с новым `nickname`;
+      - `identity.email_taken` (409) — почту заняли параллельной регистрацией: войдите;
+      - `identity.device_signup_limit` (403) — лимит регистраций устройства.
+    requestBody:
+      required: true
+      description: Код и при необходимости новый ник
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/SignupConfirmRequest'
+    responses:
+      '201':
+        description: Аккаунт создан, сессия выдана
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthResult'
+      '400':
+        description: >-
+          Неверный код. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              code_invalid:
+                summary: Неверный код, осталось 3 попытки
+                value:
+                  type: about:blank
+                  title: Bad Request
+                  status: 400
+                  code: identity.code_invalid
+                  attempts_left: 3
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-code-resend:
+  post:
+    operationId: resendAuthCode
+    tags: [identity]
+    security: []
+    x-rate-limit: auth_send
+    x-error-codes:
+      - identity.resend_too_soon
+      - identity.code_expired
+    summary: Отправить код повторно
+    description: |
+      Повторная отправка того же кода (регистрация, сброс пароля, смена почты): попытки не
+      обнуляются, паузы растут 60 → 120 → 300 с, не больше 4 отправок. Анонимная операция: код
+      регистрации и сброса запрашивают без сессии; от повторов защищают паузы и лимиты.
+
+      Ответ `202 CodeSent` не зависит от того, есть ли аккаунт: для несуществующей почты паузы и
+      ответы те же.
+
+      - `identity.resend_too_soon` (429) — раньше паузы: заголовок `Retry-After` — через сколько
+        секунд; кнопку держите неактивной до `resend_available_at`;
+      - `identity.code_expired` (410) — код истёк, погашен или исчерпал отправки: начните заново.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/CodeId'
+    responses:
+      '202':
+        description: Код отправлен повторно
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/CodeSent'
+      '429':
+        description: >-
+          Повтор раньше паузы. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`ratelimit.exceeded` и др. — info.description), не только коды операции
+        headers:
+          Retry-After:
+            description: Через сколько секунд отправить снова
+            required: true
+            schema:
+              type: integer
+              minimum: 1
+            example: 45
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              resend_too_soon:
+                summary: Пауза ещё не прошла
+                value:
+                  type: about:blank
+                  title: Too Many Requests
+                  status: 429
+                  code: identity.resend_too_soon
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-login:
+  post:
+    operationId: login
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.invalid_credentials
+      - identity.account_blocked
+      - identity.device_untrusted
+      - identity.device_required
+    summary: Войти по почте и паролю
+    description: |
+      Вход по почте и паролю. Ответ `200 AuthResult`: `authenticated` (сессия), `mfa_required`
+      (нужен второй фактор → `completeMfa`) или `deletion_pending` (аккаунт ждёт удаления →
+      `cancelDeletion`). Анонимная операция: вход возможен только без сессии; от перебора защищают
+      лимиты по IP, устройству и почте и антибот.
+
+      Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+      не передаёт, поле игнорируется. При подозрительной активности (неудачи по почте или с адреса) —
+      `403 humancheck.required`: решите задачу и повторите.
+
+      Почта, которая не проходит проверку формы (невидимые или управляющие символы, длиннее 254
+      байт после нормализации, не вида имя@домен), — `400 validation.failed` по полю `body.email`
+      (до поиска аккаунта: ответ ничего не раскрывает).
+
+      - `identity.invalid_credentials` (400) — почта или пароль неверны; ответ одинаков, если
+        аккаунта нет, у аккаунта нет пароля (вход только через Apple или Google) или пароль неверен:
+        предложите сброс пароля и соцвход;
+      - `identity.account_blocked` (403) — аккаунт заблокирован; `blocked_until` — до какого момента,
+        поля нет — бессрочно;
+      - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+
+      Вход с нового для аккаунта устройства отправляет владельцу письмо.
+    requestBody:
+      required: true
+      description: Почта, пароль и устройство
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/LoginRequest'
+    responses:
+      '200':
+        description: Результат входа
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthResult'
+      '403':
+        description: >-
+          Аккаунт заблокирован или устройство не прошло проверку. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`humancheck.required`, `feature.disabled` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              account_blocked:
+                summary: Заблокирован до 20 ноября
+                value:
+                  type: about:blank
+                  title: Forbidden
+                  status: 403
+                  code: identity.account_blocked
+                  blocked_until: '2026-11-20T00:00:00Z'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-mfa:
+  post:
+    operationId: completeMfa
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.mfa_invalid
+      - identity.mfa_expired
+      - identity.passkey_invalid
+      - identity.device_required
+    summary: Второй фактор входа
+    description: |
+      Второй шаг входа после `AuthResult.status = mfa_required`: `mfa_token` и ровно одно из `code`
+      (приложение-аутентификатор), `recovery_code` (резервный код, сгорает), `passkey` (ответ ключа
+      доступа на задачу `startMfaPasskey`); ни одного или больше одного — `400 validation.failed` по
+      полю `body`. Ответ — `200 AuthResult` (`authenticated` или `deletion_pending`). Вход со вторым
+      фактором отменяет назначенный через поддержку сброс 2FA. Анонимная операция: вход возможен
+      только без сессии; от перебора защищают одноразовый `mfa_token` (5 попыток), лимит неудач на
+      аккаунт и лимиты класса `auth`.
+
+      Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+      не передаёт, поле игнорируется.
+
+      - `identity.mfa_invalid` (400) — неверный код, в `attempts_left` — сколько попыток осталось у
+        этого `mfa_token`;
+      - `identity.mfa_expired` (410) — `mfa_token` истёк или исчерпан: начните вход заново;
+      - `identity.passkey_invalid` (400) — ключ доступа не прошёл проверку.
+    requestBody:
+      required: true
+      description: Токен шага и второй фактор
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/MfaCompleteRequest'
+    responses:
+      '200':
+        description: Результат входа
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthResult'
+      '400':
+        description: >-
+          Неверный второй фактор. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              mfa_invalid:
+                summary: Неверный код, осталось 4 попытки
+                value:
+                  type: about:blank
+                  title: Bad Request
+                  status: 400
+                  code: identity.mfa_invalid
+                  attempts_left: 4
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-password-reset:
+  post:
+    operationId: startPasswordReset
+    tags: [identity]
+    security: []
+    x-rate-limit: auth_send
+    x-error-codes: []
+    summary: Начать сброс пароля
+    description: |
+      Отправляет 6-значный код сброса на почту аккаунта. Анонимная операция: забывший пароль
+      сессии не имеет; от рассылок защищают лимиты по почте и IP и антибот.
+
+      Ответ `202 CodeSent` не зависит от того, есть ли аккаунт: на неизвестную почту письмо не
+      уходит, но ответ тот же — переходите к вводу кода. При подозрительной активности — `403
+      humancheck.required`: решите задачу и повторите.
+
+      Почта, которая не проходит проверку формы (невидимые или управляющие символы, длиннее 254
+      байт после нормализации, не вида имя@домен), — `400 validation.failed` по полю `body.email`
+      (до поиска аккаунта: ответ ничего не раскрывает).
+    requestBody:
+      required: true
+      description: Почта аккаунта
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/PasswordResetStartRequest'
+    responses:
+      '202':
+        description: Код отправлен (ответ одинаков для неизвестной почты)
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/CodeSent'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-password-reset-confirm:
+  post:
+    operationId: confirmPasswordReset
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.code_invalid
+      - identity.code_expired
+      - identity.password_weak
+      - identity.mfa_required
+      - identity.mfa_invalid
+      - identity.device_required
+    summary: Задать новый пароль по коду
+    description: |
+      Новый пароль по коду из письма. Успех отзывает все сессии аккаунта и выдаёт новую на этом
+      устройстве — `200 AuthResult` (`authenticated`, либо `deletion_pending`, если аккаунт ждёт
+      удаления). Аккаунт без пароля (только соцвход) так получает пароль. Анонимная операция:
+      забывший пароль сессии не имеет; от повторов защищает одноразовый код.
+
+      Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+      не передаёт, поле игнорируется.
+
+      Аккаунт с 2FA: сброс по почте вторую ступень не обходит. Без `mfa` — `400
+      identity.mfa_required`, в `methods` — принимаемые факторы (`totp`, `recovery_code`; ключ доступа
+      здесь не принимается — войдите ключом и смените пароль в настройках); код при этом не тратится
+      и попытка не считается — повторите с `mfa`.
+
+      - `identity.code_invalid` (400, `attempts_left`), `identity.code_expired` (410) — как у
+        `confirmSignup`;
+      - `identity.password_weak` (422) — причина в `reasons`;
+      - `identity.mfa_invalid` (400, `attempts_left`) — неверный второй фактор.
+    requestBody:
+      required: true
+      description: Код, новый пароль и при 2FA — второй фактор
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/PasswordResetConfirmRequest'
+    responses:
+      '200':
+        description: Пароль сменён, сессия выдана
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthResult'
+      '400':
+        description: >-
+          Неверный код, нужен или неверен второй фактор. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              mfa_required:
+                summary: У аккаунта 2FA — нужен второй фактор
+                value:
+                  type: about:blank
+                  title: Bad Request
+                  status: 400
+                  code: identity.mfa_required
+                  methods: [totp, recovery_code]
+              code_invalid:
+                summary: Неверный код из письма
+                value:
+                  type: about:blank
+                  title: Bad Request
+                  status: 400
+                  code: identity.code_invalid
+                  attempts_left: 2
+              mfa_invalid:
+                summary: Неверный второй фактор
+                value:
+                  type: about:blank
+                  title: Bad Request
+                  status: 400
+                  code: identity.mfa_invalid
+                  attempts_left: 4
+      '422':
+        description: >-
+          Пароль не подходит. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`idempotency.key_reused` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              password_weak:
+                summary: Пароль из списка распространённых
+                value:
+                  type: about:blank
+                  title: Unprocessable Entity
+                  status: 422
+                  code: identity.password_weak
+                  reasons: [common]
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-refresh:
+  post:
+    operationId: refreshSession
+    tags: [identity]
+    security: []
+    x-rate-limit: auth_refresh
+    x-error-codes:
+      - identity.refresh_invalid
+    summary: Обновить токены
+    description: |
+      Обмен refresh-токена на новую пару: каждый вызов выдаёт новый `refresh_token`, прежний больше
+      не действует (ротация), срок бездействия продлевается. Вызывайте при `401
+      auth.unauthenticated` один раз и повторяйте исходный запрос. Анонимная операция: access уже
+      истёк, сессию подтверждает сам refresh-токен (`Authorization` не читается); от повторов
+      защищает ротация.
+
+      Вызывайте последовательно, не параллельно, на одно устройство: повтор уже использованного
+      токена отзывает сессию. Исключение — окно гонки 15 секунд с того же устройства (`install_id`):
+      ответ тот же, что у первого вызова.
+
+      - `identity.refresh_invalid` (401) — токен неизвестен, истёк, отозван или повторён вне окна:
+        войдите заново.
+    requestBody:
+      required: true
+      description: Refresh-токен и устройство
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/RefreshRequest'
+    responses:
+      '200':
+        description: Новая пара токенов
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/TokenPair'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-deletion-cancel:
+  post:
+    operationId: cancelDeletion
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.restore_token_invalid
+      - identity.device_required
+    summary: Отменить удаление аккаунта
+    description: |
+      После входа с `AuthResult.status = deletion_pending` игрок подтверждает «Отменить удаление»:
+      аккаунт снова активен, выдаётся сессия — `200 AuthResult` (`authenticated`), владельцу уходит
+      письмо. Анонимная операция: сессии у аккаунта, ждущего удаления, нет; владельца подтверждает
+      одноразовый `restore_token` (10 минут), выданный только после входа.
+
+      Мобильный клиент обязан передать `device`; без него — `422 identity.device_required`; веб (BFF)
+      не передаёт, поле игнорируется.
+
+      - `identity.restore_token_invalid` (410) — токен истёк или использован: войдите снова.
+    requestBody:
+      required: true
+      description: Токен отмены удаления
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/DeletionCancelRequest'
+    responses:
+      '200':
+        description: Удаление отменено, сессия выдана
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthResult'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+legal-documents:
+  get:
+    operationId: getLegalDocuments
+    tags: [identity]
+    security: []
+    x-error-codes: []
+    summary: Текущие версии документов
+    description: |
+      Правила сервиса и политика конфиденциальности — текущие версии и ссылки на тексты. Экран
+      регистрации показывает их и передаёт принятые версии в `accepted_documents`; ответ
+      `422 identity.documents_outdated` — сигнал перечитать список. Без аутентификации; ответ
+      кэшируется до 5 минут.
+    responses:
+      '200':
+        description: Текущие документы
+        headers:
+          Cache-Control:
+            description: Справочник — общие кэши хранят до 5 минут
+            required: true
+            schema:
+              type: string
+            example: 'public, max-age=300'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/LegalDocumentList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+device-challenges:
+  post:
+    operationId: createDeviceChallenge
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes: []
+    summary: Задача проверки целостности приложения
+    description: |
+      Одноразовая задача (5 минут) для App Attest (iOS) или Play Integrity (Android): приложение
+      подписывает её и передаёт результат в `device.integrity` регистрации или входа. Анонимная
+      операция: нужна до входа; от повторов защищает одноразовость задачи и лимиты класса `auth`.
+      Веб её не вызывает. Запрос без тела (переданное тело сервер не читает).
+    responses:
+      '201':
+        description: Задача выдана
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/DeviceChallenge'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-logout:
+  post:
+    operationId: logout
+    tags: [identity]
+    x-error-codes: []
+    summary: Выйти
+    description: |
+      Отзывает текущую сессию (её refresh-токен больше не действует, access — в пределах 5 секунд).
+      Клиент удаляет токены у себя.
+
+      Повтор после обрыва сети может получить `401 auth.unauthenticated`, а не сохранённый `204`:
+      вход проверяется раньше ключа идемпотентности, а сессия уже отозвана. Считайте выход
+      выполненным: удалите токены, `refreshSession` не вызывайте.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '204':
+        description: Сессия отозвана
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me:
+  get:
+    operationId: getMe
+    tags: [identity]
+    x-error-codes: []
+    summary: Мой аккаунт
+    description: |
+      Аккаунт текущего игрока: почта, ник и когда его можно сменить, дата рождения, город, язык,
+      статус, ограничения, есть ли пароль и 2FA, согласие с документами. Приложение зовёт после входа
+      и на экране настроек; `documents_acceptance_required: true` — показать экран согласия.
+    responses:
+      '200':
+        description: Аккаунт
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Me'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+  patch:
+    operationId: updateMe
+    tags: [identity]
+    x-error-codes: []
+    summary: Изменить настройки аккаунта
+    description: |
+      Правка настроек аккаунта — сейчас язык (`locale`) интерфейса и писем. Хотя бы одно поле, иначе
+      `400 validation.failed`. Ответ — аккаунт целиком.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Изменяемые поля
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/MeUpdate'
+    responses:
+      '200':
+        description: Аккаунт после правки
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Me'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-nickname:
+  patch:
+    operationId: changeNickname
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.nickname_invalid
+      - identity.nickname_taken
+      - identity.nickname_change_too_soon
+    summary: Сменить ник
+    description: |
+      Новый ник — не чаще раза в 30 дней; прежний ник 90 дней никто не сможет взять. Ответ — аккаунт
+      с новым ником и `nickname_changeable_at`.
+
+      - `identity.nickname_invalid` (422), `identity.nickname_taken` (409) — выберите другой ник;
+      - `identity.nickname_change_too_soon` (409) — раньше срока; `available_at` — с какого момента.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Новый ник
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/NicknameChangeRequest'
+    responses:
+      '200':
+        description: Аккаунт с новым ником
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Me'
+      '409':
+        description: >-
+          Ник занят или менять его ещё рано. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`idempotency.in_progress`, `idempotency.replay_unavailable` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              nickname_change_too_soon:
+                summary: Ник менялся меньше 30 дней назад
+                value:
+                  type: about:blank
+                  title: Conflict
+                  status: 409
+                  code: identity.nickname_change_too_soon
+                  available_at: '2026-12-13T09:30:00Z'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-sessions:
+  get:
+    operationId: listMySessions
+    tags: [identity]
+    x-error-codes: []
+    summary: Где я вошёл
+    description: |
+      Живые сессии аккаунта для экрана «Где вы вошли»: устройство или браузер, способ входа, город по
+      IP (сам IP не отдаётся), когда вошли и последняя активность; `current` — эта сессия. Без
+      страниц: живых сессий не больше 100.
+    responses:
+      '200':
+        description: Сессии
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/SessionList'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-session:
+  delete:
+    operationId: revokeMySession
+    tags: [identity]
+    x-error-codes:
+      - identity.session_not_found
+    summary: Выйти на устройстве
+    description: |
+      Отзывает свою сессию по id («выйти здесь»); текущая — клиент выходит. Отзыв действует на всех
+      операциях в пределах 5 секунд.
+
+      Отзыв текущей сессии: повтор после обрыва сети может получить `401 auth.unauthenticated`, а не
+      сохранённый `204` — вход проверяется раньше ключа идемпотентности, а сессия уже отозвана.
+      Считайте выход выполненным: удалите токены, `refreshSession` не вызывайте.
+
+      - `identity.session_not_found` (404) — сессии нет, она уже отозвана или чужая.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/SessionId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '204':
+        description: Сессия отозвана
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-sessions-revoke-others:
+  post:
+    operationId: revokeOtherSessions
+    tags: [identity]
+    x-error-codes: []
+    summary: Выйти везде, кроме этого устройства
+    description: |
+      Отзывает все сессии аккаунта, кроме текущей; ответ — сколько отозвано (0 — других не было).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '200':
+        description: Сессии отозваны
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/RevokedCount'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-password:
+  post:
+    operationId: changePassword
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.reauth_required
+      - identity.password_weak
+    summary: Сменить или задать пароль
+    description: |
+      Новый пароль; аккаунт без пароля (только соцвход) так его задаёт. Нужен свежий вход (≤ 10
+      минут, текущий пароль или второй фактор подтверждается там), иначе `403
+      identity.reauth_required`; получить — `reauthenticate`. Отзывает все другие сессии, владельцу
+      уходит письмо.
+
+      - `identity.password_weak` (422) — причина в `reasons`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Новый пароль
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/PasswordChangeRequest'
+    responses:
+      '204':
+        description: Пароль сменён
+      '422':
+        description: >-
+          Пароль не подходит. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`idempotency.key_reused` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              password_weak:
+                summary: Пароль длиннее потолка
+                value:
+                  type: about:blank
+                  title: Unprocessable Entity
+                  status: 422
+                  code: identity.password_weak
+                  reasons: [too_long]
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-email-change:
+  post:
+    operationId: startEmailChange
+    tags: [identity]
+    x-rate-limit: auth_send
+    x-error-codes:
+      - identity.reauth_required
+      - identity.email_same
+      - identity.email_disposable
+    summary: Начать смену почты
+    description: |
+      Отправляет 6-значный код на новую почту; почта меняется после `confirmEmailChange`. Нужен
+      свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+
+      Если новая почта занята другим аккаунтом, ответ тот же `202`: код не придёт, а на новый адрес
+      уйдёт письмо «на этот адрес уже есть аккаунт».
+
+      Почта, которая не проходит проверку формы (невидимые или управляющие символы, длиннее 254
+      байт после нормализации, не вида имя@домен), — `400 validation.failed` по полю
+      `body.new_email`.
+
+      - `identity.email_same` (422) — новая почта совпадает с текущей;
+      - `identity.email_disposable` (422) — одноразовый почтовый домен.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Новая почта
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/EmailChangeStartRequest'
+    responses:
+      '202':
+        description: Код отправлен на новую почту
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/CodeSent'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-email-change-confirm:
+  post:
+    operationId: confirmEmailChange
+    tags: [identity]
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.code_invalid
+      - identity.code_expired
+      - identity.email_taken
+    summary: Подтвердить новую почту
+    description: |
+      Код с новой почты меняет почту аккаунта; на прежнюю уходит уведомление. Другие сессии не
+      отзываются, привязки Apple и Google не меняются. Ответ — аккаунт с новой почтой.
+
+      - `identity.code_invalid` (400, `attempts_left`), `identity.code_expired` (410) — как у
+        `confirmSignup`;
+      - `identity.email_taken` (409) — почту заняли, пока шёл код.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Код с новой почты
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/EmailChangeConfirmRequest'
+    responses:
+      '200':
+        description: Почта изменена
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Me'
+      '400':
+        description: >-
+          Неверный код. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`validation.failed`, `request.invalid` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              code_invalid:
+                summary: Неверный код, осталась 1 попытка
+                value:
+                  type: about:blank
+                  title: Bad Request
+                  status: 400
+                  code: identity.code_invalid
+                  attempts_left: 1
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-documents:
+  post:
+    operationId: acceptDocuments
+    tags: [identity]
+    x-error-codes:
+      - identity.documents_outdated
+    summary: Принять документы
+    description: |
+      Согласие с новыми версиями правил сервиса и политики конфиденциальности — после экрана, который
+      клиент показывает при `documents_acceptance_required: true`. Ответ — аккаунт с обновлённым
+      согласием. Работу с устаревшим согласием сервер не блокирует — экран обязан показать клиент.
+
+      - `identity.documents_outdated` (422) — версия не текущая: перечитайте `getLegalDocuments`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Принятые версии
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/DocumentsAcceptRequest'
+    responses:
+      '200':
+        description: Согласие сохранено
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Me'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-delete:
+  post:
+    operationId: deleteAccount
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.reauth_required
+      - identity.confirm_mismatch
+    summary: Удалить аккаунт
+    description: |
+      Назначает удаление через 30 дней: аккаунт сразу скрыт от других игроков, все сессии отозваны,
+      открытая заявка в капитаны отозвана, владельцу уходит письмо. До `purge_at` любой вход
+      предлагает отменить удаление (`AuthResult.status = deletion_pending` → `cancelDeletion`); после —
+      аккаунт удаляется необратимо. Нужен свежий вход (≤ 10 минут), иначе `403
+      identity.reauth_required`; получить — `reauthenticate`.
+
+      Повтор после обрыва сети может получить `401 auth.unauthenticated`, а не сохранённый ответ:
+      вход проверяется раньше ключа идемпотентности, а все сессии уже отозваны. Считайте удаление
+      назначенным: удалите токены, `refreshSession` не вызывайте; следующий вход ответит
+      `deletion_pending` с `purge_at`.
+
+      - `identity.confirm_mismatch` (422) — введённый ник не совпал с ником аккаунта.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Подтверждение ником
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/DeletionRequest'
+    responses:
+      '200':
+        description: Удаление назначено
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/DeletionScheduled'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+# --- Task 3: способы входа, второй фактор ключом, соцвход, вход ключом (§3.3, §3.5, §3.6, §4) ---
+
+auth-methods:
+  get:
+    operationId: getAuthMethods
+    tags: [identity]
+    security: []
+    x-error-codes: []
+    summary: Способы входа
+    description: |
+      Какие способы входа и регистрации сейчас включены — экран входа и регистрации и пункты
+      «Привязать Apple / Google», «Добавить ключ доступа» в настройках. Без аутентификации; ответ
+      одинаков для всех и кэшируется до минуты.
+
+      - `password` — всегда `true`: почта и пароль флагов не имеют (без них нет восстановления);
+      - `apple.signup`, `google.signup` — основной флаг провайдера (`auth_apple`, `auth_google`):
+        новая регистрация и привязка; показывайте кнопку на экране регистрации и пункт «Привязать»;
+      - `apple.login`, `google.login` — аварийный флаг (`auth_apple_login`, `auth_google_login`): вход
+        тех, у кого провайдер уже привязан; показывайте кнопку на экране входа;
+      - `passkeys.register` — `auth_passkeys`: пункт «Добавить ключ доступа»; `passkeys.login` —
+        `auth_passkeys_login`: вход ключом, ключ как второй фактор и для свежего входа.
+
+      Google считается выключенным, если выключен Apple (`google.signup` не бывает `true` при
+      `apple.signup: false`). Кнопка, которую ответ выключил, в момент нажатия всё равно может
+      получить `403 feature.disabled` (флаг сменился за минуту кэша) — покажите текст кода.
+    responses:
+      '200':
+        description: Включённые способы
+        headers:
+          Cache-Control:
+            description: Ответ одинаков для всех — общие кэши хранят до минуты
+            required: true
+            schema:
+              type: string
+            example: 'public, max-age=60'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthMethods'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-mfa-passkey-options:
+  post:
+    operationId: startMfaPasskey
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.mfa_expired
+      - identity.passkey_none
+    summary: Задача WebAuthn для второго фактора
+    description: |
+      Второй фактор входа ключом доступа: после `AuthResult.status = mfa_required` с `passkey` в
+      `mfa.methods` выдаёт задачу WebAuthn только с ключами этого аккаунта (`allowCredentials`).
+      `options` передайте платформенному API как есть, ответ — в `completeMfa` полем `passkey`
+      (`challenge_id` и `credential`). Задача одноразовая, живёт 5 минут. Анонимная операция:
+      сессии ещё нет, шаг подтверждает `mfa_token`; от повторов защищают его срок и лимиты класса
+      `auth`.
+
+      За аварийным флагом `auth_passkeys_login`: выключен — `403 feature.disabled` (ключ не годится
+      ни для входа, ни вторым фактором); выберите TOTP или резервный код.
+
+      - `identity.mfa_expired` (410) — `mfa_token` истёк или исчерпан: начните вход заново;
+      - `identity.passkey_none` (409) — у аккаунта нет ключей доступа: выберите другой фактор.
+    requestBody:
+      required: true
+      description: Токен шага второго фактора
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/MfaPasskeyOptionsRequest'
+    responses:
+      '200':
+        description: Задача WebAuthn
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/WebAuthnOptions'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-social-nonces:
+  post:
+    operationId: createSocialNonce
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes: []
+    summary: Nonce для входа через Apple или Google
+    description: |
+      Первый шаг соцвхода, привязки и свежего входа соцвходом: одноразовый `nonce` (10 минут).
+      Apple получает от клиента `SHA-256(nonce)` в hex (так требует Apple), Google — `nonce` как
+      есть; затем `id_token` провайдера вместе с `nonce_id` уходит в `socialLogin`, `linkIdentity`
+      или `reauthenticate`. Повтор `id_token` без свежего nonce не проходит. Анонимная операция:
+      нужна до входа; от повторов защищают одноразовость nonce и лимиты класса `auth`.
+
+      Флаги провайдера: nonce выдаётся, если включён хотя бы один из флагов провайдера — основной
+      (`auth_apple`, `auth_google`: регистрация и привязка) или аварийный (`auth_apple_login`,
+      `auth_google_login`: вход привязанных); оба выключены — `403 feature.disabled`. Окончательно
+      флаг проверяет операция, которой передан nonce.
+    requestBody:
+      required: true
+      description: Провайдер
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/SocialNonceRequest'
+    responses:
+      '201':
+        description: Nonce выдан
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/SocialNonce'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-social:
+  post:
+    operationId: socialLogin
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.social_token_invalid
+      - identity.social_email_unverified
+      - identity.social_email_missing
+      - identity.account_blocked
+      - identity.device_untrusted
+      - identity.device_required
+    summary: Войти через Apple или Google
+    description: |
+      `id_token`, полученный нативным SDK провайдера (Sign in with Apple, Google Sign-In / Credential
+      Manager) или в вебе, с `nonce_id` из `createSocialNonce`. Сервер сам проверяет подпись и поля
+      токена по ключам провайдера (издатель, `aud`, срок, `nonce`). Анонимная операция: вход
+      возможен только без сессии; от повторов защищают одноразовый nonce и лимиты класса `auth`.
+
+      Ветки ответа `200 AuthResult`:
+      - учётка провайдера уже привязана → `authenticated`; у аккаунта 2FA → `mfa_required`
+        (соцвход второй фактор не обходит);
+      - не привязана, провайдер подтвердил почту, почта не скрытая Apple и есть аккаунт с этой
+        почтой → автопривязка вместе с входом (при 2FA — после второго фактора), владельцу письмо;
+      - не привязана и аккаунта с почтой нет (или почта — скрытый адрес Apple) → `signup_required`:
+        дорегистрация `completeSocialSignup` с `social_signup.signup_token`;
+      - аккаунт ждёт удаления → `deletion_pending` (`cancelDeletion`).
+
+      Флаги: вход привязанных — аварийный флаг (`auth_apple_login`, `auth_google_login`); новая
+      регистрация и автопривязка — основной (`auth_apple`, `auth_google`). Нужный флаг выключен —
+      `403 feature.disabled`. Мобильный клиент обязан передать `device`; без него — `422
+      identity.device_required`; веб (BFF) не передаёт, поле игнорируется. При подозрительной
+      активности — `403 humancheck.required`.
+
+      `apple.authorization_code` — при первом входе через Apple: сервер обменивает его на
+      refresh-токен Apple, чтобы отозвать вход при отвязке и удалении аккаунта (требование Apple).
+
+      - `identity.social_token_invalid` (400) — токен не прошёл проверку или nonce неверен,
+        истёк, использован: начните заново с `createSocialNonce`;
+      - `identity.social_email_unverified` (422) — провайдер не подтвердил почту: зарегистрируйтесь
+        по почте;
+      - `identity.social_email_missing` (422) — в токене нет почты (не дано разрешение на почту);
+      - `identity.account_blocked` (403) — `blocked_until`, поля нет — бессрочно;
+      - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+    requestBody:
+      required: true
+      description: Токен провайдера, nonce и устройство
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/SocialLoginRequest'
+    responses:
+      '200':
+        description: Результат входа
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthResult'
+      '403':
+        description: >-
+          Аккаунт заблокирован, устройство не прошло проверку или способ выключен. Разбирайте по
+          `code`: с этим статусом приходят и общие коды платформы (`humancheck.required`,
+          `feature.disabled` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              account_blocked:
+                summary: Заблокирован до 20 ноября
+                value:
+                  type: about:blank
+                  title: Forbidden
+                  status: 403
+                  code: identity.account_blocked
+                  blocked_until: '2026-11-20T00:00:00Z'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-social-signup:
+  post:
+    operationId: completeSocialSignup
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.signup_token_invalid
+      - identity.documents_outdated
+      - identity.device_required
+      - identity.too_young
+      - identity.city_not_found
+      - identity.nickname_invalid
+      - identity.nickname_taken
+      - identity.email_taken
+      - identity.device_signup_limit
+      - identity.device_untrusted
+    summary: Дорегистрация после Apple или Google
+    description: |
+      После `socialLogin` со `status: signup_required`: город, дата рождения, ник и согласие с
+      документами — создаётся аккаунт с привязкой провайдера и сессия, `201 AuthResult`
+      (`authenticated`, `user.new_user: true`). Пароля нет (задать можно позже —
+      `changePassword`), кода нет: почту подтвердил провайдер. Анонимная операция: регистрация
+      возможна только без сессии; от повторов защищают одноразовый `signup_token` (30 минут),
+      уникальность почты и ника и лимиты.
+
+      За основным флагом провайдера (`auth_apple`, `auth_google`): выключен —
+      `403 feature.disabled`. Мобильный клиент обязан передать `device`; без него — `422
+      identity.device_required`; веб (BFF) не передаёт, поле игнорируется. При подозрительной
+      активности — `403 humancheck.required`. Дата рождения в будущем или возраст больше 120 лет —
+      `400 validation.failed` по полю `body.birth_date`.
+
+      - `identity.signup_token_invalid` (410) — токен истёк или использован: начните вход заново;
+      - `identity.documents_outdated` (422) — перечитайте `getLegalDocuments`;
+      - `identity.too_young` (422), `identity.city_not_found` (422) — как у `startSignup`;
+      - `identity.nickname_invalid` (422), `identity.nickname_taken` (409) — выберите другой ник;
+      - `identity.email_taken` (409) — почту заняли, пока шла дорегистрация: войдите;
+      - `identity.device_signup_limit` (403) — лимит регистраций устройства;
+      - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+    requestBody:
+      required: true
+      description: Форма дорегистрации
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/SocialSignupCompleteRequest'
+    responses:
+      '201':
+        description: Аккаунт создан, сессия выдана
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthResult'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-passkey-options:
+  post:
+    operationId: startPasskeyLogin
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes: []
+    summary: Задача WebAuthn для входа ключом
+    description: |
+      Вход ключом доступа: задача WebAuthn с пустым `allowCredentials` — ключ игрок выбирает на
+      устройстве. `options` передайте платформенному API как есть, ответ — в `passkeyLogin` вместе
+      с `challenge_id`. Задача одноразовая, живёт 5 минут. Запрос без тела (переданное тело сервер
+      не читает). Анонимная операция: нужна до входа; от повторов защищают одноразовость задачи и
+      лимиты класса `auth`.
+
+      За аварийным флагом `auth_passkeys_login`: выключен — `403 feature.disabled`; войдите другим
+      способом или через «Забыли пароль?».
+    responses:
+      '200':
+        description: Задача WebAuthn
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/WebAuthnOptions'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+auth-passkey:
+  post:
+    operationId: passkeyLogin
+    tags: [identity]
+    security: []
+    x-rate-limit: auth
+    x-error-codes:
+      - identity.passkey_invalid
+      - identity.account_blocked
+      - identity.device_required
+      - identity.device_untrusted
+    summary: Войти ключом доступа
+    description: |
+      Ответ платформенного API на задачу `startPasskeyLogin`. Ключ закрывает и второй фактор:
+      `mfa_required` после ключа не бывает. Ответ `200 AuthResult` — `authenticated` или
+      `deletion_pending` (`cancelDeletion`). Анонимная операция: вход возможен только без сессии;
+      от повторов защищают одноразовая задача и лимиты класса `auth`.
+
+      За аварийным флагом `auth_passkeys_login`: выключен — `403 feature.disabled`. Мобильный клиент
+      обязан передать `device`; без него — `422 identity.device_required`; веб (BFF) не передаёт,
+      поле игнорируется.
+
+      - `identity.passkey_invalid` (400) — ключ неизвестен, подпись, origin или rpId не прошли,
+        задача истекла или использована: начните заново;
+      - `identity.account_blocked` (403) — `blocked_until`, поля нет — бессрочно;
+      - `identity.device_untrusted` (403) — проверка целостности приложения не прошла (строгий режим).
+    requestBody:
+      required: true
+      description: Ответ ключа и устройство
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/PasskeyLoginRequest'
+    responses:
+      '200':
+        description: Результат входа
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/AuthResult'
+      '403':
+        description: >-
+          Аккаунт заблокирован, устройство не прошло проверку или способ выключен. Разбирайте по
+          `code`: с этим статусом приходят и общие коды платформы (`humancheck.required`, `feature.disabled` и др. —
+          info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              account_blocked:
+                summary: Заблокирован до 1 декабря
+                value:
+                  type: about:blank
+                  title: Forbidden
+                  status: 403
+                  code: identity.account_blocked
+                  blocked_until: '2026-12-01T00:00:00Z'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+# --- Task 3: свежий вход, способы входа, 2FA, ключи доступа, сброс 2FA (§3.3, §3.5, §3.6, §3.13, §3.15) ---
+
+me-reauth:
+  post:
+    operationId: reauthenticate
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.reauth_invalid
+      - identity.reauth_method_not_allowed
+    summary: Подтвердить, что это я (свежий вход)
+    description: |
+      Свежий вход на 10 минут для чувствительных операций (смена почты и пароля, 2FA, ключи доступа,
+      привязки, удаление): ответ `{reauth_until}`. Тело — ровно одно из `password`, `totp_code`,
+      `recovery_code`, `passkey` (ответ на задачу `startReauthPasskey`), `social` (`id_token` с
+      nonce из `createSocialNonce`); ни одного или больше одного — `400 validation.failed` по полю
+      `body`. Вход сам по себе тоже даёт свежий вход.
+
+      У аккаунта с 2FA годится только второй фактор (TOTP, резервный код, ключ доступа): пароль —
+      `422 identity.reauth_method_not_allowed`. Без 2FA — пароль, ключ доступа или соцвход
+      привязанного провайдера.
+
+      Флаги: ключом — аварийный `auth_passkeys_login`, соцвходом — `auth_apple_login` /
+      `auth_google_login`; выключен — `403 feature.disabled`.
+
+      - `identity.reauth_invalid` (400) — проверка не прошла, в `attempts_left` — сколько попыток
+        осталось; 5 неудач за 15 минут на сессию — затем `429 ratelimit.exceeded`;
+      - `identity.reauth_method_not_allowed` (422) — пароль при включённой 2FA.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Один способ подтверждения
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/ReauthRequest'
+    responses:
+      '200':
+        description: Свежий вход подтверждён
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/ReauthResult'
+      '400':
+        description: >-
+          Подтверждение не прошло. Разбирайте по `code`: с этим статусом приходят и общие коды
+          платформы (`validation.failed`, `request.invalid` и др. — info.description), не только
+          коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              reauth_invalid:
+                summary: Неверный пароль, осталось 2 попытки
+                value:
+                  type: about:blank
+                  title: Bad Request
+                  status: 400
+                  code: identity.reauth_invalid
+                  attempts_left: 2
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-reauth-passkey-options:
+  post:
+    operationId: startReauthPasskey
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.passkey_none
+    summary: Задача WebAuthn для свежего входа
+    description: |
+      Свежий вход ключом доступа: задача WebAuthn только с ключами этого аккаунта. `options`
+      передайте платформенному API как есть, ответ — в `reauthenticate` полем `passkey`. Задача
+      одноразовая, живёт 5 минут. Запрос без тела.
+
+      За аварийным флагом `auth_passkeys_login`: выключен — `403 feature.disabled`.
+
+      - `identity.passkey_none` (409) — у аккаунта нет ключей доступа: выберите другой способ.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '200':
+        description: Задача WebAuthn
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/WebAuthnOptions'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-auth-methods:
+  get:
+    operationId: listMyAuthMethods
+    tags: [identity]
+    x-error-codes: []
+    summary: Мои способы входа
+    description: |
+      Экран «Способы входа» в настройках: есть ли пароль, привязки Apple и Google (почта у
+      провайдера с пометкой скрытого адреса, дата), ключи доступа и состояние 2FA. Последний способ
+      входа отвязать или удалить нельзя (`409 identity.last_method`); пароль удалить нельзя вообще.
+    responses:
+      '200':
+        description: Способы входа
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/MyAuthMethods'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-identities:
+  post:
+    operationId: linkIdentity
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.reauth_required
+      - identity.social_token_invalid
+      - identity.identity_taken
+      - identity.identity_exists
+    summary: Привязать Apple или Google
+    description: |
+      Привязка учётки провайдера к вошедшему аккаунту по `sub` токена — без требований к почте
+      (владелец уже вошёл). `id_token` и `nonce_id` — как у `socialLogin`; Apple —
+      `apple.authorization_code` для отзыва входа при отвязке. Владельцу уходит письмо.
+      Нужен свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить —
+      `reauthenticate`.
+
+      За основным флагом провайдера (`auth_apple`, `auth_google`): выключен —
+      `403 feature.disabled`.
+
+      - `identity.social_token_invalid` (400) — токен или nonce не прошли проверку;
+      - `identity.identity_taken` (409) — эта учётка провайдера привязана к другому аккаунту;
+      - `identity.identity_exists` (409) — у аккаунта уже есть привязка этого провайдера (одна на
+        провайдера).
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Токен провайдера и nonce
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/SocialLinkRequest'
+    responses:
+      '201':
+        description: Привязка создана
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/LinkedIdentity'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-identity:
+  delete:
+    operationId: unlinkIdentity
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.reauth_required
+      - identity.identity_not_found
+      - identity.last_method
+    summary: Отвязать Apple или Google
+    description: |
+      Отвязка провайдера: вход Apple отзывается у Apple, владельцу уходит письмо.
+      Работает при любых флагах (уменьшает поверхность входа). Нужен свежий вход (≤ 10 минут),
+      иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+
+      - `identity.identity_not_found` (404) — привязки нет или она чужая;
+      - `identity.last_method` (409) — это последний способ входа: сначала задайте пароль или
+        добавьте ключ доступа.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdentityId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '204':
+        description: Привязка удалена
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-mfa:
+  get:
+    operationId: getMyMfa
+    tags: [identity]
+    x-error-codes: []
+    summary: Состояние 2FA
+    description: |
+      Включена ли 2FA, когда подтверждена, сколько резервных кодов осталось и назначен ли сброс 2FA
+      через поддержку (`reset_scheduled_at`): тогда покажите предупреждение «через N дней 2FA будет
+      сброшена по запросу в поддержку» и кнопку «Отменить» (`cancelMyMfaReset`).
+    responses:
+      '200':
+        description: Состояние 2FA
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/MfaStatus'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-mfa-totp-setup:
+  post:
+    operationId: setupTotp
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-idempotency: no-store
+    x-error-codes:
+      - identity.reauth_required
+      - identity.mfa_already_enabled
+    summary: Начать включение 2FA
+    description: |
+      Новый секрет TOTP и `otpauth_uri` для QR-кода приложения-аутентификатора; 2FA включает
+      `confirmTotp`. Повторный вызов до подтверждения выпускает новый секрет (прежний больше не
+      подойдёт). Нужен свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить —
+      `reauthenticate`.
+
+      Ответ с секретом не сохраняется ни в кэшах, ни в ключах идемпотентности: повтор с тем же
+      `Idempotency-Key` — `409 idempotency.replay_unavailable`, секрет второй раз не отдаётся;
+      вызовите заново с новым ключом.
+
+      - `identity.mfa_already_enabled` (409) — 2FA уже включена.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '200':
+        description: Секрет TOTP
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/TotpSetup'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-mfa-totp-confirm:
+  post:
+    operationId: confirmTotp
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-idempotency: no-store
+    x-error-codes:
+      - identity.mfa_setup_missing
+      - identity.mfa_invalid
+    summary: Подтвердить включение 2FA
+    description: |
+      Код из приложения-аутентификатора включает 2FA сразу и выдаёт 10 резервных кодов —
+      покажите их до закрытия экрана: второй раз они не выдаются (новые — `regenerateRecoveryCodes`).
+      Владельцу уходит письмо; другие сессии не отзываются.
+
+      Ответ с кодами не сохраняется ни в кэшах, ни в ключах идемпотентности: повтор с тем же
+      `Idempotency-Key` — `409 idempotency.replay_unavailable`, коды второй раз не отдаются; 2FA уже
+      включена — выпустите новые коды `regenerateRecoveryCodes`.
+
+      - `identity.mfa_setup_missing` (409) — нет начатого включения: сначала `setupTotp`;
+      - `identity.mfa_invalid` (400) — неверный код: проверьте время на устройстве и повторите.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Код из приложения-аутентификатора
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/TotpConfirmRequest'
+    responses:
+      '200':
+        description: 2FA включена, резервные коды
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/RecoveryCodes'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-mfa-totp:
+  delete:
+    operationId: disableTotp
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.reauth_required
+      - identity.mfa_not_enabled
+    summary: Выключить 2FA
+    description: |
+      Удаляет секрет TOTP и резервные коды; владельцу уходит письмо. Нужен свежий вход (≤ 10 минут),
+      подтверждённый вторым фактором (TOTP, резервный код или ключ доступа — пароль не годится),
+      иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+
+      - `identity.mfa_not_enabled` (409) — 2FA и так выключена.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '204':
+        description: 2FA выключена
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-mfa-recovery-codes:
+  post:
+    operationId: regenerateRecoveryCodes
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-idempotency: no-store
+    x-error-codes:
+      - identity.reauth_required
+      - identity.mfa_not_enabled
+    summary: Новые резервные коды
+    description: |
+      Выпускает 10 новых резервных кодов, прежние больше не действуют. Покажите их до закрытия
+      экрана. Нужен свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`; получить —
+      `reauthenticate`.
+
+      Ответ с кодами не сохраняется ни в кэшах, ни в ключах идемпотентности: повтор с тем же
+      `Idempotency-Key` — `409 idempotency.replay_unavailable`, коды второй раз не отдаются;
+      вызовите заново с новым ключом.
+
+      - `identity.mfa_not_enabled` (409) — 2FA выключена.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '200':
+        description: Новые резервные коды
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/RecoveryCodes'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-passkeys-registration-options:
+  post:
+    operationId: startPasskeyRegistration
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.reauth_required
+      - identity.passkey_limit
+    summary: Задача WebAuthn для нового ключа
+    description: |
+      Добавление ключа доступа: задача WebAuthn (`PublicKeyCredentialCreationOptionsJSON`;
+      `excludeCredentials` — уже имеющиеся ключи, `user.id` — случайный идентификатор, не id
+      аккаунта). `options` передайте платформенному API как есть, ответ — в `registerPasskey` вместе
+      с `challenge_id`. Задача одноразовая, живёт 5 минут. Запрос без тела. Нужен свежий вход (≤ 10
+      минут), иначе `403 identity.reauth_required`; получить — `reauthenticate`.
+
+      За основным флагом `auth_passkeys`: выключен — `403 feature.disabled` (новые ключи не
+      добавляются; вход имеющимися — по `auth_passkeys_login`).
+
+      - `identity.passkey_limit` (409) — у аккаунта уже 10 ключей: удалите ненужный.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '200':
+        description: Задача WebAuthn
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CacheNoStore'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/WebAuthnOptions'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-passkeys:
+  post:
+    operationId: registerPasskey
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.passkey_invalid
+      - identity.passkey_exists
+    summary: Добавить ключ доступа
+    description: |
+      Ответ платформенного API на задачу `startPasskeyRegistration` и необязательное имя ключа —
+      `201 Passkey`; владельцу уходит письмо. Свежий вход проверила задача.
+
+      За основным флагом `auth_passkeys`: выключен — `403 feature.disabled`.
+
+      - `identity.passkey_invalid` (400) — ответ ключа не прошёл проверку или задача истекла: начните
+        заново;
+      - `identity.passkey_exists` (409) — этот ключ уже зарегистрирован.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Ответ ключа и имя
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/PasskeyRegisterRequest'
+    responses:
+      '201':
+        description: Ключ добавлен
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Passkey'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-passkey:
+  patch:
+    operationId: renamePasskey
+    tags: [identity]
+    x-error-codes:
+      - identity.passkey_not_found
+    summary: Переименовать ключ доступа
+    description: |
+      Новое имя ключа для списка «Способы входа». Ответ — ключ с новым именем.
+
+      - `identity.passkey_not_found` (404) — ключа нет или он чужой.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/PasskeyId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Новое имя
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/PasskeyRenameRequest'
+    responses:
+      '200':
+        description: Ключ переименован
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Passkey'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+  delete:
+    operationId: deletePasskey
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.reauth_required
+      - identity.passkey_not_found
+      - identity.last_method
+    summary: Удалить ключ доступа
+    description: |
+      Удаляет ключ доступа; владельцу уходит письмо. Работает при любых флагах (уменьшает
+      поверхность входа). Нужен свежий вход (≤ 10 минут), иначе `403 identity.reauth_required`;
+      получить — `reauthenticate`.
+
+      - `identity.passkey_not_found` (404) — ключа нет или он чужой;
+      - `identity.last_method` (409) — это последний способ входа: сначала задайте пароль или
+        привяжите Apple / Google.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/PasskeyId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '204':
+        description: Ключ удалён
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-mfa-reset:
+  delete:
+    operationId: cancelMyMfaReset
+    tags: [identity]
+    x-rate-limit: account_secure
+    x-error-codes:
+      - identity.mfa_reset_not_found
+    summary: Отменить сброс 2FA через поддержку
+    description: |
+      Игрок отменяет назначенный по запросу в поддержку сброс 2FA (`MfaStatus.reset_scheduled_at`,
+      `AuthResult.mfa.reset_at`): «это не я». Ответ `204`, владельцу уходит письмо. Вход со вторым
+      фактором отменяет сброс сам: если сессия вошла с TOTP, резервным кодом или ключом, сброс уже
+      отменён — ответ тоже `204`.
+
+      - `identity.mfa_reset_not_found` (404) — назначенного сброса нет (выполнен или не
+        назначался) и эта сессия его не отменяла.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '204':
+        description: Сброс отменён
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+# --- Task 4: капитанство (§3.12) ---
+
+me-captaincy:
+  get:
+    operationId: getMyCaptaincy
+    tags: [identity]
+    x-error-codes: []
+    summary: Моё капитанство
+    description: |
+      Экран «Стать капитаном»: допуски капитана по городам (`permits`, испытательный срок —
+      `probationary`), можно ли подать заявку в текущем городе игрока (`eligibility`: причины отказа
+      в `reasons`, `available_at` — когда закончится пауза после отказа) и открытая заявка, если она
+      есть. Кнопку «Подать заявку» показывайте при `eligibility.eligible: true`, иначе — причины.
+    responses:
+      '200':
+        description: Капитанство игрока
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Captaincy'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+me-captain-applications:
+  get:
+    operationId: listMyCaptainApplications
+    tags: [identity]
+    x-error-codes: []
+    summary: Мои заявки в капитаны
+    description: |
+      История своих заявок, новые сверху: статус, решение, код причины отказа и комментарий
+      модератора. Страницы по курсору (`next_cursor` → `cursor`, `null` — страниц больше нет);
+      испорченный курсор — `400 validation.failed` по полю `query.cursor`.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/Cursor'
+      - $ref: '../root.yaml#/components/parameters/Limit'
+    responses:
+      '200':
+        description: Страница заявок
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/CaptainApplicationPage'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+captain-applications:
+  post:
+    operationId: submitCaptainApplication
+    tags: [identity]
+    x-error-codes:
+      - identity.captain_ineligible
+      - identity.application_exists
+      - identity.application_cooldown
+    summary: Подать заявку в капитаны
+    description: |
+      Заявка в капитаны; город — текущий город игрока (в теле не передаётся). Дальше её
+      рассматривает модератор города, решение приходит письмом и видно в
+      `listMyCaptainApplications`. Все поля формы необязательны; телефон — только контакт для
+      модератора, он не подтверждается и модератор видит его как неподтверждённый.
+
+      Условия: подтверждённая почта, возраст не ниже порога страны города, заполненный профиль, нет
+      ограничения `captain`, не капитан другой команды в этом городе, нет допуска в этом городе.
+      Пока модули профиля игрока и команд не запущены, проверить условия нельзя — отказ с причиной
+      `checks_unavailable` (заявку подать нельзя, это не обход правила).
+
+      - `identity.captain_ineligible` (409) — условия не выполнены, причины в `reasons` (значения
+        `CaptainIneligibility`: `too_young`, `restricted`, `profile_incomplete`,
+        `captain_elsewhere_in_city`, `already_permitted`, `checks_unavailable`);
+      - `identity.application_exists` (409) — открытая заявка в этом городе уже есть;
+      - `identity.application_cooldown` (409) — после отказа прошло меньше 7 дней; `available_at` —
+        с какого момента можно подать снова.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    requestBody:
+      required: true
+      description: Форма заявки
+      content:
+        application/json:
+          schema:
+            $ref: '../root.yaml#/components/schemas/CaptainApplicationSubmitRequest'
+    responses:
+      '201':
+        description: Заявка подана
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/CaptainApplication'
+      '409':
+        description: >-
+          Заявку подать нельзя. Разбирайте по `code`: с этим статусом приходят и общие коды
+          платформы (`idempotency.in_progress`, `idempotency.replay_unavailable` и др. —
+          info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              captain_ineligible:
+                summary: Профиль не заполнен
+                value:
+                  type: about:blank
+                  title: Conflict
+                  status: 409
+                  code: identity.captain_ineligible
+                  reasons: [profile_incomplete]
+              application_cooldown:
+                summary: Отказ был меньше 7 дней назад
+                value:
+                  type: about:blank
+                  title: Conflict
+                  status: 409
+                  code: identity.application_cooldown
+                  available_at: '2026-11-20T09:00:00Z'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'
+
+captain-application-withdraw:
+  post:
+    operationId: withdrawCaptainApplication
+    tags: [identity]
+    x-error-codes:
+      - identity.application_not_found
+      - identity.application_closed
+    summary: Отозвать заявку в капитаны
+    description: |
+      Отзыв своей заявки, пока она ждёт решения; паузы перед новой заявкой отзыв не ставит. Ответ —
+      заявка со статусом `withdrawn`.
+
+      - `identity.application_not_found` (404) — заявки нет или она чужая;
+      - `identity.application_closed` (409) — заявка уже решена или отозвана.
+    parameters:
+      - $ref: '../root.yaml#/components/parameters/ApplicationId'
+      - $ref: '../root.yaml#/components/parameters/IdempotencyKey'
+    responses:
+      '200':
+        description: Заявка отозвана
+        headers:
+          Cache-Control:
+            $ref: '../root.yaml#/components/headers/CachePrivate'
+        content:
+          application/json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/CaptainApplication'
+      default:
+        $ref: '../root.yaml#/components/responses/Problem'

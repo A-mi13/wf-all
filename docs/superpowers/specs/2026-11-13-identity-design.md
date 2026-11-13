@@ -829,7 +829,7 @@ CountryCode}, bool)`; реализация — файл MMDB «IP to City Lite»
 | `install_id` | string 16–128 | iOS — UUID установки в Keychain, Android — `ANDROID_ID`; сервер хранит только HMAC |
 | `model` | string ≤ 64 | `iPhone15,2`, `Pixel 8` — для «Где вы вошли» |
 | `os_version` | string ≤ 32 | `18.1` |
-| `app_version` | string, semver | `1.4.0` |
+| `app_version` | string `MAJOR.MINOR[.PATCH]` | `1.4.0` или `1.4` (iOS отдаёт две части); сервер при сохранении устройства дополняет до `1.4.0` — `appversion.Compare` строгий semver (план I-1, ревью группы А и Б; нормализация — этап 4) |
 | `device_check_token` | string ≤ 4096, необязательно | iOS DeviceCheck — нужен на регистрации |
 | `integrity` | `DeviceIntegrity`, необязательно | §3.8 |
 
@@ -866,25 +866,33 @@ app_attest_assertion | play_integrity`, `key_id` (App Attest, base64), `payload`
 **Л** — класс `x-rate-limit`; **С** — свежий вход (§3.13); **Ф** — флаг. Антибот (`403 humancheck.required`) — где
 отмечено «PoW».
 
+Уточнения плана I-1 (контракт — источник истины): каждый 2xx с телом объявляет `Cache-Control` — `no-store` у
+ответов с токенами, nonce и секретами, `private, no-store` у прочих ответов аккаунта, `public, max-age=…` — только у
+`getAuthMethods` и `getLegalDocuments` (R5). Пока этап не реализован, операция отвечает `501 http.not_implemented` —
+общий код платформы обоих контрактов (R1); временные списки заглушек `pendingOps` со стражем истечения (R2).
+Причины `password_weak` и факторы `mfa_required` — машинные поля `Problem.reasons` и `Problem.methods`, не `detail`
+(R3). «Ровно одно из» (`completeMfa`, `reauthenticate`, `confirmPasswordReset.mfa`) — одна схема с необязательными
+полями, не `oneOf`; нарушение — `400 validation.failed` по полю `body` (R11; ревью группы А, m4).
+
 #### Вход и регистрация
 
 | Метод и путь | operationId | А | И | Л | Тело → ответ | Коды `identity.*` (HTTP) |
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET /v1/auth/methods` | `getAuthMethods` | — | — | default | → `200 AuthMethods`, `Cache-Control: public, max-age=60` | — |
 | `GET /v1/nicknames/availability?nickname=` | `checkNickname` | — | — | `auth_check` | → `200 {available, reason: invalid\|taken\|reserved \| null}` | — (неверный формат — `available: false, reason: invalid`) |
-| `POST /v1/auth/signup` | `startSignup` | — | нет | `auth_send` | `{email, password, nickname, birth_date, city_id, accepted_documents, locale?, device?}` → `202 CodeSent`; PoW | `documents_outdated` 422, `device_required` 422, `too_young` 422, `city_not_found` 422, `password_weak` 422 (`reason` в `detail`: `too_short\|common\|too_long`), `nickname_invalid` 422, `nickname_taken` 409, `email_disposable` 422, `device_signup_limit` 403, `device_untrusted` 403 |
-| `POST /v1/auth/signup/confirm` | `confirmSignup` | — | нет | `auth` | `{code_id, code, nickname?, device?}` → `201 AuthResult` | `code_invalid` 400 (+`attempts_left`), `code_expired` 410, `nickname_taken` 409, `email_taken` 409, `device_signup_limit` 403 |
+| `POST /v1/auth/signup` | `startSignup` | — | нет | `auth_send` | `{email, password, nickname, birth_date, city_id, accepted_documents, locale?, device?}` → `202 CodeSent`; PoW | `documents_outdated` 422, `device_required` 422, `too_young` 422, `city_not_found` 422, `password_weak` 422 (причина — в `reasons`: `too_short\|common\|too_long`; план I-1, R3), `nickname_invalid` 422, `nickname_taken` 409, `email_disposable` 422, `device_signup_limit` 403, `device_untrusted` 403 |
+| `POST /v1/auth/signup/confirm` | `confirmSignup` | — | нет | `auth` | `{code_id, code, nickname?, device?}` → `201 AuthResult` | `code_invalid` 400 (+`attempts_left`), `code_expired` 410, `nickname_taken` 409, `email_taken` 409, `device_signup_limit` 403, `device_required` 422 (правило §6.2.3; план I-1, R10) |
 | `POST /v1/auth/codes/{codeId}/resend` | `resendAuthCode` | — | нет | `auth_send` | → `202 CodeSent` | `resend_too_soon` 429 (+`Retry-After`), `code_expired` 410 |
 | `POST /v1/auth/login` | `login` | — | нет | `auth` | `{email, password, device?}` → `200 AuthResult`; PoW | `invalid_credentials` 400, `account_blocked` 403 (+`blocked_until`), `device_untrusted` 403 |
 | `POST /v1/auth/mfa` | `completeMfa` | — | нет | `auth` | `{mfa_token, code? \| recovery_code? \| passkey?: {challenge_id, credential}}` (ровно одно) → `200 AuthResult` | `mfa_invalid` 400 (+`attempts_left`), `mfa_expired` 410, `passkey_invalid` 400 |
 | `POST /v1/auth/mfa/passkey-options` | `startMfaPasskey` | — | нет | `auth` | `{mfa_token}` → `200 WebAuthnOptions`; Ф `auth_passkeys_login` | `mfa_expired` 410, `passkey_none` 409 |
 | `POST /v1/auth/password-reset` | `startPasswordReset` | — | нет | `auth_send` | `{email}` → `202 CodeSent`; PoW | — |
-| `POST /v1/auth/password-reset/confirm` | `confirmPasswordReset` | — | нет | `auth` | `{code_id, code, new_password, mfa?: {code?, recovery_code?}, device?}` → `200 AuthResult` | `code_invalid` 400, `code_expired` 410, `password_weak` 422, `mfa_required` 400 (+`methods` в `detail`), `mfa_invalid` 400 |
-| `POST /v1/auth/social/nonces` | `createSocialNonce` | — | нет | `auth` | `{provider}` → `201 {nonce_id, nonce, expires_at}`; Ф провайдера | — |
+| `POST /v1/auth/password-reset/confirm` | `confirmPasswordReset` | — | нет | `auth` | `{code_id, code, new_password, mfa?: {code?, recovery_code?}, device?}` → `200 AuthResult` | `code_invalid` 400, `code_expired` 410, `password_weak` 422, `mfa_required` 400 (+`methods` — поле `Problem`, без `passkey`; план I-1, R3), `mfa_invalid` 400 |
+| `POST /v1/auth/social/nonces` | `createSocialNonce` | — | нет | `auth` | `{provider}` → `201 {nonce_id, nonce, expires_at}`; Ф провайдера — любой из двух, основной или аварийный: nonce нужен и входу, и регистрации, окончательная проверка флага — в `socialLogin`/`linkIdentity` (план I-1, R12) | — |
 | `POST /v1/auth/social` | `socialLogin` | — | нет | `auth` | `{provider, nonce_id, id_token, apple?: {authorization_code}, device?}` → `200 AuthResult`; Ф | `social_token_invalid` 400, `social_email_unverified` 422, `social_email_missing` 422, `account_blocked` 403, `device_untrusted` 403 |
-| `POST /v1/auth/social/signup` | `completeSocialSignup` | — | нет | `auth` | `{signup_token, city_id, birth_date, nickname, accepted_documents, locale?, device?}` → `201 AuthResult`; PoW | `signup_token_invalid` 410, `documents_outdated` 422, `device_required` 422, `too_young` 422, `city_not_found` 422, `nickname_invalid` 422, `nickname_taken` 409, `email_taken` 409, `device_signup_limit` 403 |
+| `POST /v1/auth/social/signup` | `completeSocialSignup` | — | нет | `auth` | `{signup_token, city_id, birth_date, nickname, accepted_documents, locale?, device?}` → `201 AuthResult`; PoW | `signup_token_invalid` 410, `documents_outdated` 422, `device_required` 422, `too_young` 422, `city_not_found` 422, `nickname_invalid` 422, `nickname_taken` 409, `email_taken` 409, `device_signup_limit` 403, `device_untrusted` 403 (§3.8: аттестация и на дорегистрации; решение контроллера, ревью группы Б плана I-1) |
 | `POST /v1/auth/passkey/options` | `startPasskeyLogin` | — | нет | `auth` | `{}` → `200 WebAuthnOptions`; Ф `auth_passkeys_login` | — |
-| `POST /v1/auth/passkey` | `passkeyLogin` | — | нет | `auth` | `{challenge_id, credential, device?}` → `200 AuthResult`; Ф | `passkey_invalid` 400, `account_blocked` 403 |
+| `POST /v1/auth/passkey` | `passkeyLogin` | — | нет | `auth` | `PasskeyLoginRequest {challenge_id, credential, device?}` (план I-1, R20) → `200 AuthResult`; Ф | `passkey_invalid` 400, `account_blocked` 403, `device_untrusted` 403 (§3.8; решение контроллера, ревью группы Б плана I-1) |
 | `POST /v1/auth/refresh` | `refreshSession` | — | нет | `auth_refresh` | `{refresh_token, install_id?}` → `200 TokenPair` | `refresh_invalid` 401 |
 | `POST /v1/auth/deletion/cancel` | `cancelDeletion` | — | нет | `auth` | `{restore_token, device?}` → `200 AuthResult` (§3.11) | `restore_token_invalid` 410, `device_required` 422 |
 | `GET /v1/legal/documents` | `getLegalDocuments` | — | — | default | → `200 {items: [LegalDocument]}`, `Cache-Control: public, max-age=300` (§3.16) | — |
@@ -911,7 +919,7 @@ app_attest_assertion | play_integrity`, `key_id` (App Attest, base64), `payload`
 | `POST /v1/me/email-change` | `startEmailChange` | да | `auth_send` | да | `{new_email}` → `202 CodeSent` | `reauth_required` 403, `email_same` 422, `email_disposable` 422 |
 | `POST /v1/me/email-change/confirm` | `confirmEmailChange` | да | `auth` | — | `{code_id, code}` → `200 Me` | `code_invalid` 400, `code_expired` 410, `email_taken` 409 |
 | `GET /v1/me/auth-methods` | `listMyAuthMethods` | — | default | — | → `200 MyAuthMethods` | — |
-| `POST /v1/me/identities` | `linkIdentity` | да | `account_secure` | да | `{provider, nonce_id, id_token, apple?: {authorization_code}}` → `201 {identity}`; Ф | `reauth_required` 403, `social_token_invalid` 400, `identity_taken` 409, `identity_exists` 409 |
+| `POST /v1/me/identities` | `linkIdentity` | да | `account_secure` | да | `{provider, nonce_id, id_token, apple?: {authorization_code}}` → `201 LinkedIdentity` (план I-1, R20); Ф | `reauth_required` 403, `social_token_invalid` 400, `identity_taken` 409, `identity_exists` 409 |
 | `DELETE /v1/me/identities/{identityId}` | `unlinkIdentity` | да | `account_secure` | да | → `204` | `reauth_required` 403, `identity_not_found` 404, `last_method` 409 |
 | `GET /v1/me/mfa` | `getMyMfa` | — | default | — | → `200 MfaStatus` | — |
 | `POST /v1/me/mfa/totp/setup` | `setupTotp` | да, `x-idempotency: no-store` | `account_secure` | да | → `200 TotpSetup`, `Cache-Control: no-store` | `reauth_required` 403, `mfa_already_enabled` 409 |
@@ -1016,10 +1024,17 @@ app_attest_assertion | play_integrity`, `key_id` (App Attest, base64), `payload`
 ### 6.6. Правки корня контракта
 
 - `Problem` (в `public/root.yaml` и `admin/root.yaml` одинаково): новые необязательные поля `reasons` (array of
-  string — у `identity.captain_ineligible`), `available_at` (date-time — у `nickname_change_too_soon` и `application_cooldown`),
-  `blocked_until` (date-time или null — у `account_blocked`). `attempts_left` уже есть.
+  string — у `identity.captain_ineligible` и `identity.password_weak`, одно значение), `methods` (значения `MfaMethod`
+  — у `identity.mfa_required`: только факторы, которые принимает операция), `available_at` (date-time — у
+  `nickname_change_too_soon` и `application_cooldown`), `blocked_until` (date-time без `null`: поля нет — бессрочно; у
+  `account_blocked`) — план I-1, R3. `attempts_left` уже есть.
 - Ответ `Problem` — заголовок `Retry-After` описывается и для `429 identity.resend_too_soon`.
 - `x-anonymous-mutations` — 16 operationId §6.3.
+- `http.not_implemented` (501) — из `AdminCommonCodes` переносится в `PlatformCodes` (`x-error-codes-common` обоих
+  контрактов): операция описана, сервер её ещё не исполняет (план I-1, R1).
+- Заморозка (план I-1, R17): срез identity public и 11 операций admin сторожит `contracts/test/identity-freeze.test.mjs`
+  (SHA-256 канонического среза); правка — только через контроллера с записью в журнал изменений документа передачи
+  нативщику. Версии: public `0.2.0`, admin `0.3.0` (R16).
 - `info.description` — раздел «Вход и токены» (§6.1) для потребителя.
 - `identity.restricted` (403) — код для операций других модулей, закрытых ограничением; в операциях identity его нет
   (ограничение `captain` в заявке — причина `restricted` в `reasons`). Константа — в `identity/codes.go`, модули
@@ -1045,11 +1060,11 @@ CSRF, `x-permission`, идемпотентность — admin-api как ест
 | `GET /v1/identity/captain-applications?status=&city_id=&cursor=&limit=` | `listCaptainApplications` | `identity.captain_applications.read` | очередь; по умолчанию `pending`, старые сверху; модератору — только его города (фильтр сценария) |
 | `GET /v1/identity/captain-applications/{applicationId}` | `getCaptainApplication` | `identity.captain_applications.read` | карточка; модератор чужого города — `404 identity.application_not_found` |
 | `GET /v1/identity/captain-applications/{applicationId}/contact` (заголовок `X-WF-Access-Reason`) | `getCaptainApplicationContact` | `identity.pii.read` | почта и телефон заявителя; причина обязательна всем (3–200 символов после декодирования; U6 требует для поддержки — решение автора спеки: для всех) — в заголовке, не в query (план I-1, R19, CWE-598), значение — UTF-8 в percent-encoding (`encodeURIComponent`; битая кодировка — `400 validation.failed` по полю заголовка); чтение — в аудит |
-| `POST /v1/identity/captain-applications/{applicationId}/approve` | `approveCaptainApplication` | `identity.captain_applications.decide` | одобрить; `{comment?}` → `200` |
-| `POST /v1/identity/captain-applications/{applicationId}/reject` | `rejectCaptainApplication` | `identity.captain_applications.decide` | отклонить; `{rejection_code, comment}` (`comment` обязателен при `other`) → `200` |
+| `POST /v1/identity/captain-applications/{applicationId}/approve` | `approveCaptainApplication` | `identity.captain_applications.decide` | одобрить; `{comment?}` → `200 IdentityCaptainApplication` — решённая заявка (план I-1, R13) |
+| `POST /v1/identity/captain-applications/{applicationId}/reject` | `rejectCaptainApplication` | `identity.captain_applications.decide` | отклонить; `{rejection_code, comment}` (`comment` обязателен при `other`) → `200 IdentityCaptainApplication` (план I-1, R13) |
 | `GET /v1/identity/auth-methods/usage` | `getAuthMethodsUsage` | `platform.flags.read` | по способам `apple`, `google`, `passkeys`: `only_method` (сколько игроков входят только им), `linked` (всего) — для экрана флагов |
-| `GET /v1/identity/users/lookup` (заголовки `X-WF-Lookup-Email`, `X-WF-Access-Reason`) | `findPlayerByEmail` | `identity.pii.read` | точный поиск игрока по почте для поддержки: `{id, nickname, city_id, status, created_at, mfa_enabled, mfa_reset: {id, execute_at} \| null}`; нет — `404 identity.user_not_found`; почта и причина обязательны и идут заголовками, не query (план I-1, R19, CWE-598: без ПД в URL и журналах прокси), значения — UTF-8 в percent-encoding (`encodeURIComponent`; битая кодировка — `400 validation.failed`; пределы после декодирования: почта ≤ 254, причина 3–200); аудит чтения. Модератору — только игроки его городов (иначе тоже 404) |
-| `POST /v1/identity/users/{userId}/mfa-reset` | `requestMfaReset` | `identity.mfa.reset` | `{reason, ticket?}` → `202 Approval` (действие `identity.mfa_reset`, §3.15) |
+| `GET /v1/identity/users/lookup` (заголовки `X-WF-Lookup-Email`, `X-WF-Access-Reason`) | `findPlayerByEmail` | `identity.pii.read` | точный поиск игрока по почте для поддержки: `{id, nickname, city_id, status, created_at, mfa_enabled, mfa_reset: {id, execute_at} \| null}`; нет — `404 identity.user_not_found`; почта и причина обязательны и идут заголовками, не query (план I-1, R19, CWE-598: без ПД в URL и журналах прокси), значения — UTF-8 в percent-encoding (`encodeURIComponent`; битая кодировка — `400 validation.failed`; пределы после декодирования: почта ≤ 254, причина 3–200; почта, не прошедшая нормализацию §5.7, — `422 validation.failed` по полю заголовка, а не 404 — план I-1, ревью группы Б m3); аудит чтения. Модератору — только игроки его городов (иначе тоже 404) |
+| `POST /v1/identity/users/{userId}/mfa-reset` | `requestMfaReset` | `identity.mfa.reset` | `{reason, ticket?}` → `202 ApprovalAccepted` (действие `identity.mfa_reset`, §3.15); коды — `user_not_found` 404, `self_action` 409, `mfa_not_enabled` 409, `mfa_reset_pending` 409 (живой сброс уже назначен; план I-1, R14) |
 | `POST /v1/identity/mfa-resets/{resetId}/cancel` | `cancelMfaReset` | `identity.mfa.reset` | отмена назначенного сброса сотрудником — сразу → `200 {id, cancelled_at}`; закрытый или чужой — `404 identity.mfa_reset_not_found` |
 
 Мутации — `Idempotency-Key`, `X-WF-Admin`. Город заявки не в пути — право `scoped` сценарий проверяет
@@ -1122,6 +1137,10 @@ CSRF, `x-permission`, идемпотентность — admin-api как ест
 - Вносит и снимает **владелец**: `PUT /v1/staff/accounts/{id}/player-link {user_id}` и `DELETE …/player-link`
   (тег `staff`, новое право `staff.player_links.manage` — владелец `да`, остальные `нет`; сразу, с аудитом и письмом
   сотруднику, решение автора спеки). Учётка игрока уже связана с другим сотрудником → `409 staff.player_link_taken`.
+  Контракт (план I-1, R15): `putStaffPlayerLink` → `200 StaffPlayerLink {user_id, nickname, linked_at,
+  linked_by_label}`, `deleteStaffPlayerLink` → `204` (повтор без связи — тоже `204`); сотрудника нет — `404
+  staff.not_found`, игрока с `user_id` нет — `422 staff.player_not_found` (`staff` не отдаёт `identity.*`). Карточка
+  сотрудника — необязательное поле `StaffAccount.player_link` (только у владельца; до этапа 9 сервер его не отдаёт).
 - `auth.Staff` получает `LinkedUserID` при загрузке сессии. Сценарии identity отказывают `409 identity.self_action`,
   если цель — своя учётка: `approveCaptainApplication`, `rejectCaptainApplication` (заявитель), `requestMfaReset`,
   `cancelMfaReset`; исполнитель `identity.mfa_reset` при подтверждении — тоже (подтверждающий связан с игроком →
@@ -1463,7 +1482,7 @@ backend/internal/platform/flags/      + Rules (GlobalOnly, Requires)
 
 | # | Этап | Содержимое |
 | --- | --- | --- |
-| 1 | Контракт | все операции §6 и §7 в YAML, коды, `x-anonymous-mutations`, классы лимитов в `DefaultRules`, тексты ошибок веба и админки; `./task gen`; временный список заглушек public (как `pendingOps` плана B, если на public действует страж «без 501» — §18); передача нативщику |
+| 1 | Контракт | все операции §6 и §7 в YAML, коды, `x-anonymous-mutations`, классы лимитов в `DefaultRules`, тексты ошибок веба и админки; `./task gen`; временные списки заглушек `pendingOps` public (50) и admin (11) со стражем истечения и хэшем `pendingOpsAtFreeze` — до реализации операция отвечает `501 http.not_implemented` (план I-1, R1, R2); заморозка — страж-хэш среза `identity-freeze.test.mjs` (R17); передача нативщику |
 | 2 | Платформа | `platform/otp`, `platform/emailaddr` (staff переходит без изменений), `flags.Rules`, `platform/ipgeo`, конфиг и env |
 | 3 | Схема | миграция §5, `grants.sql`, `ownership.go`, sqlc |
 | 4 | Ядро | регистрация (с согласиями), вход, коды, сессии и refresh, `SessionLoader` в `cmd/api`, выход, «Где вы вошли», сброс пароля, `me`, ник, документы, свежий вход, смена почты и пароля, удаление с периодом отмены и анонимизацией, письма, чистка, `.well-known` в `api` |

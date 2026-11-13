@@ -14,10 +14,15 @@ const (
 	CodeCityNotFound       = "staff.city_not_found"      // 422: несуществующий город в city_ids
 	CodeLastOwner          = "staff.last_owner"          // 409: снять последнего владельца
 	CodeSelfAction         = "staff.self_action"         // 409: действие управления над собой
+
+	// связь «сотрудник → учётка игрока» (спека identity §7.6; план I-1, R15)
+	CodePlayerLinkTaken = "staff.player_link_taken" // 409: учётка игрока уже связана с другим сотрудником
+	CodePlayerNotFound  = "staff.player_not_found"  // 422: игрока с user_id нет (staff не отдаёт identity.*, слой 0)
 )
 
 // Codes — все коды модуля.
 var Codes = []string{
 	CodeInvalidCredentials, CodeMFAInvalid, CodePasswordInvalid, CodeWrongStage, CodeInviteInvalid,
 	CodeEmailTaken, CodeNotFound, CodeSessionNotFound, CodeCityNotFound, CodeLastOwner, CodeSelfAction,
+	CodePlayerLinkTaken, CodePlayerNotFound,
 }

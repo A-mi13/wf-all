@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WF admin API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     API админки (admin-api); потребитель — только apps/admin, с того же origin, что и сам API.
 
@@ -39,8 +39,9 @@ info:
       `auth.csrf_failed` (403 — запрос не со страницы админки: нет `Origin` админки или заголовка
       `X-WF-Admin`), `auth.ip_not_allowed` (403 — вход в админку с этого адреса закрыт),
       `auth.reauth_required` (401 — подтвердите вход вторым фактором, `staffUnlock`),
-      `auth.setup_required` (403 — сначала завершите настройку 2FA), `http.not_implemented`
-      (501 — операция описана в контракте, но сервер её ещё не исполняет).
+      `auth.setup_required` (403 — сначала завершите настройку 2FA). Общий с публичным API код
+      `http.not_implemented` (501 — операция описана в контракте, но сервер её ещё не исполняет:
+      этапы выкатываются по очереди; это не ошибка клиента).
     - **X-WF-Admin: 1** — обязательный заголовок каждого изменяющего запроса (POST, PUT, PATCH,
       DELETE) вместе с `Origin` админки — защита от подделки запроса с чужого сайта.
     - **X-WF-Background: 1** — необязательный заголовок фоновых запросов клиента (опрос счётчика
@@ -68,6 +69,8 @@ tags:
     description: Сотрудники админки — вход, второй фактор, сессии, «Мой доступ», приглашения, роли и доступ других сотрудников
   - name: geo
     description: Справочник geo в админке — города (активация из GeoNames, правка, привязка), районы, страны и их правила, регионы, импорт GeoNames; выбор городов модератора
+  - name: identity
+    description: Игроки в админке — заявки в капитаны, поиск игрока по почте для поддержки, сброс 2FA игрока через поддержку, статистика способов входа для экрана флагов
   - name: platform
     description: Механизмы платформы админки — журнал действий, подтверждения вдвоём, версии нативного приложения и флаги функций
 paths:
@@ -1037,6 +1040,71 @@ paths:
                 $ref: '#/components/schemas/StaffRoles'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/staff/accounts/{staffId}/player-link:
+    put:
+      operationId: putStaffPlayerLink
+      tags:
+        - staff
+      x-permission: staff.player_links.manage
+      x-error-codes:
+        - staff.not_found
+        - staff.player_link_taken
+        - staff.player_not_found
+      summary: Связать сотрудника с его учёткой игрока
+      description: |
+        Карточка сотрудника, только владелец: связь «сотрудник → учётка игрока». Входа она не даёт —
+        служит запретом действий над собой: сотрудник не решает заявку в капитаны своей учётки и не
+        запрашивает, не подтверждает и не отменяет сброс её 2FA (409 `identity.self_action`).
+        Учётку игрока находят по почте (`findPlayerByEmail`). Сразу, без второго сотрудника: запись в
+        журнал, сотруднику уходит письмо. Повтор с той же учёткой — 200 без изменений; другая учётка —
+        связь заменяется.
+
+        Коды ошибок:
+        - 404 `staff.not_found` — сотрудника нет.
+        - 409 `staff.player_link_taken` — эта учётка игрока уже связана с другим сотрудником.
+        - 422 `staff.player_not_found` — игрока с `user_id` нет.
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Учётка игрока
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffPlayerLinkPut'
+      responses:
+        '200':
+          description: Связь установлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffPlayerLink'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteStaffPlayerLink
+      tags:
+        - staff
+      x-permission: staff.player_links.manage
+      x-error-codes:
+        - staff.not_found
+      summary: Снять связь сотрудника с учёткой игрока
+      description: |
+        Карточка сотрудника, только владелец: снимает связь «сотрудник → учётка игрока». Сразу: запись
+        в журнал, сотруднику уходит письмо. Связи не было — тоже 204, без записи и письма.
+
+        Коды ошибок: 404 `staff.not_found` — сотрудника нет.
+      parameters:
+        - $ref: '#/components/parameters/StaffId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '204':
+          description: Связи нет
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/geo/places:
     get:
       operationId: listGeoPlaces
@@ -2000,6 +2068,7 @@ paths:
         - staff.access.reset_elevated
         - staff.access.reset
         - geo.countries.rules
+        - identity.mfa.reset
       x-error-codes:
         - platform.approval_not_found
         - platform.approval_self
@@ -2034,6 +2103,10 @@ paths:
           проходят проверку (например, валюта перестала быть действующей), страну с этим кодом успели завести
           (второй из двух запросов на один код), инициатор изменился (`initiator_changed`). Запрос нужно
           подать заново.
+        - Сброс 2FA игрока (`identity.mfa_reset`) своих кодов у подтверждения не имеет: отказ исполнителя —
+          409 `platform.approval_stale`, запрос помечен `failed`. Так бывает, если у игрока уже нет 2FA,
+          сброс уже назначен, аккаунт ждёт удаления или подтверждающий связан с этим игроком (связь
+          «сотрудник → игрок»).
       parameters:
         - $ref: '#/components/parameters/ApprovalId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2067,6 +2140,7 @@ paths:
         - staff.access.reset_elevated
         - staff.access.reset
         - geo.countries.rules
+        - identity.mfa.reset
       x-error-codes:
         - platform.approval_not_found
         - platform.approval_self
@@ -2231,6 +2305,8 @@ paths:
         - platform.flag_not_found
         - platform.flag_stale
         - platform.flag_city_not_found
+        - platform.flag_global_only
+        - platform.flag_requires
       summary: Переключить флаг
       description: |
         Включает или выключает флаг везде (`enabled_globally`) и задаёт города, где он включён
@@ -2246,6 +2322,11 @@ paths:
           совпала): перечитайте флаг и повторите.
         - 422 `platform.flag_city_not_found` — в `enabled_city_ids` есть несуществующий город (город
           выключенной страны допустим).
+        - 422 `platform.flag_global_only` — у флага не бывает списка городов (только «везде»: например,
+          способы входа `auth_*` — до входа город неизвестен), а `enabled_city_ids` непустой.
+        - 409 `platform.flag_requires` — флаг зависит от другого: включить `auth_google` нельзя при
+          выключенном `auth_apple`, выключить `auth_apple` — при включённом `auth_google`; зависимость —
+          в `detail`.
         - 400 `validation.failed` — ключ в пути не по шаблону (`path.key`), больше 1000 городов.
       parameters:
         - $ref: '#/components/parameters/FlagKey'
@@ -2265,6 +2346,347 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FeatureFlag'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/captain-applications:
+    get:
+      operationId: listCaptainApplications
+      tags:
+        - identity
+      x-permission: identity.captain_applications.read
+      x-error-codes: []
+      summary: Очередь заявок в капитаны
+      description: |
+        Раздел «Капитаны»: заявки игроков с ником, городом, возрастом и стажем аккаунта. По умолчанию —
+        ожидающие решения (`status=pending`), старые сверху. Модератору — только заявки его городов:
+        заявок чужих городов в списке нет, фильтр `city_id` чужого города даёт пустую страницу.
+        Владелец, админ и поддержка видят все города. Страницы по курсору; испорченный курсор — 400
+        `validation.failed` по полю `query.cursor`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Статус заявок; без параметра — pending
+          schema:
+            $ref: '#/components/schemas/IdentityCaptainApplicationStatus'
+          example: pending
+        - name: city_id
+          in: query
+          required: false
+          description: Только заявки этого города
+          schema:
+            type: string
+            format: uuid
+          example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница заявок
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityCaptainApplicationPage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/captain-applications/{applicationId}:
+    get:
+      operationId: getCaptainApplication
+      tags:
+        - identity
+      x-permission: identity.captain_applications.read
+      x-error-codes:
+        - identity.application_not_found
+      summary: Карточка заявки
+      description: |
+        Заявка с полями формы и «телефон указан / нет» (сам телефон — `getCaptainApplicationContact`),
+        заявитель (ник, город, возраст в годах, стаж аккаунта в днях), условия капитанства сейчас
+        (`checks`: `unavailable` — модуль проверки ещё не запущен, одобрить нельзя), прошлые заявки
+        игрока с решениями и число связанных аккаунтов. Чтение своей учётки игрока
+        (связь «сотрудник → игрок») не запрещено.
+
+        Коды ошибок: 404 `identity.application_not_found` — заявки нет; модератору — и заявка чужого
+        города (неотличимо от несуществующей).
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      responses:
+        '200':
+          description: Карточка заявки
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityCaptainApplicationCard'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/captain-applications/{applicationId}/contact:
+    get:
+      operationId: getCaptainApplicationContact
+      tags:
+        - identity
+      x-permission: identity.pii.read
+      x-error-codes:
+        - identity.application_not_found
+      summary: Контакты заявителя
+      description: |
+        «Показать контакты» в карточке заявки: почта и телефон заявителя (телефон не подтверждён). Причина
+        обязательна всем (3–200 символов) и идёт заголовком `X-WF-Access-Reason`, не в query (URL и
+        журналы прокси не несут свободного текста, CWE-598); значение — UTF-8 в percent-encoding
+        (`encodeURIComponent`). Каждое чтение пишется в журнал с причиной.
+
+        Коды ошибок:
+        - 404 `identity.application_not_found` — заявки нет; модератору — и заявка чужого города.
+        - 400 `validation.failed` по полю `header.X-WF-Access-Reason` — нет причины, сырая кириллица
+          или пробел (не закодированы), битая кодировка; 422 `validation.failed` по тому же полю —
+          причина после декодирования короче 3 или длиннее 200 символов.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/AccessReason'
+      responses:
+        '200':
+          description: Почта и телефон заявителя
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityApplicantContact'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/captain-applications/{applicationId}/approve:
+    post:
+      operationId: approveCaptainApplication
+      tags:
+        - identity
+      x-permission: identity.captain_applications.decide
+      x-error-codes:
+        - identity.application_not_found
+        - identity.application_closed
+        - identity.captain_ineligible
+        - identity.self_action
+      summary: Одобрить заявку
+      description: |
+        Одобрение — одной транзакцией: условия капитанства перепроверяются в момент решения, игрок
+        получает допуск капитана в городе заявки (с испытательным сроком), заявка — `approved`; запись в
+        журнал, письмо игроку. Подтверждения вдвоём нет: решение обратимо (допуск отзывает модерация).
+        Модератор решает только заявки своих городов. Ответ — решённая заявка.
+
+        Коды ошибок:
+        - 404 `identity.application_not_found` — заявки нет; модератору — и заявка чужого города.
+        - 409 `identity.application_closed` — заявка уже решена или отозвана.
+        - 409 `identity.captain_ineligible` — условия перестали выполняться (`reasons`); в том числе
+          `checks_unavailable` — проверка ещё не запущена.
+        - 409 `identity.self_action` — заявитель — ваша собственная учётка игрока
+          (связь «сотрудник → игрок»): решение о себе принимает другой сотрудник.
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Комментарий к решению — необязателен
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityCaptainApprove'
+      responses:
+        '200':
+          description: Заявка одобрена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityCaptainApplication'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/captain-applications/{applicationId}/reject:
+    post:
+      operationId: rejectCaptainApplication
+      tags:
+        - identity
+      x-permission: identity.captain_applications.decide
+      x-error-codes:
+        - identity.application_not_found
+        - identity.application_closed
+        - identity.self_action
+      summary: Отклонить заявку
+      description: |
+        Отказ с кодом причины из списка и комментарием; заявка — `rejected`, запись в журнал, письмо
+        игроку. Повторную заявку игрок подаст не раньше чем через 7 дней. Модератор решает только
+        заявки своих городов. Ответ — решённая заявка.
+
+        Комментарий обязателен при `rejection_code = other`: без него — 422 `validation.failed` по
+        полю `body.comment` (правило `required`).
+
+        Коды ошибок:
+        - 404 `identity.application_not_found` — заявки нет; модератору — и заявка чужого города.
+        - 409 `identity.application_closed` — заявка уже решена или отозвана.
+        - 409 `identity.self_action` — заявитель — ваша собственная учётка игрока
+          (связь «сотрудник → игрок»).
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Код причины и комментарий
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityCaptainReject'
+      responses:
+        '200':
+          description: Заявка отклонена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityCaptainApplication'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/auth-methods/usage:
+    get:
+      operationId: getAuthMethodsUsage
+      tags:
+        - identity
+      x-permission: platform.flags.read
+      x-error-codes: []
+      summary: Сколько игроков входят каждым способом
+      description: |
+        Экран «Флаги функций»: по способам `apple`, `google`, `passkeys` — сколько игроков входят только
+        им (`only_method`) и у скольких он есть всего (`linked`). Перед выключением аварийного флага
+        (`auth_*_login`) экран показывает `only_method`: этим игрокам останется только «Забыли пароль?».
+      responses:
+        '200':
+          description: Статистика способов входа
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityAuthMethodsUsage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/users/lookup:
+    get:
+      operationId: findPlayerByEmail
+      tags:
+        - identity
+      x-permission: identity.pii.read
+      x-error-codes:
+        - identity.user_not_found
+      summary: Найти игрока по почте
+      description: |
+        Поддержка: точный поиск игрока по почте — ник, город, статус, есть ли 2FA и назначенный сброс.
+        Почта (`X-WF-Lookup-Email`) и причина (`X-WF-Access-Reason`) обязательны всем и идут
+        заголовками, не в query (URL и журналы прокси не несут ПД, CWE-598); значения — UTF-8 в
+        percent-encoding (`encodeURIComponent`). Каждое чтение пишется в журнал с причиной. Модератору —
+        только игроки его городов.
+
+        Коды ошибок:
+        - 404 `identity.user_not_found` — игрока с такой почтой нет; модератору — и игрок чужого города.
+        - 400 `validation.failed` по полю `header.X-WF-Lookup-Email` или `header.X-WF-Access-Reason` —
+          нет заголовка, значение не закодировано или кодировка битая; 422 `validation.failed` по тому
+          же полю — после декодирования почта длиннее 254 байт, причина короче 3 или длиннее 200
+          символов.
+      parameters:
+        - $ref: '#/components/parameters/LookupEmail'
+        - $ref: '#/components/parameters/AccessReason'
+      responses:
+        '200':
+          description: Игрок
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CachePrivate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityPlayerLookup'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/users/{userId}/mfa-reset:
+    post:
+      operationId: requestMfaReset
+      tags:
+        - identity
+      x-permission: identity.mfa.reset
+      x-error-codes:
+        - identity.user_not_found
+        - identity.self_action
+        - identity.mfa_not_enabled
+        - identity.mfa_reset_pending
+      summary: Запросить сброс 2FA игрока
+      description: |
+        Поддержка, когда игрок потерял все вторые факторы (TOTP, резервные коды, ключи доступа) и
+        личность проверена по регламенту. Всегда вдвоём: ответ 202 с запросом на подтверждение
+        (действие `identity.mfa_reset`), второй сотрудник решает его во «Входящих» подтверждений.
+        После подтверждения — 7 дней ожидания с письмом владельцу: любой вход владельца со вторым
+        фактором или «Отменить» в его настройках отменяет сброс; по истечении 2FA снимается, сессии
+        игрока отзываются.
+
+        Коды ошибок:
+        - 404 `identity.user_not_found` — игрока нет.
+        - 409 `identity.self_action` — цель — ваша собственная учётка игрока
+          (связь «сотрудник → игрок»).
+        - 409 `identity.mfa_not_enabled` — у игрока нет 2FA — сбрасывать нечего.
+        - 409 `identity.mfa_reset_pending` — сброс уже назначен (дата — в `findPlayerByEmail`).
+        Если к моменту подтверждения у игрока уже нет 2FA или сброс уже назначен, подтверждение
+        ответит 409 `platform.approval_stale`.
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      requestBody:
+        description: Причина и номер обращения
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityMfaResetRequest'
+      responses:
+        '202':
+          description: Создан запрос на подтверждение сброса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/identity/mfa-resets/{resetId}/cancel:
+    post:
+      operationId: cancelMfaReset
+      tags:
+        - identity
+      x-permission: identity.mfa.reset
+      x-error-codes:
+        - identity.mfa_reset_not_found
+        - identity.self_action
+      summary: Отменить назначенный сброс 2FA
+      description: |
+        Отмена назначенного (подтверждённого, ждущего 7 дней) сброса 2FA игрока — сразу, без второго
+        сотрудника: отмена привилегий не даёт. Владельцу уходит письмо, запись в журнал. Ответ — id
+        сброса и время отмены.
+
+        Коды ошибок:
+        - 404 `identity.mfa_reset_not_found` — сброса нет, он уже выполнен или отменён.
+        - 409 `identity.self_action` — сброс вашей собственной учётки игрока
+          (связь «сотрудник → игрок»).
+      parameters:
+        - $ref: '#/components/parameters/ResetId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/AdminHeader'
+      responses:
+        '200':
+          description: Сброс отменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityMfaResetCancelled'
         default:
           $ref: '#/components/responses/Problem'
 components:
@@ -2413,6 +2835,53 @@ components:
         maximum: 100
         default: 20
       example: 20
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      description: Id заявки в капитаны
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: Id учётки игрока — из findPlayerByEmail
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+    ResetId:
+      name: resetId
+      in: path
+      required: true
+      description: Id назначенного сброса 2FA — mfa_reset.id из findPlayerByEmail
+      schema:
+        type: string
+        format: uuid
+      example: 0193a1ca-8091-7ea1-9b2c-3d4e5f6a7b89
+    AccessReason:
+      name: X-WF-Access-Reason
+      in: header
+      required: true
+      description: 'Причина чтения персональных данных игрока — пишется в журнал. Значение — percent-encoding UTF-8 по RFC 3986 (encodeURIComponent: значение заголовка в Fetch — байтовая строка, кириллица без кодирования не уходит из браузера); после декодирования — 3–200 символов (иначе 422 validation.failed по полю header.X-WF-Access-Reason), битая кодировка — 400. Заголовок, а не query: URL и журналы прокси не должны нести свободный текст сотрудника (CWE-598)'
+      schema:
+        type: string
+        maxLength: 2400
+        pattern: ^[A-Za-z0-9%._~!*()'-]+$
+      example: '%D0%BE%D0%B1%D1%80%D0%B0%D1%89%D0%B5%D0%BD%D0%B8%D0%B5%204812'
+    LookupEmail:
+      name: X-WF-Lookup-Email
+      in: header
+      required: true
+      description: 'Почта игрока для точного поиска. Значение — percent-encoding UTF-8 по RFC 3986 (encodeURIComponent: «@» — %40, кириллический домен тоже кодируется); после декодирования — не длиннее 254 байт (иначе 422 validation.failed по полю header.X-WF-Lookup-Email), битая кодировка — 400. Почта, не прошедшая нормализацию (NFKC, нижний регистр, dot-atom, IDN по белому списку, без невидимых символов — те же правила, что у почты сотрудников), — тоже 422 validation.failed по полю header.X-WF-Lookup-Email, а не 404: такой почты не может быть ни у одного игрока. Заголовок, а не query: персональные данные не попадают в URL и журналы прокси (CWE-598)'
+      schema:
+        type: string
+        maxLength: 3048
+        pattern: ^[A-Za-z0-9%._~!*()'-]+$
+      example: ivan.petrov%40mail.example
   headers:
     SetSessionCookie:
       description: 'Новый токен сессии: прежний больше не действует. Имя — __Host-wf_admin_session, cookie сессионная (без Max-Age и Expires) — сроки держит сервер'
@@ -2455,7 +2924,7 @@ components:
       description: Ошибка в формате RFC 9457
       headers:
         Retry-After:
-          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded
+          description: Через сколько секунд повторить — только у 429 ratelimit.exceeded и 429 identity.resend_too_soon (повтор отправки кода раньше паузы)
           schema:
             type: integer
             minimum: 1
@@ -2521,6 +2990,35 @@ components:
           minimum: 0
           description: Сколько попыток осталось до блокировки — только у ошибок неверного кода или пароля, после которых число попыток ограничено; 0 — попыток больше нет, доступ закрыт на время
           example: 3
+        reasons:
+          type: array
+          description: 'Причины отказа машинными значениями — только у двух кодов. У identity.captain_ineligible — невыполненные условия заявки в капитаны (значения схемы CaptainIneligibility; ограничение captain — причина restricted). У identity.password_weak — ровно одно значение: too_short (короче 10 символов), common (из списка распространённых паролей) или too_long (длиннее потолка). Список открытый: незнакомое значение показывайте общим текстом кода'
+          items:
+            type: string
+            description: Машинное значение причины
+            example: too_short
+          example:
+            - too_short
+        methods:
+          type: array
+          description: 'Только у identity.mfa_required — вторые факторы аккаунта, которые принимает эта операция (значения схемы MfaMethod): totp, recovery_code, passkey. У confirmPasswordReset — только totp и recovery_code: ключ доступа при сбросе пароля не принимается. Клиент показывает выбор из этих способов и повторяет запрос со вторым фактором'
+          items:
+            type: string
+            description: Способ второго фактора (MfaMethod)
+            example: totp
+          example:
+            - totp
+            - recovery_code
+        available_at:
+          type: string
+          format: date-time
+          description: Когда действие станет доступно (UTC) — только у identity.nickname_change_too_soon (смена ника раньше 30 дней) и identity.application_cooldown (повторная заявка в капитаны раньше 7 дней после отказа)
+          example: '2026-12-13T09:30:00Z'
+        blocked_until:
+          type: string
+          format: date-time
+          description: До какого момента (UTC) заблокирован аккаунт — только у identity.account_blocked. Поля нет у этого кода — блокировка бессрочная (null не приходит)
+          example: '2026-11-20T00:00:00Z'
         job_id:
           type: integer
           format: int64
@@ -3139,6 +3637,8 @@ components:
           description: Живое приглашение («приглашение не принято / просрочено»); null — приглашения нет
           allOf:
             - $ref: '#/components/schemas/StaffInviteState'
+        player_link:
+          $ref: '#/components/schemas/StaffPlayerLink'
     StaffAccountPage:
       type: object
       description: Страница списка сотрудников
@@ -3191,6 +3691,45 @@ components:
           example: true
         grants:
           $ref: '#/components/schemas/RoleGrants'
+    StaffPlayerLinkPut:
+      type: object
+      description: Связь сотрудника с его учёткой игрока
+      required:
+        - user_id
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Id учётки игрока — из findPlayerByEmail
+          example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+    StaffPlayerLink:
+      type: object
+      description: Связь «сотрудник → учётка игрока» (запрет действий над собой). В карточке сотрудника (StaffAccount.player_link) — только для владельца (право staff.player_links.manage); у остальных поля нет. У владельца поля нет — связи нет. До этапа 9 спеки identity сервер поле не отдаёт никому
+      required:
+        - user_id
+        - nickname
+        - linked_at
+        - linked_by_label
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Id учётки игрока
+          example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+        nickname:
+          type: string
+          description: Ник игрока
+          example: kosta_10
+        linked_at:
+          type: string
+          format: date-time
+          description: Когда связь установлена
+          example: '2026-11-14T10:00:00Z'
+        linked_by_label:
+          type: string
+          description: Кто связал — имя владельца
+          example: Ольга В.
     StaffRoles:
       type: object
       description: Роли и матрица прав — экран «Роли и доступ»; черновые права будущих модулей не входят
@@ -4248,7 +4787,7 @@ components:
           example: '2026-10-28T08:59:58Z'
     ApprovalAction:
       type: string
-      description: Действие запроса на подтверждение — подпись берётся из локалей админки (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца; geo.country_rules — правила страны (валюта, возрастные пороги, выключение); geo.country_create — новая страна
+      description: Действие запроса на подтверждение — подпись берётся из локалей админки (approvals.actions.<действие>). staff.invite — приглашение; staff.role_change — смена роли или городов; staff.access_reset — сброс доступа; staff.revoke_owner — выключение владельца; geo.country_rules — правила страны (валюта, возрастные пороги, выключение); geo.country_create — новая страна; identity.mfa_reset — сброс 2FA игрока, потерявшего все вторые факторы
       enum:
         - staff.invite
         - staff.role_change
@@ -4256,6 +4795,7 @@ components:
         - staff.revoke_owner
         - geo.country_rules
         - geo.country_create
+        - identity.mfa_reset
       x-extensible-enum: true
     ApprovalStatus:
       type: string
@@ -4722,6 +5262,431 @@ components:
           example:
             - 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
             - 7a1d5e9c-2b4f-4c8a-b3e6-1f0d9c8b7a65
+    IdentityCaptainApplicationStatus:
+      type: string
+      description: 'Статус заявки: pending — ждёт решения; approved — одобрена (допуск выдан); rejected — отклонена; withdrawn — отозвана игроком или удалением аккаунта'
+      enum:
+        - pending
+        - approved
+        - rejected
+        - withdrawn
+      x-extensible-enum: true
+    IdentityCaptainRejectionCode:
+      type: string
+      description: 'Код причины отказа — подпись из локалей админки: profile_incomplete — профиль не заполнен; insufficient_info — мало сведений о команде и поле; contact_unreachable — не удалось связаться; suspicious_activity — подозрение на мультиаккаунт или накрутку; duplicate_account — есть другой аккаунт-капитан; other — другое (комментарий обязателен)'
+      enum:
+        - profile_incomplete
+        - insufficient_info
+        - contact_unreachable
+        - suspicious_activity
+        - duplicate_account
+        - other
+      x-extensible-enum: true
+    IdentityCaptainCheck:
+      type: string
+      description: 'Условие капитанства в карточке: age — возраст не ниже порога страны города; restrictions — нет ограничения captain; profile — профиль заполнен; captaincy — не капитан другой команды в городе'
+      enum:
+        - age
+        - restrictions
+        - profile
+        - captaincy
+      x-extensible-enum: true
+    IdentityCheckState:
+      type: string
+      description: 'Состояние условия: ok — выполнено; failed — не выполнено; unavailable — проверить нельзя (модуль проверки ещё не запущен) — одобрить заявку нельзя'
+      enum:
+        - ok
+        - failed
+        - unavailable
+      x-extensible-enum: true
+    IdentityAuthMethodKind:
+      type: string
+      description: 'Способ входа в статистике флагов: apple, google, passkeys (ключи доступа — как в ключах флагов auth_passkeys). Это не способ входа сессии (там passkey) — значения различаются намеренно'
+      enum:
+        - apple
+        - google
+        - passkeys
+      x-extensible-enum: true
+    IdentityCaptainApplication:
+      type: object
+      description: Заявка в капитаны — строка очереди и решённая заявка
+      required:
+        - id
+        - user_id
+        - nickname
+        - city_id
+        - age_years
+        - account_age_days
+        - status
+        - proposed_format
+        - proposed_pitch
+        - play_frequency
+        - contact_link
+        - note
+        - has_phone
+        - created_at
+        - decided_at
+        - decided_by_label
+        - rejection_code
+        - comment
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id заявки
+          example: 0193a1c9-7f80-7d91-8a1b-2c3d4e5f6a78
+        user_id:
+          type: string
+          format: uuid
+          description: Id игрока-заявителя
+          example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+        nickname:
+          type: string
+          description: Ник заявителя
+          example: kosta_10
+        city_id:
+          type: string
+          format: uuid
+          description: Город заявки
+          example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        age_years:
+          type: integer
+          minimum: 0
+          description: Возраст заявителя в годах на момент ответа (дата рождения не отдаётся)
+          example: 28
+        account_age_days:
+          type: integer
+          minimum: 0
+          description: Стаж аккаунта заявителя в днях на момент ответа
+          example: 256
+        status:
+          $ref: '#/components/schemas/IdentityCaptainApplicationStatus'
+        proposed_format:
+          type: string
+          nullable: true
+          description: Какие игры игрок хочет собирать, или null
+          example: 6×6 по средам
+        proposed_pitch:
+          type: string
+          nullable: true
+          description: Где играть, или null
+          example: Динамо, искусственное поле
+        play_frequency:
+          type: string
+          nullable: true
+          description: Как часто, или null
+          example: раз в неделю
+        contact_link:
+          type: string
+          nullable: true
+          description: Ссылка для связи (https) или null
+          example: https://t.me/kosta_10
+        note:
+          type: string
+          nullable: true
+          description: Свободный текст игрока или null
+          example: Собираю ребят с работы третий год
+        has_phone:
+          type: boolean
+          description: Телефон указан (номер — getCaptainApplicationContact, с причиной)
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          description: Когда подана
+          example: '2026-11-13T09:00:00Z'
+        decided_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Когда решена или отозвана; null — ждёт решения
+          example: null
+        decided_by_label:
+          type: string
+          nullable: true
+          description: Кто решил — имя сотрудника; null — не решена или отозвана игроком
+          example: null
+        rejection_code:
+          type: string
+          nullable: true
+          description: Код причины отказа (значения IdentityCaptainRejectionCode) или null
+          allOf:
+            - $ref: '#/components/schemas/IdentityCaptainRejectionCode'
+        comment:
+          type: string
+          nullable: true
+          description: Комментарий к решению или null
+          example: null
+    IdentityCaptainApplicationPage:
+      type: object
+      description: Страница очереди заявок
+      required:
+        - items
+        - next_cursor
+      properties:
+        items:
+          type: array
+          description: Заявки страницы (по умолчанию — старые сверху)
+          items:
+            $ref: '#/components/schemas/IdentityCaptainApplication'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы; null — страниц больше нет
+          example: eyJ2IjoxLCJrIjpbIjIwMjYtMTEtMTNUMDk6MDA6MDBaIl19
+    IdentityCaptainApplicationCard:
+      type: object
+      description: Карточка заявки — заявка, заявитель, условия сейчас, прошлые заявки, связанные аккаунты
+      required:
+        - application
+        - applicant
+        - checks
+        - history
+        - linked_accounts
+      properties:
+        application:
+          $ref: '#/components/schemas/IdentityCaptainApplication'
+        applicant:
+          type: object
+          description: Заявитель
+          required:
+            - user_id
+            - nickname
+            - city_id
+            - age_years
+            - account_age_days
+          properties:
+            user_id:
+              type: string
+              format: uuid
+              description: Id игрока
+              example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+            nickname:
+              type: string
+              description: Ник
+              example: kosta_10
+            city_id:
+              type: string
+              format: uuid
+              description: Текущий город игрока
+              example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+            age_years:
+              type: integer
+              minimum: 0
+              description: Возраст в годах (дата рождения не отдаётся)
+              example: 28
+            account_age_days:
+              type: integer
+              minimum: 0
+              description: Стаж аккаунта в днях
+              example: 256
+        checks:
+          type: array
+          description: Условия капитанства сейчас — галочки карточки
+          items:
+            type: object
+            description: Условие и его состояние
+            required:
+              - check
+              - state
+            properties:
+              check:
+                $ref: '#/components/schemas/IdentityCaptainCheck'
+              state:
+                $ref: '#/components/schemas/IdentityCheckState'
+          example:
+            - check: age
+              state: ok
+            - check: restrictions
+              state: ok
+            - check: profile
+              state: unavailable
+            - check: captaincy
+              state: unavailable
+        history:
+          type: array
+          description: Прошлые заявки игрока с решениями, новые сверху (без текущей)
+          items:
+            $ref: '#/components/schemas/IdentityCaptainApplication'
+        linked_accounts:
+          type: integer
+          minimum: 0
+          description: Сколько других аккаунтов связано с заявителем по устройствам
+          example: 0
+    IdentityApplicantContact:
+      type: object
+      description: Контакты заявителя — чтение записано в журнал с причиной
+      required:
+        - email
+        - phone
+      properties:
+        email:
+          type: string
+          description: Почта аккаунта
+          example: kosta.f@example.com
+        phone:
+          type: string
+          nullable: true
+          description: Телефон из заявки (E.164, не подтверждён) или null
+          example: '+79181234567'
+    IdentityCaptainApprove:
+      type: object
+      description: Одобрение заявки
+      additionalProperties: false
+      properties:
+        comment:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Комментарий к решению — увидит игрок
+          example: Знаю по городскому турниру
+    IdentityCaptainReject:
+      type: object
+      description: Отказ по заявке — код причины и комментарий (обязателен при other)
+      required:
+        - rejection_code
+      additionalProperties: false
+      properties:
+        rejection_code:
+          $ref: '#/components/schemas/IdentityCaptainRejectionCode'
+        comment:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Комментарий — увидит игрок; обязателен при rejection_code = other
+          example: Расскажите подробнее, где и когда собираете игры
+    IdentityAuthMethodsUsage:
+      type: object
+      description: Сколько игроков входят каждым способом — для экрана флагов
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: По строке на способ
+          items:
+            type: object
+            description: Способ входа и число игроков
+            required:
+              - method
+              - only_method
+              - linked
+            properties:
+              method:
+                $ref: '#/components/schemas/IdentityAuthMethodKind'
+              only_method:
+                type: integer
+                minimum: 0
+                description: Сколько игроков входят только этим способом (нет пароля и других способов)
+                example: 12
+              linked:
+                type: integer
+                minimum: 0
+                description: У скольких игроков способ есть всего
+                example: 840
+          example:
+            - method: apple
+              only_method: 12
+              linked: 840
+            - method: google
+              only_method: 5
+              linked: 310
+            - method: passkeys
+              only_method: 0
+              linked: 95
+    IdentityPlayerLookup:
+      type: object
+      description: Игрок, найденный по почте, — для поддержки
+      required:
+        - id
+        - nickname
+        - city_id
+        - status
+        - created_at
+        - mfa_enabled
+        - mfa_reset
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id игрока — для requestMfaReset и связи сотрудника
+          example: 0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90
+        nickname:
+          type: string
+          description: Ник
+          example: kosta_10
+        city_id:
+          type: string
+          format: uuid
+          description: Город игрока
+          example: 3f2c8e1a-9b4d-4c7e-a6f1-2d8b5e0c9a47
+        status:
+          type: string
+          description: 'Статус аккаунта: active, suspended, banned, pending_deletion (список открытый — незнакомое значение показывайте общим текстом)'
+          example: active
+        created_at:
+          type: string
+          format: date-time
+          description: Когда создан аккаунт
+          example: '2026-03-02T18:20:00Z'
+        mfa_enabled:
+          type: boolean
+          description: Включена ли 2FA
+          example: true
+        mfa_reset:
+          type: object
+          nullable: true
+          description: Назначенный сброс 2FA или null
+          required:
+            - id
+            - execute_at
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: Id сброса — для cancelMfaReset
+              example: 0193a1ca-8091-7ea1-9b2c-3d4e5f6a7b89
+            execute_at:
+              type: string
+              format: date-time
+              description: Когда сброс выполнится
+              example: '2026-11-20T09:00:00Z'
+    IdentityMfaResetRequest:
+      type: object
+      description: Запрос сброса 2FA игрока
+      required:
+        - reason
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: Почему и как проверена личность — попадёт в журнал и в запрос на подтверждение
+          example: Потерял телефон, личность проверена по документам
+        ticket:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Номер обращения в поддержке
+          example: SUP-4812
+    IdentityMfaResetCancelled:
+      type: object
+      description: Отменённый сброс 2FA
+      required:
+        - id
+        - cancelled_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id сброса
+          example: 0193a1ca-8091-7ea1-9b2c-3d4e5f6a7b89
+        cancelled_at:
+          type: string
+          format: date-time
+          description: Когда отменён
+          example: '2026-11-15T10:00:00Z'
 x-error-codes-common:
   - internal
   - request.invalid
@@ -4736,12 +5701,12 @@ x-error-codes-common:
   - idempotency.in_progress
   - idempotency.replay_unavailable
   - feature.disabled
+  - http.not_implemented
   - auth.forbidden
   - auth.csrf_failed
   - auth.ip_not_allowed
   - auth.reauth_required
   - auth.setup_required
-  - http.not_implemented
 x-anonymous-mutations:
   - staffLogin
   - staffAcceptInvite

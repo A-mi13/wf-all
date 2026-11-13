@@ -96,6 +96,24 @@ var (
 		"putAppVersions":     {http.MethodPut, "/v1/app/versions/ios", `{"min_version":"1.4.0","recommended_version":"1.6.2","store_url":"https://apps.apple.com/app/id6740000000"}`},
 		"listFeatureFlags":   {http.MethodGet, "/v1/flags", ""},
 		"updateFeatureFlag":  {http.MethodPatch, "/v1/flags/economy", `{"version":1,"enabled_globally":true}`},
+		// план I-1 (Task 4): identity — город заявки не в пути (скоуп модератора — сценарий), заголовки ПД — opsHeaders
+		"listCaptainApplications":      {http.MethodGet, "/v1/identity/captain-applications?status=pending&limit=20", ""},
+		"getCaptainApplication":        {http.MethodGet, "/v1/identity/captain-applications/" + anyID.String(), ""},
+		"getCaptainApplicationContact": {http.MethodGet, "/v1/identity/captain-applications/" + anyID.String() + "/contact", ""},
+		"approveCaptainApplication":    {http.MethodPost, "/v1/identity/captain-applications/" + anyID.String() + "/approve", `{"comment":"Знаю по турниру"}`},
+		"rejectCaptainApplication":     {http.MethodPost, "/v1/identity/captain-applications/" + anyID.String() + "/reject", `{"rejection_code":"insufficient_info"}`},
+		"getAuthMethodsUsage":          {http.MethodGet, "/v1/identity/auth-methods/usage", ""},
+		"findPlayerByEmail":            {http.MethodGet, "/v1/identity/users/lookup", ""},
+		"requestMfaReset":              {http.MethodPost, "/v1/identity/users/" + anyID.String() + "/mfa-reset", `{"reason":"Потерял телефон, личность проверена","ticket":"SUP-4812"}`},
+		"cancelMfaReset":               {http.MethodPost, "/v1/identity/mfa-resets/" + anyID.String() + "/cancel", ""},
+		"putStaffPlayerLink":           {http.MethodPut, "/v1/staff/accounts/" + anyID.String() + "/player-link", `{"user_id":"` + anyID.String() + `"}`},
+		"deleteStaffPlayerLink":        {http.MethodDelete, "/v1/staff/accounts/" + anyID.String() + "/player-link", ""},
+	}
+	// opsHeaders — заголовки запроса сверх общих (пары имя, значение): ПД и причина чтения — в заголовках, не в query
+	// (план I-1, R19); без них валидатор отвечает 400 до прав и хендлера.
+	opsHeaders = map[string][]string{
+		"getCaptainApplicationContact": {"X-WF-Access-Reason", accessReason},
+		"findPlayerByEmail":            {"X-WF-Lookup-Email", "ivan.petrov%40mail.example", "X-WF-Access-Reason", accessReason},
 	}
 	// handlerRoles — ручная таблица операций x-permission: handler: какие роли конвейер пропускает (точное
 	// право и цель решает сценарий). Сверяется с матрицей: хоть одно право из x-permission-any не Deny.
@@ -320,7 +338,7 @@ func TestPermissionsAllOperations(t *testing.T) {
 				} else if cityOp && s.name == "moderator-foreign" {
 					want = row.foreign
 				}
-				rec := serve(h, call(req.method, req.path, s.token, req.body))
+				rec := serve(h, withHeaders(call(req.method, req.path, s.token, req.body), opsHeaders[opID(op)]))
 				checked++
 				if want.pass && live {
 					// настоящий хендлер платформы: дошёл — не отказ конвейера (401, 403); исход — забота хендлера
@@ -388,6 +406,17 @@ func opID(op *openapi3.Operation) string {
 		return id
 	}
 	return strings.ToLower(id[:1]) + id[1:]
+}
+
+// accessReason — причина чтения ПД «обращение 4812» в percent-encoding UTF-8 (R19, ревью плана I4).
+const accessReason = "%D0%BE%D0%B1%D1%80%D0%B0%D1%89%D0%B5%D0%BD%D0%B8%D0%B5%204812"
+
+// withHeaders — запрос с заголовками из пар имя, значение.
+func withHeaders(r *http.Request, hdr []string) *http.Request {
+	for i := 0; i+1 < len(hdr); i += 2 {
+		r.Header.Set(hdr[i], hdr[i+1])
+	}
+	return r
 }
 
 // pathMatches — строка теста ведёт на путь контракта: параметры пути — любой непустой сегмент, query

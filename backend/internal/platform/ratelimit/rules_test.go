@@ -66,6 +66,32 @@ func TestDefaultRulesStaffAuth(t *testing.T) {
 	}
 }
 
+// Спека identity §6.4: классы входа и аккаунта — auth_send (письма с кодами), auth_refresh (обновление токена:
+// за CGNAT много людей), auth_check (доступность ника), account_secure (чувствительные операции аккаунта); auth
+// не меняется. Правила — раньше классов в контракте: иначе API не стартует (ratelimit.UnknownClasses).
+func TestDefaultRulesIdentityClasses(t *testing.T) {
+	t.Parallel()
+	m := func(limit, burst int) ratelimit.Policy {
+		return ratelimit.Policy{Limit: limit, Period: time.Minute, Burst: burst}
+	}
+	want := map[string]ratelimit.ClassPolicy{
+		"auth":           {IP: m(60, 20), Device: m(20, 10)},
+		"auth_send":      {IP: m(10, 5), User: m(5, 3), Device: m(5, 3)},
+		"auth_refresh":   {IP: m(300, 60), Device: m(30, 10)},
+		"auth_check":     {IP: m(60, 20), Device: m(30, 10)},
+		"account_secure": {IP: m(60, 20), User: m(10, 5)},
+	}
+	r := ratelimit.DefaultRules()
+	for class, w := range want {
+		if got, ok := r[class]; !ok || got != w {
+			t.Errorf("%s = %+v (есть: %v), want %+v", class, got, ok, w)
+		}
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseRules(t *testing.T) {
 	t.Parallel()
 	got, err := ratelimit.ParseRules("auth.ip=10/1m:5, default.device=off, upload.user=30/1h", ratelimit.DefaultRules())

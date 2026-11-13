@@ -9,7 +9,7 @@ test('ключи прав — только не-draft, по порядку ка�
     service: ['anonymous', 'session', 'self', 'handler'],
     permissions: [
       { key: 'staff.roles.read', draft: false, mutating: false },
-      { key: 'teams.captains.approve', draft: true, mutating: true },
+      { key: 'pitches.pitches.moderate', draft: true, mutating: true },
       { key: 'audit.log.read', draft: false, mutating: false },
     ],
   };
@@ -27,7 +27,7 @@ test('действия подтверждений — enum схемы ApprovalAc
 test('каталог собранного контракта admin', async () => {
   const { permissions, approvalActions: actions } = await loadLabelCatalog();
   assert.ok(permissions.includes('staff.roles.grant'));
-  assert.ok(!permissions.includes('teams.captains.approve'), 'draft-права не подписываются');
+  assert.ok(!permissions.includes('pitches.pitches.moderate'), 'draft-права не подписываются');
   assert.ok(actions.includes('staff.invite'));
 });
 

@@ -48,6 +48,21 @@ var spec25 = []struct{ key, owner, admin, moderator, support string }{
 	{"platform.flags.manage", "allow", "allow", "deny", "deny"},
 }
 
+// Права identity — спека identity §7.2 дословно и staff.player_links.manage — §7.6 (план I-1, Task 1):
+// ключ, изменение ли, привязка к городу, владелец, админ, модератор, поддержка. Порядок — порядок
+// каталога и docs/05 (R8): блок identity сразу после platform, связь сотрудника — последняя в staff.
+var specIdentity = []struct {
+	key                              string
+	mutating, cityBound              bool
+	owner, admin, moderator, support string
+}{
+	{"identity.captain_applications.read", false, true, "allow", "allow", "scoped", "allow"},
+	{"identity.captain_applications.decide", true, true, "allow", "allow", "scoped", "deny"},
+	{"identity.pii.read", false, true, "allow", "allow", "scoped", "allow"},
+	{"identity.mfa.reset", true, false, "dual", "dual", "deny", "deny"},
+	{"staff.player_links.manage", true, false, "allow", "deny", "deny", "deny"},
+}
+
 // ownerOnly — права, которые есть только у владельца (§2.5, §2.6; M5).
 var ownerOnly = []string{"staff.roles.grant_elevated", "staff.roles.revoke_owner", "staff.roles.revoke_admin",
 	"staff.access.reset_elevated"}
@@ -124,6 +139,9 @@ func TestMatrixMatchesSpec(t *testing.T) {
 	for _, s := range spec25 {
 		inSpec[s.key] = true
 	}
+	for _, s := range specIdentity {
+		inSpec[s.key] = true
+	}
 	for _, p := range perm.Catalog {
 		if !p.Draft && !inSpec[p.Key] {
 			t.Errorf("%s: нечерновое право, которого нет в спеке §2.5 (и в spec25)", p.Key)
@@ -140,6 +158,50 @@ func TestMatrixMatchesSpec(t *testing.T) {
 		if want := [4]string{s.owner, s.admin, s.moderator, s.support}; got != want {
 			t.Errorf("%s: %v, по спеке %v", s.key, got, want)
 		}
+	}
+}
+
+// Права identity и связь сотрудника с учёткой игрока (спека identity §7.2, §7.6; план I-1, Task 1, R8):
+// рабочие (не черновые), вид, привязка к городу и значения по ролям — по таблице; блок identity идёт сразу
+// за platform, staff.player_links.manage — последняя строка блока staff; черновое teams.captains.approve
+// удалено (К7), identity.pii.read перестало быть черновым.
+func TestCatalogIdentityRows(t *testing.T) {
+	index := map[string]int{}
+	for i, p := range perm.Catalog {
+		index[p.Key] = i
+	}
+	for _, s := range specIdentity {
+		p, ok := perm.Lookup(s.key)
+		if !ok || p.Draft {
+			t.Errorf("%s: права нет в каталоге или оно черновое", s.key)
+			continue
+		}
+		if p.Mutating != s.mutating || p.CityBound != s.cityBound {
+			t.Errorf("%s: Mutating=%v CityBound=%v, по спеке %v %v", s.key, p.Mutating, p.CityBound, s.mutating, s.cityBound)
+		}
+		m := perm.Matrix[s.key]
+		got := [4]string{m[perm.Owner].String(), m[perm.Admin].String(), m[perm.Moderator].String(), m[perm.Support].String()}
+		if want := [4]string{s.owner, s.admin, s.moderator, s.support}; got != want {
+			t.Errorf("%s: %v, по спеке %v", s.key, got, want)
+		}
+	}
+	if _, ok := perm.Lookup("teams.captains.approve"); ok {
+		t.Error("teams.captains.approve: черновое право удалено спекой identity (К7), а оно в каталоге")
+	}
+	// порядок блоков (R8): identity сразу за последней строкой platform, по порядку таблицы
+	last := index["platform.flags.manage"]
+	for i, s := range specIdentity[:4] {
+		if index[s.key] != last+1+i {
+			t.Errorf("%s: строка %d, ждали %d (блок identity сразу за platform)", s.key, index[s.key], last+1+i)
+		}
+	}
+	links, ok := index["staff.player_links.manage"]
+	if !ok || links == 0 || links+1 >= len(perm.Catalog) {
+		t.Fatal("staff.player_links.manage: нет в каталоге или стоит с краю")
+	}
+	if prev, next := perm.Catalog[links-1].Key, perm.Catalog[links+1].Key; prev != "staff.sessions.revoke" ||
+		strings.HasPrefix(next, "staff.") {
+		t.Errorf("staff.player_links.manage: соседи %s и %s — ждали последней строкой блока staff", prev, next)
 	}
 }
 
@@ -231,8 +293,9 @@ func TestMatrixHierarchy(t *testing.T) {
 // Права с привязкой к городу перечислены явно: значение scoped у них осмысленно.
 func TestCityBound(t *testing.T) {
 	want := []string{"audit.log.read", "geo.cities.read", "geo.cities.manage", "geo.cities.rename",
-		"geo.districts.manage", "teams.captains.approve", "pitches.pitches.moderate", "moderation.reports.read",
-		"moderation.reports.resolve", "moderation.restrictions.apply", "results.reports.annul", "identity.pii.read"}
+		"geo.districts.manage", "identity.captain_applications.read", "identity.captain_applications.decide",
+		"identity.pii.read", "pitches.pitches.moderate", "moderation.reports.read", "moderation.reports.resolve",
+		"moderation.restrictions.apply", "results.reports.annul"}
 	var got []string
 	for _, p := range perm.Catalog {
 		if p.CityBound {
