@@ -1044,11 +1044,11 @@ CSRF, `x-permission`, идемпотентность — admin-api как ест
 | --- | --- | --- | --- |
 | `GET /v1/identity/captain-applications?status=&city_id=&cursor=&limit=` | `listCaptainApplications` | `identity.captain_applications.read` | очередь; по умолчанию `pending`, старые сверху; модератору — только его города (фильтр сценария) |
 | `GET /v1/identity/captain-applications/{applicationId}` | `getCaptainApplication` | `identity.captain_applications.read` | карточка; модератор чужого города — `404 identity.application_not_found` |
-| `GET /v1/identity/captain-applications/{applicationId}/contact?reason=` | `getCaptainApplicationContact` | `identity.pii.read` | почта и телефон заявителя; `reason` обязателен всем (3–200 символов; U6 требует для поддержки — решение автора спеки: для всех); чтение — в аудит |
+| `GET /v1/identity/captain-applications/{applicationId}/contact` (заголовок `X-WF-Access-Reason`) | `getCaptainApplicationContact` | `identity.pii.read` | почта и телефон заявителя; причина обязательна всем (3–200 символов после декодирования; U6 требует для поддержки — решение автора спеки: для всех) — в заголовке, не в query (план I-1, R19, CWE-598), значение — UTF-8 в percent-encoding (`encodeURIComponent`; битая кодировка — `400 validation.failed` по полю заголовка); чтение — в аудит |
 | `POST /v1/identity/captain-applications/{applicationId}/approve` | `approveCaptainApplication` | `identity.captain_applications.decide` | одобрить; `{comment?}` → `200` |
 | `POST /v1/identity/captain-applications/{applicationId}/reject` | `rejectCaptainApplication` | `identity.captain_applications.decide` | отклонить; `{rejection_code, comment}` (`comment` обязателен при `other`) → `200` |
 | `GET /v1/identity/auth-methods/usage` | `getAuthMethodsUsage` | `platform.flags.read` | по способам `apple`, `google`, `passkeys`: `only_method` (сколько игроков входят только им), `linked` (всего) — для экрана флагов |
-| `GET /v1/identity/users/lookup?email=&reason=` | `findPlayerByEmail` | `identity.pii.read` | точный поиск игрока по почте для поддержки: `{id, nickname, city_id, status, created_at, mfa_enabled, mfa_reset: {id, execute_at} \| null}`; нет — `404 identity.user_not_found`; `reason` обязателен; аудит чтения. Модератору — только игроки его городов (иначе тоже 404) |
+| `GET /v1/identity/users/lookup` (заголовки `X-WF-Lookup-Email`, `X-WF-Access-Reason`) | `findPlayerByEmail` | `identity.pii.read` | точный поиск игрока по почте для поддержки: `{id, nickname, city_id, status, created_at, mfa_enabled, mfa_reset: {id, execute_at} \| null}`; нет — `404 identity.user_not_found`; почта и причина обязательны и идут заголовками, не query (план I-1, R19, CWE-598: без ПД в URL и журналах прокси), значения — UTF-8 в percent-encoding (`encodeURIComponent`; битая кодировка — `400 validation.failed`; пределы после декодирования: почта ≤ 254, причина 3–200); аудит чтения. Модератору — только игроки его городов (иначе тоже 404) |
 | `POST /v1/identity/users/{userId}/mfa-reset` | `requestMfaReset` | `identity.mfa.reset` | `{reason, ticket?}` → `202 Approval` (действие `identity.mfa_reset`, §3.15) |
 | `POST /v1/identity/mfa-resets/{resetId}/cancel` | `cancelMfaReset` | `identity.mfa.reset` | отмена назначенного сброса сотрудником — сразу → `200 {id, cancelled_at}`; закрытый или чужой — `404 identity.mfa_reset_not_found` |
 
@@ -1490,8 +1490,8 @@ backend/internal/platform/flags/      + Rules (GlobalOnly, Requires)
   заявкам и сбросу 2FA, `moderation` и `teams` — в своих спеках; §7 — действие `identity.mfa_reset`.
 - Удаление чернового `teams.captains.approve` (решение контроллера 13.11, К7) — одним коммитом со стражами, которые его
   называют: `backend/internal/platform/perm/catalog.go:119` (строка каталога), `perm/catalog_test.go:234` (список
-  ожидаемых ключей), `approvals/registry_test.go:52` и `approvals/request_test.go:97` (фикстуры — заменить на
-  `identity.mfa.reset` или вымышленный ключ теста), `contracts/openapi/admin/permissions.json` (`./task gen`);
+  ожидаемых ключей), `approvals/registry_test.go:52` и `approvals/request_test.go:97` (фикстуры чернового права — заменить на
+  `pitches.pitches.moderate`: обе проверяют ветку `p.Draft`; годный или вымышленный ключ её не проверяет — ревью плана I-1, I1), `contracts/openapi/admin/permissions.json` (`./task gen`);
   фикстуры `contracts/test/labels.test.mjs:12,30` и `contracts/test/permissions.test.mjs:21,133,164` — черновое право
   теста: заменить на оставшийся черновой ключ (например, `pitches.pitches.moderate`).
 - `backend/migrations/README.md` — миграция identity, защищённое базой (§5.3), решения.
