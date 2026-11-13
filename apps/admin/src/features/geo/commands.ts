@@ -68,4 +68,25 @@ export const geoCommands: Command[] = [
     permission: 'geo.cities.activate',
     run: (ctx) => ctx.navigate({ to: paths.cities, search: { activate: 1 } }),
   },
+  // «Запустить импорт» (G9 Task 20) — окно запуска в адресе (?start=1, UF2b.8): журнал и строка задачи — под ним
+  {
+    id: 'geo.imports.run',
+    group: 'action',
+    labelKey: 'geo.imports.start',
+    keywordsKey: 'geo.imports.keywords',
+    icon: 'download',
+    permission: 'geo.imports.run',
+    run: (ctx) => ctx.navigate({ to: paths.imports, search: { start: 1 } }),
+  },
+  // «Добавить страну» — ?edit=new (панель в адресе, G9): право создания — geo.countries.rules (dual: палитра
+  // пометит «на подтверждение»)
+  {
+    id: 'geo.countries.create',
+    group: 'action',
+    labelKey: 'geo.countries.add',
+    keywordsKey: 'palette.keywords.add_country',
+    icon: 'globe',
+    permission: 'geo.countries.rules',
+    run: (ctx) => ctx.navigate({ to: paths.countries, search: { edit: 'new' } }),
+  },
 ];

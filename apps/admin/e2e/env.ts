@@ -39,6 +39,10 @@ export const DEFAULT_PROJECTS: readonly ProjectName[] = ['chromium', 'webkit', '
 export const browserOf = (name: ProjectName): 'chromium' | 'webkit' =>
   name === 'webkit' ? 'webkit' : 'chromium';
 
+// Города, которые scripts/e2e-admin.sh заводит после миграций (FLAG_CITIES, страж env.test.ts): матрица флагов в
+// прод-сценарии — больше порога виртуализации столбцов (MATRIX_VIRTUALIZE_FROM × 3), в DOM — окно (G9-F, I-9).
+export const E2E_FLAG_CITIES = 150;
+
 // Собранная админка для prod — dist рядом с e2e (vite build из scripts/e2e-admin.sh)
 export const ADMIN_DIST = path.join(ROOT, 'apps', 'admin', 'dist');
 

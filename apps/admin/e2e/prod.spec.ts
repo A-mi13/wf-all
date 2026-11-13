@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
-import { pairOf, ROOT } from './env';
+import { E2E_FLAG_CITIES, pairOf, ROOT } from './env';
 import { t } from './keys';
 import { PROD_SECTIONS } from './sections';
 import { acceptAndSetup, bootstrap, newStaff, receiveInvite } from './ui';
@@ -158,6 +158,37 @@ test('под сотрудником: разделы меню и панель п�
   expect(Math.abs((box?.x ?? 0) - (anchor?.x ?? 0))).toBeLessThan(4);
   await page.keyboard.press('Escape');
   await expect(list).toHaveCount(0);
+  await collect();
+
+  // (4) первая виртуализация под настоящей CSP (G9-F, спека UI-фундамента §4.5): матрица флагов, города столбцами
+  // окном. Положение и ширины пишет setCssPx (CSSOM); запись атрибутом style CSP отрезала бы — распорки и ширины
+  // пропали бы, --wf-virtual-start остался бы пустым, и пришёл бы securitypolicyviolation. Городов на стенде больше
+  // порога (засев scripts/e2e-admin.sh): в DOM — окно, а не все столбцы.
+  await page.goto('/flags');
+  const matrix = page.getByRole('table', { name: t('flagsPage.label') });
+  await expect(matrix).toBeVisible();
+  const colcount = Number(await matrix.getAttribute('aria-colcount'));
+  expect(colcount).toBeGreaterThan(E2E_FLAG_CITIES);
+  const rendered = await matrix.getByRole('columnheader').count();
+  expect(rendered).toBeLessThan(colcount);
+  // прокрутка к последнему городу: его заголовок — в DOM и в области прокрутки, положение — числом от setCssPx
+  const scroller = page.locator('[data-matrix-scroll]');
+  await scroller.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+  const last = matrix.locator(`th[aria-colindex="${colcount}"]`);
+  await expect(last).toBeVisible();
+  await expect
+    .poll(async () => {
+      const [cell, view] = await Promise.all([last.boundingBox(), scroller.boundingBox()]);
+      return Boolean(
+        cell && view && cell.x >= view.x - 1 && cell.x + cell.width <= view.x + view.width + 1,
+      );
+    })
+    .toBe(true);
+  const start = await last.evaluate((el) =>
+    getComputedStyle(el).getPropertyValue('--wf-virtual-start'),
+  );
+  expect(Number.parseFloat(start)).toBeGreaterThan(0);
+  expect(await matrix.getByRole('columnheader').count()).toBeLessThan(colcount);
   await collect();
 
   // (3) фон собранного CSS — значение токена своей темы; системная — противоположная выбору

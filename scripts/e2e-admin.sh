@@ -127,6 +127,25 @@ if ! out=$(cd backend && MIGRATOR_DATABASE_URL="postgres://migrator:migrator@${P
   die "миграции wf_e2e не прошли"
 fi
 
+# 3a. Города для матрицы флагов (G9-F): прод-сценарий проверяет виртуализацию столбцов под настоящей CSP — городов
+# больше порога (MATRIX_VIRTUALIZE_FROM × 3; число — E2E_FLAG_CITIES в apps/admin/e2e/env.ts, страж env.test.ts).
+# Страна — из сида (RU), статус — ожидание; названия «Флагтест NNN» не совпадают с поиском других сценариев.
+FLAG_CITIES=150
+E2E_URL=$(node -e '
+  const u = new URL(process.argv[1]);
+  u.pathname = "/" + process.argv[2];
+  process.stdout.write(u.href);
+' "$SUPER_URL" "$DB")
+"$PSQL" "$E2E_URL" -v ON_ERROR_STOP=1 -q <<SQL || die "засев городов wf_e2e не прошёл"
+INSERT INTO cities (country_id, name, slug, timezone, centroid, status)
+SELECT co.id, format('Флагтест %s', lpad(n::text, 3, '0')), format('flagtest-%s', n), 'Europe/Moscow',
+       ST_SetSRID(ST_MakePoint(42 + n / 1000.0, 45), 4326)::geography, 'waitlist'
+  FROM countries co, generate_series(1, $FLAG_CITIES) AS n
+ WHERE co.code = 'RU';
+INSERT INTO city_names (city_id, locale, name)
+SELECT c.id, 'ru', c.name FROM cities c WHERE c.slug LIKE 'flagtest-%';
+SQL
+
 # 4. admin-api
 (cd backend && go build -o "../.tools/e2e/admin-api$exe" ./cmd/admin-api)
 

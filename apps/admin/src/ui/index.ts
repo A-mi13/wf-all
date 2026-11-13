@@ -30,7 +30,7 @@ export { AttentionTile, type AttentionTileProps, AttentionTiles } from './home/A
 export { type AttentionState, attentionState } from './home/state';
 export { type TodoError, type TodoItem, TodoList } from './home/TodoList';
 export { Icon, Illustration } from './icon';
-export { useIsCompact, useIsHandheld, useIsMobile } from './media';
+export { useIsCoarse, useIsCompact, useIsHandheld, useIsMobile } from './media';
 export { useReducedMotion } from './motion';
 export { useOnline } from './online';
 export { OtpInput, type OtpInputHandle, type OtpInputProps } from './OtpInput';
@@ -109,6 +109,7 @@ export {
   type Density,
   infiniteTableProps,
   SEARCH_DEBOUNCE_MS,
+  SearchBox,
   type SortState,
   useDensity,
 } from './table';
@@ -123,9 +124,12 @@ export {
 } from './theme';
 export { TOAST_HIDE_MS, type ToastApi, ToastProvider, useToast } from './toast';
 export {
+  MATRIX_VIRTUALIZE_FROM,
+  type MatrixFixedColumn,
   useVirtualRows,
   VIRTUAL_OVERSCAN,
   type VirtualItem,
   VirtualList,
+  VirtualMatrix,
   type VirtualRows,
 } from './virtual';

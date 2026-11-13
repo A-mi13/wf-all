@@ -5,7 +5,7 @@ import type { components } from '../../api/gen/admin';
 import { useAdminMutation } from '../../api/mutation';
 import type { UndoInverse } from '../../api/undo';
 import { useLocale } from '../../i18n/locale';
-import { CITIES_KEY, GEO_PLACES_KEY, geoKeys } from './queries';
+import { CITIES_KEY, COUNTRIES_KEY, GEO_PLACES_KEY, geoKeys } from './queries';
 
 type GeoCityDetails = components['schemas']['GeoCityDetails'];
 type GeoCityPatch = components['schemas']['GeoCityPatch'];
@@ -17,12 +17,20 @@ type GeoDistrict = components['schemas']['GeoDistrict'];
 // карточек и районов) помечаются устаревшими. Районы: ответ — один район, порядок и число районов
 // в карточке считает сервер — перечитываются районы, карточка и списки.
 
-// Списки и подписи городов — устарели (карточки и районы обновляет вызывающий).
+// Списки и подписи городов — устарели (карточки и районы обновляет вызывающий). Вместе с ними — список стран: его
+// open_cities (pilot и live) считает сервер по городам — активация и смена статуса города его меняют (G9, I-1;
+// регионы под COUNTRIES_KEY не трогаются).
 export function invalidateCityLists(queryClient: QueryClient) {
-  return queryClient.invalidateQueries({
-    queryKey: CITIES_KEY,
-    predicate: (q) => q.queryKey[2] !== 'card' && q.queryKey[2] !== 'districts',
-  });
+  return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: CITIES_KEY,
+      predicate: (q) => q.queryKey[2] !== 'card' && q.queryKey[2] !== 'districts',
+    }),
+    queryClient.invalidateQueries({
+      queryKey: COUNTRIES_KEY,
+      predicate: (q) => q.queryKey[2] === 'list',
+    }),
+  ]);
 }
 
 function useCityResult() {

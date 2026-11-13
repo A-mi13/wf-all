@@ -58,6 +58,7 @@ export const KEYS = [
   'locale.short.en',
   'locale.en', // «English» — опция языка в приглашении
   'pages.accept.title', // заголовок /accept: ссылка письма ?lang=en открывает экран на EN (IL2)
+  'flagsPage.label', // матрица флагов — первая виртуализация (столбцы) под настоящей CSP (G9-F)
 ] as const;
 
 export type Key = (typeof KEYS)[number];

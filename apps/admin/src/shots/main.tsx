@@ -6,6 +6,7 @@ import { createQueryClient } from '../app/query';
 import { SEARCH_DEBOUNCE_MS } from '../ui/table/model';
 import { problem } from '../test/problem';
 import { auditServer } from '../test/audit';
+import { importsShotsServer } from '../test/geo';
 import { sectionsServer } from '../test/sections';
 import { applyShotsFixture } from './fixtures';
 import { shotsMe } from './params';
@@ -34,6 +35,10 @@ const me = applyShotsFixture(params.get('shots-fixture'), roleMe);
 // журнал на снимках — с записями фикстуры тестов (LOG): раскрытая запись ?entry=, скрытые по ширине столбцы и
 // активная строка видны (sectionsServer отдаёт пустой журнал — тестам маршрутов содержимое не важно)
 auditServer();
+// «Импорт GeoNames» (G9 Task 20): журнал, задача в очереди и отчёт сверки — только на своём адресе (плитка главной
+// и прочие снимки — на моках sectionsServer)
+// (с ?shots-fixture=imports-* — данные набора: пусто, ошибка)
+if (location.pathname === '/geo/imports' && !params.get('shots-fixture')) importsShotsServer();
 server.use(
   http.get('/v1/staff/me', ({ response }) =>
     me ? response(200).json(me) : response.untyped(problem(401, 'auth.unauthenticated')),

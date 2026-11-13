@@ -23,6 +23,7 @@ import {
   useToast,
 } from '../../ui';
 import { cityLabel, useCityNames } from '../staff/cities';
+import { GEO_KEY } from '../geo/queries';
 import { ACCOUNTS_KEY, accountKey, useRoleLabel } from '../staff/queries';
 import {
   useApprovalAction,
@@ -218,6 +219,9 @@ function useDecisions(onDone: (result?: Approval) => Promise<void>) {
       toast.success(t('done.executed'));
       // учётки изменились: «Роли и доступ» (список, карточки) перечитаются
       void queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY });
+      // правила или новая страна исполнены (geo.country_rules, geo.country_create): страны и «Справочники»
+      // (страна выключена — карточки городов) перечитаются (G9, I-1)
+      if (r.action.startsWith('geo.')) void queryClient.invalidateQueries({ queryKey: GEO_KEY });
     } else if (r.status === 'failed') {
       toast.error(t('failed_toast', { reason: failureText(r.error ?? '') }));
     } else toast.info(t('done.other', { status: statusOf(r.status).text }));

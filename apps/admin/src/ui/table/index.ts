@@ -1,4 +1,4 @@
-export { DataTable } from './DataTable';
+export { DataTable, SearchBox } from './DataTable';
 export {
   type ChipOption,
   type Column,

@@ -223,8 +223,9 @@ function Toolbar<T>({ search, chips, filters, menu }: DataTableProps<T> & { menu
   );
 }
 
-// Поиск: набор держится здесь и уходит экрану после паузы; сброс снаружи (value) — сразу в поле.
-function SearchBox({
+// Поиск: набор держится здесь и уходит экрану после паузы; сброс снаружи (value) — сразу в поле. Экспорт —
+// поиск страницы без таблицы строк (матрица флагов, Task 22): то же поле, та же клавиша «/».
+export function SearchBox({
   value,
   onChange,
   placeholder,

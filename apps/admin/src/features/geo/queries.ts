@@ -1,7 +1,7 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { unwrap } from '../../api/client';
+import { type Query, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { type ApiError, background, unwrap } from '../../api/client';
 import { useApi } from '../../api/context';
-import type { operations } from '../../api/gen/admin';
+import type { components, operations } from '../../api/gen/admin';
 import { useLocale } from '../../i18n/locale';
 
 // Чтения «Справочников» (план B, Task 17): города, карточка города, районы, страны, регионы, места
@@ -22,6 +22,8 @@ export type ImportsQuery = Omit<
   NonNullable<operations['listGeoImports']['parameters']['query']>,
   'cursor' | 'limit'
 >;
+
+type GeoImportJob = components['schemas']['GeoImportJob'];
 
 export const GEO_KEY = ['geo'] as const;
 export const CITIES_KEY = ['geo', 'cities'] as const;
@@ -168,14 +170,25 @@ export function useGeoImport(importId: string) {
   });
 }
 
-// Задача импорта в очереди (R7); опрос состояния и фоновый заголовок задаёт экран импорта (Task 20).
-export function useGeoImportJob(jobId: number | undefined) {
+// Задача импорта в очереди (R7). Читает её только опрос строки задачи (Task 20) — всегда фоновым запросом
+// (X-WF-Background: 1: опрос не продлевает сессию, admin.md «Фоновые опросы»); интервал и потолок решает экран
+// (refetchInterval — функция от запроса).
+export function useGeoImportJob(
+  jobId: number | undefined,
+  refetchInterval?: (query: Query<GeoImportJob, ApiError>) => number | false,
+) {
   const api = useApi();
   return useQuery({
     queryKey: geoKeys.importJob(jobId ?? 0),
     queryFn: () =>
-      unwrap(api.GET('/v1/geo/imports/jobs/{jobId}', { params: { path: { jobId: jobId ?? 0 } } })),
+      unwrap(
+        api.GET('/v1/geo/imports/jobs/{jobId}', {
+          params: { path: { jobId: jobId ?? 0 } },
+          ...background(),
+        }),
+      ),
     enabled: jobId !== undefined,
+    refetchInterval,
   });
 }
 

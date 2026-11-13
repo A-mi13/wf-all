@@ -1,4 +1,4 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { defaultRangeExtractor, type Range, useVirtualizer } from '@tanstack/react-virtual';
 import { type RefObject, useCallback } from 'react';
 import { setCssPx } from '../cssVar';
 
@@ -15,7 +15,8 @@ export type VirtualItem = { index: number; start: number; size: number };
 export type VirtualRows = {
   items: VirtualItem[];
   totalSize: number;
-  scrollToIndex(i: number): void;
+  // align 'auto' — прокрутить, только если элемент виден не целиком (фокус клавиатуры)
+  scrollToIndex(i: number, align?: 'start' | 'auto'): void;
   // ref-колбэк элемента с data-index: меряет фактический размер (строки разной высоты)
   measure(el: HTMLElement | null): void;
   // ставит элементу его положение и размер (переменные --wf-virtual-start/-size)
@@ -38,6 +39,9 @@ export function useVirtualRows({
   horizontal = false,
   gap = 0,
   getItemKey,
+  paddingStart = 0,
+  scrollPaddingStart = 0,
+  keep = null,
 }: {
   count: number;
   estimate: number;
@@ -48,7 +52,22 @@ export function useVirtualRows({
   // ключ элемента (rowKey строки): замеры следуют за строкой, а не за индексом — перечитывание с новой
   // строкой сверху не путает высоты
   getItemKey?: (index: number) => string | number;
+  // до первого элемента — неподвижное (закреплённые столбцы матрицы): элементы начинаются с этого смещения
+  paddingStart?: number;
+  // под закреплённым краем окна ничего не видно: scrollToIndex ставит элемент правее него
+  scrollPaddingStart?: number;
+  // элемент, который всегда в DOM (столбец с фокусом клавиатуры): прокрутка мимо не снимает фокус на body
+  keep?: number | null;
 }): VirtualRows {
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const indexes = defaultRangeExtractor(range);
+      if (keep === null || keep < 0 || keep >= range.count || indexes.includes(keep))
+        return indexes;
+      return [...indexes, keep].sort((a, b) => a - b);
+    },
+    [keep],
+  );
   const v = useVirtualizer({
     count,
     estimateSize: () => estimate,
@@ -56,6 +75,9 @@ export function useVirtualRows({
     overscan,
     horizontal,
     gap,
+    paddingStart,
+    scrollPaddingStart,
+    rangeExtractor,
     ...(getItemKey ? { getItemKey } : {}),
   });
   const totalSize = v.getTotalSize();
@@ -66,7 +88,10 @@ export function useVirtualRows({
     },
     [v],
   );
-  const scrollToIndex = useCallback((i: number) => v.scrollToIndex(i, { align: 'start' }), [v]);
+  const scrollToIndex = useCallback(
+    (i: number, align: 'start' | 'auto' = 'start') => v.scrollToIndex(i, { align }),
+    [v],
+  );
   const place = useCallback((el: HTMLElement | null, item: VirtualItem) => {
     if (!el) return;
     setCssPx(el, '--wf-virtual-start', item.start);

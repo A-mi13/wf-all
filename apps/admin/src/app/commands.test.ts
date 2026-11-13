@@ -169,6 +169,12 @@ describe('реестр команд', () => {
     activate?.run(b);
     expect(b.navigate).toHaveBeenCalledWith({ to: paths.cities, search: { activate: 1 } });
     expect(activate).toMatchObject({ permission: 'geo.cities.activate' });
+    // G9 Task 20: «Запустить импорт» — окно запуска в адресе (?start=1)
+    const runImport = COMMANDS.find((c) => c.id === 'geo.imports.run');
+    const d = ctx();
+    runImport?.run(d);
+    expect(d.navigate).toHaveBeenCalledWith({ to: paths.imports, search: { start: 1 } });
+    expect(runImport).toMatchObject({ group: 'action', permission: 'geo.imports.run' });
     for (const c of COMMANDS) {
       const context = ctx();
       c.run(context);

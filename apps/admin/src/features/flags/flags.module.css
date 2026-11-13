@@ -1,0 +1,137 @@
+/* «Флаги функций» (макет 07, экран 12): панель фильтров, матрица в карточке, текст под ней; на телефоне — список
+   флагов карточками, раскрытый флаг — города строками с переключателем. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+  container-type: inline-size;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-3);
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+}
+
+.card {
+  padding: var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-bg-elevated);
+}
+
+/* подпись строки флага: название, пояснение, состояние клеток */
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  min-inline-size: 0;
+}
+
+.title {
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+}
+
+.subtle {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 500;
+}
+
+.warning {
+  color: var(--wf-color-warning);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 600;
+}
+
+.note {
+  margin: 0;
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg-elevated);
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+/* Телефон: флаги карточками */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--wf-space-2);
+  padding: var(--wf-space-3) var(--wf-space-4);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-bg-elevated);
+}
+
+.itemHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+  align-self: stretch;
+}
+
+/* строка «имя — переключатель»: «Везде» и города раскрытого флага */
+.itemRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+  align-self: stretch;
+  min-block-size: var(--wf-size-touch-min);
+}
+
+.rowName {
+  min-inline-size: 0;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  overflow-wrap: anywhere;
+}
+
+.cities {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block-start: 1px solid var(--wf-color-border);
+}
+
+/* тысячи городов: строка вне экрана не раскладывается (спека UI-фундамента §4.5) */
+.cities > li {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--wf-size-touch-min);
+  border-block-end: 1px solid var(--wf-color-border);
+}

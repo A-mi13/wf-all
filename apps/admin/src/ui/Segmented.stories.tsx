@@ -27,3 +27,19 @@ function Locales({ busy }: { busy?: boolean }) {
 
 export const Default: Story = () => <Locales />;
 export const Busy: Story = () => <Locales busy />;
+
+// Подписи словами (wide): статус города на «Флагах функций» — колонка по своей подписи.
+const STATUSES = ['all', 'live', 'pilot', 'waitlist'] as const;
+export const Words: Story = () => {
+  const t = useTranslations('flagsPage');
+  const [value, setValue] = useState<(typeof STATUSES)[number]>('all');
+  return (
+    <Segmented
+      wide
+      label={t('status')}
+      value={value}
+      onChange={setValue}
+      options={STATUSES.map((s) => ({ value: s, text: t(`statuses.${s}`) }))}
+    />
+  );
+};

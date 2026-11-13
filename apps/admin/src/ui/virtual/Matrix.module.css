@@ -1,0 +1,74 @@
+/* Матрица с виртуальными столбцами (VirtualMatrix): своя горизонтальная прокрутка, первый столбец закреплён.
+   Ширины — числа из matrix.ts переменными --wf-matrix-head/-col, положение окна — --wf-virtual-* (setCssPx). */
+.viewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  /* фокус не уходит под закреплённый столбец (WCAG 2.4.11) */
+  scroll-padding-inline-start: var(--wf-matrix-head, 0);
+}
+
+.table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  inline-size: var(--wf-virtual-total, auto);
+  font-family: var(--wf-font-body);
+}
+
+.th,
+.td {
+  box-sizing: border-box;
+  padding: var(--wf-space-3) var(--wf-space-2);
+  border-block-end: 1px solid var(--wf-color-border);
+  vertical-align: middle;
+}
+
+.th {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.td {
+  color: var(--wf-color-text);
+  text-align: center;
+}
+
+/* Закреплённый первый столбец: фон поверхности под подписью — столбцы-города уходят под него */
+.pin {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  inline-size: var(--wf-matrix-head);
+  background: var(--wf-color-bg-elevated);
+  text-align: start;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.th.pin {
+  font-weight: 800;
+}
+
+.col {
+  inline-size: var(--wf-matrix-col);
+}
+
+/* столбец окна — ширина, которую считает виртуализация */
+.placed {
+  inline-size: var(--wf-virtual-size, var(--wf-matrix-col));
+}
+
+/* распорка: место пропущенных столбцов, без рамок и отступов */
+.gap {
+  box-sizing: border-box;
+  inline-size: var(--wf-virtual-gap, 0);
+  padding: 0;
+  border: 0;
+}

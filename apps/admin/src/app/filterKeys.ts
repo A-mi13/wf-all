@@ -1,5 +1,7 @@
 import { KEYS as APPROVALS_KEYS } from '../features/approvals/search';
 import { KEYS as AUDIT_KEYS } from '../features/audit/search';
+import { KEYS as IMPORTS_KEYS } from '../features/geo/importsSearch';
+import { KEYS as FLAGS_KEYS } from '../features/flags/search';
 import { KEYS as CITIES_KEYS } from '../features/geo/search';
 import { KEYS as STAFF_KEYS } from '../features/staff/search';
 import { paths } from './paths';
@@ -13,4 +15,8 @@ export const FILTER_SEARCH_KEYS: Readonly<Record<string, readonly string[]>> = {
   [paths.staff]: STAFF_KEYS,
   [paths.approvals]: APPROVALS_KEYS,
   [paths.cities]: CITIES_KEYS,
+  [paths.flags]: FLAGS_KEYS,
+  [paths.imports]: IMPORTS_KEYS,
+  // «Страны» — фильтров нет, в search только панель ?edit= (G9, Task 21)
+  [paths.countries]: [],
 };

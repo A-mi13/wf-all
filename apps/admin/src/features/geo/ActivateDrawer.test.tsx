@@ -469,6 +469,25 @@ describe('уборка V1 и G8', () => {
     expect(places.every((q) => q.state.isInvalidated)).toBe(true);
   });
 
+  // G9-C, I-1: open_cities страны считает сервер по городам — после активации список стран устарел.
+  test('I-1: успешная активация — список стран помечен устаревшим', async () => {
+    geoServer();
+    activateServer();
+    const app = renderApp('/geo/cities', { me: meActivator });
+    const { user, drawer } = await openDrawer();
+    await choose(user, drawer, 'м');
+    const countries = () =>
+      app.queryClient.getQueryCache().find({ queryKey: ['geo', 'countries', 'list', 'ru'] });
+    // шаг 2 спросил страны (поле «Страна города»)
+    await waitFor(() => expect(countries()?.state.data).toBeDefined());
+    const updates = countries()?.state.dataUpdateCount ?? 0;
+    await user.click(within(drawer).getByRole('button', { name: 'Активировать' }));
+    await waitFor(() => expect(app.at()).toBe(`/geo/cities/${NEW_CITY}`));
+    // наблюдатель был (поле страны) — перечитан; уже нет — помечен устаревшим
+    const q = countries();
+    expect(q?.state.isInvalidated || (q?.state.dataUpdateCount ?? 0) > updates).toBe(true);
+  });
+
   // G8 m14: исход неизвестен (обрыв), панель закрыли — город мог появиться: списки перечитаны.
   test('G8 m14: исход неизвестен, панель закрыта — списки городов перечитаны', async () => {
     const { seen } = geoServer();

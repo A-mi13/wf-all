@@ -27,6 +27,8 @@ export type SegmentedProps<V extends string = string> = {
   value: V;
   onChange: (value: V) => void;
   busy?: boolean; // запрос в полёте: выбор не меняется, фокус остаётся (aria-disabled, не disabled)
+  // подписи словами («Все · Живые · Пилот · Ожидание»): колонка по своей подписи, а не 40 px
+  wide?: boolean;
   className?: string;
 };
 
@@ -40,6 +42,7 @@ export function Segmented<V extends string>({
   value,
   onChange,
   busy,
+  wide,
   className,
 }: SegmentedProps<V>) {
   return (
@@ -47,7 +50,7 @@ export function Segmented<V extends string>({
       role="group"
       aria-label={label}
       aria-busy={busy || undefined}
-      className={cx(styles.root, className)}
+      className={cx(styles.root, wide && styles.wide, className)}
     >
       {options.map((o) => {
         const selected = o.value === value;

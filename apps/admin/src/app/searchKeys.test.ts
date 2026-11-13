@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import { KEYS as APPROVALS_KEYS, parseApprovalsSearch } from '../features/approvals/search';
 import { KEYS as AUDIT_KEYS, parseAuditSearch } from '../features/audit/search';
 import { KEYS as CITIES_KEYS, parseCitiesSearch } from '../features/geo/search';
+import { KEYS as IMPORTS_KEYS, parseImportsSearch } from '../features/geo/importsSearch';
 import { KEYS as STAFF_KEYS, parseStaffSearch } from '../features/staff/search';
 import { FILTER_SEARCH_KEYS } from './filterKeys';
 import { AUTH_PATHS, PANEL_SEARCH_KEYS, paths } from './paths';
@@ -55,6 +56,9 @@ describe('ключи панелей и фильтров', () => {
       [paths.staff]: ['q', 'status', 'role'],
       [paths.approvals]: ['box'],
       [paths.cities]: ['q', 'status', 'country', 'region_id'],
+      [paths.imports]: ['country', 'job'],
+      [paths.flags]: ['q', 'status', 'flag'],
+      [paths.countries]: [],
     });
   });
 
@@ -113,6 +117,12 @@ describe('парсер возвращает только свои KEYS (n7)', ()
         region_id: '0192f1c4-0000-7b21-9c5d-0000000000ad',
       },
     },
+    {
+      name: '/geo/imports',
+      keys: IMPORTS_KEYS,
+      parse: parseImportsSearch,
+      input: { country: 'RU', job: 1842 },
+    },
   ] as const;
 
   test.each(cases)('$name', ({ keys, parse, input }) => {
@@ -157,7 +167,15 @@ describe('маршруты с search-параметрами — в FILTER_SEARCH
 
   test('стражу есть что обходить', () => {
     expect(searched.map((r) => r.fullPath).sort()).toEqual(
-      [paths.approvals, paths.audit, paths.cities, paths.staff].sort(),
+      [
+        paths.approvals,
+        paths.audit,
+        paths.cities,
+        paths.countries,
+        paths.flags,
+        paths.imports,
+        paths.staff,
+      ].sort(),
     );
   });
 

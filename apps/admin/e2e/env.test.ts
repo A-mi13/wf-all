@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NAV } from '../src/app/nav';
+import { MATRIX_VIRTUALIZE_FROM } from '../src/ui/virtual/matrix';
 import {
   adminApiEnv,
   apiOrigin,
@@ -10,6 +11,7 @@ import {
   cleanEnv,
   cookieName,
   DEFAULT_PROJECTS,
+  E2E_FLAG_CITIES,
   enabledProjects,
   mailpitEnv,
   origin,
@@ -210,6 +212,19 @@ describe('окружение e2e', () => {
     expect(sh).not.toMatch(/^LOCK=\.tools/m);
     // переход в apps/admin — после замка (иначе $PWD был бы не корень)
     expect(sh.indexOf('\ncd apps/admin')).toBeGreaterThan(lock);
+  });
+
+  // G9-F (I-9): прод-сценарий доказывает виртуализацию столбцов матрицы флагов под CSP — городов на стенде должно быть
+  // заведомо больше порога (× 3), засев — после миграций и до сборки/Playwright, число — одно на скрипт и сценарий.
+  it('засев городов для матрицы флагов: число = E2E_FLAG_CITIES ≥ порог × 3, после миграций', () => {
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'e2e-admin.sh'), 'utf8');
+    expect(sh.match(/^FLAG_CITIES=(\d+)$/m)?.[1]).toBe(String(E2E_FLAG_CITIES));
+    expect(E2E_FLAG_CITIES).toBeGreaterThanOrEqual(MATRIX_VIRTUALIZE_FROM * 3);
+    const migrate = sh.indexOf('go run ./cmd/migrate up');
+    const seed = sh.indexOf('generate_series(1, $FLAG_CITIES)');
+    expect(migrate).toBeGreaterThan(-1);
+    expect(seed).toBeGreaterThan(migrate);
+    expect(sh.indexOf('pnpm exec playwright test')).toBeGreaterThan(seed);
   });
 
   it('обход прод-проекта — все разделы меню', () => {

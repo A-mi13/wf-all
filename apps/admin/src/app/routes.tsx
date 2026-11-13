@@ -5,15 +5,16 @@ import {
   Outlet,
   redirect,
 } from '@tanstack/react-router';
-import { useTranslations } from 'use-intl';
 import { parseApprovalsSearch } from '../features/approvals/search';
 import { parseAuditSearch } from '../features/audit/search';
+import { parseImportsSearch } from '../features/geo/importsSearch';
+import { parseFlagsSearch } from '../features/flags/search';
 import { parseCitiesSearch } from '../features/geo/search';
 import { AcceptInvitePage } from '../features/auth/AcceptInvitePage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { SetupMfaPage } from '../features/auth/SetupMfaPage';
 import { parseStaffSearch } from '../features/staff/search';
-import { ChunkErrorState, PageHeader, SectionSkeleton } from '../ui';
+import { ChunkErrorState, SectionSkeleton } from '../ui';
 import { resolveRoute } from './guard';
 import { panelSearch } from './panels';
 import { paths } from './paths';
@@ -63,16 +64,6 @@ const setupRoute = createRoute({
   path: paths.setup2fa,
   component: SetupMfaPage,
 });
-
-// Разделы «Справочников», экраны которых строят следующие задачи плана B (Task 20–22): пока — только
-// шапка раздела. Маршрут нужен уже сейчас: без него прямой адрес дал бы «не найдено» вместо
-// ForbiddenState каркаса. Задача экрана заменяет component своим.
-function pendingSection(titleKey: string) {
-  return function PendingSection() {
-    const t = useTranslations();
-    return <PageHeader title={t(titleKey)} />;
-  };
-}
 
 // Ленивые разделы (спека UI-фундамента §4.15, план UF2b.9): экран раздела — свой кусок (lazyRouteComponent,
 // TanStack Router 1.170: lazyRouteComponent.tsx:16 — importer и имя экспорта; .preload вызывает загрузка маршрута,
@@ -166,22 +157,38 @@ export const routeTree = rootRoute.addChildren([
     createRoute({
       getParentRoute: () => shellRoute,
       path: paths.countries,
-      component: pendingSection('nav.countries'),
+      // панель страны — ?edit=<код> | new (G9, Task 21; country — фильтр списков, I1)
+      validateSearch: panelSearch(['edit']),
+      ...section,
+      component: lazyRouteComponent(() => import('../features/geo/CountriesPage'), 'CountriesPage'),
     }),
     createRoute({
       getParentRoute: () => shellRoute,
       path: paths.imports,
-      component: pendingSection('nav.imports'),
+      // страна журнала и строка задачи (?job=) — фильтры; запуск (?start=1) и раскрытый отчёт (?import=) — панели
+      validateSearch: (s: Record<string, unknown>) => ({
+        ...parseImportsSearch(s),
+        ...panelSearch(['start', 'import'])(s),
+      }),
+      ...section,
+      component: lazyRouteComponent(() => import('../features/geo/ImportsPage'), 'ImportsPage'),
     }),
     createRoute({
       getParentRoute: () => shellRoute,
       path: paths.versions,
-      component: pendingSection('nav.versions'),
+      ...section,
+      component: lazyRouteComponent(
+        () => import('../features/versions/VersionsPage'),
+        'VersionsPage',
+      ),
     }),
     createRoute({
       getParentRoute: () => shellRoute,
       path: paths.flags,
-      component: pendingSection('nav.flags'),
+      // поиск и статус города, раскрытый флаг телефона — search-параметры (перезагрузка, «Назад»)
+      validateSearch: parseFlagsSearch,
+      ...section,
+      component: lazyRouteComponent(() => import('../features/flags/FlagsPage'), 'FlagsPage'),
     }),
   ]),
 ]);

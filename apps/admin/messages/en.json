@@ -65,7 +65,8 @@
       "versions": "app release update",
       "flags": "feature toggles",
       "invite": "new staff member",
-      "activate": "launch new city"
+      "activate": "launch new city",
+      "add_country": "new country add create"
     },
     "offline": "No connection — search unavailable"
   },
@@ -1065,6 +1066,54 @@
       "note": "The goalkeeper changes during the match"
     }
   },
+  "flagsPage": {
+    "subtitle": "A feature is turned on for a whole city",
+    "search": "City",
+    "status": "City status",
+    "statuses": {
+      "all": "All",
+      "live": "Live",
+      "pilot": "Pilot",
+      "waitlist": "Waitlist"
+    },
+    "label": "Feature flags by city",
+    "corner": "Feature",
+    "everywhere": "Everywhere",
+    "everywhere_label": "{flag}: everywhere",
+    "city_label": "{flag}: {city}",
+    "no_title": "no label",
+    "on_everywhere": "on everywhere",
+    "limit": "over 1000 cities — turn it on everywhere",
+    "cities_count": "Cities: {count}",
+    "capped": "Showing the first {count} cities — narrow the search",
+    "no_cities": "No cities match the filter",
+    "note": "A flag turns a feature on for a city, not for a percentage of users: everyone in a city plays by the same rules, otherwise a captain and a player would see different things and argue.",
+    "empty_title": "No flags",
+    "empty_text": "Flags appear together with server features",
+    "stale": "The flag was changed — data refreshed",
+    "toast": {
+      "city_on": "“{flag}” on: {city}",
+      "city_off": "“{flag}” off: {city}",
+      "all_on": "“{flag}” on everywhere",
+      "all_off": "“{flag}” off everywhere"
+    },
+    "confirm": {
+      "city_on": "Turn on “{flag}”: {city}?",
+      "city_off": "Turn off “{flag}”: {city}?",
+      "all_on": "Turn on “{flag}” everywhere?",
+      "all_off": "Turn off “{flag}” everywhere?",
+      "text": "Players in the city will see the change right away.",
+      "on": "Turn on",
+      "off": "Turn off"
+    },
+    "state": {
+      "everywhere": "Everywhere",
+      "cities": "{count, plural, one {In # city} other {In # cities}}",
+      "off": "Off"
+    },
+    "cities": "Cities: {flag}",
+    "open_cities": "Cities"
+  },
   "geo": {
     "status": {
       "waitlist": "waitlist",
@@ -1074,7 +1123,76 @@
     },
     "countries": {
       "enabled": "enabled",
-      "disabled": "disabled"
+      "disabled": "disabled",
+      "subtitle": "Country rules: currency, language, phone code, week and age thresholds. A country's cities are visible in the apps when it is enabled.",
+      "table_label": "Countries",
+      "columns": {
+        "code": "Code",
+        "name": "Name",
+        "currency": "Currency",
+        "locale": "Language",
+        "prefix": "Phone code",
+        "week": "Week starts",
+        "ages": "Ages",
+        "enabled": "Enabled",
+        "open_cities": "Open cities",
+        "actions": "Actions"
+      },
+      "ages_value": "{min} / {majority}",
+      "switch_label": "{name}: enabled",
+      "add": "Add country",
+      "edit": "Edit",
+      "edit_label": "Edit: {name}",
+      "open": "Open",
+      "open_label": "Open: {name}",
+      "empty_title": "No countries yet",
+      "empty_text": "Add the first country — a second staff member will check its rules.",
+      "enabled_toast": "Country “{name}” enabled",
+      "disabled_toast": "Country “{name}” disabled",
+      "unknown": "—",
+      "weekday": {
+        "1": "Monday",
+        "2": "Tuesday",
+        "3": "Wednesday",
+        "4": "Thursday",
+        "5": "Friday",
+        "6": "Saturday",
+        "7": "Sunday"
+      },
+      "disable": {
+        "title": "Disable {name}?",
+        "text": "The country's cities will disappear from the app. A second staff member confirms disabling; until then the country stays enabled.",
+        "open_cities": "Open cities in the country: {count}",
+        "confirm": "Disable",
+        "requested": "Disabling “{name}” sent for approval"
+      },
+      "drawer": {
+        "title_new": "New country",
+        "title_edit": "{name} ({code})",
+        "not_found": "Country not found",
+        "not_found_text": "There is no country with code {code} in the directory.",
+        "text_new": "A second staff member will approve the new country after checking the currency and ages. It will appear in the table once approved.",
+        "text_edit": "Phone code, week and names change immediately. If the edit touches the currency or ages, all of it goes for approval.",
+        "code": "Country code (ISO 3166-1)",
+        "code_hint": "Two Latin letters, e.g. KZ",
+        "name_ru": "Name in Russian",
+        "name_en": "Name in English",
+        "locale": "Country language",
+        "locale_hint": "Canonical city names are in it. Set on creation and never changed.",
+        "locale_fixed": "Country language: {locale} — set on creation.",
+        "prefix": "Phone code",
+        "prefix_hint": "“+” and 1–4 digits, e.g. +7",
+        "week": "First day of the week",
+        "rules_title": "Country rules",
+        "source_hint": "A person enters the thresholds and currency, checking the country's law.",
+        "dual": "Change requires two people",
+        "currency": "Currency (ISO 4217)",
+        "currency_placeholder": "Choose a currency",
+        "min_age": "Minimum sign-up age",
+        "majority": "Age of majority",
+        "enable_now": "Enable the country right after approval",
+        "saved": "Country “{name}” saved"
+      }
     },
     "cities": {
       "subtitle": "Waitlist, pilot and live cities",
@@ -1216,6 +1334,125 @@
       "chosen": "Place",
       "submit": "Link",
       "linked": "City linked to GeoNames"
+    },
+    "imports": {
+      "subtitle": "GeoNames places by country: run, job progress and city reconciliation",
+      "start": "Run import",
+      "keywords": "загрузка обновить справочник места run start import geonames",
+      "label": "Import log",
+      "columns": {
+        "country": "Country",
+        "status": "Status",
+        "who": "Started by",
+        "started": "Started",
+        "duration": "Duration",
+        "counts": "Result",
+        "report": "Report"
+      },
+      "statuses": {
+        "running": "running",
+        "succeeded": "succeeded",
+        "failed": "failed",
+        "unknown": "—"
+      },
+      "who": {
+        "operator": "server operator",
+        "staff": "staff member"
+      },
+      "counts": "places: {places} · names: {names}",
+      "counts_removed": "removed: {removed} · missing: {missing}",
+      "running": "running",
+      "report_show": "Report",
+      "country_filter": "Country",
+      "country_all": "All countries",
+      "empty_title": "No imports yet",
+      "empty_text": "A country import adds GeoNames places for activating cities.",
+      "busy_operator": "An import of {country} is already running — started by the server operator. Its row is highlighted in the log.",
+      "dialog": {
+        "title": "Run GeoNames import",
+        "text": "The import refreshes the country’s places and names and reconciles existing cities. It runs in the background for up to 30 minutes; progress is shown in the job row.",
+        "country": "Country",
+        "country_placeholder": "Choose a country",
+        "country_off": "{name} (disabled)",
+        "submit": "Run"
+      },
+      "started": "Import of {country} queued",
+      "already": "Import of {country} is already queued — showing its job",
+      "job": {
+        "label": "Import job",
+        "title": "Job {id}",
+        "copy": "Copy: job id",
+        "states": {
+          "queued": "queued",
+          "running": "running",
+          "completed": "completed",
+          "failed": "discarded",
+          "cancelled": "cancelled",
+          "unknown": "—"
+        },
+        "created": "Queued <time></time>",
+        "attempt": "Attempt {attempt} of {max}",
+        "polling": "Status updates automatically",
+        "waiting_worker": "The job is waiting for a worker — if there is none (dev stand), the import will not start.",
+        "stalled": "The job status has not changed for a while — polling stopped.",
+        "stale": "The job status did not update — we will try again.",
+        "check": "Check again",
+        "cancel_label": "Cancel job {id}",
+        "cancelled": "Import job cancelled",
+        "not_cancellable": "The job is already running or finished — it cannot be cancelled. Status refreshed.",
+        "not_found": "The job is gone — it finished and was removed from the queue. Log refreshed.",
+        "open_report": "Open report",
+        "hide": "Hide job"
+      },
+      "report": {
+        "title": "Import report {country}",
+        "label": "City reconciliation",
+        "none": "No reconciliation report: the import is running or failed before reconciling.",
+        "error": "Reason: {error}",
+        "groups": {
+          "linked": "Linked automatically",
+          "ambiguous": "Several matching places",
+          "conflict": "Conflict — check manually",
+          "not_found": "No matching place",
+          "missing": "Places gone from the source"
+        },
+        "empty_group": "None",
+        "skipped": "Places skipped without a time zone: {count}",
+        "linked_item": "{slug} → GeoNames {geoname}",
+        "candidate": "{name} · {region}",
+        "no_region": "region unknown",
+        "population": "population: {population}",
+        "no_candidates": "No matching places",
+        "link": "Link",
+        "link_label": "Link {city} to place {place}",
+        "linked_mark": "linked",
+        "open_city": "Open city {slug}"
+      }
+    }
+  },
+  "versions": {
+    "subtitle": "Minimum and recommended versions of the native app and the store link. Apps pick up new values within a minute.",
+    "platforms": {
+      "ios": "iOS",
+      "android": "Android"
+    },
+    "not_set": "not set",
+    "updated": "Changed <time></time>",
+    "min": "Minimum version",
+    "min_hint": "MAJOR.MINOR.PATCH, e.g. 1.4.0. Below it the app requires an update.",
+    "recommended": "Recommended version",
+    "recommended_hint": "Not lower than the minimum. Below it the app suggests an update.",
+    "store": "Store link",
+    "store_hint": {
+      "ios": "App Store page: https://apps.apple.com/…",
+      "android": "Google Play page: https://play.google.com/…"
+    },
+    "saved": "{platform} versions saved",
+    "no_changes": "No changes",
+    "raise": {
+      "title": "Raise the {platform} minimum version to {version}?",
+      "text": "Clients below {version} will be required to update: the app cannot be used without updating.",
+      "confirm": "Raise"
     }
   },
   "glossary": {
