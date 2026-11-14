@@ -27,9 +27,30 @@ import (
 	"wf/backend/internal/platform/testkit/dbtest"
 )
 
-// mailEnv — почта воркера обязательна; в тестах — адрес, на котором никто не слушает: письма не
-// отправляются, пока модули не поставят задачу.
-var mailEnv = []string{"WORKER_MAIL_SMTP_ADDR=127.0.0.1:1", "WORKER_MAIL_FROM=WF <noreply@wf.local>", "WORKER_MAIL_SMTP_TLS=none"}
+// mailEnv — почта и кольцо identity обязательны режиму воркера (разовым командам — нет); в тестах — адрес, на котором
+// никто не слушает: письма не отправляются, пока модули не поставят задачу.
+var mailEnv = []string{"WORKER_MAIL_SMTP_ADDR=127.0.0.1:1", "WORKER_MAIL_FROM=WF <noreply@wf.local>", "WORKER_MAIL_SMTP_TLS=none",
+	identityEnv}
+
+// identityEnv — кольцо identity воркера (план I-2, Task 4): 32 нулевых байта в base64, только для тестов.
+const identityEnv = "WORKER_IDENTITY_SECRET_KEYS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+// Режиму воркера кольцо identity обязательно (письма с кодами): нет или пусто — отказ старта до подключения к базе,
+// ошибка называет ключ (база недостижима: иначе ошибка была бы о подключении).
+func TestRunRequiresIdentityKeys(t *testing.T) {
+	t.Parallel()
+	mail := mailEnv[:len(mailEnv)-1]
+	for _, ring := range []string{"", "WORKER_IDENTITY_SECRET_KEYS="} {
+		env := append(append([]string{}, mail...), "WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1")
+		if ring != "" {
+			env = append(env, ring)
+		}
+		if err := run(context.Background(), nil, env, io.Discard, io.Discard); err == nil ||
+			!strings.Contains(err.Error(), "WORKER_IDENTITY_SECRET_KEYS") {
+			t.Errorf("%q: err = %v", ring, err)
+		}
+	}
+}
 
 func TestRunFailsWithoutConfig(t *testing.T) {
 	t.Parallel()
@@ -279,6 +300,7 @@ func TestPrintGeoSummary(t *testing.T) {
 // Команда оператора импортирует синхронно в своём процессе: задачу River не ставит, почта не
 // нужна, журнал — без сотрудника и без задачи, аудит — от operator. Часы машины оператора отстают на час —
 // started_at строки всё равно по времени базы (ревью G7 m9, geojobs.OperatorClock).
+// Кольца identity у команды нет (план I-2, Task 4): разовым командам оно не нужно, импорт без него проходит.
 func TestGeoImportCommandRunsSynchronously(t *testing.T) {
 	t.Parallel()
 	url := dbtest.NewURL(t)
@@ -380,7 +402,7 @@ func TestRunWarnsOpportunisticSMTPInServiceLog(t *testing.T) {
 	var logBuf bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	env := []string{"WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1", "WORKER_LOG_FORMAT=json",
+	env := []string{"WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1", "WORKER_LOG_FORMAT=json", identityEnv,
 		"WORKER_MAIL_SMTP_ADDR=smtp.example.com:587", "WORKER_MAIL_FROM=WF <noreply@wf.local>", "WORKER_MAIL_SMTP_TLS=opportunistic"}
 	if err := run(ctx, nil, env, io.Discard, &logBuf); err == nil {
 		t.Fatal("база недостижима, а run вернул nil")

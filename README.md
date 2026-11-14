@@ -159,10 +159,11 @@ CI поднимает свою базу на 15432 (`.github/workflows/backend.y
 `deploy/dev/`), локальный файл рядом с ним не коммитится (`backend/.env`,
 `apps/web/.env.local`, `apps/admin/.env.local`, `deploy/dev/.env`) — их создаёт `./task setup`.
 
-Ключи `API_JWT_SEEDS`, `API_HUMANCHECK_KEYS` и `ADMIN_STAFF_SECRET_KEYS` без значения (переменной нет
-или она пуста) не дают api и admin-api стартовать. `./task setup`, создавая `backend/.env`, сразу
+Ключи `API_JWT_SEEDS`, `API_HUMANCHECK_KEYS`, `API_IDENTITY_SECRET_KEYS`, `API_IDENTITY_DEVICE_KEYS`,
+`WORKER_IDENTITY_SECRET_KEYS` и `ADMIN_STAFF_SECRET_KEYS` без значения (переменной нет или она пуста) не дают api,
+воркеру (разовым командам кольцо не нужно) и admin-api стартовать. `./task setup`, создавая `backend/.env`, сразу
 заменяет их плейсхолдеры (`<base64-32-байта>`) случайными ключами — `scripts/env-keys.sh`
-(значения не выводит). Файл собирается во временном `backend/.env.tmp` и встаёт на место только
+(значения не выводит; кольцо identity у api и воркера получает одно значение). Файл собирается во временном `backend/.env.tmp` и встаёт на место только
 целиком: при сбое (нет `openssl`) `backend/.env` не появится, и повторный `./task setup` сделает
 шаг заново. `API_BFF_*` пусты до спеки веба.
 

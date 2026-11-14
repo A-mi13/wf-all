@@ -18,5 +18,7 @@ paths:
   существующий `backend/.env` новый ключ дописывает скрипт: `openssl rand -base64 32` прямо в файл, без вывода.
 - Кольцо ключей (`*_SEEDS`, `*_KEYS`, `*_SECRET_KEYS`) — через запятую, первый — текущий. Ротация: новый ключ первым,
   перешифровка (для `ADMIN_STAFF_SECRET_KEYS` — `admin-api staff rekey`), затем старый убрать.
+- Кольцо identity — одно значение у `API_IDENTITY_SECRET_KEYS` и `WORKER_IDENTITY_SECRET_KEYS` (письма с кодами
+  собирает воркер); `scripts/env-keys.sh` выдаёт обоим один ключ. admin-api кольца identity не получает (спека §5.5).
 - Ключи сотрудников есть только у admin-api (`ADMIN_STAFF_SECRET_KEYS`); воркеру их не заводить (решение D3).
 - Во фронт-сборку попадают только публичные значения (`VITE_*`, `NEXT_PUBLIC_*`).

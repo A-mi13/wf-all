@@ -68,6 +68,20 @@ services:
         sync: false
       - key: MIGRATOR_DATABASE_URL
         sync: false
+      # Кольца identity (план I-2, R10): секреты (коды, TOTP, данные регистрации) и HMAC устройств — только из панели,
+      # копия у контроллера вне репозитория. Не generateValue: перегенерация стёрла бы секреты TOTP и опознание
+      # устройств, а воркеру нужно то же кольцо (WORKER_IDENTITY_SECRET_KEYS — с сервисом воркера, Task 21)
+      - key: API_IDENTITY_SECRET_KEYS
+        sync: false
+      - key: API_IDENTITY_DEVICE_KEYS
+        sync: false
+      # имя в приложении-аутентификаторе: бренд не финален — на стенде «WF dev» (U4)
+      - key: API_IDENTITY_TOTP_ISSUER
+        value: WF dev
+      # документы-заглушки версии 0.1.0 (U3, semver — формат спеки identity §3.16); настоящие тексты — сменой версии (игроки примут заново)
+      - key: API_LEGAL_DOCUMENTS
+        value: terms=0.1.0|https://example.com/legal/terms,privacy=0.1.0|https://example.com/legal/privacy
+      # API_IPGEO_DB и API_WELLKNOWN_* не задаются: файла DB-IP и приложений в сторах ещё нет (.well-known — 404)
   # Админка (план C, Task 5): API сотрудников и собранная apps/admin с одного origin, тот же образ, что у wf-api.
   # Бесплатный тариф (ответ Q3): засыпает через 15 минут без запросов, письма очереди staff уходят при первом
   # запросе после сна. Воркера на Render нет (Q1, R9). Миграции накатывает только wf-api; admin-api при старте ждёт

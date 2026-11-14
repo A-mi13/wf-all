@@ -19,6 +19,7 @@ func TestRunFailsWithoutConfig(t *testing.T) {
 func TestRunRejectsEmptyNetElement(t *testing.T) {
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_TRUSTED_PROXIES=10.0.0.0/8,"}
+	env = append(env, identityEnv...)
 	err := run(context.Background(), env, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "TrustedProxies") {
 		t.Fatalf("err = %v", err)
@@ -30,6 +31,7 @@ func TestRunRejectsEmptyNetElement(t *testing.T) {
 func TestRunRejectsClientIPHeaderWithoutProxies(t *testing.T) {
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_CLIENT_IP_HEADER=CF-Connecting-IP"}
+	env = append(env, identityEnv...)
 	err := run(context.Background(), env, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "CF-Connecting-IP") {
 		t.Fatalf("err = %v", err)
@@ -40,10 +42,15 @@ func TestRunRejectsClientIPHeaderWithoutProxies(t *testing.T) {
 func TestRunRejectsBadJWTSeeds(t *testing.T) {
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=short", "API_HUMANCHECK_KEYS=" + testSeed}
+	env = append(env, identityEnv...)
 	if err := run(context.Background(), env, io.Discard); err == nil || !strings.Contains(err.Error(), "token:") {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// identityEnv — обязательные ключи identity (план I-2, Task 4): без них run падает на конфиге раньше проверяемого.
+var identityEnv = []string{"API_IDENTITY_SECRET_KEYS=" + testSeed, "API_IDENTITY_DEVICE_KEYS=" + testSeed,
+	"API_IDENTITY_TOTP_ISSUER=WF test", "API_LEGAL_DOCUMENTS=terms=0.1.0|https://example.com/terms,privacy=0.1.0|https://example.com/privacy"}
 
 // testSeed — валидный сид: 32 нулевых байта в base64 (только для тестов).
 const testSeed = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -53,6 +60,7 @@ func TestRunRejectsBadHumancheckKeys(t *testing.T) {
 	for _, k := range []string{"не-base64", "c2hvcnQ="} {
 		env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 			"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + k}
+		env = append(env, identityEnv...)
 		if err := run(context.Background(), env, io.Discard); err == nil || !strings.Contains(err.Error(), "humancheck") {
 			t.Errorf("%q: err = %v", k, err)
 		}

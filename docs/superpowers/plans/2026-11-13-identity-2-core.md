@@ -382,18 +382,21 @@ Integrity и режим аттестации — план I-3.
   `identity.ParseLegalDocuments`, Task 7–8; `cmd/api` зовёт его до базы), `WellKnown WellKnown` (`API_WELLKNOWN_*`) —
   `AppleAppIDs []string env:"WELLKNOWN_APPLE_APP_IDS" envSeparator:","`, `Android string env:"WELLKNOWN_ANDROID"`
   (`<package>=<SHA-256>[;…]`).
-- `config.Worker` += `IdentitySecretKeys []string env:"IDENTITY_SECRET_KEYS,required,notEmpty" envSeparator:","`
-  (`WORKER_IDENTITY_SECRET_KEYS` — то же кольцо, что у api).
+- `config.WorkerIdentity{SecretKeys []string env:"IDENTITY_SECRET_KEYS,required,notEmpty" envSeparator:","}`
+  (`WORKER_IDENTITY_SECRET_KEYS` — то же кольцо, что у api) — отдельный конфиг, как `config.Mail`: `cmd/worker` читает
+  его только в режиме воркера, до базы; разовым командам (`events replay`, `geo import`) кольцо не нужно (решение
+  контроллера 14.11).
 - `render.yaml` (`wf-api`): `API_IDENTITY_SECRET_KEYS`, `API_IDENTITY_DEVICE_KEYS` — `sync: false` (значения
   генерирует и задаёт контроллер при выкатке, копия — файлом вне репозитория, U2; R10); `API_IDENTITY_TOTP_ISSUER =
-  WF dev`, `API_LEGAL_DOCUMENTS` — заглушки версии `v0.1` со ссылкой-заглушкой (U3, U4) — значения в файле;
+  WF dev`, `API_LEGAL_DOCUMENTS` — заглушки версии `0.1.0` (U3, приведено к формату §3.16) со ссылкой-заглушкой (U3, U4) — значения в файле;
   `API_IPGEO_DB` и `.well-known` — без значения (города нет; 404, К4). Сервис воркера и
   `WORKER_IDENTITY_SECRET_KEYS` на стенде — Task 21 (U1).
 
 **Тесты.**
 - `TestAPIIdentityRequired` → без каждого из четырёх обязательных ключей — ошибка с именем ключа; с ними — поля
   заполнены, кольца — в порядке.
-- `TestWorkerIdentityRequired` → без `WORKER_IDENTITY_SECRET_KEYS` — ошибка.
+- `TestWorkerIdentityRequired` → без `WORKER_IDENTITY_SECRET_KEYS` — ошибка; `config.Worker` без кольца разбирается.
+  `TestRunRequiresIdentityKeys` (`cmd/worker`) — режим воркера без кольца — отказ до базы; `geo import` без кольца проходит.
 - `.env.example` — строки с комментариями, секреты — плейсхолдер `<base64-32-байта>`; есть общий страж «поле
   конфига ↔ шаблон» — его достаточно, нет — сверка руками в отчёте.
 - `TestRenderYAMLIdentityEnv` (`render_stand_test.go`) → у `wf-api` ключи identity есть, кольца — `sync: false`;
@@ -1482,7 +1485,8 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
   `mfa_enabled`, `mfa_disabled`, `recovery_code_used`, `recovery_codes_regenerated`, `mfa_failures`,
   `account_deletion_scheduled`, `account_restored`, `account_deleted`, `mfa_reset_scheduled`, `mfa_reset_cancelled`,
   `mfa_reset_done`. `func Register(r *mail.Registry, d ComposerDeps) error`; `ComposerDeps{Pool, Secrets *keys.Ring,
-  Catalog *i18n.Catalog, Clock}`. Адрес — `users.email` либо `meta_enc` (`email_changed` — старая почта,
+  Catalog *i18n.Catalog, Clock}`; кольцо `Secrets` — из `config.WorkerIdentity` (Task 4), которое `cmd/worker` уже
+  читает только в режиме воркера (разовым командам кольцо не нужно). Адрес — `users.email` либо `meta_enc` (`email_changed` — старая почта,
   `account_deleted`), язык — `users.locale`; код — `Open(code_enc)`; код погашен, истёк или стёрт → `mail.ErrSkip`;
   получатель `deleted` (кроме `account_deleted`) → `mail.ErrSkip` (m4: не слать на заглушку `…@invalid`);
   приманка → `signup_account_exists` / `email_change_taken` на почту строки; приманка сброса пароля
@@ -1582,7 +1586,7 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
 
 **Цель.** Решение пользователя U1: письма игрокам (коды регистрации, сброса, смены почты) и чистки `maintenance`
 работают на стенде с мержа I-2 — Blueprint-сервис воркера на Render с ролью `worker` и SMTP воркера; ключи стенда
-задаёт контроллер (U2); документы — заглушки `v0.1` (U3), издатель TOTP — `WF dev` (U4).
+задаёт контроллер (U2); документы — заглушки `0.1.0` (U3, приведено к формату §3.16), издатель TOTP — `WF dev` (U4).
 
 **Риск:** B (платный сервис, секреты в панели, порядок выкатки: схема → api → воркер).
 
@@ -1774,7 +1778,7 @@ background worker у Render нет — не подменять его веб-с�
   после показа пользователю тарифа и цены и его «да».
 - **U2. Ключи стенда** `API_IDENTITY_SECRET_KEYS`, `API_IDENTITY_DEVICE_KEYS` (и `WORKER_IDENTITY_SECRET_KEYS`)
   генерирует и задаёт контроллер при выкатке, копия — файлом вне репозитория (R10, Task 21).
-- **U3. `API_LEGAL_DOCUMENTS` на стенде** — заглушки версии `v0.1` со ссылкой-заглушкой; настоящие тексты — сменой
+- **U3. `API_LEGAL_DOCUMENTS` на стенде** — заглушки версии `0.1.0` (U3, приведено к формату §3.16) со ссылкой-заглушкой; настоящие тексты — сменой
   версии (игроки примут заново, §3.16).
 - **U4. Издатель TOTP на стенде** — `WF dev`; на проде — имя бренда (не финален).
 

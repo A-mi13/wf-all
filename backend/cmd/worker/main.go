@@ -76,7 +76,7 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 		return err
 	}
 	log := logx.New(logOut, cfg.Log).With("service", "worker")
-	// почта нужна только воркеру, не разовым командам; проверяется до подключения к базе:
+	// почта и кольцо identity нужны только воркеру, не разовым командам; проверяются до подключения к базе:
 	// нет WORKER_MAIL_* или битый адрес SMTP — отказ старта; предупреждения — в журнал воркера
 	var sender *mail.SMTP
 	if len(args) == 0 {
@@ -86,6 +86,10 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 		}
 		if sender, err = mail.NewSMTP(mail.SMTPConfig{Addr: mc.SMTPAddr, From: mc.From,
 			Username: mc.Username, Password: mc.Password, TLS: mc.TLS, Log: log}); err != nil {
+			return err
+		}
+		// кольцо identity — тоже только воркеру (письма с кодами, план I-2); до базы: нет ключа — отказ старта
+		if _, err := config.Load[config.WorkerIdentity]("WORKER_", environ); err != nil {
 			return err
 		}
 	}
