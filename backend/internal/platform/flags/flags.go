@@ -28,6 +28,8 @@ type Store struct{ q *flagsdb.Queries }
 
 func NewStore(db flagsdb.DBTX) *Store { return &Store{q: flagsdb.New(db)} }
 
+// EnabledGlobally — флаг включён «везде»; флаг с Requires — только если включена и его зависимость (R12: защита в
+// глубину, строку могли включить в обход Update). Строки зависимости нет — ErrUnknownFlag (ошибка выкатки).
 func (s *Store) EnabledGlobally(ctx context.Context, key string) (bool, error) {
 	row, err := s.q.GetFlag(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -36,16 +38,25 @@ func (s *Store) EnabledGlobally(ctx context.Context, key string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if dep := RuleOf(key).Requires; row.EnabledGlobally && dep != "" {
+		return s.EnabledGlobally(ctx, dep)
+	}
 	return row.EnabledGlobally, nil
 }
 
-// Enabled — флаг включён глобально или в городе.
+// Enabled — флаг включён глобально или в городе; флаг с Requires — только если и зависимость включена там же (R12).
 func (s *Store) Enabled(ctx context.Context, key string, cityID uuid.UUID) (bool, error) {
 	on, err := s.q.IsEnabled(ctx, flagsdb.IsEnabledParams{Key: key, CityID: cityID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, ErrUnknownFlag
 	}
-	return on, err
+	if err != nil {
+		return false, err
+	}
+	if dep := RuleOf(key).Requires; on && dep != "" {
+		return s.Enabled(ctx, dep, cityID)
+	}
+	return on, nil
 }
 
 // Require — для app/ модуля: выключено — ErrDisabled (403), флага нет — ErrUnknownFlag (500:
@@ -87,23 +98,33 @@ func (s *Store) List(ctx context.Context) ([]Flag, error) {
 	return out, nil
 }
 
-// Update — правка флага в транзакции tx вызывающего (событие и аудит пишет он, в той же tx): строка флага (нет —
-// ErrUnknownFlag), version не та — ErrStale (и когда значения не меняются); globally nil — не меняется, cities nil —
-// не меняются, иначе — множество (повторы схлопываются, порядок по id). Ничего не меняется — before == after без
-// записи (version не растёт); иначе UPDATE … WHERE key AND version, version + 1: параллельная правка той же версии
-// получает 0 строк — ErrStale. before прочитан при той же version, на которой прошёл UPDATE, — это и есть «было».
+// Update — правка флага в транзакции tx вызывающего (событие и аудит пишет он, в той же tx). Правила (rules.go):
+// непустой список городов у GlobalOnly — ErrGlobalOnly до любого запроса. Затем строки флага, его зависимости и
+// зависимых — под замком одним запросом в порядке ключа (LockFlags): две правки связанных флагов не
+// взаимоблокируются, а вторая видит итог первой. Строки флага нет — ErrUnknownFlag, version не та — ErrStale (и
+// когда значения не меняются); globally nil — не меняется, cities nil — не меняются, иначе — множество (повторы
+// схлопываются, порядок по id). Ничего не меняется — before == after без записи (version не растёт). Итог нарушает
+// зависимость (включён флаг при выключенной или незаведённой зависимости, выключена зависимость при включённом
+// зависимом) — *RequiresError без записи. Иначе UPDATE … WHERE key AND version, version + 1.
 func (s *Store) Update(ctx context.Context, tx pgx.Tx, key string, version int64, globally *bool, cities []uuid.UUID) (before, after Flag, err error) {
-	q := s.q.WithTx(tx)
-	cur, err := q.FlagByKey(ctx, key)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Flag{}, Flag{}, ErrUnknownFlag
+	if RuleOf(key).GlobalOnly && len(CitySet(cities)) > 0 {
+		return Flag{}, Flag{}, fmt.Errorf("%w: %s", ErrGlobalOnly, key)
 	}
+	q := s.q.WithTx(tx)
+	rows, err := q.LockFlags(ctx, lockKeys(key))
 	if err != nil {
 		return Flag{}, Flag{}, err
 	}
-	before = flagOf(cur.Key, cur.Description, cur.EnabledGlobally, cur.EnabledCityIds, cur.Version, cur.UpdatedAt)
-	if cur.Version != version {
-		return Flag{}, Flag{}, fmt.Errorf("%w: %s — версия %d, прислана %d", ErrStale, key, cur.Version, version)
+	locked := make(map[string]Flag, len(rows))
+	for _, r := range rows {
+		locked[r.Key] = flagOf(r.Key, r.Description, r.EnabledGlobally, r.EnabledCityIds, r.Version, r.UpdatedAt)
+	}
+	before, ok := locked[key]
+	if !ok {
+		return Flag{}, Flag{}, ErrUnknownFlag
+	}
+	if before.Version != version {
+		return Flag{}, Flag{}, fmt.Errorf("%w: %s — версия %d, прислана %d", ErrStale, key, before.Version, version)
 	}
 	next := before
 	if globally != nil {
@@ -115,6 +136,9 @@ func (s *Store) Update(ctx context.Context, tx pgx.Tx, key string, version int64
 	if next.EnabledGlobally == before.EnabledGlobally && slices.Equal(next.EnabledCityIDs, before.EnabledCityIDs) {
 		return before, before, nil
 	}
+	if err := checkRequires(next, locked); err != nil {
+		return Flag{}, Flag{}, err
+	}
 	row, err := q.UpdateFlag(ctx, flagsdb.UpdateFlagParams{Key: key, Version: version, EnabledGlobally: next.EnabledGlobally,
 		EnabledCityIds: next.EnabledCityIDs})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -124,6 +148,22 @@ func (s *Store) Update(ctx context.Context, tx pgx.Tx, key string, version int64
 		return Flag{}, Flag{}, err
 	}
 	return before, flagOf(row.Key, row.Description, row.EnabledGlobally, row.EnabledCityIds, row.Version, row.UpdatedAt), nil
+}
+
+// checkRequires — зависимости после правки next по строкам под замком (locked): зависимость бывает только между
+// флагами GlobalOnly, поэтому сравнивается enabled_globally. Незаведённая строка зависимости — выключена.
+func checkRequires(next Flag, locked map[string]Flag) error {
+	if dep := RuleOf(next.Key).Requires; dep != "" && next.EnabledGlobally && !locked[dep].EnabledGlobally {
+		return &RequiresError{Key: next.Key, Requires: dep, Enabling: true}
+	}
+	if !next.EnabledGlobally {
+		for _, k := range dependents(next.Key) {
+			if locked[k].EnabledGlobally {
+				return &RequiresError{Key: k, Requires: next.Key}
+			}
+		}
+	}
+	return nil
 }
 
 // CitySet — города флага множеством: без повторов, по возрастанию id, не nil.

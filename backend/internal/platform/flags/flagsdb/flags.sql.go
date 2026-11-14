@@ -12,35 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const flagByKey = `-- name: FlagByKey :one
-SELECT key, description, enabled_globally, enabled_city_ids, version, updated_at
-FROM feature_flags WHERE key = $1
-`
-
-type FlagByKeyRow struct {
-	Key             string
-	Description     string
-	EnabledGlobally bool
-	EnabledCityIds  []uuid.UUID
-	Version         int64
-	UpdatedAt       time.Time
-}
-
-// Строка флага до правки (без замка): «было» и сверка версии; гонку правок решает UpdateFlag (WHERE version).
-func (q *Queries) FlagByKey(ctx context.Context, key string) (FlagByKeyRow, error) {
-	row := q.db.QueryRow(ctx, flagByKey, key)
-	var i FlagByKeyRow
-	err := row.Scan(
-		&i.Key,
-		&i.Description,
-		&i.EnabledGlobally,
-		&i.EnabledCityIds,
-		&i.Version,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getFlag = `-- name: GetFlag :one
 SELECT key, enabled_globally FROM feature_flags WHERE key = $1
 `
@@ -117,6 +88,50 @@ func (q *Queries) ListFlags(ctx context.Context) ([]ListFlagsRow, error) {
 	return items, nil
 }
 
+const lockFlags = `-- name: LockFlags :many
+SELECT key, description, enabled_globally, enabled_city_ids, version, updated_at
+FROM feature_flags WHERE key = ANY($1::text[]) ORDER BY key FOR UPDATE
+`
+
+type LockFlagsRow struct {
+	Key             string
+	Description     string
+	EnabledGlobally bool
+	EnabledCityIds  []uuid.UUID
+	Version         int64
+	UpdatedAt       time.Time
+}
+
+// Строки правки под замком (спека identity §4.2): флаг, его зависимость и зависимые — одним запросом в порядке
+// ключа (LockRows над сортировкой берёт замки по возрастанию key): два PATCH связанных флагов ждут друг друга, а не
+// взаимоблокируются. Строки — актуальные после коммита соседа: «было», сверка версии и проверка зависимости.
+func (q *Queries) LockFlags(ctx context.Context, keys []string) ([]LockFlagsRow, error) {
+	rows, err := q.db.Query(ctx, lockFlags, keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LockFlagsRow
+	for rows.Next() {
+		var i LockFlagsRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.Description,
+			&i.EnabledGlobally,
+			&i.EnabledCityIds,
+			&i.Version,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateFlag = `-- name: UpdateFlag :one
 UPDATE feature_flags
 SET enabled_globally = $1, enabled_city_ids = $2::uuid[], version = version + 1
@@ -140,9 +155,8 @@ type UpdateFlagRow struct {
 	UpdatedAt       time.Time
 }
 
-// Правка флага с оптимистичной версией: параллельная правка той же версии ждёт замок строки, после коммита первой
-// условие version уже ложно — 0 строк (409 platform.flag_stale). updated_at ставит триггер set_updated_at (время
-// базы); источник порядка — version.
+// Правка флага с оптимистичной версией (строка уже под замком LockFlags): version не та — 0 строк (409
+// platform.flag_stale). updated_at ставит триггер set_updated_at (время базы); источник порядка — version.
 func (q *Queries) UpdateFlag(ctx context.Context, arg UpdateFlagParams) (UpdateFlagRow, error) {
 	row := q.db.QueryRow(ctx, updateFlag,
 		arg.EnabledGlobally,

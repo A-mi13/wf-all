@@ -120,6 +120,14 @@ paths:
   правка той же версии — 0 строк `UPDATE … WHERE version` → `ErrStale`; города — множество `flags.CitySet`; ничего не
   меняется — без записи); событие — `flags.ChangedEvent` (агрегат `feature_flag`, `flags.FlagID`). Города флага
   проверяет `httpapi/admin` через `geo.Service.ExistingCityIDs` (R19): `platform` модули не импортирует.
+  Правила флагов — таблица `rules` в `flags/rules.go` (`flags.RuleOf`; модуль добавляет строку своим коммитом, как
+  права в `perm`): `GlobalOnly` — непустой список городов → `ErrGlobalOnly` до любого запроса (ручка — `422
+  platform.flag_global_only` раньше `ExistingCityIDs`); `Requires` — только между `GlobalOnly` (страж
+  `TestRulesConsistent`). `Update` берёт строки флага, его зависимости и зависимых **одним** запросом `LockFlags`
+  (`ORDER BY key FOR UPDATE`) — замки по одному в разном порядке у двух `PATCH` дают `40P01` (страж
+  `TestUpdateRequiresConcurrent`); итог, нарушающий зависимость (незаведённая строка зависимости — выключена), —
+  `*flags.RequiresError` без записи (ручка — `409 platform.flag_requires`, `detail` = `Error()`). Чтение
+  (`EnabledGlobally`, `Enabled`, `Require`) считает флаг с `Requires` выключенным при выключенной зависимости (R12).
 - `*auth.Principal` из `auth.From(ctx)` — общий для всех запросов сессии (кэш отдаёт один указатель): срезы
   `Roles` и `Restrictions` не изменять (append, sort, запись по индексу).
 - Сотрудник admin-api — `*auth.Staff` из `auth.StaffFrom(ctx)` (`Grants`, `CityIDs` только читать). Право —
