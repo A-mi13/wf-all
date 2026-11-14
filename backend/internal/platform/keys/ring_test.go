@@ -225,3 +225,19 @@ func TestNewRingRejects(t *testing.T) {
 		t.Fatalf("ошибка: %v", err)
 	}
 }
+
+// IDs — имена всех ключей кольца по порядку: текущий первым (поиск строки по HMAC любым ключом кольца — устройства
+// identity, ленивая ротация).
+func TestRingIDs(t *testing.T) {
+	t.Parallel()
+	oldKey, newKey := enc(seq(32, 0)), enc(seq(32, 100))
+	r := ring(t, newKey, oldKey)
+	got := r.IDs()
+	if len(got) != 2 || got[0] != r.CurrentID() || got[1] != ring(t, oldKey).CurrentID() {
+		t.Fatalf("IDs = %v", got)
+	}
+	got[0] = "x" // копия: кольцо не меняется
+	if r.IDs()[0] != r.CurrentID() {
+		t.Fatal("IDs отдал внутренний срез")
+	}
+}

@@ -103,21 +103,10 @@ const deviceJSON = `{"platform":"ios","install_id":"6F9619FF-8B86-4D01-B42D-00CF
 // pendingOps — операции контракта, которые собранный сервер ещё не исполняет: отвечают 501 http.not_implemented
 // (контракт identity заморожен до кода, этапы спеки выкатываются по очереди — план I-1, R1, R2). Реализовали
 // операцию — убрать её отсюда (TestNoStubOperations падает «убрать из pendingOps»). Список и TestPendingOpsExpire
-// удаляет последняя задача последнего плана identity.
-var pendingOps = []string{
-	// Task 2: вход и регистрация, аккаунт, сессии — этап 4 спеки identity
-	"checkNickname", "startSignup", "confirmSignup", "resendAuthCode", "login", "completeMfa", "startPasswordReset",
-	"confirmPasswordReset", "refreshSession", "cancelDeletion", "getLegalDocuments", "createDeviceChallenge", "logout",
-	"getMe", "updateMe", "changeNickname", "listMySessions", "revokeMySession", "revokeOtherSessions", "changePassword",
-	"startEmailChange", "confirmEmailChange", "acceptDocuments", "deleteAccount",
-	// Task 3: 2FA, ключи доступа, соцвходы, способы входа, свежий вход — этапы 5, 7, 8 спеки identity
-	"getAuthMethods", "startMfaPasskey", "createSocialNonce", "socialLogin", "completeSocialSignup", "startPasskeyLogin",
-	"passkeyLogin", "reauthenticate", "startReauthPasskey", "listMyAuthMethods", "linkIdentity", "unlinkIdentity",
-	"getMyMfa", "setupTotp", "confirmTotp", "disableTotp", "regenerateRecoveryCodes", "startPasskeyRegistration",
-	"registerPasskey", "renamePasskey", "deletePasskey", "cancelMyMfaReset",
-	// Task 4: капитанство — этап 9 спеки identity
-	"getMyCaptaincy", "listMyCaptainApplications", "submitCaptainApplication", "withdrawCaptainApplication",
-}
+// удаляет последняя задача последнего плана identity. Части — по файлам-владельцам областей pending_<область>_test.go
+// (план I-2, Task 8, R5): параллельные задачи правят только свой файл.
+var pendingOps = slices.Concat(pendingSignup, pendingLogin, pendingSessions, pendingPassword, pendingAccount,
+	pendingDeletion, pendingMfa, pendingMfaReset, pendingI3, pendingI4)
 
 // pendingOpsAtFreezeSHA256 — SHA-256 pendingOpsAtFreeze (TestPendingOpsExpire).
 const pendingOpsAtFreezeSHA256 = "e7325137ad6accfe367f7e23094a8c5eab0080f12a0c2bfbcfb8bda1cbd1251e"

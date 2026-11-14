@@ -668,6 +668,8 @@ CREATE TYPE identity_provider AS ENUM ('apple', 'google');
 | `consents` | `user_id` → users, `document legal_document`, `version text` (1–32), `accepted_at`, `client_kind` | PK `(user_id, document, version)`; индекс `(user_id, document, accepted_at DESC)` |
 | `mfa_resets` | `id`, `user_id` → users, `approval_id uuid` (без FK: `approvals` у `api` недоступна), `requested_by_staff_id uuid`, `requested_by_label text`, `reason text` (3–500), `ticket text NULL` (≤ 100), `execute_at`, `executed_at NULL`, `cancelled_at NULL`, `cancelled_by text NULL` (`owner` \| `staff:<label>` \| `system`), `created_at` | частичный UNIQUE `(user_id) WHERE executed_at IS NULL AND cancelled_at IS NULL` (один живой сброс); `executed_at` и `cancelled_at` не оба; индекс `(execute_at) WHERE executed_at IS NULL AND cancelled_at IS NULL` |
 
+Срок бана — ограничение `user_restrictions` с `capability = login` (соглашение с `moderation`, ревью плана I-2): статус `banned` — сам бан, а `403 identity.account_blocked.blocked_until` — самое позднее `until` живых (`lifted_at IS NULL`, `until IS NULL OR until > now`) строк `login`; нет строки или есть бессрочная — бессрочно, без поля. `SetRestrictionsInTx` (I-4) при бане обязан писать строку `login`.
+
 `users.status` (`active | suspended | banned | pending_deletion | deleted`) меняет только `identity`: пользователь
 (удаление, отмена), воркер (анонимизация) или `moderation` через `intx.SetRestrictionsInTx` (вызова в этом этапе нет).
 

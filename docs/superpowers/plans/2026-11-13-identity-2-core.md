@@ -987,6 +987,8 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   сессия + аккаунт + действующие ограничения + живые допуски капитана → `*auth.Principal{UserID, SessionID,
   DeviceID, Status, Restrictions, Roles}`; отозвана, `idle`/`absolute` истекли, статус `banned|pending_deletion|deleted`
   → `auth.ErrSessionInvalid`. `cmd/api`: `auth.NewCachedLoader(identity.NewSessionLoader(pool, clock.System), 5*time.Second, …)`.
+  Заглушки Task 8 (I9) его не объявляют — это не метод `App`: `NewSessionLoader` объявляет и реализует Task 11 в новом
+  файле `backend/internal/identity/session_loader.go` (ревью W3, ⚠️ 3).
 
 **Тесты.**
 - `TestLoginInvalidCredentialsUniform` → нет почты / нет пароля / неверный / `deleted` → один код, тело и заголовки.
@@ -1396,6 +1398,8 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   identity.mfa_reset_not_found`; своя учётка → `409 identity.self_action`; `cancelled_at`, `cancelled_by =
   staff:<label>`, событие `identity.mfa_reset_cancelled` (версия 2), письмо `mfa_reset_cancelled`, аудит.
 - `identityadmin.New(svc identity.Service, d Deps)`; `Deps{Pool, Clock, River, Log}`; `admin.Options.Identity`.
+  Task 8 их не объявлял (I9 — только методы `App` задач 10–18): `identityadmin.Deps`/`New` объявляет Task 17 в
+  `identity/admin/handler.go`, методы сброса 2FA сотрудником — в новом `app/mfa_reset_admin.go` (ревью W3, ⚠️ 3).
 
 **Тесты.**
 - `TestRequestMfaResetCodes` — таблица: нет игрока, своя учётка (связь в `staff_player_links` фикстурой), нет 2FA,
@@ -1827,6 +1831,7 @@ background worker у Render нет — не подменять его веб-с�
 | Хвосты §16: спека бэкенда §4.4 (`GrantRoleInTx`), `docs/05` (U5 применена), ответ нативщику | I-4 |
 | `getAuthMethodsUsage` (§7.1, «сколько игроков входят только этим способом»): у `admin` по §5.5 нет прав на `credentials`, `user_identities`, `passkeys` — нужен агрегирующий `identity_read_*` без секретов (например, `identity_read_auth_methods(user_id, has_password, apple, google, passkeys)`) новой миграцией или правка §5.5 (ревью W2) | I-4 (спека и план) |
 | Валидация `contact_link` заявки (`submitCaptainApplication`): CHECK `0025` принимает схему `https://` в любом регистре (`~*`) — код может приводить схему к нижнему регистру до записи (ревью W2) | I-4 |
+| Соглашение «бан = ограничение `user_restrictions(capability = login)`»: `finishLogin` берёт `blocked_until` из живых строк `login` (нет строки или `until NULL` — бессрочно); `SetRestrictionsInTx` при статусе `banned` обязан писать строку `login` со сроком бана (ревью W3, спека §5.3) | I-4 / спека `moderation` |
 | Наблюдение (отказ 1 раунда 2 ревью плана): `startCode` гасит прежний живой код на `(purpose, email)` — вошедший, запустив `startEmailChange` на чужой свободный адрес, отзывает чужой живой код смены почты на тот же адрес (тот получает `410`). Правило спеки «один живой код на `(purpose, email)`»; решить — ключ «один живой код» на `(purpose, user_id, email)` или оставить | I-4 (спека) |
 
 ## Сверка хвостов плана I-1 (раздел «Передача следующим планам»)
