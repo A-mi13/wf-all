@@ -180,7 +180,7 @@
 | `…/app/{mfa.go,mfa_login.go}`, `…/queries/mfa.sql`, `…/httpapi/mfa.go`, `pending_mfa_test.go`, `backend/internal/httpapi/public/nostore_test.go` | TOTP, коды, шаг входа, сквозной `no-store` | 16 |
 | `backend/internal/identity/admin/{handler.go,mfa_reset.go,approvals.go}`, `…/app/mfa_reset_admin.go`, `…/queries/mfa_reset.sql`, `backend/internal/platform/auth/staff.go` (`LinkedUserID`), `backend/internal/staff/{queries/sessions.sql,internal/app/session.go}`, `backend/internal/httpapi/admin/{server.go,nostub_test.go,permissions_test.go}`, `backend/cmd/admin-api/{main.go,identity_wiring_test.go}`, `.claude/rules/backend-staff.md` | сброс 2FA сотрудником, исполнитель, сборка admin-api | 17 |
 | `…/app/{mfa_reset_hook.go,mfa_reset_player.go,mfa_reset_exec.go}`, `…/httpapi/mfa_reset.go`, `pending_mfa_reset_test.go` | отмена владельцем, исполнение по сроку | 18 |
-| `backend/internal/identity/mail/*` (composers), `backend/locales/{ru,en}.json`, `backend/internal/identity/jobs/{jobs.go,maintenance.go,rekey.go}`, `…/app/{cleanup.go,rekey.go}`, `…/queries/cleanup.sql`, `backend/internal/platform/queue/foreign.go`, `backend/cmd/worker/{main.go,kinds_test.go,maintenance_test.go}`, `backend/cmd/admin-api/main.go` (периодика) | письма, задачи и чистка, ротация кольца | 19 |
+| `backend/internal/identity/mail/*` (composers), `backend/locales/{ru,en}.json`, `backend/internal/identity/jobs/{jobs.go,maintenance.go}`, `backend/internal/identity/rekey/rekey.go`, `…/app/{cleanup.go,rekey.go}`, `…/queries/cleanup.sql`, `backend/internal/platform/queue/foreign.go`, `backend/cmd/worker/{main.go,kinds_test.go,maintenance_test.go}`, `backend/cmd/admin-api/main.go` (периодика), `backend/cmd/api/{main.go,rekey.go}` (команда `api identity rekey`) | письма, задачи и чистка, ротация кольца | 19 |
 | `backend/internal/httpapi/public/identity_core_test.go`, `.claude/rules/backend-identity.md` (новый), `CLAUDE.md` (список правил), `docs/01-домен-и-правила.md`, спека бэкенда (§2, §4.1, §4.6, §6.2, §7.1, §7.6, §11, §13), спека identity (поправки R) | сквозные стражи и документы этапа | 20 |
 | `render.yaml` (сервис воркера), `backend/internal/platform/config/render_stand_test.go` (`TestRenderYAMLNoWorker` → страж воркера), `docs/deploy-dev.md`; вне репозитория — панель Render и Neon | выкатка воркера и ключей на стенд | 21 |
 
@@ -366,10 +366,12 @@ Integrity и режим аттестации — план I-3.
 потребители конфига, которые иначе упадут на новых обязательных ключах (I6 ревью плана): `backend/cmd/api/main_test.go`
 (базовое окружение тестов `run`), `backend/cmd/worker/{main_test.go,kinds_test.go}` и прочие тесты воркера с `run`,
 `.github/workflows/image.yml` (smoke `migrate-then-api` — значения-заглушки колец), `apps/admin/e2e/env.ts` и
-`scripts/e2e-admin.sh` (окружение воркера и api в e2e), любые другие места запуска `api`/`worker` (найти `git grep
+`scripts/e2e-admin.sh` (окружение воркера и api в e2e), `scripts/env-keys.sh` (`./task setup` заменяет
+плейсхолдеры новых колец; одно значение `API_IDENTITY_SECRET_KEYS` и `WORKER_IDENTITY_SECRET_KEYS`, N8), любые другие места запуска `api`/`worker` (найти `git grep
 -n "API_JWT_SEEDS\|WORKER_DATABASE_URL"`); ключ, его потребители, CI и e2e — одним коммитом.
 `docs/deploy-dev.md` (env identity; шаги §11.2 п. 7–8 в части I-2; ротация кольца — «новый ключ первым →
-`api identity rekey` → не раньше 7 дней убрать старый; резервные коды — после перевыпуска», спека §5.4, R28).
+`api identity rekey` → старый убрать только когда под ним нет резервных кодов (отчёт `rekey` — число
+`user_recovery_codes` по `key_id`; коды — после перевыпуска владельцем) и не раньше 7 дней», спека §5.4, R28).
 
 **Интерфейсы.**
 - `config.API` += `Identity Identity` (вложенная структура, префикс `API_IDENTITY_`): `SecretKeys []string env:"SECRET_KEYS,required,notEmpty" envSeparator:","`,
@@ -650,7 +652,7 @@ slices.Concat(pendingSignup, …)`), `backend/cmd/api/{main.go,main_test.go}`, `
   { User(ctx context.Context, id uuid.UUID) (UserSummary, error) }`; `type UserSummary struct { ID, CityID uuid.UUID;
   Nickname, Status, Locale string }` (без ПД; `ErrUserNotFound`); `func New(pool *pgxpool.Pool) Service`.
 - `identity.Deps` (корень, для `api`): `Pool *pgxpool.Pool`, `Clock clock.Clock`, `Secrets *keys.Ring`, `Devices
-  *keys.Ring`, `Hasher *password.Hasher`, `Limiter ratelimit.Limiter`, `Risk *risk.Assessor`, `Human
+  *keys.Ring`, `Hasher PasswordHasher`, `Limiter ratelimit.Limiter`, `Risk *risk.Assessor`, `Human
   humancheck.Verifier`, `Geo geo.Service`, `Flags *flags.Store`, `IPGeo ipgeo.Locator`, `Legal LegalDocs`, `Tokens
   *token.Issuer`, `River *river.Client[pgx.Tx]` (только вставка: `queue.InsertConfig`), `Attestor Attestor`,
   `Providers ProviderReadiness`, `TOTPIssuer string`, `Log *slog.Logger`. `identity.WorkerDeps` (воркер): `Pool`,
@@ -662,12 +664,32 @@ slices.Concat(pendingSignup, …)`), `backend/cmd/api/{main.go,main_test.go}`, `
 - Внутри `app` — два конструктора с разным обязательным: `app.New(identity-зависимости api) (*App, error)` и
   `app.NewMaintenance(pool, clock, secrets, river, log) (*App, error)` — для воркера и admin-api (методы анонимизации,
   исполнения сбросов, чистки и исполнитель сброса 2FA не требуют хэшера, токенов и `Geo`); отсутствие обязательного —
-  ошибка конструктора. Пакеты-сборщики (`identity/httpapi`, `identity/admin`, `identity/jobs`) лежат под
-  `identity/` и импортируют `internal/app` законно.
+  ошибка конструктора. У `NewMaintenance` обязательны `pool`, `clock`, `river`, `log`; **`secrets` необязателен** (N3):
+  admin-api кольца identity не получает (Task 4, «Ловушки»), а сброс 2FA пишет `security_events` без `meta_enc`
+  (спека §5.4: `meta_enc` — только адрес для писем после смены почты и удаления; письмо сброса 2FA — по
+  `mfa_resets.id` и `users.email`). `securityEvent` с адресом при `Secrets == nil` — ошибка `errNoSecrets` (500), не
+  паника; страж `TestSecurityEventNoRing`. Воркер и `rekey` передают кольцо. Пакеты-сборщики (`identity/httpapi`,
+  `identity/admin`, `identity/jobs`, `identity/rekey`) лежат под `identity/` и импортируют `internal/app` законно;
+  **корень `identity` не импортирует ни `app`, ни сборщики** — `app` сам импортирует корень (коды, события,
+  `identity.Deps`), образец `staff/internal/app/app.go` (N2).
 - **Порядок замков** (I2): `users` → `sessions` → `refresh_tokens` → `devices` → `user_mfa`/`user_recovery_codes` →
   `mfa_resets` → `auth_codes`/`auth_challenges`. Каждый сценарий, меняющий аккаунт или его сессии, первым берёт
   `users … FOR NO KEY UPDATE` (функция `a.lockUser(ctx, tx, userID)`); `requireFresh`, Refresh, отзыв сессий,
   исполнение сброса 2FA — тоже. Порядок — в комментарии `app/app.go` и в `backend-identity.md` (Task 20).
+  **Аккаунт по строке кода, вызова или токена** (N1, R30): `user_id` известен только из строки `auth_codes` /
+  `auth_challenges` (`mfa_token`, `restore_token`) или `refresh_tokens` → `sessions` (R3-3) — поиск строки **без замка** → `lockUser(row.user_id)` → `FOR UPDATE`
+  той же строки и перепроверка (не погашена, не отозвана, не истекла, `user_id` тот же; иначе — ответ «истёк»
+  операции). Строка без `user_id` (код регистрации, приманка сброса) — без `lockUser`. Помощник `a.lockByRow(ctx, tx,
+  find, lock)` — в `app/app.go`.
+- **Порт хэшера** (R3-2): корень объявляет `type PasswordHasher interface { Hash(ctx context.Context, pw string)
+  (string, error); Verify(ctx context.Context, pw, encoded string) (ok, needsRehash bool, err error); VerifyDummy(ctx
+  context.Context, pw string) }` (сигнатуры — по `platform/password`); `*password.Hasher` его реализует, `cmd/api`
+  передаёт его. Тесты подставляют хэшер на канале (`TestCheckPasswordNoTxDuringArgon`, `TestConfirmResetTwoPhase`).
+- **Точки синхронизации тестов** (N1, N6): `App.hooks` (неэкспортируемая структура, `nil` в проде) — `afterRowFound
+  func(kind string)` (после поиска строки кода или вызова, до `lockUser`) и `afterFirstLock func(op string)` (после
+  первого замка сценария). Ставит только тест пакета `app`; объявляет Task 8, вызовы ставят владельцы сценариев.
+  `afterFirstLock` вызывается **в сценарии, сразу после первого оператора с замком** — не внутри `lockUser`: иначе
+  при подсадке «`sessions` раньше `users`» хук сместится за второй замок и барьер не сведёт участников (R3-5).
 - **Заглушки методов и тестовая сборка** (I9): Task 8 объявляет сигнатуры всех методов `App` из «Интерфейсов» задач
   10–18 в их файлах-владельцах с телом `errNotImplemented` и собирает настоящий identity (`App` на `dbtest`) в
   `testOptions` пакета `internal/httpapi/public` (`handler_test.go`, общий файл — у Task 8). Красный шаг TDD в
@@ -726,8 +748,11 @@ slices.Concat(pendingSignup, …)`), `backend/cmd/api/{main.go,main_test.go}`, `
 - `TestEnqueueMailInTx` → откат tx → задачи `mail.send` нет; коммит → одна, аргументы `{v, mail, ref}` без адреса.
 - `TestIPCityLocale` → фикстура `ipgeo`, аккаунт `en` → `ip_city = "Stavropol"`; `None` → `NULL`.
 - `TestUpsertDeviceOldKeyConcurrent` → два параллельных `upsertDevice` по старому ключу → одна строка, ни одного 23505.
-- `TestLockOrderNoDeadlock` (I2) → 20 повторов параллельно «отзыв всех сессий аккаунта из сессии A» и «отзыв одной
-  сессии B» → ни одного `40P01`.
+- `TestLockOrderNoDeadlock` (I2, N6) → параллельно «отзыв всех сессий аккаунта из сессии A» и «отзыв одной
+  сессии B» с барьером `hooks.afterFirstLock`: первый участник ждёт второго до 200 мс (при верном порядке второй
+  стоит на `users` — барьер истекает; при неверном оба держат первый замок и идут друг на друга) → ни одного
+  `40P01`; 20 повторов. Подсадка не ловится — усилить барьер, как в Task 2.
+- `TestSecurityEventNoRing` (N3) → `NewMaintenance` без кольца: запись без адреса проходит, с адресом — `errNoSecrets`.
 - `TestAppStubsCompile` — не тест, а приёмка: `go vet ./internal/identity/...` зелёный с заглушками всех сигнатур.
 - `cmd/api`: `TestRunRejectsBadLegalDocuments` → негодный `API_LEGAL_DOCUMENTS` → ошибка до базы;
   `TestNoStubOperations`/`TestPendingOpsExpire` — зелёные после раскладки (те же 50 операций в `pendingOps`).
@@ -783,8 +808,9 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   `deleted` сюда не доходит (вызывающий отвечает как «нет аккаунта»). У операций, в контракте которых нет
   `account_blocked` (`completeMfa`, `confirmPasswordReset`), бан между шагами даёт `410` их токена или кода (R29):
   `finishLogin` принимает флаг `blockedAsExpired`.
-- `func (a *App) takeChallenge(ctx, tx, purpose, raw string) (challengeRow, error)` — по SHA-256, `FOR UPDATE`,
-  истёк, погашен или `attempts ≥ 5` → `errChallengeGone`; `func (a *App) failChallenge(…) (attemptsLeft int, err error)`.
+- `func (a *App) takeChallenge(ctx, tx, purpose, raw string) (challengeRow, error)` — по SHA-256 приёмом R30 (N1):
+  поиск без замка → `hooks.afterRowFound` → `lockUser(user_id)` → `FOR UPDATE` строки и перепроверка; истёк, погашен
+  или `attempts ≥ 5` → `errChallengeGone`; `func (a *App) failChallenge(…) (attemptsLeft int, err error)`.
 - `mfa_reset_hook.go`: `func (a *App) onSecondFactorLogin(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error { return nil }`.
 
 **Тесты.**
@@ -793,8 +819,10 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   времени`).
 - `TestCheckPasswordRehash` → хэш со старыми параметрами → после верного пароля в базе новые параметры; смена пароля
   между `Verify` и записью → пересчёт не затирает новый хэш.
-- `TestCheckPasswordNoTxDuringArgon` (I10) → хэшер с семафором 1 и 8 параллельных входов → занятых соединений пула
-  во время ожидания семафора ≤ 1 (трассировщик пула или `pool.Stat()`).
+- `TestCheckPasswordNoTxDuringArgon` (I10, N9) → тестовый хэшер, чей `Verify` ждёт канала; 8 параллельных
+  `checkPassword` на своём пуле теста; когда все 8 внутри `Verify` (счётчик), `pool.Stat().AcquiredConns() = 0`
+  (хэш прочитан до `Verify`, соединение возвращено); затем канал открыт — все 8 завершились. Без реального времени
+  и порогов.
 - `TestVerifyTOTPReplay` → тот же код дважды → второй `errFactorInvalid`; код предыдущего шага после принятого
   текущего → отказ.
 - `TestVerifyRecoveryBurns` → код принят, повтор → отказ; код с ключом вне кольца → отказ без 500.
@@ -807,9 +835,14 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 - `TestMfaChallengeMethods` → без ключей — `[totp, recovery_code]`; с ключом и флагом — `+passkey`; аварийный флаг
   выключен — без `passkey`.
 - `TestTakeChallengeAttempts` → 5 неудач → `errChallengeGone`; повторное использование погашенного — тоже.
+- `TestTakeChallengeLockOrder` (R3-4, TDD приёма `lockByRow`) → `takeChallenge` встаёт на `hooks.afterRowFound`;
+  синтетический второй участник — tx теста: `lockUser` → `UPDATE auth_challenges` той же строки → коммит; затем
+  `takeChallenge` продолжается → ни одного `40P01`, вызов видит перепроверенную строку. Подсадка: `FOR UPDATE` строки
+  до `lockUser` → `40P01`, тест красный (барьер участника — до 2 с).
 
 **Подсадка.** В `finishLogin` проверять `pending_deletion` раньше 2FA → `TestFinishLoginBranches` красный (удаление
-выдало бы токен восстановления без второго фактора). Не писать `last_used_step` → `TestVerifyTOTPReplay` красный.
+выдало бы токен восстановления без второго фактора). Не писать `last_used_step` → `TestVerifyTOTPReplay` красный. Читать хэш в открытой tx и держать
+её до `Verify` → `TestCheckPasswordNoTxDuringArgon` красный (N9).
 
 **Приёмка.** Ни один путь не создаёт сессию в обход `finishLogin`; неудачи второго фактора не закрывают аккаунт
 (спека §3.3 п. 3); письма — задачей в той же tx; `mfa_token`/`restore_token` в базе — только SHA-256.
@@ -837,10 +870,15 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   `code_mac = MAC(cur, LabelCode, id‖код)`, `code_enc = Seal(код, aad = id)`, `payload_enc = Seal(json, aad = id)`;
   приманка — без `code_mac/code_enc/payload_enc`; лимит `ratelimit.EmailKey("auth_send", MAC(cur, LabelRateLimit,
   purpose‖email))` — 5/ч одинаково для приманки (`429 ratelimit.exceeded`).
-  `func (a *App) checkCode(ctx, tx, purpose string, codeID uuid.UUID, code string) (codeRow, error)` — `FOR UPDATE`;
-  истёк, погашен, отозван или `attempts = 5` → `410 identity.code_expired`; неверный (приманке совпасть нечему) →
-  `attempts + 1`, пятая гасит → `410`, иначе `400 identity.code_invalid` + `attempts_left` (неудача коммитится, Task 9);
-  успех — `consumed_at`, `code_enc = NULL`.
+  `func (a *App) checkCode(ctx, tx, purpose string, codeID uuid.UUID, code string, mode CodeMode) (codeRow, error)`,
+  `CodeMode` — `CodeConsume | CodeVerifyOnly` (N7; сигнатура объявляется Task 8 сразу с режимом) — строка приёмом
+  R30 (N1): поиск без замка → `hooks.afterRowFound("code")` → `lockUser(user_id)`, если `user_id` есть → `FOR UPDATE`
+  и перепроверка; истёк, погашен, отозван или `attempts = 5` → `410 identity.code_expired`; неверный (приманке
+  совпасть нечему) → `attempts + 1`, пятая гасит → `410`, иначе `400 identity.code_invalid` + `attempts_left`
+  (неудача коммитится, Task 9); успех в `CodeConsume` — `consumed_at`, `code_enc = NULL`; в `CodeVerifyOnly` — без
+  записей (погашение — `consumeCode(ctx, tx, codeID)` вызывающего, Task 13). Приманка смены почты несёт `user_id`
+  вызывающего (I7) и берёт `lockUser` как настоящий код; приманка без `user_id` (регистрация, сброс) — без замка
+  аккаунта.
   `func (a *App) ResendCode(ctx, codeID uuid.UUID) (CodeSent, error)` — пауза `ResendAvailableAt` → `429
   identity.resend_too_soon` + `Retry-After`; `sends = 4` или код закрыт → `410`; приманка — те же паузы без письма,
   кроме `signup_account_exists` (письмо владельцу один раз на старт — R26).
@@ -857,8 +895,9 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   хэш пароля **в обеих ветках**; почта свободна → код + письмо `signup_code`; занята (в том числе
   `pending_deletion`) → приманка + письмо `signup_account_exists` (для `pending_deletion` — текст «войдите, чтобы
   отменить удаление»).
-- `func (a *App) ConfirmSignup(ctx, in ConfirmInput, c Client) (LoginOutcome, error)` — `checkCode`; ник
-  перепроверяется: занят → `409 identity.nickname_taken` **без** траты попытки (новый `nickname` — в том же вызове);
+- `func (a *App) ConfirmSignup(ctx, in ConfirmInput, c Client) (LoginOutcome, error)` — `checkCode(CodeVerifyOnly)`; ник
+  перепроверяется: занят → `409 identity.nickname_taken` **без** траты попытки и без погашения кода (новый `nickname` —
+  в том же вызове); код гасит `consumeCode` в tx создания аккаунта;
   одна tx: `users` (`email_verified_at = now`, `version = 1`), `credentials`, `consents` (версии из `payload`,
   `client_kind`), `upsertDevice` + `countSignup` + `linkDevice(signed_up)`, `issueSession` (`auth_method =
   password`), событие `identity.user_registered`, аудит, `security_events (signup)`; гонка почты (23505 по
@@ -888,6 +927,9 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 - `TestConfirmSignupEmailRace` → два кода на одну почту (второй старт гасит первый: подтверждение первого → `410`);
   две параллельные регистрации разных кодов с одной почтой через разные `purpose`-строки невозможны — проверить
   23505 на прямой вставке → `409 identity.email_taken`.
+- `TestCheckCodeLockOrder` (R3-4, TDD приёма `lockByRow`) → как `TestTakeChallengeLockOrder`, второй участник —
+  `lockUser` → `UPDATE auth_codes … revoked_at`; итог — `410 code_expired` без `40P01`; подсадка та же. Интеграционные
+  стражи с настоящими сценариями — Task 20.
 - `TestResendSchedule` → 60/120/300 с, пятая отправка → `410`, рано → `429` + `Retry-After`; приманка — так же.
 - `TestEmailSendLimit` → 6-й старт за час на одну почту (существующую и нет) → `429 ratelimit.exceeded` одинаково.
 - `TestCheckNickname` → `invalid`, `taken` (двойник латиница/кириллица), `reserved`, свободный.
@@ -922,8 +964,10 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   identity.invalid_credentials` (`dummyPassword` / `checkPassword`), неудача: `risk.Record` по почте и IP, для
   существующего — `security_events (login_failed)` и аудит `identity.login_failed` от `anonymous` без `object_id`;
   верный → `finishLogin(method = password)`.
-- `func (a *App) Refresh(ctx, raw, installID string, c Client) (TokenPair, error)` (тип `app`, не `oapi`) — по SHA-256 под
-  `FOR UPDATE` сессии; токен не использован → ротация (новый токен, `used_at`, `successor_id`, `successor_enc =
+- `func (a *App) Refresh(ctx, raw, installID string, c Client) (TokenPair, error)` (тип `app`, не `oapi`) — по SHA-256
+  приёмом R30 «аккаунт по строке» (R3-3): строка `refresh_tokens` и её сессия — без замка → `hooks.afterRowFound("refresh")`
+  → `lockUser(user_id)` → `FOR UPDATE` сессии и токена с перепроверкой (на ветке повтора порядок «сессия → `users`»
+  дал бы `40P01` с `deleteAccount`); токен не использован → ротация (новый токен, `used_at`, `successor_id`, `successor_enc =
   token.SealSuccessor(raw, new)`, `successor_until = now + 15 с`), продление `idle_expires_at` (не дальше
   `absolute_expires_at`), `last_seen_at` сессии и устройства, новый access; использован и `now < successor_until` и
   устройство совпало (HMAC `platform‖install_id` мобильного — платформа из строки `devices` сессии, m10 — или метка
@@ -1027,19 +1071,28 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 - `func (a *App) StartPasswordReset(ctx, email string) (CodeSent, error)` — PoW по риску `risk.LoginFailed` (почта и
   IP); лимит `email:auth_send`; аккаунт `active|suspended|pending_deletion` → код + письмо `password_reset_code`; нет,
   `deleted` или `banned` → приманка без письма (R29: у `banned` сброс не ведёт ко входу, а `account_blocked` в
-  контракте `confirmPasswordReset` нет); ответ одинаков (`202`).
+  контракте `confirmPasswordReset` нет); ответ одинаков (`202`). Приманка делает ту же работу (m12): строка
+  `auth_codes` и задача `mail.send` вида `password_reset_code` — Composer на строке-приманке отвечает `mail.ErrSkip`
+  (Task 19); тайминг-теста нет (флак), страж — одинаковое число вставок `auth_codes` и `river_job` в обеих ветках.
 - `func (a *App) ConfirmPasswordReset(ctx, in ResetInput, c Client) (LoginOutcome, error)` — порядок (C1 ревью плана:
-  ни одна ветка 2FA не отвечает раньше сверки кода): `requireDevice`; (1) `checkCode` — **сверка MAC кода первой**:
-  неверный → `attempts + 1`, коммит неудачи, `400 identity.code_invalid` + `attempts_left` (пятая гасит → `410`) —
-  одинаково для приманки, аккаунта без 2FA и с 2FA, независимо от наличия и верности `mfa`; (2) только при верном
-  коде: 2FA включена и `mfa` пуст → `400 identity.mfa_required` + `methods: [totp, recovery_code]`, код не гасится и
-  попытка не считается (код верен — считать нечего); (3) `mfa` передан → лимит `user:mfa:<id>` (как `completeMfa`,
-  `429`) и `verifySecondFactor` (неудача → `400 identity.mfa_invalid`, коммит неудачи, код не гасится); (4)
-  `password.Check` → `422 identity.password_weak`; (5) успех, одна tx: код погашен, `credentials` upsert, отзыв всех
-  сессий (`password_reset`), `security_events (password_reset)`, письмо `password_changed`, событие
-  `identity.password_changed`, аудит `identity.password_reset`; затем `finishLogin(method = password, mfaDone =
-  mfa передан)` — сессия или `deletion_pending` (§3.11 п. 2). Аккаунт стал `banned` после старта — код считается
-  истёкшим (`410`, R29).
+  ни одна ветка 2FA не отвечает раньше сверки кода; две tx, N10): `requireDevice`; `password.Check` нового пароля →
+  `422 identity.password_weak` — **до tx1** (R3-1: чистая проверка без БД, ответ одинаков для любого аккаунта и
+  приманки; резервный код не сгорает на слабом пароле).
+  **tx1:** (1) `checkCode(CodeVerifyOnly)` (приём R30: строка без замка → `lockUser` → `FOR UPDATE`) — **сверка MAC
+  кода первой**: неверный → `attempts + 1`, коммит неудачи, `400 identity.code_invalid` + `attempts_left` (пятая гасит
+  → `410`) — одинаково для приманки, аккаунта без 2FA и с 2FA, независимо от наличия и верности `mfa`; (1a) только
+  при верном коде: аккаунт `banned` → `410 identity.code_expired` **без записей** (N4, R29: до верного MAC бан не
+  виден — неверный код у забаненного даёт тот же `400`); (2) 2FA включена и `mfa` пуст → `400 identity.mfa_required`
+  + `methods: [totp, recovery_code]`, код не гасится и попытка не считается (код верен — считать нечего); (3) `mfa`
+  передан → лимит `user:mfa:<id>` (как `completeMfa`, `429`) и `verifySecondFactor` (неудача → `400
+  identity.mfa_invalid`, коммит неудачи, код не гасится); успех фактора (шаг TOTP, сгоревший резервный код)
+  коммитится вместе с tx1. **Вне tx:** (4) `Hasher.Hash` нового пароля (R31). **tx2:** (5) `lockUser` → `FOR UPDATE` кода и перепроверка (не погашен, не отозван, не истёк, тот же
+  `user_id`, аккаунт не `banned`; иначе `410 identity.code_expired`, без записей); `consumeCode`, `credentials` upsert,
+  отзыв всех сессий (`password_reset`), `security_events (password_reset)`, письмо `password_changed`, событие
+  `identity.password_changed`, аудит `identity.password_reset`; затем `finishLogin(method = password, mfaDone = фактор
+  принят в tx1, blockedAsExpired)` — сессия или `deletion_pending` (§3.11 п. 2). Между tx1 и tx2 код могли отозвать
+  (удаление, новый старт сброса) — ответ `410`, шаг TOTP или резервный код уже потрачены: принято (клиент начинает
+  сброс заново).
 - `func (a *App) Reauthenticate(ctx, sessionID uuid.UUID, in ReauthInput) (time.Time, error)` — ровно одно из
   `password`, `totp_code`, `recovery_code`, `passkey`, `social` (иначе `validation.failed`); 2FA включена и
   `password` → `422 identity.reauth_method_not_allowed`; 5 неудач за 15 минут → `429` + `Retry-After` до конца окна
@@ -1047,15 +1100,18 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   неудача → `400 identity.reauth_invalid` + `attempts_left` (коммит неудачи); `passkey` и
   `social` в I-2 — `reauth_invalid` (ключей и привязок ещё нет, R3); успех → `reauth_at = now`, `reauth_failures =
   0` (TOTP или резервный код — ещё и `mfa_at = now`, R27), ответ `reauth_until = now + 10 мин`.
-- `func (a *App) ChangePassword(ctx, sessionID uuid.UUID, pw string) error` — `requireFresh`; аккаунт без пароля —
-  задаёт; отзыв **других** сессий (`password_changed`), письмо, событие, аудит.
+- `func (a *App) ChangePassword(ctx, sessionID uuid.UUID, pw string) error` — `password.Check` и `Hasher.Hash` **до
+  tx** (N10, R31; неудача свежести тратит один argon2 — под лимитом `account_secure`); в tx — `requireFresh`
+  (`lockUser` первым); аккаунт без пароля — задаёт; отзыв **других** сессий (`password_changed`), письмо, событие,
+  аудит.
 - `func (a *App) StartEmailChange(ctx, sessionID uuid.UUID, newEmail string) (CodeSent, error)` — `requireFresh`;
   нормализация; совпадает с текущей → `422 identity.email_same`; одноразовый → `422 identity.email_disposable`;
   занята другим → приманка + письмо `email_change_taken` на новый адрес; иначе код на новую почту
   (`email_change_code`, `payload_enc` — новая почта). Приманка несёт `user_id` вызывающего (I7): подтверждение
   приманки и настоящего кода ведёт себя одинаково.
 - `func (a *App) ConfirmEmailChange(ctx, userID uuid.UUID, codeID uuid.UUID, code string) (MeView, error)` —
-  `checkCode` (код принадлежит этому пользователю, иначе `410`); старая почта — `meta_enc` в `security_events
+  `checkCode(CodeConsume)` приёмом R30 (код принадлежит этому пользователю, иначе `410`; `lockUser` — до `FOR UPDATE`
+  кода, N1); старая почта — `meta_enc` в `security_events
   (email_changed)`; `users.email`, `email_verified_at = now`, `version + 1`; гонка 23505 → `409 identity.email_taken`;
   письмо `email_changed` на **старую** почту; событие `identity.user_email_changed` без адреса; сессии не гасятся.
 
@@ -1068,7 +1124,14 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 - `TestConfirmResetRequiresMfa` → 2FA включена, верный код без `mfa` → `400 mfa_required` с `methods` без `passkey`,
   попытка не считается, код жив; с верным TOTP → пароль сменён, все прежние сессии отозваны, новая выдана; с неверным
   → `mfa_invalid`, пароль прежний, код жив; 11-я неудача TOTP за час → `429`.
-- `TestConfirmResetBannedAfterStart` → `banned` между стартом и подтверждением → `410 code_expired`.
+- `TestConfirmResetWeakPasswordKeepsFactor` (R3-1) → резервный код и слабый пароль → `422 password_weak`, код
+  сброса и резервный код живы, `attempts` не изменился.
+- `TestConfirmResetBannedAfterStart` → `banned` между стартом и подтверждением: верный код → `410 code_expired`,
+  пароль, сессии и `attempts` не тронуты; неверный код → `400 code_invalid` (как у незабаненного, N4).
+- `TestConfirmResetTwoPhase` (N10) → `hooks.afterRowFound` второго вызова (хук считает вызовы: первый — tx1, второй —
+  tx2 после хэша): код отозван → `410`, пароль прежний; тестовый хэшер
+  фиксирует, что `Hash` вызван без занятого соединения (`AcquiredConns` = 0 на своём пуле).
+- `TestStartResetDecoyWork` (m12) → есть / нет аккаунта → по одной вставке `auth_codes` и `river_job`.
 - `TestConfirmResetPendingDeletion` → `deletion_pending`, сессии нет, пароль сменён.
 - `TestConfirmResetSocialOnlySetsPassword` → аккаунт без `credentials` → пароль задан.
 - `TestReauthMethods` — таблица: без 2FA пароль → ок; с 2FA пароль → `422`; TOTP → ок, `mfa_at = now`; резервный код →
@@ -1087,14 +1150,18 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 **Подсадка.** Проверять 2FA до сверки кода → `TestConfirmResetNoOracle` красный; тратить попытку при верном коде без
 `mfa` → `TestConfirmResetRequiresMfa` красный; приманка смены почты без `user_id` →
 `TestEmailChangeTakenIndistinguishable` красный. Принимать пароль при
-2FA в `Reauthenticate` → `TestReauthMethods` красный. Писать письмо `email_changed` на новый адрес →
+2FA в `Reauthenticate` → `TestReauthMethods` красный. Не сбрасывать счёт неудач по истечении окна →
+`TestReauthWindow` (`+15 мин 1 с` снова `429`) красный (N9). Проверять бан до сверки MAC → `TestConfirmResetBannedAfterStart`
+(неверный код → `410`) красный (N4). Хэшировать новый пароль в tx1 → `TestConfirmResetTwoPhase` красный (N10). Писать письмо `email_changed` на новый адрес →
 `TestConfirmEmailChange…` (адрес письма — через Composer, проверка `ref` и `meta_enc`) красный.
 
 **Приёмка.** Сброс по почте при 2FA не даёт сессию без фактора; захват почты не даёт аккаунт; новый адрес не
 раскрывается вошедшему.
 
 **Ловушки.** `confirmPasswordReset` — анонимная мутация без идемпотентности: повтор после успеха — `410` (код
-погашен). Свежий вход не нужен `confirmEmailChange` (§6.3), но код принадлежит сессии пользователя.
+погашен). Свежий вход не нужен `confirmEmailChange` (§6.3), но код принадлежит сессии пользователя. Строки кодов —
+только приёмом R30 (`lockUser` раньше `FOR UPDATE` кода): иначе взаимоблокировка с `deleteAccount`, который берёт
+`users` и гасит коды (стражи — Task 20).
 
 ### Task 14: `me`, ник, документы, способы входа
 
@@ -1153,11 +1220,13 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   `requireFresh`; ник (NFKC, без учёта регистра) ≠ текущему → `422 identity.confirm_mismatch`; одна tx:
   `status = pending_deletion`, `deletion_requested_at`, `purge_at = now + 30 д`, `version + 1`; все сессии
   (`account_deleted`); открытая заявка в капитаны → `withdrawn` (`closed_at`); живые коды аккаунта (`auth_codes`
-  смены почты, сброса) → `revoked_at`; живой сброс 2FA → `cancelled_at`, `cancelled_by = system` (m4); адрес —
+  смены почты, сброса) → `revoked_at`; живой сброс 2FA → `cancelled_at`, `cancelled_by = system` (m4; событие
+  `identity.mfa_reset_cancelled` публикуется и при `system`, версия агрегата `mfa_reset` + 1, письма нет); порядок
+  замков R30: `users` (`requireFresh`) → `sessions` → `mfa_resets` → `auth_codes`; адрес —
   `meta_enc` в `security_events (account_deletion_scheduled)` (для письма о запросе); событие `identity.user_deletion_scheduled {user_id, purge_at}`; письмо
   `account_deletion_scheduled`; аудит `identity.user_deletion_requested`.
 - `func (a *App) CancelDeletion(ctx, raw string, c Client) (LoginOutcome, error)` — `takeChallenge(deletion_restore)`
-  → нет → `410 identity.restore_token_invalid`; `requireDevice`; аккаунт не `pending_deletion` (уже
+  (приём R30: `lockUser` раньше `FOR UPDATE` вызова) → нет → `410 identity.restore_token_invalid`; `requireDevice`; аккаунт не `pending_deletion` (уже
   анонимизирован) → `410`; `active`, поля удаления — `NULL`, событие `identity.user_deletion_cancelled`, письмо
   `account_restored`, аудит; `issueSession` (способ — из `data` вызова, `mfa_at` — если вход был со вторым
   фактором).
@@ -1232,8 +1301,10 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 - `func (a *App) RegenerateRecoveryCodes(ctx, sessionID uuid.UUID) ([]string, error)` — `requireFresh`; нет 2FA →
   `409`; старые удаляются, новые 10, письмо `recovery_codes_regenerated`.
 - `func (a *App) CompleteMfa(ctx, raw string, f SecondFactor, passkey *PasskeyInput, c Client) (LoginOutcome, error)`
-  — `requireDevice`; лимит `user:mfa:<id>` 10 неудач/ч (`429`); `takeChallenge(mfa)` → нет → `410
-  identity.mfa_expired`; ровно одно из трёх; `passkey` в I-2 → `400 identity.passkey_invalid` (ключей нет, R3);
+  — `requireDevice`; лимит `user:mfa:<id>` 10 неудач/ч (`429`); `takeChallenge(mfa)` (приём R30) → нет → `410
+  identity.mfa_expired`; аккаунт стал `banned` → `mfa_token` гасится (`consumed_at`, коммит), `410
+  identity.mfa_expired` **до** `verifySecondFactor` (R29; отказ 3 раунда 2: повторы не крутят `user_mfa.failures` и
+  письма `mfa_failures` забаненного); ровно одно из трёх; `passkey` в I-2 → `400 identity.passkey_invalid` (ключей нет, R3);
   `verifySecondFactor` → неудача: `failChallenge`, пятая гасит → `410`, иначе `400 identity.mfa_invalid` +
   `attempts_left`; успех → `consumed_at`, `finishLogin(mfaDone = true, method = из challenge)`.
 - httpapi: `setupTotp`, `confirmTotp`, `regenerateRecoveryCodes` — `Cache-Control: no-store` (заголовок ставит
@@ -1252,6 +1323,8 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   `410`; через 5 мин → `410`.
 - `TestCompleteMfaUserLimit` → 10 неудач за час на разных `mfa_token` → `429`.
 - `TestCompleteMfaPendingDeletion` → после фактора — `deletion_pending`.
+- `TestCompleteMfaBannedBurnsToken` → бан между `login` и `completeMfa` → `410 mfa_expired`, `user_mfa.failures` не
+  изменился; повтор тем же токеном → `410`.
 - `TestPublicNoStoreReplay` (`internal/httpapi/public`, через весь конвейер) → `setupTotp` с `Idempotency-Key`, повтор с
   тем же ключом → `409 idempotency.replay_unavailable`; ответ — `Cache-Control: no-store`, тело в
   `idempotency_keys` не сохранено.
@@ -1354,9 +1427,10 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
   живого, но сброс отменён владельцем (`cancelled_by = owner`) не раньше `sessions.mfa_at` этой сессии → `204`; иначе
   `404 identity.mfa_reset_not_found`.
 - `func (a *App) ExecuteDueMfaResets(ctx context.Context, batch int) (int, error)` — под ролью `worker`; кандидаты —
-  живые с `execute_at <= now`; на строку — порядок замков R30: `users … FOR NO KEY UPDATE SKIP LOCKED`, затем
-  `mfa_resets FOR UPDATE` и перепроверка «живой»; аккаунт `pending_deletion`/`deleted` или 2FA уже нет →
-  `cancelled_by = system` без писем; иначе `DELETE user_mfa`, `user_recovery_codes` (ключи доступа остаются), отзыв
+  живые с `execute_at <= now`; на строку — порядок замков R30 (N5): `users … FOR NO KEY UPDATE SKIP LOCKED`, затем
+  `user_mfa FOR UPDATE` (нет строки — 2FA нет), затем `mfa_resets FOR UPDATE` и перепроверка «живой»; аккаунт
+  `pending_deletion`/`deleted` или 2FA уже нет → `cancelled_by = system` без писем (событие
+  `identity.mfa_reset_cancelled` публикуется, версия агрегата + 1 — как в Task 15); иначе `DELETE user_mfa`, `user_recovery_codes` (ключи доступа остаются), отзыв
   всех сессий (`revoked`), `executed_at`, письмо `mfa_reset_done`, событие `identity.mfa_changed {enabled: false}`,
   аудит `identity.mfa_reset_executed` от `system`.
 - `jobs.MfaResetWorker` (`Kind() = "identity.mfa_reset_execute"`, очередь `maintenance`, `V = 1`).
@@ -1392,12 +1466,15 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
 **Риск:** B (письма с кодами — секреты в памяти воркера; периодика у двух бинарников).
 
 **Файлы.** Создать: `backend/internal/identity/mail/{composer.go,composer_test.go}` (по одному `mail.Composer` на вид
-или один с таблицей видов), `backend/internal/identity/jobs/{jobs.go,maintenance.go,rekey.go}` и тесты,
+или один с таблицей видов), `backend/internal/identity/jobs/{jobs.go,maintenance.go}` и тесты,
 `backend/internal/identity/internal/app/{cleanup.go,rekey.go}` и тесты, `backend/internal/identity/queries/{cleanup,mail}.sql`.
 Изменить: `backend/locales/{ru,en}.json` (`identity.mail.<письмо>.{subject,text}` — все письма I-2),
 `backend/internal/platform/queue/foreign.go` (виды identity в `WorkerKinds`), `backend/cmd/worker/{main.go,kinds_test.go,maintenance_test.go,main_test.go}`
-(реестр писем, исполнители, периодика, команда `identity rekey`), `backend/cmd/admin-api/main.go` (периодика identity
+(реестр писем, исполнители, периодика), `backend/cmd/admin-api/main.go` (периодика identity
 в списке лидера), `backend/internal/platform/periodic/periodic_test.go` (если страж сверяет списки — расширить).
+Ротация (R28, I4, N2): создать `backend/internal/identity/rekey/{rekey.go,rekey_test.go}` (сборщик под `identity/`,
+не в корне — корень импортирует `app` нельзя, цикл), `backend/cmd/api/rekey.go`; изменить `backend/cmd/api/main.go`
+(подкоманда). Вариантов в `cmd/worker` и `identity/jobs` нет.
 
 **Интерфейсы.**
 - Письма I-2 (виды — константы Task 8): `signup_code`, `signup_account_exists`, `password_reset_code`,
@@ -1408,7 +1485,8 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
   Catalog *i18n.Catalog, Clock}`. Адрес — `users.email` либо `meta_enc` (`email_changed` — старая почта,
   `account_deleted`), язык — `users.locale`; код — `Open(code_enc)`; код погашен, истёк или стёрт → `mail.ErrSkip`;
   получатель `deleted` (кроме `account_deleted`) → `mail.ErrSkip` (m4: не слать на заглушку `…@invalid`);
-  приманка → `signup_account_exists` / `email_change_taken` на почту строки.
+  приманка → `signup_account_exists` / `email_change_taken` на почту строки; приманка сброса пароля
+  (`password_reset_code` без `code_enc`) → `mail.ErrSkip` (m12, Task 13).
 - `func (a *App) Cleanup(ctx context.Context) (CleanupReport, error)` — §5.10 в части I-2: `auth_codes` и
   `auth_challenges` через 24 ч после `expires_at` или закрытия; `refresh_tokens.successor_enc` после окна;
   `sessions` отозванные и истёкшие — через 30 дней; `security_events` — 180 дней, `meta_enc` — 7 дней (`UPDATE
@@ -1422,9 +1500,12 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
 - `api identity rekey [--dry-run]` (команда `cmd/api`, роль `api`, R28; I4: у `worker` нет `UPDATE` и чтения
   секретов этих таблиц) — перешифровка долгоживущих секретов `user_mfa.secret_enc` и
   `user_identities.apple_refresh_enc` текущим ключом; HMAC не пересчитываются; короткоживущие (`auth_codes`,
-  `auth_challenges` — минуты, `security_events.meta_enc` — ≤ 7 дней) не перешифровываются: старый ключ убирается из
-  кольца не раньше 7 дней после ротации; отчёт — число строк по `key_id` до и после. Файлы: `backend/cmd/api/{main.go,rekey.go}`,
-  `backend/internal/identity/rekey.go` (корневая обёртка над `app`).
+  `auth_challenges` — минуты, `security_events.meta_enc` — ≤ 7 дней) не перешифровываются; MAC резервных кодов
+  пересчитать нельзя — старый ключ убирается из кольца только когда под ним нет `user_recovery_codes` (перевыпуск
+  владельцем, спека §5.4) и не раньше 7 дней после ротации; отчёт — число строк по `key_id` до и после, отдельно
+  `user_recovery_codes` под старыми ключами. Сборка: `identityrekey.Run(ctx, d identityrekey.Deps{Pool, Clock,
+  Secrets, River, Log}, dryRun bool) (Report, error)` (`backend/internal/identity/rekey`, внутри —
+  `app.NewMaintenance` с кольцом и `(*App).Rekey`); `cmd/api/rekey.go` разбирает флаги и зовёт его.
 
 **Тесты.**
 - `TestComposersCoverKinds` → каждая константа вида письма I-2 зарегистрирована; у каждого — ключи ru и en в
@@ -1438,7 +1519,8 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
   видами identity; `TestPeriodicSameInBothBinaries` (новый, `cmd/worker` или общий тест) → множества видов
   периодики воркера и admin-api равны.
 - `TestRekey` (под ролью `api`, `dbtest.NewPoolsAs`) → строки под старым ключом → после команды под текущим,
-  открываются; `--dry-run` ничего не пишет.
+  открываются; `--dry-run` ничего не пишет; резервные коды под старым ключом — в отчёте, не изменены. Сборка
+  `go build ./cmd/api ./cmd/worker ./cmd/admin-api` — в приёмке (цикл импорта, N2).
 - `TestExecuteSkipsDeleted` (m4) → аккаунт в `pending_deletion` с живым сбросом → `cancelled_by = system`, письма нет.
 
 **Подсадка.** Брать адрес `email_changed` из `users.email` → `TestComposeEmailChangedToOldAddress` красный. Не
@@ -1458,7 +1540,8 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
 
 **Риск:** B (стражи), C (документы).
 
-**Файлы.** Создать: `backend/internal/httpapi/public/identity_core_test.go`, `.claude/rules/backend-identity.md`
+**Файлы.** Создать: `backend/internal/httpapi/public/identity_core_test.go`,
+`backend/internal/identity/internal/app/lock_order_test.go` (стражи N1), `.claude/rules/backend-identity.md`
 (`paths: backend/internal/identity/**`). Изменить: `CLAUDE.md` (список правил `.claude/rules/` — `backend-identity`),
 `docs/01-домен-и-правила.md` (вход и сессии, 2FA и её сброс поддержкой, согласие с документами, удаление с периодом
 отмены, флаги способов входа), спека бэкенда (§2 — 2FA игроков сейчас; §4.1 — таблицы identity и
@@ -1477,9 +1560,18 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
 - `TestCoreNoPIIInEvents` → полный сценарий (регистрация, вход, смена почты, удаление) → `outbox.payload` без почты,
   ника, IP; `river_job.args` без почты.
 - `identity-freeze.test.mjs` — зелёный (контракт не правился, кроме enum флагов).
+- `TestConfirmEmailChangeVsDeleteNoDeadlock`, `TestConfirmResetVsDeleteNoDeadlock` (N1, пакет `app`, реальная база) →
+  `confirmEmailChange` / `confirmPasswordReset` (tx2) останавливается на `hooks.afterRowFound` (строка кода найдена);
+  `deleteAccount` той же учётки проходит целиком (берёт `users`, гасит коды); затем подтверждение продолжается →
+  ни одного `40P01`: удаление `200`, подтверждение `410 identity.code_expired`, почта и пароль прежние. Барьер
+  детерминирован (канал), повторы не нужны.
+- `TestRefreshReuseVsDeleteNoDeadlock` (R3-3) → повтор использованного refresh встаёт на `afterRowFound("refresh")`,
+  `deleteAccount` проходит; затем refresh → `401 identity.refresh_invalid`, ни одного `40P01`.
 
 **Подсадка.** Вернуть одну реализованную операцию в `pendingOps` → `TestPendingOpsExpire` и `TestCoreOpsNotStub`
-красные.
+красные. Брать `FOR UPDATE` строки кода до `lockUser` в `checkCode` → удаление встаёт на коде, подтверждение — на
+`users`: `40P01`, `TestConfirmEmailChangeVsDeleteNoDeadlock` красный (N1). Для подсадки барьер удаления — ожидание
+до 2 с, не бесконечное.
 
 **Приёмка.** Документы не расходятся с кодом; `backend-identity.md` описывает ядро входа (R6), приманки, свежий
 вход, файлы-владельцы (R5), периодику (R7), права воркера; полный `./task backend:test` контроллера зелёный.
@@ -1530,7 +1622,7 @@ background worker у Render нет — не подменять его веб-с�
 Волна 2 (схема):      Исп. А: 5 → 6        (Исп. В доделывает 7, если не успел; pnpm — только Task 5)
 Волна 3 (ядро-основа):Исп. А: 8 → 9        (одна ветка: все стыки задач 10–18)
 Волна 4 (сценарии):   Исп. А: 10 → 13      Исп. Б: 11 → 12      Исп. В: 14 → 15
-Волна 5 (2FA):        Исп. А: 16           Исп. Б: 17 → 18
+Волна 5 (2FA):        Исп. А: 16           Исп. Б: 17 → 18 (18 — после коммита 16)
 Волна 6 (фон, итог):  Исп. А: 19 → 20; затем контроллер — Task 21 (выкатка, после итогового ревью и ./task ci)
 Ревью — одно на группу исполнителя в волне (wf-reviewer, opus, effort high); итоговое ревью ветки — после 20.
 ```
@@ -1539,8 +1631,10 @@ background worker у Render нет — не подменять его веб-с�
   `platform/flags` + `httpapi/admin/flags.go` ∥ `platform/config` + `render.yaml` (+ `identity/internal/domain`,
   `identity/events.go`); волна 4 — файлы-владельцы R5 (`app/<область>.go`, `httpapi/<область>.go`,
   `queries/<область>.sql`, `pending_<область>_test.go`). Общие файлы (`app/app.go`, `httpapi/handler.go`,
-  `nostub_test.go`, `identitydb/models.go`, `cmd/api/main.go`) — у Task 8; в брифах волн 4–5 — «Не трогай».
-  Исключения: Task 11 и 12 правят `cmd/api/main.go` по одной строке — один исполнитель (Б), по очереди.
+  `nostub_test.go`, `identitydb/models.go`, `cmd/api/main.go`) — у Task 8; `httpapi/handler.go` здесь —
+  `backend/internal/identity/httpapi/handler.go` (N8); в брифах волн 4–5 — «Не трогай».
+  Исключения: Task 11 и 12 правят `cmd/api/main.go` по одной строке, Task 12 — ещё
+  `backend/internal/httpapi/public/handler.go` (монтаж `.well-known`, R14) — один исполнитель (Б), по очереди.
 - `sqlc generate` параллельные исполнители запускают сами: вывод детерминирован по всем файлам `queries/`, общий
   только `models.go`, а он закреплён якорем Task 6 (R5). Расхождение `gen:check` — контроллер перед коммитом пачки.
 - pnpm: только Task 5 (`./task gen`). В остальных задачах — `sqlc generate` и `go test` напрямую.
@@ -1549,7 +1643,7 @@ background worker у Render нет — не подменять его веб-с�
 - Ворота перед ревью (контроллер): «Done when» задачи, typecheck/`go vet` пакета, `gofmt -l` по путям, сверка
   `git status` со списком путей отчёта.
 - Пачки по 3–5 задач за сессию (`work-cadence`): «1 + 2 + 4 → 3 + 7» → «5 → 6» → «8 → 9» → «10 ∥ 11 ∥ 14» →
-  «13 ∥ 12 ∥ 15» → «16 ∥ 17 → 18» → «19 → 20». Не больше 4 opus-агентов одновременно.
+  «13 ∥ 12 ∥ 15» → «16 ∥ 17» → «18» (18 ← 16, 17) → «19 → 20». Не больше 4 opus-агентов одновременно.
 - Коммит — контроллер, один на задачу; пример: «I-2 Task 10: регистрация по почте, коды из письма, ник и документы».
 - После Task 20 — итоговое ревью ветки по областям (платформа и схема; ядро входа и сессии; 2FA и сброс
   поддержкой; фон), волна исправлений, полный `./task ci` (постоянная просьба пользователя 05.10), пуш и PR — по
@@ -1614,26 +1708,6 @@ background worker у Render нет — не подменять его веб-с�
   `sessions.reauth_failures` и `reauth_failed_at` (новая колонка сверх §5.3, Task 5; I8): окно 15 минут от первой
   неудачи, истекло — счёт с нуля, успех обнуляет; `attempts_left` и `429` + `Retry-After` — из них. Ключ лимитера
   `user:reauth:<sid>` отвергнут: `attempts_left` из лимитера не получить, а две меры (ключ и колонка) расходились бы.
-- **R28. Ротация кольца identity — `api identity rekey`** (I4): долгоживущие секреты (`user_mfa.secret_enc`,
-  `user_identities.apple_refresh_enc`) — в таблицах, где `UPDATE` есть только у `api`; у `worker` чтение этих
-  секретов запрещено §5.5 намеренно. Короткоживущие (`auth_codes`, `auth_challenges`, `security_events.meta_enc` ≤ 7
-  дней) не перешифровываются — старый ключ убирается не раньше 7 дней после ротации. Спека §5.4 («`worker identity
-  rekey`») правится в Task 20. Вариант «колоночные права `worker` на секреты» отвергнут: он снимает страж
-  `TestIdentitySecretsHidden`.
-- **R29. `banned` и операции без `account_blocked` в контракте** (I5): контракт заморожен, у `confirmPasswordReset` и
-  `completeMfa` кода `account_blocked` нет. `startPasswordReset` для `banned` — приманка без письма (сброс не ведёт
-  ко входу; знающий пароль узнает о бане в `login`); бан между шагами — `410` кода или `mfa_token` (`finishLogin` с
-  `blockedAsExpired`). Вариант «правка среза через журнал заморозки» отвергнут: он меняет контракт ради состояния,
-  которого клиент не исправит.
-- **R30. Порядок замков identity** (I2): `users` → `sessions` → `refresh_tokens` → `devices` →
-  `user_mfa`/`user_recovery_codes` → `mfa_resets` → `auth_codes`/`auth_challenges`; сценарий, меняющий аккаунт или
-  его сессии, первым берёт `users FOR NO KEY UPDATE` (`lockUser`); задачи воркера по аккаунтам — `SKIP LOCKED` на
-  `users`. Строка `approvals` — раньше строк модуля (платформа).
-- **R31. argon2 вне транзакции** (I10): `Verify`/`Hash` не держат соединение пула; в tx — сверка, что хэш не
-  изменился, и условная запись пересчёта.
-- **Не принято из ревью плана.** Непредусмотренный отказ 3 (CGNAT и PoW по `risk.Signup` при `AttestOff`) — пороги
-  `risk.DefaultPolicies` спека §6.4 не меняет; наблюдение на стенде после Task 21, правка порогов — отдельно по
-  данным. Остальные пункты ревью (C1, I1–I10, m1–m13, отказы 1–2) внесены.
 - **R17. Сверх 100 живых сессий** — старшие по `last_seen_at` отзываются при создании новой с причиной `revoked`
   (спека §6.3 `listMySessions`; отдельной причины в списке §5.3 нет).
 - **R18. `sessions.device_id` — `NULL` допустим**: веб без метки BFF (`auth.Principal.DeviceID = uuid.Nil` уже
@@ -1657,6 +1731,39 @@ background worker у Render нет — не подменять его веб-с�
 - **R27. Свежесть вторым фактором** (`disableTotp`, спека §3.13, §6.3 «да (вторым фактором)») — признак
   `sessions.mfa_at` не старше 10 минут; `mfa_at` ставят вход со вторым фактором и `reauthenticate` TOTP или резервным
   кодом. Отдельной колонки не нужно.
+- **R28. Ротация кольца identity — `api identity rekey`** (I4): долгоживущие секреты (`user_mfa.secret_enc`,
+  `user_identities.apple_refresh_enc`) — в таблицах, где `UPDATE` есть только у `api`; у `worker` чтение этих
+  секретов запрещено §5.5 намеренно. Короткоживущие (`auth_codes`, `auth_challenges`, `security_events.meta_enc` ≤ 7
+  дней) не перешифровываются. MAC резервных кодов не пересчитывается: старый ключ убирается из кольца только когда
+  под ним не осталось `user_recovery_codes` (перевыпуск, спека §5.4) и не раньше 7 дней после ротации (отказ 2
+  раунда 2). Сборщик — пакет `identity/rekey`, не корень: корень импортируется `app`, обратный импорт — цикл (N2).
+  Спека §5.4 («`worker identity rekey`») правится в Task 20. Вариант «колоночные права `worker` на секреты» отвергнут:
+  он снимает страж `TestIdentitySecretsHidden`.
+- **R29. `banned` и операции без `account_blocked` в контракте** (I5): контракт заморожен, у `confirmPasswordReset` и
+  `completeMfa` кода `account_blocked` нет. `startPasswordReset` для `banned` — приманка без письма (сброс не ведёт
+  ко входу; знающий пароль узнает о бане в `login`); бан между шагами — `410` кода или `mfa_token`. Место проверки:
+  сброс — сразу после верного MAC, до ветвей 2FA, без записей, и повторно в tx2 (N4); `completeMfa` — сразу после
+  `takeChallenge`, токен гасится до `verifySecondFactor` (отказ 3 раунда 2); `finishLogin` с `blockedAsExpired` —
+  защита в глубину. Вариант «правка среза через журнал заморозки» отвергнут: он меняет контракт ради состояния,
+  которого клиент не исправит.
+- **R30. Порядок замков identity** (I2): `users` → `sessions` → `refresh_tokens` → `devices` →
+  `user_mfa`/`user_recovery_codes` → `mfa_resets` → `auth_codes`/`auth_challenges`; сценарий, меняющий аккаунт или
+  его сессии, первым берёт `users FOR NO KEY UPDATE` (`lockUser`); задачи воркера по аккаунтам — `SKIP LOCKED` на
+  `users`. Строка `approvals` — раньше строк модуля (платформа). **Аккаунт по строке** (N1): если `user_id` известен
+  только из строки `auth_codes`/`auth_challenges` (код, `mfa_token`, `restore_token`) или `refresh_tokens` (R3-3),
+  строка ищется без замка →
+  `lockUser` → `FOR UPDATE` строки с перепроверкой (не погашена, не отозвана, не истекла, тот же `user_id`); строка
+  без `user_id` — без `lockUser`. Отвергнуто «снять гашение кодов из `deleteAccount`»: гашение закрывает отказ 1
+  раунда 1 (живой код смены почты в периоде удаления), а перенос в проверку статуса при подтверждении размазывает
+  правило по каждой операции с кодом.
+- **R31. argon2 вне транзакции** (I10, N10): `Verify` и `Hash` — и проверка текущего, и хэш **нового** пароля — не
+  держат соединение пула и замок `users`; в tx — сверка, что хэш не изменился, и условная запись. `changePassword` —
+  хэш до tx; `confirmPasswordReset` — две tx: сверка кода и фактора → хэш вне tx → `lockUser`, перепроверка кода,
+  запись и погашение.
+- **Не принято из ревью плана.** Непредусмотренный отказ 3 раунда 1 (CGNAT и PoW по `risk.Signup` при `AttestOff`) —
+  пороги `risk.DefaultPolicies` спека §6.4 не меняет; наблюдение на стенде после Task 21, правка порогов — отдельно
+  по данным. Остальные пункты ревью раунда 1 (C1, I1–I10, m1–m13, отказы 1–2) и раунда 2 (N1–N10, I4, m12, отказы
+  2–3, наблюдения) внесены; отказ 1 раунда 2 — в «Передача следующим планам» (I-4).
 
 ## Решения пользователя
 
@@ -1686,6 +1793,7 @@ background worker у Render нет — не подменять его веб-с�
 | Стенд: живой e2e identity, ключи Apple/Google/WebAuthn (воркер и SMTP — Task 21 этого плана) | I-4 |
 | Удаление `pendingOps`, `TestPendingOpsExpire`, решение о `identity-freeze` | последняя задача I-4 (R2, R17 плана I-1) |
 | Хвосты §16: спека бэкенда §4.4 (`GrantRoleInTx`), `docs/05` (U5 применена), ответ нативщику | I-4 |
+| Наблюдение (отказ 1 раунда 2 ревью плана): `startCode` гасит прежний живой код на `(purpose, email)` — вошедший, запустив `startEmailChange` на чужой свободный адрес, отзывает чужой живой код смены почты на тот же адрес (тот получает `410`). Правило спеки «один живой код на `(purpose, email)`»; решить — ключ «один живой код» на `(purpose, user_id, email)` или оставить | I-4 (спека) |
 
 ## Сверка хвостов плана I-1 (раздел «Передача следующим планам»)
 
