@@ -36,7 +36,7 @@
 | goose / pgtestdb / kin-openapi | 3.29.0 / 0.1.1 / 0.152.0 | `backend/go.mod` |
 | google/uuid | 1.6.0 | `backend/go.mod` (UUIDv7 — `internal/platform/id`) |
 | golang-jwt/jwt | 5.3.1 | `backend/go.mod` (access-токены, EdDSA — `internal/platform/token`) |
-| golang.org/x/crypto / x/net / x/sync / x/text | 0.58.0 / 0.61.0 / 0.24.0 / 0.43.0 | `backend/go.mod` (argon2id и NFKC пароля — `internal/platform/password`; singleflight — `internal/platform/auth`, `internal/platform/health`; IDNA домена почты сотрудника (UTS #46) и NFKC кодов — `internal/staff/internal/domain`) |
+| golang.org/x/crypto / x/net / x/sync / x/text | 0.58.0 / 0.61.0 / 0.24.0 / 0.43.0 | `backend/go.mod` (argon2id и NFKC пароля — `internal/platform/password`; singleflight — `internal/platform/auth`, `internal/platform/health`; IDNA домена почты (UTS #46) и NFKC кодов — `internal/platform/emailaddr`, `internal/platform/otp`) |
 | messageformat-go/mf1 | 0.8.6 | `backend/go.mod` (ICU MessageFormat v1 серверных локалей — `internal/platform/i18n`) |
 | go-mail | 0.8.1 | `backend/go.mod` (SMTP — `internal/platform/mail`) |
 | altcha-lib-go | 1.0.0 | `backend/go.mod` (только тесты совместимости ALTCHA — `internal/platform/humancheck`) |
@@ -48,6 +48,8 @@
 | Redocly CLI | 2.71.0 | `contracts/package.json` (сборка бандлов контракта) |
 | oasdiff | 1.34.1 | `tools/oasdiff/go.mod` (отдельный модуль, см. ловушки) |
 | go-pgquery (pg_query в wasm) | v0.0.0-20250409022910-10ac41983c07 | `backend/go.mod` — та же версия, что у sqlc в `backend/tools/go.mod` |
+| maxminddb-golang/v2 | 2.9.0 | `backend/go.mod` (чтение MMDB DB-IP «IP to City Lite» — `internal/platform/ipgeo`, спека identity §5.9); та же версия — косвенно в `backend/tools/go.mod` |
+| mmdbwriter | 1.2.0 | `backend/tools/go.mod` (только генератор фикстуры `backend/tools/ipgeofixture`; в `backend/go.mod` не входит) |
 
 ## Исключения
 
