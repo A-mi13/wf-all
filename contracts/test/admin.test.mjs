@@ -658,6 +658,13 @@ test('план B: FeatureFlagKey — открытый enum ключей сида
     'payment_flags',
     'ads',
     'gk_rotation',
+    // способы входа — миграция 0025 (спека identity §4.1, R4 плана I-1)
+    'auth_apple',
+    'auth_google',
+    'auth_passkeys',
+    'auth_apple_login',
+    'auth_google_login',
+    'auth_passkeys_login',
   ]);
   assert.equal(key['x-extensible-enum'], true);
   assert.equal(refName(schema('FeatureFlag').properties.key), 'FeatureFlagKey');

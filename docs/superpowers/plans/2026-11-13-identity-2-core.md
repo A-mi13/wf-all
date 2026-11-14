@@ -1013,6 +1013,9 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 
 **Ловушки.** `pending_deletion` при верном пароле — ответ `deletion_pending`, а не `invalid_credentials` (знает пароль
 — знает и статус). Ротация продлевает только `idle`. Время окна — часы приложения, не базы.
+Страж (ревью W2 m4): store-тест — каждая константа `domain.RevokedReason` вставляется в `sessions.revoked_reason`
+под ролью `api` (CHECK `sessions_revoked_reason_check` из `0025` и домен сверяются автоматически: новая причина в
+домене без миграции иначе даст 500 при отзыве); подсадка — убрать значение из CHECK или добавить константу.
 
 ### Task 12: «Где вы вошли», способы входа, `.well-known`
 
@@ -1419,6 +1422,16 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 **Ловушки.** Свободный текст причины — не в `Before/After` аудита (маскирование по ключу, не по содержимому). Письма
 identity в admin-api — `mail.SendArgs` в очередь `mail` (исполняет воркер), **не** `staff.NewMailArgs`. Порядок замков
 — строка `approvals` раньше строк модуля (`backend-platform.md`).
+**Замки под ролью `admin` (ревью W2, решение исполнителя W2 по §5.5).** У `admin` нет `UPDATE` на `users`, `sessions`,
+`user_mfa` (К2), а `SELECT … FOR UPDATE/NO KEY UPDATE/SHARE/KEY SHARE` требует `UPDATE` — под `admin` это `42501`
+→ 500. Права §5.5 не расширяем (иначе снимается К2): исполнитель `identity.mfa_reset`, `requestMfaReset` и
+`cancelMfaReset` читают `users`/`user_mfa` **без** `FOR …` (есть ли 2FA, статус аккаунта, связь сотрудника); гонку
+«два сброса» закрывает частичный UNIQUE `mfa_resets_live_key` (23505 по имени ограничения
+`mfa_resets_live_key` → `approvals.Fail(ErrStale)` → 409 `platform.approval_stale` §3.15 п. 3, запрос не остаётся
+`pending`, не 500; тест `TestMfaResetConcurrentApprovals`), «сброс и отмена» — замок строки
+`mfa_resets` (`FOR UPDATE` — у `admin` есть `UPDATE`), «2FA отключили или аккаунт ушёл в удаление между запросом и
+исполнением» — перепроверка воркером при исполнении по сроку (Task 18: `lockUser` под ролью `worker`, у неё
+`UPDATE` на `users`). Тест исполнителя — под ролью `admin` (проба `FOR …` на этих таблицах упала бы `42501`).
 
 ### Task 18: сброс 2FA — отмена владельцем и исполнение по сроку
 
@@ -1613,6 +1626,12 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
    `wf-api`; то же значение секретов — `WORKER_IDENTITY_SECRET_KEYS` воркера; копия — файлом вне репозитория для
    менеджера паролей пользователя (как ключи admin-api). Значения не выводить в отчёты.
 3. Строка подключения роли `worker` (Neon) — в `WORKER_DATABASE_URL`; проверить права (`grants.sql` применяет мигратор).
+3a. До мержа (ревью W2) — на `wf-dev` (Neon) роль мигратора: `SELECT count(*) FROM users; SELECT count(*) FROM
+   sessions; SELECT count(*) FROM captain_applications;` — `0025` отказывает на непустой `sessions`, неподтверждённой или
+   не канонической почте и заявках вне новых CHECK; не пусто — разобрать с пользователем до мержа. Проверить
+   `lock_timeout` у `migrate up` стенда: `0025` — одна транзакция с `ACCESS EXCLUSIVE` на `users`, `role_assignments`,
+   `captain_applications` (и пересоздаёт `sessions`); `wf-api` и admin-api стенда на это время ждут (`WaitSchema`) —
+   записать фактическое время наката в журнал сессии.
 4. Выкатка: мерж → `wf-api` накатывает миграции и стартует → воркер стартует (ждёт схему) → проверка: регистрация на
    стенде, письмо с кодом пришло, `confirmSignup` → `201`.
 
@@ -1806,6 +1825,8 @@ background worker у Render нет — не подменять его веб-с�
 | Стенд: живой e2e identity, ключи Apple/Google/WebAuthn (воркер и SMTP — Task 21 этого плана) | I-4 |
 | Удаление `pendingOps`, `TestPendingOpsExpire`, решение о `identity-freeze` | последняя задача I-4 (R2, R17 плана I-1) |
 | Хвосты §16: спека бэкенда §4.4 (`GrantRoleInTx`), `docs/05` (U5 применена), ответ нативщику | I-4 |
+| `getAuthMethodsUsage` (§7.1, «сколько игроков входят только этим способом»): у `admin` по §5.5 нет прав на `credentials`, `user_identities`, `passkeys` — нужен агрегирующий `identity_read_*` без секретов (например, `identity_read_auth_methods(user_id, has_password, apple, google, passkeys)`) новой миграцией или правка §5.5 (ревью W2) | I-4 (спека и план) |
+| Валидация `contact_link` заявки (`submitCaptainApplication`): CHECK `0025` принимает схему `https://` в любом регистре (`~*`) — код может приводить схему к нижнему регистру до записи (ревью W2) | I-4 |
 | Наблюдение (отказ 1 раунда 2 ревью плана): `startCode` гасит прежний живой код на `(purpose, email)` — вошедший, запустив `startEmailChange` на чужой свободный адрес, отзывает чужой живой код смены почты на тот же адрес (тот получает `410`). Правило спеки «один живой код на `(purpose, email)`»; решить — ключ «один живой код» на `(purpose, user_id, email)` или оставить | I-4 (спека) |
 
 ## Сверка хвостов плана I-1 (раздел «Передача следующим планам»)

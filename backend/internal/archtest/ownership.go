@@ -85,26 +85,48 @@ var Schema = map[string]Object{
 	"staff_invites":           table("staff"),
 	"staff_sessions":          table("staff"),
 	"staff_role_cities_check": {Function, "staff", false},
+	// связь «сотрудник → учётка игрока» (спека identity §7.6): права только admin
+	"staff_player_links": table("staff"),
 
-	// identity
+	// identity (спека identity §5)
 	"users":                 table("identity"),
 	"sessions":              table("identity"),
 	"role_assignments":      table("identity"),
 	"nickname_reservations": table("identity"),
 	"nickname_changes":      table("identity"),
 	"reserved_nicknames":    table("identity"),
+	"credentials":           table("identity"),
+	"auth_codes":            table("identity"),
+	"auth_challenges":       table("identity"),
+	"devices":               table("identity"),
+	"device_accounts":       table("identity"),
+	"refresh_tokens":        table("identity"),
+	"user_mfa":              table("identity"),
+	"user_recovery_codes":   table("identity"),
+	"user_identities":       table("identity"),
+	"passkeys":              table("identity"),
+	"security_events":       table("identity"),
+	"user_restrictions":     table("identity"),
+	"consents":              table("identity"),
+	"mfa_resets":            table("identity"),
+	// заявки в капитаны — identity, а не teams (спека identity §2.3)
+	"captain_applications": table("identity"),
+
+	"identity_read_users":           {View, "identity", true},
+	"identity_read_linked_accounts": {View, "identity", true},
+	"identity_read_captain_permits": {View, "identity", true},
+	"identity_read_restrictions":    {View, "identity", true},
 
 	// pitches
 	"pitches":        table("pitches"),
 	"nearby_pitches": {Function, "pitches", true},
 
 	// teams
-	"teams":                table("teams"),
-	"team_slug_history":    table("teams"),
-	"team_members":         table("teams"),
-	"team_join_requests":   table("teams"),
-	"captaincy_transfers":  table("teams"),
-	"captain_applications": table("teams"),
+	"teams":               table("teams"),
+	"team_slug_history":   table("teams"),
+	"team_members":        table("teams"),
+	"team_join_requests":  table("teams"),
+	"captaincy_transfers": table("teams"),
 
 	// matches
 	"matches":                            table("matches"),

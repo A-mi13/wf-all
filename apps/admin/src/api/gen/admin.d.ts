@@ -3455,7 +3455,7 @@ export interface components {
          * @description Ключ флага функции — подпись в локалях админки (flags.<ключ>.title и .note). Список открытый: флаг из новой миграции, которого нет в этом списке, приходит своим ключом — экран показывает сам ключ. Только в ответах: путь updateFeatureFlag принимает любой ключ по шаблону
          * @enum {string}
          */
-        FeatureFlagKey: "subscriptions" | "economy" | "lootboxes" | "predictions" | "competitions" | "city_tables" | "challenges" | "match_comments" | "payment_flags" | "ads" | "gk_rotation";
+        FeatureFlagKey: "subscriptions" | "economy" | "lootboxes" | "predictions" | "competitions" | "city_tables" | "challenges" | "match_comments" | "payment_flags" | "ads" | "gk_rotation" | "auth_apple" | "auth_google" | "auth_passkeys" | "auth_apple_login" | "auth_google_login" | "auth_passkeys_login";
         /** @description Флаг функции. Функция включена в городе, если флаг включён везде или город в enabled_city_ids */
         FeatureFlag: {
             key: components["schemas"]["FeatureFlagKey"];
