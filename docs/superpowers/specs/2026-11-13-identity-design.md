@@ -446,7 +446,7 @@ deletion_restore`) → `status = active`, поля удаления очищаю
 **3. Анонимизация** (задача `maintenance` воркера по `purge_at`; повтор безопасен). Одна транзакция:
 
 - `users.status = deleted`, `deleted_at`; почта → необратимая заглушка `deleted+<id>@invalid`; ник → карантин
-  90 дней (`nickname_reservations`), в `users.nickname` — `deleted-<первые 8 hex id>`;
+  90 дней (`nickname_reservations`), в `users.nickname` — `deleted-<12 hex>` (12 hex случайной части id);
 - удаляются `credentials`, `user_mfa`, `user_recovery_codes`, `passkeys`, `user_identities` (Apple — отзыв токена
   задачей после коммита), `consents`; `device_accounts` остаются (связи прошлых голосов нужны `results`);
 - допуски капитана отзываются;

@@ -1,0 +1,12 @@
+{
+  "type": "identity.mfa_reset_cancelled",
+  "schema_version": 1,
+  "aggregate_type": "mfa_reset",
+  "aggregate_id": "01930000-0000-7000-8000-000000000003",
+  "aggregate_version": 2,
+  "payload": {
+    "reset_id": "01930000-0000-7000-8000-000000000003",
+    "user_id": "01930000-0000-7000-8000-000000000001",
+    "execute_at": "2026-12-14T09:30:00Z"
+  }
+}

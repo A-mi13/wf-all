@@ -568,8 +568,8 @@ Integrity и режим аттестации — план I-3.
   буквы, цифры, `_`, `.`, `-`, не начинается и не кончается знаком, двух знаков подряд нет, не из одних цифр,
   невидимые и управляющие — отказ, форма заглушки `deleted-…` — отказ; `NicknameProblem` = `""` | `invalid`;
   уникальность (`normalize_text`) — забота БД. `const NicknameChangeEvery = 30 * 24 * time.Hour`,
-  `NicknameQuarantine = 90 * 24 * time.Hour`; `func DeletedNickname(id uuid.UUID) string` (`deleted-<8 hex>`).
-- Возраст: `func AgeYears(birth time.Time, now time.Time, tz *time.Location) int` (дата рождения — полночь UTC, как `date` из pgx) —
+  `NicknameQuarantine = 90 * 24 * time.Hour`; `func DeletedNickname(id uuid.UUID) string` (`deleted-<12 hex>`: 12 hex случайной части id).
+- Возраст: `func AgeYears(birth time.Time, now time.Time, tz *time.Location) (int, error)` (`tz == nil` — `ErrNoTimezone`; дата рождения — полночь UTC, как `date` из pgx) —
   «сегодня» в таймзоне города; `func CheckBirthDate(birth, now) error` (не в будущем, ≤ 120 лет).
 - Код из письма: `const CodeTTL = 15 * time.Minute`, `CodeAttempts = 5`, `MaxSends = 4`;
   `func NewEmailCode(rnd io.Reader) (string, error)` (6 цифр, равномерно); `func NormalizeEmailCode(s string) (string, bool)`
@@ -608,7 +608,7 @@ Integrity и режим аттестации — план I-3.
 
 **Тесты.**
 - `TestCheckNickname` — таблица ≥ 30 случаев: границы 3/20 после NFKC, полноширинные, `a..b`, `.ab`, `ab-`, `123`,
-  невидимые U+200B, U+2800, эмодзи, `deleted-0a1b2c3d`, кириллица с латиницей (формат ок — двойника ловит БД).
+  невидимые U+200B, U+2800, эмодзи, `deleted-0a1b2c3d4e5f` (12 hex случайной части id) и формы `deleted_…`, `dеlеtеd-…` с гомоглифами, цифры со знаками без букв (`1.2.3`), кириллица с латиницей (формат ок — двойника ловит БД).
 - `TestAgeYearsCityTZ` → день рождения «завтра по UTC, сегодня по Владивостоку» → возраст по городу; 29 февраля.
 - `TestEmailCodeUniform` → 100 000 кодов: 6 цифр, ведущие нули есть, χ² по первой цифре в пределах.
 - `TestResendSchedule` → 1-я отправка + 59 с → рано; + 60 с → можно; 4 отправки → больше нельзя.
@@ -817,6 +817,7 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 - `mfa_reset_hook.go`: `func (a *App) onSecondFactorLogin(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error { return nil }`.
 
 **Тесты.**
+- Страж «после 101-го входа живых сессий 100» (R17: старшая по `last_seen_at` отозвана с `revoked`).
 - `TestCheckPasswordNoAccountCostsLikeReal` → медиана 50 вызовов `dummyPassword` и `checkPassword` с неверным
   паролем на реальном argon2 расходится < 15 % (как `TestVerifyDummyCostsLikeVerify`; `// serial: порог реального
   времени`).
@@ -946,7 +947,10 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 приманка ведёт счётчики как настоящий код; `pendingSignup` пуст.
 
 **Ловушки.** `payload_enc` хранит **хэш** пароля, не пароль. Код — `crypto/rand`. Почта сравнивается в канонической
-форме (`citext` + `emailaddr`). Таймзона города — из `CitySettings`, не из `users`.
+форме (`citext` + `emailaddr`). Таймзона города — из `CitySettings`, не из `users`; нет таймзоны (`nil`) — ошибка
+(`domain.ErrNoTimezone`), не паника. Ник: кроме `CheckNickname` — SQL `length(normalize_text($1)) < 3` →
+`nickname_invalid` (спека §5.8 «после нормализации не короче 3»; тест: 李小龍, Ἀλέξης, `a.b`). После последней
+отправки (`ResendAvailableAt` → `ok=false`) `resend_available_at` = `expires_at` текущего кода (поле обязательное).
 
 ### Task 11: вход, обновление токенов, выход, `SessionLoader`
 
@@ -1204,7 +1208,11 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
 
 **Приёмка.** `Me` — ровно схема контракта (страж `apitest`); ник уникален по `normalize_text` под гонкой.
 
-**Ловушки.** `PATCH /v1/me` — с `Idempotency-Key`: одна tx. Ник заглушки удалённых — `nickname_invalid`.
+**Ловушки.** `PATCH /v1/me` — с `Idempotency-Key`: одна tx. Ник заглушки удалённых — `nickname_invalid`. Ник: кроме
+`CheckNickname` — SQL `length(normalize_text($1)) < 3` → `nickname_invalid` (спека §5.8; тест: 李小龍, Ἀλέξης, `a.b`).
+`acceptDocuments` принимает подмножество (`minItems 1`): `Legal.Check` — по набору «на каждый документ —
+присланная версия, иначе последняя принятая из `consents` (`accepted_at DESC`)»; `consents` хранит историю версий,
+наивное объединение даёт лишние записи и вечный 422 (ревью Task 7, раунд 2).
 
 ### Task 15: удаление аккаунта, отмена, анонимизация
 
@@ -1240,7 +1248,8 @@ refresh вместо хэша → `TestIssueSessionTerms` красный. Убр
   капитана → `revoked_at`, `revoke_reason = account_deleted`; событие `identity.user_deleted`; **до** замены почты —
   новая запись `security_events (account_deleted)` с `meta_enc = Seal(users.email, aad = id записи)` (у `worker` есть
   `INSERT` и кольцо) и письмо `account_deleted` с `ref` на неё (I3: `meta_enc` записи запроса чистка стирает через 7
-  дней, а анонимизация — через 30); аудит от `system`; повтор на `deleted` — ничего.
+  дней, а анонимизация — через 30); аудит от `system`; повтор на `deleted` — ничего. Ник-заглушка — `domain.DeletedNickname`;
+  повтора при 23505 нет: `users_nickname_key` частичный (`WHERE deleted_at IS NULL`), коллизия невозможна.
 - `jobs.AnonymizeWorker` (`Kind() = "identity.anonymize"`, очередь `maintenance`, `V = 1`, без аргументов-данных) —
   зовёт `AnonymizeDue` до исчерпания пачек.
 
