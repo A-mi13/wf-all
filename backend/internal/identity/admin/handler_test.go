@@ -12,7 +12,7 @@ import (
 // TestNoStubOperations (internal/httpapi/admin, список pendingOps).
 func TestZeroHandlerNotImplemented(t *testing.T) {
 	t.Parallel()
-	n, bad := apitest.NotImplemented(identityadmin.Handler{})
+	n, bad := apitest.NotImplemented(&identityadmin.Handler{})
 	// Task 4 — 9 операций тега identity (спека §7.1); связь «сотрудник → игрок» — тег staff (staff/admin)
 	if n != 9 {
 		t.Fatalf("операций identity %d, ждали 9", n)

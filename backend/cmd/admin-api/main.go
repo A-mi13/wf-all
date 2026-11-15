@@ -28,6 +28,8 @@ import (
 	"wf/backend/internal/geo"
 	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin"
+	"wf/backend/internal/identity"
+	identityadmin "wf/backend/internal/identity/admin"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
@@ -158,8 +160,10 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 				// тот же сервис, в котором staff зарегистрировал действия (ревью 10b: два сервиса — approve 500)
 				Approvals: a.approvals,
 				// geo собран в assemble: его действия подтверждения — в том же реестре и сервисе (Task 16)
-				Geo:   a.geo,
-				Clock: a.deps.Clock,
+				Geo: a.geo,
+				// identity (сброс 2FA поддержкой, план I-2 Task 17): действие identity.mfa_reset — в том же реестре
+				Identity: a.identity,
+				Clock:    a.deps.Clock,
 			})
 			if err != nil {
 				return server.Service{}, err
@@ -185,19 +189,20 @@ func waitSchema(ctx context.Context, pool *pgxpool.Pool, timeout time.Duration, 
 	return migrate.WaitSchema(ctx, pool, want, timeout, schemaPoll, clock.System, log)
 }
 
-// assembly — модули на пуле admin-api: зависимости staff, хендлеры staff и geo, реестр и сервис подтверждений, в
-// которых оба модуля зарегистрировали свои действия (одна переменная на всё: Options.Approvals, RegisterApprovals,
+// assembly — модули на пуле admin-api: зависимости staff, хендлеры staff, geo и identity, реестр и сервис
+// подтверждений, в которых модули зарегистрировали свои действия (одна переменная на всё: Options.Approvals, RegisterApprovals,
 // чистка). geoDeps — зависимости хендлера geo (клиент River — тот же, что у staff).
 type assembly struct {
 	deps      staff.Deps
 	staff     *staffadmin.Handler
 	geo       *geoadmin.Handler
 	geoDeps   geoadmin.Deps
+	identity  *identityadmin.Handler
 	reg       *approvals.Registry
 	approvals *approvals.Service
 }
 
-// assemble — сборка staff и geo для сервера и команд оператора. Deps.River — клиент только для вставки: сценарии и
+// assemble — сборка staff, geo и identity для сервера и команд оператора. Deps.River — клиент только для вставки: сценарии и
 // команды ставят staff.mail в транзакции действия, geo — задачу geo.import (тот же клиент); исполняет письма
 // отдельный клиент фона (у него в исполнителях Deps — иначе цикл). Действия подтверждения staff и geo
 // (geo.country_rules, geo.country_create — LockActors, хук замка акторов ставит staff) регистрируются в одном реестре
@@ -224,10 +229,17 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 	gd := geoadmin.Deps{Pool: pool, Clock: d.Clock, River: ins, Log: log}
 	gh := geoadmin.New(geo.New(pool), gd)
 	gh.RegisterApprovals(reg, svc)
+	// identity: письма — mail.SendArgs в очередь mail тем же клиентом вставки (исполняет воркер, R21); кольца identity
+	// у admin-api нет (N3); действие identity.mfa_reset (LockActors) — в том же реестре до Validate
+	ih, err := identityadmin.New(identity.New(pool), identityadmin.Deps{Pool: pool, Clock: d.Clock, River: ins, Log: log})
+	if err != nil {
+		return assembly{}, err
+	}
+	ih.RegisterApprovals(reg, svc)
 	if err := reg.Validate(); err != nil {
 		return assembly{}, fmt.Errorf("admin-api: реестр подтверждений: %w", err)
 	}
-	return assembly{deps: d, staff: h, geo: gh, geoDeps: gd, reg: reg, approvals: svc}, nil
+	return assembly{deps: d, staff: h, geo: gh, geoDeps: gd, identity: ih, reg: reg, approvals: svc}, nil
 }
 
 // background — фон сервера: исполняющий River-клиент (очередь staff — письма; периодика платформы

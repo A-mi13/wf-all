@@ -90,8 +90,8 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
   собранных staff, geo и подтверждениях отвечает не 501; список `pendingOps` плана B удалён в Task 16), кроме операций
-  identity: `public.Server` и `admin.Server` встраивают `identity/httpapi.Handler` / `identity/admin.Handler` значением
-  через псевдоним `identityHandler` — нулевой отвечает `501 http.not_implemented`; временные `pendingOps` и
+  identity: `public.Server` встраивает `identity/httpapi.Handler`, `admin.Server` — `*identity/admin.Handler` (с Task 17
+  плана I-2) через псевдоним `identityHandler` — нулевой отвечает `501 http.not_implemented`; временные `pendingOps` и
   `pendingOpsAtFreeze` с хэшем в `nostub_test.go` обоих пакетов, страж истечения `TestPendingOpsExpire` (план identity
   I-1, R2, R17); список уменьшается этапами реализации, удаляет его последний план identity. Тест прав admin передаёт
   обязательные заголовки операций (`opsHeaders`: `X-WF-Lookup-Email`, `X-WF-Access-Reason` — иначе валидатор отвечает 400
@@ -112,6 +112,13 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   настоящей сборке — `TestAssembleRegistersGeoActions` (без хука staff `assemble` вернул бы ошибку `Validate`), `TestStartupWiring`
   (`cmd/admin-api`); инвариант «`LockActors` без хука — отказ `Validate`» — `approvals/actor_lock_test.go`. Тест прав по всем операциям идёт на настоящем хендлере geo (`liveGeo`): модератор чужого города
   на `updateGeoCity` — 403 сценария.
+- **Сборка identity** (`cmd/admin-api`, `assemble`, план I-2 Task 17): `identityadmin.New(identity.New(pool),
+  identityadmin.Deps{Pool, Clock, River, Log})` (`River` — тот же клиент вставки: письма identity — `mail.SendArgs` в
+  очередь `mail`, исполняет воркер; кольца identity у admin-api нет) → `Options.Identity`; `ih.RegisterApprovals(reg, svc)`
+  (действие `identity.mfa_reset`, `LockActors`) — до `reg.Validate()`. `admin.Server` встраивает `*identityHandler`:
+  `Options.Identity == nil` — нулевой `&identityadmin.Handler{}` (501 на каждую операцию; тесты конвейера). Стражи —
+  `TestAssembleRegistersIdentityActions` (`cmd/admin-api`); тест прав идёт на настоящем `liveIdentity`, `TestNoStubOperations`
+  — на `newIdentityStaffEnv` (geo и identity в реестре staff).
 - **Операции платформы** (`server.go`, Task 10b): `Options.Approvals` (`ApprovalService` — `*approvals.Service`)
   задаётся ровно вместе с собранным `Options.Staff` (иначе отказ старта, `TestNewHandlerApprovalsWiring`); подпись
   решившего — `Staff.Label` (перечитывает учётку и сессию: выключен или сессия погашена — 401 со стиранием cookie,

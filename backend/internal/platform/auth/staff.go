@@ -40,6 +40,9 @@ type Staff struct {
 	// Label — отображаемое имя на момент загрузки (снимок для audit.Entry.ActorLabel). У подтверждающего в
 	// исполнителе — подпись решения (decided_by_label), а не загрузки (approvals.Approve).
 	Label string
+	// LinkedUserID — учётка игрока, связанная с сотрудником (staff_player_links, спека identity §7.6, R8); uuid.Nil —
+	// связи нет. Только читается: сценарии identity отказывают в действиях над своей учёткой (identity.self_action).
+	LinkedUserID uuid.UUID
 }
 
 // Grant — значение права для роли сотрудника; нет ключа — GrantDeny. От стадии сессии не

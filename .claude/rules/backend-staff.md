@@ -20,6 +20,11 @@ paths:
   (`RegisterApprovals` → `SetActorLock`): та же перепроверка, что `execLocks`, без `lockOwners`; у `staff.*`
   `LockActors = false` (страж порядка «владельцы → учётки» — `TestStaffActionsDoNotLockActors`; у всех `staff.*`
   реестра перебором `Registry.Actions()` — `TestStaffRegistryActionsSkipActorLock`).
+- **Связь «сотрудник → учётка игрока»** (`staff_player_links`, таблица staff из миграции identity 0025; спека identity
+  §7.6, R8 плана I-2): `LoadStaff` читает её тем же запросом `LoadSession` (LEFT JOIN) в `auth.Staff.LinkedUserID`
+  (`uuid.Nil` — связи нет; страж `TestLoadStaffLinkedUser`). Поле только читается: модули отказывают в действиях над
+  своей учёткой (`identity.self_action` — запрос, подтверждение и отмена сброса 2FA). Ручки связи
+  (`putStaffPlayerLink`/`deleteStaffPlayerLink`) — этап 9 identity (I-4); до них связь заводит только тест.
 - **Блокировки строк — всегда в порядке учётка → сессия → `staff_mfa` → резервные коды** (`LockAccount`,
   `LockSession`, `LockMFA`, `LockUnusedRecoveryCodes`). Иначе блокировка (гасит все сессии под замком учётки) и
   разблокировка в другой вкладке взаимно ждут.

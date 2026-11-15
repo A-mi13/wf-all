@@ -20,6 +20,8 @@ import (
 	"wf/backend/internal/geo"
 	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin/oapi"
+	"wf/backend/internal/identity"
+	identityadmin "wf/backend/internal/identity/admin"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/clock"
@@ -282,10 +284,34 @@ func liveGeo(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *geoadmin.Handle
 	return gh
 }
 
+// liveIdentity — настоящий хендлер identity на пуле теста: действие identity.mfa_reset в своём реестре с подменёнными
+// хуками staff (учёток тестовых субъектов в базе нет).
+func liveIdentity(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *identityadmin.Handler {
+	t.Helper()
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ih, err := identityadmin.New(identity.New(pool), identityadmin.Deps{Pool: pool, Clock: clk, River: rc, Log: quiet()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := approvals.NewRegistry()
+	ih.RegisterApprovals(reg, approvals.New(pool, clk, reg))
+	reg.SetInitiatorCheck(func(context.Context, pgx.Tx, approvals.Approval) error { return nil })
+	reg.SetActorLock(func(context.Context, pgx.Tx, approvals.Approval, *auth.Staff) error { return nil })
+	if err := reg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return ih
+}
+
 // liveOps — операции платформы с настоящими хендлерами в сборке теста (Task 15): журнал проверяется выше по 200,
 // версии и флаги пишут базу — проход до хендлера по отсутствию отказа конвейера. Операции тега geo — тоже
 // настоящие (liveGeo, Task 16): «проход» — не 401 и не 403 конвейера или сценария, исход — забота сценария.
-var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "listFeatureFlags": {}, "updateFeatureFlag": {}}
+var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "listFeatureFlags": {}, "updateFeatureFlag": {},
+	// сброс 2FA поддержкой — настоящий хендлер identity (liveIdentity, план I-2 Task 17): игрока anyID нет — 404 сценария
+	"requestMfaReset": {}, "cancelMfaReset": {}}
 
 func TestPermissionsAllOperations(t *testing.T) {
 	t.Parallel()
@@ -305,6 +331,7 @@ func TestPermissionsAllOperations(t *testing.T) {
 	o.DB = pools.As // журнал читается под ролью admin
 	o.Sessions = &fakeSessions{staff: sessions}
 	o.Geo = liveGeo(t, pools.As, o.Clock)
+	o.Identity = liveIdentity(t, pools.As, o.Clock)
 	h := newHandler(t, o)
 
 	for _, v := range cityRowViolations(spec, cityRows) {

@@ -24,8 +24,9 @@ import (
 // замороженного до кода: операция из pendingOps — ровно 501 http.not_implemented, реализованная в списке — падение.
 func TestNoStubOperations(t *testing.T) {
 	t.Parallel()
-	// действия geo «вдвоём» — как в сборке admin-api (Task 13): без них страны отвечали бы 501
-	e := newGeoStaffEnv(t)
+	// действия geo и identity «вдвоём» — как в сборке admin-api (Task 13; I-2 Task 17): без них страны и сброс 2FA
+	// отвечали бы 501
+	e := newIdentityStaffEnv(t)
 	owner := e.firstLogin("olga.v@wf.example", string(perm.Owner))
 	spec, err := oapi.GetSpec()
 	if err != nil {
@@ -88,7 +89,8 @@ func TestNoStubOperations(t *testing.T) {
 var pendingOps = []string{
 	// Task 4: заявки в капитаны, поиск игрока, сброс 2FA, статистика способов входа — этап 9 спеки identity
 	"listCaptainApplications", "getCaptainApplication", "getCaptainApplicationContact", "approveCaptainApplication",
-	"rejectCaptainApplication", "getAuthMethodsUsage", "findPlayerByEmail", "requestMfaReset", "cancelMfaReset",
+	"rejectCaptainApplication", "getAuthMethodsUsage", "findPlayerByEmail",
+	// requestMfaReset, cancelMfaReset — реализованы (план I-2, Task 17)
 	// связь «сотрудник → учётка игрока» (тег staff, §7.6, R15) — этап 9
 	"putStaffPlayerLink", "deleteStaffPlayerLink",
 }
