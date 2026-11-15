@@ -28,11 +28,12 @@ const (
 	SecAccountDeletionScheduled SecurityKind = "account_deletion_scheduled"
 	SecAccountRestored          SecurityKind = "account_restored"
 	SecAccountDeleted           SecurityKind = "account_deleted"
+	SecMfaResetScheduled        SecurityKind = "mfa_reset_scheduled" // сброс 2FA поддержкой назначен (Task 17)
 )
 
 // SecurityKinds — все виды I-2 (для тестов и сверок).
 func SecurityKinds() []SecurityKind {
 	return []SecurityKind{SecSignup, SecLogin, SecLoginFailed, SecRefreshReuse, SecPasswordChanged, SecPasswordReset,
 		SecEmailChanged, SecMfaEnabled, SecMfaDisabled, SecMfaFailures, SecRecoveryCodeUsed, SecRecoveryCodesRegenerated,
-		SecAccountDeletionScheduled, SecAccountRestored, SecAccountDeleted}
+		SecAccountDeletionScheduled, SecAccountRestored, SecAccountDeleted, SecMfaResetScheduled}
 }

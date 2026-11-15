@@ -148,6 +148,7 @@ func TestRequestMfaResetCodes(t *testing.T) {
 	target := seedUser(t, r.owner, "reset_target", "ru")
 	r.withMfa(t, target, true)
 	long := strings.Repeat("я", 101)
+	nulTicket := "SUP\x004812"
 
 	cases := []struct {
 		name   string
@@ -170,6 +171,11 @@ func TestRequestMfaResetCodes(t *testing.T) {
 		{"причина длиннее 500", owner, target, strings.Repeat("я", 501), nil, http.StatusBadRequest,
 			httpx.CodeValidationFailed, "body.reason"},
 		{"обращение длиннее 100", owner, target, resetReason, &long, http.StatusBadRequest, httpx.CodeValidationFailed,
+			"body.ticket"},
+		// NUL: text и jsonb его не хранят (22021/22P05 → было 500)
+		{"NUL в причине", owner, target, "Потерял\x00телефон", nil, http.StatusBadRequest, httpx.CodeValidationFailed,
+			"body.reason"},
+		{"NUL в обращении", owner, target, resetReason, &nulTicket, http.StatusBadRequest, httpx.CodeValidationFailed,
 			"body.ticket"},
 		{"поддержка", staffMember(perm.Support, "Вера", uuid.Nil), target, resetReason, nil, http.StatusForbidden,
 			httpx.CodeForbidden, ""},
@@ -287,6 +293,10 @@ func TestMfaResetApproveExecutes(t *testing.T) {
 	}
 	if strings.Contains(after, "Потерял") {
 		t.Errorf("свободный текст причины в аудите: %s", after)
+	}
+	// обращение — только признак наличия (R1 W5: свободный текст сотрудника в after не кладётся)
+	if strings.Contains(after, ticket) || !strings.Contains(after, `"ticket_present": true`) {
+		t.Errorf("обращение в аудите: %s", after)
 	}
 	// users и sessions не тронуты (у admin нет UPDATE — К2)
 	var verAfter int64

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -41,8 +42,6 @@ const (
 	// rowMfaResetState — вид строки для hooks.afterRowFound: состояние игрока прочитано без замка (гонка двух
 	// подтверждений, TestMfaResetConcurrentApprovals).
 	rowMfaResetState = "mfa_reset_state"
-	// secMfaResetScheduled — вид журнала безопасности о назначенном сбросе (класс mfa_* спеки §8.3).
-	secMfaResetScheduled domain.SecurityKind = "mfa_reset_scheduled"
 
 	mfaResetReasonMin = 3
 	mfaResetReasonMax = 500
@@ -105,18 +104,24 @@ func (a *App) MfaResetAction() approvals.Action {
 		}}
 }
 
-// checkMfaResetInput — пределы причины и обращения (символы, как char_length в CHECK mfa_resets).
+// checkMfaResetInput — пределы причины и обращения (символы, как char_length в CHECK mfa_resets); NUL — отказ по
+// полю (pattern): text и jsonb approvals.payload его не хранят (22021/22P05 — был бы 500), валидатор контракта его
+// пропускает.
 func checkMfaResetInput(in MfaResetInput) error {
 	if n := utf8.RuneCountInString(in.Reason); n < mfaResetReasonMin {
 		return httpx.NewFieldError("body.reason", "minLength")
 	} else if n > mfaResetReasonMax {
 		return httpx.NewFieldError("body.reason", "maxLength")
+	} else if strings.ContainsRune(in.Reason, 0) {
+		return httpx.NewFieldError("body.reason", "pattern")
 	}
 	if in.Ticket != nil {
 		if n := utf8.RuneCountInString(*in.Ticket); n < 1 {
 			return httpx.NewFieldError("body.ticket", "minLength")
 		} else if n > mfaResetTicketMax {
 			return httpx.NewFieldError("body.ticket", "maxLength")
+		} else if strings.ContainsRune(*in.Ticket, 0) {
+			return httpx.NewFieldError("body.ticket", "pattern")
 		}
 	}
 	return nil
@@ -208,7 +213,7 @@ func (a *App) execMfaReset(ctx context.Context, tx pgx.Tx, raw json.RawMessage, 
 		}
 		return fmt.Errorf("identity: строка сброса 2FA: %w", err)
 	}
-	if _, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: p.UserID, Kind: secMfaResetScheduled,
+	if _, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: p.UserID, Kind: domain.SecMfaResetScheduled,
 		Meta: map[string]any{"reset_id": resetID, "approval_id": approvalID}}); err != nil {
 		return err
 	}
@@ -217,10 +222,7 @@ func (a *App) execMfaReset(ctx context.Context, tx pgx.Tx, raw json.RawMessage, 
 		return err
 	}
 	after := map[string]any{"reset_id": resetID, "execute_at": executeAt, "approval_id": approvalID,
-		"initiator_id": p.ID, "reason_length": utf8.RuneCountInString(p.Reason)}
-	if p.Ticket != nil {
-		after["ticket"] = *p.Ticket
-	}
+		"initiator_id": p.ID, "reason_length": utf8.RuneCountInString(p.Reason), "ticket_present": p.Ticket != nil}
 	if err := audit.Write(ctx, audit.Entry{ActorStaffID: approver.StaffID, ActorRole: approver.Role,
 		ActorLabel: approver.Label, Action: ActionMfaResetRequested, ObjectType: objectUser, ObjectID: p.UserID,
 		After: after}); err != nil {

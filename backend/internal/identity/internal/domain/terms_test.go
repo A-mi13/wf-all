@@ -3,6 +3,7 @@ package domain_test
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -93,7 +94,11 @@ func TestSecurityLabels(t *testing.T) {
 			t.Errorf("вид %q не проходит CHECK security_events.kind", k)
 		}
 	}
-	if len(domain.SecurityKinds()) != 15 {
+	// R1 W5: mfa_reset_scheduled — вид каталога, а не локальная константа сценария
+	if !slices.Contains(domain.SecurityKinds(), domain.SecurityKind("mfa_reset_scheduled")) {
+		t.Error("mfa_reset_scheduled не в каталоге видов")
+	}
+	if len(domain.SecurityKinds()) != 16 {
 		t.Fatalf("видов %d", len(domain.SecurityKinds()))
 	}
 }

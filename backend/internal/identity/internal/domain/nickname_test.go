@@ -55,6 +55,14 @@ func TestCheckNickname(t *testing.T) {
 		{"délèted-0a1b", ""},         // Task 7 m7: диакритика (normalize_text через unaccent сводит к заглушке)
 		{"ḍeleted-0a1b", ""},         // точка под буквой
 		{"DÉLETED_0a1b", ""},         // диакритика и верхний регистр
+		{"đeleted-0a1b", ""},         // уборка W5 m1: перечёркнутые без разложения NFD (unaccent сводит к d, l, t, e)
+		{"Đeleted-0a1b", ""},         //
+		{"dełeted-0a1b", ""},         //
+		{"deŁeted-0a1b", ""},         //
+		{"deleŧed-0a1b", ""},         //
+		{"dɇleted-0a1b", ""},         //
+		{"ɗeƚeʈeɖ-0a1b", ""},         //
+		{"đøħ", "đøħ"},               // перечёркнутые — обычные буквы ника
 		{"délètedfan", "délètedfan"}, // без разделителя — обычный ник и с диакритикой
 		{"deletedfan", "deletedfan"}, // без разделителя — обычный ник
 		{"deleted-0a1b2c3d", ""},

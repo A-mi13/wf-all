@@ -42,7 +42,7 @@ func TestExecuteDueMfaResets(t *testing.T) {
 
 	// до срока — ничего
 	r.clock.Advance(domain.MfaResetDelay - time.Second)
-	if n, err := w.ExecuteDueMfaResets(ctx, 10); err != nil || n != 0 {
+	if n, _, err := w.ExecuteDueMfaResets(ctx, 10, nil); err != nil || n != 0 {
 		t.Fatalf("до срока: %d %v", n, err)
 	}
 	if count(t, r.owner, `SELECT count(*) FROM user_mfa WHERE user_id = $1`, uid) != 1 {
@@ -50,7 +50,7 @@ func TestExecuteDueMfaResets(t *testing.T) {
 	}
 	// ровно в срок — исполнение
 	r.clock.Advance(time.Second)
-	if n, err := w.ExecuteDueMfaResets(ctx, 10); err != nil || n != 1 {
+	if n, _, err := w.ExecuteDueMfaResets(ctx, 10, nil); err != nil || n != 1 {
 		t.Fatalf("в срок: %d %v", n, err)
 	}
 	for q, want := range map[string]int{
@@ -80,7 +80,7 @@ func TestExecuteDueMfaResets(t *testing.T) {
 		t.Errorf("письмо mfa_reset_done: %d", n)
 	}
 	// повтор — ничего
-	if n, err := w.ExecuteDueMfaResets(ctx, 10); err != nil || n != 0 {
+	if n, _, err := w.ExecuteDueMfaResets(ctx, 10, nil); err != nil || n != 0 {
 		t.Fatalf("повтор: %d %v", n, err)
 	}
 	if n := count(t, r.owner, `SELECT count(*) FROM river_job WHERE args->>'mail' = $1`, MailMfaResetDone); n != 1 {
@@ -98,7 +98,7 @@ func TestExecuteKeepsPasskeys(t *testing.T) {
 	r.withRecoveryAndPasskey(t, uid)
 	r.liveReset(t, uid)
 	r.clock.Advance(domain.MfaResetDelay)
-	if n, err := w.ExecuteDueMfaResets(context.Background(), 10); err != nil || n != 1 {
+	if n, _, err := w.ExecuteDueMfaResets(context.Background(), 10, nil); err != nil || n != 1 {
 		t.Fatalf("%d %v", n, err)
 	}
 	if count(t, r.owner, `SELECT count(*) FROM passkeys WHERE user_id = $1`, uid) != 1 {
@@ -121,7 +121,7 @@ func TestExecuteCancelsStale(t *testing.T) {
 		deletion_requested_at = now(), purge_at = now() + interval '30 days' WHERE id = $1`, deleting)
 	sid := issue(t, r.env, noMfa, web("a")).SessionID
 	r.clock.Advance(domain.MfaResetDelay)
-	if n, err := w.ExecuteDueMfaResets(context.Background(), 10); err != nil || n != 2 {
+	if n, _, err := w.ExecuteDueMfaResets(context.Background(), 10, nil); err != nil || n != 2 {
 		t.Fatalf("%d %v", n, err)
 	}
 	for _, rid := range []uuid.UUID{ridA, ridB} {
@@ -163,14 +163,14 @@ func TestExecuteSkipsLockedUser(t *testing.T) {
 	}
 	wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	n, err := w.ExecuteDueMfaResets(wctx, 10)
+	n, _, err := w.ExecuteDueMfaResets(wctx, 10, nil)
 	if err != nil || n != 0 {
 		t.Fatalf("под замком: %d %v", n, err)
 	}
 	if err := hold.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := w.ExecuteDueMfaResets(ctx, 10); err != nil || n != 1 {
+	if n, _, err := w.ExecuteDueMfaResets(ctx, 10, nil); err != nil || n != 1 {
 		t.Fatalf("после замка: %d %v", n, err)
 	}
 }
@@ -209,7 +209,7 @@ func TestExecuteVsOwnerCancelRace(t *testing.T) {
 		cancelErr error
 	)
 	start := make(chan struct{})
-	wg.Go(func() { <-start; executed, execErr = w.ExecuteDueMfaResets(context.Background(), 10) })
+	wg.Go(func() { <-start; executed, _, execErr = w.ExecuteDueMfaResets(context.Background(), 10, nil) })
 	wg.Go(func() { <-start; cancelErr = r.a.CancelMyMfaReset(context.Background(), uid, sid) })
 	close(start)
 	wg.Wait()
@@ -252,7 +252,7 @@ func TestExecuteRechecksAfterCancel(t *testing.T) {
 			cancelErr = r.a.CancelMyMfaReset(context.Background(), uid, sid)
 		}
 	}}
-	n, err := w.ExecuteDueMfaResets(context.Background(), 10)
+	n, _, err := w.ExecuteDueMfaResets(context.Background(), 10, nil)
 	if err != nil || cancelErr != nil || n != 0 {
 		t.Fatalf("исполнение после отмены: %d %v, отмена %v", n, err, cancelErr)
 	}
@@ -260,5 +260,42 @@ func TestExecuteRechecksAfterCancel(t *testing.T) {
 		count(t, r.owner, `SELECT count(*) FROM user_mfa WHERE user_id = $1`, uid) != 1 ||
 		count(t, r.owner, `SELECT count(*) FROM sessions WHERE id = $1 AND revoked_at IS NULL`, sid) != 1 {
 		t.Fatal("воркер исполнил отменённый сброс")
+	}
+}
+
+// TestExecutePoisonedRowDoesNotStopOthers — m2 ревью W5: строка, на которой исполнение падает (триггер на mfa_resets),
+// первой в выборке: она откатывается одна и уходит в failed (воркер пропустит её до конца прогона), остальные
+// исполняются, вызов не обрывается; с skip упавшая не выбирается.
+func TestExecutePoisonedRowDoesNotStopOthers(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	w := roleApp(t, r.env, "worker", true)
+	ctx := context.Background()
+	bad := seedUser(t, r.owner, "reset_poison", "ru")
+	r.withMfa(t, bad, true)
+	ridBad := r.liveReset(t, bad) // UUIDv7 раньше — первой в ORDER BY execute_at, id
+	good := seedUser(t, r.owner, "reset_healthy", "ru")
+	r.withMfa(t, good, true)
+	ridGood := r.liveReset(t, good)
+	acctExec(t, r.env, `CREATE FUNCTION test_poison_reset() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'отравленная строка'; END $$`)
+	acctExec(t, r.env, `CREATE TRIGGER test_poison_reset BEFORE UPDATE ON mfa_resets FOR EACH ROW
+		WHEN (OLD.id = '`+ridBad.String()+`'::uuid) EXECUTE FUNCTION test_poison_reset()`)
+	r.clock.Advance(domain.MfaResetDelay)
+	n, failed, err := w.ExecuteDueMfaResets(ctx, 10, nil)
+	if err != nil || n != 1 || len(failed) != 1 || failed[0] != ridBad {
+		t.Fatalf("исполнено %d, упали %v, ошибка %v", n, failed, err)
+	}
+	if count(t, r.owner, `SELECT count(*) FROM mfa_resets WHERE id = $1 AND executed_at IS NOT NULL`, ridGood) != 1 ||
+		count(t, r.owner, `SELECT count(*) FROM user_mfa WHERE user_id = $1`, good) != 0 {
+		t.Fatal("здоровая строка не исполнена")
+	}
+	if count(t, r.owner, `SELECT count(*) FROM mfa_resets WHERE id = $1 AND executed_at IS NULL AND cancelled_at IS NULL`, ridBad) != 1 ||
+		count(t, r.owner, `SELECT count(*) FROM user_mfa WHERE user_id = $1`, bad) != 1 {
+		t.Fatal("упавшая строка не откатилась")
+	}
+	// в skip — не выбирается
+	if n, failed, err := w.ExecuteDueMfaResets(ctx, 10, []uuid.UUID{ridBad}); err != nil || n != 0 || len(failed) != 0 {
+		t.Fatalf("со skip: %d %v %v", n, failed, err)
 	}
 }

@@ -124,3 +124,32 @@ func TestMfaStatusShowsReset(t *testing.T) {
 		t.Fatalf("шаг 2FA: %v %+v", err, out)
 	}
 }
+
+// TestCancelMyMfaResetOnlyLatest — m1 ревью W5: повтор отмены той же сессией — 204 только про последний сброс
+// аккаунта. R1 отменён этой сессией, затем назначен R2 и отменён сотрудником — отмена из той же сессии: 404, а не 204.
+func TestCancelMyMfaResetOnlyLatest(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	ctx := context.Background()
+	uid := seedUser(t, r.owner, "reset_latest", "ru")
+	r.withMfa(t, uid, true)
+	s, err := finish(t, r.env, uid, web("a"), true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := s.Issued.SessionID
+	r.clock.Advance(time.Hour)
+	r.liveReset(t, uid)
+	if err := r.a.CancelMyMfaReset(ctx, uid, sid); err != nil {
+		t.Fatalf("R1: %v", err)
+	}
+	r.clock.Advance(time.Hour)
+	now := r.clock.Now()
+	acctExec(t, r.env, `INSERT INTO mfa_resets (id, user_id, approval_id, requested_by_staff_id, requested_by_label, reason,
+		execute_at, created_at, cancelled_at, cancelled_by) VALUES (gen_random_uuid(), $1, gen_random_uuid(), gen_random_uuid(),
+		'Ольга', 'потерян телефон', $2, $3, $4, 'staff:Ольга')`, uid, now.Add(7*24*time.Hour), now, now.Add(time.Minute))
+	if status, code := problemStatus(r.a.CancelMyMfaReset(ctx, uid, sid)); status != http.StatusNotFound ||
+		code != identity.CodeMfaResetNotFound {
+		t.Fatalf("R2 отменён сотрудником: %d %s", status, code)
+	}
+}

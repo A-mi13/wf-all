@@ -70,9 +70,11 @@ func (q *Queries) MfaResetCancelByOwner(ctx context.Context, arg MfaResetCancelB
 
 const mfaResetCancelledBySession = `-- name: MfaResetCancelledBySession :one
 SELECT EXISTS (
-    SELECT 1 FROM mfa_resets r JOIN sessions s ON s.user_id = r.user_id
-    WHERE r.user_id = $1 AND s.id = $2 AND r.cancelled_by = 'owner' AND s.mfa_at IS NOT NULL
-      AND r.cancelled_at >= s.mfa_at
+    SELECT 1
+    FROM (SELECT m.cancelled_by, m.cancelled_at FROM mfa_resets m WHERE m.user_id = $1::uuid
+          ORDER BY m.created_at DESC, m.id DESC LIMIT 1) r
+    JOIN sessions s ON s.id = $2::uuid AND s.user_id = $1::uuid
+    WHERE r.cancelled_by = 'owner' AND s.mfa_at IS NOT NULL AND r.cancelled_at >= s.mfa_at
 ) AS cancelled
 `
 
@@ -81,7 +83,9 @@ type MfaResetCancelledBySessionParams struct {
 	SessionID uuid.UUID
 }
 
-// сброс уже отменён владельцем не раньше входа этой сессии вторым фактором (повтор cancelMyMfaReset — 204)
+// последний сброс аккаунта отменён владельцем не раньше входа этой сессии вторым фактором (повтор cancelMyMfaReset —
+// 204); более ранний, отменённый этой сессией, не в счёт, если после него назначен новый (m1 ревью W5: R2 отменён
+// сотрудником — 404)
 func (q *Queries) MfaResetCancelledBySession(ctx context.Context, arg MfaResetCancelledBySessionParams) (bool, error) {
 	row := q.db.QueryRow(ctx, mfaResetCancelledBySession, arg.UserID, arg.SessionID)
 	var cancelled bool
@@ -92,12 +96,14 @@ func (q *Queries) MfaResetCancelledBySession(ctx context.Context, arg MfaResetCa
 const mfaResetDue = `-- name: MfaResetDue :many
 SELECT id, user_id FROM mfa_resets
 WHERE executed_at IS NULL AND cancelled_at IS NULL AND execute_at <= $1
+  AND NOT (id = ANY(coalesce($2::uuid[], '{}')))
 ORDER BY execute_at, id
-LIMIT $2
+LIMIT $3
 `
 
 type MfaResetDueParams struct {
 	Now   time.Time
+	Skip  []uuid.UUID
 	Batch int32
 }
 
@@ -106,9 +112,10 @@ type MfaResetDueRow struct {
 	UserID uuid.UUID
 }
 
-// кандидаты исполнения по сроку, без замка: замки и перепроверка — на строку (ExecuteDueMfaResets)
+// кандидаты исполнения по сроку, без замка: замки и перепроверка — на строку (ExecuteDueMfaResets); skip — упавшие за
+// этот прогон воркера (m2 ревью W5: иначе пачка отравленных строк, старших по execute_at, заслоняла бы остальные)
 func (q *Queries) MfaResetDue(ctx context.Context, arg MfaResetDueParams) ([]MfaResetDueRow, error) {
-	rows, err := q.db.Query(ctx, mfaResetDue, arg.Now, arg.Batch)
+	rows, err := q.db.Query(ctx, mfaResetDue, arg.Now, arg.Skip, arg.Batch)
 	if err != nil {
 		return nil, err
 	}

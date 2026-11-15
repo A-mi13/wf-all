@@ -26,27 +26,34 @@ const (
 	mfaResetMaxBatch = 1000
 )
 
-// ExecuteDueMfaResets — живые сбросы с execute_at <= now: кандидаты без замка, затем каждый — своей короткой
-// транзакцией (executeMfaReset). Возвращает число закрытых сбросов (исполненных и отменённых системой); аккаунт под
-// замком сценария игрока пропускается (SKIP LOCKED) — его возьмёт следующий запуск. Повтор безопасен.
-func (a *App) ExecuteDueMfaResets(ctx context.Context, batch int) (int, error) {
-	rows, err := identitydb.New(a.pool).MfaResetDue(ctx, identitydb.MfaResetDueParams{Now: a.clock.Now(),
+// ExecuteDueMfaResets — живые сбросы с execute_at <= now, кроме skip: кандидаты без замка, затем каждый — своей
+// короткой транзакцией (executeMfaReset). closed — закрытые сбросы (исполненные и отменённые системой); аккаунт под
+// замком сценария игрока пропускается (SKIP LOCKED) — его возьмёт следующий запуск. Строка, на которой исполнение
+// упало, откатывается одна, уходит в журнал (id сброса и ошибка, без ПД) и в failed — остальные исполняются (m2 ревью
+// W5; воркер держит упавшие в skip до конца прогона). Отмена ctx — ошибка сразу. Повтор безопасен.
+func (a *App) ExecuteDueMfaResets(ctx context.Context, batch int, skip []uuid.UUID) (closed int, failed []uuid.UUID, err error) {
+	rows, err := identitydb.New(a.pool).MfaResetDue(ctx, identitydb.MfaResetDueParams{Now: a.clock.Now(), Skip: skip,
 		Batch: int32(min(max(batch, 1), mfaResetMaxBatch))}) //nolint:gosec // G115: пачка ≤ 1000
 	if err != nil {
-		return 0, fmt.Errorf("identity: сбросы 2FA к исполнению: %w", err)
+		return 0, nil, fmt.Errorf("identity: сбросы 2FA к исполнению: %w", err)
 	}
 	a.rowFound(rowMfaResetDue)
-	n := 0
 	for _, r := range rows {
-		closed, err := a.executeMfaReset(ctx, r)
-		if err != nil {
-			return n, err
+		ok, rowErr := a.executeMfaReset(ctx, r)
+		if rowErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return closed, failed, errors.Join(ctxErr, rowErr)
+			}
+			a.log.ErrorContext(ctx, "identity: исполнение сброса 2FA не удалось — строка пропущена до следующего запуска",
+				"reset_id", r.ID.String(), "err", rowErr)
+			failed = append(failed, r.ID)
+			continue
 		}
-		if closed {
-			n++
+		if ok {
+			closed++
 		}
 	}
-	return n, nil
+	return closed, failed, nil
 }
 
 // executeMfaReset — одна строка, порядок замков R30 (N5): users FOR NO KEY UPDATE SKIP LOCKED (занят — пропуск), затем

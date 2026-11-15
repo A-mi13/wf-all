@@ -39,17 +39,23 @@ WHERE user_id = @user_id AND executed_at IS NULL AND cancelled_at IS NULL
 RETURNING id, execute_at;
 
 -- name: MfaResetCancelledBySession :one
--- сброс уже отменён владельцем не раньше входа этой сессии вторым фактором (повтор cancelMyMfaReset — 204)
+-- последний сброс аккаунта отменён владельцем не раньше входа этой сессии вторым фактором (повтор cancelMyMfaReset —
+-- 204); более ранний, отменённый этой сессией, не в счёт, если после него назначен новый (m1 ревью W5: R2 отменён
+-- сотрудником — 404)
 SELECT EXISTS (
-    SELECT 1 FROM mfa_resets r JOIN sessions s ON s.user_id = r.user_id
-    WHERE r.user_id = @user_id AND s.id = @session_id AND r.cancelled_by = 'owner' AND s.mfa_at IS NOT NULL
-      AND r.cancelled_at >= s.mfa_at
+    SELECT 1
+    FROM (SELECT m.cancelled_by, m.cancelled_at FROM mfa_resets m WHERE m.user_id = sqlc.arg(user_id)::uuid
+          ORDER BY m.created_at DESC, m.id DESC LIMIT 1) r
+    JOIN sessions s ON s.id = sqlc.arg(session_id)::uuid AND s.user_id = sqlc.arg(user_id)::uuid
+    WHERE r.cancelled_by = 'owner' AND s.mfa_at IS NOT NULL AND r.cancelled_at >= s.mfa_at
 ) AS cancelled;
 
 -- name: MfaResetDue :many
--- кандидаты исполнения по сроку, без замка: замки и перепроверка — на строку (ExecuteDueMfaResets)
+-- кандидаты исполнения по сроку, без замка: замки и перепроверка — на строку (ExecuteDueMfaResets); skip — упавшие за
+-- этот прогон воркера (m2 ревью W5: иначе пачка отравленных строк, старших по execute_at, заслоняла бы остальные)
 SELECT id, user_id FROM mfa_resets
 WHERE executed_at IS NULL AND cancelled_at IS NULL AND execute_at <= @now
+  AND NOT (id = ANY(coalesce(sqlc.narg(skip)::uuid[], '{}')))
 ORDER BY execute_at, id
 LIMIT @batch;
 

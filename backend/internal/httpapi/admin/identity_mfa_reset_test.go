@@ -176,3 +176,25 @@ func TestMfaResetInitiatorDisabledConcurrently(t *testing.T) {
 		t.Fatal("сброс назначен при выключенном инициаторе")
 	}
 }
+
+// TestMfaResetNulHTTP — NUL (\u0000) в причине или обращении: 400 validation.failed по полю, а не 500 (text и jsonb
+// его не хранят); запроса нет.
+func TestMfaResetNulHTTP(t *testing.T) {
+	t.Parallel()
+	e := newIdentityStaffEnv(t)
+	a := e.owners(1)[0]
+	uid := e.player("reset_nul_http")
+	for field, body := range map[string]string{
+		"body.reason": `{"reason":"Потерял\u0000телефон"}`,
+		"body.ticket": `{"reason":"Потерял телефон","ticket":"SUP\u00004812"}`,
+	} {
+		rec := e.send(http.MethodPost, mfaResetPath(uid), a.token, uuid.NewString(), body)
+		wantProblem(t, rec, http.StatusBadRequest, httpx.CodeValidationFailed)
+		if !strings.Contains(rec.Body.String(), field) {
+			t.Errorf("нет поля %s: %s", field, rec.Body.String())
+		}
+	}
+	if e.count(`SELECT count(*) FROM approvals`) != 0 {
+		t.Fatal("запрос создан")
+	}
+}
