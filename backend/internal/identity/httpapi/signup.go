@@ -23,31 +23,6 @@ func codeSent(s app.CodeSent) oapi.CodeSent {
 	return oapi.CodeSent{CodeId: s.CodeID, ExpiresAt: s.ExpiresAt, ResendAvailableAt: s.ResendAvailable}
 }
 
-// codeAuthResult — AuthResult входа по коду из письма (регистрация, сброс пароля): сессия, шаг 2FA или период отмены
-// удаления. docsRequired — у игрока есть непринятая текущая версия документа.
-func codeAuthResult(out app.LoginOutcome, newUser, docsRequired bool) oapi.AuthResult {
-	r := oapi.AuthResult{Status: oapi.AuthStatus(out.Status)}
-	switch out.Status {
-	case app.StatusAuthenticated:
-		if out.Issued != nil {
-			t := out.Issued.Tokens
-			r.Tokens = &oapi.TokenPair{AccessToken: t.Access, AccessExpiresAt: t.AccessExpires, RefreshToken: t.Refresh,
-				RefreshIdleExpiresAt: t.RefreshIdleExpires, SessionId: t.SessionID}
-		}
-		r.User = &oapi.AuthUser{Id: out.User.ID, Nickname: out.User.Nickname, NewUser: newUser,
-			DocumentsAcceptanceRequired: docsRequired}
-	case app.StatusMfaRequired:
-		methods := make([]oapi.MfaMethod, len(out.Methods))
-		for i, m := range out.Methods {
-			methods[i] = oapi.MfaMethod(m)
-		}
-		r.Mfa = &oapi.MfaChallenge{MfaToken: out.MfaToken, ExpiresAt: out.MfaExpires, Methods: methods, ResetAt: out.ResetAt}
-	case app.StatusDeletionPending:
-		r.Deletion = &oapi.DeletionPending{RestoreToken: out.RestoreToken, ExpiresAt: out.RestoreExpires, PurgeAt: out.PurgeAt}
-	}
-	return r
-}
-
 // CheckNickname — GET /v1/nicknames/availability: доступность ника.
 func (h Handler) CheckNickname(ctx context.Context, req oapi.CheckNicknameRequestObject) (oapi.CheckNicknameResponseObject, error) {
 	if h.app == nil {
@@ -100,7 +75,7 @@ func (h Handler) ConfirmSignup(ctx context.Context, req oapi.ConfirmSignupReques
 	if err != nil {
 		return nil, err
 	}
-	return oapi.ConfirmSignup201JSONResponse{Body: codeAuthResult(out.LoginOutcome, true, out.DocumentsRequired),
+	return oapi.ConfirmSignup201JSONResponse{Body: authResult(out, true),
 		Headers: oapi.ConfirmSignup201ResponseHeaders{CacheControl: codeCacheNoStore}}, nil
 }
 

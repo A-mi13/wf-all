@@ -37,13 +37,6 @@ var (
 	errLoginStale = errors.New("identity: пароль сменили во время входа")
 )
 
-// LoginResult — итог входа: LoginOutcome и documents_acceptance_required (у authenticated; считается в транзакции
-// входа — ответ после коммита базу не читает, m1 ревью W4-Б).
-type LoginResult struct {
-	LoginOutcome
-	DocumentsRequired bool
-}
-
 // Login — вход по почте и паролю. Порядок: устройство мобильного (422) → форма почты (400 по полю) → лимит почты
 // 30/ч (429, ключ — HMAC «login ‖ почта», одинаков для несуществующих) → риск risk.LoginFailed по почте или IP —
 // humancheck.Require (403 с задачей) → аккаунт пулом без замка → пароль вне транзакции (checkPassword; «нет
@@ -56,25 +49,25 @@ type LoginResult struct {
 // Сбой хранилища лимитов (лимит почты и риск) — ошибка (500) до поиска аккаунта и argon2: одна политика с кодами и
 // сбросом пароля (m5 ревью W4-Б). Пропуск открыл бы перебор паролей без счётчиков, а лимиты живут в той же базе, что
 // и аккаунт: при их сбое вход всё равно не завершится.
-func (a *App) Login(ctx context.Context, email, pw string, c Client) (LoginResult, error) {
+func (a *App) Login(ctx context.Context, email, pw string, c Client) (AuthOutcome, error) {
 	if err := a.requireDevice(c); err != nil {
-		return LoginResult{}, err
+		return AuthOutcome{}, err
 	}
 	norm, ok := emailaddr.Normalize(email)
 	if !ok {
-		return LoginResult{}, errEmailShape
+		return AuthOutcome{}, errEmailShape
 	}
 	mac, err := a.secrets.MAC(a.secrets.CurrentID(), domain.LabelRateLimit, []byte(classLogin+norm))
 	if err != nil {
-		return LoginResult{}, err
+		return AuthOutcome{}, err
 	}
 	emailKey := ratelimit.EmailKey(classLogin, mac)
 	res, err := a.limiter.Allow(ctx, emailKey, loginEmailPolicy)
 	if err != nil {
-		return LoginResult{}, fmt.Errorf("identity: лимит входа по почте: %w", err)
+		return AuthOutcome{}, fmt.Errorf("identity: лимит входа по почте: %w", err)
 	}
 	if !res.Allowed {
-		return LoginResult{}, httpx.NewError(http.StatusTooManyRequests, httpx.CodeRateLimited).WithRetryAfter(res.RetryAfter)
+		return AuthOutcome{}, httpx.NewError(http.StatusTooManyRequests, httpx.CodeRateLimited).WithRetryAfter(res.RetryAfter)
 	}
 	riskKeys := []string{emailKey}
 	if c.IP.IsValid() {
@@ -82,11 +75,11 @@ func (a *App) Login(ctx context.Context, email, pw string, c Client) (LoginResul
 	}
 	suspicious, err := a.risk.Suspicious(ctx, risk.LoginFailed, riskKeys...)
 	if err != nil {
-		return LoginResult{}, fmt.Errorf("identity: риск входа: %w", err)
+		return AuthOutcome{}, fmt.Errorf("identity: риск входа: %w", err)
 	}
 	if suspicious {
 		if err := humancheck.Require(ctx, a.human); err != nil {
-			return LoginResult{}, err
+			return AuthOutcome{}, err
 		}
 	}
 
@@ -95,20 +88,20 @@ func (a *App) Login(ctx context.Context, email, pw string, c Client) (LoginResul
 	case errors.Is(err, pgx.ErrNoRows) || (err == nil && user.Status == identitydb.UserStatusDeleted):
 		// нет аккаунта и анонимизированный — одна ветка: та же работа argon2, журнала нет (§9.1)
 		if err := a.dummyPassword(ctx, pw); err != nil {
-			return LoginResult{}, err
+			return AuthOutcome{}, err
 		}
-		return LoginResult{}, a.loginFailed(ctx, uuid.Nil, riskKeys, c)
+		return AuthOutcome{}, a.loginFailed(ctx, uuid.Nil, riskKeys, c)
 	case err != nil:
-		return LoginResult{}, fmt.Errorf("identity: аккаунт по почте: %w", err)
+		return AuthOutcome{}, fmt.Errorf("identity: аккаунт по почте: %w", err)
 	}
 	ok, seenHash, err := a.checkPassword(ctx, user.ID, pw)
 	if err != nil {
-		return LoginResult{}, err
+		return AuthOutcome{}, err
 	}
 	if !ok {
-		return LoginResult{}, a.loginFailed(ctx, user.ID, riskKeys, c)
+		return AuthOutcome{}, a.loginFailed(ctx, user.ID, riskKeys, c)
 	}
-	var out LoginResult
+	var out AuthOutcome
 	err = db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		u, err := a.lockUser(ctx, tx, user.ID)
 		if errors.Is(err, errUserGone) {
@@ -129,7 +122,7 @@ func (a *App) Login(ctx context.Context, email, pw string, c Client) (LoginResul
 		if err != nil {
 			return err
 		}
-		out = LoginResult{}
+		out = AuthOutcome{}
 		if out.LoginOutcome, err = a.finishLogin(ctx, tx, u, c, dev, domain.MethodPassword, false, false); err != nil {
 			return err
 		}
@@ -140,12 +133,12 @@ func (a *App) Login(ctx context.Context, email, pw string, c Client) (LoginResul
 	})
 	switch {
 	case errors.Is(err, errLoginStale):
-		return LoginResult{}, a.loginFailed(ctx, user.ID, riskKeys, c)
+		return AuthOutcome{}, a.loginFailed(ctx, user.ID, riskKeys, c)
 	case errors.Is(err, errAccountDeleted):
 		// анонимизирован между проверкой и замком — как «нет аккаунта»
-		return LoginResult{}, a.loginFailed(ctx, uuid.Nil, riskKeys, c)
+		return AuthOutcome{}, a.loginFailed(ctx, uuid.Nil, riskKeys, c)
 	case err != nil:
-		return LoginResult{}, err
+		return AuthOutcome{}, err
 	}
 	return out, nil
 }

@@ -43,6 +43,13 @@ type UserBrief struct {
 	Locale   string
 }
 
+// AuthOutcome — итог сценария, выдающего AuthResult (вход, регистрация, отмена удаления, сброс пароля, второй шаг):
+// DocumentsRequired считается в транзакции сценария — после коммита база не читается.
+type AuthOutcome struct {
+	LoginOutcome
+	DocumentsRequired bool
+}
+
 // LoginOutcome — итог завершения входа: сессия (authenticated), шаг 2FA (mfa_required) или период отмены удаления
 // (deletion_pending). Токены шагов — сырые только здесь, в базе — SHA-256.
 type LoginOutcome struct {

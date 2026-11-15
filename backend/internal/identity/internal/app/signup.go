@@ -295,33 +295,26 @@ func eventPlatform(c Client) string {
 	return string(domain.ClientWeb)
 }
 
-// SignupOutcome — итог confirmSignup: вход и documents_acceptance_required (§3.16).
-type SignupOutcome struct {
-	LoginOutcome
-	// DocumentsRequired — принятые при старте версии уже не текущие (документ обновили, пока код ждал ввода).
-	DocumentsRequired bool
-}
-
 // ConfirmSignup — аккаунт и сессия по коду (§3.1 п. 3): сверка без погашения (CodeVerifyOnly; неудача коммитится);
 // ник перепроверяется — занят: 409 без траты попытки и без погашения (клиент присылает новый nickname); затем одна tx:
 // погашение кода, users, credentials, consents, устройство (signups + 1, signed_up), сессия, журнал signup, событие
 // identity.user_registered, аудит. Гонка почты (23505 users_email_key) — 409 email_taken, ника — 409 nickname_taken.
-func (a *App) ConfirmSignup(ctx context.Context, in ConfirmInput, c Client) (SignupOutcome, error) {
+func (a *App) ConfirmSignup(ctx context.Context, in ConfirmInput, c Client) (AuthOutcome, error) {
 	if err := a.requireDevice(c); err != nil {
-		return SignupOutcome{}, err
+		return AuthOutcome{}, err
 	}
 	var newNick string
 	if in.Nickname != "" {
 		n, reason, err := a.nicknameVerdict(ctx, identitydb.New(a.pool), in.Nickname)
 		if err != nil {
-			return SignupOutcome{}, err
+			return AuthOutcome{}, err
 		}
 		if reason == NickInvalid {
-			return SignupOutcome{}, errSignupNickInvalid
+			return AuthOutcome{}, errSignupNickInvalid
 		}
 		newNick = n
 	}
-	var out SignupOutcome
+	var out AuthOutcome
 	err := a.inTxCommitFailure(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		row, err := a.checkCode(ctx, tx, identitydb.AuthCodePurposeSignup, in.CodeID, in.Code, CodeVerifyOnly)
 		if err != nil {
@@ -410,7 +403,7 @@ func (a *App) ConfirmSignup(ctx context.Context, in ConfirmInput, c Client) (Sig
 		return nil
 	})
 	if err != nil {
-		return SignupOutcome{}, err
+		return AuthOutcome{}, err
 	}
 	// сигнал Signup — созданный аккаунт (m9); лимитер — вне tx, сбой не отменяет регистрацию
 	if subnet := risk.Subnet(c.IP); subnet != "" {

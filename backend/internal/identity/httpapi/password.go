@@ -63,7 +63,7 @@ func (h Handler) ConfirmPasswordReset(ctx context.Context, req oapi.ConfirmPassw
 			return nil, err
 		}
 	}
-	return oapi.ConfirmPasswordReset200JSONResponse{Body: codeAuthResult(out, false, docs),
+	return oapi.ConfirmPasswordReset200JSONResponse{Body: authResult(app.AuthOutcome{LoginOutcome: out, DocumentsRequired: docs}, false),
 		Headers: oapi.ConfirmPasswordReset200ResponseHeaders{CacheControl: codeCacheNoStore}}, nil
 }
 

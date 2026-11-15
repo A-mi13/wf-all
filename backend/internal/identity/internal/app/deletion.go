@@ -115,20 +115,14 @@ func (a *App) cancelMfaResetsBySystem(ctx context.Context, q *identitydb.Queries
 	return nil
 }
 
-// CancelOutcome — итог отмены удаления: вход и documents_acceptance_required (посчитан в транзакции отмены).
-type CancelOutcome struct {
-	LoginOutcome
-	DocumentsRequired bool
-}
-
 // CancelDeletion — отмена удаления по restore_token (§3.11 п. 2): takeChallenge(deletion_restore) приёмом R30 (users
 // раньше FOR UPDATE вызова) — нет, истёк или погашен → 410 restore_token_invalid; мобильный без device → 422; аккаунт
 // уже не pending_deletion (анонимизирован) → 410. Иначе прежний статус (active | suspended — решение пользователя
 // 15.11), поля удаления — NULL, событие
 // user_deletion_cancelled, журнал и письмо account_restored, аудит, токен погашен и сессия через finishLogin (способ и
 // второй фактор — из data вызова); documents_acceptance_required — в той же транзакции (m1).
-func (a *App) CancelDeletion(ctx context.Context, raw string, c Client) (CancelOutcome, error) {
-	var out CancelOutcome
+func (a *App) CancelDeletion(ctx context.Context, raw string, c Client) (AuthOutcome, error) {
+	var out AuthOutcome
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		ch, err := a.takeChallenge(ctx, tx, domain.ChallengeDeletionRestore, raw)
 		if errors.Is(err, errChallengeGone) {
