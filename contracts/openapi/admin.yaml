@@ -3150,7 +3150,7 @@ components:
           minLength: 1
           maxLength: 64
           description: Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны
-          example: k7m2q-x9p4t
+          example: k7m2q-x6p4t
     StaffCodeRequest:
       type: object
       description: Код из приложения-аутентификатора (резервные коды здесь не принимаются)
@@ -3349,16 +3349,16 @@ components:
           items:
             type: string
           example:
-            - k7m2q-x9p4t
+            - k7m2q-x6p4t
             - a3b5c-d7e2f
-            - m4n6p-q2r8s
-            - t5v7w-x3y9z
-            - b2c4d-f6g8h
+            - m4n6p-q2r4s
+            - t5v7w-x3y6z
+            - b2c4d-f6g4h
             - j3k5m-n7p2q
-            - r4s6t-v8w3x
-            - y5z7a-b2c9d
+            - r4s6t-v4w3x
+            - y5z7a-b2c6d
             - e3f5g-h7j4k
-            - p6q8r-s2t5v
+            - p6q4r-s2t5v
     StaffPasswordChange:
       type: object
       description: 'Смена своего пароля: текущий пароль, второй фактор (ровно одно из code и recovery_code) и новый пароль. Остальные свои сессии гасятся'
@@ -3382,7 +3382,7 @@ components:
           minLength: 1
           maxLength: 64
           description: Резервный код вида xxxxx-xxxxx вместо кода из приложения; сгорает
-          example: k7m2q-x9p4t
+          example: k7m2q-x6p4t
         new_password:
           type: string
           description: 'Новый пароль: не короче 10 символов, не длиннее 128, не из списка распространённых. Нарушение — 400 validation.failed по полю body.new_password с кодом too_short, too_long или common'

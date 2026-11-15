@@ -129,7 +129,7 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 		t.Fatal(err)
 	}
 	d := identity.Deps{Pool: pools.As, Clock: c, Secrets: newRing(t, genKey(t)), Devices: newRing(t, devKey),
-		Hasher: &fakeHasher{}, Limiter: ratelimit.Unlimited, Risk: assessor, Human: fakeHuman{},
+		Hasher: &fakeHasher{}, Limiter: ratelimit.Unlimited, LimiterTx: unlimitedTx, Risk: assessor, Human: fakeHuman{},
 		Geo: geo.New(pools.As), Flags: flags.NewStore(pools.As), IPGeo: ipgeo.None, Legal: legal, Tokens: tokens,
 		River: ins, Attestor: identity.AttestOff{}, Providers: identity.NoProviders{}, TOTPIssuer: "WF test", Log: log}
 	for _, o := range opts {
@@ -203,3 +203,6 @@ func count(t *testing.T, owner *pgxpool.Pool, q string, args ...any) int {
 	}
 	return n
 }
+
+// unlimitedTx — LimiterTx тестов без лимитов.
+func unlimitedTx(pgx.Tx) ratelimit.Limiter { return ratelimit.Unlimited }

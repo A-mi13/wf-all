@@ -1922,7 +1922,7 @@ export interface components {
             code?: string;
             /**
              * @description Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны
-             * @example k7m2q-x9p4t
+             * @example k7m2q-x6p4t
              */
             recovery_code?: string;
         };
@@ -2073,16 +2073,16 @@ export interface components {
             /**
              * @description 10 кодов вида xxxxx-xxxxx
              * @example [
-             *       "k7m2q-x9p4t",
+             *       "k7m2q-x6p4t",
              *       "a3b5c-d7e2f",
-             *       "m4n6p-q2r8s",
-             *       "t5v7w-x3y9z",
-             *       "b2c4d-f6g8h",
+             *       "m4n6p-q2r4s",
+             *       "t5v7w-x3y6z",
+             *       "b2c4d-f6g4h",
              *       "j3k5m-n7p2q",
-             *       "r4s6t-v8w3x",
-             *       "y5z7a-b2c9d",
+             *       "r4s6t-v4w3x",
+             *       "y5z7a-b2c6d",
              *       "e3f5g-h7j4k",
-             *       "p6q8r-s2t5v"
+             *       "p6q4r-s2t5v"
              *     ]
              */
             recovery_codes: string[];
@@ -2101,7 +2101,7 @@ export interface components {
             code?: string;
             /**
              * @description Резервный код вида xxxxx-xxxxx вместо кода из приложения; сгорает
-             * @example k7m2q-x9p4t
+             * @example k7m2q-x6p4t
              */
             recovery_code?: string;
             /**

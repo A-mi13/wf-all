@@ -22,7 +22,7 @@ var (
 // requireFresh — операция «С» (§6.3): сессия вошла или прошла свежий вход не раньше domain.ReauthFresh назад,
 // иначе 403 identity.reauth_required до любых изменений. Замки — приём R30: users сессии первым, затем строка
 // sessions FOR UPDATE (её же правят неудачи свежего входа). Сессии нет или она отозвана (кэш загрузчика ≤ 5 с) —
-// 401 http.unauthenticated (как конвейер на мёртвую сессию).
+// 401 auth.unauthenticated (как конвейер на мёртвую сессию).
 func (a *App) requireFresh(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID) (sessionRow, error) {
 	var s sessionRow
 	err := a.lockByRow(ctx, tx, "session",

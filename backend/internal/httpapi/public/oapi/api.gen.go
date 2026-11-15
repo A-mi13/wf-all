@@ -1239,7 +1239,7 @@ type MfaCompleteRequest struct {
 
 	// RecoveryCode Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны; сгорает
 	//
-	// Example: k7m2q-x9p4t
+	// Example: k7m2q-x6p4t
 	RecoveryCode *string `json:"recovery_code,omitempty"`
 }
 
@@ -1462,7 +1462,7 @@ type PasswordResetConfirmRequest struct {
 
 		// RecoveryCode Резервный код вида xxxxx-xxxxx; сгорает
 		//
-		// Example: k7m2q-x9p4t
+		// Example: k7m2q-x6p4t
 		RecoveryCode *string `json:"recovery_code,omitempty"`
 	} `json:"mfa,omitempty"`
 
@@ -1596,7 +1596,7 @@ type ReauthRequest struct {
 
 	// RecoveryCode Резервный код вида xxxxx-xxxxx; сгорает
 	//
-	// Example: k7m2q-x9p4t
+	// Example: k7m2q-x6p4t
 	RecoveryCode *string `json:"recovery_code,omitempty"`
 
 	// Social Свежий вход через привязанного провайдера
@@ -1636,7 +1636,7 @@ type ReauthSocial struct {
 type RecoveryCodes struct {
 	// RecoveryCodes 10 кодов вида xxxxx-xxxxx
 	//
-	// Example: ["k7m2q-x9p4t","a3b5c-d7e2f","m4n6p-q8r3s","t5u7v-w9x2y","z3a5b-c7d2e","f4g6h-j8k3l","n5p7q-r9s2t","u3v5w-x7y2z","b4c6d-e8f3g","h5j7k-l9m2n"]
+	// Example: ["k7m2q-x6p4t","a3b5c-d7e2f","m4n6p-q4r3s","t5u7v-w6x2y","z3a5b-c7d2e","f4g6h-j4k3l","n5p7q-r6s2t","u3v5w-x7y2z","b4c6d-e4f3g","h5j7k-l6m2n"]
 	RecoveryCodes []string `json:"recovery_codes"`
 }
 
@@ -9931,7 +9931,7 @@ var swaggerSpec = []string{
 	"Y9Bj8EusbMJHCVKaHYBjh/zt0luJwWqCvOOwSO6Rkt9kBTy1su862n1zhUwYAdEhfsCDyLD1OgGl+oVB",
 	"qSsWa+UN6EjyZ1lrYMoQ0W8H67kxNY7g2Lkl7wqNcDiWLIb2jZeDZRLCG/yGw0Akang2lsA4xOKvZ9G2",
 	"+A4XdaJjBTwX8Ip2FPFwdYPHydwMJvFMpqjVVxdQQ5ZCsaPXb3Js/8+KspH7ptKw49ieM2SFxtPMYKEt",
-	"5x78Xwb/fzNvhWwqQIzbiTaV5Ig4AnrOCtArDJ3ZipGz3p5azf8mc29mbbz5asQrck8TxAzThoVPBxUg",
+	"5x78Xwb/fzNvhWwqQIzbiTaV5Ig4AnrOCtArDJ3ZipGz3p5azf8mc29ybbz5asQrck8TxAzThoVPBxUg",
 	"0NCvuabz1h3vzszqMkVCAW07oFshiSHc9/1FOJtBWuvyZjEY5DEaKgsr5cq7uFKNY4pnldqEj1l0W+pl",
 	"SsTE2T/GrR32WCYz+ur5RcKL2ELS1DkrKSRtCwFQSUr/nBnaELtGYDxm9VgCVzPg5OayfRg8BwjvKge5",
 	"sVD1l+wBwX01J2LcK3Cv9oVzxdZUNEabdbIcQIXumjpVWtn8hbPqBKdV8GW2H10+mT4NTvPUb70Vew1H",
@@ -10001,9 +10001,9 @@ var swaggerSpec = []string{
 	"8m7lnQu33rx6/dfXLjYurjbXbp27OHnx9sr4XL4xceODN+YuBtlRf+OdT8rvX6y8W7l4d+767U/mVm/e",
 	"u7mRHbt5/XIVPi/lq8Hi6oVs+YN3qvrNmc7N5PuKh6AGBXgJxh9+yABSWNJDu3sZ/mzDiE1mxksT5cyU",
 	"N5nLzEz50xkBMy6PD9QI/4QaSim9pMT8XHkM7KeXhDlA4BoDCPM2hyTuGJ1BBJ0FM39RcYZHLGo6q7ZK",
-	"2TMUq/llUBSSLESkXoEvyCKWVH6f+ARyWY1DyqKBdCdFVzmYLMqUp/z8Epyx8WByLfOb6foYGFzNifWp",
-	"O5m7M/fyUNb3yZg3sZgpTZXzcEKWxpcnVzIfT98eg7MZTKxN/SZTn2nk4ZnrY3cm7mbuTW3kP4GyMEhM",
-	"ZfzppTGo412Z+HjqdqY6s5oPejlJSRq2h/K0pbXsbfSzfZhpjBW3H6qlut84rs35TfiEFIdTp+dkWDpZ",
+	"2TMUq/llUBSSLESkXoEvyCKWVH6f+ARyWY1DyqKBdCdFVzmYLMqUp/z8Epyx8WByLfOb8foYGFzNifWp",
+	"O5m7k/fyUNb3yZg3sZgpTZXzcEKWxpcnVzIfj98eg7MZTKxN/SZTn2zk4ZnrY3cm7mbuTW3kP4GyMEhM",
+	"ZfzxpTGo412Z+HjqdqY6uZoPejlJSRq2h/K0pbXsbfSzfZhpjBW3H6qlut84rs35TfiEFIdTp+dkWDpZ",
 	"4CbMzvYYuY6Lv6DR9KpV6yWXn1lx9M4Ii+qHu45EZqYtbqAG14+2mbv6JddULGCEiWGBJfghbNvfirHV",
 	"cF/ankcsY3MYds1Uz74eZRPsvCx9Lp0S7VBMXpiZzM1cuJCZfmN6MjN+PpvLvDGeP5/JZs9dGL9wbmZy",
 	"/MKFPrR5k1aTEDeqB8efatPGt1Ubo3SCpy6t5t9bHL+8Nn21mbt1d/JmKft2Y+KsP3N+aeytlal3butD",

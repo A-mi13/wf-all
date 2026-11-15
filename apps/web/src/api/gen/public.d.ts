@@ -2500,7 +2500,7 @@ export interface components {
             code?: string;
             /**
              * @description Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны; сгорает
-             * @example k7m2q-x9p4t
+             * @example k7m2q-x6p4t
              */
             recovery_code?: string;
             passkey?: components["schemas"]["PasskeyAssertion"];
@@ -2541,7 +2541,7 @@ export interface components {
                 code?: string;
                 /**
                  * @description Резервный код вида xxxxx-xxxxx; сгорает
-                 * @example k7m2q-x9p4t
+                 * @example k7m2q-x6p4t
                  */
                 recovery_code?: string;
             };
@@ -2823,7 +2823,7 @@ export interface components {
             totp_code?: string;
             /**
              * @description Резервный код вида xxxxx-xxxxx; сгорает
-             * @example k7m2q-x9p4t
+             * @example k7m2q-x6p4t
              */
             recovery_code?: string;
             passkey?: components["schemas"]["PasskeyAssertion"];
@@ -2959,16 +2959,16 @@ export interface components {
             /**
              * @description 10 кодов вида xxxxx-xxxxx
              * @example [
-             *       "k7m2q-x9p4t",
+             *       "k7m2q-x6p4t",
              *       "a3b5c-d7e2f",
-             *       "m4n6p-q8r3s",
-             *       "t5u7v-w9x2y",
+             *       "m4n6p-q4r3s",
+             *       "t5u7v-w6x2y",
              *       "z3a5b-c7d2e",
-             *       "f4g6h-j8k3l",
-             *       "n5p7q-r9s2t",
+             *       "f4g6h-j4k3l",
+             *       "n5p7q-r6s2t",
              *       "u3v5w-x7y2z",
-             *       "b4c6d-e8f3g",
-             *       "h5j7k-l9m2n"
+             *       "b4c6d-e4f3g",
+             *       "h5j7k-l6m2n"
              *     ]
              */
             recovery_codes: string[];

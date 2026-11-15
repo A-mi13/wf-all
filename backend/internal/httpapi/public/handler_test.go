@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -553,11 +554,16 @@ func liveIdentity(t *testing.T, pool *pgxpool.Pool, tokens *token.Issuer) identi
 		t.Fatal(err)
 	}
 	h, err := identityhttp.New(identity.Deps{Pool: pool, Clock: clock.System, Secrets: ring(), Devices: ring(),
-		Hasher: hasher, Limiter: limiter, Risk: assessor, Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool),
+		Hasher: hasher, Limiter: limiter, LimiterTx: pgLimiterTx, Risk: assessor, Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool),
 		IPGeo: ipgeo.None, Legal: legal, Tokens: tokens, River: ins, Attestor: identity.AttestOff{},
 		Providers: identity.NoProviders{}, TOTPIssuer: "WF test", Log: log})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return h
+}
+
+// pgLimiterTx — LimiterTx сборок identity в тестах: тот же ratelimit.PG на соединении транзакции.
+func pgLimiterTx(tx pgx.Tx) ratelimit.Limiter {
+	return ratelimit.NewPG(tx, clock.System, ratelimit.Players)
 }
