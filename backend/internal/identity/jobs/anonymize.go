@@ -20,6 +20,10 @@ const anonymizeBatch = 100
 // errAnonymizeVersion — аргументы задачи незнакомой версии (задача другого релиза).
 var errAnonymizeVersion = errors.New("identity: identity.anonymize — незнакомая версия аргументов")
 
+// errAnonymizeRowsFailed — в прогоне были строки, которые не удалось анонимизировать (откачены, в журнале): задача
+// завершается ошибкой, чтобы неисполненное стирание ПД было видно и River повторил его (как у сброса 2FA).
+var errAnonymizeRowsFailed = errors.New("identity: identity.anonymize — часть строк не анонимизирована")
+
 // AnonymizeArgs — задача анонимизации аккаунтов с наступившим purge_at: без данных аккаунтов (ПД в аргументах нет).
 type AnonymizeArgs struct {
 	V int `json:"v"`
@@ -53,7 +57,8 @@ func (*AnonymizeWorker) Timeout(*river.Job[AnonymizeArgs]) time.Duration { retur
 
 // Work — AnonymizeDue пачками; каждая пачка — своя транзакция, повтор задачи безопасен. Упавшие за прогон строки
 // исключаются из следующих выборок (m8): пачка из одних отравленных строк не останавливает прогон, и он конечен —
-// каждая строка выбирается в прогоне не больше раза до успеха или падения. Упавшие пробует следующий запуск.
+// каждая строка выбирается в прогоне не больше раза до успеха или падения. Были упавшие — после всех пачек
+// errAnonymizeRowsFailed (число строк, без ПД): River повторит задачу, исполненные строки уже закоммичены.
 func (w *AnonymizeWorker) Work(ctx context.Context, job *river.Job[AnonymizeArgs]) error {
 	if job.Args.V != 1 {
 		return fmt.Errorf("%w: v=%d", errAnonymizeVersion, job.Args.V)
@@ -66,6 +71,9 @@ func (w *AnonymizeWorker) Work(ctx context.Context, job *river.Job[AnonymizeArgs
 		}
 		skip = append(skip, failed...)
 		if selected < anonymizeBatch {
+			if len(skip) > 0 {
+				return fmt.Errorf("%w: %d", errAnonymizeRowsFailed, len(skip))
+			}
 			return nil
 		}
 		if err := ctx.Err(); err != nil {

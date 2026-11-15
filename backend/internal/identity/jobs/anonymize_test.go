@@ -90,6 +90,8 @@ func TestAnonymizeWorkerVersion(t *testing.T) {
 
 // m8: пачка из одних отравленных строк (старших по purge_at) не останавливает прогон — упавшие id исключаются из
 // следующей выборки, воркер идёт, пока выбрано столько, сколько просили; нормальные строки за ними анонимизированы.
+// Были упавшие — прогон в конце возвращает errAnonymizeRowsFailed (как воркер сброса 2FA): задача видна как
+// неудачная и River повторит её, а не завершит молча успехом при несделанном стирании ПД.
 func TestAnonymizeWorkerSkipsPoisoned(t *testing.T) {
 	t.Parallel()
 	poisoned := make([]int, anonymizeBatch)
@@ -97,8 +99,8 @@ func TestAnonymizeWorkerSkipsPoisoned(t *testing.T) {
 		poisoned[i] = i
 	}
 	f := newFake(anonymizeBatch+2, poisoned...)
-	if err := NewAnonymizeWorker(f).Work(context.Background(), anonJob(1)); err != nil {
-		t.Fatal(err)
+	if err := NewAnonymizeWorker(f).Work(context.Background(), anonJob(1)); !errors.Is(err, errAnonymizeRowsFailed) {
+		t.Fatalf("err = %v, ждали errAnonymizeRowsFailed", err)
 	}
 	if len(f.done) != 2 || f.calls != 2 {
 		t.Fatalf("анонимизировано %d, вызовов %d", len(f.done), f.calls)
