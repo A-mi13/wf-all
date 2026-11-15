@@ -9,6 +9,13 @@
 // auth_codes/auth_challenges. Сценарий, меняющий аккаунт или его сессии, первым берёт users FOR NO KEY UPDATE
 // (lockUser). Аккаунт, известный только из строки кода, вызова или токена, — приём lockByRow: строка без замка →
 // lockUser(user_id) → FOR UPDATE строки с перепроверкой. Строка approvals (платформа) — раньше строк модуля.
+// Исключение из порядка (m7 ревью W4-А): сценарии кода (сброс пароля tx1/tx2, смена почты, регистрация) берут строку
+// auth_codes сразу после users и лишь затем user_mfa, sessions, devices. Взаимной блокировки нет: всякий сценарий,
+// трогающий строки одного аккаунта, сперва держит его users, и второй ждёт на users, не доходя до остальных строк;
+// коды без аккаунта (регистрация, приманка) других строк модуля под замком не берут. Старты кода на (назначение,
+// почта) идут по очереди под pg_advisory_xact_lock (startCode), после users, если он взят.
+// Внутри db.InTx — только соединение tx: лимит — a.limiterTx(tx), не a.limiter/a.risk/a.pool (второе соединение
+// под замком users при исчерпанном пуле ждёт вечно; C1, I1 ревью W4-А).
 package app
 
 import (
@@ -46,6 +53,7 @@ type App struct {
 	devices    *keys.Ring
 	hasher     identity.PasswordHasher
 	limiter    ratelimit.Limiter
+	limiterTx  func(pgx.Tx) ratelimit.Limiter // лимит внутри db.InTx — только им (C1 волны 4)
 	risk       *risk.Assessor
 	human      humancheck.Verifier
 	geo        geo.Service
@@ -89,7 +97,7 @@ func New(d identity.Deps) (*App, error) {
 	var missing []string
 	for name, ok := range map[string]bool{
 		"Pool": d.Pool != nil, "Clock": d.Clock != nil, "Secrets": d.Secrets != nil, "Devices": d.Devices != nil,
-		"Hasher": d.Hasher != nil, "Limiter": d.Limiter != nil, "Risk": d.Risk != nil, "Human": d.Human != nil,
+		"Hasher": d.Hasher != nil, "Limiter": d.Limiter != nil, "LimiterTx": d.LimiterTx != nil, "Risk": d.Risk != nil, "Human": d.Human != nil,
 		"Geo": d.Geo != nil, "Flags": d.Flags != nil, "IPGeo": d.IPGeo != nil, "Tokens": d.Tokens != nil,
 		"River": d.River != nil, "Attestor": d.Attestor != nil, "Providers": d.Providers != nil,
 		"TOTPIssuer": d.TOTPIssuer != "", "Log": d.Log != nil,
@@ -106,7 +114,8 @@ func New(d identity.Deps) (*App, error) {
 	}
 	return &App{
 		pool: d.Pool, clock: d.Clock, secrets: d.Secrets, devices: d.Devices, hasher: d.Hasher, limiter: d.Limiter,
-		risk: d.Risk, human: d.Human, geo: d.Geo, flags: d.Flags, ipgeo: d.IPGeo, legal: d.Legal, tokens: d.Tokens,
+		limiterTx: d.LimiterTx,
+		risk:      d.Risk, human: d.Human, geo: d.Geo, flags: d.Flags, ipgeo: d.IPGeo, legal: d.Legal, tokens: d.Tokens,
 		river: d.River, attestor: d.Attestor, providers: d.Providers, totpIssuer: d.TOTPIssuer, log: d.Log,
 	}, nil
 }
