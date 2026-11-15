@@ -10,6 +10,7 @@ import (
 
 	"wf/backend/internal/httpapi/public/oapi"
 	"wf/backend/internal/identity"
+	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/otp"
 )
 
@@ -102,5 +103,82 @@ func TestMfaHTTP(t *testing.T) {
 	if r := e.do(t, http.MethodDelete, "/v1/me/mfa/totp", "", res.Tokens.AccessToken, true); r.Code != http.StatusConflict ||
 		problemCodeOf(t, r) != identity.CodeMfaNotEnabled {
 		t.Fatalf("повтор: %d %s", r.Code, r.Body.String())
+	}
+}
+
+// m5 ревью W5-А: коды контракта Task 16 через весь конвейер (apitest сверяет Problem с объявленными ответами):
+// confirmTotp без начатой настройки — 409 mfa_setup_missing; regenerateRecoveryCodes без 2FA — 409 mfa_not_enabled;
+// несвежая сессия — 403 reauth_required у setupTotp и regenerateRecoveryCodes; setupTotp при включённой — 409
+// mfa_already_enabled; completeMfa: неизвестный токен — 410 mfa_expired, мобильный без device — 422 device_required,
+// 10 неудач фактора за час — 429 ratelimit.exceeded с Retry-After.
+func TestMfaHTTPCodes(t *testing.T) {
+	t.Parallel()
+	e := newIdentityEnv(t)
+	const pw = "Угловой на последней секунде" //nolint:gosec // G101: пароль теста, не учётные данные
+	uid := e.seedLogin(t, "http_mfa_codes", pw)
+	access := e.login(t, "http_mfa_codes", pw).Tokens.AccessToken
+	want := func(name string, r *httptest.ResponseRecorder, status int, code string) {
+		t.Helper()
+		if r.Code != status || problemCodeOf(t, r) != code {
+			t.Fatalf("%s: %d %s", name, r.Code, r.Body.String())
+		}
+	}
+	want("confirm без setup", e.do(t, http.MethodPost, "/v1/me/mfa/totp/confirm", `{"code":"123456"}`, access, true),
+		http.StatusConflict, identity.CodeMfaSetupMissing)
+	want("regenerate без 2FA", e.do(t, http.MethodPost, "/v1/me/mfa/recovery-codes", "", access, true),
+		http.StatusConflict, identity.CodeMfaNotEnabled)
+
+	freshness := func(at string) {
+		t.Helper()
+		if _, err := e.pool.Exec(t.Context(), `UPDATE sessions SET reauth_at = `+at+` WHERE user_id = $1`, uid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	freshness("now() - interval '1 hour'")
+	want("setup несвежей", e.do(t, http.MethodPost, "/v1/me/mfa/totp/setup", "", access, true),
+		http.StatusForbidden, identity.CodeReauthRequired)
+	want("regenerate несвежей", e.do(t, http.MethodPost, "/v1/me/mfa/recovery-codes", "", access, true),
+		http.StatusForbidden, identity.CodeReauthRequired)
+	freshness("now()")
+
+	setup := e.do(t, http.MethodPost, "/v1/me/mfa/totp/setup", "", access, true)
+	if setup.Code != http.StatusOK {
+		t.Fatalf("setupTotp: %d %s", setup.Code, setup.Body.String())
+	}
+	var ts oapi.TotpSetup
+	if err := json.Unmarshal(setup.Body.Bytes(), &ts); err != nil {
+		t.Fatal(err)
+	}
+	secret := totpSecret(t, ts.Secret)
+	code := otp.Code(secret, otp.Step(time.Now()))
+	if r := e.do(t, http.MethodPost, "/v1/me/mfa/totp/confirm", `{"code":"`+code+`"}`, access, true); r.Code != http.StatusOK {
+		t.Fatalf("confirmTotp: %d %s", r.Code, r.Body.String())
+	}
+	want("setup при включённой", e.do(t, http.MethodPost, "/v1/me/mfa/totp/setup", "", access, true),
+		http.StatusConflict, identity.CodeMfaAlreadyEnabled)
+
+	completeMfa := func(tok, body string) *httptest.ResponseRecorder {
+		return e.do(t, http.MethodPost, "/v1/auth/mfa", `{"mfa_token":"`+tok+`",`+body+`}`, "", false)
+	}
+	withDevice := `"code":"` + code + `","device":` + deviceJSON
+	want("неизвестный токен", completeMfa("unknown-token", withDevice), http.StatusGone, identity.CodeMfaExpired)
+	tok := e.login(t, "http_mfa_codes", pw).Mfa.MfaToken
+	want("без device", completeMfa(tok, `"code":"`+code+`"`), http.StatusUnprocessableEntity, identity.CodeDeviceRequired)
+
+	// 10 неудач user:mfa: два токена по 5 (пятая гасит токен — 410), третий — 429 до проверки фактора
+	wrong := `"recovery_code":"aaaaa-aaaaa","device":` + deviceJSON
+	for range 2 {
+		tok := e.login(t, "http_mfa_codes", pw).Mfa.MfaToken
+		for i := range 5 {
+			r := completeMfa(tok, wrong)
+			if (i < 4 && r.Code != http.StatusBadRequest) || (i == 4 && r.Code != http.StatusGone) {
+				t.Fatalf("неудача %d: %d %s", i, r.Code, r.Body.String())
+			}
+		}
+	}
+	r := completeMfa(e.login(t, "http_mfa_codes", pw).Mfa.MfaToken, wrong)
+	want("лимит user:mfa", r, http.StatusTooManyRequests, httpx.CodeRateLimited)
+	if r.Header().Get("Retry-After") == "" {
+		t.Fatal("429 без Retry-After")
 	}
 }

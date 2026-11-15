@@ -248,3 +248,18 @@ func TestRevokeFromExpiredSession(t *testing.T) {
 		t.Fatalf("мобильная отозвана: %q", r)
 	}
 }
+
+// Непредусмотренное 1 ревью W5-А: «выйти везде» гасит живые токены шагов аккаунта (mfa_token) — и когда других
+// сессий нет (n = 0).
+func TestRevokeOthersKillsStepTokens(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid, _, tok := mfaLogin(t, e, "others_tokens", "abcde-fghij")
+	cur := issue(t, e, uid, web("cur")).SessionID
+	if n, err := e.a.RevokeOthers(context.Background(), uid, cur); err != nil || n != 0 {
+		t.Fatalf("%d %v", n, err)
+	}
+	if _, err := complete(e, tok, SecondFactor{Recovery: "abcde-fghij"}); problemCode(err) != identity.CodeMfaExpired {
+		t.Fatalf("mfa_token после «выйти везде»: %v", err)
+	}
+}

@@ -117,7 +117,8 @@ func (a *App) cancelMfaResetsBySystem(ctx context.Context, q *identitydb.Queries
 
 // CancelDeletion — отмена удаления по restore_token (§3.11 п. 2): takeChallenge(deletion_restore) приёмом R30 (users
 // раньше FOR UPDATE вызова) — нет, истёк или погашен → 410 restore_token_invalid; мобильный без device → 422; аккаунт
-// уже не pending_deletion (анонимизирован) → 410. Иначе прежний статус (active | suspended — решение пользователя
+// уже не pending_deletion (анонимизирован) → 410; клиент не тот, что на первом шаге (stepClientMatches: вид клиента,
+// устройство мобильного) → 410 без записей. Иначе прежний статус (active | suspended — решение пользователя
 // 15.11), поля удаления — NULL, событие
 // user_deletion_cancelled, журнал и письмо account_restored, аудит, токен погашен и сессия через finishLogin (способ и
 // второй фактор — из data вызова); documents_acceptance_required — в той же транзакции (m1).
@@ -151,6 +152,11 @@ func (a *App) CancelDeletion(ctx context.Context, raw string, c Client) (AuthOut
 		var data challengeData
 		if err := json.Unmarshal(ch.Data, &data); err != nil {
 			return fmt.Errorf("identity: данные вызова: %w", err)
+		}
+		if same, err := a.stepClientMatches(ctx, tx, data, c); err != nil {
+			return err
+		} else if !same {
+			return errRestoreTokenInvalid // m2 ревью W5-А: без записей, токен остаётся у клиента первого шага
 		}
 		q := identitydb.New(tx)
 		ver, err := q.DeletionRestore(ctx, u.ID)

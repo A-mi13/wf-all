@@ -84,7 +84,7 @@ func (a *App) lockReauthSession(ctx context.Context, tx pgx.Tx, sessionID uuid.U
 // Retry-After до конца окна (R16: sessions.reauth_failures и reauth_failed_at; окно истекло — счёт с нуля); неудача —
 // 400 reauth_invalid + attempts_left (коммитится); passkey и social в I-2 — неудача (R3). Пароль — argon2 вне tx
 // (checkPassword, R31), в tx — сверка, что хэш тот же. Успех — reauth_at = now, счёт с нуля, при TOTP или резервном
-// коде ещё mfa_at = now (R27); ответ — reauth_until.
+// коде ещё mfa_at = now (R27) и отмена живого сброса 2FA владельцем (cancelResetsByOwner); ответ — reauth_until.
 func (a *App) Reauthenticate(ctx context.Context, sessionID uuid.UUID, in ReauthInput) (time.Time, error) {
 	if in.fields() != 1 {
 		return time.Time{}, errFactorShape
@@ -159,6 +159,12 @@ func (a *App) Reauthenticate(ctx context.Context, sessionID uuid.UUID, in Reauth
 		}
 		if err := q.ReauthSucceeded(ctx, identitydb.ReauthSucceededParams{Now: &now, MfaAt: mfaAt, ID: s.ID}); err != nil {
 			return fmt.Errorf("identity: свежий вход: %w", err)
+		}
+		if mfaAt != nil {
+			// второй фактор при владельце — живой сброс 2FA поддержкой отменяется (§3.15 п. 4; I1 ревью W5-Б)
+			if _, err := a.cancelResetsByOwner(ctx, tx, s.UserID); err != nil {
+				return err
+			}
 		}
 		until = now.Add(domain.ReauthFresh)
 		return nil

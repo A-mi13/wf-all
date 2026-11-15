@@ -123,3 +123,18 @@ func (q *Queries) LockChallenge(ctx context.Context, id uuid.UUID) (AuthChalleng
 	)
 	return i, err
 }
+
+const revokeUserChallenges = `-- name: RevokeUserChallenges :exec
+UPDATE auth_challenges SET consumed_at = $1 WHERE user_id = $2 AND consumed_at IS NULL
+`
+
+type RevokeUserChallengesParams struct {
+	Now    *time.Time
+	UserID *uuid.UUID
+}
+
+// смена/сброс пароля и «выйти везде» гасят живые токены шагов аккаунта (mfa, deletion_restore) — под замком users
+func (q *Queries) RevokeUserChallenges(ctx context.Context, arg RevokeUserChallengesParams) error {
+	_, err := q.db.Exec(ctx, revokeUserChallenges, arg.Now, arg.UserID)
+	return err
+}

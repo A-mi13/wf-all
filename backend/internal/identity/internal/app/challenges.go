@@ -95,3 +95,15 @@ func (a *App) consumeChallenge(ctx context.Context, tx pgx.Tx, id uuid.UUID) err
 	now := a.clock.Now()
 	return identitydb.New(tx).ConsumeChallenge(ctx, identitydb.ConsumeChallengeParams{Now: &now, ID: id})
 }
+
+// revokeChallenges — гасит все живые токены шагов аккаунта (users под замком вызывающего): смена и сброс пароля, «выйти
+// везде» — недоведённый вход вторым фактором (mfa_token) и отмена удаления (restore_token) первого шага старыми
+// учётными данными не доходят до сессии (ревью W5-А, непредусмотренное 1).
+func (a *App) revokeChallenges(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
+	now := a.clock.Now()
+	if err := identitydb.New(tx).RevokeUserChallenges(ctx, identitydb.RevokeUserChallengesParams{Now: &now,
+		UserID: &userID}); err != nil {
+		return fmt.Errorf("identity: токены шагов: %w", err)
+	}
+	return nil
+}

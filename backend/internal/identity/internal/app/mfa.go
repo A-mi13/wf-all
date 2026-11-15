@@ -94,17 +94,16 @@ func (a *App) SetupTotp(ctx context.Context, sessionID uuid.UUID) (secret, uri s
 	return otp.Base32(raw), uri, nil
 }
 
-// ConfirmTotp — включение 2FA кодом от начатой настройки: нет неподтверждённого секрета (не начата или уже
+// ConfirmTotp — включение 2FA кодом от начатой настройки: сессия запроса мертва под замком аккаунта (requireCurrent) —
+// 401 auth.unauthenticated; нет неподтверждённого секрета (не начата или уже
 // включена) — 409 mfa_setup_missing; неверный код — 400 mfa_invalid (без записей); верный — confirmed_at и
 // last_used_step (этот код больше не примут), 10 резервных кодов (прежние строки удаляются), журнал, письмо
 // mfa_enabled, событие mfa_changed {enabled: true}, аудит. Другие сессии не гасятся (§3.3 п. 3).
-func (a *App) ConfirmTotp(ctx context.Context, userID uuid.UUID, code string) ([]string, error) {
+func (a *App) ConfirmTotp(ctx context.Context, userID, sessionID uuid.UUID, code string) ([]string, error) {
 	var codes []string
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := a.lockUser(ctx, tx, userID); err != nil {
-			if errors.Is(err, errUserGone) {
-				return errSessionGone
-			}
+		// users первым, затем сессия запроса под замком (m1 ревью W5-А): кэш загрузчика ≤ 5 с пропускает отозванную
+		if err := a.requireCurrent(ctx, tx, userID, sessionID); err != nil {
 			return err
 		}
 		q := identitydb.New(tx)
@@ -139,7 +138,7 @@ func (a *App) ConfirmTotp(ctx context.Context, userID uuid.UUID, code string) ([
 		if codes, err = a.replaceRecoveryCodes(ctx, q, userID); err != nil {
 			return err
 		}
-		ref, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: userID, Kind: domain.SecMfaEnabled})
+		ref, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: userID, Kind: domain.SecMfaEnabled, SessionID: sessionID})
 		if err != nil {
 			return err
 		}
@@ -156,8 +155,8 @@ func (a *App) ConfirmTotp(ctx context.Context, userID uuid.UUID, code string) ([
 
 // DisableTotp — выключение 2FA: requireFresh; 2FA не включена — 409 mfa_not_enabled (раньше проверки второго фактора:
 // без 2FA подтвердить свежесть вторым фактором нечем — иначе тупик 403); сессия не подтвердила свежесть вторым
-// фактором (sessions.mfa_at старше domain.ReauthFresh, R27) — 403 reauth_required; иначе секрет и коды удаляются,
-// журнал, письмо mfa_disabled, событие mfa_changed {enabled: false}, аудит.
+// фактором (sessions.mfa_at старше domain.ReauthFresh, R27) — 403 reauth_required; иначе живой сброс 2FA поддержкой
+// отменяется владельцем, секрет и коды удаляются, журнал, письмо mfa_disabled, событие mfa_changed {enabled: false}, аудит.
 func (a *App) DisableTotp(ctx context.Context, sessionID uuid.UUID) error {
 	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		s, err := a.requireFresh(ctx, tx, sessionID)
@@ -166,6 +165,11 @@ func (a *App) DisableTotp(ctx context.Context, sessionID uuid.UUID) error {
 		}
 		q := identitydb.New(tx)
 		if err := a.requireMfaOn(ctx, q, s.UserID); err != nil {
+			return err
+		}
+		// живой сброс 2FA поддержкой отменяется владельцем (I1 ревью W5-Б): иначе воркер в срок стёр бы 2FA, включённую
+		// заново после выключения; 403 ниже откатывает и отмену
+		if _, err := a.cancelResetsByOwner(ctx, tx, s.UserID); err != nil {
 			return err
 		}
 		if s.MfaAt == nil || a.clock.Now().Sub(*s.MfaAt) > domain.ReauthFresh {

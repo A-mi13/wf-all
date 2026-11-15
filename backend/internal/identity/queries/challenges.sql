@@ -21,3 +21,7 @@ RETURNING attempts;
 
 -- name: ConsumeChallenge :exec
 UPDATE auth_challenges SET consumed_at = @now WHERE id = @id AND consumed_at IS NULL;
+
+-- name: RevokeUserChallenges :exec
+-- смена/сброс пароля и «выйти везде» гасят живые токены шагов аккаунта (mfa, deletion_restore) — под замком users
+UPDATE auth_challenges SET consumed_at = @now WHERE user_id = @user_id AND consumed_at IS NULL;

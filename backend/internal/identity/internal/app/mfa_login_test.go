@@ -216,3 +216,54 @@ func TestCompleteMfaParallel(t *testing.T) {
 		t.Fatalf("успехов %d, сессий %d", ok, sessions(t, e, uid))
 	}
 }
+
+// m2 ревью W5-А: mfa_token привязан к клиенту первого шага — другой вид клиента, другое устройство мобильного или
+// другая платформа с тем же install_id — 410 mfa_expired без записей (попытка не тратится, фактор не проверяется:
+// нет оракула кода на чужом клиенте); с исходного устройства токен по-прежнему работает.
+func TestCompleteMfaClientMismatch(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid, secret, tok := mfaLogin(t, e, "mfa_client")
+	upsert(t, e, mobile("ios", "11111111-2222-3333-4444-555555555555")) // чужое устройство уже известно базе
+	for name, c := range map[string]Client{
+		"веб":               web("a"),
+		"другое устройство": mobile("ios", "11111111-2222-3333-4444-555555555555"),
+		"другая платформа":  mobile("android", "6F9619FF-8B86-4D01-B42D-00CF4FC964FF"),
+	} {
+		if _, err := e.a.CompleteMfa(context.Background(), tok, SecondFactor{TOTP: totpNow(e, secret)}, nil, c); problemCode(err) != identity.CodeMfaExpired {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM auth_challenges WHERE user_id = $1 AND attempts = 0 AND consumed_at IS NULL`, uid); n != 1 {
+		t.Fatal("несовпадение клиента потратило попытку или погасило токен")
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM sessions WHERE user_id = $1`, uid); n != 0 {
+		t.Fatal("сессия на чужом клиенте")
+	}
+	if out, err := complete(e, tok, SecondFactor{TOTP: totpNow(e, secret)}); err != nil || out.Status != StatusAuthenticated {
+		t.Fatalf("исходное устройство: %+v %v", out, err)
+	}
+}
+
+// Непредусмотренное 3 ревью W5-Б: между первым шагом и completeMfa воркер исполнил сброс 2FA (user_mfa нет) — токен
+// гасится, 410 mfa_expired (клиент начинает вход заново и проходит без второго шага), не 400 и не 500; попытка и
+// лимит user:mfa не тратятся.
+func TestCompleteMfaAfterResetExecuted(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid, secret, tok := mfaLogin(t, e, "mfa_reset_done", "abcde-fghij")
+	acctExec(t, e, `DELETE FROM user_recovery_codes WHERE user_id = $1`, uid)
+	acctExec(t, e, `DELETE FROM user_mfa WHERE user_id = $1`, uid)
+	if _, err := complete(e, tok, SecondFactor{TOTP: totpNow(e, secret)}); problemCode(err) != identity.CodeMfaExpired {
+		t.Fatalf("после сброса: %v", err)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM auth_challenges WHERE user_id = $1 AND attempts = 0 AND consumed_at IS NOT NULL`, uid); n != 1 {
+		t.Fatal("токен не погашен или попытка потрачена")
+	}
+	if _, err := complete(e, tok, SecondFactor{Recovery: "abcde-fghij"}); problemCode(err) != identity.CodeMfaExpired {
+		t.Fatalf("повтор: %v", err)
+	}
+	if out, err := e.a.Login(context.Background(), "mfa_reset_done@example.com", "secret", iphone); err != nil || out.Status != StatusAuthenticated {
+		t.Fatalf("вход заново: %+v %v", out, err)
+	}
+}

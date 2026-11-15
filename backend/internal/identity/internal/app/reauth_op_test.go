@@ -158,3 +158,25 @@ func TestChangePasswordNeedsFresh(t *testing.T) {
 		t.Fatalf("без пароля: %v", err)
 	}
 }
+
+// I1 ревью W5-Б: свежий вход вторым фактором доказывает, что факторы при владельце, — живой сброс 2FA поддержкой
+// отменяется в той же транзакции (§3.15 п. 4); неудачная попытка сброс не трогает.
+func TestReauthSecondFactorCancelsReset(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	ctx := context.Background()
+	uid := seedUser(t, r.owner, "reauth_cancel", "ru")
+	secret := seedMfa(t, r.env, uid, "abcde-fghij")
+	rid := r.liveReset(t, uid)
+	sid := staleSession(t, r.env, uid)
+	if _, err := r.a.Reauthenticate(ctx, sid, ReauthInput{TOTPCode: wrongCode(totpNow(r.env, secret))}); problemCode(err) != identity.CodeReauthInvalid {
+		t.Fatalf("неверный TOTP: %v", err)
+	}
+	if n := count(t, r.owner, `SELECT count(*) FROM mfa_resets WHERE id = $1 AND cancelled_at IS NULL`, rid); n != 1 {
+		t.Fatal("неудача отменила сброс")
+	}
+	if _, err := r.a.Reauthenticate(ctx, sid, ReauthInput{RecoveryCode: "abcde-fghij"}); err != nil {
+		t.Fatal(err)
+	}
+	ownerCancelled(t, r.env, uid, rid)
+}

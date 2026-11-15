@@ -325,6 +325,11 @@ func TestConfirmResetPendingDeletion(t *testing.T) {
 	if passwordHash(t, e, uid) != "h:"+resetNewPassword || sessions(t, e, uid) != 0 {
 		t.Fatal("пароль не сменён или выдана сессия")
 	}
+	// m6 ревью R1W5: выданный restore_token жив — гашение токенов шагов (revokeChallenges) идёт раньше finishLogin
+	got, err := e.a.CancelDeletion(context.Background(), out.RestoreToken, web("reset-dev"))
+	if err != nil || got.Status != StatusAuthenticated {
+		t.Fatalf("отмена удаления выданным токеном: %+v %v", got, err)
+	}
 }
 
 // Уборка W5 п. 1: флаг документов сброса считается в tx2 сценария (httpapi после коммита базу не читает): без
@@ -398,5 +403,33 @@ func TestConfirmResetSocialOnlySetsPassword(t *testing.T) {
 	}
 	if passwordHash(t, e, uid) != "h:"+resetNewPassword {
 		t.Fatal("пароль не задан")
+	}
+}
+
+// Непредусмотренное 1 ревью W5-А: смена пароля гасит живые mfa_token аккаунта — старый пароль не доводит вход вторым
+// фактором.
+func TestChangePasswordKillsStepTokens(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid, _, tok := mfaLogin(t, e, "change_tokens", "abcde-fghij")
+	if err := e.a.ChangePassword(context.Background(), freshSession(t, e, uid), resetNewPassword, web("req")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := complete(e, tok, SecondFactor{Recovery: "abcde-fghij"}); problemCode(err) != identity.CodeMfaExpired {
+		t.Fatalf("mfa_token после смены пароля: %v", err)
+	}
+}
+
+// Непредусмотренное 1 ревью W5-А: сброс пароля (tx2) гасит живые mfa_token аккаунта.
+func TestConfirmResetKillsStepTokens(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	_, secret, tok := mfaLogin(t, e, "reset_tokens", "abcde-fghij")
+	sent := startReset(t, e, "reset_tokens@example.com")
+	if _, err := confirmReset(e, sent, plainCode(t, e, sent.CodeID), &SecondFactor{TOTP: totpNow(e, secret)}, resetNewPassword); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := complete(e, tok, SecondFactor{Recovery: "abcde-fghij"}); problemCode(err) != identity.CodeMfaExpired {
+		t.Fatalf("mfa_token после сброса пароля: %v", err)
 	}
 }

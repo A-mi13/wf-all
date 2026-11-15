@@ -77,7 +77,7 @@ func (a *App) RevokeSession(ctx context.Context, userID, current, sessionID uuid
 }
 
 // RevokeOthers — «выйти везде, кроме этого»: все неотозванные, кроме current (revoked_others), событие и аудит — если
-// было что отзывать; ответ — сколько живых отозвано. current мёртвая под замком аккаунта (requireCurrent) — 401 без
+// было что отзывать; живые токены шагов аккаунта гаснут всегда; ответ — сколько живых отозвано. current мёртвая под замком аккаунта (requireCurrent) — 401 без
 // отзыва: отозванная сессия не выкидывает владельца.
 func (a *App) RevokeOthers(ctx context.Context, userID, current uuid.UUID) (int, error) {
 	var n int
@@ -88,6 +88,10 @@ func (a *App) RevokeOthers(ctx context.Context, userID, current uuid.UUID) (int,
 		}
 		ids, err := a.revokeSessions(ctx, tx, userID, current, domain.RevokedOthers)
 		if err != nil {
+			return err
+		}
+		// «выйти везде» закрывает и недоведённые входы (mfa_token) — даже когда других сессий нет
+		if err := a.revokeChallenges(ctx, tx, userID); err != nil {
 			return err
 		}
 		n = len(ids)

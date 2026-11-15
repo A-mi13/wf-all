@@ -49,7 +49,7 @@ func (h Handler) ConfirmTotp(ctx context.Context, req oapi.ConfirmTotpRequestObj
 	if err != nil {
 		return nil, err
 	}
-	codes, err := h.app.ConfirmTotp(ctx, p.UserID, req.Body.Code)
+	codes, err := h.app.ConfirmTotp(ctx, p.UserID, p.SessionID, req.Body.Code)
 	if err != nil {
 		return nil, err
 	}

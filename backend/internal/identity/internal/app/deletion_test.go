@@ -750,3 +750,30 @@ func TestAnonymizeSkipsFailedInRun(t *testing.T) {
 		t.Fatalf("отравленных в ожидании %d", n)
 	}
 }
+
+// m2 ревью W5-А: restore_token привязан к клиенту первого шага — другой вид клиента или другое устройство мобильного —
+// 410 restore_token_invalid без записей; с исходного устройства отмена проходит.
+func TestCancelDeletionClientMismatch(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid, sid := delSeed(t, e, "restore_client")
+	if _, err := e.a.DeleteAccount(context.Background(), sid, "restore_client"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := finish(t, e, uid, iphone, false, false)
+	if err != nil || out.RestoreToken == "" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	upsert(t, e, mobile("ios", "11111111-2222-3333-4444-555555555555")) // чужое устройство уже известно базе
+	for name, c := range map[string]Client{"веб": web("a"), "другое устройство": mobile("ios", "11111111-2222-3333-4444-555555555555")} {
+		if _, err := e.a.CancelDeletion(context.Background(), out.RestoreToken, c); problemCode(err) != identity.CodeRestoreTokenInvalid {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM users WHERE id = $1 AND status = 'pending_deletion'`, uid); n != 1 {
+		t.Fatal("удаление отменено с чужого клиента")
+	}
+	if res, err := e.a.CancelDeletion(context.Background(), out.RestoreToken, iphone); err != nil || res.Status != StatusAuthenticated {
+		t.Fatalf("исходное устройство: %+v %v", res, err)
+	}
+}

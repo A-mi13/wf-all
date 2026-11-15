@@ -14,6 +14,7 @@ import (
 
 	"wf/backend/internal/identity"
 	"wf/backend/internal/identity/internal/domain"
+	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/otp"
 )
 
@@ -49,7 +50,7 @@ func TestSetupConfirmTotp(t *testing.T) {
 	uid := seedUser(t, e.owner, "totp_on", "ru")
 	issue(t, e, uid, web("other")) // другая сессия — включение 2FA её не гасит
 	sid := freshSession(t, e, uid)
-	if _, err := e.a.ConfirmTotp(ctx, uid, "123456"); problemCode(err) != identity.CodeMfaSetupMissing {
+	if _, err := e.a.ConfirmTotp(ctx, uid, sid, "123456"); problemCode(err) != identity.CodeMfaSetupMissing {
 		t.Fatalf("confirm без setup: %v", err)
 	}
 	secret, uri := setupSecret(t, e, sid)
@@ -66,10 +67,10 @@ func TestSetupConfirmTotp(t *testing.T) {
 	if bytes.Contains(enc, secret) || confirmed != nil {
 		t.Fatalf("секрет открытым текстом или уже подтверждён: %v", confirmed)
 	}
-	if _, err := e.a.ConfirmTotp(ctx, uid, wrongCode(totpNow(e, secret))); problemCode(err) != identity.CodeMfaInvalid {
+	if _, err := e.a.ConfirmTotp(ctx, uid, sid, wrongCode(totpNow(e, secret))); problemCode(err) != identity.CodeMfaInvalid {
 		t.Fatalf("неверный код: %v", err)
 	}
-	codes, err := e.a.ConfirmTotp(ctx, uid, totpNow(e, secret))
+	codes, err := e.a.ConfirmTotp(ctx, uid, sid, totpNow(e, secret))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +109,7 @@ func TestSetupConfirmTotp(t *testing.T) {
 	if _, _, err := e.a.SetupTotp(ctx, sid); problemCode(err) != identity.CodeMfaAlreadyEnabled {
 		t.Fatalf("setup после включения: %v", err)
 	}
-	if _, err := e.a.ConfirmTotp(ctx, uid, totpNow(e, secret)); problemCode(err) != identity.CodeMfaSetupMissing {
+	if _, err := e.a.ConfirmTotp(ctx, uid, sid, totpNow(e, secret)); problemCode(err) != identity.CodeMfaSetupMissing {
 		t.Fatalf("confirm после включения: %v", err)
 	}
 	// несвежая сессия — 403 до любых изменений
@@ -132,10 +133,10 @@ func TestSetupTwiceReissues(t *testing.T) {
 	if bytes.Equal(first, second) {
 		t.Fatal("тот же секрет")
 	}
-	if _, err := e.a.ConfirmTotp(context.Background(), uid, totpNow(e, first)); problemCode(err) != identity.CodeMfaInvalid {
+	if _, err := e.a.ConfirmTotp(context.Background(), uid, sid, totpNow(e, first)); problemCode(err) != identity.CodeMfaInvalid {
 		t.Fatalf("код первого секрета: %v", err)
 	}
-	if _, err := e.a.ConfirmTotp(context.Background(), uid, totpNow(e, second)); err != nil {
+	if _, err := e.a.ConfirmTotp(context.Background(), uid, sid, totpNow(e, second)); err != nil {
 		t.Fatalf("код второго: %v", err)
 	}
 }
@@ -145,7 +146,8 @@ func TestConfirmTotpParallel(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	uid := seedUser(t, e.owner, "totp_race", "ru")
-	secret, _ := setupSecret(t, e, freshSession(t, e, uid))
+	sid := freshSession(t, e, uid)
+	secret, _ := setupSecret(t, e, sid)
 	code := totpNow(e, secret)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -154,7 +156,7 @@ func TestConfirmTotpParallel(t *testing.T) {
 	for i := range 2 {
 		wg.Go(func() {
 			<-start
-			got[i], errs[i] = e.a.ConfirmTotp(context.Background(), uid, code)
+			got[i], errs[i] = e.a.ConfirmTotp(context.Background(), uid, sid, code)
 		})
 	}
 	close(start)
@@ -298,5 +300,67 @@ func TestMfaStatus(t *testing.T) {
 	if err != nil || !st.TOTPEnabled || st.ConfirmedAt == nil || st.RecoveryCodesLeft != 1 || st.ResetScheduledAt == nil ||
 		!st.ResetScheduledAt.Equal(at) {
 		t.Fatalf("включено: %+v %v", st, err)
+	}
+}
+
+// I1 ревью W5-Б: выключение 2FA (свежий второй фактор) отменяет живой сброс владельцем — иначе воркер через 7 дней
+// стёр бы новую 2FA, включённую после выключения. mfa_at ставится напрямую: свежий вход вторым фактором сам отменяет
+// сброс (TestReauthSecondFactorCancelsReset) и замаскировал бы отмену в DisableTotp.
+func TestDisableTotpCancelsReset(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	w := roleApp(t, r.env, "worker", true)
+	ctx := context.Background()
+	uid := seedUser(t, r.owner, "disable_cancel", "ru")
+	seedMfa(t, r.env, uid)
+	rid := r.liveReset(t, uid)
+	sid := freshSession(t, r.env, uid)
+	acctExec(t, r.env, `UPDATE sessions SET mfa_at = $2 WHERE id = $1`, sid, r.clock.Now())
+	if err := r.a.DisableTotp(ctx, sid); err != nil {
+		t.Fatal(err)
+	}
+	ownerCancelled(t, r.env, uid, rid)
+	secret, _ := setupSecret(t, r.env, sid)
+	if _, err := r.a.ConfirmTotp(ctx, uid, sid, totpNow(r.env, secret)); err != nil {
+		t.Fatal(err)
+	}
+	r.clock.Advance(domain.MfaResetDelay)
+	if n, _, err := w.ExecuteDueMfaResets(ctx, 10, nil); err != nil || n != 0 {
+		t.Fatalf("воркер: %d %v", n, err)
+	}
+	if n := count(t, r.owner, `SELECT count(*) FROM user_mfa WHERE user_id = $1 AND confirmed_at IS NOT NULL`, uid); n != 1 {
+		t.Fatal("новая 2FA снята")
+	}
+	if n := count(t, r.owner, `SELECT count(*) FROM sessions WHERE id = $1 AND revoked_at IS NULL`, sid); n != 1 {
+		t.Fatal("сессия отозвана")
+	}
+}
+
+// m1 ревью W5-А: confirmTotp перечитывает сессию запроса под замком аккаунта — отозванная (кэш загрузчика ≤ 5 с ещё
+// пропускает её) получает 401 без кодов и без включения.
+func TestConfirmTotpRevokedSession(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+	uid := seedUser(t, e.owner, "confirm_revoked", "ru")
+	sid := freshSession(t, e, uid)
+	secret, _ := setupSecret(t, e, sid)
+	other := freshSession(t, e, seedUser(t, e.owner, "confirm_other", "ru"))
+	if _, err := e.a.ConfirmTotp(ctx, uid, other, totpNow(e, secret)); problemCode(err) != httpx.CodeUnauthenticated {
+		t.Fatalf("чужая сессия: %v", err)
+	}
+	if err := e.a.RevokeSession(ctx, uid, sid, sid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.a.ConfirmTotp(ctx, uid, sid, totpNow(e, secret)); problemCode(err) != httpx.CodeUnauthenticated {
+		t.Fatalf("отозванная: %v", err)
+	}
+	for q, want := range map[string]int{
+		`SELECT count(*) FROM user_mfa WHERE user_id = $1 AND confirmed_at IS NULL`: 1,
+		`SELECT count(*) FROM user_recovery_codes WHERE user_id = $1`:               0,
+	} {
+		if n := count(t, e.owner, q, uid); n != want {
+			t.Errorf("%s: %d, ждали %d", q, n, want)
+		}
 	}
 }

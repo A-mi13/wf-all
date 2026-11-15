@@ -251,8 +251,8 @@ func (a *App) ConfirmPasswordReset(ctx context.Context, in ResetInput, c Client)
 	return out, nil
 }
 
-// setPassword — новый хэш (users уже под замком): credentials upsert, отзыв сессий кроме keep (uuid.Nil — всех),
-// журнал безопасности, письмо password_changed, событие identity.password_changed (версия + 1), аудит action.
+// setPassword — новый хэш (users уже под замком): credentials upsert, отзыв сессий кроме keep (uuid.Nil — всех) и
+// всех живых токенов шагов аккаунта, журнал безопасности, письмо password_changed, событие identity.password_changed (версия + 1), аудит action.
 func (a *App) setPassword(ctx context.Context, tx pgx.Tx, userID uuid.UUID, hash string, keep uuid.UUID,
 	reason domain.RevokedReason, kind domain.SecurityKind, action string, c Client) error {
 	q := identitydb.New(tx)
@@ -262,6 +262,11 @@ func (a *App) setPassword(ctx context.Context, tx pgx.Tx, userID uuid.UUID, hash
 	}
 	revoked, err := a.revokeSessions(ctx, tx, userID, keep, reason)
 	if err != nil {
+		return err
+	}
+	// недоведённые шаги входа старым паролем (mfa_token, restore_token) — гаснут вместе с сессиями; у сброса — раньше
+	// finishLogin, который может выдать новый restore_token
+	if err := a.revokeChallenges(ctx, tx, userID); err != nil {
 		return err
 	}
 	ref, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: userID, Kind: kind, SessionID: keep, IP: c.IP,
