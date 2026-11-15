@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
 
 	"wf/backend/internal/geo"
 	"wf/backend/internal/identity/internal/domain"
+	"wf/backend/internal/identity/internal/store/identitydb"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/flags"
 	"wf/backend/internal/platform/humancheck"
@@ -36,13 +38,16 @@ type Deps struct {
 	Devices *keys.Ring // API_IDENTITY_DEVICE_KEYS: HMAC install_id и метки устройства BFF
 	Hasher  PasswordHasher
 	Limiter ratelimit.Limiter
-	Risk    *risk.Assessor
-	Human   humancheck.Verifier // PoW (humancheck.Require по риску)
-	Geo     geo.Service
-	Flags   *flags.Store
-	IPGeo   ipgeo.Locator // город по IP (ipgeo.None — без базы)
-	Legal   LegalDocs     // ParseLegalDocuments(API_LEGAL_DOCUMENTS)
-	Tokens  *token.Issuer
+	// LimiterTx — тот же лимитер на соединении транзакции: внутри db.InTx лимит только через него — второе соединение
+	// пула под замком users при исчерпанном пуле ждёт вечно (ревью волны 4, C1)
+	LimiterTx func(pgx.Tx) ratelimit.Limiter
+	Risk      *risk.Assessor
+	Human     humancheck.Verifier // PoW (humancheck.Require по риску)
+	Geo       geo.Service
+	Flags     *flags.Store
+	IPGeo     ipgeo.Locator // город по IP (ipgeo.None — без базы)
+	Legal     LegalDocs     // ParseLegalDocuments(API_LEGAL_DOCUMENTS)
+	Tokens    *token.Issuer
 	// River — клиент только для вставки (queue.InsertConfig): письма ставятся в транзакции действия
 	River      *river.Client[pgx.Tx]
 	Attestor   Attestor          // до I-3 — AttestOff (R2)
@@ -151,10 +156,19 @@ func New(pool *pgxpool.Pool) Service { return &service{pool: pool} }
 
 type service struct{ pool *pgxpool.Pool }
 
-// errServiceNotImplemented — тело Service.User пишет Task 14 плана I-2 (сигнатура — Task 8).
-var errServiceNotImplemented = errors.New("identity: Service.User не реализован (план I-2, Task 14)")
-
-// User — аккаунт по id; нет — ErrUserNotFound.
-func (s *service) User(context.Context, uuid.UUID) (UserSummary, error) {
-	return UserSummary{}, errServiceNotImplemented
+// User — аккаунт по id из экспортированного представления identity_read_users (у удалённого — ник-заглушка); нет —
+// ErrUserNotFound.
+func (s *service) User(ctx context.Context, id uuid.UUID) (UserSummary, error) {
+	r, err := identitydb.New(s.pool).UserSummary(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UserSummary{}, ErrUserNotFound
+	}
+	if err != nil {
+		return UserSummary{}, fmt.Errorf("identity: аккаунт: %w", err)
+	}
+	u := UserSummary{ID: r.ID, Nickname: r.Nickname, Status: string(r.Status), Locale: r.Locale}
+	if r.CityID != nil {
+		u.CityID = *r.CityID
+	}
+	return u, nil
 }

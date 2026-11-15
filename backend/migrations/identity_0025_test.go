@@ -253,7 +253,7 @@ func TestPendingDeletionDownRefuses(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	u := identityUser(t, db, "leaving@example.com", "leaving")
-	execArgs(t, db, `UPDATE users SET status = 'pending_deletion', deletion_requested_at = now(),
+	execArgs(t, db, `UPDATE users SET status = 'pending_deletion', status_before_deletion = 'active', deletion_requested_at = now(),
 		purge_at = now() + interval '30 days' WHERE id = $1`, u)
 
 	err := migrateTo(t, db, identityStatusVersion-1)
@@ -491,7 +491,7 @@ func TestIdentityReadViews(t *testing.T) {
 	active := identityUser(t, db, "active@example.com", "active_one")
 	leaving := identityUser(t, db, "leaving@example.com", "leaving_one")
 	gone := identityUser(t, db, "gone@example.com", "gone_one")
-	execArgs(t, db, `UPDATE users SET status = 'pending_deletion', deletion_requested_at = now(),
+	execArgs(t, db, `UPDATE users SET status = 'pending_deletion', status_before_deletion = 'active', deletion_requested_at = now(),
 		purge_at = now() + interval '30 days' WHERE id = $1`, leaving)
 	execArgs(t, db, `UPDATE users SET status = 'deleted' WHERE id = $1`, gone)
 

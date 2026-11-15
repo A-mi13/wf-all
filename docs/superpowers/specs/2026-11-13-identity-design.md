@@ -426,7 +426,9 @@ Apple; client id iOS, Android, web для Google), `exp`, `nonce`. Из токе
 **1. Запрос.** `deleteAccount {confirm_nickname}` (свежий вход; ник должен совпасть — `422 identity.confirm_mismatch`).
 Одна транзакция:
 
-- `users.status = pending_deletion`, `deletion_requested_at = now`, `purge_at = now + 30 дней`, `version + 1`;
+- `users.status = pending_deletion`, прежний статус (`active | suspended`) — в `status_before_deletion`,
+  `deletion_requested_at = now`, `purge_at = now + 30 дней`, `version + 1`; живые `restore_token` прошлых периодов
+  гаснут;
 - аккаунт **скрыт**: `identity_read_users.hidden = true` — модули не показывают его в лентах, поиске, составах, выдачах
   (их представления фильтруют по `hidden`); ник и почта остаются занятыми;
 - все сессии отзываются (`revoked_reason = account_deleted`); открытая заявка в капитаны — `withdrawn`; допуски
@@ -438,17 +440,26 @@ Apple; client id iOS, Android, web для Google), `exp`, `nonce`. Из токе
 **2. Отмена.** Любой успешный вход в течение срока (пароль, соцвход, ключ доступа — после 2FA, если она включена)
 отвечает `200 AuthResult {status: deletion_pending, deletion: {restore_token, purge_at}}` — сессия **не** создаётся.
 `cancelDeletion {restore_token, device}` (анонимно; токен — 256 бит, 10 минут, `auth_challenges`, `purpose =
-deletion_restore`) → `status = active`, поля удаления очищаются, новая сессия, `200 AuthResult authenticated`; событие
+deletion_restore`) → прежний статус из `status_before_deletion` (`suspended` остаётся `suspended` — решение
+пользователя 15.11), поля удаления очищаются, новая сессия, `200 AuthResult authenticated`; событие
 `identity.user_deletion_cancelled`, письмо `identity.account_restored`. Сброс пароля в период тоже ведёт к
 `deletion_pending`, а не к сессии. Регистрация на эту почту — как на занятую (письмо «аккаунт ожидает удаления — войдите,
 чтобы отменить»).
 
-**3. Анонимизация** (задача `maintenance` воркера по `purge_at`; повтор безопасен). Одна транзакция:
+**3. Анонимизация** (задача `maintenance` воркера по `purge_at`; повтор безопасен). Пачка — одна транзакция,
+каждый аккаунт — под своим `SAVEPOINT`: упавшая строка откатывается одна и пишется в журнал (id, ошибка), пачка идёт
+дальше. На аккаунт:
 
 - `users.status = deleted`, `deleted_at`; почта → необратимая заглушка `deleted+<id>@invalid`; ник → карантин
   90 дней (`nickname_reservations`), в `users.nickname` — `deleted-<12 hex>` (12 hex случайной части id);
 - удаляются `credentials`, `user_mfa`, `user_recovery_codes`, `passkeys`, `user_identities` (Apple — отзыв токена
   задачей после коммита), `consents`; `device_accounts` остаются (связи прошлых голосов нужны `results`);
+- затираются все ПД (решение пользователя 15.11): в `users` — телефон, `display_name`, `birth_date` (NULL допустим только
+  у `deleted`, CHECK `users_birth_date_required`), `city_id`, игровые поля профиля (к умолчаниям), `timezone`,
+  `webauthn_handle`, `last_login_at`; остаются `id`, `locale` (язык письма), `avatar_item_id` (предмет `economy`),
+  времена и `version`; в `captain_applications` — телефон, ссылка, заметка и поля формы, комментарий модератора
+  (у отказа `other` — прочерк: CHECK требует текст); удаляются `nickname_changes`, `sessions` (с `refresh_tokens`) и
+  записи `security_events`, кроме записи анонимизации (её `meta_enc` — адрес письма, стирает чистка);
 - допуски капитана отзываются;
 - событие `identity.user_deleted` (только сейчас — решение пользователя 13.11), письмо `identity.account_deleted`
   (адрес — зашифрован в `security_events` в момент запроса, стирается чисткой после письма), аудит `system`.

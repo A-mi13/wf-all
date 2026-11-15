@@ -700,7 +700,7 @@ func (q *Queries) AnchorUserRestrictions(ctx context.Context) ([]UserRestriction
 }
 
 const anchorUsers = `-- name: AnchorUsers :many
-SELECT id, email, email_verified_at, phone, phone_verified_at, nickname, nickname_normalized, display_name, birth_date, city_id, primary_position, secondary_position, claimed_skill, confirmed_skill, preferred_foot, height_cm, shirt_number, favourite_club, motto, locale, timezone, avatar_item_id, status, created_at, updated_at, deleted_at, version, webauthn_handle, last_login_at, deletion_requested_at, purge_at FROM users LIMIT 0
+SELECT id, email, email_verified_at, phone, phone_verified_at, nickname, nickname_normalized, display_name, birth_date, city_id, primary_position, secondary_position, claimed_skill, confirmed_skill, preferred_foot, height_cm, shirt_number, favourite_club, motto, locale, timezone, avatar_item_id, status, created_at, updated_at, deleted_at, version, webauthn_handle, last_login_at, deletion_requested_at, purge_at, status_before_deletion FROM users LIMIT 0
 `
 
 func (q *Queries) AnchorUsers(ctx context.Context) ([]User, error) {
@@ -744,6 +744,7 @@ func (q *Queries) AnchorUsers(ctx context.Context) ([]User, error) {
 			&i.LastLoginAt,
 			&i.DeletionRequestedAt,
 			&i.PurgeAt,
+			&i.StatusBeforeDeletion,
 		); err != nil {
 			return nil, err
 		}

@@ -299,9 +299,10 @@ func finish(t *testing.T, e *env, uid uuid.UUID, c Client, mfaDone, blockedAsExp
 
 func setStatus(t *testing.T, e *env, uid uuid.UUID, status string) {
 	t.Helper()
-	q := `UPDATE users SET status = $2, deletion_requested_at = NULL, purge_at = NULL WHERE id = $1`
+	q := `UPDATE users SET status = $2, status_before_deletion = NULL, deletion_requested_at = NULL, purge_at = NULL WHERE id = $1`
 	if status == "pending_deletion" {
-		q = `UPDATE users SET status = $2, deletion_requested_at = now(), purge_at = now() + interval '30 days' WHERE id = $1`
+		q = `UPDATE users SET status = $2, status_before_deletion = 'active', deletion_requested_at = now(),
+			purge_at = now() + interval '30 days' WHERE id = $1`
 	}
 	if _, err := e.owner.Exec(context.Background(), q, uid, status); err != nil {
 		t.Fatal(err)

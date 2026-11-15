@@ -141,5 +141,17 @@ func withFakeSession(t *testing.T, o *public.Options) *fakeSession {
 		t.Fatal(err)
 	}
 	o.Tokens, o.Sessions = issuer, f
+	// аккаунт и сессия подделки есть в базе: сценарии identity читают их (аккаунта нет — 401, как у мёртвой сессии)
+	if o.DB != nil {
+		if _, err := o.DB.Exec(context.Background(), `INSERT INTO users (id, email, email_verified_at, nickname, birth_date)
+			VALUES ($1, 'fake.session@example.com', now(), 'fake_session', '2000-01-01')`, f.userID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := o.DB.Exec(context.Background(), `INSERT INTO sessions (id, user_id, client_kind, auth_method, reauth_at,
+			ip, created_at, last_seen_at, idle_expires_at, absolute_expires_at) VALUES ($1, $2, 'web', 'password', now(),
+			'203.0.113.7', now(), now(), now() + interval '30 days', now() + interval '180 days')`, f.sessionID, f.userID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return f
 }

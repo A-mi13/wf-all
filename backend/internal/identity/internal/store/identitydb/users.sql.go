@@ -25,7 +25,7 @@ func (q *Queries) BumpUserVersion(ctx context.Context, id uuid.UUID) (int64, err
 
 const lockUser = `-- name: LockUser :one
 
-SELECT id, email, email_verified_at, phone, phone_verified_at, nickname, nickname_normalized, display_name, birth_date, city_id, primary_position, secondary_position, claimed_skill, confirmed_skill, preferred_foot, height_cm, shirt_number, favourite_club, motto, locale, timezone, avatar_item_id, status, created_at, updated_at, deleted_at, version, webauthn_handle, last_login_at, deletion_requested_at, purge_at FROM users WHERE id = $1 FOR NO KEY UPDATE
+SELECT id, email, email_verified_at, phone, phone_verified_at, nickname, nickname_normalized, display_name, birth_date, city_id, primary_position, secondary_position, claimed_skill, confirmed_skill, preferred_foot, height_cm, shirt_number, favourite_club, motto, locale, timezone, avatar_item_id, status, created_at, updated_at, deleted_at, version, webauthn_handle, last_login_at, deletion_requested_at, purge_at, status_before_deletion FROM users WHERE id = $1 FOR NO KEY UPDATE
 `
 
 // Аккаунт: замок и версия (план I-2, Task 8). Порядок замков R30: users первым (FOR NO KEY UPDATE).
@@ -64,6 +64,7 @@ func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.LastLoginAt,
 		&i.DeletionRequestedAt,
 		&i.PurgeAt,
+		&i.StatusBeforeDeletion,
 	)
 	return i, err
 }

@@ -794,37 +794,38 @@ type Session struct {
 }
 
 type User struct {
-	ID                  uuid.UUID
-	Email               string
-	EmailVerifiedAt     time.Time
-	Phone               *string
-	PhoneVerifiedAt     *time.Time
-	Nickname            string
-	NicknameNormalized  *string
-	DisplayName         *string
-	BirthDate           pgtype.Date
-	CityID              *uuid.UUID
-	PrimaryPosition     PlayerPosition
-	SecondaryPosition   *PlayerPosition
-	ClaimedSkill        SkillLevel
-	ConfirmedSkill      *SkillLevel
-	PreferredFoot       *string
-	HeightCm            *int16
-	ShirtNumber         *int16
-	FavouriteClub       *string
-	Motto               *string
-	Locale              string
-	Timezone            *string
-	AvatarItemID        *uuid.UUID
-	Status              UserStatus
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	DeletedAt           *time.Time
-	Version             int64
-	WebauthnHandle      []byte
-	LastLoginAt         *time.Time
-	DeletionRequestedAt *time.Time
-	PurgeAt             *time.Time
+	ID                   uuid.UUID
+	Email                string
+	EmailVerifiedAt      time.Time
+	Phone                *string
+	PhoneVerifiedAt      *time.Time
+	Nickname             string
+	NicknameNormalized   *string
+	DisplayName          *string
+	BirthDate            pgtype.Date
+	CityID               *uuid.UUID
+	PrimaryPosition      PlayerPosition
+	SecondaryPosition    *PlayerPosition
+	ClaimedSkill         SkillLevel
+	ConfirmedSkill       *SkillLevel
+	PreferredFoot        *string
+	HeightCm             *int16
+	ShirtNumber          *int16
+	FavouriteClub        *string
+	Motto                *string
+	Locale               string
+	Timezone             *string
+	AvatarItemID         *uuid.UUID
+	Status               UserStatus
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+	Version              int64
+	WebauthnHandle       []byte
+	LastLoginAt          *time.Time
+	DeletionRequestedAt  *time.Time
+	PurgeAt              *time.Time
+	StatusBeforeDeletion *UserStatus
 }
 
 type UserIdentity struct {
