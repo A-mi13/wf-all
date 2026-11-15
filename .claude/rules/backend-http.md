@@ -28,7 +28,20 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
 иначе API не стартует.
 
 - Перед peer `httpx.NewRouter` ставит `request_id`, лог доступа и recover; пробы — до роутера.
+- `/.well-known/*` (AASA и `assetlinks.json` до веба, спека identity §9.4, К4) — вне контракта: `public.Options.WellKnown`
+  (`identityhttp.WellKnown(API_WELLKNOWN_APPLE_APP_IDS, API_WELLKNOWN_ANDROID)`) монтируется на роутер, как `/docs`:
+  маршрута контракта нет — валидатор и `ratelimit.Middleware` его пропускают (лимитов класса `auth` нет); пустой
+  конфиг файла — 404 (страж `TestWellKnownMounted`); битый `API_WELLKNOWN_ANDROID` (нет пакета; отпечаток не 32 байта
+  hex через «:») — ошибка `WellKnown(…) (http.Handler, error)`, `cmd/api` отказывает в старте до базы (стражи
+  `TestWellKnownRejectsBadAndroid`, `TestRunRejectsBadWellKnownAndroid`).
+- Сессии игроков — `identity.NewSessionLoader(pool, clock)` под `auth.NewCachedLoader` (5 с) в `cmd/api`: отзыв,
+  бан и истечение доходят до запросов не позже чем через 5 с (`TestAccessAfterLogout`).
 - Нестроковый или пустой `x-rate-limit` — ошибка старта (`ratelimit.UnknownClasses`), а не тихий `default`.
+- Страж `TestNoStubOperations` (public) идёт с живой сессией подделки, у которой есть строки `users`/`sessions` в
+  базе (`withFakeSession`); операции обходятся по отсортированным id, `logout` — последним (он гасит эту сессию).
+  «Не дошёл до хендлера» = 401 **с** `WWW-Authenticate`: его ставят только `auth.Middleware` и валидатор, 401 хендлеров
+  (`identity.refresh_invalid`, `errSessionGone`) — без него. Добавить заголовок в `httpx.WriteError` — страж начнёт
+  ложно краснеть: тогда нужен другой признак.
 
 ## Конвейер admin-api (спека сотрудников §5.1)
 

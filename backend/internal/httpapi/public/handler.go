@@ -38,6 +38,8 @@ type Options struct {
 	AppVersions    appversion.Reader // минимальные версии приложения (appversion.NewReader)
 	// Identity — ручки identity (identityhttp.New); нулевое значение — 501 на каждую операцию (план I-1, R2)
 	Identity identityhttp.Handler
+	// WellKnown — файлы /.well-known до веба (identityhttp.WellKnown, R14 плана I-2); nil — каталога нет (404)
+	WellKnown http.Handler
 }
 
 const defaultRequestTimeout = 15 * time.Second
@@ -112,6 +114,10 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 			return nil, fmt.Errorf("public: контракт: %w", err)
 		}
 		apidocs.Mount(router, title, specJSON)
+	}
+	if o.WellKnown != nil {
+		// /.well-known/* не в контракте: как /docs — мимо валидатора (маршрута контракта нет) и без лимитов auth
+		router.Handle(identityhttp.WellKnownPrefix+"*", o.WellKnown)
 	}
 	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
 		BaseRouter: router,

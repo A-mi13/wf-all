@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -80,6 +81,11 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// /.well-known до веба (К4): битый API_WELLKNOWN_ANDROID — отказ старта здесь, до базы
+	wellKnown, err := identityhttp.WellKnown(cfg.WellKnown.AppleAppIDs, cfg.WellKnown.Android)
+	if err != nil {
+		return err
+	}
 	pc := peer.Config{TrustedProxies: cfg.Peer.TrustedProxies, BFFNets: cfg.Peer.BFFNets, BFFSecrets: cfg.Peer.BFFSecrets,
 		ClientIPHeader: cfg.Peer.ClientIPHeader}
 	if err := pc.Validate(); err != nil {
@@ -104,7 +110,8 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 			tokens := token.NewIssuer(jwtKeys, clock.System)
 			limiter := ratelimit.NewPG(pool, clock.System, ratelimit.Players)
 			idh, err := buildIdentity(log, pool, identity.Deps{Clock: clock.System, Secrets: secrets, Devices: devices,
-				Limiter: limiter, Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool), IPGeo: loc, Legal: legal,
+				Limiter: limiter, LimiterTx: func(tx pgx.Tx) ratelimit.Limiter { return ratelimit.NewPG(tx, clock.System, ratelimit.Players) },
+				Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool), IPGeo: loc, Legal: legal,
 				Tokens: tokens, TOTPIssuer: cfg.Identity.TOTPIssuer})
 			if err != nil {
 				return nil, err
@@ -116,8 +123,9 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 				DB:             pool,
 				Tokens:         tokens,
 				Identity:       idh,
-				// сессий нет до спеки identity: любой токен — 401; identity подставит свой загрузчик
-				Sessions:    auth.NewCachedLoader(auth.NoSessions, 5*time.Second, clock.System, 100_000),
+				WellKnown:      wellKnown,
+				// загрузчик identity (статус, отзыв, сроки, ограничения, допуски) под кэшем 5 с: отзыв действует ≤ 5 с
+				Sessions:    auth.NewCachedLoader(identity.NewSessionLoader(pool, clock.System), 5*time.Second, clock.System, 100_000),
 				Limiter:     limiter,
 				RateRules:   rules,
 				Geo:         geo.New(pool),

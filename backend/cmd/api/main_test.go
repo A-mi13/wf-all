@@ -112,3 +112,13 @@ func TestRunRejectsMissingIPGeoDB(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// Битый API_WELLKNOWN_ANDROID (отпечаток не SHA-256) — ошибка старта до подключения к базе, не паника.
+func TestRunRejectsBadWellKnownAndroid(t *testing.T) {
+	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
+		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_WELLKNOWN_ANDROID=app.wf=AA:BB"}
+	env = append(env, identityEnv...)
+	if err := run(context.Background(), env, io.Discard); err == nil || !strings.Contains(err.Error(), "API_WELLKNOWN_ANDROID") {
+		t.Fatalf("err = %v", err)
+	}
+}

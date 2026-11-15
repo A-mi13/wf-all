@@ -42,7 +42,7 @@ var opsBase = map[string]opRequest{
 	"completeMfa":        {http.MethodPost, "/v1/auth/mfa", `{"mfa_token":"Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1","code":"492817"}`},
 	"startPasswordReset": {http.MethodPost, "/v1/auth/password-reset", `{"email":"kosta.f@example.com"}`},
 	"confirmPasswordReset": {http.MethodPost, "/v1/auth/password-reset/confirm", `{"code_id":"0193a1c3-1f2e-7d31-a4b5-6c7d8e9f0a12",` +
-		`"code":"492817","new_password":"Свисток на 46-й минуте","mfa":{"recovery_code":"k7m2q-x9p4t"}}`},
+		`"code":"492817","new_password":"Свисток на 46-й минуте","mfa":{"recovery_code":"k7m2q-x6p4t"}}`},
 	"refreshSession":        {http.MethodPost, "/v1/auth/refresh", `{"refresh_token":"Yx3kQp1bZt7Lm2Vb4Np8Rt1Zw6Yc0Hs5Ae9Df3Gh7Jk","install_id":"6F9619FF-8B86-4D01-B42D-00CF4FC964FF"}`},
 	"cancelDeletion":        {http.MethodPost, "/v1/auth/deletion/cancel", `{"restore_token":"UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj"}`},
 	"getLegalDocuments":     {http.MethodGet, "/v1/legal/documents", ""},
@@ -143,9 +143,26 @@ func TestNoStubOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := 0
+	// порядок детерминирован: обход map случаен, а настоящий logout гасит общую сессию подделки в базе — после него
+	// операции со свежим входом честно отвечали бы 401; logout — последним
+	var ops []*openapi3.Operation
 	for _, item := range spec.Paths.Map() {
 		for _, op := range item.Operations() {
+			ops = append(ops, op)
+		}
+	}
+	slices.SortFunc(ops, func(a, b *openapi3.Operation) int {
+		if (opID(a) == "logout") != (opID(b) == "logout") {
+			if opID(a) == "logout" {
+				return 1
+			}
+			return -1
+		}
+		return strings.Compare(opID(a), opID(b))
+	})
+	n := 0
+	{
+		for _, op := range ops {
 			id := opID(op)
 			req, ok := opsBase[id]
 			if !ok {
@@ -175,7 +192,9 @@ func TestNoStubOperations(t *testing.T) {
 				}
 			case stub:
 				t.Errorf("%s: заглушка вне pendingOps — %d %s", id, rec.Code, body)
-			case rec.Code == http.StatusUnauthorized:
+			// 401 хендлера (identity.refresh_invalid, отозванная сессия под замком) — честный ответ; не дошёл — 401 края:
+			// WWW-Authenticate ставят только auth.Middleware и валидатор, хендлеры — нет
+			case rec.Code == http.StatusUnauthorized && rec.Header().Get("WWW-Authenticate") != "":
 				t.Errorf("%s: не дошёл до хендлера — %d %s", id, rec.Code, body)
 			}
 		}
