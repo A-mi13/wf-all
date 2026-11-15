@@ -159,8 +159,9 @@ func TestUpdateFlag(t *testing.T) {
 	}
 }
 
-// Два обновления одной версии: первое изменило строку (транзакция открыта), второе прочитало version 1 и ждёт
-// замок строки в UPDATE; первое коммитит — второе ErrStale (WHERE version), в базе одна запись (version 2).
+// Два обновления одной версии: первое изменило строку (транзакция открыта), второе ждёт замок строки в LockFlags
+// (SELECT … FOR UPDATE); первое коммитит — второе видит version 2 и отказывает сверкой версии (ErrStale), в базе одна
+// запись (version 2).
 func TestUpdateFlagConcurrent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -477,5 +478,30 @@ func TestEnabledHonoursRequires(t *testing.T) {
 	}
 	if _, err := s.Enabled(ctx, "auth_google", city); !errors.Is(err, flags.ErrUnknownFlag) {
 		t.Fatalf("Enabled без строки Apple: %v", err)
+	}
+}
+
+// Task 2 m2: у флага GlobalOnly города в строке (запись в обход Update: сид, ручной SQL) чтение не учитывает — админка
+// их не показывает, флаг для неё «выключен»; включён он только «везде».
+func TestEnabledGlobalOnlyIgnoresCities(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pools := dbtest.NewPoolsAs(t, "api")
+	s := flags.NewStore(pools.As)
+	city := uuid.New()
+	setAuthFlags(t, pools.Owner, false, false)
+	if _, err := pools.Owner.Exec(ctx, `UPDATE feature_flags SET enabled_city_ids = $1 WHERE key = 'auth_apple'`,
+		[]uuid.UUID{city}); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := s.Enabled(ctx, "auth_apple", city); err != nil || on {
+		t.Fatalf("Enabled по городу у GlobalOnly: %v %v", on, err)
+	}
+	if err := s.Require(ctx, "auth_apple", city); !errors.Is(err, flags.ErrDisabled) {
+		t.Fatalf("Require по городу у GlobalOnly: %v", err)
+	}
+	setAuthFlags(t, pools.Owner, true, false)
+	if on, err := s.Enabled(ctx, "auth_apple", city); err != nil || !on {
+		t.Fatalf("Enabled «везде» у GlobalOnly: %v %v", on, err)
 	}
 }

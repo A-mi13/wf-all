@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,13 @@ const identityEnv = "WORKER_IDENTITY_SECRET_KEYS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 // ошибка называет ключ (база недостижима: иначе ошибка была бы о подключении).
 func TestRunRequiresIdentityKeys(t *testing.T) {
 	t.Parallel()
-	mail := mailEnv[:len(mailEnv)-1]
+	// всё окружение воркера, кроме кольца identity (по префиксу, а не позиции в mailEnv — Task 4 m2)
+	mail := slices.DeleteFunc(slices.Clone(mailEnv), func(kv string) bool {
+		return strings.HasPrefix(kv, "WORKER_IDENTITY_SECRET_KEYS=")
+	})
+	if len(mail) != len(mailEnv)-1 {
+		t.Fatalf("кольца identity в mailEnv нет: %q", mailEnv)
+	}
 	for _, ring := range []string{"", "WORKER_IDENTITY_SECRET_KEYS="} {
 		env := append(append([]string{}, mail...), "WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1")
 		if ring != "" {

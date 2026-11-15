@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
+
+	"github.com/google/uuid"
 
 	"wf/backend/internal/identity/internal/domain"
 	"wf/backend/internal/identity/internal/store/identitydb"
@@ -19,26 +22,40 @@ const (
 	NickReserved = "reserved"
 )
 
-// nicknameVerdict — ник после NFKC и причина недоступности ("" — свободен). Проверка в базе — запросом q (пул или
-// tx вызывающего); now — граница живого карантина.
-func (a *App) nicknameVerdict(ctx context.Context, q *identitydb.Queries, nick string) (string, string, error) {
+// nickCheck — вердикт ника: Nick — после NFKC, Normalized — normalize_text (ключ занятости и карантина), Reason —
+// причина недоступности ("" — свободен).
+type nickCheck struct {
+	Nick, Normalized, Reason string
+}
+
+// nicknameCheck — доступность ника одним запросом NicknameState (регистрация, проверка и смена ника). owner — владелец
+// (смена ника): его аккаунт и его карантин ник не занимают; nil — не исключается никто. Запрос — q (пул или tx
+// вызывающего); now — граница живого карантина.
+func (a *App) nicknameCheck(ctx context.Context, q *identitydb.Queries, nick string, owner *uuid.UUID) (nickCheck, error) {
 	n, problem := domain.CheckNickname(nick)
 	if problem != domain.NicknameOK {
-		return "", NickInvalid, nil
+		return nickCheck{Reason: NickInvalid}, nil
 	}
-	st, err := q.NicknameState(ctx, identitydb.NicknameStateParams{Nickname: n, Now: a.clock.Now()})
+	st, err := q.NicknameState(ctx, identitydb.NicknameStateParams{Nickname: n, UserID: owner, Now: a.clock.Now()})
 	if err != nil {
-		return "", "", fmt.Errorf("identity: проверка ника: %w", err)
+		return nickCheck{}, fmt.Errorf("identity: проверка ника: %w", err)
 	}
+	c := nickCheck{Nick: n, Normalized: st.Normalized}
 	switch {
-	case int(st.NormLen) < domain.NicknameMinLen:
-		return "", NickInvalid, nil
+	case utf8.RuneCountInString(st.Normalized) < domain.NicknameMinLen:
+		return nickCheck{Reason: NickInvalid}, nil
 	case st.Reserved:
-		return n, NickReserved, nil
+		c.Reason = NickReserved
 	case st.Taken || st.Quarantined:
-		return n, NickTaken, nil
+		c.Reason = NickTaken
 	}
-	return n, "", nil
+	return c, nil
+}
+
+// nicknameVerdict — ник после NFKC и причина недоступности ("" — свободен) для регистрации: никто не исключается.
+func (a *App) nicknameVerdict(ctx context.Context, q *identitydb.Queries, nick string) (string, string, error) {
+	c, err := a.nicknameCheck(ctx, q, nick, nil)
+	return c.Nick, c.Reason, err
 }
 
 // CheckNickname — доступность ника (§5.8): reason — invalid | taken | reserved; свободен — available и "".

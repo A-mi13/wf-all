@@ -76,7 +76,9 @@ func (s Server) UpdateFeatureFlag(ctx context.Context, req oapi.UpdateFeatureFla
 	if req.Body.EnabledCityIds != nil {
 		cities = flags.CitySet(*req.Body.EnabledCityIds)
 		if len(cities) > 0 && flags.RuleOf(req.Key).GlobalOnly {
-			return nil, errFlagGlobalOnly // раньше проверки городов: у флага «только везде» их не смотрим
+			// раньше проверки городов: у флага «только везде» их не смотрим; единственная точка 422 — то же условие
+			// в flags.Store.Update (ErrGlobalOnly) отсюда недостижимо (Task 2 m3)
+			return nil, errFlagGlobalOnly
 		}
 		found, err := s.cities(ctx, cities)
 		if err != nil {
@@ -111,8 +113,6 @@ func (s Server) UpdateFeatureFlag(ctx context.Context, req oapi.UpdateFeatureFla
 		return nil, errFlagNotFound
 	case errors.Is(err, flags.ErrStale):
 		return nil, errFlagStale
-	case errors.Is(err, flags.ErrGlobalOnly):
-		return nil, errFlagGlobalOnly
 	}
 	if re, ok := errors.AsType[*flags.RequiresError](err); ok {
 		return nil, flagRequiresProblem{detail: re.Error()}

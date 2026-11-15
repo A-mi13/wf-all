@@ -20,6 +20,11 @@ UPDATE mfa_resets SET cancelled_at = @now, cancelled_by = 'system'
 WHERE user_id = @user_id AND executed_at IS NULL AND cancelled_at IS NULL
 RETURNING id, execute_at;
 
+-- name: DeletionScrubMfaResets :exec
+-- анонимизация (решение пользователя 15.11): причина и тикет сброса 2FA — свободный текст сотрудника, может называть
+-- игрока; reason NOT NULL с CHECK 3–500 — заглушка, ticket — NULL. Все сбросы аккаунта, и прошлые
+UPDATE mfa_resets SET reason = @reason_erased, ticket = NULL WHERE user_id = @user_id;
+
 -- name: DeletionRevokeCodes :exec
 -- живые коды аккаунта (смена почты, сброс пароля) — отозваны, код для письма стирается
 UPDATE auth_codes SET revoked_at = @now, code_enc = NULL, payload_enc = NULL
@@ -39,9 +44,11 @@ UPDATE auth_challenges SET consumed_at = @now
 WHERE user_id = @user_id AND purpose = 'deletion_restore' AND consumed_at IS NULL;
 
 -- name: DeletionDue :many
--- аккаунты с наступившим сроком: строка под замком, занятую (отмена удаления в процессе) пропустить
+-- аккаунты с наступившим сроком: строка под замком, занятую (отмена удаления в процессе) пропустить; skip — упавшие за
+-- этот прогон воркера (m8: иначе пачка из одних отравленных строк, старших по purge_at, заслоняла бы остальные навсегда)
 SELECT id, email, nickname_normalized FROM users
 WHERE status = 'pending_deletion' AND purge_at <= @now
+  AND NOT (id = ANY(coalesce(sqlc.narg(skip)::uuid[], '{}')))
 ORDER BY purge_at, id
 LIMIT sqlc.arg(batch)::int
 FOR NO KEY UPDATE SKIP LOCKED;

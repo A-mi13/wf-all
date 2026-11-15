@@ -80,7 +80,24 @@ paths:
 - Ошибка, которую должен увидеть клиент (лимит, антибот, идемпотентность, флаг), — `httpx.ProblemError`
   (`httpx.NewError(статус, httpx.Code…)`); код строкой — падение стража `TestProblemCodesAreConstants`.
   Остаток попыток (неверный код или пароль) — `.WithAttemptsLeft(n)`: новая ошибка, поле `attempts_left` (0 тоже
-  уходит); `Retry-After` — только заголовком (`Problem.RetryAfter`, в теле `retry_after` нет).
+  уходит); `Retry-After` — только заголовком (`Problem.RetryAfter`, в теле `retry_after` нет;
+  `.WithRetryAfter(d)` — секунды вверх, не меньше 1). Прочие поля тела — тоже копирующими `With…` (исходная ошибка не
+  меняется): `.WithReasons(…)` (`reasons`: `password_weak`, `captain_ineligible`), `.WithMethods(…)` (`methods` вторых
+  факторов, `mfa_required`), `.WithAvailableAt(t)` (`available_at` UTC: `nickname_change_too_soon`),
+  `.WithBlockedUntil(t)` (`blocked_until` UTC у `account_blocked`; бессрочно — поля нет); пустые поля не уходят.
+- Почта игрока и сотрудника — только `emailaddr.Normalize` (одна каноническая ASCII-форма: NFKC, нижний регистр,
+  dot-atom ≤ 64, IDN → A-label с белым списком, невидимые — отказ, ≤ 254 байт; `ok=false` — не адрес); её же
+  повторяет CHECK `users_email_format` (`0025`, плюс заглушка `deleted+<uuid>@invalid`; предпроверка наката —
+  дословно, страж `TestIdentityEmailPrecheckMatchesCheck`); `emailaddr.Domain` — домен, `IsInvisible` — невидимые
+  символы (правила ника).
+- Второй фактор и коды — `platform/otp` (без БД и часов: время передаёт вызывающий): TOTP RFC 6238 (SHA-1, 6 цифр,
+  30 с, ±1 шаг) — `Verify(secret, code, now, lastUsed)` отдаёт принятый шаг (вызывающий пишет его в `last_used_step`,
+  шаг ≤ lastUsed не принимается); резервные коды и код приглашения — `NewCode`/`NewRecoveryCodes` (`xxxxx-xxxxx`,
+  base32 RFC 4648 строчными), ввод — `NormalizeRecoveryCode`/`NormalizeCode`; MAC и хранение кодов — у модуля.
+- Город по IP — `platform/ipgeo` (`Open(API_IPGEO_DB)`: пусто — `ipgeo.None`; файл не MMDB городов — ошибка старта);
+  `Lookup` → `ok=false` на служебных адресах (частные, CGNAT 100.64/10, 0/8, петля, link-local, multicast) и вне базы
+  — город лишь подсказка; игроку — только имя города, не IP. `Closer` закрывать после дренажа HTTP и остановки фона
+  (иначе SIGSEGV у maxminddb).
 - Почта — только задача `mail.SendArgs{V: 1, Mail: "<модуль>.<письмо>", Ref: id}` (на другую версию воркер
   вернёт ошибку, задача уйдёт в повтор и после `MaxAttempts` станет «мёртвой»); адрес находит
   `mail.Composer` модуля, текст — `i18n.Catalog.Text` (`backend/locales`, ключи ru = en). `mail.SMTP.Send` закрывает
@@ -117,12 +134,13 @@ paths:
   событие — `appversion.ChangedEvent` (агрегат `app_versions`, `id.Named`), его и аудит пишет ручка в той же tx.
 - Флаги функций — `flags.Store`: чтение модулями `Enabled`/`Require`; админка — `List` и `Update(ctx, tx, key,
   version, globally, cities)` (оптимистичная `version`: не та — `ErrStale`, и при неизменных значениях; параллельная
-  правка той же версии — 0 строк `UPDATE … WHERE version` → `ErrStale`; города — множество `flags.CitySet`; ничего не
-  меняется — без записи); событие — `flags.ChangedEvent` (агрегат `feature_flag`, `flags.FlagID`). Города флага
+  правка той же версии ждёт замок `LockFlags` и видит version + 1 → `ErrStale`, `WHERE version` в `UPDATE` — защита в
+  глубину; города — множество `flags.CitySet`; ничего не меняется — без записи); событие — `flags.ChangedEvent` (агрегат `feature_flag`, `flags.FlagID`). Города флага
   проверяет `httpapi/admin` через `geo.Service.ExistingCityIDs` (R19): `platform` модули не импортирует.
   Правила флагов — таблица `rules` в `flags/rules.go` (`flags.RuleOf`; модуль добавляет строку своим коммитом, как
   права в `perm`): `GlobalOnly` — непустой список городов → `ErrGlobalOnly` до любого запроса (ручка — `422
-  platform.flag_global_only` раньше `ExistingCityIDs`); `Requires` — только между `GlobalOnly` (страж
+  platform.flag_global_only` своей предпроверкой раньше `ExistingCityIDs`; `Enabled` такого флага смотрит только
+  `enabled_globally` — города в строке, записанные в обход `Update`, не включают его); `Requires` — только между `GlobalOnly` (страж
   `TestRulesConsistent`). `Update` берёт строки флага, его зависимости и зависимых **одним** запросом `LockFlags`
   (`ORDER BY key FOR UPDATE`) — замки по одному в разном порядке у двух `PATCH` дают `40P01` (страж
   `TestUpdateRequiresConcurrent`); итог, нарушающий зависимость (незаведённая строка зависимости — выключена), —

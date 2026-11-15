@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"wf/backend/internal/identity"
@@ -15,6 +16,10 @@ import (
 	"wf/backend/internal/platform/events"
 )
 
+// mfaResetReasonErased — заглушка mfa_resets.reason анонимизированного аккаунта: колонка NOT NULL с CHECK 3–500
+// символов, а причина — свободный текст сотрудника (может называть игрока).
+const mfaResetReasonErased = "---"
+
 // AnonymizeDue — необратимая анонимизация аккаунтов с наступившим purge_at (§3.11 п. 3; воркер, роль worker,
 // права §5.5). Пачка — одна tx: строки users status = pending_deletion AND purge_at ≤ now под FOR NO KEY UPDATE SKIP
 // LOCKED (R30: users первым; строку под замком отмены удаления пропустить — отмена решит её судьбу). Каждая строка —
@@ -23,36 +28,38 @@ import (
 // Отмена ctx и сбой самой транзакции — откат пачки целиком. На строку: журнал account_deleted с адресом в meta_enc
 // (Seal кольцом, aad = id записи) и письмо по нему — ДО замены почты (I3: meta_enc записи запроса чистка стирает
 // раньше); все ПД аккаунта затираются (решение пользователя 15.11; список колонок — DeletionAnonymizeUser и
-// DeletionScrubApplications), ник → domain.DeletedNickname (индекс ника частичный — коллизии и повтора при 23505 нет),
+// DeletionScrubApplications; причина и тикет сбросов 2FA — DeletionScrubMfaResets), ник → domain.DeletedNickname (индекс ника частичный — коллизии и повтора при 23505 нет),
 // прежний — в карантин 90 дней; удаляются секреты, привязки, согласия, коды с адресом, история ника, сессии и прочий
 // журнал безопасности; допуски капитана — revoked (account_deleted); событие user_deleted, аудит system. Повтор на
-// deleted — ничего (строка не выбирается). n — анонимизировано в пачке (упавшие строки не в счёт: воркер на неполной
-// пачке останавливается до следующего запуска).
-func (a *App) AnonymizeDue(ctx context.Context, batch int) (n int, err error) {
+// deleted — ничего (строка не выбирается). skip — строки, упавшие раньше в этом прогоне воркера (m8: не выбираются);
+// selected — выбрано строк, failed — упавшие в этой пачке (анонимизировано selected − len(failed)); воркер идёт, пока
+// выбрана полная пачка.
+func (a *App) AnonymizeDue(ctx context.Context, batch int, skip []uuid.UUID) (selected int, failed []uuid.UUID, err error) {
 	err = db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
-		n = 0
+		selected, failed = 0, nil
 		q := identitydb.New(tx)
 		now := a.clock.Now()
-		rows, err := q.DeletionDue(ctx, identitydb.DeletionDueParams{Now: &now, Batch: int32(min(batch, 1000))}) //nolint:gosec // G115: пачка ≤ 1000
+		rows, err := q.DeletionDue(ctx, identitydb.DeletionDueParams{Now: &now, Skip: skip, Batch: int32(min(batch, 1000))}) //nolint:gosec // G115: пачка ≤ 1000
 		if err != nil {
 			return fmt.Errorf("identity: аккаунты к анонимизации: %w", err)
 		}
 		a.firstLock("anonymize")
+		selected = len(rows)
 		for _, r := range rows {
 			ok, err := a.anonymizeSaved(ctx, tx, r)
 			if err != nil {
 				return err
 			}
-			if ok {
-				n++
+			if !ok {
+				failed = append(failed, r.ID)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return n, nil
+	return selected, failed, nil
 }
 
 // anonymizeSaved — anonymize под SAVEPOINT: ошибка строки — откат до точки сохранения и журнал, ok = false; ошибка
@@ -139,6 +146,10 @@ func (a *App) anonymize(ctx context.Context, tx pgx.Tx, q *identitydb.Queries, r
 	// сброс 2FA, назначенный в период отмены (admin-api не видит статус удаления), — отменён системой
 	if err := a.cancelMfaResetsBySystem(ctx, q, r.ID); err != nil {
 		return err
+	}
+	if err := q.DeletionScrubMfaResets(ctx, identitydb.DeletionScrubMfaResetsParams{ReasonErased: mfaResetReasonErased,
+		UserID: r.ID}); err != nil {
+		return fmt.Errorf("identity: причина сброса 2FA: %w", err)
 	}
 	if _, err := events.Publish(ctx, identity.UserDeleted(identity.UserRef{ID: r.ID, Version: ver})); err != nil {
 		return err

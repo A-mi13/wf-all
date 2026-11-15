@@ -102,33 +102,38 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
 
 const nicknameState = `-- name: NicknameState :one
 
-SELECT length(normalize_text($1::text))::int AS norm_len,
+SELECT normalize_text($1::text)::text AS normalized,
        EXISTS (SELECT 1 FROM reserved_nicknames r WHERE r.nickname_normalized = normalize_text($1::text)) AS reserved,
        EXISTS (SELECT 1 FROM users u
-               WHERE u.nickname_normalized = normalize_text($1::text) AND u.deleted_at IS NULL) AS taken,
+               WHERE u.nickname_normalized = normalize_text($1::text) AND u.deleted_at IS NULL
+                 AND u.id IS DISTINCT FROM $2::uuid) AS taken,
        EXISTS (SELECT 1 FROM nickname_reservations n
-               WHERE n.nickname_normalized = normalize_text($1::text) AND n.expires_at > $2::timestamptz) AS quarantined
+               WHERE n.nickname_normalized = normalize_text($1::text) AND n.expires_at > $3::timestamptz
+                 AND (n.previous_user_id IS NULL OR n.previous_user_id IS DISTINCT FROM $2::uuid)) AS quarantined
 `
 
 type NicknameStateParams struct {
 	Nickname string
+	UserID   *uuid.UUID
 	Now      time.Time
 }
 
 type NicknameStateRow struct {
-	NormLen     int32
+	Normalized  string
 	Reserved    bool
 	Taken       bool
 	Quarantined bool
 }
 
 // Регистрация по почте и доступность ника (спека identity §3.1, §5.8; план I-2, Task 10).
-// длина после normalize_text (§5.8: не короче 3), резерв, занятость живым аккаунтом и живой карантин
+// ник после normalize_text (§5.8: не короче 3), резерв, занятость живым аккаунтом и живой карантин — один запрос
+// регистрации, проверки ника и смены ника. user_id — владелец (смена ника): его аккаунт и его карантин ник не занимают;
+// NULL (регистрация, проверка) — не исключается никто; карантин удалённого (previous_user_id NULL) занят для всех.
 func (q *Queries) NicknameState(ctx context.Context, arg NicknameStateParams) (NicknameStateRow, error) {
-	row := q.db.QueryRow(ctx, nicknameState, arg.Nickname, arg.Now)
+	row := q.db.QueryRow(ctx, nicknameState, arg.Nickname, arg.UserID, arg.Now)
 	var i NicknameStateRow
 	err := row.Scan(
-		&i.NormLen,
+		&i.Normalized,
 		&i.Reserved,
 		&i.Taken,
 		&i.Quarantined,

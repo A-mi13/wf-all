@@ -36,7 +36,7 @@ func startReset(t *testing.T, e *env, email string) CodeSent {
 	return sent
 }
 
-func confirmReset(e *env, sent CodeSent, code string, mfa *SecondFactor, pw string) (LoginOutcome, error) {
+func confirmReset(e *env, sent CodeSent, code string, mfa *SecondFactor, pw string) (AuthOutcome, error) {
 	return e.a.ConfirmPasswordReset(context.Background(), ResetInput{CodeID: sent.CodeID, Code: code, NewPassword: pw,
 		MFA: mfa}, web("reset-dev"))
 }
@@ -325,6 +325,65 @@ func TestConfirmResetPendingDeletion(t *testing.T) {
 	if passwordHash(t, e, uid) != "h:"+resetNewPassword || sessions(t, e, uid) != 0 {
 		t.Fatal("пароль не сменён или выдана сессия")
 	}
+}
+
+// Уборка W5 п. 1: флаг документов сброса считается в tx2 сценария (httpapi после коммита базу не читает): без
+// согласий — true, с текущими версиями — false.
+func TestConfirmResetDocumentsRequired(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for _, tc := range []struct {
+		nick     string
+		accepted bool
+	}{{"reset_docs_none", false}, {"reset_docs_ok", true}} {
+		uid := seedUser(t, e.owner, tc.nick, "ru")
+		setPassword(t, e, uid, "h:old")
+		if tc.accepted {
+			for _, d := range []string{"terms", "privacy"} {
+				if _, err := e.owner.Exec(context.Background(), `INSERT INTO consents (user_id, document, version, accepted_at, client_kind)
+					VALUES ($1, $2, '2026-11-01', now(), 'mobile')`, uid, d); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		sent := startReset(t, e, tc.nick+"@example.com")
+		out, err := confirmReset(e, sent, plainCode(t, e, sent.CodeID), nil, resetNewPassword)
+		if err != nil || out.Status != StatusAuthenticated {
+			t.Fatalf("%s: %+v %v", tc.nick, out, err)
+		}
+		if out.DocumentsRequired == tc.accepted {
+			t.Fatalf("%s: documents_acceptance_required = %v", tc.nick, out.DocumentsRequired)
+		}
+	}
+}
+
+// deadlineHasher — хэшер, запоминающий срок ctx хэша.
+type deadlineHasher struct {
+	fakeHasher
+	ctx context.Context
+}
+
+func (h *deadlineHasher) Hash(ctx context.Context, pw string) (string, error) {
+	h.ctx = ctx
+	return h.fakeHasher.Hash(ctx, pw)
+}
+
+// m11: хэш нового пароля после tx1 — на ctx со сроком ≤ detachedTimeout, даже если у запроса срока нет.
+func TestConfirmResetHashDeadline(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	h := &deadlineHasher{}
+	e.a.hasher = h
+	uid := seedUser(t, e.owner, "reset_deadline", "ru")
+	setPassword(t, e, uid, "h:old")
+	sent := startReset(t, e, "reset_deadline@example.com")
+	if _, err := confirmReset(e, sent, plainCode(t, e, sent.CodeID), nil, resetNewPassword); err != nil {
+		t.Fatal(err)
+	}
+	if h.ctx == nil {
+		t.Fatal("Hash не вызван")
+	}
+	assertDetachedDeadline(h.ctx, t)
 }
 
 // §3.4: аккаунт без пароля (только соцвход) сбросом получает пароль.

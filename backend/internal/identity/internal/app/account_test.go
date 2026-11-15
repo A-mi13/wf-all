@@ -209,6 +209,23 @@ func TestChangeNicknameInvalid(t *testing.T) {
 	}
 }
 
+// Уборка W5 п. 2 (общий запрос NicknameState с user_id): свой ник другим регистром — не «занят собой»; живой карантин
+// удалённого владельца (previous_user_id NULL) — занят для всех.
+func TestChangeNicknameOwnerExclusion(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid := seedUser(t, e.owner, "case_user", "ru")
+	if _, err := e.a.ChangeNickname(context.Background(), uid, "CASE_USER"); err != nil {
+		t.Fatalf("свой ник другим регистром: %v", err)
+	}
+	e.clock.Advance(domain.NicknameChangeEvery)
+	acctExec(t, e, `INSERT INTO nickname_reservations (nickname_normalized, previous_user_id, released_at, expires_at)
+		VALUES (normalize_text('orphan_q'), NULL, $1, $2)`, e.clock.Now(), e.clock.Now().Add(time.Hour))
+	if _, err := e.a.ChangeNickname(context.Background(), uid, "orphan_q"); problemCode(err) != identity.CodeNicknameTaken {
+		t.Fatalf("карантин удалённого: %v", err)
+	}
+}
+
 // Гонка: два аккаунта на один свободный ник — оба прошли проверки (барьер), один 200, второй 409 (23505).
 func TestChangeNicknameRace(t *testing.T) {
 	t.Parallel()

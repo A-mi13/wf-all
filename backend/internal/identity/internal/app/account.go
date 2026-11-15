@@ -240,25 +240,15 @@ func (a *App) ChangeNickname(ctx context.Context, userID uuid.UUID, nick string)
 		case !errors.Is(err, pgx.ErrNoRows):
 			return err
 		}
-		busy, err := q.AccountNicknameBusy(ctx, identitydb.AccountNicknameBusyParams{Nickname: nick, UserID: userID})
-		if err != nil {
-			return fmt.Errorf("identity: ник: %w", err)
-		}
-		if len([]rune(busy.Normalized)) < domain.NicknameMinLen {
-			return errNicknameInvalid
-		}
-		if busy.Reserved || busy.Used {
-			return errNicknameTaken
-		}
-		holders, err := q.AccountNicknameQuarantine(ctx, identitydb.AccountNicknameQuarantineParams{
-			NicknameNormalized: busy.Normalized, Now: now})
+		busy, err := a.nicknameCheck(ctx, q, nick, &userID)
 		if err != nil {
 			return err
 		}
-		for _, h := range holders {
-			if h == nil || *h != userID {
-				return errNicknameTaken
-			}
+		switch busy.Reason {
+		case NickInvalid:
+			return errNicknameInvalid
+		case NickReserved, NickTaken:
+			return errNicknameTaken
 		}
 		// свой прежний ник (или истёкший карантин) — строка карантина больше не нужна
 		if err := q.AccountDeleteNicknameReservation(ctx, busy.Normalized); err != nil {

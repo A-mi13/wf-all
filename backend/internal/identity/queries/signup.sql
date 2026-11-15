@@ -1,13 +1,17 @@
 -- Регистрация по почте и доступность ника (спека identity §3.1, §5.8; план I-2, Task 10).
 
 -- name: NicknameState :one
--- длина после normalize_text (§5.8: не короче 3), резерв, занятость живым аккаунтом и живой карантин
-SELECT length(normalize_text(@nickname::text))::int AS norm_len,
+-- ник после normalize_text (§5.8: не короче 3), резерв, занятость живым аккаунтом и живой карантин — один запрос
+-- регистрации, проверки ника и смены ника. user_id — владелец (смена ника): его аккаунт и его карантин ник не занимают;
+-- NULL (регистрация, проверка) — не исключается никто; карантин удалённого (previous_user_id NULL) занят для всех.
+SELECT normalize_text(@nickname::text)::text AS normalized,
        EXISTS (SELECT 1 FROM reserved_nicknames r WHERE r.nickname_normalized = normalize_text(@nickname::text)) AS reserved,
        EXISTS (SELECT 1 FROM users u
-               WHERE u.nickname_normalized = normalize_text(@nickname::text) AND u.deleted_at IS NULL) AS taken,
+               WHERE u.nickname_normalized = normalize_text(@nickname::text) AND u.deleted_at IS NULL
+                 AND u.id IS DISTINCT FROM sqlc.narg(user_id)::uuid) AS taken,
        EXISTS (SELECT 1 FROM nickname_reservations n
-               WHERE n.nickname_normalized = normalize_text(@nickname::text) AND n.expires_at > sqlc.arg(now)::timestamptz) AS quarantined;
+               WHERE n.nickname_normalized = normalize_text(@nickname::text) AND n.expires_at > sqlc.arg(now)::timestamptz
+                 AND (n.previous_user_id IS NULL OR n.previous_user_id IS DISTINCT FROM sqlc.narg(user_id)::uuid)) AS quarantined;
 
 -- name: UserByEmail :one
 -- живой аккаунт с этой почтой (анонимизированный носит заглушку deleted+<uuid>@invalid и сюда не попадает)

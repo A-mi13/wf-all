@@ -126,20 +126,21 @@ func resetBlocked(u userRow, row codeRow) bool {
 // резервный код — коммитится с tx1). После tx1 фактор может быть сожжён — Hash и tx2 идут на detached: обрыв запроса
 // смену не прерывает (m3). tx2: lockUser → FOR UPDATE кода и перепроверка (тот же аккаунт, не закрыт, не banned, та
 // же почта; иначе 410 без записей), погашение, пароль, отзыв всех сессий (password_reset), журнал, письмо
-// password_changed, событие, аудит, finishLogin (сессия или deletion_pending).
+// password_changed, событие, аудит, finishLogin (сессия или deletion_pending) и флаг документов (в tx2 — после
+// коммита база не читается).
 //
 // Retry-After у 429 лимита user:mfa — интервал политики (час / 10 = 6 мин; m10): Limiter.Over отдаёт только «да/нет»,
 // а при Over у GCRA следующий проход наступает не позже одного интервала (tat − now ≤ окно: неудачи сверх Over не
 // учитываются) — оценка сверху, без расширения интерфейса платформы.
-func (a *App) ConfirmPasswordReset(ctx context.Context, in ResetInput, c Client) (LoginOutcome, error) {
+func (a *App) ConfirmPasswordReset(ctx context.Context, in ResetInput, c Client) (AuthOutcome, error) {
 	if err := a.requireDevice(c); err != nil {
-		return LoginOutcome{}, err
+		return AuthOutcome{}, err
 	}
 	if err := password.Check(in.NewPassword); err != nil {
-		return LoginOutcome{}, weakPassword(err, "body.new_password")
+		return AuthOutcome{}, weakPassword(err, "body.new_password")
 	}
 	if in.MFA != nil && (in.MFA.TOTP == "") == (in.MFA.Recovery == "") {
-		return LoginOutcome{}, errFactorShape
+		return AuthOutcome{}, errFactorShape
 	}
 	var userID uuid.UUID
 	var mfaDone bool
@@ -194,7 +195,7 @@ func (a *App) ConfirmPasswordReset(ctx context.Context, in ResetInput, c Client)
 		return nil
 	})
 	if err != nil {
-		return LoginOutcome{}, err
+		return AuthOutcome{}, err
 	}
 	// tx1 закоммитила шаг TOTP или резервный код — смену доводим и при оборванном запросе (m3)
 	dctx, cancel := detached(ctx)
@@ -202,9 +203,9 @@ func (a *App) ConfirmPasswordReset(ctx context.Context, in ResetInput, c Client)
 	// argon2 — вне транзакции и без соединения пула (R31)
 	hash, err := a.hasher.Hash(dctx, in.NewPassword)
 	if err != nil {
-		return LoginOutcome{}, err
+		return AuthOutcome{}, err
 	}
-	var out LoginOutcome
+	var out AuthOutcome
 	err = db.InTx(dctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		u, err := a.lockUser(ctx, tx, userID)
 		if errors.Is(err, errUserGone) {
@@ -231,14 +232,21 @@ func (a *App) ConfirmPasswordReset(ctx context.Context, in ResetInput, c Client)
 		if err != nil {
 			return err
 		}
-		out, err = a.finishLogin(ctx, tx, u, c, dev, domain.MethodPassword, mfaDone, true)
+		out = AuthOutcome{}
+		out.LoginOutcome, err = a.finishLogin(ctx, tx, u, c, dev, domain.MethodPassword, mfaDone, true)
 		if errors.Is(err, errBlockedAsExpired) || errors.Is(err, errAccountDeleted) {
 			return errCodeExpired
+		}
+		if err != nil {
+			return err
+		}
+		if out.Status == StatusAuthenticated {
+			out.DocumentsRequired, err = a.documentsRequired(ctx, identitydb.New(tx), u.ID)
 		}
 		return err
 	})
 	if err != nil {
-		return LoginOutcome{}, err
+		return AuthOutcome{}, err
 	}
 	return out, nil
 }

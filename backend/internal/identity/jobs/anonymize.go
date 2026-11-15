@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 
 	"wf/backend/internal/platform/queue"
@@ -32,12 +33,13 @@ func (AnonymizeArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: queue.Maintenance, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByPeriod: time.Hour}}
 }
 
-// Anonymizer — сценарий анонимизации (app.App.AnonymizeDue у сборки воркера, NewMaintenance под ролью worker).
+// Anonymizer — сценарий анонимизации (app.App.AnonymizeDue у сборки воркера, NewMaintenance под ролью worker): пачка
+// до batch строк без skip; selected — выбрано строк, failed — упавшие (откачены, в журнале).
 type Anonymizer interface {
-	AnonymizeDue(ctx context.Context, batch int) (int, error)
+	AnonymizeDue(ctx context.Context, batch int, skip []uuid.UUID) (selected int, failed []uuid.UUID, err error)
 }
 
-// AnonymizeWorker — исполнитель identity.anonymize: пачки до исчерпания (неполная пачка — последняя).
+// AnonymizeWorker — исполнитель identity.anonymize: пачки до исчерпания (выбрано меньше пачки — последняя).
 type AnonymizeWorker struct {
 	river.WorkerDefaults[AnonymizeArgs]
 	a Anonymizer
@@ -49,17 +51,21 @@ func NewAnonymizeWorker(a Anonymizer) *AnonymizeWorker { return &AnonymizeWorker
 // Timeout — срок задачи.
 func (*AnonymizeWorker) Timeout(*river.Job[AnonymizeArgs]) time.Duration { return 10 * time.Minute }
 
-// Work — AnonymizeDue пачками; каждая пачка — своя транзакция, повтор задачи безопасен.
+// Work — AnonymizeDue пачками; каждая пачка — своя транзакция, повтор задачи безопасен. Упавшие за прогон строки
+// исключаются из следующих выборок (m8): пачка из одних отравленных строк не останавливает прогон, и он конечен —
+// каждая строка выбирается в прогоне не больше раза до успеха или падения. Упавшие пробует следующий запуск.
 func (w *AnonymizeWorker) Work(ctx context.Context, job *river.Job[AnonymizeArgs]) error {
 	if job.Args.V != 1 {
 		return fmt.Errorf("%w: v=%d", errAnonymizeVersion, job.Args.V)
 	}
+	var skip []uuid.UUID
 	for {
-		n, err := w.a.AnonymizeDue(ctx, anonymizeBatch)
+		selected, failed, err := w.a.AnonymizeDue(ctx, anonymizeBatch, skip)
 		if err != nil {
 			return err
 		}
-		if n < anonymizeBatch {
+		skip = append(skip, failed...)
+		if selected < anonymizeBatch {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {

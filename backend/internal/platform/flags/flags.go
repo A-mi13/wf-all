@@ -45,7 +45,12 @@ func (s *Store) EnabledGlobally(ctx context.Context, key string) (bool, error) {
 }
 
 // Enabled — флаг включён глобально или в городе; флаг с Requires — только если и зависимость включена там же (R12).
+// Флаг GlobalOnly — только «везде» (EnabledGlobally): города в его строке (запись в обход Update) не учитываются —
+// админка их не показывает (Task 2 m2).
 func (s *Store) Enabled(ctx context.Context, key string, cityID uuid.UUID) (bool, error) {
+	if RuleOf(key).GlobalOnly {
+		return s.EnabledGlobally(ctx, key)
+	}
 	on, err := s.q.IsEnabled(ctx, flagsdb.IsEnabledParams{Key: key, CityID: cityID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, ErrUnknownFlag
@@ -102,10 +107,11 @@ func (s *Store) List(ctx context.Context) ([]Flag, error) {
 // непустой список городов у GlobalOnly — ErrGlobalOnly до любого запроса. Затем строки флага, его зависимости и
 // зависимых — под замком одним запросом в порядке ключа (LockFlags): две правки связанных флагов не
 // взаимоблокируются, а вторая видит итог первой. Строки флага нет — ErrUnknownFlag, version не та — ErrStale (и
-// когда значения не меняются); globally nil — не меняется, cities nil — не меняются, иначе — множество (повторы
+// когда значения не меняются; параллельная правка той же версии ждёт замок LockFlags и видит version + 1); globally nil — не меняется, cities nil — не меняются, иначе — множество (повторы
 // схлопываются, порядок по id). Ничего не меняется — before == after без записи (version не растёт). Итог нарушает
 // зависимость (включён флаг при выключенной или незаведённой зависимости, выключена зависимость при включённом
-// зависимом) — *RequiresError без записи. Иначе UPDATE … WHERE key AND version, version + 1.
+// зависимом) — *RequiresError без записи. Иначе UPDATE … WHERE key AND version, version + 1 (строка под замком
+// LockFlags этой же tx — UPDATE её всегда находит; WHERE version — защита в глубину, ErrNoRows — обычная ошибка).
 func (s *Store) Update(ctx context.Context, tx pgx.Tx, key string, version int64, globally *bool, cities []uuid.UUID) (before, after Flag, err error) {
 	if RuleOf(key).GlobalOnly && len(CitySet(cities)) > 0 {
 		return Flag{}, Flag{}, fmt.Errorf("%w: %s", ErrGlobalOnly, key)
@@ -141,9 +147,6 @@ func (s *Store) Update(ctx context.Context, tx pgx.Tx, key string, version int64
 	}
 	row, err := q.UpdateFlag(ctx, flagsdb.UpdateFlagParams{Key: key, Version: version, EnabledGlobally: next.EnabledGlobally,
 		EnabledCityIds: next.EnabledCityIDs})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Flag{}, Flag{}, fmt.Errorf("%w: %s", ErrStale, key)
-	}
 	if err != nil {
 		return Flag{}, Flag{}, err
 	}

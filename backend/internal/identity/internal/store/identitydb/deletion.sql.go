@@ -202,13 +202,15 @@ func (q *Queries) DeletionDropReservation(ctx context.Context, nicknameNormalize
 const deletionDue = `-- name: DeletionDue :many
 SELECT id, email, nickname_normalized FROM users
 WHERE status = 'pending_deletion' AND purge_at <= $1
+  AND NOT (id = ANY(coalesce($2::uuid[], '{}')))
 ORDER BY purge_at, id
-LIMIT $2::int
+LIMIT $3::int
 FOR NO KEY UPDATE SKIP LOCKED
 `
 
 type DeletionDueParams struct {
 	Now   *time.Time
+	Skip  []uuid.UUID
 	Batch int32
 }
 
@@ -218,9 +220,10 @@ type DeletionDueRow struct {
 	NicknameNormalized *string
 }
 
-// аккаунты с наступившим сроком: строка под замком, занятую (отмена удаления в процессе) пропустить
+// аккаунты с наступившим сроком: строка под замком, занятую (отмена удаления в процессе) пропустить; skip — упавшие за
+// этот прогон воркера (m8: иначе пачка из одних отравленных строк, старших по purge_at, заслоняла бы остальные навсегда)
 func (q *Queries) DeletionDue(ctx context.Context, arg DeletionDueParams) ([]DeletionDueRow, error) {
-	rows, err := q.db.Query(ctx, deletionDue, arg.Now, arg.Batch)
+	rows, err := q.db.Query(ctx, deletionDue, arg.Now, arg.Skip, arg.Batch)
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +364,22 @@ WHERE user_id = $1
 // игрока: у отказа other он обязателен (CHECK captain_applications_other_comment) — прочерк
 func (q *Queries) DeletionScrubApplications(ctx context.Context, userID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deletionScrubApplications, userID)
+	return err
+}
+
+const deletionScrubMfaResets = `-- name: DeletionScrubMfaResets :exec
+UPDATE mfa_resets SET reason = $1, ticket = NULL WHERE user_id = $2
+`
+
+type DeletionScrubMfaResetsParams struct {
+	ReasonErased string
+	UserID       uuid.UUID
+}
+
+// анонимизация (решение пользователя 15.11): причина и тикет сброса 2FA — свободный текст сотрудника, может называть
+// игрока; reason NOT NULL с CHECK 3–500 — заглушка, ticket — NULL. Все сбросы аккаунта, и прошлые
+func (q *Queries) DeletionScrubMfaResets(ctx context.Context, arg DeletionScrubMfaResetsParams) error {
+	_, err := q.db.Exec(ctx, deletionScrubMfaResets, arg.ReasonErased, arg.UserID)
 	return err
 }
 

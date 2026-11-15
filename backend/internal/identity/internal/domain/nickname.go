@@ -86,12 +86,16 @@ var skeleton = map[rune]rune{
 	'т': 't', 'Т': 't', 'τ': 't', 'Τ': 't', // т Т τ Τ
 }
 
-// looksDeleted — ник читается как заглушка удалённого: «deleted» и сразу знак (_ . -), с точностью до регистра и
-// гомоглифов (skeleton). «deletedfan» — обычный ник.
+// looksDeleted — ник читается как заглушка удалённого: «deleted» и сразу знак (_ . -), с точностью до регистра,
+// гомоглифов (skeleton) и диакритики (NFD, комбинирующие знаки Mn пропускаются — как unaccent в normalize_text;
+// Task 7 m7: «délèted-…»). «deletedfan» — обычный ник.
 func looksDeleted(n string) bool {
 	const word = "deleted"
 	i := 0
-	for _, r := range n {
+	for _, r := range norm.NFD.String(n) {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
 		if i == len(word) {
 			return isSign(r)
 		}

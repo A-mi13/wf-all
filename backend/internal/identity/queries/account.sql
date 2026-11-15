@@ -29,20 +29,6 @@ VALUES (@user_id, @document, @version, @now, @client_kind)
 ON CONFLICT (user_id, document, version) DO UPDATE
 SET accepted_at = EXCLUDED.accepted_at, client_kind = EXCLUDED.client_kind;
 
--- name: AccountNicknameBusy :one
--- нормализованный ник (§5.8: короче 3 после normalize_text — nickname_invalid), резерв и занятость чужим живым
--- аккаунтом; карантин — AccountNicknameQuarantine
-SELECT normalize_text(@nickname::text)::text AS normalized,
-       EXISTS (SELECT 1 FROM reserved_nicknames r WHERE r.nickname_normalized = normalize_text(@nickname::text)) AS reserved,
-       EXISTS (SELECT 1 FROM users u
-               WHERE u.nickname_normalized = normalize_text(@nickname::text) AND u.deleted_at IS NULL
-                 AND u.id <> @user_id) AS used;
-
--- name: AccountNicknameQuarantine :many
--- живой карантин ника: previous_user_id NULL — прежний владелец удалён (чужой)
-SELECT previous_user_id FROM nickname_reservations
-WHERE nickname_normalized = @nickname_normalized AND expires_at > @now;
-
 -- name: AccountDeleteNicknameReservation :exec
 DELETE FROM nickname_reservations WHERE nickname_normalized = @nickname_normalized;
 

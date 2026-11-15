@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +41,12 @@ func delCity(t *testing.T, e *env) uuid.UUID {
 func delWorker(t *testing.T, e *env) *App {
 	t.Helper()
 	return delWorkerLog(t, e, slog.New(slog.DiscardHandler))
+}
+
+// anonymizeDone — одна пачка AnonymizeDue без пропуска: анонимизировано строк (выбрано минус упавшие).
+func anonymizeDone(a *App, batch int) (int, error) {
+	selected, failed, err := a.AnonymizeDue(context.Background(), batch, nil)
+	return selected - len(failed), err
 }
 
 // delWorkerLog — delWorker с журналом log.
@@ -323,11 +330,11 @@ func TestAnonymizeDue(t *testing.T) {
 	}
 	w := delWorker(t, e)
 	e.clock.Advance(domain.DeletionGrace - time.Second)
-	if n, err := w.AnonymizeDue(context.Background(), 10); err != nil || n != 0 {
+	if n, err := anonymizeDone(w, 10); err != nil || n != 0 {
 		t.Fatalf("до срока: %d %v", n, err)
 	}
 	e.clock.Advance(time.Second)
-	if n, err := w.AnonymizeDue(context.Background(), 10); err != nil || n != 1 {
+	if n, err := anonymizeDone(w, 10); err != nil || n != 1 {
 		t.Fatalf("в срок: %d %v", n, err)
 	}
 	var email, nick, status string
@@ -394,7 +401,7 @@ func TestAnonymizeDue(t *testing.T) {
 		t.Errorf("адрес письма %q", got)
 	}
 	// повтор — ничего
-	if n, err := w.AnonymizeDue(context.Background(), 10); err != nil || n != 0 {
+	if n, err := anonymizeDone(w, 10); err != nil || n != 0 {
 		t.Fatalf("повтор: %d %v", n, err)
 	}
 	if delOutbox(t, e, identity.EventUserDeleted) != 1 {
@@ -417,7 +424,7 @@ func TestAnonymizeAsWorker(t *testing.T) {
 	w := delWorker(t, e)
 	e.clock.Advance(domain.DeletionGrace)
 	for i, want := range []int{2, 1, 0} {
-		n, err := w.AnonymizeDue(context.Background(), 2)
+		n, err := anonymizeDone(w, 2)
 		if err != nil || n != want {
 			t.Fatalf("пачка %d: %d %v", i, n, err)
 		}
@@ -440,7 +447,7 @@ func TestAnonymizeMailAfterCleanup(t *testing.T) {
 	e.clock.Advance(8 * 24 * time.Hour)
 	acctExec(t, e, `UPDATE security_events SET meta_enc = NULL WHERE created_at < $1`, e.clock.Now().Add(-7*24*time.Hour))
 	e.clock.Advance(domain.DeletionGrace - 8*24*time.Hour)
-	if n, err := delWorker(t, e).AnonymizeDue(context.Background(), 10); err != nil || n != 1 {
+	if n, err := anonymizeDone(delWorker(t, e), 10); err != nil || n != 1 {
 		t.Fatalf("%d %v", n, err)
 	}
 	if got := delMailAddress(t, e, MailAccountDeleted); got != "clean_user@example.com" {
@@ -486,7 +493,7 @@ func TestAnonymizeVsCancelRace(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Go(func() {
 			<-locked
-			anonN, anonErr = w.AnonymizeDue(context.Background(), 10)
+			anonN, anonErr = anonymizeDone(w, 10)
 			close(anonDone)
 		})
 		got, err := e.a.CancelDeletion(context.Background(), out.RestoreToken, web("a"))
@@ -515,7 +522,7 @@ func TestAnonymizeVsCancelRace(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.clock.Advance(time.Minute)
-		if n, err := delWorker(t, e).AnonymizeDue(context.Background(), 10); err != nil || n != 1 {
+		if n, err := anonymizeDone(delWorker(t, e), 10); err != nil || n != 1 {
 			t.Fatalf("%d %v", n, err)
 		}
 		if _, err := e.a.CancelDeletion(context.Background(), out.RestoreToken, web("a")); problemCode(err) != identity.CodeRestoreTokenInvalid {
@@ -644,7 +651,7 @@ func TestAnonymizePoisonedRow(t *testing.T) {
 	var buf bytes.Buffer
 	w := delWorkerLog(t, e, slog.New(slog.NewTextHandler(&buf, nil)))
 	e.clock.Advance(domain.DeletionGrace)
-	n, err := w.AnonymizeDue(context.Background(), 10)
+	n, err := anonymizeDone(w, 10)
 	if err != nil || n != 2 {
 		t.Fatalf("пачка: %d %v", n, err)
 	}
@@ -676,11 +683,20 @@ func TestAnonymizeCancelsMfaReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	acctExec(t, e, `INSERT INTO mfa_resets (id, user_id, approval_id, requested_by_staff_id, requested_by_label, reason,
-		execute_at, created_at) VALUES (gen_random_uuid(), $1, gen_random_uuid(), gen_random_uuid(), 'Ольга', 'потерян телефон', $2, now())`,
+		ticket, execute_at, created_at) VALUES (gen_random_uuid(), $1, gen_random_uuid(), gen_random_uuid(), 'Ольга',
+		'потерян телефон', 'SUP-1', $2, now())`,
 		uid, testNow.Add(domain.DeletionGrace+domain.MfaResetDelay))
+	// прошлый, уже отменённый сброс — свободный текст сотрудника тоже затирается (решение пользователя 15.11)
+	acctExec(t, e, `INSERT INTO mfa_resets (id, user_id, approval_id, requested_by_staff_id, requested_by_label, reason,
+		ticket, execute_at, cancelled_at, cancelled_by, created_at) VALUES (gen_random_uuid(), $1, gen_random_uuid(),
+		gen_random_uuid(), 'Ольга', 'звонил Иван Петров, +79990000000', 'SUP-0', now(), now(), 'owner', now())`, uid)
 	e.clock.Advance(domain.DeletionGrace)
-	if n, err := delWorker(t, e).AnonymizeDue(context.Background(), 10); err != nil || n != 1 {
+	if n, err := anonymizeDone(delWorker(t, e), 10); err != nil || n != 1 {
 		t.Fatalf("%d %v", n, err)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM mfa_resets WHERE user_id = $1 AND reason = $2 AND ticket IS NULL`,
+		uid, mfaResetReasonErased); n != 2 {
+		t.Fatalf("reason/ticket затёрты у %d из 2 сбросов", n)
 	}
 	if n := count(t, e.owner, `SELECT count(*) FROM mfa_resets WHERE user_id = $1 AND cancelled_by = 'system'`, uid); n != 1 {
 		t.Fatal("сброс 2FA не отменён")
@@ -690,5 +706,47 @@ func TestAnonymizeCancelsMfaReset(t *testing.T) {
 	}
 	if n := count(t, e.owner, `SELECT count(*) FROM river_job WHERE args->>'mail' = $1`, MailMfaResetCancelled); n != 0 {
 		t.Fatal("письмо об отмене сброса системой")
+	}
+}
+
+// m8: batch = 2, две отравленные строки старше нормальной — первая пачка выбирает обе и обе падают; со skip упавших
+// следующая пачка выбирает нормальную и анонимизирует её (без skip отравленные заслоняли бы её навсегда).
+func TestAnonymizeSkipsFailedInRun(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ids := map[string]uuid.UUID{}
+	for _, nick := range []string{"s_bad1", "s_bad2", "s_good"} { // отравленные — первыми по purge_at
+		uid := seedUser(t, e.owner, nick, "ru")
+		ids[nick] = uid
+		sid := issue(t, e, uid, web(nick)).SessionID
+		if _, err := e.a.DeleteAccount(context.Background(), sid, nick); err != nil {
+			t.Fatal(err)
+		}
+		e.clock.Advance(time.Second)
+	}
+	acctExec(t, e, `CREATE FUNCTION poison_anonymize() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.status = 'deleted' AND OLD.nickname IN ('s_bad1', 's_bad2') THEN RAISE EXCEPTION 'отравленная строка'; END IF;
+			RETURN NEW;
+		END $$`)
+	acctExec(t, e, `CREATE TRIGGER poison_anonymize BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION poison_anonymize()`)
+	w := delWorker(t, e)
+	e.clock.Advance(domain.DeletionGrace)
+	selected, failed, err := w.AnonymizeDue(context.Background(), 2, nil)
+	if err != nil || selected != 2 || len(failed) != 2 {
+		t.Fatalf("первая пачка: выбрано %d, упало %v, %v", selected, failed, err)
+	}
+	if !slices.Contains(failed, ids["s_bad1"]) || !slices.Contains(failed, ids["s_bad2"]) {
+		t.Fatalf("упавшие %v", failed)
+	}
+	selected, failed, err = w.AnonymizeDue(context.Background(), 2, failed)
+	if err != nil || selected != 1 || len(failed) != 0 {
+		t.Fatalf("пачка со skip: выбрано %d, упало %v, %v", selected, failed, err)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM users WHERE id = $1 AND status = 'deleted'`, ids["s_good"]); n != 1 {
+		t.Fatal("нормальная строка не анонимизирована")
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM users WHERE status = 'pending_deletion'`); n != 2 {
+		t.Fatalf("отравленных в ожидании %d", n)
 	}
 }

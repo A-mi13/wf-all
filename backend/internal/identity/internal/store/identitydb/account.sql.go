@@ -138,65 +138,6 @@ func (q *Queries) AccountLatestConsents(ctx context.Context, userID uuid.UUID) (
 	return items, nil
 }
 
-const accountNicknameBusy = `-- name: AccountNicknameBusy :one
-SELECT normalize_text($1::text)::text AS normalized,
-       EXISTS (SELECT 1 FROM reserved_nicknames r WHERE r.nickname_normalized = normalize_text($1::text)) AS reserved,
-       EXISTS (SELECT 1 FROM users u
-               WHERE u.nickname_normalized = normalize_text($1::text) AND u.deleted_at IS NULL
-                 AND u.id <> $2) AS used
-`
-
-type AccountNicknameBusyParams struct {
-	Nickname string
-	UserID   uuid.UUID
-}
-
-type AccountNicknameBusyRow struct {
-	Normalized string
-	Reserved   bool
-	Used       bool
-}
-
-// нормализованный ник (§5.8: короче 3 после normalize_text — nickname_invalid), резерв и занятость чужим живым
-// аккаунтом; карантин — AccountNicknameQuarantine
-func (q *Queries) AccountNicknameBusy(ctx context.Context, arg AccountNicknameBusyParams) (AccountNicknameBusyRow, error) {
-	row := q.db.QueryRow(ctx, accountNicknameBusy, arg.Nickname, arg.UserID)
-	var i AccountNicknameBusyRow
-	err := row.Scan(&i.Normalized, &i.Reserved, &i.Used)
-	return i, err
-}
-
-const accountNicknameQuarantine = `-- name: AccountNicknameQuarantine :many
-SELECT previous_user_id FROM nickname_reservations
-WHERE nickname_normalized = $1 AND expires_at > $2
-`
-
-type AccountNicknameQuarantineParams struct {
-	NicknameNormalized string
-	Now                time.Time
-}
-
-// живой карантин ника: previous_user_id NULL — прежний владелец удалён (чужой)
-func (q *Queries) AccountNicknameQuarantine(ctx context.Context, arg AccountNicknameQuarantineParams) ([]*uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, accountNicknameQuarantine, arg.NicknameNormalized, arg.Now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []*uuid.UUID
-	for rows.Next() {
-		var previous_user_id *uuid.UUID
-		if err := rows.Scan(&previous_user_id); err != nil {
-			return nil, err
-		}
-		items = append(items, previous_user_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const accountPasskeys = `-- name: AccountPasskeys :many
 SELECT id, name, created_at, last_used_at, backup_state FROM passkeys WHERE user_id = $1 ORDER BY created_at, id
 `

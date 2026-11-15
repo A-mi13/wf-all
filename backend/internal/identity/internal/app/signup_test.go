@@ -392,13 +392,14 @@ func TestCheckNickname(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := e.owner.Exec(ctx, `INSERT INTO nickname_reservations (nickname_normalized, previous_user_id, released_at, expires_at)
-		VALUES (normalize_text('old_nick'), $1, $2, $3), (normalize_text('gone_nick'), $1, $2, $2)`, owner,
+		VALUES (normalize_text('old_nick'), $1, $2, $3), (normalize_text('gone_nick'), $1, $2, $2),
+		       (normalize_text('orphan_nick'), NULL, $2, $3)`, owner,
 		e.clock.Now(), e.clock.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	for nick, want := range map[string]string{
 		"a": "invalid", "李小龍": "invalid", "a.b": "invalid", "deleted-123": "invalid",
-		"КОSТА_10": "taken", "Kosta_10": "taken", "old_nick": "taken",
+		"КОSТА_10": "taken", "Kosta_10": "taken", "old_nick": "taken", "orphan_nick": "taken",
 		"Reserved_Nick": "reserved",
 		"free_nick":     "", "gone_nick": "",
 	} {

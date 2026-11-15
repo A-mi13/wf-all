@@ -305,3 +305,32 @@ func TestResendSchedule(t *testing.T) {
 		t.Fatalf("неизвестный код: %v", err)
 	}
 }
+
+// assertDetachedDeadline — ctx работы после обрыва запроса: срок задан и не дальше detachedTimeout от момента проверки
+// (m11 ревью W4-A: ctx без отмены и без срока держал бы соединение и горутину вечно).
+func assertDetachedDeadline(ctx context.Context, t *testing.T) {
+	t.Helper()
+	dl, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("у ctx нет срока: detached без WithTimeout")
+	}
+	if left := time.Until(dl); left > detachedTimeout {
+		t.Fatalf("до срока %v — дальше detachedTimeout %v", left, detachedTimeout)
+	}
+}
+
+// m11: inTxCommitFailure идёт на ctx со сроком ≤ detachedTimeout — и когда у запроса срок дальше (час).
+func TestInTxCommitFailureDeadline(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	parent, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	called := false
+	if err := e.a.inTxCommitFailure(parent, func(ctx context.Context, _ pgx.Tx) error {
+		called = true
+		assertDetachedDeadline(ctx, t)
+		return nil
+	}); err != nil || !called {
+		t.Fatalf("called=%v err=%v", called, err)
+	}
+}

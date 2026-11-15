@@ -57,13 +57,8 @@ func (h Handler) ConfirmPasswordReset(ctx context.Context, req oapi.ConfirmPassw
 	if err != nil {
 		return nil, err
 	}
-	docs := false
-	if out.Status == app.StatusAuthenticated {
-		if docs, err = h.app.DocumentsRequired(ctx, out.User.ID); err != nil {
-			return nil, err
-		}
-	}
-	return oapi.ConfirmPasswordReset200JSONResponse{Body: authResult(app.AuthOutcome{LoginOutcome: out, DocumentsRequired: docs}, false),
+	// флаг документов посчитан в транзакции сценария — после коммита база не читается
+	return oapi.ConfirmPasswordReset200JSONResponse{Body: authResult(out, false),
 		Headers: oapi.ConfirmPasswordReset200ResponseHeaders{CacheControl: codeCacheNoStore}}, nil
 }
 
