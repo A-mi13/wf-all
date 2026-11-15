@@ -15,6 +15,9 @@ var strokeDeleted = []string{
 	"dɇleted-0a1b", "dɆleted-0a1b",
 	"dełeted-0a1b", "deŁeted-0a1b", "deƚeted-0a1b", "deȴeted-0a1b", "deɫeted-0a1b", "deɬeted-0a1b", "deɭeted-0a1b",
 	"deleŧed-0a1b", "deleŦed-0a1b", "deleȶed-0a1b", "deleƫed-0a1b", "deleʈed-0a1b",
+	// перебор U+00C0–U+024F на базе (контроллер, 15.11): ещё d и l без разложения NFD
+	"Ðeleted-0a1b", "ðeleted-0a1b", "Ɖeleted-0a1b", "Ɗeleted-0a1b", "Ƌeleted-0a1b", "ƌeleted-0a1b",
+	"deĿeted-0a1b", "deŀeted-0a1b", "deȽeted-0a1b",
 }
 
 // TestNicknameStrokeMatchesNormalizeText — уборка W5 m1: каждое написание, которое normalize_text базы сводит к
