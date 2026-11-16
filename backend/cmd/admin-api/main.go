@@ -104,6 +104,9 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	if err := admin.ValidateOrigin(cfg.Origin); err != nil {
 		return err
 	}
+	if err := admin.ValidateWakeURL(cfg.WakeAPIURL); err != nil {
+		return err
+	}
 	if err := admin.ValidateCookieSecure(cfg.Origin, cfg.CookieSecure); err != nil {
 		return err
 	}
@@ -165,6 +168,8 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 				// identity (сброс 2FA поддержкой, план I-2 Task 17): действие identity.mfa_reset — в том же реестре
 				Identity: a.identity,
 				Clock:    a.deps.Clock,
+				// побудка wf-api (dev-стенд): команды оператора её не получают
+				Wake: admin.NewWaker(cfg.WakeAPIURL, nil, log),
 			})
 			if err != nil {
 				return server.Service{}, err
