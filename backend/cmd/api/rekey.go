@@ -33,6 +33,15 @@ var errUsage = errors.New("неверная команда")
 
 func usageError(msg string) error { return fmt.Errorf("%w: %s: %s", errUsage, msg, usage) }
 
+// exitCode — 2 для ошибки использования, 1 для остальных (нечитаемые строки rekey, конфиг, база) — как у worker и
+// admin-api.
+func exitCode(err error) int {
+	if errors.Is(err, errUsage) {
+		return 2
+	}
+	return 1
+}
+
 // dispatch — без аргументов — HTTP-сервер (run); с аргументами — разовая команда.
 func dispatch(ctx context.Context, args, environ []string, out, logOut io.Writer) error {
 	switch {

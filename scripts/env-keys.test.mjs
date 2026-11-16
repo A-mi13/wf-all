@@ -21,6 +21,7 @@ function run(content) {
     return {
       out,
       stdout: r.stdout,
+      stderr: r.stderr,
       env: Object.fromEntries(
         out
           .split('\n')
@@ -68,4 +69,25 @@ test('кольцо identity уже заполнено у одного — вто
     assert.equal(env.API_IDENTITY_SECRET_KEYS, ring, content);
     assert.equal(env.WORKER_IDENTITY_SECRET_KEYS, ring, content);
   }
+});
+
+test('кольцо identity заполнено у обоих разными значениями — предупреждение без значений, файл не меняется', () => {
+  const ringA = 'Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmE=';
+  const ringB = 'b2xkb2xkb2xkb2xkb2xkb2xkb2xkb2xkb2xkb2xkb2w=';
+  const { env, stdout, stderr } = run(
+    `API_IDENTITY_SECRET_KEYS=${ringA}\nWORKER_IDENTITY_SECRET_KEYS=${ringB}\n`,
+  );
+  assert.equal(env.API_IDENTITY_SECRET_KEYS, ringA);
+  assert.equal(env.WORKER_IDENTITY_SECRET_KEYS, ringB);
+  assert.match(stderr, /API_IDENTITY_SECRET_KEYS/);
+  assert.match(stderr, /WORKER_IDENTITY_SECRET_KEYS/);
+  for (const v of [ringA, ringB]) {
+    assert.ok(!stderr.includes(v) && !stdout.includes(v), 'значение в выводе');
+  }
+});
+
+test('кольцо identity у обоих одинаковое — без предупреждения', () => {
+  const ring = 'Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmE=';
+  const { stderr } = run(`API_IDENTITY_SECRET_KEYS=${ring}\nWORKER_IDENTITY_SECRET_KEYS=${ring}\n`);
+  assert.equal(stderr, '');
 });

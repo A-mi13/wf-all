@@ -44,7 +44,7 @@ func main() {
 	defer stop()
 	if err := dispatch(ctx, os.Args[1:], os.Environ(), os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "api:", err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 

@@ -185,7 +185,8 @@ func cleanupSteps() []cleanupStep {
 
 // liftExpiredRestrictions — истёкшие ограничения (until ≤ now) снимаются по аккаунтам: на аккаунт — своя tx, users
 // первым FOR NO KEY UPDATE SKIP LOCKED (R30; занят сценарием — пропуск до следующего запуска), lifted_at, версия
-// аккаунта + 1 и событие identity.restrictions_changed (статус и оставшиеся закрытые возможности) в той же tx.
+// аккаунта + 1 и событие identity.restrictions_changed (статус и оставшиеся закрытые возможности) в той же tx; у
+// удалённого (deleted) — только lifted_at, без версии и события.
 // Упавший аккаунт — в журнал и позади курсора до конца прогона (не заслоняет остальных); failed — их число.
 func (a *App) liftExpiredRestrictions(ctx context.Context, now time.Time, batch int32) (lifted, failed int, err error) {
 	return a.eachAccount(ctx, "снятие истёкших ограничений", batch,
@@ -251,6 +252,12 @@ func (a *App) liftRestrictions(ctx context.Context, userID uuid.UUID, now time.T
 		}
 		if len(caps) == 0 {
 			return nil // сняли раньше (параллельный запуск)
+		}
+		// удалённый аккаунт (анонимизация user_restrictions не стирает): снято молча — без версии и события
+		// restrictions_changed, аккаунта для подписчиков больше нет (m5 ревью 4); deleted — конечный статус
+		if u.Status == statusDeleted {
+			ok = true
+			return nil
 		}
 		live, err := q.CleanupLiveCapabilities(ctx, identitydb.CleanupLiveCapabilitiesParams{UserID: userID, Now: &now})
 		if err != nil {

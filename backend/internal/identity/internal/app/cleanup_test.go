@@ -243,6 +243,36 @@ func TestCleanupLiftsRestrictions(t *testing.T) {
 	}
 }
 
+// m5 ревью 4: анонимизация user_restrictions не стирает — истёкшее ограничение удалённого (deleted) аккаунта снимается
+// молча: lifted_at есть (иначе выборка возвращала бы его каждый запуск), версия аккаунта не растёт, события
+// restrictions_changed нет (аккаунта для подписчиков больше нет).
+func TestCleanupLiftDeletedQuietly(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	w := roleApp(t, e, "worker", true)
+	uid := seedUser(t, e.owner, "cleanup_lift_gone", "ru")
+	past := testNow.Add(-time.Second)
+	acctExec(t, e, `INSERT INTO user_restrictions (id, user_id, capability, until, source_id, created_at)
+		VALUES (gen_random_uuid(), $1, 'comment', $2, gen_random_uuid(), $2)`, uid, past)
+	acctExec(t, e, `UPDATE users SET status = 'deleted' WHERE id = $1`, uid)
+	var verBefore int64
+	if err := e.owner.QueryRow(context.Background(), `SELECT version FROM users WHERE id = $1`, uid).Scan(&verBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM user_restrictions WHERE user_id = $1 AND lifted_at IS NULL`, uid); n != 0 {
+		t.Fatalf("не снято у удалённого: %d", n)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM users WHERE id = $1 AND version = $2`, uid, verBefore); n != 1 {
+		t.Fatal("версия удалённого аккаунта выросла")
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM outbox WHERE event_type = $1`, identity.EventRestrictionsChanged); n != 0 {
+		t.Fatalf("событий restrictions_changed у удалённого: %d", n)
+	}
+}
+
 // Аккаунт под замком сценария (users FOR NO KEY UPDATE) — пропуск без ожидания и без ошибки; следующий запуск снимает.
 func TestCleanupLiftSkipsLockedUser(t *testing.T) {
 	t.Parallel()

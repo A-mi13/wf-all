@@ -27,6 +27,23 @@ func TestCommandRejectsUnknown(t *testing.T) {
 	}
 }
 
+// m2 ревью 4: код выхода — как у worker и admin-api: опечатка в команде — 2, прочие ошибки (нечитаемые строки,
+// конфиг, база) — 1.
+func TestExitCode(t *testing.T) {
+	err := dispatch(context.Background(), []string{"identity", "rekeys"}, nil, io.Discard, io.Discard)
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("опечатка: код %d (%v), ждали 2", code, err)
+	}
+	unreadable := printRekey(io.Discard, identityrekey.Report{CurrentKey: "cur",
+		UnreadableMFA: []uuid.UUID{uuid.MustParse("01930000-0000-7000-8000-000000000003")}})
+	if code := exitCode(unreadable); unreadable == nil || code != 1 {
+		t.Fatalf("нечитаемые строки: код %d (%v), ждали 1", code, unreadable)
+	}
+	if code := exitCode(errors.New("сбой базы")); code != 1 {
+		t.Fatalf("прочая ошибка: код %d, ждали 1", code)
+	}
+}
+
 func TestRekeyNeedsRingBeforeDatabase(t *testing.T) {
 	key, err := keys.Generate()
 	if err != nil {

@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"errors"
 	"time"
 
 	"github.com/riverqueue/river"
@@ -30,8 +31,11 @@ func periodicJob(every time.Duration, args func() river.JobArgs) *river.Periodic
 
 // AddWorkers — исполнители identity у воркера: анонимизация, исполнение сброса 2FA, чистка. Сценарии — на
 // app.NewMaintenance (роль worker); d.River — клиент только для вставки (письма из транзакций сценариев). Нет
-// Pool, Clock, River или Log — ошибка сборки (отказ старта).
+// Pool, Clock, River, Log или кольца Secrets (WORKER_IDENTITY_SECRET_KEYS, m3 ревью 4) — ошибка сборки (отказ старта).
 func AddWorkers(w *river.Workers, d identity.WorkerDeps) error {
+	if d.Secrets == nil {
+		return errors.New("identity: исполнители воркера: нужно кольцо секретов WORKER_IDENTITY_SECRET_KEYS")
+	}
 	a, err := maintenanceApp(d)
 	if err != nil {
 		return err

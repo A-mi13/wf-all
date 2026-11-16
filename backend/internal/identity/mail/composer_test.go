@@ -114,6 +114,20 @@ func (e *env) mustSend(t *testing.T, kind string, ref uuid.UUID) pmail.Message {
 	return m
 }
 
+// mustRetry — сборка обязана упасть обычной ошибкой (повтор River, не ErrSkip), без секретов secret в тексте ошибки.
+func (e *env) mustRetry(t *testing.T, kind string, ref uuid.UUID, secret ...string) {
+	t.Helper()
+	err := e.work(kind, ref)
+	if err == nil || errors.Is(err, pmail.ErrSkip) {
+		t.Fatalf("%s: %v; ждали ошибку для повтора, не ErrSkip", kind, err)
+	}
+	for _, s := range secret {
+		if strings.Contains(err.Error(), s) {
+			t.Fatalf("%s: %q в ошибке: %v", kind, s, err)
+		}
+	}
+}
+
 // mustSkip — письмо обязано отмениться ErrSkip.
 func (e *env) mustSkip(t *testing.T, kind string, ref uuid.UUID) {
 	t.Helper()
@@ -269,6 +283,17 @@ func (e *env) mfaReset(t *testing.T, userID uuid.UUID, state string) uuid.UUID {
 	return id
 }
 
+// mfa — у аккаунта включена 2FA (строка user_mfa; секрет письмам не нужен).
+func (e *env) mfa(t *testing.T, userID uuid.UUID) {
+	t.Helper()
+	ct, kid, err := e.ring.Seal([]byte("JBSWY3DPEHPK3PXP"), userID[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.exec(t, `INSERT INTO user_mfa (user_id, secret_enc, key_id, confirmed_at, created_at) VALUES ($1, $2, $3, $4, $4)`,
+		userID, ct, kid, testNow.Add(-24*time.Hour))
+}
+
 func mustContain(t *testing.T, what, s, sub string) {
 	t.Helper()
 	if !strings.Contains(s, sub) {
@@ -337,13 +362,17 @@ func TestComposeSignupCode(t *testing.T) {
 	e.mustSkip(t, app.MailSignupCode, uuid.Must(uuid.NewV7()))
 	e.mustSkip(t, app.MailPasswordResetCode, alive) // назначение кода не то
 
-	// код под ключом, которого нет в кольце: отмена без повторов, кода нет в ошибке
+	// код под ключом, которого нет в кольце (ротация: api с новым ключом раньше воркера, m1 ревью 4) — обычная ошибка:
+	// повтор River дождётся кольца воркера; кода и адреса в ошибке нет
 	foreign := e.code(t, codeRow{purpose: "signup", email: "f@example.com", code: "987654", ring: newRing(t)})
-	mem := &pmail.Memory{}
-	err := pmail.NewSendWorker(e.reg, mem).Work(context.Background(),
-		&river.Job[pmail.SendArgs]{Args: pmail.SendArgs{V: 1, Mail: app.MailSignupCode, Ref: foreign}})
-	if !errors.Is(err, pmail.ErrSkip) || strings.Contains(err.Error(), "987654") || strings.Contains(err.Error(), "f@example.com") {
-		t.Fatalf("нечитаемый код: %v", err)
+	e.mustRetry(t, app.MailSignupCode, foreign, "987654", "f@example.com")
+	// шифротекст повреждён (ключ в кольце) — повтор не поможет: ErrSkip, кода и адреса в ошибке нет
+	broken := e.code(t, codeRow{purpose: "signup", email: "b@example.com", code: "876543"})
+	e.exec(t, `UPDATE auth_codes SET code_enc = set_byte(code_enc, length(code_enc) - 1,
+		(get_byte(code_enc, length(code_enc) - 1) + 1) % 256) WHERE id = $1`, broken)
+	err := e.work(app.MailSignupCode, broken)
+	if !errors.Is(err, pmail.ErrSkip) || strings.Contains(err.Error(), "876543") || strings.Contains(err.Error(), "b@example.com") {
+		t.Fatalf("повреждённый код: %v", err)
 	}
 
 	// приманка: аккаунт есть — письмо владельцу на его языке
@@ -447,6 +476,13 @@ func TestComposeEmailChangedToOldAddress(t *testing.T) {
 	if m.To != "was@example.com" {
 		t.Fatalf("адрес: %q, ждали старую почту", m.To)
 	}
+	// ключа записи нет в кольце воркера (ротация, m1 ревью 4) — повтор, не ErrSkip; адреса в ошибке нет
+	e.exec(t, `UPDATE security_events SET key_id = 'unknownkey0' WHERE id = $1`, ref)
+	e.mustRetry(t, app.MailEmailChanged, ref, "was@example.com")
+	// ключ в кольце, шифротекст повреждён — ErrSkip
+	e.exec(t, `UPDATE security_events SET key_id = $2, meta_enc = set_byte(meta_enc, length(meta_enc) - 1,
+		(get_byte(meta_enc, length(meta_enc) - 1) + 1) % 256) WHERE id = $1`, ref, e.ring.CurrentID())
+	e.mustSkip(t, app.MailEmailChanged, ref)
 	e.exec(t, `UPDATE security_events SET meta_enc = NULL WHERE id = $1`, ref)
 	e.mustSkip(t, app.MailEmailChanged, ref)
 }
@@ -580,22 +616,40 @@ func TestComposeMfaReset(t *testing.T) {
 	e.mustSkip(t, app.MailMfaResetDone, live)
 
 	v := e.user(t, "three@example.com", "ru")
+	e.mfa(t, v)
 	cancelled := e.mfaReset(t, v, "cancelled")
 	m = e.mustSend(t, app.MailMfaResetCancelled, cancelled)
 	when := testNow.Format("2006-01-02 15:04") + " (UTC)" // без пояса и города — UTC
 	if want := e.text(t, "ru", "mfa_reset_cancelled", "text", map[string]any{"by": "owner", "time": when}); !strings.HasPrefix(m.Text, want) {
 		t.Fatalf("отмена владельцем: %q", m.Text)
 	}
+	mustContain(t, "2FA осталась", m.Text, "продолжает действовать")
 	e.mustSkip(t, app.MailMfaResetScheduled, cancelled)
-	// отмена сотрудником — cancelled_by = staff:<id>: в письме «поддержка», без id сотрудника
-	staffID := uuid.Must(uuid.NewV7())
-	e.exec(t, `UPDATE mfa_resets SET cancelled_by = 'staff:' || $2::text WHERE id = $1`, cancelled, staffID)
+	// отмена сотрудником — cancelled_by = staff:<подпись> (как пишет прод, CHECK mfa_resets_cancelled_by_format):
+	// в письме «поддержка», без подписи сотрудника
+	const label = "Оператор Иванов"
+	e.exec(t, `UPDATE mfa_resets SET cancelled_by = 'staff:' || $2::text WHERE id = $1`, cancelled, label)
 	m = e.mustSend(t, app.MailMfaResetCancelled, cancelled)
 	if want := e.text(t, "ru", "mfa_reset_cancelled", "text", map[string]any{"by": "staff", "time": when}); !strings.HasPrefix(m.Text, want) {
 		t.Fatalf("отмена сотрудником: %q", m.Text)
 	}
-	if strings.Contains(m.Text, staffID.String()) {
-		t.Fatal("id сотрудника в письме")
+	if strings.Contains(m.Text, label) {
+		t.Fatal("подпись сотрудника в письме")
+	}
+
+	// I1 ревью 4: отмена владельцем из DisableTotp — 2FA снята в той же tx (строки user_mfa нет): без «продолжает
+	// действовать» (о снятии — отдельное письмо mfa_disabled); на обоих языках
+	for _, loc := range i18n.Supported {
+		off := e.user(t, "off-"+loc+"@example.com", loc)
+		m = e.mustSend(t, app.MailMfaResetCancelled, e.mfaReset(t, off, "cancelled"))
+		if want := e.text(t, loc, "mfa_reset_cancelled", "text_disabled", map[string]any{"by": "owner", "time": when}); !strings.HasPrefix(m.Text, want) {
+			t.Fatalf("%s: отмена со снятой 2FA: %q", loc, m.Text)
+		}
+		for _, no := range []string{"продолжает действовать", "stays on"} {
+			if strings.Contains(m.Text, no) {
+				t.Fatalf("%s: 2FA снята, а в письме %q: %q", loc, no, m.Text)
+			}
+		}
 	}
 
 	w := e.user(t, "four@example.com", "ru")

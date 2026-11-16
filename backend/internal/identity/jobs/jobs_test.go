@@ -17,6 +17,7 @@ import (
 
 	"wf/backend/internal/identity"
 	"wf/backend/internal/identity/internal/app"
+	"wf/backend/internal/platform/keys"
 	"wf/backend/internal/platform/queue"
 	"wf/backend/internal/platform/testkit/clocktest"
 	"wf/backend/internal/platform/testkit/dbtest"
@@ -71,8 +72,17 @@ func TestAddWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	k, err := keys.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := keys.NewRing([]string{k})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := identity.WorkerDeps{Pool: pools.As, Clock: clocktest.New(time.Now()), Secrets: ring, River: ins, Log: log}
 	w := river.NewWorkers()
-	if err := AddWorkers(w, identity.WorkerDeps{Pool: pools.As, Clock: clocktest.New(time.Now()), River: ins, Log: log}); err != nil {
+	if err := AddWorkers(w, d); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"identity.anonymize", "identity.maintenance", "identity.mfa_reset_execute"}
@@ -81,6 +91,12 @@ func TestAddWorkers(t *testing.T) {
 	}
 	if err := AddWorkers(river.NewWorkers(), identity.WorkerDeps{}); err == nil {
 		t.Fatal("сборка без зависимостей прошла")
+	}
+	// m3 ревью 4: без кольца WORKER_IDENTITY_SECRET_KEYS — отказ сборки (отказ старта), а не сбой задачи позже
+	noRing := d
+	noRing.Secrets = nil
+	if err := AddWorkers(river.NewWorkers(), noRing); err == nil {
+		t.Fatal("сборка без кольца секретов прошла")
 	}
 }
 

@@ -168,7 +168,8 @@ func MfaResetScheduled(r MfaResetRef, userID uuid.UUID, executeAt time.Time) eve
 	return mfaResetEvent(EventMfaResetScheduled, r, userID, executeAt)
 }
 
-// MfaResetCancelled — сброс 2FA отменён владельцем (версия агрегата 2).
+// MfaResetCancelled — сброс 2FA отменён (версия агрегата 2): владельцем (вход вторым фактором, отмена, снятие 2FA),
+// сотрудником, запросом удаления аккаунта или исполнителем по сроку (2FA уже нет, аккаунт удаляется).
 func MfaResetCancelled(r MfaResetRef, userID uuid.UUID, executeAt time.Time) events.Event {
 	return mfaResetEvent(EventMfaResetCancelled, r, userID, executeAt)
 }

@@ -130,9 +130,24 @@ type composers struct {
 // skip — письмо больше не нужно: задача отменяется без повторов. why — без адресов и кодов.
 func skip(why string) error { return fmt.Errorf("%w: %s", pmail.ErrSkip, why) }
 
+// open — секрет строки (what — «код» или «адрес» для текста ошибки; сам секрет в ошибку не попадает). Ключа строки
+// нет в кольце воркера — обычная ошибка: при ротации api с новым ключом мог выйти раньше воркера, повтор River
+// дождётся кольца (m1 ревью 4); шифротекст не расшифровывается (повреждён, чужой aad) — ErrSkip: повтор не поможет.
+func (c *composers) open(kind, what string, ct []byte, keyID string, aad []byte) ([]byte, error) {
+	plain, err := c.d.Secrets.Open(ct, keyID, aad)
+	switch {
+	case err == nil:
+		return plain, nil
+	case errors.Is(err, keys.ErrUnknownKey):
+		return nil, fmt.Errorf("identity: письмо %s: %s под ключом %s вне кольца: %w", kind, what, keyID, err)
+	default:
+		return nil, skip(what + " не прочитать: " + err.Error())
+	}
+}
+
 // code — письма по auth_codes.id: настоящий код (decoy = false) или приманка (decoy = true) назначения purpose.
 // Строки нет, назначение или приманка не те, код погашен, отозван или истёк (ровно срок — истёк) — ErrSkip; код не
-// прочитать (ключ убран из кольца) — ErrSkip: повторы этого не исправят. Приманка сброса пароля (m12) — ErrSkip по
+// расшифровать — ErrSkip, ключа нет в кольце воркера — ошибка с повтором (open). Приманка сброса пароля (m12) — ErrSkip по
 // несовпадению decoy; код сброса аккаунту в бане или с почтой ≠ адресу кода — ErrSkip (как resetBlocked). Адрес — почта строки кода (новая почта у регистрации и смены почты), язык — users.locale
 // аккаунта (регистрация — язык из данных регистрации, приманки — язык владельца адреса).
 func (c *composers) code(ctx context.Context, kind string, ref uuid.UUID, purpose identitydb.AuthCodePurpose, decoy bool) (pmail.Message, error) {
@@ -154,9 +169,9 @@ func (c *composers) code(ctx context.Context, kind string, ref uuid.UUID, purpos
 		if row.CodeEnc == nil || row.KeyID == nil {
 			return pmail.Message{}, skip("кода нет в строке")
 		}
-		plain, err := c.d.Secrets.Open(row.CodeEnc, *row.KeyID, row.ID[:])
+		plain, err := c.open(kind, "код", row.CodeEnc, *row.KeyID, row.ID[:])
 		if err != nil {
-			return pmail.Message{}, skip("код не прочитать: " + err.Error())
+			return pmail.Message{}, err
 		}
 		args["code"] = string(plain)
 		args["minutes"] = int(ceilUnits(row.ExpiresAt.Sub(c.d.Clock.Now()), time.Minute))
@@ -265,9 +280,9 @@ func (c *composers) event(ctx context.Context, kind string, ref uuid.UUID, kinds
 		if row.MetaEnc == nil || row.KeyID == nil {
 			return pmail.Message{}, skip("адрес стёрт")
 		}
-		plain, err := c.d.Secrets.Open(row.MetaEnc, *row.KeyID, ref[:])
+		plain, err := c.open(kind, "адрес", row.MetaEnc, *row.KeyID, ref[:])
 		if err != nil {
-			return pmail.Message{}, skip("адрес не прочитать: " + err.Error())
+			return pmail.Message{}, err
 		}
 		to = string(plain)
 	}
@@ -301,7 +316,8 @@ func (c *composers) event(ctx context.Context, kind string, ref uuid.UUID, kinds
 }
 
 // mfaReset — письма по mfa_resets.id (роль worker: SELECT mfa_resets и users). Назначен — пока сброс живой,
-// отменён и выполнен — по исходу; записи нет или аккаунт анонимизирован — ErrSkip.
+// отменён и выполнен — по исходу; записи нет или аккаунт анонимизирован — ErrSkip. Отмена при снятой 2FA (строки
+// user_mfa нет) — текст text_disabled.
 func (c *composers) mfaReset(ctx context.Context, kind string, ref uuid.UUID) (pmail.Message, error) {
 	row, err := c.q.MailMfaReset(ctx, ref)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -314,6 +330,7 @@ func (c *composers) mfaReset(ctx context.Context, kind string, ref uuid.UUID) (p
 		return pmail.Message{}, skip("аккаунт удалён")
 	}
 	args := map[string]any{}
+	text := "text"
 	zone := mailZone(row.Timezone, row.CityTimezone)
 	switch kind {
 	case app.MailMfaResetScheduled:
@@ -330,13 +347,18 @@ func (c *composers) mfaReset(ctx context.Context, kind string, ref uuid.UUID) (p
 			by = *row.CancelledBy
 		}
 		args["by"], args["time"] = by, formatTime(*row.CancelledAt, zone)
+		// 2FA уже нет (отмена из DisableTotp снимает её в той же tx, I1 ревью 4) — текст без «защита продолжает
+		// действовать»: о снятии — отдельное письмо mfa_disabled
+		if !row.HasMfa {
+			text = "text_disabled"
+		}
 	case app.MailMfaResetDone:
 		if row.ExecutedAt == nil {
 			return pmail.Message{}, skip("сброс не выполнен")
 		}
 		args["time"] = formatTime(*row.ExecutedAt, zone)
 	}
-	return c.compose(row.Email, mailLocale(row.Locale), mailName(kind), "text", args)
+	return c.compose(row.Email, mailLocale(row.Locale), mailName(kind), text, args)
 }
 
 // compose — письмо identity.mail.<name>.subject и .<text> с подписью mail.footer.
