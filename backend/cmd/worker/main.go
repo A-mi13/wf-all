@@ -3,18 +3,15 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -23,25 +20,13 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"wf/backend/cmd/internal/workerhost"
 	geojobs "wf/backend/internal/geo/jobs"
-	"wf/backend/internal/identity"
-	identityjobs "wf/backend/internal/identity/jobs"
-	identitymail "wf/backend/internal/identity/mail"
 	"wf/backend/internal/platform/clock"
-	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events"
-	"wf/backend/internal/platform/humancheck"
-	"wf/backend/internal/platform/i18n"
-	"wf/backend/internal/platform/idempotency"
-	"wf/backend/internal/platform/keys"
 	"wf/backend/internal/platform/logx"
-	"wf/backend/internal/platform/mail"
-	"wf/backend/internal/platform/migrate"
-	"wf/backend/internal/platform/periodic"
 	"wf/backend/internal/platform/queue"
-	"wf/backend/internal/platform/ratelimit"
-	"wf/backend/locales"
 )
 
 func main() {
@@ -67,105 +52,41 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	return runOn(ctx, host{clock: clock.System}, args, environ, out, logOut)
 }
 
-// runOn — run на машине h.
+// runOn — run на машине h: проверки до базы (workerhost.Load), журнал воркера из WORKER_LOG_*, затем разовая команда
+// или сервис воркера (workerhost.Prepare и Run).
 func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.Writer) error {
-	cfg, err := config.Load[config.Worker]("WORKER_", environ)
+	b, err := workerhost.Load(environ, h.httpClient)
 	if err != nil {
 		return err
 	}
-	if err := errors.Join(validateRelay(cfg.Relay), validateGeoNames(cfg.GeoNames)); err != nil {
-		return err
+	log := logx.New(logOut, b.Config.Log).With("service", "worker")
+	if len(args) > 0 {
+		// разовым командам почта, кольцо identity и очереди не нужны
+		slog.SetDefault(log)
+		pool, err := db.Open(ctx, b.Config.DB)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		reg, err := workerhost.Subscriptions()
+		if err != nil {
+			return err
+		}
+		return command(ctx, args, pool, reg, b.Geo, h.clock, out, log)
 	}
-	// клиент источника GeoNames — до базы: битый WORKER_GEONAMES_CA_FILE — отказ старта, а не x509 на первом импорте
-	geoClient, err := geoNamesClient(h.httpClient, cfg.GeoNames)
+	// почта, кольцо identity и очереди — до подключения к базе; предупреждения SMTP — в журнал воркера
+	p, err := workerhost.Prepare(b, environ, log)
 	if err != nil {
 		return err
-	}
-	log := logx.New(logOut, cfg.Log).With("service", "worker")
-	// почта и кольцо identity нужны только воркеру, не разовым командам; проверяются до подключения к базе:
-	// нет WORKER_MAIL_* или битый адрес SMTP — отказ старта; предупреждения — в журнал воркера
-	var (
-		sender *mail.SMTP
-		ring   *keys.Ring
-		cat    *i18n.Catalog
-	)
-	if len(args) == 0 {
-		mc, err := config.Load[config.Mail]("WORKER_", environ)
-		if err != nil {
-			return err
-		}
-		if sender, err = mail.NewSMTP(mail.SMTPConfig{Addr: mc.SMTPAddr, From: mc.From,
-			Username: mc.Username, Password: mc.Password, TLS: mc.TLS, Log: log}); err != nil {
-			return err
-		}
-		// кольцо identity — тоже только воркеру (письма с кодами, план I-2); до базы: нет ключа — отказ старта
-		ic, err := config.Load[config.WorkerIdentity]("WORKER_", environ)
-		if err != nil {
-			return err
-		}
-		if ring, err = keys.NewRing(ic.SecretKeys); err != nil {
-			return fmt.Errorf("WORKER_IDENTITY_SECRET_KEYS: %w", err)
-		}
-		// тексты писем модулей — серверные локали (ключи ru = en)
-		if cat, err = i18n.Load(locales.FS); err != nil {
-			return err
-		}
 	}
 	// сторонние библиотеки и стандартный log — через тот же логгер с маскированием ПД
 	slog.SetDefault(log)
-	pool, err := db.Open(ctx, cfg.DB)
+	pool, err := db.Open(ctx, p.DB())
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	reg, err := subscriptions()
-	if err != nil {
-		return err
-	}
-	geo := geojobs.Config{BaseURL: cfg.GeoNames.BaseURL, MaxCompressed: cfg.GeoNames.MaxCompressed,
-		MaxUncompressed: cfg.GeoNames.MaxUncompressed, HTTPClient: geoClient}
-	if len(args) > 0 {
-		return command(ctx, args, pool, reg, geo, h.clock, out, log)
-	}
-	// River и relay — только на схеме своего релиза: миграции накатывает wf-api (план C, R3)
-	if err := waitSchema(ctx, pool, cfg.DB.SchemaWait, log); err != nil {
-		return err
-	}
-	// сценарии identity ставят письма в транзакции действия — клиентом только для вставки (исполняющий клиент
-	// собирается из этого же реестра исполнителей)
-	ins, err := river.NewClient(riverpgxv5.New(pool), queue.InsertConfig(log))
-	if err != nil {
-		return err
-	}
-	idd := identity.WorkerDeps{Pool: pool, Clock: clock.System, Secrets: ring, River: ins, Catalog: cat, Log: log}
-	workers, err := allWorkers(pool, reg, geo, log, sender, idd)
-	if err != nil {
-		return err
-	}
-	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig(cfg.Queues, workers, log))
-	if err != nil {
-		return err
-	}
-	queue.WarnPool(log, queue.Slots(queue.Config(cfg.Queues)), cfg.DB.MaxConns)
-	// Отмена ctx Start в River — жёсткая остановка (ctx задач отменяется сразу); останавливаем
-	// сами: сначала relay, потом мягко River (queue.Stop).
-	if err := client.Start(context.WithoutCancel(ctx)); err != nil {
-		return err
-	}
-	relay := events.NewRelay(pool, client, reg, log, events.RelayConfig{Batch: cfg.Relay.Batch, Poll: cfg.Relay.Poll,
-		StopTimeout: config.WorkerRelayStop})
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		if err := relay.Run(ctx); err != nil {
-			// завис LISTEN или пачка — остановка River не ждёт их дольше срока (бюджет, план C R4)
-			log.Warn("events: relay", "err", err)
-		}
-	})
-	log.Info("воркер запущен", "queues", cfg.Queues)
-	<-ctx.Done()
-	wg.Wait() // relay больше не ставит задачи (или не уложился в config.WorkerRelayStop)
-	// relay + мягкая River + жёсткая (queue.Stop) — в пределах config.StopBudget (TestWorkerShutdownBudget)
-	return queue.Stop(context.Background(), client, config.WorkerRiverSoftStop)
+	return workerhost.Run(ctx, p, pool, log, workerhost.ServiceStop)
 }
 
 const usage = "без аргументов — воркер; events replay --type <модуль>.<факт> --subscriber <модуль>.<имя> --since <RFC 3339>; " +
@@ -199,23 +120,10 @@ func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events
 		return usageError(fmt.Sprintf("неизвестная команда %q", strings.Join(args, " ")))
 	}
 	// команду запускают руками: схема отстала — ошибка сразу, без ожидания
-	if err := waitSchema(ctx, pool, 0, log); err != nil {
+	if err := workerhost.WaitSchema(ctx, pool, 0, log); err != nil {
 		return err
 	}
 	return do()
-}
-
-// schemaPoll — как часто воркер опрашивает версию схемы при старте.
-const schemaPoll = time.Second
-
-// waitSchema — ждать, пока wf-api не накатит миграции релиза (план C, R3): воркер — до WORKER_DB_SCHEMA_WAIT, разовая
-// команда — одна проверка (timeout 0).
-func waitSchema(ctx context.Context, pool *pgxpool.Pool, timeout time.Duration, log *slog.Logger) error {
-	want, err := migrate.Latest()
-	if err != nil {
-		return err
-	}
-	return migrate.WaitSchema(ctx, pool, want, timeout, schemaPoll, clock.System, log)
 }
 
 func replay(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, out io.Writer, log *slog.Logger) error {
@@ -300,109 +208,4 @@ func printGeoSummary(out io.Writer, cc string, s geojobs.Summary) {
 	for _, slug := range s.Conflict {
 		fmt.Fprintf(out, "  конфликт: %s\n", slug)
 	}
-}
-
-// validateGeoNames — до подключения к базе: источник только https, лимиты положительны.
-func validateGeoNames(g config.GeoNames) error {
-	var errs []error
-	if u, err := url.Parse(g.BaseURL); err != nil || u.Scheme != "https" || u.Host == "" {
-		errs = append(errs, fmt.Errorf("WORKER_GEONAMES_BASE_URL = %q: нужен https://<хост>", g.BaseURL))
-	}
-	if g.MaxCompressed < 1 {
-		errs = append(errs, fmt.Errorf("WORKER_GEONAMES_MAX_COMPRESSED = %d: нужно больше нуля", g.MaxCompressed))
-	}
-	if g.MaxUncompressed < 1 {
-		errs = append(errs, fmt.Errorf("WORKER_GEONAMES_MAX_UNCOMPRESSED = %d: нужно больше нуля", g.MaxUncompressed))
-	}
-	return errors.Join(errs...)
-}
-
-// geoNamesTimeout — предел одного запроса к источнику, как у клиента по умолчанию пакета source (15 мин): копию клиента
-// с нулевым Timeout source не ограничивает.
-const geoNamesTimeout = 15 * time.Minute
-
-// geoNamesClient — HTTP-клиент загрузки GeoNames: подставленный хостом (тесты) — как есть; без WORKER_GEONAMES_CA_FILE —
-// nil (клиент по умолчанию source, системные корни); с ним — системные корни плюс корень из файла (HTTPS-фикстура
-// живого e2e, зеркало с собственным CA; Task 23).
-func geoNamesClient(given *http.Client, g config.GeoNames) (*http.Client, error) {
-	if given != nil {
-		return given, nil
-	}
-	pool, err := g.RootCAs()
-	if err != nil || pool == nil {
-		return nil, err
-	}
-	tr := http.DefaultTransport.(*http.Transport).Clone() //nolint:forcetypeassert // DefaultTransport — *http.Transport
-	tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
-	return &http.Client{Transport: tr, Timeout: geoNamesTimeout}, nil
-}
-
-// validateRelay — до подключения к базе: пачка меньше 1 зациклила бы Drain, неположительный
-// опрос уронил бы time.NewTicker паникой.
-func validateRelay(r config.Relay) error {
-	var errs []error
-	if r.Batch < 1 {
-		errs = append(errs, fmt.Errorf("WORKER_RELAY_BATCH = %d: нужно не меньше 1", r.Batch))
-	}
-	if r.Poll <= 0 {
-		errs = append(errs, fmt.Errorf("WORKER_RELAY_POLL = %s: нужно больше нуля", r.Poll))
-	}
-	return errors.Join(errs...)
-}
-
-// subscriptions — подписчики модулей на события. Пусто, пока нет модулей: каждая спека
-// модуля добавляет сюда свои Subscription (internal/<модуль>/subscribers).
-func subscriptions() (*events.Registry, error) {
-	return events.NewRegistry()
-}
-
-// mails — виды писем модулей: identity (коды, уведомления безопасности, удаление, сброс 2FA — план I-2, Task 19).
-// Composer'ы identity — на кольце WORKER_IDENTITY_SECRET_KEYS (коды из письма) и серверных локалях.
-func mails(idd identity.WorkerDeps) (*mail.Registry, error) {
-	r := mail.NewRegistry()
-	if err := identitymail.Register(r, identitymail.ComposerDeps{Pool: idd.Pool, Secrets: idd.Secrets, Catalog: idd.Catalog,
-		Clock: idd.Clock}); err != nil {
-		return nil, err
-	}
-	return r, nil
-}
-
-// realWorkers — исполнители воркера; их виды — ровно queue.WorkerKinds (сверка — TestWorkerKinds). idd — зависимости
-// задач identity (письма, чистка, анонимизация, сброс 2FA; R7: исполнители identity — только у воркера).
-func realWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, log *slog.Logger, sender mail.Sender,
-	idd identity.WorkerDeps) (*river.Workers, error) {
-	workers := queue.NewWorkers()
-	events.AddWorkers(workers, pool, reg)
-	river.AddWorker(workers, ratelimit.NewCleanupWorker(pool, clock.System))
-	river.AddWorker(workers, humancheck.NewCleanupWorker(pool, clock.System))
-	river.AddWorker(workers, idempotency.NewCleanupWorker(pool))
-	river.AddWorker(workers, geojobs.NewImportWorker(pool, clock.System, geo, log))
-	letters, err := mails(idd)
-	if err != nil {
-		return nil, err
-	}
-	mail.AddWorkers(workers, letters, sender)
-	if err := identityjobs.AddWorkers(workers, idd); err != nil {
-		return nil, err
-	}
-	return workers, nil
-}
-
-// allWorkers — реестр исполняющего клиента воркера: свои исполнители и заглушки видов admin-api (I1 ревью 10c): став
-// лидером River, рескьюер воркера вернёт зависшее письмо staff.mail в retryable, а не выбросит неизвестный вид.
-func allWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, log *slog.Logger, sender mail.Sender,
-	idd identity.WorkerDeps) (*river.Workers, error) {
-	workers, err := realWorkers(pool, reg, geo, log, sender, idd)
-	if err != nil {
-		return nil, err
-	}
-	queue.AddForeign(workers, queue.AdminKinds())
-	return workers, nil
-}
-
-// riverConfig — исполняющий клиент воркера: обслуживание — общее с admin-api (queue.ClientConfig от
-// queue.MaintenanceConfig, страж TestWorkerRiverMaintenance), периодика — платформа и identity: тот же список у
-// admin-api, лидером River может стать любой (P27, R7; страж TestPeriodicSameInBothBinaries).
-func riverConfig(q config.Queues, workers *river.Workers, log *slog.Logger) *river.Config {
-	return queue.ClientConfig(queue.Config(q), workers, append(periodic.Jobs(), identityjobs.Periodic()...), log)
 }

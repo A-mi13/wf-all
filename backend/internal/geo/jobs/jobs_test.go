@@ -32,7 +32,7 @@ func TestImportArgsOptions(t *testing.T) {
 		t.Fatalf("%+v %s", a, a.Kind())
 	}
 	o := a.InsertOpts()
-	if o.Queue != queue.Maintenance || o.MaxAttempts != 3 || !o.UniqueOpts.ByArgs {
+	if o.Queue != queue.Import || o.MaxAttempts != 3 || !o.UniqueOpts.ByArgs {
 		t.Fatalf("%+v", o)
 	}
 	want := []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateScheduled,
@@ -75,7 +75,7 @@ func TestImportUniquePerCountryUntilCompleted(t *testing.T) {
 		return r
 	}
 	first := insert("RU", nil)
-	if first.UniqueSkippedAsDuplicate || first.Job.Queue != queue.Maintenance || first.Job.MaxAttempts != 3 || first.Job.Kind != "geo.import" {
+	if first.UniqueSkippedAsDuplicate || first.Job.Queue != queue.Import || first.Job.MaxAttempts != 3 || first.Job.Kind != "geo.import" {
 		t.Fatalf("первая: %+v", first.Job)
 	}
 	staff := uuid.New()

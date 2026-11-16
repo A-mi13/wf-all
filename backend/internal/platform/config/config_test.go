@@ -125,14 +125,26 @@ func TestLoadWorkerQueuesAndRelay(t *testing.T) {
 	c, err := config.Load[config.Worker]("WORKER_", []string{
 		"WORKER_DATABASE_URL=postgres://w@localhost/wf",
 		"WORKER_MAIL_SMTP_ADDR=127.0.0.1:11025", "WORKER_MAIL_FROM=WF <noreply@wf.local>",
-		"WORKER_QUEUE_MAIL=7",
+		"WORKER_QUEUE_MAIL=7", "WORKER_QUEUE_IMPORT=3",
 		"WORKER_RELAY_POLL=2s",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Queues.Mail != 7 || c.Queues.Events != 10 || c.Queues.Maintenance != 2 {
+	if c.Queues.Mail != 7 || c.Queues.Events != 10 || c.Queues.Maintenance != 2 || c.Queues.Import != 3 {
 		t.Fatalf("очереди: %+v", c.Queues)
+	}
+	// импорт GeoNames по умолчанию включён (R3); стенд выключает его WORKER_GEO_IMPORT_ENABLED=false
+	if !c.GeoImportEnabled {
+		t.Fatal("GeoImportEnabled по умолчанию — false")
+	}
+	d, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=postgres://w@localhost/wf",
+		"WORKER_GEO_IMPORT_ENABLED=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Queues.Import != 1 || d.GeoImportEnabled {
+		t.Fatalf("умолчание очереди import %d, флаг импорта %v", d.Queues.Import, d.GeoImportEnabled)
 	}
 	if c.Relay.Poll != 2*time.Second || c.Relay.Batch != 100 {
 		t.Fatalf("relay: %+v", c.Relay)

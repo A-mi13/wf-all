@@ -26,6 +26,7 @@ const (
 	Stats       = "stats"       // ночные пересчёты
 	Media       = "media"       // обработка загрузок
 	Maintenance = "maintenance" // чистка, сроки, сверки, отложенные действия админки
+	Import      = "import"      // импорт GeoNames, до 30 мин на задачу — отдельно от maintenance
 )
 
 // Staff — очередь писем сотрудникам (staff.mail, D3): её обслуживает только admin-api (у роли БД
@@ -50,7 +51,8 @@ func NewWorkers() *river.Workers {
 	return w
 }
 
-// Config — очереди §9.1 с конкурентностью из конфига. Очереди default нет намеренно.
+// Config — восемь очередей §9.1 с конкурентностью из конфига, всегда все (выключение import по флагу —
+// у воркера, cmd/internal/workerhost). Очереди default нет намеренно.
 func Config(c config.Queues) map[string]river.QueueConfig {
 	return map[string]river.QueueConfig{
 		Events:      {MaxWorkers: c.Events},
@@ -60,6 +62,7 @@ func Config(c config.Queues) map[string]river.QueueConfig {
 		Stats:       {MaxWorkers: c.Stats},
 		Media:       {MaxWorkers: c.Media},
 		Maintenance: {MaxWorkers: c.Maintenance},
+		Import:      {MaxWorkers: c.Import},
 	}
 }
 

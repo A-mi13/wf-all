@@ -147,6 +147,8 @@ type Queues struct {
 	Stats       int `env:"QUEUE_STATS" envDefault:"2"`
 	Media       int `env:"QUEUE_MEDIA" envDefault:"2"`
 	Maintenance int `env:"QUEUE_MAINTENANCE" envDefault:"2"`
+	// Import — импорт GeoNames (до 30 мин на задачу): своя очередь, не держит слоты maintenance
+	Import int `env:"QUEUE_IMPORT" envDefault:"1"`
 }
 
 // Relay — раскладка событий outbox (internal/platform/events).
@@ -174,6 +176,9 @@ type Worker struct {
 	Queues   Queues
 	Relay    Relay
 	GeoNames GeoNames
+	// GeoImportEnabled — обслуживать ли очередь import (спека §8.2): false — очереди нет в карте River, задачи
+	// geo.import ждут (стенд: импорт на бесплатном инстансе не идёт); вид geo.import зарегистрирован всегда
+	GeoImportEnabled bool `env:"GEO_IMPORT_ENABLED" envDefault:"true"`
 }
 
 // WorkerIdentity — кольцо секретов identity воркера (WORKER_IDENTITY_SECRET_KEYS; то же значение, что

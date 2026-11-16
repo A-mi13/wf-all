@@ -39,7 +39,7 @@ func periodicIDs(jobs []*river.PeriodicJob) []string {
 }
 
 // R7 плана I-2: admin-api бывает лидером River и ставит периодику по своему списку — он равен общему (платформа +
-// identity), как у воркера (зеркало — TestPeriodicSameInBothBinaries в cmd/worker): иначе, пока лидер — admin-api,
+// identity), как у воркера (зеркало — TestPeriodicSameInBothBinaries в cmd/internal/workerhost): иначе, пока лидер — admin-api,
 // анонимизация, сбросы 2FA и чистка identity не ставились бы.
 func TestPeriodicSameInBothBinaries(t *testing.T) {
 	t.Parallel()

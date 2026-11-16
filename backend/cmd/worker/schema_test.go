@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,5 +79,60 @@ func TestWorkerCommandNoWait(t *testing.T) {
 		if err := runResult(t, args, env); !errors.Is(err, migrate.ErrSchemaBehind) || exitCode(err) != 1 {
 			t.Fatalf("%v: err = %v, ждали ErrSchemaBehind и код 1", args, err)
 		}
+	}
+}
+
+// syncBuffer — журнал, который пишет run и читает тест параллельно.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// Спека §2, R11: SIGTERM во время ожидания схемы — штатная остановка: run возвращает nil (код выхода 0), а не
+// обёрнутую context.Canceled; River не стартовал.
+func TestRunStopsDuringSchemaWait(t *testing.T) {
+	t.Parallel()
+	u, pool, _ := behindURL(t)
+	var logBuf syncBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, nil, append(mailEnv, "WORKER_DATABASE_URL="+u, "WORKER_DB_SCHEMA_WAIT=10m"), io.Discard, &logBuf)
+	}()
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(logBuf.String(), "схема базы отстаёт") {
+		if time.Now().After(deadline) {
+			t.Fatalf("воркер не начал ждать схему: %q", logBuf.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("остановка во время ожидания схемы: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run не вернулся за 5 с после отмены")
+	}
+	var jobs int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM river_job`).Scan(&jobs); err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 0 {
+		t.Fatalf("River стартовал: задач %d", jobs)
 	}
 }

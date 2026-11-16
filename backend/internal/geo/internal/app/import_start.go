@@ -59,9 +59,9 @@ func (ImportArgs) Kind() string { return ImportKind }
 
 func (ImportArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		// Импорт занимает слот очереди maintenance до ImportTimeout (30 мин; geo 1 Task 11 M6) — принято: импорт
-		// редкий и ручной; ожидание чужого импорта (JobSnooze) слот отпускает.
-		Queue:       queue.Maintenance,
+		// Своя очередь import: не держит слот maintenance до ImportTimeout (30 мин); на стенде очередь выключена
+		// флагом (WORKER_GEO_IMPORT_ENABLED=false) — задача ждёт.
+		Queue:       queue.Import,
 		MaxAttempts: 3,
 		// по стране: пока импорт страны не завершён, второй River отбросит как дубль (409
 		// geo.import_in_progress у ручки); completed в списке нет — повторный импорт после

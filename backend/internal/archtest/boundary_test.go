@@ -28,7 +28,8 @@ func TestPublicBinariesDoNotDependOnAdmin(t *testing.T) {
 		required []string
 	}{
 		{"./cmd/api", []string{"wf/backend/internal/platform/config", "wf/backend/internal/httpapi/public"}},
-		{"./cmd/worker", []string{"wf/backend/internal/platform/config", "wf/backend/internal/platform/queue"}},
+		{"./cmd/worker", []string{"wf/backend/internal/platform/config", "wf/backend/internal/platform/queue",
+			"wf/backend/cmd/internal/workerhost"}},
 	}
 	for _, bin := range binaries {
 		for _, goos := range []string{"linux", "windows"} {
@@ -57,7 +58,8 @@ func TestPublicBinariesDoNotDependOnStaff(t *testing.T) {
 		required []string
 	}{
 		{"./cmd/api", []string{"wf/backend/internal/platform/config", "wf/backend/internal/httpapi/public"}},
-		{"./cmd/worker", []string{"wf/backend/internal/platform/config", "wf/backend/internal/platform/periodic"}},
+		{"./cmd/worker", []string{"wf/backend/internal/platform/config", "wf/backend/internal/platform/periodic",
+			"wf/backend/cmd/internal/workerhost"}},
 	}
 	for _, bin := range binaries {
 		deps := listDeps(t, bin.pkg, "linux")
