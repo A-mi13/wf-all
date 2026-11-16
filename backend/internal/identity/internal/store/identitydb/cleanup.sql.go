@@ -127,7 +127,7 @@ func (q *Queries) CleanupDeletedIdentities(ctx context.Context, userID uuid.UUID
 const cleanupDeletedLeftovers = `-- name: CleanupDeletedLeftovers :many
 SELECT u.id FROM users u
 WHERE u.status = 'deleted'
-  AND NOT (u.id = ANY(coalesce($1::uuid[], '{}')))
+  AND u.id > $1
   AND (EXISTS (SELECT 1 FROM credentials c WHERE c.user_id = u.id)
        OR EXISTS (SELECT 1 FROM user_mfa m WHERE m.user_id = u.id)
        OR EXISTS (SELECT 1 FROM user_recovery_codes rc WHERE rc.user_id = u.id)
@@ -142,16 +142,16 @@ LIMIT $2
 `
 
 type CleanupDeletedLeftoversParams struct {
-	Skip  []uuid.UUID
+	After uuid.UUID
 	Batch int32
 }
 
 // сверка удаления (спека бэкенда §6.5): аккаунты deleted, у которых остались секреты, привязки, согласия, коды, сессии
 // или история ника (анонимизация их стирает; строка могла появиться гонкой или старым релизом). Без замка: замок users
-// (CleanupLockUser, R30) и удаление — на аккаунт своей tx (I2 ревью R1W6); skip — аккаунты, упавшие или занятые в этом
-// прогоне. Вызовы auth_challenges воркеру по user_id не видны (§5.5) — их убирает срок (CleanupAuthChallenges)
+// (CleanupLockUser, R30) и удаление — на аккаунт своей tx (I2 ревью R1W6); after — курсор прогона
+// (упавшие и занятые не повторяются до следующего запуска, m-r3). Вызовы auth_challenges воркеру по user_id не видны (§5.5) — их убирает срок (CleanupAuthChallenges)
 func (q *Queries) CleanupDeletedLeftovers(ctx context.Context, arg CleanupDeletedLeftoversParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, cleanupDeletedLeftovers, arg.Skip, arg.Batch)
+	rows, err := q.db.Query(ctx, cleanupDeletedLeftovers, arg.After, arg.Batch)
 	if err != nil {
 		return nil, err
 	}
@@ -296,26 +296,59 @@ func (q *Queries) CleanupLockUser(ctx context.Context, id uuid.UUID) (CleanupLoc
 	return i, err
 }
 
-const cleanupNicknameReservations = `-- name: CleanupNicknameReservations :execrows
-DELETE FROM nickname_reservations
-WHERE nickname_normalized IN (SELECT n.nickname_normalized FROM nickname_reservations n
-                              WHERE n.expires_at < $1
-                              ORDER BY n.nickname_normalized
-                              LIMIT $2)
+const cleanupNicknameReservation = `-- name: CleanupNicknameReservation :execrows
+DELETE FROM nickname_reservations n
+WHERE n.nickname_normalized = $1 AND n.expires_at < $2
 `
 
-type CleanupNicknameReservationsParams struct {
-	Now   time.Time
-	Batch int32
+type CleanupNicknameReservationParams struct {
+	NicknameNormalized string
+	Now                time.Time
 }
 
-// карантин ника — после expires_at; у worker нет UPDATE — без FOR UPDATE
-func (q *Queries) CleanupNicknameReservations(ctx context.Context, arg CleanupNicknameReservationsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, cleanupNicknameReservations, arg.Now, arg.Batch)
+// один карантин своим оператором вне транзакции: ожидая занятый, чистка не держит замков других — цикла нет. Условие
+// срока — снова (UPSERT сценария мог продлить карантин после выборки)
+func (q *Queries) CleanupNicknameReservation(ctx context.Context, arg CleanupNicknameReservationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cleanupNicknameReservation, arg.NicknameNormalized, arg.Now)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const cleanupNicknameReservationsDue = `-- name: CleanupNicknameReservationsDue :many
+SELECT n.nickname_normalized FROM nickname_reservations n
+WHERE n.expires_at < $1
+ORDER BY n.nickname_normalized
+LIMIT $2
+`
+
+type CleanupNicknameReservationsDueParams struct {
+	Now   time.Time
+	Batch int32
+}
+
+// карантин ника — после expires_at: пачка ников без замка; удаляет CleanupNicknameReservation по одному (m-r1 ревью
+// R1W6). Пачкой одним DELETE чистка держала бы замки в порядке nickname_normalized и ждала занятый: смена ника удаляет
+// карантин нового ника Y, затем UPSERT старого X (Y → X) — при X < Y цикл, 40P01. У worker нет UPDATE — без FOR UPDATE
+func (q *Queries) CleanupNicknameReservationsDue(ctx context.Context, arg CleanupNicknameReservationsDueParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, cleanupNicknameReservationsDue, arg.Now, arg.Batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var nickname_normalized string
+		if err := rows.Scan(&nickname_normalized); err != nil {
+			return nil, err
+		}
+		items = append(items, nickname_normalized)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const cleanupRefreshSuccessors = `-- name: CleanupRefreshSuccessors :execrows
@@ -344,22 +377,22 @@ func (q *Queries) CleanupRefreshSuccessors(ctx context.Context, arg CleanupRefre
 const cleanupRestrictionsDue = `-- name: CleanupRestrictionsDue :many
 SELECT DISTINCT r.user_id FROM user_restrictions r
 WHERE r.lifted_at IS NULL AND r.until IS NOT NULL AND r.until <= $1
-  AND NOT (r.user_id = ANY(coalesce($2::uuid[], '{}')))
+  AND r.user_id > $2
 ORDER BY r.user_id
 LIMIT $3
 `
 
 type CleanupRestrictionsDueParams struct {
 	Now   *time.Time
-	Skip  []uuid.UUID
+	After uuid.UUID
 	Batch int32
 }
 
 // аккаунты с истёкшими неснятыми ограничениями, без замка: замок users и снятие — на аккаунт (CleanupLiftRestrictions).
-// until ≤ now — ограничение уже не действует (загрузчик сессии считает живым until > now); skip — аккаунты, упавшие
-// или занятые в этом прогоне
+// until ≤ now — ограничение уже не действует (загрузчик сессии считает живым until > now); after — курсор
+// прогона (id последнего обработанного, uuid.Nil — с начала): упавшие и занятые в этом прогоне не повторяются (m-r3)
 func (q *Queries) CleanupRestrictionsDue(ctx context.Context, arg CleanupRestrictionsDueParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, cleanupRestrictionsDue, arg.Now, arg.Skip, arg.Batch)
+	rows, err := q.db.Query(ctx, cleanupRestrictionsDue, arg.Now, arg.After, arg.Batch)
 	if err != nil {
 		return nil, err
 	}

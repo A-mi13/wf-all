@@ -163,8 +163,22 @@ func cleanupSteps() []cleanupStep {
 		{name: "security_meta", run: func(ctx context.Context, q *identitydb.Queries, now time.Time, b int32) (int64, error) {
 			return q.CleanupSecurityMeta(ctx, identitydb.CleanupSecurityMetaParams{Cutoff: now.Add(-cleanupMetaAfter), Batch: b})
 		}},
-		{name: "nickname_reservations", run: func(ctx context.Context, q *identitydb.Queries, now time.Time, b int32) (int64, error) {
-			return q.CleanupNicknameReservations(ctx, identitydb.CleanupNicknameReservationsParams{Now: now, Batch: b})
+		// карантины ников — по одному вне tx, как коды (m-r1 ревью R1W6): смена ника берёт замки Y → X, пачка одним
+		// DELETE — в порядке ника; чистка, ждущая Y, не держит X — цикла и 40P01 нет
+		{name: "nickname_reservations", noTx: true, run: func(ctx context.Context, q *identitydb.Queries, now time.Time, b int32) (int64, error) {
+			nicks, err := q.CleanupNicknameReservationsDue(ctx, identitydb.CleanupNicknameReservationsDueParams{Now: now, Batch: b})
+			if err != nil {
+				return 0, err
+			}
+			var n int64
+			for _, nick := range nicks {
+				d, err := q.CleanupNicknameReservation(ctx, identitydb.CleanupNicknameReservationParams{NicknameNormalized: nick, Now: now})
+				if err != nil {
+					return n, err
+				}
+				n += d
+			}
+			return n, nil
 		}},
 	}
 }
@@ -172,26 +186,27 @@ func cleanupSteps() []cleanupStep {
 // liftExpiredRestrictions — истёкшие ограничения (until ≤ now) снимаются по аккаунтам: на аккаунт — своя tx, users
 // первым FOR NO KEY UPDATE SKIP LOCKED (R30; занят сценарием — пропуск до следующего запуска), lifted_at, версия
 // аккаунта + 1 и событие identity.restrictions_changed (статус и оставшиеся закрытые возможности) в той же tx.
-// Упавший аккаунт — в журнал и skip до конца прогона (не заслоняет остальных); failed — их число.
+// Упавший аккаунт — в журнал и позади курсора до конца прогона (не заслоняет остальных); failed — их число.
 func (a *App) liftExpiredRestrictions(ctx context.Context, now time.Time, batch int32) (lifted, failed int, err error) {
 	return a.eachAccount(ctx, "снятие истёкших ограничений", batch,
-		func(ctx context.Context, skip []uuid.UUID) ([]uuid.UUID, error) {
+		func(ctx context.Context, after uuid.UUID) ([]uuid.UUID, error) {
 			return identitydb.New(a.pool).CleanupRestrictionsDue(ctx,
-				identitydb.CleanupRestrictionsDueParams{Now: &now, Skip: skip, Batch: batch})
+				identitydb.CleanupRestrictionsDueParams{Now: &now, After: after, Batch: batch})
 		},
 		func(ctx context.Context, id uuid.UUID) (bool, error) { return a.liftRestrictions(ctx, id, now) })
 }
 
-// eachAccount — пачки аккаунтов (due — без замка, skip — уже обработанные, занятые и упавшие в этом прогоне), на
-// аккаунт — do своей tx (ok = false — занят или делать уже нечего). Упавший аккаунт — в журнал (id и ошибка, без ПД) и
-// skip: не откатывает и не заслоняет остальных; failed — их число, итог решает вызывающий (errCleanupRowsFailed).
+// eachAccount — пачки аккаунтов по возрастанию id (due — без замка, after — курсор: id последнего обработанного, занятого
+// или упавшего в этом прогоне; m-r3 — вместо растущего списка пропусков), на аккаунт — do своей tx (ok = false — занят
+// или делать уже нечего). Упавший аккаунт — в журнал (id и ошибка, без ПД) и позади курсора: не откатывает и не
+// заслоняет остальных, повтор — следующим запуском; failed — их число, итог решает вызывающий (errCleanupRowsFailed).
 func (a *App) eachAccount(ctx context.Context, what string, batch int32,
-	due func(ctx context.Context, skip []uuid.UUID) ([]uuid.UUID, error),
+	due func(ctx context.Context, after uuid.UUID) ([]uuid.UUID, error),
 	do func(ctx context.Context, id uuid.UUID) (bool, error),
 ) (done, failed int, err error) {
-	var skip []uuid.UUID
+	var after uuid.UUID // uuid.Nil — с начала: id аккаунтов (v7) больше
 	for {
-		ids, err := due(ctx, skip)
+		ids, err := due(ctx, after)
 		if err != nil {
 			return done, failed, fmt.Errorf("identity: %s: %w", what, err)
 		}
@@ -207,7 +222,7 @@ func (a *App) eachAccount(ctx context.Context, what string, batch int32,
 			case ok:
 				done++
 			}
-			skip = append(skip, id) // обработан, занят (следующий запуск) или упал
+			after = id // обработан, занят (следующий запуск) или упал
 		}
 		if len(ids) < int(batch) {
 			return done, failed, nil
@@ -260,9 +275,9 @@ func (a *App) liftRestrictions(ctx context.Context, userID uuid.UUID, now time.T
 // дочищенных аккаунтов, failed — упавших.
 func (a *App) scrubDeleted(ctx context.Context, batch int32) (done, failed int, err error) {
 	return a.eachAccount(ctx, "сверка удаления", batch,
-		func(ctx context.Context, skip []uuid.UUID) ([]uuid.UUID, error) {
+		func(ctx context.Context, after uuid.UUID) ([]uuid.UUID, error) {
 			return identitydb.New(a.pool).CleanupDeletedLeftovers(ctx,
-				identitydb.CleanupDeletedLeftoversParams{Skip: skip, Batch: batch})
+				identitydb.CleanupDeletedLeftoversParams{After: after, Batch: batch})
 		},
 		a.scrubAccount)
 }

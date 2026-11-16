@@ -493,31 +493,8 @@ func TestCleanupCodesNoDeadlock(t *testing.T) {
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM auth_codes WHERE id = $1 FOR UPDATE`, second); err != nil {
 		t.Fatal(err)
 	}
-	type result struct {
-		rep CleanupReport
-		err error
-	}
-	done := make(chan result, 1)
-	go func() {
-		rep, err := w.Cleanup(ctx)
-		done <- result{rep, err}
-	}()
-	// барьер: чистка ждёт замок second (не по времени — по pg_stat_activity)
-	for {
-		var waiting int
-		if err := e.owner.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
-			AND wait_event_type = 'Lock' AND query ILIKE '%DELETE FROM auth_codes%'`).Scan(&waiting); err != nil {
-			t.Fatalf("ожидание чистки: %v", err)
-		}
-		if waiting > 0 {
-			break
-		}
-		select {
-		case r := <-done:
-			t.Fatalf("чистка не ждала занятый код: %+v", r)
-		default:
-		}
-	}
+	done := runCleanup(ctx, w)
+	awaitCleanupWaiting(ctx, t, e, "%DELETE FROM auth_codes%", done) // чистка ждёт замок second
 	if _, err := tx.Exec(ctx, `UPDATE auth_codes SET revoked_at = $2 WHERE id = $1`, first, testNow); err != nil {
 		t.Fatalf("сценарий: %v", err)
 	}
@@ -530,5 +507,125 @@ func TestCleanupCodesNoDeadlock(t *testing.T) {
 	}
 	if n := count(t, e.owner, `SELECT count(*) FROM auth_codes`); n != 0 || r.rep.Rows["auth_codes"] != 2 {
 		t.Fatalf("осталось кодов %d, в отчёте %d", n, r.rep.Rows["auth_codes"])
+	}
+}
+
+// cleanupResult — итог Cleanup из горутины теста.
+type cleanupResult struct {
+	rep CleanupReport
+	err error
+}
+
+// runCleanup — Cleanup в горутине; итог — в канал.
+func runCleanup(ctx context.Context, w *App) <-chan cleanupResult {
+	done := make(chan cleanupResult, 1)
+	go func() {
+		rep, err := w.Cleanup(ctx)
+		done <- cleanupResult{rep, err}
+	}()
+	return done
+}
+
+// awaitCleanupWaiting — барьер: чистка ждёт замок оператором like (не по времени — по pg_stat_activity, опрос раз в
+// 10 мс, m-r2); чистка закончилась раньше — тест падает.
+func awaitCleanupWaiting(ctx context.Context, t *testing.T, e *env, like string, done <-chan cleanupResult) {
+	t.Helper()
+	for {
+		var waiting int
+		if err := e.owner.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+			AND wait_event_type = 'Lock' AND query ILIKE $1`, like).Scan(&waiting); err != nil {
+			t.Fatalf("ожидание чистки: %v", err)
+		}
+		if waiting > 0 {
+			return
+		}
+		select {
+		case r := <-done:
+			t.Fatalf("чистка не ждала занятую строку: %+v", r)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// m-r1: смена ника (changeNickname) удаляет карантин нового ника Y, затем UPSERT старого X — замки в порядке Y → X.
+// Чистка, ждущая Y, не держит замок X (карантин за карантином, каждый — своим оператором), — цикла нет, 40P01 ни у
+// кого. Пачкой одним DELETE (порядок nickname_normalized: X < Y) чистка держала бы X и ждала Y — взаимная блокировка.
+func TestCleanupNicknameReservationsNoDeadlock(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	w := roleApp(t, e, "worker", true)
+	uid := seedUser(t, e.owner, "nick_dl", "ru")
+	expired := testNow.Add(-time.Hour)
+	// вставка по порядку ника: и порядок кучи, и порядок индекса — X раньше Y
+	acctExec(t, e, `INSERT INTO nickname_reservations (nickname_normalized, released_at, expires_at) VALUES
+		('dl_x', $1, $1), ('dl_y', $1, $1)`, expired)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tx, err := e.owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	// сценарий, шаг 1 (AccountDeleteNicknameReservation): новый ник Y свободен — его истёкший карантин удаляется
+	if _, err := tx.Exec(ctx, `DELETE FROM nickname_reservations WHERE nickname_normalized = 'dl_y'`); err != nil {
+		t.Fatal(err)
+	}
+	done := runCleanup(ctx, w)
+	awaitCleanupWaiting(ctx, t, e, "%DELETE FROM nickname_reservations%", done) // чистка ждёт замок Y
+	// сценарий, шаг 2 (AccountReserveNickname): старый ник X — в карантин
+	if _, err := tx.Exec(ctx, `INSERT INTO nickname_reservations (nickname_normalized, previous_user_id, released_at, expires_at)
+		VALUES ('dl_x', $1, $2, $3)
+		ON CONFLICT (nickname_normalized) DO UPDATE
+		SET previous_user_id = EXCLUDED.previous_user_id, released_at = EXCLUDED.released_at, expires_at = EXCLUDED.expires_at`,
+		uid, testNow, testNow.Add(90*24*time.Hour)); err != nil {
+		t.Fatalf("сценарий: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("чистка: %v", r.err)
+	}
+	// X — свежий карантин сценария, Y удалён сценарием; чистка удалила старый X (до UPSERT сценария)
+	if n := count(t, e.owner, `SELECT count(*) FROM nickname_reservations WHERE nickname_normalized = 'dl_x'
+		AND previous_user_id = $1`, uid); n != 1 {
+		t.Fatal("карантин старого ника сценария потерян")
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM nickname_reservations`); n != 1 || r.rep.Rows["nickname_reservations"] != 1 {
+		t.Fatalf("карантинов %d, в отчёте %d", n, r.rep.Rows["nickname_reservations"])
+	}
+}
+
+// m-r3: аккаунты идут курсором по id — упавший (меньший id) в пачке из одного не выбирается снова в этом прогоне:
+// чистка доходит до следующего и завершается errCleanupRowsFailed, а не крутит упавший до отмены ctx. Страж
+// продвижения курсора, а не формы: прежний skip-список тоже прошёл бы этот тест.
+func TestCleanupAccountsCursor(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	w := roleApp(t, e, "worker", true)
+	ids := []uuid.UUID{seedUser(t, e.owner, "cursor_a", "ru"), seedUser(t, e.owner, "cursor_b", "ru")}
+	slices.SortFunc(ids, func(x, y uuid.UUID) int { return strings.Compare(x.String(), y.String()) })
+	bad, good := ids[0], ids[1]
+	past := testNow.Add(-time.Second)
+	for _, u := range ids {
+		acctExec(t, e, `INSERT INTO user_restrictions (id, user_id, capability, until, source_id, created_at)
+			VALUES (gen_random_uuid(), $1, 'comment', $2, gen_random_uuid(), $2)`, u, past)
+	}
+	acctExec(t, e, `CREATE FUNCTION poison_cursor() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.user_id = '`+bad.String()+`' THEN RAISE EXCEPTION 'отравленная строка'; END IF;
+			RETURN NEW;
+		END $$`)
+	acctExec(t, e, `CREATE TRIGGER poison_cursor BEFORE UPDATE ON user_restrictions FOR EACH ROW EXECUTE FUNCTION poison_cursor()`)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	rep, err := w.cleanup(ctx, 1)
+	if !errors.Is(err, errCleanupRowsFailed) || ctx.Err() != nil {
+		t.Fatalf("ждали errCleanupRowsFailed без отмены, получили %v", err)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM user_restrictions WHERE user_id = $1 AND lifted_at IS NOT NULL`, good); n != 1 ||
+		rep.Rows["user_restrictions"] != 1 {
+		t.Fatalf("следующий за упавшим не снят (в отчёте %d)", rep.Rows["user_restrictions"])
 	}
 }

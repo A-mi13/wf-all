@@ -60,21 +60,28 @@ WHERE id IN (SELECT e.id FROM security_events e
              LIMIT @batch
              FOR UPDATE SKIP LOCKED);
 
--- name: CleanupNicknameReservations :execrows
--- карантин ника — после expires_at; у worker нет UPDATE — без FOR UPDATE
-DELETE FROM nickname_reservations
-WHERE nickname_normalized IN (SELECT n.nickname_normalized FROM nickname_reservations n
-                              WHERE n.expires_at < @now
-                              ORDER BY n.nickname_normalized
-                              LIMIT @batch);
+-- name: CleanupNicknameReservationsDue :many
+-- карантин ника — после expires_at: пачка ников без замка; удаляет CleanupNicknameReservation по одному (m-r1 ревью
+-- R1W6). Пачкой одним DELETE чистка держала бы замки в порядке nickname_normalized и ждала занятый: смена ника удаляет
+-- карантин нового ника Y, затем UPSERT старого X (Y → X) — при X < Y цикл, 40P01. У worker нет UPDATE — без FOR UPDATE
+SELECT n.nickname_normalized FROM nickname_reservations n
+WHERE n.expires_at < @now
+ORDER BY n.nickname_normalized
+LIMIT @batch;
+
+-- name: CleanupNicknameReservation :execrows
+-- один карантин своим оператором вне транзакции: ожидая занятый, чистка не держит замков других — цикла нет. Условие
+-- срока — снова (UPSERT сценария мог продлить карантин после выборки)
+DELETE FROM nickname_reservations n
+WHERE n.nickname_normalized = @nickname_normalized AND n.expires_at < @now;
 
 -- name: CleanupRestrictionsDue :many
 -- аккаунты с истёкшими неснятыми ограничениями, без замка: замок users и снятие — на аккаунт (CleanupLiftRestrictions).
--- until ≤ now — ограничение уже не действует (загрузчик сессии считает живым until > now); skip — аккаунты, упавшие
--- или занятые в этом прогоне
+-- until ≤ now — ограничение уже не действует (загрузчик сессии считает живым until > now); after — курсор
+-- прогона (id последнего обработанного, uuid.Nil — с начала): упавшие и занятые в этом прогоне не повторяются (m-r3)
 SELECT DISTINCT r.user_id FROM user_restrictions r
 WHERE r.lifted_at IS NULL AND r.until IS NOT NULL AND r.until <= @now
-  AND NOT (r.user_id = ANY(coalesce(sqlc.narg(skip)::uuid[], '{}')))
+  AND r.user_id > @after
 ORDER BY r.user_id
 LIMIT @batch;
 
@@ -97,11 +104,11 @@ ORDER BY capability;
 -- name: CleanupDeletedLeftovers :many
 -- сверка удаления (спека бэкенда §6.5): аккаунты deleted, у которых остались секреты, привязки, согласия, коды, сессии
 -- или история ника (анонимизация их стирает; строка могла появиться гонкой или старым релизом). Без замка: замок users
--- (CleanupLockUser, R30) и удаление — на аккаунт своей tx (I2 ревью R1W6); skip — аккаунты, упавшие или занятые в этом
--- прогоне. Вызовы auth_challenges воркеру по user_id не видны (§5.5) — их убирает срок (CleanupAuthChallenges)
+-- (CleanupLockUser, R30) и удаление — на аккаунт своей tx (I2 ревью R1W6); after — курсор прогона
+-- (упавшие и занятые не повторяются до следующего запуска, m-r3). Вызовы auth_challenges воркеру по user_id не видны (§5.5) — их убирает срок (CleanupAuthChallenges)
 SELECT u.id FROM users u
 WHERE u.status = 'deleted'
-  AND NOT (u.id = ANY(coalesce(sqlc.narg(skip)::uuid[], '{}')))
+  AND u.id > @after
   AND (EXISTS (SELECT 1 FROM credentials c WHERE c.user_id = u.id)
        OR EXISTS (SELECT 1 FROM user_mfa m WHERE m.user_id = u.id)
        OR EXISTS (SELECT 1 FROM user_recovery_codes rc WHERE rc.user_id = u.id)
