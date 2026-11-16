@@ -18,6 +18,7 @@ import (
 // identity/rekey.TestRekey под ролью api).
 
 func TestCommandRejectsUnknown(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{{"identity"}, {"identity", "rekeys"}, {"geo", "import"},
 		{"identity", "rekey", "extra"}, {"identity", "rekey", "--dry"}} {
 		err := dispatch(context.Background(), args, nil, io.Discard, io.Discard)
@@ -30,6 +31,7 @@ func TestCommandRejectsUnknown(t *testing.T) {
 // m2 ревью 4: код выхода — как у worker и admin-api: опечатка в команде — 2, прочие ошибки (нечитаемые строки,
 // конфиг, база) — 1.
 func TestExitCode(t *testing.T) {
+	t.Parallel()
 	err := dispatch(context.Background(), []string{"identity", "rekeys"}, nil, io.Discard, io.Discard)
 	if code := exitCode(err); code != 2 {
 		t.Fatalf("опечатка: код %d (%v), ждали 2", code, err)
@@ -45,6 +47,7 @@ func TestExitCode(t *testing.T) {
 }
 
 func TestRekeyNeedsRingBeforeDatabase(t *testing.T) {
+	t.Parallel()
 	key, err := keys.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +72,7 @@ func TestRekeyNeedsRingBeforeDatabase(t *testing.T) {
 // Прогон прерван (обрыв соединения посреди пачки) — сначала то, что успели (перешифровано до обрыва, нечитаемые уже
 // найденные), без совета убирать ключи, затем ошибка с подсказкой «повторите»; прогон не начался — только ошибка.
 func TestRekeyInterruptedPrintsPartial(t *testing.T) {
+	t.Parallel()
 	bad := uuid.MustParse("01930000-0000-7000-8000-000000000002")
 	runErr := errors.New("conn reset")
 	var out bytes.Buffer
@@ -100,6 +104,7 @@ func TestRekeyInterruptedPrintsPartial(t *testing.T) {
 }
 
 func TestPrintRekeyReport(t *testing.T) {
+	t.Parallel()
 	bad := uuid.MustParse("01930000-0000-7000-8000-000000000001")
 	for name, tc := range map[string]struct {
 		rep     identityrekey.Report
@@ -130,5 +135,21 @@ func TestPrintRekeyReport(t *testing.T) {
 		if (err != nil) != tc.wantErr {
 			t.Fatalf("%s: ошибка %v, want %v", name, err, tc.wantErr)
 		}
+	}
+}
+
+// Команда identity rekey идёт через dispatch мимо run: флаг встроенного воркера она не читает и WORKER_* не требует —
+// ошибка прежняя (о базе), не о WORKER_.
+func TestRekeyIgnoresEmbedFlag(t *testing.T) {
+	t.Parallel()
+	key, err := keys.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1", "API_EMBED_WORKER=true",
+		"API_IDENTITY_SECRET_KEYS=" + key, "API_IDENTITY_DEVICE_KEYS=" + key, "API_IDENTITY_TOTP_ISSUER=WF"}
+	err = dispatch(context.Background(), []string{"identity", "rekey", "--dry-run"}, env, io.Discard, io.Discard)
+	if err == nil || strings.Contains(err.Error(), "WORKER_") || !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("err = %v, ждали ошибку подключения без WORKER_", err)
 	}
 }

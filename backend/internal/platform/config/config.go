@@ -75,6 +75,9 @@ type API struct {
 	LegalDocuments string `env:"LEGAL_DOCUMENTS,required,notEmpty"`
 	// WellKnown — файлы /.well-known до веба (API_WELLKNOWN_*); пусто — 404.
 	WellKnown WellKnown
+	// EmbedWorker — воркер в процессе api (спека встроенного воркера §3): только dev-стенд без отдельного процесса;
+	// прод — отдельный процесс worker. true — читаются WORKER_* (второй пул под ролью worker), false — не читаются.
+	EmbedWorker bool `env:"EMBED_WORKER" envDefault:"false"`
 }
 
 // Identity — кольца и настройки identity у api. Кольца (keys.Ring) — base64 ≥ 32 байт через запятую, первый —
@@ -126,6 +129,9 @@ type Admin struct {
 	StaticDir string `env:"STATIC_DIR"`
 	// Mail — SMTP писем сотрудникам (ADMIN_MAIL_*): исполнитель очереди staff внутри admin-api.
 	Mail Mail
+	// WakeAPIURL — адрес wf-api для побудки после успешных мутаций (спека встроенного воркера §8.1): только dev-стенд,
+	// где фон спит вместе с api; пусто — выключено. https://<хост> без пути.
+	WakeAPIURL string `env:"WAKE_API_URL"`
 }
 
 // Mail — SMTP транзакционных писем (спека §6.9); в dev — Mailpit. Воркер читает отдельно:
@@ -204,10 +210,19 @@ const (
 	WorkerRelayStop = 5 * time.Second
 	// WorkerRiverSoftStop — мягкая остановка River воркера после relay.
 	WorkerRiverSoftStop = 15 * time.Second
+	// APIEmbeddedRelayStop, APIEmbeddedRiverSoftStop — сроки встроенного воркера api после дренажа HTTP (R5): дренаж 10 +
+	// 2 + 8 + 5 = 25 с — бюджет по умолчанию.
+	APIEmbeddedRelayStop     = 2 * time.Second
+	APIEmbeddedRiverSoftStop = 8 * time.Second
 )
 
 // AdminStopTime — худший срок остановки admin-api при дренаже HTTP drain (ADMIN_SHUTDOWN_TIMEOUT).
 func AdminStopTime(drain time.Duration) time.Duration { return drain + AdminRiverSoftStop + HardStop }
+
+// APIEmbeddedStopTime — худший срок остановки api со встроенным воркером при дренаже HTTP drain (API_SHUTDOWN_TIMEOUT).
+func APIEmbeddedStopTime(drain time.Duration) time.Duration {
+	return drain + APIEmbeddedRelayStop + APIEmbeddedRiverSoftStop + HardStop
+}
 
 // WorkerStopTime — худший срок остановки воркера.
 func WorkerStopTime() time.Duration { return WorkerRelayStop + WorkerRiverSoftStop + HardStop }

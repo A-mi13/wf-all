@@ -27,7 +27,8 @@ func TestPublicBinariesDoNotDependOnAdmin(t *testing.T) {
 		pkg      string
 		required []string
 	}{
-		{"./cmd/api", []string{"wf/backend/internal/platform/config", "wf/backend/internal/httpapi/public"}},
+		{"./cmd/api", []string{"wf/backend/internal/platform/config", "wf/backend/internal/httpapi/public",
+			"wf/backend/cmd/internal/workerhost"}},
 		{"./cmd/worker", []string{"wf/backend/internal/platform/config", "wf/backend/internal/platform/queue",
 			"wf/backend/cmd/internal/workerhost"}},
 	}
@@ -57,7 +58,8 @@ func TestPublicBinariesDoNotDependOnStaff(t *testing.T) {
 		pkg      string
 		required []string
 	}{
-		{"./cmd/api", []string{"wf/backend/internal/platform/config", "wf/backend/internal/httpapi/public"}},
+		{"./cmd/api", []string{"wf/backend/internal/platform/config", "wf/backend/internal/httpapi/public",
+			"wf/backend/cmd/internal/workerhost"}},
 		{"./cmd/worker", []string{"wf/backend/internal/platform/config", "wf/backend/internal/platform/periodic",
 			"wf/backend/cmd/internal/workerhost"}},
 	}

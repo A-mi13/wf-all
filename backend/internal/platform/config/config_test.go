@@ -30,6 +30,17 @@ func TestLoadAPIWithDefaults(t *testing.T) {
 	if c.HTTP.DocsEnabled {
 		t.Fatal("DocsEnabled по умолчанию включён")
 	}
+	// встроенный воркер — только по явному флагу (dev-стенд); прод — отдельный процесс worker
+	if c.EmbedWorker {
+		t.Fatal("EmbedWorker по умолчанию включён")
+	}
+}
+
+// R5: остановка api со встроенным воркером — дренаж + relay + мягкая River + жёсткая.
+func TestAPIEmbeddedStopTime(t *testing.T) {
+	if got, want := config.APIEmbeddedStopTime(7*time.Second), 7*time.Second+2*time.Second+8*time.Second+config.HardStop; got != want {
+		t.Fatalf("APIEmbeddedStopTime(7s) = %s, ждали %s", got, want)
+	}
 }
 
 // adminEnv — обязательные переменные admin-api с правками: "KEY=value" заменяет или добавляет,
@@ -405,4 +416,22 @@ func TestAdminHasNoIdentityKeys(t *testing.T) {
 		}
 	}
 	walk(reflect.TypeFor[config.Admin]())
+}
+
+// Побудка api из admin-api (спека встроенного воркера §8.1): по умолчанию выключена (пусто), адрес — как задан.
+func TestLoadAdminWakeAPIURL(t *testing.T) {
+	c, err := config.Load[config.Admin]("ADMIN_", adminEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WakeAPIURL != "" {
+		t.Fatalf("WakeAPIURL по умолчанию %q", c.WakeAPIURL)
+	}
+	c, err = config.Load[config.Admin]("ADMIN_", adminEnv("ADMIN_WAKE_API_URL=https://wf-api.onrender.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WakeAPIURL != "https://wf-api.onrender.com" {
+		t.Fatalf("WakeAPIURL = %q", c.WakeAPIURL)
+	}
 }
