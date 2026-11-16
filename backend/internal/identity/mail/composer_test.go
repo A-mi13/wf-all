@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -157,12 +158,26 @@ func (e *env) pendingDeletion(t *testing.T, id uuid.UUID) {
 		deletion_requested_at = $2, purge_at = $3 WHERE id = $1`, id, testNow, testNow.Add(30*24*time.Hour))
 }
 
-// anonymized — аккаунт после анонимизации: статус deleted, почта — заглушка.
+// anonymized — аккаунт после анонимизации: статус deleted, почта — заглушка; пояс и город затёрты, как в 0026.
 func (e *env) anonymized(t *testing.T, id uuid.UUID) {
 	t.Helper()
 	e.exec(t, `UPDATE users SET status = 'deleted', deleted_at = $2, email = 'deleted+' || id::text || '@invalid',
-		status_before_deletion = NULL, deletion_requested_at = NULL, purge_at = NULL
+		status_before_deletion = NULL, deletion_requested_at = NULL, purge_at = NULL, timezone = NULL, city_id = NULL
 		WHERE id = $1`, id, testNow)
+}
+
+// zone — пояс аккаунта (tz, nil — NULL) и город по slug ("" — без города).
+func (e *env) zone(t *testing.T, id uuid.UUID, tz *string, citySlug string) {
+	t.Helper()
+	e.exec(t, `UPDATE users SET timezone = $2, city_id = (SELECT c.id FROM cities c WHERE c.slug = NULLIF($3, ''))
+		WHERE id = $1`, id, tz, citySlug)
+	if citySlug != "" {
+		var n int
+		if err := e.owner.QueryRow(context.Background(), `SELECT count(*) FROM users WHERE id = $1 AND city_id IS NOT NULL`,
+			id).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("город %q не найден: %v", citySlug, err)
+		}
+	}
 }
 
 // codeRow — строка auth_codes; code == "" — приманка без секретов.
@@ -567,7 +582,7 @@ func TestComposeMfaReset(t *testing.T) {
 	v := e.user(t, "three@example.com", "ru")
 	cancelled := e.mfaReset(t, v, "cancelled")
 	m = e.mustSend(t, app.MailMfaResetCancelled, cancelled)
-	when := testNow.Format("2006-01-02 15:04 UTC")
+	when := testNow.Format("2006-01-02 15:04") + " (UTC)" // без пояса и города — UTC
 	if want := e.text(t, "ru", "mfa_reset_cancelled", "text", map[string]any{"by": "owner", "time": when}); !strings.HasPrefix(m.Text, want) {
 		t.Fatalf("отмена владельцем: %q", m.Text)
 	}
@@ -589,6 +604,50 @@ func TestComposeMfaReset(t *testing.T) {
 	e.anonymized(t, w)
 	e.mustSkip(t, app.MailMfaResetDone, done)
 	e.mustSkip(t, app.MailMfaResetScheduled, uuid.Must(uuid.NewV7()))
+}
+
+// Время в письмах — в поясе получателя (решение пользователя 16.11): users.timezone, нет или битый — пояс города
+// аккаунта (cities.timezone; город посева stavropol — Europe/Moscow), нет и его — UTC. Подпись — имя пояса IANA.
+// Битое имя и «Local» (пояс сервера) — не ошибка и не ErrSkip, а следующий шаг цепочки.
+func TestComposeTimeInUserZone(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	// testNow = 12:00 UTC; запись журнала — минутой раньше
+	cases := []struct {
+		name, tz, city, done, event string
+	}{
+		{"пояс аккаунта", "Europe/Moscow", "", "2026-11-16 15:00 (Europe/Moscow)", "2026-11-16 14:59 (Europe/Moscow)"},
+		{"пояс аккаунта важнее города", "Asia/Yekaterinburg", "stavropol", "2026-11-16 17:00 (Asia/Yekaterinburg)", "2026-11-16 16:59 (Asia/Yekaterinburg)"},
+		{"без пояса — город", "", "stavropol", "2026-11-16 15:00 (Europe/Moscow)", "2026-11-16 14:59 (Europe/Moscow)"},
+		{"битый пояс — город", "Mars/Olympus", "stavropol", "2026-11-16 15:00 (Europe/Moscow)", "2026-11-16 14:59 (Europe/Moscow)"},
+		{"битый пояс без города — UTC", "Mars/Olympus", "", "2026-11-16 12:00 (UTC)", "2026-11-16 11:59 (UTC)"},
+		{"пояс сервера не берём", "Local", "", "2026-11-16 12:00 (UTC)", "2026-11-16 11:59 (UTC)"},
+		{"путь вместо пояса", "../../etc/passwd", "", "2026-11-16 12:00 (UTC)", "2026-11-16 11:59 (UTC)"},
+		{"ничего — UTC", "", "", "2026-11-16 12:00 (UTC)", "2026-11-16 11:59 (UTC)"},
+	}
+	for i, c := range cases {
+		u := e.user(t, fmt.Sprintf("tz%d@example.com", i), "ru")
+		var tz *string
+		if c.tz != "" {
+			tz = &c.tz
+		}
+		e.zone(t, u, tz, c.city)
+		mustContain(t, c.name+": сброс выполнен", e.mustSend(t, app.MailMfaResetDone, e.mfaReset(t, u, "executed")).Text, c.done)
+		mustContain(t, c.name+": журнал", e.mustSend(t, app.MailPasswordChanged, e.secEvent(t, u, "password_changed", nil, "")).Text, c.event)
+	}
+	// остальные даты писем — в том же поясе: срок сброса (execute_at = +7 дней), отмена, дата удаления из meta
+	u := e.user(t, "tz-all@example.com", "en")
+	e.zone(t, u, new("Europe/Moscow"), "")
+	mustContain(t, "срок сброса", e.mustSend(t, app.MailMfaResetScheduled, e.mfaReset(t, u, "live")).Text, "2026-11-23 15:00 (Europe/Moscow)")
+	mustContain(t, "отмена сброса", e.mustSend(t, app.MailMfaResetCancelled, e.mfaReset(t, u, "cancelled")).Text, "2026-11-16 15:00 (Europe/Moscow)")
+	e.pendingDeletion(t, u)
+	mustContain(t, "дата удаления", e.mustSend(t, app.MailAccountDeletionScheduled, e.secEvent(t, u, "account_deletion_scheduled",
+		map[string]any{"purge_at": "2026-12-16T12:00:00Z"}, "tz-all@example.com")).Text, "2026-12-16 15:00 (Europe/Moscow)")
+	// анонимизация затирает timezone и city_id (0026): время «аккаунт удалён» считалось бы в UTC — это ожидаемо (в
+	// тексте письма даты сейчас нет); письмо собирается без пояса
+	del := e.secEvent(t, u, "account_deleted", nil, "tz-all@example.com")
+	e.anonymized(t, u)
+	e.mustSend(t, app.MailAccountDeleted, del)
 }
 
 // Все 19 видов собираются на обоих языках: аргументы текстов совпадают с тем, что даёт Composer (ICU требует все).

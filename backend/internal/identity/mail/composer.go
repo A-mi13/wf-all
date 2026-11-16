@@ -36,8 +36,29 @@ type ComposerDeps struct {
 	Clock   clock.Clock
 }
 
-// mailTime — время в письмах: UTC с подписью (часовой пояс игрока письма не знают).
-const mailTime = "2006-01-02 15:04 UTC"
+// mailTime — время в письмах; за ним — подпись пояса IANA в скобках, одинаковая для ru и en (formatTime).
+const mailTime = "2006-01-02 15:04"
+
+// mailZone — пояс времени в письме (решение пользователя 16.11): users.timezone, нет или не загружается — пояс города
+// аккаунта, нет и его — UTC. Битое имя — не ошибка и не ErrSkip: письмо важнее подписи. «Local» (пояс сервера) не
+// берём; имена с «..» отвергает сам time.LoadLocation. Анонимизация затирает пояс и город (0026) — письма после неё в
+// UTC. Базу поясов бинарник берёт из tzdata образа (backend/Dockerfile) или из GOROOT.
+func mailZone(names ...*string) *time.Location {
+	for _, n := range names {
+		if n == nil || *n == "" || *n == "Local" {
+			continue
+		}
+		if loc, err := time.LoadLocation(*n); err == nil {
+			return loc
+		}
+	}
+	return time.UTC
+}
+
+// formatTime — время t в поясе loc: «2026-11-16 15:00 (Europe/Moscow)».
+func formatTime(t time.Time, loc *time.Location) string {
+	return t.In(loc).Format(mailTime) + " (" + loc.String() + ")"
+}
 
 // Register добавляет в реестр воркера Composer каждого вида письма I-2. Без пула, кольца, каталога или часов —
 // ошибка сборки (письма с кодами без кольца не собрать, §8.2).
@@ -256,7 +277,8 @@ func (c *composers) event(ctx context.Context, kind string, ref uuid.UUID, kinds
 	}
 	// нет ключа meta, который пишет производитель, — расхождение кода, а не «письмо не нужно»: обычная ошибка (повторы,
 	// затем видимая мёртвая задача), не ErrSkip
-	args := map[string]any{"time": row.CreatedAt.UTC().Format(mailTime)}
+	zone := mailZone(row.Timezone, row.CityTimezone)
+	args := map[string]any{"time": formatTime(row.CreatedAt, zone)}
 	switch kind {
 	case app.MailRecoveryCodeUsed:
 		if meta.Left == nil {
@@ -273,7 +295,7 @@ func (c *composers) event(ctx context.Context, kind string, ref uuid.UUID, kinds
 		if err != nil {
 			return pmail.Message{}, fmt.Errorf("identity: письмо %s: purge_at в meta журнала: %w", kind, err)
 		}
-		args["purge"] = purge.UTC().Format(mailTime)
+		args["purge"] = formatTime(purge, zone)
 	}
 	return c.compose(to, mailLocale(row.Locale), mailName(kind), "text", args)
 }
@@ -292,12 +314,13 @@ func (c *composers) mfaReset(ctx context.Context, kind string, ref uuid.UUID) (p
 		return pmail.Message{}, skip("аккаунт удалён")
 	}
 	args := map[string]any{}
+	zone := mailZone(row.Timezone, row.CityTimezone)
 	switch kind {
 	case app.MailMfaResetScheduled:
 		if row.ExecutedAt != nil || row.CancelledAt != nil {
 			return pmail.Message{}, skip("сброс уже закрыт")
 		}
-		args["execute"] = row.ExecuteAt.UTC().Format(mailTime)
+		args["execute"] = formatTime(row.ExecuteAt, zone)
 	case app.MailMfaResetCancelled:
 		if row.CancelledAt == nil {
 			return pmail.Message{}, skip("сброс не отменён")
@@ -306,12 +329,12 @@ func (c *composers) mfaReset(ctx context.Context, kind string, ref uuid.UUID) (p
 		if row.CancelledBy != nil && (*row.CancelledBy == "owner" || *row.CancelledBy == "system") {
 			by = *row.CancelledBy
 		}
-		args["by"], args["time"] = by, row.CancelledAt.UTC().Format(mailTime)
+		args["by"], args["time"] = by, formatTime(*row.CancelledAt, zone)
 	case app.MailMfaResetDone:
 		if row.ExecutedAt == nil {
 			return pmail.Message{}, skip("сброс не выполнен")
 		}
-		args["time"] = row.ExecutedAt.UTC().Format(mailTime)
+		args["time"] = formatTime(*row.ExecutedAt, zone)
 	}
 	return c.compose(row.Email, mailLocale(row.Locale), mailName(kind), "text", args)
 }

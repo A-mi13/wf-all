@@ -54,20 +54,24 @@ func (q *Queries) MailCode(ctx context.Context, id uuid.UUID) (MailCodeRow, erro
 }
 
 const mailMfaReset = `-- name: MailMfaReset :one
-SELECT r.execute_at, r.executed_at, r.cancelled_at, r.cancelled_by, u.email, u.locale, u.status
+SELECT r.execute_at, r.executed_at, r.cancelled_at, r.cancelled_by, u.email, u.locale, u.status,
+       u.timezone, c.timezone AS city_timezone
 FROM mfa_resets r
 JOIN users u ON u.id = r.user_id
+LEFT JOIN geo_read_city_settings c ON c.city_id = u.city_id
 WHERE r.id = $1
 `
 
 type MailMfaResetRow struct {
-	ExecuteAt   time.Time
-	ExecutedAt  *time.Time
-	CancelledAt *time.Time
-	CancelledBy *string
-	Email       string
-	Locale      string
-	Status      UserStatus
+	ExecuteAt    time.Time
+	ExecutedAt   *time.Time
+	CancelledAt  *time.Time
+	CancelledBy  *string
+	Email        string
+	Locale       string
+	Status       UserStatus
+	Timezone     *string
+	CityTimezone *string
 }
 
 func (q *Queries) MailMfaReset(ctx context.Context, id uuid.UUID) (MailMfaResetRow, error) {
@@ -81,28 +85,37 @@ func (q *Queries) MailMfaReset(ctx context.Context, id uuid.UUID) (MailMfaResetR
 		&i.Email,
 		&i.Locale,
 		&i.Status,
+		&i.Timezone,
+		&i.CityTimezone,
 	)
 	return i, err
 }
 
 const mailSecurityEvent = `-- name: MailSecurityEvent :one
-SELECT e.kind, e.meta, e.meta_enc, e.key_id, e.created_at, u.email, u.locale, u.status
+
+SELECT e.kind, e.meta, e.meta_enc, e.key_id, e.created_at, u.email, u.locale, u.status,
+       u.timezone, c.timezone AS city_timezone
 FROM security_events e
 JOIN users u ON u.id = e.user_id
+LEFT JOIN geo_read_city_settings c ON c.city_id = u.city_id
 WHERE e.id = $1
 `
 
 type MailSecurityEventRow struct {
-	Kind      string
-	Meta      []byte
-	MetaEnc   []byte
-	KeyID     *string
-	CreatedAt time.Time
-	Email     string
-	Locale    string
-	Status    UserStatus
+	Kind         string
+	Meta         []byte
+	MetaEnc      []byte
+	KeyID        *string
+	CreatedAt    time.Time
+	Email        string
+	Locale       string
+	Status       UserStatus
+	Timezone     *string
+	CityTimezone *string
 }
 
+// Пояс времени в письме: users.timezone, затем пояс города аккаунта (экспортированное представление geo, спека §4.2), затем
+// UTC — выбирает Composer (решение пользователя 16.11).
 func (q *Queries) MailSecurityEvent(ctx context.Context, id uuid.UUID) (MailSecurityEventRow, error) {
 	row := q.db.QueryRow(ctx, mailSecurityEvent, id)
 	var i MailSecurityEventRow
@@ -115,6 +128,8 @@ func (q *Queries) MailSecurityEvent(ctx context.Context, id uuid.UUID) (MailSecu
 		&i.Email,
 		&i.Locale,
 		&i.Status,
+		&i.Timezone,
+		&i.CityTimezone,
 	)
 	return i, err
 }
