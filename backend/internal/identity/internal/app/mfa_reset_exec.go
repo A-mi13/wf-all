@@ -57,8 +57,8 @@ func (a *App) ExecuteDueMfaResets(ctx context.Context, batch int, skip []uuid.UU
 }
 
 // executeMfaReset — одна строка, порядок замков R30 (N5): users FOR NO KEY UPDATE SKIP LOCKED (занят — пропуск), затем
-// есть ли user_mfa (нет строки — 2FA нет; без FOR UPDATE: у worker нет UPDATE на user_mfa, а писатели строки — сценарии
-// api — сперва берут тот же замок users), затем mfa_resets FOR UPDATE с перепроверкой «живой» (закрыт отменой или
+// есть ли подтверждённая 2FA (нет строки или только неподтверждённая настройка SetupTotp — 2FA нет; без FOR UPDATE: у
+// worker нет UPDATE на user_mfa, а писатели строки — сценарии api — сперва берут тот же замок users), затем mfa_resets FOR UPDATE с перепроверкой «живой» (закрыт отменой или
 // предыдущим запуском — пропуск). Аккаунт pending_deletion/deleted или 2FA нет — cancelled_by = system, событие
 // mfa_reset_cancelled (версия 2), аудит mfa_reset_cancelled от system, без писем. Иначе удаляются user_mfa и
 // user_recovery_codes (ключи доступа остаются), все сессии отзываются (revoked; версия и событие sessions_revoked),

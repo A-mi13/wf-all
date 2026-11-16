@@ -433,3 +433,29 @@ func TestConfirmResetKillsStepTokens(t *testing.T) {
 		t.Fatalf("mfa_token после сброса пароля: %v", err)
 	}
 }
+
+// Добор F п. 4: pending_deletion с purge_at ≤ now (purgeDue) — как удалённый: приманка без user_id (тот же ответ, строка
+// и задача письма; Composer её пропустит). Ровно purge_at — уже приманка; секундой раньше срока — настоящий код.
+func TestStartResetPurgeDueDecoy(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	now := e.clock.Now()
+	for _, tc := range []struct {
+		nick  string
+		purge time.Time
+		real  bool
+	}{{"reset_purge_due", now, false}, {"reset_purge_past", now.Add(-time.Hour), false}, {"reset_purge_soon", now.Add(time.Second), true}} {
+		uid := seedUser(t, e.owner, tc.nick, "ru")
+		acctExec(t, e, `UPDATE users SET status = 'pending_deletion', status_before_deletion = 'active',
+			deletion_requested_at = $2, purge_at = $3 WHERE id = $1`, uid, now.Add(-30*24*time.Hour), tc.purge)
+		jobs := mailJobs(t, e, MailPasswordResetCode)
+		sent := startReset(t, e, tc.nick+"@example.com")
+		if sent.ExpiresAt.Sub(now) != 15*time.Minute || mailJobs(t, e, MailPasswordResetCode) != jobs+1 {
+			t.Fatalf("%s: ответ или задача письма отличаются: %+v", tc.nick, sent)
+		}
+		genuine := count(t, e.owner, `SELECT count(*) FROM auth_codes WHERE id = $1 AND NOT decoy AND user_id IS NOT NULL`, sent.CodeID) == 1
+		if genuine != tc.real {
+			t.Fatalf("%s: настоящий код %v, ждали %v", tc.nick, genuine, tc.real)
+		}
+	}
+}

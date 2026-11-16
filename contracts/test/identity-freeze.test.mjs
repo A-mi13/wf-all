@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { parse } from 'yaml';
 import { bullet, operationsOf, section, sha256, slice } from '../src/freeze.mjs';
 
-const PUBLIC_IDENTITY_SHA256 = 'f4aad9565912cd63bf1ce024ca7c0b7ec9718498b666c6400d9ba96dd1481c86';
+const PUBLIC_IDENTITY_SHA256 = '5be36d7adc9a15950505ae57b3a3cf7f865e3d62ca90d50460043e52730062cb';
 const ADMIN_IDENTITY_SHA256 = '0b5784d39fcb3500779cef2a75def42dc4f93d68c4616039e776cd1b2598afa4';
 
 const load = async (path) =>

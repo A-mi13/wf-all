@@ -624,6 +624,9 @@ func TestComposeMfaReset(t *testing.T) {
 		t.Fatalf("отмена владельцем: %q", m.Text)
 	}
 	mustContain(t, "2FA осталась", m.Text, "продолжает действовать")
+	if strings.Contains(m.Text, "вторым фактором") {
+		t.Fatalf("отмена владельцем называет способ: %q", m.Text)
+	}
 	e.mustSkip(t, app.MailMfaResetScheduled, cancelled)
 	// отмена сотрудником — cancelled_by = staff:<подпись> (как пишет прод, CHECK mfa_resets_cancelled_by_format):
 	// в письме «поддержка», без подписи сотрудника
@@ -648,6 +651,23 @@ func TestComposeMfaReset(t *testing.T) {
 		for _, no := range []string{"продолжает действовать", "stays on"} {
 			if strings.Contains(m.Text, no) {
 				t.Fatalf("%s: 2FA снята, а в письме %q: %q", loc, no, m.Text)
+			}
+		}
+	}
+
+	// добор F п. 1: неподтверждённая настройка (SetupTotp без ConfirmTotp) — не 2FA: text_disabled; отмена владельцем
+	// идёт и из SetupTotp/ConfirmTotp/DisableTotp — текст не называет способ («вошли со вторым фактором» неверно)
+	for _, loc := range i18n.Supported {
+		pend := e.user(t, "pending-"+loc+"@example.com", loc)
+		e.exec(t, `INSERT INTO user_mfa (user_id, secret_enc, key_id, confirmed_at, created_at) VALUES ($1, '\x00', 'AAAAAAAAAAA', NULL, $2)`,
+			pend, testNow)
+		m = e.mustSend(t, app.MailMfaResetCancelled, e.mfaReset(t, pend, "cancelled"))
+		if want := e.text(t, loc, "mfa_reset_cancelled", "text_disabled", map[string]any{"by": "owner", "time": when}); !strings.HasPrefix(m.Text, want) {
+			t.Fatalf("%s: отмена при неподтверждённой 2FA: %q", loc, m.Text)
+		}
+		for _, no := range []string{"продолжает действовать", "stays on", "вторым фактором", "second factor"} {
+			if strings.Contains(m.Text, no) {
+				t.Fatalf("%s: в письме %q: %q", loc, no, m.Text)
 			}
 		}
 	}

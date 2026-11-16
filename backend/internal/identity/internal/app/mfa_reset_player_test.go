@@ -218,3 +218,23 @@ func TestCancelMyMfaResetOnlyLatest(t *testing.T) {
 		t.Fatalf("R2 отменён сотрудником: %d %s", status, code)
 	}
 }
+
+// Добор F п. 3: подтверждённой 2FA нет (только неподтверждённая настройка или ничего) — защищать нечего, второго фактора
+// нет: явная отмена разрешена любой живой сессии (иначе петля 403 → reauth нечем).
+func TestCancelMyMfaResetWithoutConfirmedMfa(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	ctx := context.Background()
+	for _, unconfirmed := range []bool{true, false} {
+		uid := seedUser(t, r.owner, "reset_nofactor_"+map[bool]string{true: "pending", false: "none"}[unconfirmed], "ru")
+		if unconfirmed {
+			r.withMfa(t, uid, false)
+		}
+		sid := issue(t, r.env, uid, web("a")).SessionID // mfa_at = NULL
+		rid := r.liveReset(t, uid)
+		if err := r.a.CancelMyMfaReset(ctx, uid, sid); err != nil {
+			t.Fatalf("неподтверждённая %v: %v", unconfirmed, err)
+		}
+		ownerCancelled(t, r.env, uid, rid)
+	}
+}

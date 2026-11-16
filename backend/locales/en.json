@@ -78,8 +78,8 @@
       },
       "mfa_reset_cancelled": {
         "subject": "Two-factor reset cancelled",
-        "text": "The reset of the two-factor protection of your account was cancelled{by, select, owner { because you signed in with your second factor} system { automatically} other { by support}}. Two-factor protection stays on.\n\nWhen: {time}",
-        "text_disabled": "The reset of the two-factor protection of your account was cancelled{by, select, owner { because you signed in with your second factor} system { automatically} other { by support}}.\n\nWhen: {time}"
+        "text": "The reset of the two-factor protection of your account was cancelled{by, select, owner { by you} system { automatically} other { by support}}. Two-factor protection stays on.\n\nWhen: {time}",
+        "text_disabled": "The reset of the two-factor protection of your account was cancelled{by, select, owner { by you} system { automatically} other { by support}}.\n\nWhen: {time}"
       },
       "mfa_reset_done": {
         "subject": "Two-factor protection reset",

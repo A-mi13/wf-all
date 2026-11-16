@@ -47,7 +47,8 @@ func (a *App) cancelResetsByOwner(ctx context.Context, tx pgx.Tx, userID uuid.UU
 
 // CancelMyMfaReset — cancelMyMfaReset (m3): lockUser (R30; гонку с исполнением по сроку решает этот замок — воркер
 // берёт users SKIP LOCKED); сессия запроса отозвана после загрузки (кэш до 5 с) — 401; сессия не проходила второй
-// фактор (sessions.mfa_at NULL) — при живом сбросе 403 reauth_required, без него 404; живой сброс — отмена владельцем;
+// фактор (sessions.mfa_at NULL) — при подтверждённой 2FA и живом сбросе 403 reauth_required, без сброса 404 (без
+// подтверждённой 2FA второй фактор не требуется — добор F п. 3); живой сброс — отмена владельцем;
 // живого нет, но последний сброс отменён владельцем за жизнь этой сессии (не раньше sessions.created_at; свежий вход
 // вторым фактором после отмены не мешает) — тоже успех (204: вход или прошлый вызов этой сессии уже отменил); иначе
 // 404 identity.mfa_reset_not_found.
@@ -67,7 +68,17 @@ func (a *App) CancelMyMfaReset(ctx context.Context, userID, sessionID uuid.UUID)
 		if !sess.Live {
 			return errSessionGone
 		}
+		hasMfa := true
 		if !sess.SecondFactor {
+			// подтверждённой 2FA нет (снята или только неподтверждённая настройка) — защищать нечего и второго фактора
+			// нет: требование reauth было бы петлёй 403 (добор F п. 3) — отменяет любая живая сессия
+			if _, err := q.MfaResetUserMfa(ctx, userID); errors.Is(err, pgx.ErrNoRows) {
+				hasMfa = false
+			} else if err != nil {
+				return fmt.Errorf("identity: 2FA аккаунта: %w", err)
+			}
+		}
+		if !sess.SecondFactor && hasMfa {
 			// явная отмена — только сессией, прошедшей второй фактор (решение пользователя 16.11): вошедший одним
 			// паролем при живом сбросе получает 403 reauth_required (reauthenticate вторым фактором отменит сброс сам)
 			if _, err := q.LiveMfaResetAt(ctx, userID); errors.Is(err, pgx.ErrNoRows) {

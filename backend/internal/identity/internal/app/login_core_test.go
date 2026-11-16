@@ -7,8 +7,8 @@ import (
 	"go/ast"
 	"go/parser"
 	gotoken "go/token"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -567,7 +567,8 @@ func TestMfaChallengeMethods(t *testing.T) {
 // (регистрация, вход, сброс пароля, второй шаг, отмена удаления идут через неё).
 func TestIssueSessionOnlyInFinishLogin(t *testing.T) {
 	t.Parallel()
-	files, err := filepath.Glob("*.go")
+	pkg := os.DirFS(".") // только файлы пакета: имена из fs.Glob, без путей снаружи
+	files, err := fs.Glob(pkg, "*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +578,7 @@ func TestIssueSessionOnlyInFinishLogin(t *testing.T) {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}
-		src, err := os.ReadFile(f)
+		src, err := fs.ReadFile(pkg, f)
 		if err != nil {
 			t.Fatal(err)
 		}

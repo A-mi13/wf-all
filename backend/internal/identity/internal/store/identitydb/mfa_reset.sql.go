@@ -248,12 +248,13 @@ func (q *Queries) MfaResetSessionLive(ctx context.Context, arg MfaResetSessionLi
 }
 
 const mfaResetUserMfa = `-- name: MfaResetUserMfa :one
-SELECT user_id FROM user_mfa WHERE user_id = $1
+SELECT user_id FROM user_mfa WHERE user_id = $1 AND confirmed_at IS NOT NULL
 `
 
 // есть ли 2FA: у worker нет UPDATE на user_mfa (§5.5) — FOR UPDATE дал бы 42501; строку меняют только сценарии api
-// под замком users (R30), его воркер уже держит — чтение без замка не устаревает до конца транзакции. Колонка — только
-// user_id (колоночное право worker), confirmed_at воркеру не видна
+// под замком users (R30), его воркер уже держит — чтение без замка не устаревает до конца транзакции. 2FA — только
+// подтверждённая строка (неподтверждённая настройка SetupTotp — не 2FA; колоночное право worker — user_id и
+// confirmed_at). Тот же запрос — явная отмена владельцем (cancelMyMfaReset): без 2FA второй фактор не требуется
 func (q *Queries) MfaResetUserMfa(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, mfaResetUserMfa, userID)
 	var user_id uuid.UUID

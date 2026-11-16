@@ -60,7 +60,7 @@ var identityMatrix = map[string][3]string{ // api, worker, admin
 var identityColumnGrants = map[string][]string{
 	"worker credentials SELECT":         {"user_id"},
 	"worker auth_challenges SELECT":     {"expires_at", "consumed_at"},
-	"worker user_mfa SELECT":            {"user_id"},
+	"worker user_mfa SELECT":            {"user_id", "confirmed_at"},
 	"worker user_recovery_codes SELECT": {"user_id"},
 	"worker passkeys SELECT":            {"user_id"},
 	"worker consents SELECT":            {"user_id"},
@@ -220,6 +220,7 @@ func TestIdentitySecretsHidden(t *testing.T) {
 		{"worker", "SELECT data_enc FROM auth_challenges", false},
 		{"worker", "SELECT public_key FROM passkeys", false},
 		{"worker", "SELECT user_id FROM credentials", true},
+		{"worker", "SELECT user_id, confirmed_at FROM user_mfa", true}, // есть ли подтверждённая 2FA (письмо и исполнение сброса)
 	} {
 		t.Run(c.role+": "+c.sql, func(t *testing.T) {
 			err := asRole(ctx, t, db, c.role, c.sql)

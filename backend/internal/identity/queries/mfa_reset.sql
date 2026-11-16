@@ -66,9 +66,10 @@ SELECT id, status::text AS status FROM users WHERE id = @id FOR NO KEY UPDATE SK
 
 -- name: MfaResetUserMfa :one
 -- есть ли 2FA: у worker нет UPDATE на user_mfa (§5.5) — FOR UPDATE дал бы 42501; строку меняют только сценарии api
--- под замком users (R30), его воркер уже держит — чтение без замка не устаревает до конца транзакции. Колонка — только
--- user_id (колоночное право worker), confirmed_at воркеру не видна
-SELECT user_id FROM user_mfa WHERE user_id = @user_id;
+-- под замком users (R30), его воркер уже держит — чтение без замка не устаревает до конца транзакции. 2FA — только
+-- подтверждённая строка (неподтверждённая настройка SetupTotp — не 2FA; колоночное право worker — user_id и
+-- confirmed_at). Тот же запрос — явная отмена владельцем (cancelMyMfaReset): без 2FA второй фактор не требуется
+SELECT user_id FROM user_mfa WHERE user_id = @user_id AND confirmed_at IS NOT NULL;
 
 -- name: MfaResetMarkExecuted :exec
 UPDATE mfa_resets SET executed_at = @now WHERE id = @id AND executed_at IS NULL AND cancelled_at IS NULL;

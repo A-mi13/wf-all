@@ -61,8 +61,8 @@ func (a *App) resetRiskKeys(email string) ([]string, error) {
 }
 
 // StartPasswordReset — код сброса (§3.4 п. 1): форма почты (400) → PoW по риску LoginFailed (почта и IP запроса) →
-// лимит по почте → аккаунт active | suspended | pending_deletion — настоящий код с user_id; нет, deleted или banned
-// (R29) — приманка без user_id. Работа обеих веток одинакова (m12): строка auth_codes и задача письма
+// лимит по почте → аккаунт active | suspended | pending_deletion до purge_at — настоящий код с user_id; нет, deleted,
+// banned (R29) или pending_deletion с purge_at ≤ now (purgeDue) — приманка без user_id. Работа обеих веток одинакова (m12): строка auth_codes и задача письма
 // password_reset_code (Composer на приманке отвечает mail.ErrSkip, Task 19). Ответ одинаков.
 func (a *App) StartPasswordReset(ctx context.Context, email string) (CodeSent, error) {
 	norm, ok := emailaddr.Normalize(email)
@@ -91,12 +91,13 @@ func (a *App) StartPasswordReset(ctx context.Context, email string) (CodeSent, e
 	}
 	var sent CodeSent
 	err = db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
-		u, err := identitydb.New(tx).UserByEmail(ctx, norm)
+		u, err := identitydb.New(tx).LoginFindUser(ctx, norm)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("identity: аккаунт по почте: %w", err)
 		}
 		p := StartCode{Purpose: identitydb.AuthCodePurposePasswordReset, Email: norm, Decoy: true, Client: Client{IP: ip}}
-		if err == nil {
+		// pending_deletion с вышедшим сроком отмены (purgeDue) — как удалённый: приманка (добор F п. 4)
+		if err == nil && !a.purgeDue(u.Status, u.PurgeAt) {
 			switch u.Status {
 			case identitydb.UserStatusActive, identitydb.UserStatusSuspended, identitydb.UserStatusPendingDeletion:
 				p.Decoy, p.UserID = false, u.ID

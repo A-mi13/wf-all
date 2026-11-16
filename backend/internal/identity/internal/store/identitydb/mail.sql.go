@@ -56,7 +56,7 @@ func (q *Queries) MailCode(ctx context.Context, id uuid.UUID) (MailCodeRow, erro
 const mailMfaReset = `-- name: MailMfaReset :one
 SELECT r.execute_at, r.executed_at, r.cancelled_at, r.cancelled_by, u.email, u.locale, u.status,
        u.timezone, c.timezone AS city_timezone,
-       EXISTS (SELECT 1 FROM user_mfa m WHERE m.user_id = r.user_id) AS has_mfa
+       EXISTS (SELECT 1 FROM user_mfa m WHERE m.user_id = r.user_id AND m.confirmed_at IS NOT NULL) AS has_mfa
 FROM mfa_resets r
 JOIN users u ON u.id = r.user_id
 LEFT JOIN geo_read_city_settings c ON c.city_id = u.city_id
@@ -76,8 +76,9 @@ type MailMfaResetRow struct {
 	HasMfa       bool
 }
 
-// has_mfa — есть ли строка user_mfa (у worker — SELECT только user_id, §5.5; как в исполнении сброса): отмена из
-// DisableTotp снимает 2FA в той же tx — письму об отмене нельзя говорить «защита продолжает действовать» (I1 ревью 4)
+// has_mfa — есть ли подтверждённая 2FA (у worker — SELECT user_id, confirmed_at, §5.5; как в исполнении сброса):
+// неподтверждённая настройка SetupTotp — не 2FA; отмена из DisableTotp снимает 2FA в той же tx — письму об отмене
+// нельзя говорить «защита продолжает действовать» (I1 ревью 4, добор F п. 1)
 func (q *Queries) MailMfaReset(ctx context.Context, id uuid.UUID) (MailMfaResetRow, error) {
 	row := q.db.QueryRow(ctx, mailMfaReset, id)
 	var i MailMfaResetRow

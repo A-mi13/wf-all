@@ -138,7 +138,10 @@ BEGIN
       -- нечего выдавать.
       colpriv := NULL;
       cols := NULL;
-      IF who = 'worker' AND r.name IN ('credentials', 'user_mfa', 'user_recovery_codes', 'passkeys', 'consents') THEN
+      IF who = 'worker' AND r.name = 'user_mfa' THEN
+        -- есть ли подтверждённая 2FA (письмо отмены сброса и исполнение сброса); confirmed_at — не секрет
+        colpriv := 'SELECT'; cols := ARRAY['user_id', 'confirmed_at'];
+      ELSIF who = 'worker' AND r.name IN ('credentials', 'user_recovery_codes', 'passkeys', 'consents') THEN
         colpriv := 'SELECT'; cols := ARRAY['user_id'];
       ELSIF who = 'worker' AND r.name = 'auth_challenges' THEN
         colpriv := 'SELECT'; cols := ARRAY['expires_at', 'consumed_at'];

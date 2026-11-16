@@ -277,7 +277,8 @@
 
 1. `startPasswordReset {email}` (анонимно) → всегда `202 {code_id, expires_at, resend_available_at}`. Аккаунт есть и
    не удалён → код в письме `identity.password_reset_code`; нет — приманка, письма нет (решение автора спеки: письмо на
-   чужой адрес «аккаунта нет» превращало бы ручку в рассылку по любым адресам).
+   чужой адрес «аккаунта нет» превращало бы ручку в рассылку по любым адресам). `pending_deletion` с `purge_at ≤ now`
+   (срок отмены удаления вышел, `purgeDue`) — как удалённый: приманка (добор F ревью ветки I-2).
 2. `confirmPasswordReset {code_id, code, new_password, mfa?, device}` (анонимно):
    - код как в §3.1 (5 попыток, 15 минут);
    - **2FA включена** и `mfa` не передан → `400 identity.mfa_required {methods}`; код при этом не тратится и попытка
@@ -573,7 +574,8 @@ deletion_restore`) → прежний статус из `status_before_deletion`
    - владелец: любой успешный вход **со вторым фактором** (TOTP, резервный код, ключ доступа) отменяет сброс
      автоматически — владелец доказал, что факторы при нём; так же — свежий вход вторым фактором (`reauthenticate`),
      `setupTotp`, `confirmTotp`, `disableTotp` (план I-2). Явно — `cancelMyMfaReset` (с замком): только сессией,
-     прошедшей второй фактор, иначе `403 identity.reauth_required` (решение пользователя 16.11). Повтор после отмены
+     прошедшей второй фактор, иначе `403 identity.reauth_required` (решение пользователя 16.11); подтверждённой 2FA у
+     аккаунта нет (снята или настройка TOTP не подтверждена) — отменяет любая живая сессия (добор F). Повтор после отмены
      владельцем за жизнь этой сессии (отменён не раньше `sessions.created_at`, и после него новый сброс не назначен) —
      `204`, иначе `404 identity.mfa_reset_not_found`;
    - сотрудник: `cancelMfaReset {resetId}` (право `identity.mfa.reset`, сразу — отмена привилегий не даёт);
@@ -764,7 +766,7 @@ CREATE TYPE identity_provider AS ENUM ('apple', 'google');
 | `credentials` | DML | `DELETE` + `SELECT (user_id)` (как сейчас) | **ничего** (сейчас DML по ветке — сужается) |
 | `auth_codes` | DML | `SELECT, DELETE` (письмо, чистка) | ничего |
 | `auth_challenges` | DML | `DELETE` + `SELECT (expires_at, consumed_at)` | ничего |
-| `user_mfa` | DML | `DELETE` + `SELECT (user_id)` (сброс 2FA, анонимизация) | `SELECT (user_id, confirmed_at)` — есть ли 2FA (§3.15) |
+| `user_mfa` | DML | `DELETE` + `SELECT (user_id, confirmed_at)` (сброс 2FA и его письма — есть ли подтверждённая 2FA, анонимизация) | `SELECT (user_id, confirmed_at)` — есть ли 2FA (§3.15) |
 | `user_recovery_codes`, `passkeys` | DML | `DELETE` + `SELECT (user_id)` | ничего |
 | `user_identities` | DML | `SELECT, UPDATE, DELETE` (отзыв токена Apple, чистка) | ничего |
 | `consents` | DML | `DELETE` + `SELECT (user_id)` | ничего |
@@ -1314,7 +1316,9 @@ Payload — только идентификаторы, `v = 1`, без почт�
   шифротекст не расшифровывается — `keys.ErrDecrypt`, аккаунт `deleted`). Ключа строки нет в кольце воркера
   (`keys.ErrUnknownKey`: при ротации api мог получить новый ключ раньше воркера), нарушенный контракт производителя
   (нет нужного ключа `meta`) и сбой базы — ошибка: повторы, затем видимая «мёртвая» задача, а не тихая отмена.
-- `mfa_reset_cancelled` при уже снятой 2FA (строки `user_mfa` нет) — вариант текста `text_disabled`.
+- `mfa_reset_cancelled` при уже снятой 2FA (подтверждённой строки `user_mfa` нет: снята или настройка не подтверждена) —
+  вариант текста `text_disabled`; отмена владельцем (`owner`) — нейтрально «отменён вами», без способа: владелец
+  отменяет и входом, и `setupTotp`/`confirmTotp`/`disableTotp`, и явно.
 - Время в письмах — в поясе получателя (решение пользователя 16.11): `users.timezone` → пояс города аккаунта
   (экспортированное представление `geo_read_city_settings`) → UTC; пустое, `Local` и незагружаемое имя — следующий
   шаг цепочки (не ошибка). Формат — `2026-11-16 15:00 (Europe/Moscow)`, без пояса — `(UTC)`. У `account_deleted` пояс

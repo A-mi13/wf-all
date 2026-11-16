@@ -28,14 +28,16 @@ paths:
   (`latestConsents`) ≠ текущей → принять (`consentsOutdated`).
 - **2FA.** `user_mfa.failures` насыщается (`least(failures, 32766) + 1`). `SetupTotp`, `ConfirmTotp`, `DisableTotp`
   и `reauthenticate` вторым фактором, как и вход вторым фактором (`onSecondFactorLogin`), отменяют живой сброс 2FA
-  владельцем (`cancelResetsByOwner`).
+  владельцем (`cancelResetsByOwner`). «2FA есть» для сброса и его писем — только подтверждённая строка `user_mfa`
+  (`confirmed_at IS NOT NULL`; `MfaResetUserMfa`, `has_mfa` в `MailMfaReset`). Явная отмена `cancelMyMfaReset` без
+  подтверждённой 2FA — любой живой сессией (второго фактора нет — `403 reauth_required` был бы петлёй).
 - **Бан** = ограничение `user_restrictions` с `capability = login` (спека §5.3): `blocked_until` — самое позднее
   `until` живых строк, нет строки или бессрочная — без поля. Операции без `account_blocked` в контракте отвечают
   `410` кода или `mfa_token` (R29).
 - **Приманки** (спека §9.1): ответ и работа одинаковы для «есть аккаунт» и «нет». Нет почты на входе —
   `dummyPassword` (тот же запрос хэша и `VerifyDummy`); пароль длиннее предела — та же работа argon2. Регистрация на
   занятую почту и смена почты на занятую — строка `auth_codes` с `decoy` и письмо владельцу; сброс для нет/`deleted`/
-  `banned` — приманка без `user_id`, задача письма ставится, Composer отвечает `ErrSkip`; повтор отправки приманки
+  `banned` и `pending_deletion` с `purgeDue` — приманка без `user_id`, задача письма ставится, Composer отвечает `ErrSkip`; повтор отправки приманки
   писем не шлёт (R26).
 - **Свежий вход** — `requireFresh` (`app/reauth.go`): `sessions.reauth_at` не старше `domain.ReauthFresh` (10 мин),
   иначе `403 identity.reauth_required` до изменений. Свежесть вторым фактором (`disableTotp`) — `sessions.mfa_at`
@@ -54,8 +56,8 @@ paths:
   `queue.WorkerKinds`. Страж — `TestPeriodicSameInBothBinaries` (`cmd/admin-api` и `cmd/worker`). Смена лидера
   сдвигает интервал: сброс 2FA может уйти до ~20 мин позже `execute_at`.
 - **Права воркера** (спека §5.5, `platform/grants/grants.sql`): у `worker` на `credentials`, `user_mfa`,
-  `user_recovery_codes`, `passkeys`, `consents` — только `DELETE` и чтение `user_id` (секретов не видит, rekey — у
-  api); `user_identities.apple_refresh_enc` читает — для отзыва токена Apple (I-3); на `auth_codes` — `SELECT, DELETE` (`FOR UPDATE` — 42501); `auth_challenges` — чтение только `expires_at`,
+  `user_recovery_codes`, `passkeys`, `consents` — только `DELETE` и чтение `user_id` (на `user_mfa` ещё `confirmed_at` —
+  есть ли подтверждённая 2FA; секретов не видит, rekey — у api); `user_identities.apple_refresh_enc` читает — для отзыва токена Apple (I-3); на `auth_codes` — `SELECT, DELETE` (`FOR UPDATE` — 42501); `auth_challenges` — чтение только `expires_at`,
   `consumed_at` (чистка без пачки по id); `security_events.meta_enc` — колоночный `UPDATE`. Тесты фона, писем и rekey — под ролью прода (`worker`, rekey —
   `api`): `dbtest.NewPoolsAs` или `roleApp` (`SET ROLE`).
 - **Письма** (`identity/mail`, спека §8.2): Composer на каждый вид `app.MailKinds()`, только чтение под `worker`,
@@ -63,7 +65,8 @@ paths:
   поможет (строки нет, код погашен/истёк — ровно срок истёк, шифротекст не расшифровывается — `keys.ErrDecrypt`,
   аккаунт `deleted`); ключ строки вне кольца воркера (`keys.ErrUnknownKey` — при ротации api мог получить ключ раньше),
   сбой базы и нарушенный контракт производителя (нет ключа `meta`) — ошибка: повтор, затем видимая «мёртвая» задача.
-  Отмена сброса 2FA при уже снятой 2FA (`has_mfa = false`) — текст `text_disabled`. Время — `mailZone`: `users.timezone` → пояс города
+  Отмена сброса 2FA без подтверждённой 2FA (`has_mfa = false`: снята или не подтверждена) — текст `text_disabled`;
+  отмена владельцем — нейтрально («отменён вами»), без способа отмены. Время — `mailZone`: `users.timezone` → пояс города
   (`geo_read_city_settings`) → UTC, пустое/`Local`/битое имя — следующий шаг; формат `2026-11-16 15:00
   (Europe/Moscow)` (решение пользователя 16.11).
 - **Чистка** (`app/cleanup.go`, спека §5.10): граница строгая (ровно срок — остаётся), шаги независимы

@@ -306,3 +306,28 @@ func TestExecutePoisonedRowDoesNotStopOthers(t *testing.T) {
 		t.Fatalf("со skip: %d %v %v", n, failed, err)
 	}
 }
+
+// Добор F п. 2: у аккаунта только неподтверждённая настройка TOTP (SetupTotp без ConfirmTotp) — 2FA нет: исполнение по
+// сроку = системная отмена, сессии живы, письма mfa_reset_done нет.
+func TestExecuteUnconfirmedMfaCancels(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	w := roleApp(t, r.env, "worker", true)
+	uid := seedUser(t, r.owner, "reset_unconfirmed", "ru")
+	r.withMfa(t, uid, false)
+	rid := r.liveReset(t, uid)
+	sid := issue(t, r.env, uid, web("a")).SessionID
+	r.clock.Advance(domain.MfaResetDelay)
+	if n, _, err := w.ExecuteDueMfaResets(context.Background(), 10, nil); err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+	if n := count(t, r.owner, `SELECT count(*) FROM mfa_resets WHERE id = $1 AND cancelled_by = 'system' AND executed_at IS NULL`, rid); n != 1 {
+		t.Fatal("сброс не отменён системой")
+	}
+	if count(t, r.owner, `SELECT count(*) FROM sessions WHERE id = $1 AND revoked_at IS NULL`, sid) != 1 {
+		t.Fatal("сессия отозвана у аккаунта без 2FA")
+	}
+	if n := count(t, r.owner, `SELECT count(*) FROM river_job WHERE args->>'mail' = $1`, MailMfaResetDone); n != 0 {
+		t.Fatalf("письмо mfa_reset_done: %d", n)
+	}
+}
