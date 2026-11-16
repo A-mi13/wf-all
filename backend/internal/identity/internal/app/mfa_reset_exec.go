@@ -60,9 +60,9 @@ func (a *App) ExecuteDueMfaResets(ctx context.Context, batch int, skip []uuid.UU
 // есть ли user_mfa (нет строки — 2FA нет; без FOR UPDATE: у worker нет UPDATE на user_mfa, а писатели строки — сценарии
 // api — сперва берут тот же замок users), затем mfa_resets FOR UPDATE с перепроверкой «живой» (закрыт отменой или
 // предыдущим запуском — пропуск). Аккаунт pending_deletion/deleted или 2FA нет — cancelled_by = system, событие
-// mfa_reset_cancelled (версия 2), без писем. Иначе удаляются user_mfa и user_recovery_codes (ключи доступа остаются),
-// все сессии отзываются (revoked; версия и событие sessions_revoked), executed_at, событие mfa_changed {enabled:
-// false}, аудит mfa_reset_executed от system, письмо mfa_reset_done.
+// mfa_reset_cancelled (версия 2), аудит mfa_reset_cancelled от system, без писем. Иначе удаляются user_mfa и
+// user_recovery_codes (ключи доступа остаются), все сессии отзываются (revoked; версия и событие sessions_revoked),
+// executed_at, событие mfa_changed {enabled: false}, аудит mfa_reset_executed от system, письмо mfa_reset_done.
 func (a *App) executeMfaReset(ctx context.Context, r identitydb.MfaResetDueRow) (closed bool, err error) {
 	err = db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		closed = false
@@ -96,6 +96,12 @@ func (a *App) executeMfaReset(ctx context.Context, r identitydb.MfaResetDueRow) 
 			}
 			if _, err := events.Publish(ctx, identity.MfaResetCancelled(identity.MfaResetRef{ID: live.ID, Version: 2},
 				live.UserID, live.ExecuteAt)); err != nil {
+				return err
+			}
+			// аудит отмены от system (спека §8.3; m4 ревью 3)
+			if err := audit.Write(ctx, audit.Entry{ActorRole: roleSystem, ActorLabel: roleSystem, Action: ActionMfaResetCancelled,
+				ObjectType: objectUser, ObjectID: live.UserID,
+				After: map[string]any{"reset_id": live.ID, "cancelled_by": roleSystem}}); err != nil {
 				return err
 			}
 			closed = true

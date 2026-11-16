@@ -46,9 +46,11 @@ func (a *App) cancelResetsByOwner(ctx context.Context, tx pgx.Tx, userID uuid.UU
 }
 
 // CancelMyMfaReset — cancelMyMfaReset (m3): lockUser (R30; гонку с исполнением по сроку решает этот замок — воркер
-// берёт users SKIP LOCKED); сессия запроса отозвана после загрузки (кэш до 5 с) — 401; живой сброс — отмена владельцем;
-// живого нет, но сброс отменён владельцем не раньше входа этой сессии вторым фактором (sessions.mfa_at) — тоже успех
-// (204: вход этой сессии уже отменил); иначе 404 identity.mfa_reset_not_found.
+// берёт users SKIP LOCKED); сессия запроса отозвана после загрузки (кэш до 5 с) — 401; сессия не проходила второй
+// фактор (sessions.mfa_at NULL) — при живом сбросе 403 reauth_required, без него 404; живой сброс — отмена владельцем;
+// живого нет, но последний сброс отменён владельцем за жизнь этой сессии (не раньше sessions.created_at; свежий вход
+// вторым фактором после отмены не мешает) — тоже успех (204: вход или прошлый вызов этой сессии уже отменил); иначе
+// 404 identity.mfa_reset_not_found.
 func (a *App) CancelMyMfaReset(ctx context.Context, userID, sessionID uuid.UUID) error {
 	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := a.lockUser(ctx, tx, userID); errors.Is(err, errUserGone) {
@@ -58,12 +60,22 @@ func (a *App) CancelMyMfaReset(ctx context.Context, userID, sessionID uuid.UUID)
 		}
 		a.firstLock(opCancelMyMfaReset)
 		q := identitydb.New(tx)
-		live, err := q.MfaResetSessionLive(ctx, identitydb.MfaResetSessionLiveParams{ID: sessionID, UserID: userID})
+		sess, err := q.MfaResetSessionLive(ctx, identitydb.MfaResetSessionLiveParams{ID: sessionID, UserID: userID})
 		if err != nil {
 			return fmt.Errorf("identity: сессия отмены сброса 2FA: %w", err)
 		}
-		if !live {
+		if !sess.Live {
 			return errSessionGone
+		}
+		if !sess.SecondFactor {
+			// явная отмена — только сессией, прошедшей второй фактор (решение пользователя 16.11): вошедший одним
+			// паролем при живом сбросе получает 403 reauth_required (reauthenticate вторым фактором отменит сброс сам)
+			if _, err := q.LiveMfaResetAt(ctx, userID); errors.Is(err, pgx.ErrNoRows) {
+				return errMfaResetNotFound
+			} else if err != nil {
+				return fmt.Errorf("identity: живой сброс 2FA: %w", err)
+			}
+			return errReauthRequired
 		}
 		n, err := a.cancelResetsByOwner(ctx, tx, userID)
 		if err != nil || n > 0 {

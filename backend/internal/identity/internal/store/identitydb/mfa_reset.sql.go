@@ -74,7 +74,7 @@ SELECT EXISTS (
     FROM (SELECT m.cancelled_by, m.cancelled_at FROM mfa_resets m WHERE m.user_id = $1::uuid
           ORDER BY m.created_at DESC, m.id DESC LIMIT 1) r
     JOIN sessions s ON s.id = $2::uuid AND s.user_id = $1::uuid
-    WHERE r.cancelled_by = 'owner' AND s.mfa_at IS NOT NULL AND r.cancelled_at >= s.mfa_at
+    WHERE r.cancelled_by = 'owner' AND r.cancelled_at >= s.created_at
 ) AS cancelled
 `
 
@@ -83,9 +83,10 @@ type MfaResetCancelledBySessionParams struct {
 	SessionID uuid.UUID
 }
 
-// последний сброс аккаунта отменён владельцем не раньше входа этой сессии вторым фактором (повтор cancelMyMfaReset —
-// 204); более ранний, отменённый этой сессией, не в счёт, если после него назначен новый (m1 ревью W5: R2 отменён
-// сотрудником — 404)
+// последний сброс аккаунта отменён владельцем за жизнь этой сессии (не раньше её создания; повтор cancelMyMfaReset —
+// 204; сессию без второго фактора CancelMyMfaReset отсекает раньше — явная отмена только после него); сравнение с
+// created_at, а не mfa_at: свежий вход TOTP после отмены сдвигает mfa_at и превращал повтор в 404 (m2 ревью 3); более
+// ранний, отменённый этой сессией, не в счёт, если после него назначен новый (m1 ревью W5: R2 отменён сотрудником — 404)
 func (q *Queries) MfaResetCancelledBySession(ctx context.Context, arg MfaResetCancelledBySessionParams) (bool, error) {
 	row := q.db.QueryRow(ctx, mfaResetCancelledBySession, arg.UserID, arg.SessionID)
 	var cancelled bool
@@ -221,7 +222,10 @@ func (q *Queries) MfaResetMarkExecuted(ctx context.Context, arg MfaResetMarkExec
 }
 
 const mfaResetSessionLive = `-- name: MfaResetSessionLive :one
-SELECT EXISTS (SELECT 1 FROM sessions WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL) AS live
+SELECT EXISTS (SELECT 1 FROM sessions s WHERE s.id = $1::uuid AND s.user_id = $2::uuid
+               AND s.revoked_at IS NULL) AS live,
+       EXISTS (SELECT 1 FROM sessions s WHERE s.id = $1::uuid AND s.user_id = $2::uuid
+               AND s.revoked_at IS NULL AND s.mfa_at IS NOT NULL) AS second_factor
 `
 
 type MfaResetSessionLiveParams struct {
@@ -229,12 +233,18 @@ type MfaResetSessionLiveParams struct {
 	UserID uuid.UUID
 }
 
-// сессия запроса жива и принадлежит аккаунту (загрузчик кэширует до 5 с; users уже под замком)
-func (q *Queries) MfaResetSessionLive(ctx context.Context, arg MfaResetSessionLiveParams) (bool, error) {
+type MfaResetSessionLiveRow struct {
+	Live         bool
+	SecondFactor bool
+}
+
+// сессия запроса жива и принадлежит аккаунту, и проходила ли она второй фактор (загрузчик кэширует до 5 с; users уже
+// под замком)
+func (q *Queries) MfaResetSessionLive(ctx context.Context, arg MfaResetSessionLiveParams) (MfaResetSessionLiveRow, error) {
 	row := q.db.QueryRow(ctx, mfaResetSessionLive, arg.ID, arg.UserID)
-	var live bool
-	err := row.Scan(&live)
-	return live, err
+	var i MfaResetSessionLiveRow
+	err := row.Scan(&i.Live, &i.SecondFactor)
+	return i, err
 }
 
 const mfaResetUserMfa = `-- name: MfaResetUserMfa :one

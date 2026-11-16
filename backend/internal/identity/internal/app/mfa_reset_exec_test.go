@@ -133,6 +133,13 @@ func TestExecuteCancelsStale(t *testing.T) {
 			t.Errorf("событие отмены %s: %d", rid, n)
 		}
 	}
+	// аудит отмены от system (спека §8.3; m4 ревью 3)
+	for _, uid := range []uuid.UUID{noMfa, deleting} {
+		if n := count(t, r.owner, `SELECT count(*) FROM audit_log WHERE action = $1 AND object_id = $2 AND actor_role = 'system'
+			AND after->>'cancelled_by' = 'system'`, ActionMfaResetCancelled, uid); n != 1 {
+			t.Errorf("аудит системной отмены %s: %d", uid, n)
+		}
+	}
 	if n := count(t, r.owner, `SELECT count(*) FROM river_job WHERE args->>'mail' IN ($1, $2)`, MailMfaResetDone, MailMfaResetCancelled); n != 0 {
 		t.Fatalf("письма при отмене системой: %d", n)
 	}

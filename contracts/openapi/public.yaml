@@ -2303,6 +2303,7 @@ paths:
         - identity
       x-rate-limit: account_secure
       x-error-codes:
+        - identity.reauth_required
         - identity.mfa_reset_not_found
       summary: Отменить сброс 2FA через поддержку
       description: |
@@ -2311,6 +2312,12 @@ paths:
         фактором отменяет сброс сам: если сессия вошла с TOTP, резервным кодом или ключом, сброс уже
         отменён — ответ тоже `204`.
 
+        Явная отмена — только сессией, прошедшей второй фактор (вход или `reauthenticate` с TOTP,
+        резервным кодом или ключом доступа): сессия, вошедшая одним паролем, при назначенном сбросе
+        получает `403 identity.reauth_required` — пройдите `reauthenticate` вторым фактором (он сам
+        отменит сброс).
+
+        - `identity.reauth_required` (403) — сброс назначен, а эта сессия не проходила второй фактор;
         - `identity.mfa_reset_not_found` (404) — назначенного сброса нет (выполнен или не
           назначался) и эта сессия его не отменяла.
       parameters:
@@ -2318,6 +2325,20 @@ paths:
       responses:
         '204':
           description: Сброс отменён
+        '403':
+          description: 'Сессия не проходила второй фактор, а сброс назначен — нужен `reauthenticate` вторым фактором. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`humancheck.required`, `feature.disabled` и др. — info.description), не только коды операции'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                reauth_required:
+                  summary: Сессия без второго фактора
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: identity.reauth_required
         default:
           $ref: '#/components/responses/Problem'
   /v1/me/captaincy:

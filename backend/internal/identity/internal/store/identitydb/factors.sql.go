@@ -175,7 +175,7 @@ func (q *Queries) MfaConfirmed(ctx context.Context, userID uuid.UUID) (bool, err
 }
 
 const mfaFailed = `-- name: MfaFailed :one
-UPDATE user_mfa SET failures = failures + 1 WHERE user_id = $1 RETURNING failures, failures_notified_at
+UPDATE user_mfa SET failures = least(failures, 32766) + 1 WHERE user_id = $1 RETURNING failures, failures_notified_at
 `
 
 type MfaFailedRow struct {
@@ -183,6 +183,8 @@ type MfaFailedRow struct {
 	FailuresNotifiedAt *time.Time
 }
 
+// счётчик насыщается у предела smallint (I1 итогового ревью): иначе неудача на 32767 — 22003 и откат tx, а с ним лимит
+// user:mfa, попытка mfa_token и письмо mfa_failures
 func (q *Queries) MfaFailed(ctx context.Context, userID uuid.UUID) (MfaFailedRow, error) {
 	row := q.db.QueryRow(ctx, mfaFailed, userID)
 	var i MfaFailedRow

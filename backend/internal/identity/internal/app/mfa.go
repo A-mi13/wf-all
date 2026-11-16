@@ -57,7 +57,8 @@ func (a *App) MfaStatus(ctx context.Context, userID uuid.UUID) (MfaStatusView, e
 }
 
 // SetupTotp — новый секрет при свежем входе (requireFresh: users, затем sessions); подтверждённая 2FA — 409
-// mfa_already_enabled; повтор до подтверждения выпускает новый секрет (прежний перестаёт подходить). Ответ —
+// mfa_already_enabled; повтор до подтверждения выпускает новый секрет (прежний перестаёт подходить); живой сброс 2FA
+// поддержкой отменяется владельцем (cancelResetsByOwner). Ответ —
 // секрет в base32 и otpauth URI (издатель — API_IDENTITY_TOTP_ISSUER, аккаунт — ник).
 func (a *App) SetupTotp(ctx context.Context, sessionID uuid.UUID) (secret, uri string, err error) {
 	raw, err := otp.NewSecret(rand.Reader)
@@ -85,6 +86,11 @@ func (a *App) SetupTotp(ctx context.Context, sessionID uuid.UUID) (secret, uri s
 		if n == 0 {
 			return errMfaAlreadyEnabled
 		}
+		// живой сброс у аккаунта без подтверждённой 2FA (гонка одобрения с DisableTotp, m1 ревью 3) отменяет владелец:
+		// иначе воркер в срок стёр бы новую 2FA (R30: mfa_resets после user_mfa)
+		if _, err := a.cancelResetsByOwner(ctx, tx, u.ID); err != nil {
+			return err
+		}
 		uri = otp.URI(a.totpIssuer, u.Nickname, raw)
 		return nil
 	})
@@ -98,7 +104,8 @@ func (a *App) SetupTotp(ctx context.Context, sessionID uuid.UUID) (secret, uri s
 // 401 auth.unauthenticated; нет неподтверждённого секрета (не начата или уже
 // включена) — 409 mfa_setup_missing; неверный код — 400 mfa_invalid (без записей); верный — confirmed_at и
 // last_used_step (этот код больше не примут), 10 резервных кодов (прежние строки удаляются), журнал, письмо
-// mfa_enabled, событие mfa_changed {enabled: true}, аудит. Другие сессии не гасятся (§3.3 п. 3).
+// mfa_enabled, событие mfa_changed {enabled: true}, аудит; живой сброс 2FA поддержкой отменяется владельцем. Другие
+// сессии не гасятся (§3.3 п. 3).
 func (a *App) ConfirmTotp(ctx context.Context, userID, sessionID uuid.UUID, code string) ([]string, error) {
 	var codes []string
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
@@ -136,6 +143,10 @@ func (a *App) ConfirmTotp(ctx context.Context, userID, sessionID uuid.UUID, code
 			return errMfaSetupMissing
 		}
 		if codes, err = a.replaceRecoveryCodes(ctx, q, userID); err != nil {
+			return err
+		}
+		// сброс, назначенный между setup и confirm, не должен снять включаемую 2FA (m1 ревью 3)
+		if _, err := a.cancelResetsByOwner(ctx, tx, userID); err != nil {
 			return err
 		}
 		ref, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: userID, Kind: domain.SecMfaEnabled, SessionID: sessionID})

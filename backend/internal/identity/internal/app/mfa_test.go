@@ -336,6 +336,43 @@ func TestDisableTotpCancelsReset(t *testing.T) {
 	}
 }
 
+// m1 ревью 3: гонка «одобрение сброса ↔ DisableTotp» оставляет живой сброс у аккаунта без 2FA. Новая настройка
+// (SetupTotp) и подтверждение (ConfirmTotp — сброс назначен между setup и confirm) отменяют его владельцем — иначе
+// воркер в срок стёр бы новую 2FA.
+func TestSetupConfirmTotpCancelsReset(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	w := roleApp(t, r.env, "worker", true)
+	ctx := context.Background()
+	// сброс жив до setup
+	a := seedUser(t, r.owner, "setup_cancel", "ru")
+	ridA := r.liveReset(t, a)
+	sidA := freshSession(t, r.env, a)
+	secretA, _ := setupSecret(t, r.env, sidA)
+	ownerCancelled(t, r.env, a, ridA)
+	if _, err := r.a.ConfirmTotp(ctx, a, sidA, totpNow(r.env, secretA)); err != nil {
+		t.Fatal(err)
+	}
+	// сброс назначен между setup и confirm
+	b := seedUser(t, r.owner, "confirm_cancel", "ru")
+	sidB := freshSession(t, r.env, b)
+	secretB, _ := setupSecret(t, r.env, sidB)
+	ridB := r.liveReset(t, b)
+	if _, err := r.a.ConfirmTotp(ctx, b, sidB, totpNow(r.env, secretB)); err != nil {
+		t.Fatal(err)
+	}
+	ownerCancelled(t, r.env, b, ridB)
+	r.clock.Advance(domain.MfaResetDelay)
+	if n, _, err := w.ExecuteDueMfaResets(ctx, 10, nil); err != nil || n != 0 {
+		t.Fatalf("воркер: %d %v", n, err)
+	}
+	for _, uid := range []uuid.UUID{a, b} {
+		if n := count(t, r.owner, `SELECT count(*) FROM user_mfa WHERE user_id = $1 AND confirmed_at IS NOT NULL`, uid); n != 1 {
+			t.Fatalf("новая 2FA %s снята", uid)
+		}
+	}
+}
+
 // m1 ревью W5-А: confirmTotp перечитывает сессию запроса под замком аккаунта — отозванная (кэш загрузчика ≤ 5 с ещё
 // пропускает её) получает 401 без кодов и без включения.
 func TestConfirmTotpRevokedSession(t *testing.T) {

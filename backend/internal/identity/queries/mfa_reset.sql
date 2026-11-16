@@ -39,15 +39,16 @@ WHERE user_id = @user_id AND executed_at IS NULL AND cancelled_at IS NULL
 RETURNING id, execute_at;
 
 -- name: MfaResetCancelledBySession :one
--- последний сброс аккаунта отменён владельцем не раньше входа этой сессии вторым фактором (повтор cancelMyMfaReset —
--- 204); более ранний, отменённый этой сессией, не в счёт, если после него назначен новый (m1 ревью W5: R2 отменён
--- сотрудником — 404)
+-- последний сброс аккаунта отменён владельцем за жизнь этой сессии (не раньше её создания; повтор cancelMyMfaReset —
+-- 204; сессию без второго фактора CancelMyMfaReset отсекает раньше — явная отмена только после него); сравнение с
+-- created_at, а не mfa_at: свежий вход TOTP после отмены сдвигает mfa_at и превращал повтор в 404 (m2 ревью 3); более
+-- ранний, отменённый этой сессией, не в счёт, если после него назначен новый (m1 ревью W5: R2 отменён сотрудником — 404)
 SELECT EXISTS (
     SELECT 1
     FROM (SELECT m.cancelled_by, m.cancelled_at FROM mfa_resets m WHERE m.user_id = sqlc.arg(user_id)::uuid
           ORDER BY m.created_at DESC, m.id DESC LIMIT 1) r
     JOIN sessions s ON s.id = sqlc.arg(session_id)::uuid AND s.user_id = sqlc.arg(user_id)::uuid
-    WHERE r.cancelled_by = 'owner' AND s.mfa_at IS NOT NULL AND r.cancelled_at >= s.mfa_at
+    WHERE r.cancelled_by = 'owner' AND r.cancelled_at >= s.created_at
 ) AS cancelled;
 
 -- name: MfaResetDue :many
@@ -73,5 +74,9 @@ SELECT user_id FROM user_mfa WHERE user_id = @user_id;
 UPDATE mfa_resets SET executed_at = @now WHERE id = @id AND executed_at IS NULL AND cancelled_at IS NULL;
 
 -- name: MfaResetSessionLive :one
--- сессия запроса жива и принадлежит аккаунту (загрузчик кэширует до 5 с; users уже под замком)
-SELECT EXISTS (SELECT 1 FROM sessions WHERE id = @id AND user_id = @user_id AND revoked_at IS NULL) AS live;
+-- сессия запроса жива и принадлежит аккаунту, и проходила ли она второй фактор (загрузчик кэширует до 5 с; users уже
+-- под замком)
+SELECT EXISTS (SELECT 1 FROM sessions s WHERE s.id = sqlc.arg(id)::uuid AND s.user_id = sqlc.arg(user_id)::uuid
+               AND s.revoked_at IS NULL) AS live,
+       EXISTS (SELECT 1 FROM sessions s WHERE s.id = sqlc.arg(id)::uuid AND s.user_id = sqlc.arg(user_id)::uuid
+               AND s.revoked_at IS NULL AND s.mfa_at IS NOT NULL) AS second_factor;

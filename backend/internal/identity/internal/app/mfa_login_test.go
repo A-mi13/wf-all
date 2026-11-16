@@ -149,6 +149,28 @@ func TestCompleteMfaUserLimit(t *testing.T) {
 	}
 }
 
+// I1 итогового ревью: user_mfa.failures — smallint; без насыщения неудача на 32767 давала 22003 и откат tx — лимит
+// user:mfa, попытка mfa_token и письмо mfa_failures не тратились (перебор без учёта). Счётчик насыщается.
+func TestCompleteMfaFailuresSaturate(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, pgLimiters)
+	uid, secret, tok := mfaLogin(t, e, "mfa_saturate")
+	acctExec(t, e, `UPDATE user_mfa SET failures = 32767 WHERE user_id = $1`, uid)
+	_, err := complete(e, tok, SecondFactor{TOTP: wrongCode(totpNow(e, secret))})
+	if p := problemOfErr(err); p.Code != identity.CodeMfaInvalid || p.AttemptsLeft == nil || *p.AttemptsLeft != 4 {
+		t.Fatalf("неудача на пределе счётчика: %+v %v", p, err)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM rate_limits WHERE key = $1`, mfaFailureKey(uid)); n != 1 {
+		t.Fatal("неудача не учтена в лимите user:mfa")
+	}
+	if n := count(t, e.owner, `SELECT failures FROM user_mfa WHERE user_id = $1`, uid); n != 32767 {
+		t.Fatalf("счётчик: %d", n)
+	}
+	if n := mailJobs(t, e, MailMfaFailures); n != 1 {
+		t.Fatalf("писем mfa_failures: %d", n)
+	}
+}
+
 // §3.11, R6: аккаунт в периоде удаления после второго фактора — deletion_pending с restore_token, без сессии.
 func TestCompleteMfaPendingDeletion(t *testing.T) {
 	t.Parallel()

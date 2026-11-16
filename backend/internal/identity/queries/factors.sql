@@ -15,7 +15,9 @@ SELECT * FROM user_mfa WHERE user_id = $1 FOR UPDATE;
 UPDATE user_mfa SET last_used_step = coalesce(sqlc.narg(step), last_used_step), failures = 0 WHERE user_id = @user_id;
 
 -- name: MfaFailed :one
-UPDATE user_mfa SET failures = failures + 1 WHERE user_id = $1 RETURNING failures, failures_notified_at;
+-- счётчик насыщается у предела smallint (I1 итогового ревью): иначе неудача на 32767 — 22003 и откат tx, а с ним лимит
+-- user:mfa, попытка mfa_token и письмо mfa_failures
+UPDATE user_mfa SET failures = least(failures, 32766) + 1 WHERE user_id = $1 RETURNING failures, failures_notified_at;
 
 -- name: MfaFailuresNotified :exec
 UPDATE user_mfa SET failures_notified_at = @now WHERE user_id = @user_id;

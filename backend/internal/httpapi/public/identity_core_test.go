@@ -368,6 +368,11 @@ func coreScenario(t *testing.T) *coreEnv {
 		uid, e.clock.Now().Add(7*24*time.Hour), e.clock.Now()); err != nil {
 		t.Fatal(err)
 	}
+	// явная отмена — только сессией, прошедшей второй фактор (п. 5 волны F): сессия вошла паролем до включения 2FA
+	if _, err := e.pool.Exec(context.Background(), `UPDATE sessions SET mfa_at = $2 WHERE user_id = $1 AND revoked_at IS NULL`,
+		uid, e.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
 	e.ok(t, "cancel mfa reset", e.do(t, http.MethodDelete, "/v1/me/mfa-reset", "", access))
 	step := e.login(t, "core.new@example.com", corePW2)
 	mfa := e.ok(t, "complete mfa", e.do(t, http.MethodPost, "/v1/auth/mfa", `{"mfa_token":"`+str(t, step, "mfa", "mfa_token")+

@@ -107,6 +107,71 @@ func TestCancelMyMfaReset(t *testing.T) {
 	}
 }
 
+// m2 ревью 3: свежий вход TOTP после отмены (mfa_at сессии позже cancelled_at) не превращает повтор явной отмены той
+// же сессией в 404 — сброс отменён владельцем за жизнь сессии.
+func TestCancelMyMfaResetAfterReauth(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	ctx := context.Background()
+	uid := seedUser(t, r.owner, "reset_reauth", "ru")
+	secret := seedMfa(t, r.env, uid)
+	rid := r.liveReset(t, uid)
+	s, err := finish(t, r.env, uid, web("a"), true, false) // вход вторым фактором отменяет сброс
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerCancelled(t, r.env, uid, rid)
+	r.clock.Advance(time.Minute)
+	if _, err := r.a.Reauthenticate(ctx, s.Issued.SessionID, ReauthInput{TOTPCode: totpNow(r.env, secret)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.a.CancelMyMfaReset(ctx, uid, s.Issued.SessionID); err != nil {
+		t.Fatalf("повтор после свежего входа: %v", err)
+	}
+}
+
+// П. 5 волны F (решение пользователя 16.11): явная отмена — только сессией, прошедшей второй фактор (mfa_at задан).
+// Без него при живом сбросе — 403 reauth_required, сброс жив, письма нет; без него и без живого сброса — 404, даже если
+// сброс отменил владелец другой сессией за жизнь этой; после второго фактора — 204.
+func TestCancelMyMfaResetNeedsSecondFactor(t *testing.T) {
+	t.Parallel()
+	r := newResetEnv(t)
+	ctx := context.Background()
+	uid := seedUser(t, r.owner, "reset_no_mfa", "ru")
+	r.withMfa(t, uid, true)
+	sid := issue(t, r.env, uid, web("a")).SessionID // mfa_at = NULL
+	r.clock.Advance(time.Minute)
+	rid := r.liveReset(t, uid)
+	if status, code := problemStatus(r.a.CancelMyMfaReset(ctx, uid, sid)); status != http.StatusForbidden ||
+		code != identity.CodeReauthRequired {
+		t.Fatalf("без второго фактора: %d %s", status, code)
+	}
+	if n := count(t, r.owner, `SELECT count(*) FROM mfa_resets WHERE id = $1 AND cancelled_at IS NULL`, rid); n != 1 {
+		t.Fatal("сброс отменён сессией без второго фактора")
+	}
+	if n := count(t, r.owner, `SELECT count(*) FROM river_job WHERE args->>'mail' = $1`, MailMfaResetCancelled); n != 0 {
+		t.Fatalf("письмо отмены: %d", n)
+	}
+	// другая сессия входит вторым фактором и отменяет сброс — эта (без второго фактора) его не отменяла: 404
+	if _, err := finish(t, r.env, uid, web("b"), true, false); err != nil {
+		t.Fatal(err)
+	}
+	if status, code := problemStatus(r.a.CancelMyMfaReset(ctx, uid, sid)); status != http.StatusNotFound ||
+		code != identity.CodeMfaResetNotFound {
+		t.Fatalf("отменён другой сессией: %d %s", status, code)
+	}
+	// новый сброс, сессия прошла второй фактор — 204
+	r.clock.Advance(time.Minute)
+	rid2 := r.liveReset(t, uid)
+	acctExec(t, r.env, `UPDATE sessions SET mfa_at = $2 WHERE id = $1`, sid, r.clock.Now())
+	if err := r.a.CancelMyMfaReset(ctx, uid, sid); err != nil {
+		t.Fatalf("после второго фактора: %v", err)
+	}
+	if n := count(t, r.owner, `SELECT count(*) FROM mfa_resets WHERE id = $1 AND cancelled_by = 'owner'`, rid2); n != 1 {
+		t.Fatal("сброс не отменён владельцем")
+	}
+}
+
 // TestMfaStatusShowsReset — назначенный сброс виден в getMyMfa (reset_scheduled_at) и в шаге 2FA входа (reset_at).
 func TestMfaStatusShowsReset(t *testing.T) {
 	t.Parallel()
