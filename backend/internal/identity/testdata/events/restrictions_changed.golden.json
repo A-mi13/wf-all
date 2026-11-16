@@ -1,0 +1,12 @@
+{
+  "type": "identity.restrictions_changed",
+  "schema_version": 1,
+  "aggregate_type": "user",
+  "aggregate_id": "01930000-0000-7000-8000-000000000001",
+  "aggregate_version": 7,
+  "payload": {
+    "user_id": "01930000-0000-7000-8000-000000000001",
+    "status": "active",
+    "capabilities": ["match_join"]
+  }
+}

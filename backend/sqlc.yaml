@@ -279,3 +279,32 @@ sql:
           - db_type: geography
             nullable: true
             go_type: { type: string, pointer: true }
+  # identity (план I-2, R5): без общего querier.go — параллельные задачи меняют только свои *.sql.go; модели всех
+  # таблиц закреплены якорем queries/models.sql (models.go не меняется в задачах сценариев)
+  - engine: postgresql
+    schema: migrations/
+    queries: internal/identity/queries/
+    gen:
+      go:
+        package: identitydb
+        out: internal/identity/internal/store/identitydb
+        sql_package: pgx/v5
+        emit_interface: false
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: { import: github.com/google/uuid, type: UUID, pointer: true }
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: { type: time.Time, pointer: true }
+          - db_type: geography
+            go_type: string
+          - db_type: geography
+            nullable: true
+            go_type: { type: string, pointer: true }

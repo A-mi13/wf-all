@@ -22,16 +22,19 @@ UPDATE staff_sessions SET revoked_at = sqlc.arg(now)::timestamptz, revoked_reaso
 WHERE staff_id = sqlc.arg(staff_id) AND revoked_at IS NULL;
 
 -- name: LoadSession :one
--- Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка (версия и имя — R5), роль и города модератора.
+-- Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка (версия и имя — R5), роль, города модератора и
+-- связь с учёткой игрока (staff_player_links, спека identity §7.6, R8).
 SELECT s.id, s.staff_id, s.stage::text AS stage, s.last_seen_at, s.expires_at, s.ip,
        s.revoked_at, s.revoked_reason,
        a.status::text AS status, a.locked_until, a.version, a.display_name,
        r.role::text AS role,
        coalesce((SELECT array_agg(c.city_id ORDER BY c.city_id) FROM staff_role_cities c
-                 WHERE c.staff_id = s.staff_id), '{}')::uuid[] AS city_ids
+                 WHERE c.staff_id = s.staff_id), '{}')::uuid[] AS city_ids,
+       l.user_id AS linked_user_id
 FROM staff_sessions s
 JOIN staff_accounts a ON a.id = s.staff_id
 JOIN staff_roles r ON r.staff_id = s.staff_id
+LEFT JOIN staff_player_links l ON l.staff_id = s.staff_id
 WHERE s.token_hash = sqlc.arg(token_hash);
 
 -- name: TouchSession :exec

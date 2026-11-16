@@ -117,11 +117,13 @@ export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 // и уже под именами ADMIN_* (adminApiEnv). Playwright запускает webServer с окружением поверх process.env
 // (DEFAULT_ENVIRONMENT_VARIABLES, process.env, env сервера), поэтому «не передать» нельзя — значения
 // затираются пустыми (ревью Task 16, M7): ни Vite, ни Mailpit, ни дочерние процессы их не видят.
-// База воркера (WF_E2E_WORKER_DATABASE_URL) — так же: только воркеру, под именем WORKER_DATABASE_URL.
+// База воркера (WF_E2E_WORKER_DATABASE_URL) — так же: только воркеру, под именем WORKER_DATABASE_URL; кольцо
+// identity (WF_E2E_IDENTITY_SECRET_KEYS, план I-2) — только воркеру, под именем WORKER_IDENTITY_SECRET_KEYS.
 const RUN_SECRETS = {
   WF_E2E_STAFF_SECRET_KEYS: '',
   WF_E2E_ADMIN_DATABASE_URL: '',
   WF_E2E_WORKER_DATABASE_URL: '',
+  WF_E2E_IDENTITY_SECRET_KEYS: '',
 } as const;
 
 function required(name: string): string {
@@ -199,12 +201,14 @@ export function viteEnv(p: Pair & { vite: number }): NodeJS.ProcessEnv {
 }
 
 // Окружение воркера (план B, Task 23): база прогона под ролью worker, источник GeoNames — только фикстура со своим
-// корнем (внешней сети прогон не трогает), почта — Mailpit e2e (WORKER_MAIL_* воркеру обязательны).
+// корнем (внешней сети прогон не трогает), почта — Mailpit e2e (WORKER_MAIL_* воркеру обязательны), кольцо identity —
+// одноразовый ключ прогона (обязательно воркеру, план I-2 Task 4).
 export function workerEnv(): NodeJS.ProcessEnv {
   return {
     ...cleanEnv(),
     ...RUN_SECRETS,
     WORKER_DATABASE_URL: runDatabaseUrl('WF_E2E_WORKER_DATABASE_URL'),
+    WORKER_IDENTITY_SECRET_KEYS: runKey('WF_E2E_IDENTITY_SECRET_KEYS'),
     WORKER_LOG_FORMAT: 'text',
     WORKER_GEONAMES_BASE_URL: GEOFIXTURE_URL,
     WORKER_GEONAMES_CA_FILE: GEOFIXTURE_CA,

@@ -39,6 +39,9 @@ PostGIS обязателен двум миграциям: `0005_pitches.sql` (п
 0021_geo_admin.sql       geo 2/2 в админке: feature_flags.version, store_url без пробельных и управляющих, CHECK форматов правил страны; DELETE истории slug у admin — в grants.sql
 0022_staff_rate_limits.sql  staff_rate_limits — лимиты admin-api (копия rate_limits, UNLOGGED), права только admin; у admin на rate_limits — ничего (grants.sql)
 0023_normalize_text_case.sql  normalize_text без учёта регистра (все строчные латинские двойники, диакритика до них); пересчёт семи *_normalized и хранимых ников
+0024_identity_status.sql  user_status += pending_deletion (без транзакции: новое значение enum нельзя использовать в той же транзакции)
+0025_identity.sql        identity целиком (спека identity §5): users и sessions по §5.2–5.3, пароли, коды из письма, токены шагов, устройства, refresh-токены, 2FA, привязки провайдеров, ключи доступа, события безопасности, ограничения, согласия, сбросы 2FA; role_assignments и captain_applications — авторы-сотрудники; staff_player_links (staff); представления identity_read_*; флаги способов входа auth_*
+0026_identity_deletion.sql  удаление аккаунта: users.status_before_deletion (отмена возвращает прежний статус), birth_date NULL только у удалённого; затирание ПД удалённых до 0026
 ```
 
 Правка миграции: пока она не слита в `main` и не накатана на стенд (стенд накатывает `migrate up` из `main`,
@@ -103,6 +106,15 @@ bash scripts/pg.sh psql -d postgres -c "CREATE DATABASE wf OWNER migrator"
 | Активная сессия сотрудника без второго фактора | `CHECK` `staff_sessions_active_mfa` |
 | Подтверждение своего запроса или запроса о себе; отмена чужого запроса | `CHECK` `approvals_two_hands`, `approvals_cancel_by_initiator` |
 | Запись журнала с двумя авторами, без роли, служебная роль у автора, сотрудник без снимка имени | `CHECK` `audit_log_one_actor`, `audit_log_service_actor`, `audit_log_staff_actor` |
+| Аккаунт без подтверждённой почты, почта не в канонической форме (с `0025`) | `users.email`, `email_verified_at` `NOT NULL`; `CHECK` `users_email_format` (форма `emailaddr` или заглушка `deleted+<uuid>@invalid`) |
+| Сроки удаления без статуса `pending_deletion` и наоборот | `CHECK` `users_deletion_pending` |
+| Два живых кода из письма на одну почту и назначение; секрет у приманки; код без HMAC; шифротекст без ключа; код у погашенного; больше 5 попыток или 4 отправок | частичный уникальный индекс `auth_codes_live_key`; `CHECK` `auth_codes_decoy_no_secret`, `auth_codes_real_has_mac`, `auth_codes_secret_key`, `auth_codes_closed_no_code`, `auth_codes_attempts_check`, `auth_codes_sends_check` |
+| Причина отзыва сессии не из списка, отозванная без причины | `CHECK` `sessions_revoked_reason_check`, `sessions_revoked_pair` |
+| Один refresh-токен в двух семьях; преемник без срока окна гонки | `UNIQUE` `refresh_tokens_token_hash_key`; `CHECK` `refresh_tokens_successor_pair` |
+| Два живых сброса 2FA у аккаунта; сброс и исполнен, и отменён; два сброса по одному подтверждению | частичный уникальный индекс `mfa_resets_live_key`; `CHECK` `mfa_resets_one_outcome`; `UNIQUE` `mfa_resets_approval_key` |
+| Учётка игрока связана с двумя сотрудниками | `UNIQUE` `staff_player_links_user_id_key` |
+| Refresh-токен Apple у привязки Google или без ключа | `CHECK` `user_identities_apple_refresh` |
+| Отклонённая заявка в капитаны без кода причины, `other` без комментария, решённая без времени решения | `CHECK` `captain_applications_rejected_code`, `captain_applications_other_comment`, `captain_applications_reviewed` |
 
 ## Решения, которые стоит знать
 
@@ -232,6 +244,34 @@ id — UUIDv7 из Go, время — из `clock.Clock`, поэтому умо�
 первыми берут `geonames_*` (как импорт GeoNames) с `lock_timeout` 5 с: во время импорта — `55P03`, при встречной
 ручной привязке города (`cities`, затем `geonames_places`) — возможен `40P01`; в обоих случаях миграция откатывается
 целиком, остальные таблицы за ожидание не заперты (тест `migrations/platform_0023_test.go`).
+
+**identity (`0024`, `0025`, спека `docs/superpowers/specs/2026-11-13-identity-design.md` §5; план I-2, Task 5).**
+Значение `pending_deletion` — отдельной миграцией без транзакции (`0024`): CHECK и представления `0025` его уже
+используют. Её откат пересоздаёт тип `user_status` одним блоком `DO` (атомарно, хотя миграция без транзакции) и
+отказывает с понятным текстом, если есть строки `pending_deletion` — отменить удаление или довести анонимизацию и
+повторить. `0025` перед изменением отказывает с понятным текстом при игроках без подтверждённой или с не канонической
+почтой, при любой строке `sessions` (таблица пересоздаётся: строка = вход, семья refresh-токенов — в `refresh_tokens`)
+и при заявках, не проходящих новые CHECK; на стенде `users` и `sessions` пусты — сверка перед мержем в Task 21 плана
+I-2. Форма почты — всё, что выдаёт `emailaddr.Normalize`, включая домен из одной метки (`localhost`, `xn--p1ai`). id и время
+новых таблиц — из Go (умолчаний `now()` нет). Секреты — только HMAC (`code_mac`, `install_mac`, резервные коды; длина
+32), SHA-256 (`token_hash`) или шифротекст с `key_id` (форма `keys.ID`). Права ролей на новые таблицы — ветки
+`grants.sql` (спека §5.5): умолчание `ELSE` дало бы DML всем. `staff_player_links` — таблица модуля `staff` (права
+только `admin`), FK на `users` без обратной видимости. Ник-заглушку удалённого (`deleted-<12 hex>` из последних 6
+байт id) `identity_read_users` выводит сам, даже до записи анонимизацией. Строки флагов `auth_*` — только «везде»,
+`ON CONFLICT DO NOTHING`. `identity_read_restrictions` считает срок `until` по `now()` базы, а не по `clock.Clock`
+(так требует план): на границе `until` чтение представления и решения кода с часами Go могут разойтись на перекос
+часов, а тест с `clocktest.Fake` в будущем увидит истёкшее ограничение действующим — сравнивать с часами Go в коде
+потребителя. **Откат `0025`** возвращает схему `0024` в точности (тест
+`migrations/identity_0025_test.go`): данные новых таблиц, сессии, связи сотрудников и авторы-сотрудники допусков и
+решений по заявкам теряются; прежние `granted_by`, `reviewed_by`, `rejection_reason` возвращаются пустыми.
+**`0026`** (решения пользователя 15.11): `users.status_before_deletion` задан ⇔ `pending_deletion` и только
+`active | suspended` (CHECK `users_status_before_deletion`; строки периода удаления на момент наката получают
+`active` — до `0026` отмена давала его); `birth_date` — NULL только у `deleted` (CHECK `users_birth_date_required`):
+анонимизация затирает все ПД, включая причину и тикет сбросов 2FA (`mfa_resets.reason` — заглушка `---`, CHECK 3–500).
+Накат затирает аккаунты, удалённые до `0026`, как `app.anonymize` (заглушки почты и ника, ПД, секреты, привязки, коды,
+сессии, журнал безопасности, допуски, сбросы 2FA), но без письма, события, аудита и карантина ника, — необратимо.
+Откат отказывает с понятным текстом при строках без даты рождения (затёртым её не вернуть); прежний статус строк
+периода удаления теряется (тест `migrations/identity_0026_test.go`).
 
 **Запланированные изменения.** Спека бэкенда (`docs/superpowers/specs/2026-10-01-backend-architecture-design.md`,
 §11) перечисляет миграции, которые добавят план «фундамента» и спеки модулей: таблицы входа и устройств, `player_profiles`,

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -45,6 +46,17 @@ type Problem struct {
 	// JobID — id задачи импорта, которая уже стоит в очереди или выполняется (409 geo.import_in_progress админки,
 	// R26 плана B): экран находит её и предлагает отменить без памяти клиента. nil — поля нет.
 	JobID *int64 `json:"job_id,omitempty"`
+	// Reasons — причины отказа машинными значениями (identity.password_weak, identity.captain_ineligible;
+	// спека identity §6.6). Пусто — поля нет.
+	Reasons []string `json:"reasons,omitempty"`
+	// Methods — вторые факторы, которые принимает операция (identity.mfa_required). Пусто — поля нет.
+	Methods []string `json:"methods,omitempty"`
+	// AvailableAt — когда действие станет доступно, UTC (identity.nickname_change_too_soon,
+	// identity.application_cooldown). nil — поля нет.
+	AvailableAt *time.Time `json:"available_at,omitempty"`
+	// BlockedUntil — до какого момента заблокирован аккаунт, UTC (identity.account_blocked); бессрочная
+	// блокировка — nil, поля нет.
+	BlockedUntil *time.Time `json:"blocked_until,omitempty"`
 }
 
 func WriteProblem(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
@@ -104,6 +116,44 @@ func (e *Error) WithAttemptsLeft(n int) *Error {
 func (e *Error) WithJobID(id int64) *Error {
 	p := e.p
 	p.JobID = &id
+	return &Error{p: p}
+}
+
+// WithReasons — та же ошибка с reasons = r (копия среза): новая *Error, исходная не меняется.
+func (e *Error) WithReasons(r ...string) *Error {
+	p := e.p
+	p.Reasons = slices.Clone(r)
+	return &Error{p: p}
+}
+
+// WithMethods — та же ошибка с methods = m (копия среза): новая *Error, исходная не меняется.
+func (e *Error) WithMethods(m ...string) *Error {
+	p := e.p
+	p.Methods = slices.Clone(m)
+	return &Error{p: p}
+}
+
+// WithAvailableAt — та же ошибка с available_at = t в UTC: новая *Error, исходная не меняется.
+func (e *Error) WithAvailableAt(t time.Time) *Error {
+	p := e.p
+	u := t.UTC()
+	p.AvailableAt = &u
+	return &Error{p: p}
+}
+
+// WithBlockedUntil — та же ошибка с blocked_until = t в UTC: новая *Error, исходная не меняется.
+func (e *Error) WithBlockedUntil(t time.Time) *Error {
+	p := e.p
+	u := t.UTC()
+	p.BlockedUntil = &u
+	return &Error{p: p}
+}
+
+// WithRetryAfter — та же ошибка с заголовком Retry-After: секунды d вверх, не меньше 1 (контракт:
+// minimum 1; 429 identity.resend_too_soon и др.); в теле поля нет. Новая *Error, исходная не меняется.
+func (e *Error) WithRetryAfter(d time.Duration) *Error {
+	p := e.p
+	p.RetryAfter = max(1, int((d+time.Second-1)/time.Second))
 	return &Error{p: p}
 }
 

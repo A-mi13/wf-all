@@ -6,7 +6,7 @@ paths:
 # Бэкенд
 
 Узкие правила грузятся вместе с этим по своим путям: схема и стражи — `backend-schema.md`, платформа и
-воркер — `backend-platform.md`, HTTP-слой — `backend-http.md`, модуль сотрудников — `backend-staff.md`.
+воркер — `backend-platform.md`, HTTP-слой — `backend-http.md`, модуль сотрудников — `backend-staff.md`, аккаунт игрока — `backend-identity.md`.
 
 - Архитектура — `docs/superpowers/specs/2026-10-01-backend-architecture-design.md`: устройство модуля (§3: корневой пакет = API, `internal/{domain,app,store}`, `httpapi`, `admin`, `subscribers`, `jobs`, `intx`), владение таблицами (§4.1), граф слоёв (§4.3).
 - Общее — только в `internal/platform/*`. Чужую таблицу не писать никогда; читать чужое — только через экспортированные представления владельца `<модуль>_read_*` (§4.2). Синхронно — интерфейс корневого пакета; реакции — события outbox; транзакция между модулями — только `intx` из списка §4.4, транзакция явным параметром.
@@ -33,7 +33,7 @@ paths:
   объявляет `func TestMain(m *testing.M) { os.Exit(dbtest.Main(m)) }`. Страж — `archtest.TestDBTestsAreParallel`.
   Сколько разом: `dbtest.Main` ставит `-parallel` = `dbtest.DefaultParallel` (4), если флаг не задан явно (умолчание
   go — GOMAXPROCS = 24: клоны и DROP DATABASE душат Postgres, пакет вдвое медленнее последовательного);
-  `./task backend:test` и `test:watch` — явно `-p 4 -parallel 1 -timeout 20m` (предел пакета: `httpapi/admin` идёт ~10 мин; job CI — 30 мин): весь набор упирается в CREATE/DROP DATABASE
+  `./task backend:test` и `test:watch` — явно `-p 4 -parallel 1 -timeout 30m` (предел пакета: под нагрузкой полного набора `identity/internal/app` идёт 15–20 мин, `httpapi/admin` ~13 мин; job CI — 45 мин): весь набор упирается в CREATE/DROP DATABASE
   (запись клона ~21 МБ, checkpoint и барьер каждого DROP) — параллельность полному набору выигрыша не даёт (S1,
   03.11, одиночные прогоны: 359 с у `-parallel 1` против 686 с у `-parallel 8`). Несколько пакетов одной командой
   (`go test ./...`, IDE, список пакетов) — только с `-p 4`: без него GOMAXPROCS (24) пакетов × 4 = до 96 тестов разом

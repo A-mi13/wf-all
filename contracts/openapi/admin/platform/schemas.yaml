@@ -392,6 +392,12 @@ FeatureFlagKey:
     - payment_flags
     - ads
     - gk_rotation
+    - auth_apple
+    - auth_google
+    - auth_passkeys
+    - auth_apple_login
+    - auth_google_login
+    - auth_passkeys_login
   x-extensible-enum: true
 FeatureFlag:
   type: object

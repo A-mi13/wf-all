@@ -1096,6 +1096,30 @@
     "gk_rotation": {
       "title": "Rotating goalkeeper",
       "note": "The goalkeeper changes during the match"
+    },
+    "auth_apple": {
+      "title": "Sign up with Apple",
+      "note": "New sign-ups and linking Apple"
+    },
+    "auth_google": {
+      "title": "Sign up with Google",
+      "note": "New sign-ups and linking Google; only together with Apple"
+    },
+    "auth_passkeys": {
+      "title": "Passkeys",
+      "note": "Adding new passkeys"
+    },
+    "auth_apple_login": {
+      "title": "Sign in with Apple",
+      "note": "Emergency: turns off Apple sign-in for everyone"
+    },
+    "auth_google_login": {
+      "title": "Sign in with Google",
+      "note": "Emergency: turns off Google sign-in for everyone"
+    },
+    "auth_passkeys_login": {
+      "title": "Sign in with a passkey",
+      "note": "Emergency: turns off passkey sign-in for everyone"
     }
   },
   "flagsPage": {

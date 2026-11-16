@@ -1096,6 +1096,30 @@
     "gk_rotation": {
       "title": "Сменный вратарь",
       "note": "Вратарь меняется по ходу матча"
+    },
+    "auth_apple": {
+      "title": "Регистрация через Apple",
+      "note": "Новые регистрации и привязка Apple"
+    },
+    "auth_google": {
+      "title": "Регистрация через Google",
+      "note": "Новые регистрации и привязка Google; только вместе с Apple"
+    },
+    "auth_passkeys": {
+      "title": "Ключи доступа",
+      "note": "Добавление новых ключей доступа"
+    },
+    "auth_apple_login": {
+      "title": "Вход через Apple",
+      "note": "Авария: выключает вход через Apple всем"
+    },
+    "auth_google_login": {
+      "title": "Вход через Google",
+      "note": "Авария: выключает вход через Google всем"
+    },
+    "auth_passkeys_login": {
+      "title": "Вход ключом доступа",
+      "note": "Авария: выключает вход ключом доступа всем"
     }
   },
   "flagsPage": {

@@ -28,7 +28,9 @@ func TestKinds(t *testing.T) {
 			seen[k.Name] = true
 		}
 	}
-	if !seen["mail.send"] || !seen["staff.mail"] {
+	// виды identity (план I-2, Task 19) исполняет воркер: без строки здесь admin-api, став лидером, выбросил бы зависшую
+	if !seen["mail.send"] || !seen["staff.mail"] || !seen["identity.maintenance"] || !seen["identity.anonymize"] ||
+		!seen["identity.mfa_reset_execute"] {
 		t.Fatalf("виды: %v", seen)
 	}
 	a := queue.WorkerKinds()

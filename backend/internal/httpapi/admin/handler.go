@@ -50,7 +50,10 @@ type Options struct {
 	Sessions  auth.StaffSessions  // загрузчик сессии сотрудника по токену cookie
 	Staff     *staffadmin.Handler // операции тега staff
 	Geo       *geoadmin.Handler   // операции тега geo
-	Clock     clock.Clock         // негативный кэш сессий
+	// Identity — операции тега identity (identityadmin.New; действия подтверждения — RegisterApprovals в том же реестре
+	// до Validate). nil — нулевой хендлер: 501 на каждую операцию (тесты конвейера).
+	Identity *identityHandler
+	Clock    clock.Clock // негативный кэш сессий
 	// Approvals — подтверждения вдвоём (*approvals.Service после RegisterApprovals модулей, сборка 10c):
 	// операции тега platform listApprovals, approve, reject, cancel. Обязателен вместе с собранным Staff
 	// (подпись решившего — Staff.Label) и только с ним: nil при нулевом Staff — эти операции отвечают 501.
@@ -155,8 +158,13 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	// ошибок staff.Problem, стирание cookie при погашенной сессии, 501 у несобранного хендлера;
 	// requestMeta — последним, то есть внешним (strict-сервер оборачивает по порядку): IP и UA для
 	// операций платформы и стирание cookie при погашенной сессии в подписи решившего
-	// identity — нулевой хендлер: 501 на каждую операцию до реализации (план I-1, R2; pendingOps в nostub_test.go)
-	srv := Server{staffHandler: o.Staff, geoHandler: o.Geo, identityHandler: identityHandler{}, approvals: o.Approvals,
+	// identity — собранный хендлер или нулевой (501 на каждую операцию до реализации: план I-1, R2; pendingOps в
+	// nostub_test.go)
+	idh := o.Identity
+	if idh == nil {
+		idh = &identityHandler{}
+	}
+	srv := Server{staffHandler: o.Staff, geoHandler: o.Geo, identityHandler: idh, approvals: o.Approvals,
 		audit: o.DB, clock: o.Clock, flags: flags.NewStore(o.DB), cities: geo.New(o.DB).ExistingCityIDs}
 	if o.Approvals != nil {
 		srv.label = o.Staff.Label

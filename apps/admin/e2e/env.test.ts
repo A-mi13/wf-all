@@ -42,6 +42,8 @@ function errorOf(fn: () => unknown): string {
 }
 
 const DB_URL = 'postgres://admin:admin@127.0.0.1:15432/wf_e2e?sslmode=disable';
+// Кольцо identity прогона (план I-2, Task 4) — свой ключ, не равный ключу сотрудников.
+const IDENTITY_KEY = Buffer.alloc(32, 9).toString('base64url');
 
 describe('окружение e2e', () => {
   afterEach(() => {
@@ -263,10 +265,13 @@ describe('окружение e2e', () => {
     vi.stubEnv('WORKER_GEONAMES_BASE_URL', 'https://download.geonames.org');
     vi.stubEnv('WORKER_MAIL_SMTP_USERNAME', 'dev-user');
     vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', WORKER_DB);
+    vi.stubEnv('WF_E2E_IDENTITY_SECRET_KEYS', IDENTITY_KEY);
+    vi.stubEnv('WORKER_IDENTITY_SECRET_KEYS', 'dev-ring');
     const env = workerEnv();
     expect(env).not.toHaveProperty('WORKER_MAIL_SMTP_USERNAME');
     expect(env).toMatchObject({
       WORKER_DATABASE_URL: WORKER_DB,
+      WORKER_IDENTITY_SECRET_KEYS: IDENTITY_KEY,
       WORKER_GEONAMES_BASE_URL: 'https://127.0.0.1:18190',
       WORKER_GEONAMES_CA_FILE: path.join(ROOT, '.tools', 'e2e', 'geofixture-ca.pem'),
       WORKER_MAIL_SMTP_ADDR: '127.0.0.1:11026',
@@ -288,9 +293,20 @@ describe('окружение e2e', () => {
     ]);
   });
 
+  it('кольцо identity воркера переписано или короче 32 байт — ошибка без значения', () => {
+    vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', WORKER_DB);
+    for (const bad of ['C:/Program Files/Git/abc', Buffer.alloc(16, 1).toString('base64url')]) {
+      vi.stubEnv('WF_E2E_IDENTITY_SECRET_KEYS', bad);
+      const message = errorOf(() => workerEnv());
+      expect(message).toMatch(/WF_E2E_IDENTITY_SECRET_KEYS.*base64url/);
+      expect(message).not.toContain(bad);
+    }
+  });
+
   it('адрес базы воркера не postgres:// (переписан) — ошибка без значения', () => {
     const bad = 'C:/Program Files/Git/worker:worker@127.0.0.1:15432/wf_e2e';
     vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', bad);
+    vi.stubEnv('WF_E2E_IDENTITY_SECRET_KEYS', IDENTITY_KEY);
     const message = errorOf(() => workerEnv());
     expect(message).toMatch(/WF_E2E_WORKER_DATABASE_URL.*postgres:/);
     expect(message).not.toContain('Program Files');
@@ -300,6 +316,7 @@ describe('окружение e2e', () => {
     vi.stubEnv('WF_E2E_ADMIN_DATABASE_URL', DB_URL);
     vi.stubEnv('WF_E2E_STAFF_SECRET_KEYS', KEY);
     vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', WORKER_DB);
+    vi.stubEnv('WF_E2E_IDENTITY_SECRET_KEYS', IDENTITY_KEY);
     for (const env of [
       viteEnv(PAIRS.chromium),
       mailpitEnv(),
@@ -308,8 +325,13 @@ describe('окружение e2e', () => {
     ]) {
       expect(env.WF_E2E_WORKER_DATABASE_URL).toBe('');
       expect(Object.values(env)).not.toContain(WORKER_DB);
+      // кольцо identity — только воркеру: admin-api его не получает (сброс 2FA не шифрует, спека §5.5)
+      expect(env.WF_E2E_IDENTITY_SECRET_KEYS).toBe('');
+      expect(Object.values(env)).not.toContain(IDENTITY_KEY);
     }
     const w = workerEnv();
+    expect(Object.values(w).filter((v) => v === IDENTITY_KEY)).toHaveLength(1);
+    expect(w.WF_E2E_IDENTITY_SECRET_KEYS).toBe('');
     expect(Object.values(w).filter((v) => v === WORKER_DB)).toHaveLength(1);
     expect(Object.values(w)).not.toContain(KEY);
     expect(Object.values(w)).not.toContain(DB_URL);
@@ -339,6 +361,10 @@ describe('окружение e2e', () => {
     }
     expect(sh).toMatch(/^export WF_E2E_WORKER_DATABASE_URL="postgres:\/\/worker:worker@/m);
     expect(sh).toMatch(/MSYS2_ENV_CONV_EXCL="[^"]*WF_E2E_WORKER_DATABASE_URL/);
+    // кольцо identity воркера: одноразовый ключ base64url (без «/» — MSYS не перепишет), исключён из конверсии
+    expect(sh).toMatch(/^WF_E2E_IDENTITY_SECRET_KEYS=\$\(node -e .*base64url/m);
+    expect(sh).toMatch(/^export WF_E2E_IDENTITY_SECRET_KEYS$/m);
+    expect(sh).toMatch(/MSYS2_ENV_CONV_EXCL="[^"]*WF_E2E_IDENTITY_SECRET_KEYS/);
     // dev WORKER_* убираются из окружения прогона, как ADMIN_*
     expect(sh).toMatch(/ADMIN_\* \| WORKER_\* \| WF_ADMIN_API_ORIGIN\) unset/);
   });

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/platform/db"
@@ -157,8 +159,9 @@ func TestUpdateFlag(t *testing.T) {
 	}
 }
 
-// Два обновления одной версии: первое изменило строку (транзакция открыта), второе прочитало version 1 и ждёт
-// замок строки в UPDATE; первое коммитит — второе ErrStale (WHERE version), в базе одна запись (version 2).
+// Два обновления одной версии: первое изменило строку (транзакция открыта), второе ждёт замок строки в LockFlags
+// (SELECT … FOR UPDATE); первое коммитит — второе видит version 2 и отказывает сверкой версии (ErrStale), в базе одна
+// запись (version 2).
 func TestUpdateFlagConcurrent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -231,5 +234,274 @@ func TestFlagChangedEventAggregate(t *testing.T) {
 	}
 	if p, ok := ev.Payload.(flags.FlagChanged); !ok || p.Key != "ads" || !p.EnabledGlobally || !slices.Equal(p.EnabledCityIDs, []uuid.UUID{city}) {
 		t.Fatalf("payload %+v", ev.Payload)
+	}
+}
+
+// setAuthFlags — строки auth_apple и auth_google владельцем схемы в обход Update (до Task 5 строк нет; после — те же
+// значения поверх сида): флаги «везде», городов нет, version = 1.
+func setAuthFlags(t *testing.T, owner *pgxpool.Pool, apple, google bool) {
+	t.Helper()
+	if _, err := owner.Exec(context.Background(), `INSERT INTO feature_flags (key, enabled_globally, enabled_city_ids, version)
+		VALUES ('auth_apple', $1, '{}', 1), ('auth_google', $2, '{}', 1)
+		ON CONFLICT (key) DO UPDATE SET enabled_globally = EXCLUDED.enabled_globally, enabled_city_ids = '{}', version = 1`,
+		apple, google); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// flagRow — флаг и версия в базе (владельцем).
+func flagRow(t *testing.T, owner *pgxpool.Pool, key string) (on bool, cities []uuid.UUID, version int64) {
+	t.Helper()
+	if err := owner.QueryRow(context.Background(), `SELECT enabled_globally, enabled_city_ids, version FROM feature_flags
+		WHERE key = $1`, key).Scan(&on, &cities, &version); err != nil {
+		t.Fatal(err)
+	}
+	return on, cities, version
+}
+
+// GlobalOnly (спека §4.2): непустой список городов — ErrGlobalOnly до записи; пустое множество — допустимо.
+func TestUpdateGlobalOnlyRejectsCities(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pools := dbtest.NewPoolsAs(t, "admin")
+	setAuthFlags(t, pools.Owner, false, false)
+	s := flags.NewStore(pools.As)
+	err := inTx(t, pools.As, func(tx pgx.Tx) error {
+		_, _, err := s.Update(ctx, tx, "auth_apple", 1, nil, []uuid.UUID{uuid.New()})
+		return err
+	})
+	if !errors.Is(err, flags.ErrGlobalOnly) {
+		t.Fatalf("город у GlobalOnly: %v", err)
+	}
+	if on, cities, v := flagRow(t, pools.Owner, "auth_apple"); on || len(cities) != 0 || v != 1 {
+		t.Fatalf("строка изменилась: %v %v %d", on, cities, v)
+	}
+	on := true
+	var after flags.Flag
+	err = inTx(t, pools.As, func(tx pgx.Tx) (err error) {
+		_, after, err = s.Update(ctx, tx, "auth_apple", 1, &on, []uuid.UUID{})
+		return err
+	})
+	if err != nil || !after.EnabledGlobally || after.Version != 2 || len(after.EnabledCityIDs) != 0 {
+		t.Fatalf("пустое множество городов: %+v %v", after, err)
+	}
+}
+
+func requiresErr(t *testing.T, err error, enabling bool) {
+	t.Helper()
+	re, ok := errors.AsType[*flags.RequiresError](err)
+	if !ok || re.Key != "auth_google" || re.Requires != "auth_apple" || re.Enabling != enabling || re.Error() == "" {
+		t.Fatalf("ждали RequiresError{Enabling: %v}: %v", enabling, err)
+	}
+}
+
+// Requires в обе стороны (спека §4.2): Google без Apple не включается, Apple при Google не выключается; строки
+// зависимости нет — она выключена; порядок Apple → Google и обратно — успех.
+func TestUpdateRequiresBothDirections(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pools := dbtest.NewPoolsAs(t, "admin")
+	s := flags.NewStore(pools.As)
+	on, off := true, false
+	upd := func(key string, v int64, to *bool) error {
+		return inTx(t, pools.As, func(tx pgx.Tx) error { _, _, err := s.Update(ctx, tx, key, v, to, nil); return err })
+	}
+	setAuthFlags(t, pools.Owner, false, false)
+	if _, err := pools.Owner.Exec(ctx, `DELETE FROM feature_flags WHERE key = 'auth_apple'`); err != nil {
+		t.Fatal(err)
+	}
+	requiresErr(t, upd("auth_google", 1, &on), true) // строки Apple нет
+
+	setAuthFlags(t, pools.Owner, false, false)
+	requiresErr(t, upd("auth_google", 1, &on), true)
+	if g, _, v := flagRow(t, pools.Owner, "auth_google"); g || v != 1 {
+		t.Fatalf("Google записан: %v %d", g, v)
+	}
+
+	setAuthFlags(t, pools.Owner, true, true)
+	requiresErr(t, upd("auth_apple", 1, &off), false)
+	if a, _, v := flagRow(t, pools.Owner, "auth_apple"); !a || v != 1 {
+		t.Fatalf("Apple записан: %v %d", a, v)
+	}
+
+	setAuthFlags(t, pools.Owner, false, false)
+	for _, st := range []struct {
+		key string
+		v   int64
+		to  *bool
+	}{{"auth_apple", 1, &on}, {"auth_google", 1, &on}, {"auth_google", 2, &off}, {"auth_apple", 2, &off}} {
+		if err := upd(st.key, st.v, st.to); err != nil {
+			t.Fatalf("%s → %v: %v", st.key, *st.to, err)
+		}
+	}
+}
+
+func isDeadlock(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "40P01"
+}
+
+// Гонка «включить Google» ∥ «выключить Apple» (оба исходно допустимы): замок обеих строк одним запросом в порядке
+// ключа — ровно один успех, второй RequiresError или ErrStale, ни одного 40P01, итог согласован. Сначала
+// детерминированно: блокирующая tx держит строку auth_google, обе правки встают в очередь (замки по одному в разном
+// порядке здесь гарантированно дают 40P01); затем 50 гонок с общим стартом. Срок — 10 с.
+func TestUpdateRequiresConcurrent(t *testing.T) {
+	t.Parallel()
+	pools := dbtest.NewPoolsAs(t, "admin")
+	// срок — от готовой базы: клон под нагрузкой соседних пакетов сам занимает секунды
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s := flags.NewStore(pools.As)
+	on, off := true, false
+	enableGoogle := func() error {
+		return db.InTx(ctx, pools.As, func(ctx context.Context, tx pgx.Tx) error {
+			_, _, err := s.Update(ctx, tx, "auth_google", 1, &on, nil)
+			return err
+		})
+	}
+	disableApple := func() error {
+		return db.InTx(ctx, pools.As, func(ctx context.Context, tx pgx.Tx) error {
+			_, _, err := s.Update(ctx, tx, "auth_apple", 1, &off, nil)
+			return err
+		})
+	}
+	check := func(round int, errG, errA error) {
+		t.Helper()
+		if isDeadlock(errG) || isDeadlock(errA) {
+			t.Fatalf("раунд %d: взаимоблокировка: %v / %v", round, errG, errA)
+		}
+		lost := func(err error) bool {
+			_, req := errors.AsType[*flags.RequiresError](err)
+			return req || errors.Is(err, flags.ErrStale)
+		}
+		if (errG != nil || !lost(errA)) && (errA != nil || !lost(errG)) {
+			t.Fatalf("раунд %d: ждали ровно один успех: Google %v, Apple %v", round, errG, errA)
+		}
+		a, _, _ := flagRow(t, pools.Owner, "auth_apple")
+		g, _, _ := flagRow(t, pools.Owner, "auth_google")
+		if g && !a {
+			t.Fatalf("раунд %d: Google включён при выключенном Apple", round)
+		}
+	}
+
+	setAuthFlags(t, pools.Owner, true, false)
+	blocker, err := pools.Owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err := blocker.Exec(ctx, `SELECT 1 FROM feature_flags WHERE key = 'auth_google' FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	g, a := make(chan error, 1), make(chan error, 1)
+	go func() { g <- enableGoogle() }()
+	if err := waitWaiters(ctx, pools.Owner, 1, g); err != nil {
+		t.Fatal(err)
+	}
+	go func() { a <- disableApple() }()
+	if err := waitWaiters(ctx, pools.Owner, 2, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	check(0, <-g, <-a)
+
+	for round := 1; round <= 50; round++ {
+		setAuthFlags(t, pools.Owner, true, false)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var errG, errA error
+		wg.Add(2)
+		go func() { defer wg.Done(); <-start; errG = enableGoogle() }()
+		go func() { defer wg.Done(); <-start; errA = disableApple() }()
+		close(start)
+		wg.Wait()
+		check(round, errG, errA)
+	}
+}
+
+// waitWaiters — ждать, пока в базе теста не меньше n незахваченных замков (правки встали в очередь); правка
+// завершилась раньше (done) — ошибка с её итогом. Опрос раз в 10 мс до срока ctx.
+func waitWaiters(ctx context.Context, owner *pgxpool.Pool, n int, done <-chan error) error {
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var got int
+		if err := owner.QueryRow(ctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+			WHERE NOT l.granted AND a.datname = current_database()`).Scan(&got); err != nil {
+			return fmt.Errorf("ожидание %d замков: %w", n, err)
+		}
+		if got >= n {
+			return nil
+		}
+		select {
+		case err := <-done:
+			return fmt.Errorf("правка завершилась, не встав на замок: %w", err)
+		case <-ctx.Done():
+			return fmt.Errorf("не дождались %d ожидающих замков: %w", n, ctx.Err())
+		case <-tick.C:
+		}
+	}
+}
+
+// R12: чтение считает зависимый флаг выключенным при выключенной зависимости, даже если строка включена в обход
+// Update; зависимости нет строки — ErrUnknownFlag (ошибка выкатки).
+func TestEnabledHonoursRequires(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pools := dbtest.NewPoolsAs(t, "api")
+	s := flags.NewStore(pools.As)
+	city := uuid.New()
+	setAuthFlags(t, pools.Owner, false, true)
+	if on, err := s.EnabledGlobally(ctx, "auth_google"); err != nil || on {
+		t.Fatalf("EnabledGlobally при выключенном Apple: %v %v", on, err)
+	}
+	if on, err := s.Enabled(ctx, "auth_google", city); err != nil || on {
+		t.Fatalf("Enabled при выключенном Apple: %v %v", on, err)
+	}
+	if err := s.Require(ctx, "auth_google", city); !errors.Is(err, flags.ErrDisabled) {
+		t.Fatalf("Require при выключенном Apple: %v", err)
+	}
+	setAuthFlags(t, pools.Owner, true, true)
+	if on, err := s.EnabledGlobally(ctx, "auth_google"); err != nil || !on {
+		t.Fatalf("EnabledGlobally при включённом Apple: %v %v", on, err)
+	}
+	if err := s.Require(ctx, "auth_google", city); err != nil {
+		t.Fatalf("Require при включённом Apple: %v", err)
+	}
+	if _, err := pools.Owner.Exec(ctx, `DELETE FROM feature_flags WHERE key = 'auth_apple'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnabledGlobally(ctx, "auth_google"); !errors.Is(err, flags.ErrUnknownFlag) {
+		t.Fatalf("без строки Apple: %v", err)
+	}
+	if _, err := s.Enabled(ctx, "auth_google", city); !errors.Is(err, flags.ErrUnknownFlag) {
+		t.Fatalf("Enabled без строки Apple: %v", err)
+	}
+}
+
+// Task 2 m2: у флага GlobalOnly города в строке (запись в обход Update: сид, ручной SQL) чтение не учитывает — админка
+// их не показывает, флаг для неё «выключен»; включён он только «везде».
+func TestEnabledGlobalOnlyIgnoresCities(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pools := dbtest.NewPoolsAs(t, "api")
+	s := flags.NewStore(pools.As)
+	city := uuid.New()
+	setAuthFlags(t, pools.Owner, false, false)
+	if _, err := pools.Owner.Exec(ctx, `UPDATE feature_flags SET enabled_city_ids = $1 WHERE key = 'auth_apple'`,
+		[]uuid.UUID{city}); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := s.Enabled(ctx, "auth_apple", city); err != nil || on {
+		t.Fatalf("Enabled по городу у GlobalOnly: %v %v", on, err)
+	}
+	if err := s.Require(ctx, "auth_apple", city); !errors.Is(err, flags.ErrDisabled) {
+		t.Fatalf("Require по городу у GlobalOnly: %v", err)
+	}
+	setAuthFlags(t, pools.Owner, true, false)
+	if on, err := s.Enabled(ctx, "auth_apple", city); err != nil || !on {
+		t.Fatalf("Enabled «везде» у GlobalOnly: %v %v", on, err)
 	}
 }

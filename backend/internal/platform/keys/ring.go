@@ -85,6 +85,16 @@ func NewRing(encoded []string) (*Ring, error) {
 // CurrentID — имя текущего ключа: им шифруются и подписываются новые строки.
 func (r *Ring) CurrentID() string { return r.keys[0].id }
 
+// IDs — имена всех ключей кольца, текущий первым (копия): поиск строки по HMAC любым ключом кольца, когда
+// key_id строки заранее не известен (устройства identity — ленивая ротация, спека identity §3.8).
+func (r *Ring) IDs() []string {
+	out := make([]string, len(r.keys))
+	for i, k := range r.keys {
+		out[i] = k.id
+	}
+	return out
+}
+
 // Has — есть ли ключ с таким именем (сверка строк перед удалением старого ключа из окружения).
 func (r *Ring) Has(keyID string) bool {
 	_, ok := r.byID[keyID]

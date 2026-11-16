@@ -11,14 +11,15 @@ FROM feature_flags WHERE key = @key;
 SELECT key, description, enabled_globally, enabled_city_ids, version, updated_at
 FROM feature_flags ORDER BY key;
 
--- Строка флага до правки (без замка): «было» и сверка версии; гонку правок решает UpdateFlag (WHERE version).
--- name: FlagByKey :one
+-- Строки правки под замком (спека identity §4.2): флаг, его зависимость и зависимые — одним запросом в порядке
+-- ключа (LockRows над сортировкой берёт замки по возрастанию key): два PATCH связанных флагов ждут друг друга, а не
+-- взаимоблокируются. Строки — актуальные после коммита соседа: «было», сверка версии и проверка зависимости.
+-- name: LockFlags :many
 SELECT key, description, enabled_globally, enabled_city_ids, version, updated_at
-FROM feature_flags WHERE key = @key;
+FROM feature_flags WHERE key = ANY(@keys::text[]) ORDER BY key FOR UPDATE;
 
--- Правка флага с оптимистичной версией: параллельная правка той же версии ждёт замок строки, после коммита первой
--- условие version уже ложно — 0 строк (409 platform.flag_stale). updated_at ставит триггер set_updated_at (время
--- базы); источник порядка — version.
+-- Правка флага с оптимистичной версией (строка уже под замком LockFlags): version не та — 0 строк (409
+-- platform.flag_stale). updated_at ставит триггер set_updated_at (время базы); источник порядка — version.
 -- name: UpdateFlag :one
 UPDATE feature_flags
 SET enabled_globally = @enabled_globally, enabled_city_ids = @enabled_city_ids::uuid[], version = version + 1

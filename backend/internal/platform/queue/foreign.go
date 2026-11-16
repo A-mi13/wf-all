@@ -34,6 +34,10 @@ func WorkerKinds() []Kind {
 		{Name: "idempotency.cleanup", Timeout: 10 * time.Minute},
 		{Name: "geo.import", Timeout: 30 * time.Minute},
 		{Name: "mail.send", Timeout: time.Minute},
+		// identity (план I-2, Task 19): чистка, анонимизация, исполнение сброса 2FA — identity/jobs
+		{Name: "identity.maintenance", Timeout: 10 * time.Minute},
+		{Name: "identity.anonymize", Timeout: 10 * time.Minute},
+		{Name: "identity.mfa_reset_execute", Timeout: 10 * time.Minute},
 	}
 }
 

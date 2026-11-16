@@ -24,18 +24,24 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	geojobs "wf/backend/internal/geo/jobs"
+	"wf/backend/internal/identity"
+	identityjobs "wf/backend/internal/identity/jobs"
+	identitymail "wf/backend/internal/identity/mail"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/humancheck"
+	"wf/backend/internal/platform/i18n"
 	"wf/backend/internal/platform/idempotency"
+	"wf/backend/internal/platform/keys"
 	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/mail"
 	"wf/backend/internal/platform/migrate"
 	"wf/backend/internal/platform/periodic"
 	"wf/backend/internal/platform/queue"
 	"wf/backend/internal/platform/ratelimit"
+	"wf/backend/locales"
 )
 
 func main() {
@@ -76,9 +82,13 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 		return err
 	}
 	log := logx.New(logOut, cfg.Log).With("service", "worker")
-	// почта нужна только воркеру, не разовым командам; проверяется до подключения к базе:
+	// почта и кольцо identity нужны только воркеру, не разовым командам; проверяются до подключения к базе:
 	// нет WORKER_MAIL_* или битый адрес SMTP — отказ старта; предупреждения — в журнал воркера
-	var sender *mail.SMTP
+	var (
+		sender *mail.SMTP
+		ring   *keys.Ring
+		cat    *i18n.Catalog
+	)
 	if len(args) == 0 {
 		mc, err := config.Load[config.Mail]("WORKER_", environ)
 		if err != nil {
@@ -86,6 +96,18 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 		}
 		if sender, err = mail.NewSMTP(mail.SMTPConfig{Addr: mc.SMTPAddr, From: mc.From,
 			Username: mc.Username, Password: mc.Password, TLS: mc.TLS, Log: log}); err != nil {
+			return err
+		}
+		// кольцо identity — тоже только воркеру (письма с кодами, план I-2); до базы: нет ключа — отказ старта
+		ic, err := config.Load[config.WorkerIdentity]("WORKER_", environ)
+		if err != nil {
+			return err
+		}
+		if ring, err = keys.NewRing(ic.SecretKeys); err != nil {
+			return fmt.Errorf("WORKER_IDENTITY_SECRET_KEYS: %w", err)
+		}
+		// тексты писем модулей — серверные локали (ключи ru = en)
+		if cat, err = i18n.Load(locales.FS); err != nil {
 			return err
 		}
 	}
@@ -109,7 +131,17 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 	if err := waitSchema(ctx, pool, cfg.DB.SchemaWait, log); err != nil {
 		return err
 	}
-	workers := allWorkers(pool, reg, geo, log, sender)
+	// сценарии identity ставят письма в транзакции действия — клиентом только для вставки (исполняющий клиент
+	// собирается из этого же реестра исполнителей)
+	ins, err := river.NewClient(riverpgxv5.New(pool), queue.InsertConfig(log))
+	if err != nil {
+		return err
+	}
+	idd := identity.WorkerDeps{Pool: pool, Clock: clock.System, Secrets: ring, River: ins, Catalog: cat, Log: log}
+	workers, err := allWorkers(pool, reg, geo, log, sender, idd)
+	if err != nil {
+		return err
+	}
 	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig(cfg.Queues, workers, log))
 	if err != nil {
 		return err
@@ -324,35 +356,53 @@ func subscriptions() (*events.Registry, error) {
 	return events.NewRegistry()
 }
 
-// mails — виды писем модулей. Пусто, пока нет модулей: спека identity добавит письма с кодами
-// (mail.Composer по id кода).
-func mails() *mail.Registry {
-	return mail.NewRegistry()
+// mails — виды писем модулей: identity (коды, уведомления безопасности, удаление, сброс 2FA — план I-2, Task 19).
+// Composer'ы identity — на кольце WORKER_IDENTITY_SECRET_KEYS (коды из письма) и серверных локалях.
+func mails(idd identity.WorkerDeps) (*mail.Registry, error) {
+	r := mail.NewRegistry()
+	if err := identitymail.Register(r, identitymail.ComposerDeps{Pool: idd.Pool, Secrets: idd.Secrets, Catalog: idd.Catalog,
+		Clock: idd.Clock}); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
-// realWorkers — исполнители воркера; их виды — ровно queue.WorkerKinds (сверка — TestWorkerKinds).
-func realWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, log *slog.Logger, sender mail.Sender) *river.Workers {
+// realWorkers — исполнители воркера; их виды — ровно queue.WorkerKinds (сверка — TestWorkerKinds). idd — зависимости
+// задач identity (письма, чистка, анонимизация, сброс 2FA; R7: исполнители identity — только у воркера).
+func realWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, log *slog.Logger, sender mail.Sender,
+	idd identity.WorkerDeps) (*river.Workers, error) {
 	workers := queue.NewWorkers()
 	events.AddWorkers(workers, pool, reg)
 	river.AddWorker(workers, ratelimit.NewCleanupWorker(pool, clock.System))
 	river.AddWorker(workers, humancheck.NewCleanupWorker(pool, clock.System))
 	river.AddWorker(workers, idempotency.NewCleanupWorker(pool))
 	river.AddWorker(workers, geojobs.NewImportWorker(pool, clock.System, geo, log))
-	mail.AddWorkers(workers, mails(), sender)
-	return workers
+	letters, err := mails(idd)
+	if err != nil {
+		return nil, err
+	}
+	mail.AddWorkers(workers, letters, sender)
+	if err := identityjobs.AddWorkers(workers, idd); err != nil {
+		return nil, err
+	}
+	return workers, nil
 }
 
 // allWorkers — реестр исполняющего клиента воркера: свои исполнители и заглушки видов admin-api (I1 ревью 10c): став
 // лидером River, рескьюер воркера вернёт зависшее письмо staff.mail в retryable, а не выбросит неизвестный вид.
-func allWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, log *slog.Logger, sender mail.Sender) *river.Workers {
-	workers := realWorkers(pool, reg, geo, log, sender)
+func allWorkers(pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config, log *slog.Logger, sender mail.Sender,
+	idd identity.WorkerDeps) (*river.Workers, error) {
+	workers, err := realWorkers(pool, reg, geo, log, sender, idd)
+	if err != nil {
+		return nil, err
+	}
 	queue.AddForeign(workers, queue.AdminKinds())
-	return workers
+	return workers, nil
 }
 
 // riverConfig — исполняющий клиент воркера: обслуживание — общее с admin-api (queue.ClientConfig от
-// queue.MaintenanceConfig, страж TestWorkerRiverMaintenance), периодика — общий список платформы: его же подключает
-// admin-api, лидером River может стать любой (P27).
+// queue.MaintenanceConfig, страж TestWorkerRiverMaintenance), периодика — платформа и identity: тот же список у
+// admin-api, лидером River может стать любой (P27, R7; страж TestPeriodicSameInBothBinaries).
 func riverConfig(q config.Queues, workers *river.Workers, log *slog.Logger) *river.Config {
-	return queue.ClientConfig(queue.Config(q), workers, periodic.Jobs(), log)
+	return queue.ClientConfig(queue.Config(q), workers, append(periodic.Jobs(), identityjobs.Periodic()...), log)
 }

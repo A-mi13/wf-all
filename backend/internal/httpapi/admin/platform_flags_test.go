@@ -261,6 +261,73 @@ func TestUpdateFlagUnknown(t *testing.T) {
 	fieldErrors(t, e.send(http.MethodPatch, "/v1/flags/ads", adm.token, uuid.NewString(), `{"enabled_globally":true}`))
 }
 
+// authFlags — строки auth_apple и auth_google фикстурой владельца схемы (до Task 5 их нет; после — поверх сида).
+func authFlags(e *staffEnv, apple, google bool) {
+	e.exec(`INSERT INTO feature_flags (key, enabled_globally, enabled_city_ids, version)
+		VALUES ('auth_apple', $1, '{}', 1), ('auth_google', $2, '{}', 1)
+		ON CONFLICT (key) DO UPDATE SET enabled_globally = EXCLUDED.enabled_globally, enabled_city_ids = '{}', version = 1`,
+		apple, google)
+}
+
+// GlobalOnly (спека identity §4.2, §7.5): город у флага «только везде» — 422 platform.flag_global_only раньше
+// проверки городов (несуществующий город не даёт flag_city_not_found), без записи, события и аудита.
+func TestUpdateFlagGlobalOnly(t *testing.T) {
+	t.Parallel()
+	e := newGeoStaffEnv(t)
+	e.v = apitest.New(t, oapi.GetSpec)
+	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
+	authFlags(e, false, false)
+	var stav uuid.UUID
+	if err := e.owner.QueryRow(context.Background(), `SELECT id FROM cities WHERE slug = 'stavropol'`).Scan(&stav); err != nil {
+		t.Fatal(err)
+	}
+	for _, city := range []uuid.UUID{uuid.New(), stav} {
+		wantProblem(t, e.send(http.MethodPatch, "/v1/flags/auth_apple", adm.token, uuid.NewString(), flagBody(1, nil, city)),
+			http.StatusUnprocessableEntity, httpx.CodeFlagGlobalOnly)
+	}
+	if n := e.count(`SELECT count(*) FROM feature_flags WHERE key = 'auth_apple' AND version = 1 AND enabled_city_ids = '{}'`); n != 1 {
+		t.Fatal("строка флага изменилась")
+	}
+	if n := e.count(`SELECT count(*) FROM outbox WHERE event_type = 'platform.flag_changed'`) +
+		e.count(`SELECT count(*) FROM audit_log WHERE action = 'platform.flag_changed'`); n != 0 {
+		t.Fatalf("событий и аудита %d", n)
+	}
+}
+
+// Requires (спека identity §4.2): включить Google при выключенном Apple и выключить Apple при включённом Google —
+// 409 platform.flag_requires с непустым detail (зависимость), без записи, события и аудита.
+func TestUpdateFlagRequires(t *testing.T) {
+	t.Parallel()
+	e := newGeoStaffEnv(t)
+	e.v = apitest.New(t, oapi.GetSpec)
+	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
+	on, off := true, false
+	detail := func(rec *httptest.ResponseRecorder) string {
+		t.Helper()
+		wantProblem(t, rec, http.StatusConflict, httpx.CodeFlagRequires)
+		var p httpx.Problem
+		if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || p.Detail == "" {
+			t.Fatalf("detail пуст: %v %s", err, rec.Body.String())
+		}
+		return p.Detail
+	}
+	authFlags(e, false, false)
+	if d := detail(e.send(http.MethodPatch, "/v1/flags/auth_google", adm.token, uuid.NewString(), flagBody(1, &on))); !strings.Contains(d, "auth_apple") {
+		t.Fatalf("detail включения: %q", d)
+	}
+	authFlags(e, true, true)
+	if d := detail(e.send(http.MethodPatch, "/v1/flags/auth_apple", adm.token, uuid.NewString(), flagBody(1, &off))); !strings.Contains(d, "auth_google") {
+		t.Fatalf("detail выключения: %q", d)
+	}
+	if n := e.count(`SELECT count(*) FROM feature_flags WHERE key IN ('auth_apple', 'auth_google') AND version = 1 AND enabled_globally`); n != 2 {
+		t.Fatalf("строки изменились: %d", n)
+	}
+	if n := e.count(`SELECT count(*) FROM outbox WHERE event_type = 'platform.flag_changed'`) +
+		e.count(`SELECT count(*) FROM audit_log WHERE action = 'platform.flag_changed'`); n != 0 {
+		t.Fatalf("событий и аудита %d", n)
+	}
+}
+
 // R6: ключи feature_flags после миграций = enum FeatureFlagKey контракта (подписи флагов на экране сторожит enum).
 func TestFlagKeysMatchContract(t *testing.T) {
 	t.Parallel()

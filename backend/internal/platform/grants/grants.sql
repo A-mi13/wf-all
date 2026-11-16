@@ -5,9 +5,11 @@
 -- (на Neon — роли api и worker: worker для разовых команд оператора, docs/deploy-dev.md). Правила по объектам — в ветках CASE ниже.
 DO $grants$
 DECLARE
-  r     record;
-  who   text;
-  privs text;
+  r       record;
+  who     text;
+  privs   text;
+  colpriv text;
+  cols    text[];
 BEGIN
   FOREACH who IN ARRAY ARRAY['api', 'admin', 'worker'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = who) THEN
@@ -16,7 +18,7 @@ BEGIN
     END IF;
     EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', who);
     FOR r IN
-      SELECT c.relname AS name, c.relkind AS kind
+      SELECT c.oid AS oid, c.relname AS name, c.relkind AS kind
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public'
@@ -47,9 +49,46 @@ BEGIN
         WHEN r.name = 'idempotency_keys' THEN CASE who WHEN 'admin' THEN NULL ELSE 'SELECT, INSERT, UPDATE, DELETE' END
         -- подтверждения вдвоём (D2) — только admin-api; DELETE — чистка решённых старше 180 дней
         WHEN r.name = 'approvals' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE, DELETE' END
-        -- пароли: воркер только удаляет (удаление аккаунта), хеш прочитать не может; SELECT (user_id)
-        -- для WHERE удаления выдаётся колоночно ниже
-        WHEN r.name = 'credentials' THEN CASE who WHEN 'worker' THEN 'DELETE' ELSE 'SELECT, INSERT, UPDATE, DELETE' END
+        -- identity (спека identity §5.5): каждая таблица — своей веткой, умолчание ELSE дало бы DML всем, а для
+        -- секретов это неприемлемо. admin-api в I-2 не пишет users и sessions (К2); секреты (пароли, коды, токены
+        -- шагов, 2FA, привязки, ключи доступа) admin не видит вовсе, воркер — только колонки для WHERE удаления
+        -- (колоночно ниже). Порядок веток важен: staff_player_links ловит ветка staff_* выше
+        WHEN r.name = 'users' THEN CASE who WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                            WHEN 'worker' THEN 'SELECT, UPDATE' ELSE 'SELECT' END
+        -- воркер: удаление аккаунта и чистка; читает только колонки WHERE (ниже)
+        WHEN r.name IN ('credentials', 'auth_challenges', 'user_mfa', 'user_recovery_codes', 'passkeys', 'consents') THEN
+          CASE who WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE' WHEN 'worker' THEN 'DELETE' END
+        -- коды из письма: воркер собирает письмо (code_enc) и чистит
+        WHEN r.name = 'auth_codes' THEN CASE who WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                                 WHEN 'worker' THEN 'SELECT, DELETE' END
+        -- привязки провайдеров: воркер отзывает токен Apple и чистит
+        WHEN r.name = 'user_identities' THEN CASE who WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                                      WHEN 'worker' THEN 'SELECT, UPDATE, DELETE' END
+        -- сброс 2FA: заводит и отменяет сотрудник (admin), отменяет владелец (api), исполняет по сроку воркер
+        WHEN r.name = 'mfa_resets' THEN CASE who WHEN 'admin' THEN 'SELECT, INSERT, UPDATE' ELSE 'SELECT, UPDATE' END
+        -- сессии: admin только считает (без UPDATE, К2); refresh-токены admin не видит
+        WHEN r.name IN ('sessions', 'refresh_tokens') THEN CASE who
+          WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE'
+          WHEN 'worker' THEN 'SELECT, UPDATE, DELETE'
+          WHEN 'admin' THEN CASE r.name WHEN 'sessions' THEN 'SELECT' END
+        END
+        WHEN r.name IN ('devices', 'device_accounts') THEN CASE who WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                                                   WHEN 'worker' THEN 'SELECT, UPDATE' ELSE 'SELECT' END
+        -- события безопасности только дописываются; воркер стирает адрес для писем (UPDATE (meta_enc) ниже, К6) и
+        -- чистит; admin пишет события сброса 2FA
+        WHEN r.name = 'security_events' THEN CASE who WHEN 'api' THEN 'SELECT, INSERT'
+                                                      WHEN 'worker' THEN 'SELECT, INSERT, DELETE' ELSE 'INSERT' END
+        -- ограничения: запись admin — со спекой moderation (К2)
+        WHEN r.name = 'user_restrictions' THEN CASE who WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                                        WHEN 'worker' THEN 'SELECT, UPDATE' ELSE 'SELECT' END
+        -- допуски и заявки капитана: решения — в админке; воркер анонимизирует
+        WHEN r.name IN ('role_assignments', 'captain_applications') THEN CASE who WHEN 'worker' THEN 'SELECT, UPDATE'
+                                                                                 ELSE 'SELECT, INSERT, UPDATE, DELETE' END
+        -- ники: карантин при анонимизации и чистка — воркер
+        WHEN r.name = 'nickname_reservations' THEN CASE who WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE'
+                                                            WHEN 'worker' THEN 'SELECT, INSERT, DELETE' ELSE 'SELECT' END
+        WHEN r.name IN ('nickname_changes', 'reserved_nicknames') THEN CASE who
+          WHEN 'api' THEN 'SELECT, INSERT, UPDATE, DELETE' WHEN 'worker' THEN 'SELECT, DELETE' ELSE 'SELECT' END
         -- события: API и админка публикуют, воркер раскладывает и чистит
         WHEN r.name = 'outbox' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, UPDATE, DELETE'
                                              WHEN 'admin' THEN 'SELECT, INSERT' ELSE 'INSERT' END
@@ -93,13 +132,30 @@ BEGIN
       IF privs IS NOT NULL THEN
         EXECUTE format('GRANT %s ON %I TO %I', privs, r.name, who);
       END IF;
-      -- DELETE … WHERE user_id = $1 требует SELECT на колонки из WHERE. REVOKE ALL выше снимает
-      -- и колоночные права, поэтому выдача идемпотентна. Нет колонки — нечего выдавать.
-      IF r.name = 'credentials' AND who = 'worker' AND EXISTS (
-           SELECT 1 FROM pg_attribute a
-           WHERE a.attrelid = format('%I', r.name)::regclass AND a.attname = 'user_id'
-             AND a.attnum > 0 AND NOT a.attisdropped) THEN
-        EXECUTE format('GRANT SELECT (user_id) ON %I TO %I', r.name, who);
+      -- Колоночные права (спека identity §5.5): DELETE … WHERE user_id = $1 требует SELECT на колонки из WHERE;
+      -- воркер стирает адрес для писем (К6); admin видит, есть ли у игрока 2FA, но не секрет. REVOKE ALL выше
+      -- снимает и колоночные права, поэтому выдача идемпотентна. Нет хоть одной колонки (схема до 0025) —
+      -- нечего выдавать.
+      colpriv := NULL;
+      cols := NULL;
+      IF who = 'worker' AND r.name = 'user_mfa' THEN
+        -- есть ли подтверждённая 2FA (письмо отмены сброса и исполнение сброса); confirmed_at — не секрет
+        colpriv := 'SELECT'; cols := ARRAY['user_id', 'confirmed_at'];
+      ELSIF who = 'worker' AND r.name IN ('credentials', 'user_recovery_codes', 'passkeys', 'consents') THEN
+        colpriv := 'SELECT'; cols := ARRAY['user_id'];
+      ELSIF who = 'worker' AND r.name = 'auth_challenges' THEN
+        colpriv := 'SELECT'; cols := ARRAY['expires_at', 'consumed_at'];
+      ELSIF who = 'worker' AND r.name = 'security_events' THEN
+        colpriv := 'UPDATE'; cols := ARRAY['meta_enc'];
+      ELSIF who = 'admin' AND r.name = 'user_mfa' THEN
+        colpriv := 'SELECT'; cols := ARRAY['user_id', 'confirmed_at'];
+      END IF;
+      IF colpriv IS NOT NULL AND (
+           SELECT count(*) FROM pg_attribute a
+           WHERE a.attrelid = r.oid AND a.attname = ANY (cols) AND a.attnum > 0 AND NOT a.attisdropped
+         ) = cardinality(cols) THEN
+        EXECUTE format('GRANT %s (%s) ON %I TO %I', colpriv,
+                       (SELECT string_agg(quote_ident(c), ', ') FROM unnest(cols) AS c), r.name, who);
       END IF;
     END LOOP;
   END LOOP;

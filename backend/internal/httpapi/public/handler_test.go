@@ -14,17 +14,28 @@ import (
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/public"
 	"wf/backend/internal/httpapi/public/oapi"
 	"wf/backend/internal/identity"
+	identityhttp "wf/backend/internal/identity/httpapi"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/clock"
+	"wf/backend/internal/platform/flags"
 	"wf/backend/internal/platform/httpx"
+	"wf/backend/internal/platform/humancheck"
+	"wf/backend/internal/platform/ipgeo"
 	"wf/backend/internal/platform/keys"
+	"wf/backend/internal/platform/password"
 	"wf/backend/internal/platform/peer"
+	"wf/backend/internal/platform/queue"
 	"wf/backend/internal/platform/ratelimit"
+	"wf/backend/internal/platform/risk"
 	"wf/backend/internal/platform/testkit/apitest"
 	"wf/backend/internal/platform/testkit/dbtest"
 	"wf/backend/internal/platform/token"
@@ -46,9 +57,12 @@ func testOptions(t *testing.T) public.Options {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pool := dbtest.NewPool(t)
+	tokens := token.NewIssuer(k, clock.System)
 	return public.Options{
-		DB:          dbtest.NewPool(t),
-		Tokens:      token.NewIssuer(k, clock.System),
+		DB:          pool,
+		Tokens:      tokens,
+		Identity:    liveIdentity(t, pool, tokens),
 		Sessions:    auth.NoSessions,
 		Limiter:     ratelimit.Unlimited,
 		RateRules:   ratelimit.DefaultRules(),
@@ -495,4 +509,61 @@ func tagCodes(t *testing.T, spec *openapi3.T, tag string) []string {
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+// liveIdentity — настоящий identity на базе теста (план I-2, Task 8, I9): задачи 10–18 реализуют операции на нём,
+// не трогая сборку. Кольца — новые на тест, хэшер — параметры по умолчанию, PoW — настоящий, город по IP — нет.
+func liveIdentity(t *testing.T, pool *pgxpool.Pool, tokens *token.Issuer) identityhttp.Handler {
+	t.Helper()
+	ring := func() *keys.Ring {
+		s, err := keys.Generate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := keys.NewRing([]string{s})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	powKey, err := keys.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pow, err := humancheck.NewPoW(pool, clock.System, humancheck.PoWConfig{Keys: []string{powKey}, TTL: time.Minute,
+		MaxNumber: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasher, err := password.NewHasher(password.DefaultParams(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter := ratelimit.NewPG(pool, clock.System, ratelimit.Players)
+	assessor, err := risk.NewAssessor(limiter, risk.DefaultPolicies())
+	if err != nil {
+		t.Fatal(err)
+	}
+	legal, err := identity.ParseLegalDocuments("terms=2026-11-01|https://example.com/terms,privacy=2026-11-01|https://example.com/privacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.DiscardHandler)
+	ins, err := river.NewClient(riverpgxv5.New(pool), queue.InsertConfig(log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := identityhttp.New(identity.Deps{Pool: pool, Clock: clock.System, Secrets: ring(), Devices: ring(),
+		Hasher: hasher, Limiter: limiter, LimiterTx: pgLimiterTx, Risk: assessor, Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool),
+		IPGeo: ipgeo.None, Legal: legal, Tokens: tokens, River: ins, Attestor: identity.AttestOff{},
+		Providers: identity.NoProviders{}, TOTPIssuer: "WF test", Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// pgLimiterTx — LimiterTx сборок identity в тестах: тот же ratelimit.PG на соединении транзакции.
+func pgLimiterTx(tx pgx.Tx) ratelimit.Limiter {
+	return ratelimit.NewPG(tx, clock.System, ratelimit.Players)
 }

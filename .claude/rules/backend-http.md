@@ -28,7 +28,20 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
 иначе API не стартует.
 
 - Перед peer `httpx.NewRouter` ставит `request_id`, лог доступа и recover; пробы — до роутера.
+- `/.well-known/*` (AASA и `assetlinks.json` до веба, спека identity §9.4, К4) — вне контракта: `public.Options.WellKnown`
+  (`identityhttp.WellKnown(API_WELLKNOWN_APPLE_APP_IDS, API_WELLKNOWN_ANDROID)`) монтируется на роутер, как `/docs`:
+  маршрута контракта нет — валидатор и `ratelimit.Middleware` его пропускают (лимитов класса `auth` нет); пустой
+  конфиг файла — 404 (страж `TestWellKnownMounted`); битый `API_WELLKNOWN_ANDROID` (нет пакета; отпечаток не 32 байта
+  hex через «:») — ошибка `WellKnown(…) (http.Handler, error)`, `cmd/api` отказывает в старте до базы (стражи
+  `TestWellKnownRejectsBadAndroid`, `TestRunRejectsBadWellKnownAndroid`).
+- Сессии игроков — `identity.NewSessionLoader(pool, clock)` под `auth.NewCachedLoader` (5 с) в `cmd/api`: отзыв,
+  бан и истечение доходят до запросов не позже чем через 5 с (`TestAccessAfterLogout`).
 - Нестроковый или пустой `x-rate-limit` — ошибка старта (`ratelimit.UnknownClasses`), а не тихий `default`.
+- Страж `TestNoStubOperations` (public) идёт с живой сессией подделки, у которой есть строки `users`/`sessions` в
+  базе (`withFakeSession`); операции обходятся по отсортированным id, `logout` — последним (он гасит эту сессию).
+  «Не дошёл до хендлера» = 401 **с** `WWW-Authenticate`: его ставят только `auth.Middleware` и валидатор, 401 хендлеров
+  (`identity.refresh_invalid`, `errSessionGone`) — без него. Добавить заголовок в `httpx.WriteError` — страж начнёт
+  ложно краснеть: тогда нужен другой признак.
 
 ## Конвейер admin-api (спека сотрудников §5.1)
 
@@ -77,8 +90,8 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
   собранных staff, geo и подтверждениях отвечает не 501; список `pendingOps` плана B удалён в Task 16), кроме операций
-  identity: `public.Server` и `admin.Server` встраивают `identity/httpapi.Handler` / `identity/admin.Handler` значением
-  через псевдоним `identityHandler` — нулевой отвечает `501 http.not_implemented`; временные `pendingOps` и
+  identity: `public.Server` встраивает `identity/httpapi.Handler`, `admin.Server` — `*identity/admin.Handler` (с Task 17
+  плана I-2) через псевдоним `identityHandler` — нулевой отвечает `501 http.not_implemented`; временные `pendingOps` и
   `pendingOpsAtFreeze` с хэшем в `nostub_test.go` обоих пакетов, страж истечения `TestPendingOpsExpire` (план identity
   I-1, R2, R17); список уменьшается этапами реализации, удаляет его последний план identity. Тест прав admin передаёт
   обязательные заголовки операций (`opsHeaders`: `X-WF-Lookup-Email`, `X-WF-Access-Reason` — иначе валидатор отвечает 400
@@ -99,6 +112,13 @@ strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка �
   настоящей сборке — `TestAssembleRegistersGeoActions` (без хука staff `assemble` вернул бы ошибку `Validate`), `TestStartupWiring`
   (`cmd/admin-api`); инвариант «`LockActors` без хука — отказ `Validate`» — `approvals/actor_lock_test.go`. Тест прав по всем операциям идёт на настоящем хендлере geo (`liveGeo`): модератор чужого города
   на `updateGeoCity` — 403 сценария.
+- **Сборка identity** (`cmd/admin-api`, `assemble`, план I-2 Task 17): `identityadmin.New(identity.New(pool),
+  identityadmin.Deps{Pool, Clock, River, Log})` (`River` — тот же клиент вставки: письма identity — `mail.SendArgs` в
+  очередь `mail`, исполняет воркер; кольца identity у admin-api нет) → `Options.Identity`; `ih.RegisterApprovals(reg, svc)`
+  (действие `identity.mfa_reset`, `LockActors`) — до `reg.Validate()`. `admin.Server` встраивает `*identityHandler`:
+  `Options.Identity == nil` — нулевой `&identityadmin.Handler{}` (501 на каждую операцию; тесты конвейера). Стражи —
+  `TestAssembleRegistersIdentityActions` (`cmd/admin-api`); тест прав идёт на настоящем `liveIdentity`, `TestNoStubOperations`
+  — на `newIdentityStaffEnv` (geo и identity в реестре staff).
 - **Операции платформы** (`server.go`, Task 10b): `Options.Approvals` (`ApprovalService` — `*approvals.Service`)
   задаётся ровно вместе с собранным `Options.Staff` (иначе отказ старта, `TestNewHandlerApprovalsWiring`); подпись
   решившего — `Staff.Label` (перечитывает учётку и сессию: выключен или сессия погашена — 401 со стиранием cookie,

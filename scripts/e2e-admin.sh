@@ -168,10 +168,13 @@ done
 # ни на что не влияет). Адрес базы начинается с postgres:// — MSYS такие не трогает. Страж — e2e/env.ts.
 WF_E2E_STAFF_SECRET_KEYS=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
 export WF_E2E_STAFF_SECRET_KEYS
+# Кольцо identity воркера (план I-2, Task 4) — свой одноразовый ключ, тоже base64url; api в прогоне нет
+WF_E2E_IDENTITY_SECRET_KEYS=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
+export WF_E2E_IDENTITY_SECRET_KEYS
 export WF_E2E_ADMIN_DATABASE_URL="postgres://admin:admin@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
 export WF_E2E_WORKER_DATABASE_URL="postgres://worker:worker@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
 export WF_E2E_PROJECTS="$PROJECTS"
-export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_WORKER_DATABASE_URL;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
+export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_WORKER_DATABASE_URL;WF_E2E_IDENTITY_SECRET_KEYS;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
 
 # 6. Прод-проект: свежая сборка админки и её проверка (dist — apps/admin/dist, ADMIN_STATIC_DIR пары prod)
 case ",$PROJECTS," in

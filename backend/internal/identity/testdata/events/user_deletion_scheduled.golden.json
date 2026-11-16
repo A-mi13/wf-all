@@ -1,0 +1,11 @@
+{
+  "type": "identity.user_deletion_scheduled",
+  "schema_version": 1,
+  "aggregate_type": "user",
+  "aggregate_id": "01930000-0000-7000-8000-000000000001",
+  "aggregate_version": 7,
+  "payload": {
+    "user_id": "01930000-0000-7000-8000-000000000001",
+    "purge_at": "2026-12-14T09:30:00Z"
+  }
+}

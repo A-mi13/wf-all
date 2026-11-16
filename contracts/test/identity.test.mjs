@@ -479,7 +479,7 @@ const expected = {
     '/v1/me/mfa-reset',
     false,
     'account_secure',
-    ['mfa_reset_not_found'],
+    ['reauth_required', 'mfa_reset_not_found'],
     '204',
     null,
     null,

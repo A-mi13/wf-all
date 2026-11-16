@@ -1959,6 +1959,7 @@ me-mfa-reset:
     tags: [identity]
     x-rate-limit: account_secure
     x-error-codes:
+      - identity.reauth_required
       - identity.mfa_reset_not_found
     summary: Отменить сброс 2FA через поддержку
     description: |
@@ -1967,6 +1968,14 @@ me-mfa-reset:
       фактором отменяет сброс сам: если сессия вошла с TOTP, резервным кодом или ключом, сброс уже
       отменён — ответ тоже `204`.
 
+      Если у аккаунта подтверждённая 2FA, явная отмена — только сессией, прошедшей второй фактор (вход
+      или `reauthenticate` с TOTP, резервным кодом или ключом доступа): сессия, вошедшая одним паролем,
+      при назначенном сбросе получает `403 identity.reauth_required` — пройдите `reauthenticate`
+      вторым фактором (он сам отменит сброс). Подтверждённой 2FA нет (снята или настройка TOTP не
+      подтверждена) — второго фактора нет и защищать нечего: отменяет любая живая сессия.
+
+      - `identity.reauth_required` (403) — сброс назначен, у аккаунта подтверждённая 2FA, а эта сессия
+        не проходила второй фактор;
       - `identity.mfa_reset_not_found` (404) — назначенного сброса нет (выполнен или не
         назначался) и эта сессия его не отменяла.
     parameters:
@@ -1974,6 +1983,23 @@ me-mfa-reset:
     responses:
       '204':
         description: Сброс отменён
+      '403':
+        description: >-
+          Сброс назначен, у аккаунта подтверждённая 2FA, а сессия не проходила второй фактор — нужен
+          `reauthenticate` вторым фактором. Разбирайте по `code`: с этим статусом приходят и общие коды платформы
+          (`humancheck.required`, `feature.disabled` и др. — info.description), не только коды операции
+        content:
+          application/problem+json:
+            schema:
+              $ref: '../root.yaml#/components/schemas/Problem'
+            examples:
+              reauth_required:
+                summary: Сессия без второго фактора
+                value:
+                  type: about:blank
+                  title: Forbidden
+                  status: 403
+                  code: identity.reauth_required
       default:
         $ref: '../root.yaml#/components/responses/Problem'
 

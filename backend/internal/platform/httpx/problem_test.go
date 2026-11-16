@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"wf/backend/internal/platform/httpx"
 )
@@ -199,5 +200,106 @@ func TestNewFieldErrors(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || rec.Code != http.StatusBadRequest ||
 		p.Code != httpx.CodeValidationFailed || !reflect.DeepEqual(p.Errors, errs) {
 		t.Fatalf("%d %s %v", rec.Code, rec.Body.String(), err)
+	}
+}
+
+// Поля Problem identity (спека identity §6.6, хвост m5 плана I-1): reasons, methods, available_at и
+// blocked_until — ключами контракта, время — RFC 3339 в UTC; без значения — без ключа (omitempty).
+func TestProblemNewFieldsJSON(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*60*60)
+	at := time.Date(2026, 12, 13, 12, 30, 0, 0, msk)
+	until := time.Date(2026, 11, 20, 3, 0, 0, 0, msk)
+	base := httpx.NewError(http.StatusConflict, httpx.CodeValidationFailed)
+	e := base.WithReasons("too_short").WithMethods("totp", "recovery_code").WithAvailableAt(at).WithBlockedUntil(until)
+	rec := httptest.NewRecorder()
+	httpx.WriteError(slog.New(slog.DiscardHandler), rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil),
+		fmt.Errorf("обёртка: %w", e))
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"reasons":       `["too_short"]`,
+		"methods":       `["totp","recovery_code"]`,
+		"available_at":  `"2026-12-13T09:30:00Z"`,
+		"blocked_until": `"2026-11-20T00:00:00Z"`,
+	}
+	for k, v := range want {
+		if string(m[k]) != v {
+			t.Errorf("%s = %s, ждали %s", k, m[k], v)
+		}
+	}
+
+	rec = httptest.NewRecorder()
+	httpx.WriteError(slog.New(slog.DiscardHandler), rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil),
+		base.WithReasons().WithMethods())
+	got := decode(t, rec)
+	for k := range want {
+		if _, ok := got[k]; ok {
+			t.Errorf("пустое поле %s ушло в ответ: %v", k, got)
+		}
+	}
+}
+
+// Хелперы, как WithAttemptsLeft, возвращают новую ошибку: общие переменные ошибок модулей не получают
+// чужих причин, способов, сроков и Retry-After; срезы аргументов не делятся с ошибкой.
+func TestProblemHelpersDoNotMutate(t *testing.T) {
+	base := httpx.NewError(http.StatusBadRequest, httpx.CodeValidationFailed)
+	reasons := []string{"common"}
+	derived := []*httpx.Error{
+		base.WithReasons(reasons...),
+		base.WithMethods("totp"),
+		base.WithAvailableAt(time.Now()),
+		base.WithBlockedUntil(time.Now()),
+		base.WithRetryAfter(time.Minute),
+	}
+	for i, d := range derived {
+		if d == base {
+			t.Errorf("хелпер %d вернул тот же указатель", i)
+		}
+	}
+	p := base.Problem()
+	if p.Reasons != nil || p.Methods != nil || p.AvailableAt != nil || p.BlockedUntil != nil || p.RetryAfter != 0 {
+		t.Fatalf("исходная ошибка изменилась: %+v", p)
+	}
+	reasons[0] = "too_long"
+	if got := derived[0].Problem().Reasons; len(got) != 1 || got[0] != "common" {
+		t.Fatalf("reasons делит срез с вызывающим: %v", got)
+	}
+	// цепочка: вторая производная не меняет первую
+	two := derived[1].WithMethods("recovery_code")
+	if got := derived[1].Problem().Methods; len(got) != 1 || got[0] != "totp" {
+		t.Fatalf("WithMethods изменил предыдущую ошибку цепочки: %v", got)
+	}
+	if got := two.Problem().Methods; len(got) != 1 || got[0] != "recovery_code" {
+		t.Fatalf("methods = %v", got)
+	}
+}
+
+// Retry-After (429 identity.resend_too_soon и др.) — только заголовком, секунды вверх и не меньше 1
+// (контракт: minimum 1); в теле retry_after нет.
+func TestRetryAfterHeader(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{61 * time.Second, "61"},
+		{60*time.Second + time.Millisecond, "61"},
+		{500 * time.Millisecond, "1"},
+		{0, "1"},
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		httpx.WriteError(slog.New(slog.DiscardHandler), rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/x", nil),
+			httpx.NewError(http.StatusTooManyRequests, httpx.CodeRateLimited).WithRetryAfter(c.d))
+		if got := rec.Header().Get("Retry-After"); got != c.want {
+			t.Errorf("WithRetryAfter(%v): Retry-After = %q, ждали %q", c.d, got, c.want)
+		}
+		m := decode(t, rec)
+		for _, k := range []string{"retry_after", "RetryAfter"} {
+			if _, ok := m[k]; ok {
+				t.Errorf("поле %s в теле: %v", k, m)
+			}
+		}
 	}
 }

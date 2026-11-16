@@ -61,6 +61,10 @@ func (a *App) LoadStaff(ctx context.Context, raw string, ip netip.Addr, backgrou
 	if row.Role == auth.RoleModerator {
 		st.CityIDs = row.CityIds
 	}
+	// связь «сотрудник → учётка игрока» (спека identity §7.6, R8): запрет действий над своей учёткой
+	if row.LinkedUserID != nil {
+		st.LinkedUserID = *row.LinkedUserID
+	}
 	if row.Stage == auth.StageActive {
 		st.Reauth = now.Sub(row.LastSeenAt) > idleTimeout || !samePrefix(row.Ip, ip)
 	}

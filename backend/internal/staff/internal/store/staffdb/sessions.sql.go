@@ -112,10 +112,12 @@ SELECT s.id, s.staff_id, s.stage::text AS stage, s.last_seen_at, s.expires_at, s
        a.status::text AS status, a.locked_until, a.version, a.display_name,
        r.role::text AS role,
        coalesce((SELECT array_agg(c.city_id ORDER BY c.city_id) FROM staff_role_cities c
-                 WHERE c.staff_id = s.staff_id), '{}')::uuid[] AS city_ids
+                 WHERE c.staff_id = s.staff_id), '{}')::uuid[] AS city_ids,
+       l.user_id AS linked_user_id
 FROM staff_sessions s
 JOIN staff_accounts a ON a.id = s.staff_id
 JOIN staff_roles r ON r.staff_id = s.staff_id
+LEFT JOIN staff_player_links l ON l.staff_id = s.staff_id
 WHERE s.token_hash = $1
 `
 
@@ -134,9 +136,11 @@ type LoadSessionRow struct {
 	DisplayName   string
 	Role          string
 	CityIds       []uuid.UUID
+	LinkedUserID  *uuid.UUID
 }
 
-// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка (версия и имя — R5), роль и города модератора.
+// Загрузчик сессии admin-api: один запрос на запрос — сессия, учётка (версия и имя — R5), роль, города модератора и
+// связь с учёткой игрока (staff_player_links, спека identity §7.6, R8).
 func (q *Queries) LoadSession(ctx context.Context, tokenHash []byte) (LoadSessionRow, error) {
 	row := q.db.QueryRow(ctx, loadSession, tokenHash)
 	var i LoadSessionRow
@@ -155,6 +159,7 @@ func (q *Queries) LoadSession(ctx context.Context, tokenHash []byte) (LoadSessio
 		&i.DisplayName,
 		&i.Role,
 		&i.CityIds,
+		&i.LinkedUserID,
 	)
 	return i, err
 }

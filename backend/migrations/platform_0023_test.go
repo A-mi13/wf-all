@@ -217,7 +217,7 @@ func seed0023(t *testing.T, db *sql.DB) {
 		 SELECT id, 'en', 'Tambov' FROM cities WHERE slug = 'tambov'
 		 UNION ALL SELECT id, 'ru', 'Тамбов' FROM cities WHERE slug = 'tambov'`,
 		`INSERT INTO districts (city_id, name) SELECT id, 'Bolshoy' FROM cities WHERE slug = 'stavropol'`,
-		`INSERT INTO users (email, nickname, birth_date) VALUES ('tom@example.com', 'tom_hanks', '2000-01-01')`,
+		`INSERT INTO users (email, email_verified_at, nickname, birth_date) VALUES ('tom@example.com', now(), 'tom_hanks', '2000-01-01')`,
 		`INSERT INTO teams (city_id, name, display_name, slug, captain_id, primary_format, roster_limit)
 		 SELECT c.id, 'barsy', 'barsy Stavropol', 'barsy', u.id, '5x5', 10
 		   FROM cities c, users u WHERE c.slug = 'stavropol' AND u.nickname = 'tom_hanks'`,
@@ -232,7 +232,7 @@ func seed0023(t *testing.T, db *sql.DB) {
 		`INSERT INTO reserved_nicknames (nickname_normalized, reason) VALUES (normalize_text('ADMIN'), 'test') ON CONFLICT DO NOTHING`,
 		// карантин: 'Tim' и 'tiM' — разные старые значения, одно новое; у обеих прежний владелец (ревью N1 m1: накат
 		// не теряет previous_user_id и released_at более ранней брони); новая форма берёт поздний срок
-		`INSERT INTO users (email, nickname, birth_date) VALUES ('tim1@example.com', 'tim_one', '2000-01-01'), ('tim2@example.com', 'tim_two', '2000-01-01')`,
+		`INSERT INTO users (email, email_verified_at, nickname, birth_date) VALUES ('tim1@example.com', now(), 'tim_one', '2000-01-01'), ('tim2@example.com', now(), 'tim_two', '2000-01-01')`,
 		`INSERT INTO nickname_reservations (nickname_normalized, previous_user_id, released_at, expires_at)
 		 SELECT normalize_text(v.nick), u.id, v.released::timestamptz, v.expires::timestamptz
 		   FROM (VALUES ('Tim', 'tim_one', '2026-10-01T12:00:00Z', '2026-12-30T12:00:00Z'),

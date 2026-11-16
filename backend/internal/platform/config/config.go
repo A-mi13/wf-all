@@ -66,6 +66,35 @@ type API struct {
 	Peer       Peer
 	RateLimits string `env:"RATE_LIMITS"` // переопределения ratelimit.DefaultRules: auth.ip=30/1m:10,…
 	Humancheck Humancheck
+	// Identity — ключи модуля identity (API_IDENTITY_*, спека identity §11.3).
+	Identity Identity `envPrefix:"IDENTITY_"`
+	// IPGeoDB — путь к файлу MMDB «город по IP» (DB-IP Lite); пусто — город по IP не определяется.
+	IPGeoDB string `env:"IPGEO_DB"`
+	// LegalDocuments — текущие версии и ссылки документов (спека identity §3.16):
+	// terms=<версия>|<url>,privacy=<версия>|<url>; разбор — identity.ParseLegalDocuments до подключения к базе.
+	LegalDocuments string `env:"LEGAL_DOCUMENTS,required,notEmpty"`
+	// WellKnown — файлы /.well-known до веба (API_WELLKNOWN_*); пусто — 404.
+	WellKnown WellKnown
+}
+
+// Identity — кольца и настройки identity у api. Кольца (keys.Ring) — base64 ≥ 32 байт через запятую, первый —
+// текущий. Ротация SecretKeys — docs/deploy-dev.md («новый ключ первым → api identity rekey → старый убрать»).
+type Identity struct {
+	// SecretKeys — кольцо секретов: коды, TOTP, данные регистрации, токены Apple. То же значение — у воркера
+	// (WORKER_IDENTITY_SECRET_KEYS): письма с кодами собирает он.
+	SecretKeys []string `env:"SECRET_KEYS,required,notEmpty" envSeparator:","`
+	// DeviceKeys — кольцо HMAC устройств (install_id).
+	DeviceKeys []string `env:"DEVICE_KEYS,required,notEmpty" envSeparator:","`
+	// TOTPIssuer — имя в приложении-аутентификаторе; бренд не финален — значение только в окружении.
+	TOTPIssuer string `env:"TOTP_ISSUER,required,notEmpty"`
+}
+
+// WellKnown — ассоциация приложений с доменом api до веба (спека identity §9.4, К4).
+type WellKnown struct {
+	// AppleAppIDs — <TEAMID>.<bundle id> через запятую (apple-app-site-association).
+	AppleAppIDs []string `env:"WELLKNOWN_APPLE_APP_IDS" envSeparator:","`
+	// Android — <package>=<SHA-256 сертификата>[;…] (assetlinks.json).
+	Android string `env:"WELLKNOWN_ANDROID"`
 }
 
 // Admin — API админки: вход сотрудников по cookie-сессии с TOTP (спека среза сотрудников §5),
@@ -145,6 +174,13 @@ type Worker struct {
 	Queues   Queues
 	Relay    Relay
 	GeoNames GeoNames
+}
+
+// WorkerIdentity — кольцо секретов identity воркера (WORKER_IDENTITY_SECRET_KEYS; то же значение, что
+// API_IDENTITY_SECRET_KEYS): письма с кодами. Как Mail — читается только в режиме воркера: разовым командам (events
+// replay, geo import) кольцо не нужно и на машину оператора не копируется.
+type WorkerIdentity struct {
+	SecretKeys []string `env:"IDENTITY_SECRET_KEYS,required,notEmpty" envSeparator:","`
 }
 
 // Остановка процессов (план C, R4) — единственное место бюджета: бинарники берут сроки отсюда, тесты бюджета и

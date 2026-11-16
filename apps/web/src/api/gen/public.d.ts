@@ -1438,6 +1438,14 @@ export interface paths {
          *     фактором отменяет сброс сам: если сессия вошла с TOTP, резервным кодом или ключом, сброс уже
          *     отменён — ответ тоже `204`.
          *
+         *     Если у аккаунта подтверждённая 2FA, явная отмена — только сессией, прошедшей второй фактор (вход
+         *     или `reauthenticate` с TOTP, резервным кодом или ключом доступа): сессия, вошедшая одним паролем,
+         *     при назначенном сбросе получает `403 identity.reauth_required` — пройдите `reauthenticate`
+         *     вторым фактором (он сам отменит сброс). Подтверждённой 2FA нет (снята или настройка TOTP не
+         *     подтверждена) — второго фактора нет и защищать нечего: отменяет любая живая сессия.
+         *
+         *     - `identity.reauth_required` (403) — сброс назначен, у аккаунта подтверждённая 2FA, а эта сессия
+         *       не проходила второй фактор;
          *     - `identity.mfa_reset_not_found` (404) — назначенного сброса нет (выполнен или не
          *       назначался) и эта сессия его не отменяла.
          */
@@ -2500,7 +2508,7 @@ export interface components {
             code?: string;
             /**
              * @description Резервный код вида xxxxx-xxxxx; регистр, дефис и пробелы не важны; сгорает
-             * @example k7m2q-x9p4t
+             * @example k7m2q-x6p4t
              */
             recovery_code?: string;
             passkey?: components["schemas"]["PasskeyAssertion"];
@@ -2541,7 +2549,7 @@ export interface components {
                 code?: string;
                 /**
                  * @description Резервный код вида xxxxx-xxxxx; сгорает
-                 * @example k7m2q-x9p4t
+                 * @example k7m2q-x6p4t
                  */
                 recovery_code?: string;
             };
@@ -2823,7 +2831,7 @@ export interface components {
             totp_code?: string;
             /**
              * @description Резервный код вида xxxxx-xxxxx; сгорает
-             * @example k7m2q-x9p4t
+             * @example k7m2q-x6p4t
              */
             recovery_code?: string;
             passkey?: components["schemas"]["PasskeyAssertion"];
@@ -2959,16 +2967,16 @@ export interface components {
             /**
              * @description 10 кодов вида xxxxx-xxxxx
              * @example [
-             *       "k7m2q-x9p4t",
+             *       "k7m2q-x6p4t",
              *       "a3b5c-d7e2f",
-             *       "m4n6p-q8r3s",
-             *       "t5u7v-w9x2y",
+             *       "m4n6p-q4r3s",
+             *       "t5u7v-w6x2y",
              *       "z3a5b-c7d2e",
-             *       "f4g6h-j8k3l",
-             *       "n5p7q-r9s2t",
+             *       "f4g6h-j4k3l",
+             *       "n5p7q-r6s2t",
              *       "u3v5w-x7y2z",
-             *       "b4c6d-e8f3g",
-             *       "h5j7k-l9m2n"
+             *       "b4c6d-e4f3g",
+             *       "h5j7k-l6m2n"
              *     ]
              */
             recovery_codes: string[];
@@ -4901,6 +4909,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Сброс назначен, у аккаунта подтверждённая 2FA, а сессия не проходила второй фактор — нужен `reauthenticate` вторым фактором. Разбирайте по `code`: с этим статусом приходят и общие коды платформы (`humancheck.required`, `feature.disabled` и др. — info.description), не только коды операции */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             default: components["responses"]["Problem"];
         };

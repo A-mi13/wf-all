@@ -61,6 +61,10 @@ jobs:
             -e API_DOCS_ENABLED=true \
             -e API_JWT_SEEDS="$(openssl rand -base64 32)" \
             -e API_HUMANCHECK_KEYS="$(openssl rand -base64 32)" \
+            -e API_IDENTITY_SECRET_KEYS="$(openssl rand -base64 32)" \
+            -e API_IDENTITY_DEVICE_KEYS="$(openssl rand -base64 32)" \
+            -e API_IDENTITY_TOTP_ISSUER='WF smoke' \
+            -e API_LEGAL_DOCUMENTS='terms=0.1.0|https://example.com/legal/terms,privacy=0.1.0|https://example.com/legal/privacy' \
             -e API_DATABASE_URL='postgres://api:api@127.0.0.1:15432/wf?sslmode=disable' \
             -e MIGRATOR_DATABASE_URL='postgres://migrator:migrator@127.0.0.1:15432/wf?sslmode=disable' \
             wf-backend migrate-then-api

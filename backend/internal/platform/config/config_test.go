@@ -12,11 +12,11 @@ import (
 )
 
 func TestLoadAPIWithDefaults(t *testing.T) {
-	c, err := config.Load[config.API]("API_", []string{
+	c, err := config.Load[config.API]("API_", append([]string{
 		"API_HTTP_ADDR=:8080",
 		"API_DATABASE_URL=postgres://api@localhost/wf",
 		"API_JWT_SEEDS=a", "API_HUMANCHECK_KEYS=k",
-	})
+	}, apiIdentity...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestAPIConfig(t *testing.T) {
 		"API_CLIENT_IP_HEADER=CF-Connecting-IP",
 		"API_RATE_LIMITS=auth.ip=10/1m",
 	}
-	c, err := config.Load[config.API]("API_", env)
+	c, err := config.Load[config.API]("API_", append(env, apiIdentity...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestWorkerMailConfig(t *testing.T) {
 // netip.Prefix разбирает "" без ошибки в нулевой (невалидный) префикс — его отвергает
 // peer.Config.Validate на старте (cmd/api, cmd/admin-api), а не молча доверяет пустоте.
 func TestPeerNetsEmptyAndTrailingComma(t *testing.T) {
-	base := []string{"API_HTTP_ADDR=x", "API_DATABASE_URL=y", "API_JWT_SEEDS=a", "API_HUMANCHECK_KEYS=k"}
+	base := append([]string{"API_HTTP_ADDR=x", "API_DATABASE_URL=y", "API_JWT_SEEDS=a", "API_HUMANCHECK_KEYS=k"}, apiIdentity...)
 	c, err := config.Load[config.API]("API_", append(base, "API_TRUSTED_PROXIES=", "API_BFF_NETS="))
 	if err != nil || len(c.Peer.TrustedProxies) != 0 || len(c.Peer.BFFNets) != 0 {
 		t.Fatalf("пустые списки: %v %+v", err, c.Peer)
@@ -311,4 +311,86 @@ func TestDBSchemaWait(t *testing.T) {
 	if w.DB.SchemaWait != 90*time.Second {
 		t.Fatalf("WORKER_DB_SCHEMA_WAIT = %s", w.DB.SchemaWait)
 	}
+}
+
+// apiIdentity — обязательные ключи identity у api (спека identity §11.3): кольца, издатель TOTP, документы.
+var apiIdentity = []string{
+	"API_IDENTITY_SECRET_KEYS=s1,s0", "API_IDENTITY_DEVICE_KEYS=d1",
+	"API_IDENTITY_TOTP_ISSUER=WF dev",
+	"API_LEGAL_DOCUMENTS=terms=0.1.0|https://example.com/terms,privacy=0.1.0|https://example.com/privacy",
+}
+
+// Ключи identity у api (план I-2, Task 4): без любого из четырёх обязательных или с пустым значением — отказ старта
+// с именем ключа; с ними — поля заполнены, кольца — в порядке (первый — текущий). Город по IP и .well-known
+// необязательны: пусто — выключено (404).
+func TestAPIIdentityRequired(t *testing.T) {
+	base := []string{"API_HTTP_ADDR=:8080", "API_DATABASE_URL=postgres://api@localhost/wf", "API_JWT_SEEDS=a", "API_HUMANCHECK_KEYS=k"}
+	for i, kv := range apiIdentity {
+		name, _, _ := strings.Cut(kv, "=")
+		rest := append(append([]string{}, apiIdentity[:i]...), apiIdentity[i+1:]...)
+		for _, env := range [][]string{rest, append(rest, name+"=")} {
+			_, err := config.Load[config.API]("API_", append(append([]string{}, base...), env...))
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("без %s (%d переменных): err = %v", name, len(env), err)
+			}
+		}
+	}
+	c, err := config.Load[config.API]("API_", append(append([]string{}, base...), append(apiIdentity,
+		"API_IPGEO_DB=/var/lib/wf/dbip-city-lite.mmdb",
+		"API_WELLKNOWN_APPLE_APP_IDS=TEAM1.app.wf,TEAM1.app.wf.dev",
+		"API_WELLKNOWN_ANDROID=app.wf=AA:BB;app.wf.dev=CC:DD")...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := c.Identity
+	if !reflect.DeepEqual(id.SecretKeys, []string{"s1", "s0"}) || !reflect.DeepEqual(id.DeviceKeys, []string{"d1"}) ||
+		id.TOTPIssuer != "WF dev" {
+		t.Fatalf("identity: %+v", id)
+	}
+	if c.LegalDocuments != "terms=0.1.0|https://example.com/terms,privacy=0.1.0|https://example.com/privacy" ||
+		c.IPGeoDB != "/var/lib/wf/dbip-city-lite.mmdb" {
+		t.Fatalf("документы и ipgeo: %q %q", c.LegalDocuments, c.IPGeoDB)
+	}
+	if !reflect.DeepEqual(c.WellKnown.AppleAppIDs, []string{"TEAM1.app.wf", "TEAM1.app.wf.dev"}) ||
+		c.WellKnown.Android != "app.wf=AA:BB;app.wf.dev=CC:DD" {
+		t.Fatalf("well-known: %+v", c.WellKnown)
+	}
+	c, err = config.Load[config.API]("API_", append(append([]string{}, base...), apiIdentity...))
+	if err != nil || c.IPGeoDB != "" || len(c.WellKnown.AppleAppIDs) != 0 || c.WellKnown.Android != "" {
+		t.Fatalf("необязательные по умолчанию пусты: %v %+v", err, c)
+	}
+}
+
+// Кольцо identity воркера (WORKER_IDENTITY_SECRET_KEYS) — отдельный конфиг, как почта: его читает только режим
+// воркера (письма с кодами), разовым командам (events replay, geo import) оно не нужно. Нет или пусто — ошибка.
+func TestWorkerIdentityRequired(t *testing.T) {
+	for _, env := range [][]string{nil, {"WORKER_IDENTITY_SECRET_KEYS="}} {
+		if _, err := config.Load[config.WorkerIdentity]("WORKER_", env); err == nil ||
+			!strings.Contains(err.Error(), "WORKER_IDENTITY_SECRET_KEYS") {
+			t.Errorf("%v: err = %v", env, err)
+		}
+	}
+	c, err := config.Load[config.WorkerIdentity]("WORKER_", []string{"WORKER_IDENTITY_SECRET_KEYS=s1,s0"})
+	if err != nil || !reflect.DeepEqual(c.SecretKeys, []string{"s1", "s0"}) {
+		t.Fatalf("%v %+v", err, c.SecretKeys)
+	}
+	if _, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=x"}); err != nil {
+		t.Fatalf("конфиг воркера без кольца (разовые команды): %v", err)
+	}
+}
+
+// Кольцо identity — только у api и воркера: admin-api сброс 2FA не шифрует и не расшифровывает (спека §5.5).
+func TestAdminHasNoIdentityKeys(t *testing.T) {
+	var walk func(reflect.Type)
+	walk = func(rt reflect.Type) {
+		for f := range rt.Fields() {
+			if strings.Contains(f.Tag.Get("env"), "IDENTITY") || strings.Contains(f.Tag.Get("envPrefix"), "IDENTITY") {
+				t.Errorf("config.Admin: поле %s", f.Name)
+			}
+			if f.Type.Kind() == reflect.Struct {
+				walk(f.Type)
+			}
+		}
+	}
+	walk(reflect.TypeFor[config.Admin]())
 }

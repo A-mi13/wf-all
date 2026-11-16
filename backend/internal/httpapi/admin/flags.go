@@ -24,7 +24,20 @@ var (
 	errFlagNotFound     = httpx.NewError(http.StatusNotFound, httpx.CodeFlagNotFound)
 	errFlagStale        = httpx.NewError(http.StatusConflict, httpx.CodeFlagStale)
 	errFlagCityNotFound = httpx.NewError(http.StatusUnprocessableEntity, httpx.CodeFlagCityNotFound)
+	errFlagGlobalOnly   = httpx.NewError(http.StatusUnprocessableEntity, httpx.CodeFlagGlobalOnly)
 )
+
+// flagRequiresProblem — 409 platform.flag_requires с detail = зависимость (flags.RequiresError.Error(): только ключи
+// флагов, без ПД). Свой ProblemError: у httpx.Error нет detail, а RequiresError — ошибка платформы без HTTP.
+type flagRequiresProblem struct{ detail string }
+
+func (e flagRequiresProblem) Error() string {
+	return "httpx: " + httpx.CodeFlagRequires + ": " + e.detail
+}
+
+func (e flagRequiresProblem) Problem() httpx.Problem {
+	return httpx.Problem{Status: http.StatusConflict, Code: httpx.CodeFlagRequires, Detail: e.detail}
+}
 
 // ListFeatureFlags — GET /v1/flags: все флаги по ключу.
 func (s Server) ListFeatureFlags(ctx context.Context, _ oapi.ListFeatureFlagsRequestObject) (oapi.ListFeatureFlagsResponseObject, error) {
@@ -43,9 +56,10 @@ func (s Server) ListFeatureFlags(ctx context.Context, _ oapi.ListFeatureFlagsReq
 }
 
 // UpdateFeatureFlag — PATCH /v1/flags/{key}: version обязательна; enabled_city_ids — множество (повторы схлопываются,
-// порядок по id); несуществующий город — 422 platform.flag_city_not_found до записи; затем одна транзакция под
-// Idempotency-Key: flags.Store.Update (нет флага — 404 platform.flag_not_found, version не та — 409
-// platform.flag_stale), событие platform.flag_changed и аудит сотрудника. Ничего не изменилось — 200 с текущим
+// порядок по id); город у флага GlobalOnly — 422 platform.flag_global_only раньше проверки городов; несуществующий
+// город — 422 platform.flag_city_not_found до записи; затем одна транзакция под Idempotency-Key: flags.Store.Update
+// (нет флага — 404 platform.flag_not_found, version не та — 409 platform.flag_stale, нарушена зависимость — 409
+// platform.flag_requires с detail), событие platform.flag_changed и аудит сотрудника. Ничего не изменилось — 200 с текущим
 // флагом без события и аудита, version не растёт.
 func (s Server) UpdateFeatureFlag(ctx context.Context, req oapi.UpdateFeatureFlagRequestObject) (oapi.UpdateFeatureFlagResponseObject, error) {
 	if s.flags == nil || s.cities == nil {
@@ -61,6 +75,11 @@ func (s Server) UpdateFeatureFlag(ctx context.Context, req oapi.UpdateFeatureFla
 	var cities []uuid.UUID
 	if req.Body.EnabledCityIds != nil {
 		cities = flags.CitySet(*req.Body.EnabledCityIds)
+		if len(cities) > 0 && flags.RuleOf(req.Key).GlobalOnly {
+			// раньше проверки городов: у флага «только везде» их не смотрим; единственная точка 422 — то же условие
+			// в flags.Store.Update (ErrGlobalOnly) отсюда недостижимо (Task 2 m3)
+			return nil, errFlagGlobalOnly
+		}
 		found, err := s.cities(ctx, cities)
 		if err != nil {
 			return nil, err
@@ -94,7 +113,11 @@ func (s Server) UpdateFeatureFlag(ctx context.Context, req oapi.UpdateFeatureFla
 		return nil, errFlagNotFound
 	case errors.Is(err, flags.ErrStale):
 		return nil, errFlagStale
-	case err != nil:
+	}
+	if re, ok := errors.AsType[*flags.RequiresError](err); ok {
+		return nil, flagRequiresProblem{detail: re.Error()}
+	}
+	if err != nil {
 		return nil, err
 	}
 	return oapi.UpdateFeatureFlag200JSONResponse(flagOut(after)), nil

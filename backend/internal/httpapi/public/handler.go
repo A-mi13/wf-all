@@ -13,6 +13,7 @@ import (
 	"wf/backend/internal/geo"
 	geohttp "wf/backend/internal/geo/httpapi"
 	"wf/backend/internal/httpapi/public/oapi"
+	identityhttp "wf/backend/internal/identity/httpapi"
 	"wf/backend/internal/platform/apidocs"
 	"wf/backend/internal/platform/appversion"
 	"wf/backend/internal/platform/auth"
@@ -35,6 +36,10 @@ type Options struct {
 	RateRules      ratelimit.Rules
 	Geo            geo.Service       // справочник городов (geo.New)
 	AppVersions    appversion.Reader // минимальные версии приложения (appversion.NewReader)
+	// Identity — ручки identity (identityhttp.New); нулевое значение — 501 на каждую операцию (план I-1, R2)
+	Identity identityhttp.Handler
+	// WellKnown — файлы /.well-known до веба (identityhttp.WellKnown, R14 плана I-2); nil — каталога нет (404)
+	WellKnown http.Handler
 }
 
 const defaultRequestTimeout = 15 * time.Second
@@ -80,9 +85,10 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		timeout = defaultRequestTimeout
 	}
 	requestErr := httpx.RequestErrorHandler(log)
-	// identity — нулевой хендлер: 501 на каждую операцию до реализации (план I-1, R2; pendingOps в nostub_test.go)
-	srv := Server{Handler: geohttp.New(o.Geo), identityHandler: identityHandler{}, versions: o.AppVersions}
-	strict := oapi.NewStrictHandlerWithOptions(srv, nil, oapi.StrictHTTPServerOptions{
+	// identity — o.Identity; нереализованные операции — 501 (pendingOps в nostub_test.go)
+	srv := Server{Handler: geohttp.New(o.Geo), identityHandler: o.Identity, versions: o.AppVersions}
+	// RequestInfo — User-Agent запроса в ctx операций identity (strict-сервер его не передаёт)
+	strict := oapi.NewStrictHandlerWithOptions(srv, []oapi.StrictMiddlewareFunc{identityhttp.RequestInfo}, oapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  requestErr,
 		ResponseErrorHandlerFunc: httpx.ResponseErrorHandler(log),
 	})
@@ -108,6 +114,10 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 			return nil, fmt.Errorf("public: контракт: %w", err)
 		}
 		apidocs.Mount(router, title, specJSON)
+	}
+	if o.WellKnown != nil {
+		// /.well-known/* не в контракте: как /docs — мимо валидатора (маршрута контракта нет) и без лимитов auth
+		router.Handle(identityhttp.WellKnownPrefix+"*", o.WellKnown)
 	}
 	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
 		BaseRouter: router,

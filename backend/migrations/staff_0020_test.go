@@ -90,8 +90,9 @@ func newStaff(t *testing.T, db *sql.DB, email string) string {
 func newUser(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var id string
-	if err := db.QueryRowContext(context.Background(), `INSERT INTO users (email, nickname, birth_date)
-		VALUES ('player@example.com', 'probe_player', '2000-01-01') RETURNING id::text`).Scan(&id); err != nil {
+	// почта подтверждена: с 0025 обязательна (спека identity §5.2)
+	if err := db.QueryRowContext(context.Background(), `INSERT INTO users (email, email_verified_at, nickname, birth_date)
+		VALUES ('player@example.com', now(), 'probe_player', '2000-01-01') RETURNING id::text`).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id

@@ -366,11 +366,11 @@ func TestRenderYAMLClientIP(t *testing.T) {
 			t.Fatalf("render.yaml: у wf-api нет %s со значением", k)
 		}
 	}
-	c, err := config.Load[config.API]("API_", []string{
+	c, err := config.Load[config.API]("API_", append([]string{
 		"API_HTTP_ADDR=:8080", "API_DATABASE_URL=postgres://x", "API_JWT_SEEDS=a", "API_HUMANCHECK_KEYS=k",
 		"API_TRUSTED_PROXIES=" + stand["API_TRUSTED_PROXIES"],
 		"API_CLIENT_IP_HEADER=" + stand["API_CLIENT_IP_HEADER"],
-	})
+	}, apiIdentity...))
 	if err != nil {
 		t.Fatalf("render.yaml: настройки не разбираются: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestRenderYAMLAdminCookie(t *testing.T) {
 // generateValue: ключи сотрудников нужны и командам оператора (R2), сгенерированный Render ключ пришлось бы копировать
 // из панели, а перегенерация обнулила бы все секреты TOTP. У каждой переменной — ровно один источник.
 func TestRenderYAMLSecretsNotInFile(t *testing.T) {
-	secret := []string{"DATABASE_URL", "SECRET", "PASSWORD", "USERNAME", "SMTP_ADDR", "MAIL_FROM", "ORIGIN"}
+	secret := []string{"DATABASE_URL", "SECRET", "PASSWORD", "USERNAME", "SMTP_ADDR", "MAIL_FROM", "ORIGIN", "DEVICE_KEYS"}
 	for _, s := range blueprint(t) {
 		for _, e := range s.EnvVars {
 			n := 0
@@ -509,6 +509,59 @@ func TestRenderYAMLSecretsNotInFile(t *testing.T) {
 		if !panel[k] {
 			t.Errorf("wf-admin-api: %s не задан как sync: false", k)
 		}
+	}
+	panel = map[string]bool{}
+	for _, e := range service(t, "wf-api").EnvVars {
+		if e.Sync != nil && !*e.Sync {
+			panel[e.Key] = true
+		}
+	}
+	for _, k := range apiPanel {
+		if !panel[k] {
+			t.Errorf("wf-api: %s не задан как sync: false", k)
+		}
+	}
+}
+
+// apiPanel — переменные wf-api, которые задаются только в панели Render (sync: false).
+var apiPanel = []string{"API_DATABASE_URL", "MIGRATOR_DATABASE_URL", "API_IDENTITY_SECRET_KEYS", "API_IDENTITY_DEVICE_KEYS"}
+
+// Ключи identity на стенде (план I-2, Task 4; R10, U2–U4): кольца — только из панели (sync: false — потеря кольца
+// стирает секреты TOTP и опознание устройств, generateValue их перегенерировал бы, и воркеру нужен тот же ключ);
+// издатель TOTP и документы-заглушки — значением в файле; город по IP и .well-known на стенде не заданы (404).
+func TestRenderYAMLIdentityEnv(t *testing.T) {
+	vars := map[string]envVar{}
+	for _, e := range service(t, "wf-api").EnvVars {
+		vars[e.Key] = e
+	}
+	for _, k := range []string{"API_IDENTITY_SECRET_KEYS", "API_IDENTITY_DEVICE_KEYS"} {
+		e, ok := vars[k]
+		if !ok || e.Sync == nil || *e.Sync || e.GenerateValue || e.Value != nil {
+			t.Errorf("wf-api: %s — нужен только sync: false (%+v)", k, e)
+		}
+	}
+	for k, want := range map[string]string{
+		"API_IDENTITY_TOTP_ISSUER": "WF dev",
+		"API_LEGAL_DOCUMENTS":      "terms=0.1.0|https://example.com/legal/terms,privacy=0.1.0|https://example.com/legal/privacy",
+	} {
+		if e, ok := vars[k]; !ok || e.Value == nil || *e.Value != want {
+			t.Errorf("wf-api: %s — нужно значение %q в файле", k, want)
+		}
+	}
+	for _, k := range []string{"API_IPGEO_DB", "API_WELLKNOWN_APPLE_APP_IDS", "API_WELLKNOWN_ANDROID"} {
+		if _, ok := vars[k]; ok {
+			t.Errorf("wf-api: %s на стенде не задаётся (города по IP и приложений ещё нет)", k)
+		}
+	}
+	// кольца у admin-api нет (§5.5); воркер на стенде с кольцом — Task 21
+	for _, e := range service(t, "wf-admin-api").EnvVars {
+		if strings.Contains(e.Key, "IDENTITY") {
+			t.Errorf("wf-admin-api: %s — кольцо identity admin-api не получает", e.Key)
+		}
+	}
+	c := apiConfig(t)
+	if len(c.Identity.SecretKeys) != 1 || len(c.Identity.DeviceKeys) != 1 || c.Identity.TOTPIssuer != "WF dev" {
+		t.Errorf("wf-api: identity стенда разобран неверно: %d %d %q", len(c.Identity.SecretKeys), len(c.Identity.DeviceKeys), c.Identity.TOTPIssuer)
 	}
 }
 
@@ -593,6 +646,7 @@ const (
 // apiFill — заглушки переменных wf-api из панели и generateValue.
 var apiFill = map[string]string{
 	"API_JWT_SEEDS": key32, "API_HUMANCHECK_KEYS": key32,
+	"API_IDENTITY_SECRET_KEYS": key32, "API_IDENTITY_DEVICE_KEYS": key32,
 	"API_DATABASE_URL":      "postgres://api@db.example/wf?sslmode=require",
 	"MIGRATOR_DATABASE_URL": "postgres://wf_owner@db.example/wf?sslmode=require",
 }
