@@ -47,7 +47,8 @@ func TestRunRequiresIdentityKeys(t *testing.T) {
 	if len(mail) != len(mailEnv)-1 {
 		t.Fatalf("кольца identity в mailEnv нет: %q", mailEnv)
 	}
-	for _, ring := range []string{"", "WORKER_IDENTITY_SECRET_KEYS="} {
+	// битый ключ (не base64 32 байт) — тоже отказ старта до базы, а не ошибка первого письма (Task 19)
+	for _, ring := range []string{"", "WORKER_IDENTITY_SECRET_KEYS=", "WORKER_IDENTITY_SECRET_KEYS=not-a-key"} {
 		env := append(append([]string{}, mail...), "WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1")
 		if ring != "" {
 			env = append(env, ring)

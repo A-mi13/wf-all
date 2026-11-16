@@ -42,7 +42,7 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Environ(), os.Stderr); err != nil {
+	if err := dispatch(ctx, os.Args[1:], os.Environ(), os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "api:", err)
 		os.Exit(1)
 	}

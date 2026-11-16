@@ -12,6 +12,7 @@ import (
 	"github.com/riverqueue/river"
 
 	geojobs "wf/backend/internal/geo/jobs"
+	identityjobs "wf/backend/internal/identity/jobs"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/humancheck"
@@ -44,19 +45,26 @@ func TestWorkerKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.DiscardHandler)
-	own := realWorkers(nil, reg, geojobs.Config{}, log, nil)
+	idd := lazyIdentityDeps(t)
+	own, err := realWorkers(nil, reg, geojobs.Config{}, log, nil, idd)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := rivertest.Kinds(own), names(queue.WorkerKinds()); !slices.Equal(got, want) {
 		t.Fatalf("исполнители воркера %v, queue.WorkerKinds %v", got, want)
 	}
 	timeouts := map[string]time.Duration{
-		"platform.ping":       (&queue.PingWorker{}).Timeout(nil),
-		"events.deliver":      (&events.DeliverWorker{}).Timeout(nil),
-		"events.cleanup":      (&events.CleanupWorker{}).Timeout(nil),
-		"ratelimit.cleanup":   (&ratelimit.CleanupWorker{}).Timeout(nil),
-		"humancheck.cleanup":  (&humancheck.CleanupWorker{}).Timeout(nil),
-		"idempotency.cleanup": (&idempotency.CleanupWorker{}).Timeout(nil),
-		"geo.import":          (&geojobs.ImportWorker{}).Timeout(nil),
-		"mail.send":           (&mail.SendWorker{}).Timeout(nil),
+		"platform.ping":              (&queue.PingWorker{}).Timeout(nil),
+		"events.deliver":             (&events.DeliverWorker{}).Timeout(nil),
+		"events.cleanup":             (&events.CleanupWorker{}).Timeout(nil),
+		"ratelimit.cleanup":          (&ratelimit.CleanupWorker{}).Timeout(nil),
+		"humancheck.cleanup":         (&humancheck.CleanupWorker{}).Timeout(nil),
+		"idempotency.cleanup":        (&idempotency.CleanupWorker{}).Timeout(nil),
+		"geo.import":                 (&geojobs.ImportWorker{}).Timeout(nil),
+		"mail.send":                  (&mail.SendWorker{}).Timeout(nil),
+		"identity.maintenance":       (&identityjobs.MaintenanceWorker{}).Timeout(nil),
+		"identity.anonymize":         (&identityjobs.AnonymizeWorker{}).Timeout(nil),
+		"identity.mfa_reset_execute": (&identityjobs.MfaResetWorker{}).Timeout(nil),
 	}
 	for _, k := range queue.WorkerKinds() {
 		d, ok := timeouts[k.Name]
@@ -64,7 +72,10 @@ func TestWorkerKinds(t *testing.T) {
 			t.Errorf("%s: срок в queue.WorkerKinds %s, у исполнителя %s (есть в таблице теста: %v)", k.Name, k.Timeout, d, ok)
 		}
 	}
-	all := allWorkers(nil, reg, geojobs.Config{}, log, nil)
+	all, err := allWorkers(nil, reg, geojobs.Config{}, log, nil, idd)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := rivertest.Kinds(all), names(queue.WorkerKinds(), queue.AdminKinds()); !slices.Equal(got, want) {
 		t.Fatalf("исполняющий клиент воркера знает %v, ждали %v", got, want)
 	}
@@ -126,7 +137,8 @@ func TestWorkerKindsQueues(t *testing.T) {
 	t.Parallel()
 	// вид — из самих аргументов (Kind), а не строкой таблицы: перепутанная пара вида и аргументов не пройдёт (m-r5)
 	queues := queuesOf(queue.PingArgs{}, events.DeliverArgs{}, events.CleanupArgs{}, ratelimit.CleanupArgs{},
-		humancheck.CleanupArgs{}, idempotency.CleanupArgs{}, geojobs.ImportArgs{}, mail.SendArgs{})
+		humancheck.CleanupArgs{}, idempotency.CleanupArgs{}, geojobs.ImportArgs{}, mail.SendArgs{},
+		identityjobs.MaintenanceArgs{}, identityjobs.AnonymizeArgs{}, identityjobs.MfaResetExecuteArgs{})
 	served := queue.Config(config.Queues{})
 	for _, k := range queue.WorkerKinds() {
 		q, ok := queues[k.Name]

@@ -58,8 +58,17 @@ func TestRescuerKeepsWorkerJobs(t *testing.T) {
 		now() - interval '2 hours', 1, '{}') RETURNING id`).Scan(&jobID); err != nil {
 		t.Fatal(err)
 	}
+	// задача identity (план I-2, Task 19): срок исполнителя 10 мин, зависла на 2 ч — тоже возвращается, не выбрасывается
+	var identityJobID int64
+	if err := e.owner.QueryRow(context.Background(), `INSERT INTO river_job (kind, queue, state, args, attempt, max_attempts,
+		attempted_at, scheduled_at, priority, metadata)
+		VALUES ('identity.maintenance', 'maintenance', 'running', '{"v":1}', 1, 5, now() - interval '2 hours',
+		now() - interval '2 hours', 1, '{}') RETURNING id`).Scan(&identityJobID); err != nil {
+		t.Fatal(err)
+	}
 	cancel, done := e.startServer()
 	waitRescued(t, e.owner, jobID)
+	waitRescued(t, e.owner, identityJobID)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("остановка: %v", err)

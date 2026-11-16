@@ -1,5 +1,5 @@
-// Package jobs — задачи River модуля identity у воркера (спека identity §5.10, §3.11). Регистрацию исполнителей и
-// периодики в cmd/worker и cmd/admin-api делает Task 19 плана I-2 (R7).
+// Package jobs — задачи River модуля identity у воркера (спека identity §5.10, §3.11): исполнители — AddWorkers
+// (только cmd/worker), периодика — Periodic (cmd/worker и cmd/admin-api, R7).
 package jobs
 
 import (

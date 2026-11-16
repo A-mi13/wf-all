@@ -30,6 +30,7 @@ import (
 	"wf/backend/internal/httpapi/admin"
 	"wf/backend/internal/identity"
 	identityadmin "wf/backend/internal/identity/admin"
+	identityjobs "wf/backend/internal/identity/jobs"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
@@ -243,7 +244,8 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 }
 
 // background — фон сервера: исполняющий River-клиент (очередь staff — письма; периодика платформы
-// periodic.Jobs — если admin-api станет лидером River, чистки воркера не пропадут, P27) и тикер чистки staff.
+// periodic.Jobs и identityjobs.Periodic — если admin-api станет лидером River, чистки воркера не пропадут, P27, R7) и
+// тикер чистки staff.
 // River работает на ctx без отмены и останавливается сам после тикера: мягко (письмо в полёте доигрывается),
 // не уложился — StopAndCancel, задача вернётся в повтор.
 func background(log *slog.Logger, pool *pgxpool.Pool, a assembly, sender mail.Sender) (func(context.Context) error, error) {
@@ -539,9 +541,11 @@ func checkKeys(ctx context.Context, h *staffadmin.Handler, keysLost bool, errOut
 }
 
 // riverConfig — исполняющий клиент admin-api: обслуживание — общее с воркером (queue.ClientConfig от
-// queue.MaintenanceConfig, страж TestAdminRiverMaintenance), очередь — только staff, периодика — общий список платформы.
+// queue.MaintenanceConfig, страж TestAdminRiverMaintenance), очередь — только staff, периодика — платформа и identity,
+// как у воркера (R7 плана I-2: став лидером, admin-api ставит и чистку, анонимизацию, сбросы 2FA identity — исполняет
+// воркер; страж TestPeriodicSameInBothBinaries).
 func riverConfig(workers *river.Workers, log *slog.Logger) *river.Config {
-	return queue.ClientConfig(staffQueues(), workers, periodic.Jobs(), log)
+	return queue.ClientConfig(staffQueues(), workers, append(periodic.Jobs(), identityjobs.Periodic()...), log)
 }
 
 // staffQueues — очереди исполняющего клиента admin-api: только staff (у воркера её нет — TestAdminKindsQueues).

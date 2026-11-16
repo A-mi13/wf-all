@@ -2,10 +2,13 @@ package main
 
 import (
 	"log/slog"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/riverqueue/river"
 
+	identityjobs "wf/backend/internal/identity/jobs"
 	"wf/backend/internal/platform/periodic"
 	"wf/backend/internal/platform/queue"
 )
@@ -20,7 +23,29 @@ func TestAdminRiverMaintenance(t *testing.T) {
 		t.Fatalf("настройки River admin-api мимо queue.MaintenanceConfig: %v", d)
 	}
 	if c.Workers != workers || len(c.Queues) != 1 || c.Queues[queue.Staff].MaxWorkers != staffMailWorkers ||
-		len(c.PeriodicJobs) != len(periodic.Jobs()) {
+		len(c.PeriodicJobs) != len(periodic.Jobs())+len(identityjobs.Periodic()) {
 		t.Fatalf("поля admin-api: %+v", c)
+	}
+}
+
+// periodicIDs — ID периодических задач по алфавиту (River их не отдаёт; reflect только читает строку). ID = вид.
+func periodicIDs(jobs []*river.PeriodicJob) []string {
+	out := make([]string, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, reflect.ValueOf(j).Elem().FieldByName("opts").Elem().FieldByName("ID").String())
+	}
+	slices.Sort(out)
+	return out
+}
+
+// R7 плана I-2: admin-api бывает лидером River и ставит периодику по своему списку — он равен общему (платформа +
+// identity), как у воркера (зеркало — TestPeriodicSameInBothBinaries в cmd/worker): иначе, пока лидер — admin-api,
+// анонимизация, сбросы 2FA и чистка identity не ставились бы.
+func TestPeriodicSameInBothBinaries(t *testing.T) {
+	t.Parallel()
+	c := riverConfig(river.NewWorkers(), slog.New(slog.DiscardHandler))
+	want := periodicIDs(append(periodic.Jobs(), identityjobs.Periodic()...))
+	if got := periodicIDs(c.PeriodicJobs); !slices.Equal(got, want) || len(want) != 7 {
+		t.Fatalf("периодика admin-api %v, ждали %v", got, want)
 	}
 }

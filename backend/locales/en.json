@@ -5,6 +5,87 @@
   "mail": {
     "footer": "This email was sent automatically, please do not reply."
   },
+  "identity": {
+    "mail": {
+      "signup_code": {
+        "subject": "Your sign-up code",
+        "text": "Your sign-up code: {code}\n\nIt is valid for {minutes, plural, one {# minute} other {# minutes}}. Do not share it with anyone.\n\nIf you did not sign up, just ignore this email."
+      },
+      "signup_account_exists": {
+        "subject": "Sign-up attempt with your email",
+        "text": "Someone tried to create a new account with this email, but you already have an account with it. To get in, open the app and sign in with this email; forgot your password? Reset it on the sign-in screen.\n\nIf it was not you, no action is needed.",
+        "text_pending": "Someone tried to create a new account with this email, but your account with this email is pending deletion. Changed your mind? Sign in to the app with this email and the deletion will be cancelled.\n\nIf it was not you and you still want to delete your account, no action is needed."
+      },
+      "password_reset_code": {
+        "subject": "Your password reset code",
+        "text": "Your password reset code: {code}\n\nIt is valid for {minutes, plural, one {# minute} other {# minutes}}. Do not share it with anyone.\n\nIf you did not request a reset, ignore this email and your password will stay the same."
+      },
+      "email_change_code": {
+        "subject": "Confirm your new email",
+        "text": "Code to change your account email to this address: {code}\n\nIt is valid for {minutes, plural, one {# minute} other {# minutes}}. Do not share it with anyone.\n\nIf you did not change your email, ignore this email."
+      },
+      "email_change_taken": {
+        "subject": "Attempt to link your email to another account",
+        "text": "Someone tried to change the email of their account to this address, but it already belongs to your account. Your account has not changed.\n\nIf it was you, sign in to the account with this email."
+      },
+      "email_changed": {
+        "subject": "Your account email was changed",
+        "text": "The email of your account was changed. This message was sent to the previous address.\n\nWhen: {time}\n\nIf it was not you, contact support right away."
+      },
+      "password_changed": {
+        "subject": "Password changed",
+        "text": "The password of your account was changed or set, other sessions were signed out.\n\nWhen: {time}\n\nIf it was not you, reset your password on the sign-in screen and contact support."
+      },
+      "session_revoked_suspicious": {
+        "subject": "Session ended for your security",
+        "text": "We ended a session of your account: its sign-in key was reused, which happens when it is stolen. Please sign in again.\n\nWhen: {time}\n\nIf this happens again, change your password."
+      },
+      "mfa_enabled": {
+        "subject": "Two-factor protection enabled",
+        "text": "Two-factor protection was enabled on your account. Keep your recovery codes in a safe place.\n\nWhen: {time}\n\nIf it was not you, contact support right away."
+      },
+      "mfa_disabled": {
+        "subject": "Two-factor protection disabled",
+        "text": "Two-factor protection was disabled on your account.\n\nWhen: {time}\n\nIf it was not you, change your password and contact support."
+      },
+      "recovery_code_used": {
+        "subject": "Recovery code used",
+        "text": "A recovery code was used to sign in to your account. Codes left: {left}.\n\nWhen: {time}\n\nIf it was not you, change your password and regenerate your recovery codes."
+      },
+      "recovery_codes_regenerated": {
+        "subject": "Recovery codes regenerated",
+        "text": "The recovery codes of your account were regenerated, the previous ones no longer work.\n\nWhen: {time}\n\nIf it was not you, change your password and contact support."
+      },
+      "mfa_failures": {
+        "subject": "Failed sign-in attempts",
+        "text": "A wrong second-factor code was entered for your account {failures, plural, one {# time} other {# times}} in a row. Someone may know your password, so change it.\n\nWhen: {time}"
+      },
+      "account_deletion_scheduled": {
+        "subject": "Your account will be deleted",
+        "text": "You requested to delete your account. It will be deleted permanently on {purge}.\n\nChanged your mind? Just sign in to the app before then and the deletion will be cancelled."
+      },
+      "account_restored": {
+        "subject": "Account deletion cancelled",
+        "text": "The deletion of your account was cancelled, the account is available again.\n\nWhen: {time}\n\nIf it was not you, change your password and contact support."
+      },
+      "account_deleted": {
+        "subject": "Your account was deleted",
+        "text": "Your account was deleted: personal data was erased and it cannot be restored. Thank you for playing with us."
+      },
+      "mfa_reset_scheduled": {
+        "subject": "Two-factor reset scheduled",
+        "text": "Following a support request, a reset of the two-factor protection of your account was scheduled. It will happen on {execute}: your authenticator app and recovery codes will stop working and all sessions will be signed out.\n\nIf you did not contact support, just sign in with your second factor and the reset will be cancelled."
+      },
+      "mfa_reset_cancelled": {
+        "subject": "Two-factor reset cancelled",
+        "text": "The reset of the two-factor protection of your account was cancelled{by, select, owner { because you signed in with your second factor} system { automatically} other { by support}}. Two-factor protection stays on.\n\nWhen: {time}"
+      },
+      "mfa_reset_done": {
+        "subject": "Two-factor protection reset",
+        "text": "Following a support request, the two-factor protection of your account was reset and all sessions were signed out. Sign in with your password and enable it again.\n\nWhen: {time}\n\nIf you did not contact support, contact it right away."
+      }
+    }
+  },
   "staff": {
     "invite": {
       "subject": "Admin panel invitation",

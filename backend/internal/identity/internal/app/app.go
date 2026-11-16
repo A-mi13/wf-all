@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"slices"
 
 	"github.com/google/uuid"
@@ -38,7 +37,6 @@ import (
 	"wf/backend/internal/identity/internal/store/identitydb"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/flags"
-	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/humancheck"
 	"wf/backend/internal/platform/ipgeo"
 	"wf/backend/internal/platform/keys"
@@ -131,9 +129,6 @@ func NewMaintenance(pool *pgxpool.Pool, c clock.Clock, secrets *keys.Ring, rc *r
 	}
 	return &App{pool: pool, clock: c, secrets: secrets, river: rc, log: log, ipgeo: ipgeo.None}, nil
 }
-
-// errNotImplemented — сигнатура объявлена (Task 8, I9), сценарий реализует задача-владелец файла.
-var errNotImplemented = httpx.NewError(http.StatusNotImplemented, httpx.CodeNotImplemented)
 
 // userRow — строка аккаунта под замком.
 type userRow = identitydb.User

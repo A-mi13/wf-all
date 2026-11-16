@@ -22,7 +22,7 @@ var errMfaResetVersion = errors.New("identity: identity.mfa_reset_execute — н
 var errMfaResetRowsFailed = errors.New("identity: identity.mfa_reset_execute — часть сбросов не исполнена")
 
 // MfaResetExecuteArgs — задача исполнения сбросов 2FA с наступившим execute_at (спека §3.15 п. 5): без данных
-// аккаунтов (ПД в аргументах нет). Периодику и регистрацию исполнителя в cmd/worker делает Task 19 плана I-2 (R7).
+// аккаунтов (ПД в аргументах нет). Периодика и регистрация — jobs.go (Periodic, AddWorkers; R7).
 type MfaResetExecuteArgs struct {
 	V int `json:"v"`
 }
@@ -30,9 +30,10 @@ type MfaResetExecuteArgs struct {
 // Kind — вид задачи.
 func (MfaResetExecuteArgs) Kind() string { return "identity.mfa_reset_execute" }
 
-// InsertOpts — очередь maintenance, одна задача в час.
+// InsertOpts — очередь maintenance, одна задача в 10 минут (как периодика: окно уникальности длиннее интервала
+// глотало бы запуски).
 func (MfaResetExecuteArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: queue.Maintenance, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByPeriod: time.Hour}}
+	return river.InsertOpts{Queue: queue.Maintenance, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByPeriod: 10 * time.Minute}}
 }
 
 // MfaResetExecutor — сценарий исполнения (app.App.ExecuteDueMfaResets у сборки воркера, NewMaintenance под ролью
