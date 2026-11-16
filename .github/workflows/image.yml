@@ -22,6 +22,8 @@ on:
       - 'scripts/check-admin-dist.mjs'
       - 'render.yaml'
       - 'deploy/dev/initdb/**'
+      # свой сервер (job server): compose, Caddy, шаблоны env
+      - 'deploy/server/**'
       - '.github/workflows/image.yml'
   pull_request:
     paths: *paths
@@ -132,3 +134,116 @@ jobs:
           if ! { [ "$code" = 403 ] && grep -q '"code":"auth.csrf_failed"' login.json; }; then
             fail "POST /v1/staff/auth/login без Origin: $code $(cat login.json 2>/dev/null)"
           fi
+
+  # Свой сервер (deploy/server, спека 2026-11-16-embedded-worker §5, I7): compose из того же образа поднимается и
+  # исполняет фон. База — сервис db в compose.ci.yaml (не services: job), Caddy — с local_certs. Два прогона: отдельный
+  # сервис worker (как на сервере) и api со встроенным воркером (compose.ci-embed.yaml, как на стенде Render).
+  # Сквозную отправку письма не проверяет (SMTP — закрытый порт петли контейнера, TLS none): её проверяет выкатка на
+  # стенд. Локально — те же шаги по deploy/server/README.md, «Проверка локально».
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: deploy/server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: docker build — образ, который compose берёт как WF_IMAGE
+        working-directory: .
+        run: docker build -f backend/Dockerfile -t wf-backend .
+      # рабочие env из шаблонов: значения CI, секреты — одноразовые; кольцо identity одно у api и worker
+      - name: env из шаблонов
+        run: |
+          set_kv() { sed -i "/^$2=/d" "$1"; printf '%s=%s\n' "$2" "$3" >>"$1"; }
+          for s in api admin-api worker migrate; do cp "$s.env.example" "$s.env"; done
+          cp .env.example .env
+          ring=$(openssl rand -base64 32)
+          set_kv migrate.env MIGRATOR_DATABASE_URL 'postgres://migrator:migrator@db:5432/wf?sslmode=disable'
+          set_kv api.env API_DATABASE_URL 'postgres://api:api@db:5432/wf?sslmode=disable'
+          set_kv api.env API_JWT_SEEDS "$(openssl rand -base64 32)"
+          set_kv api.env API_HUMANCHECK_KEYS "$(openssl rand -base64 32)"
+          set_kv api.env API_IDENTITY_SECRET_KEYS "$ring"
+          set_kv api.env API_IDENTITY_DEVICE_KEYS "$(openssl rand -base64 32)"
+          set_kv api.env API_IDENTITY_TOTP_ISSUER 'WF ci'
+          set_kv api.env API_LEGAL_DOCUMENTS \
+            '"terms=0.1.0|https://example.com/legal/terms,privacy=0.1.0|https://example.com/legal/privacy"'
+          set_kv admin-api.env ADMIN_DATABASE_URL 'postgres://admin:admin@db:5432/wf?sslmode=disable'
+          set_kv admin-api.env ADMIN_ORIGIN 'https://admin.wf.test'
+          set_kv admin-api.env ADMIN_STAFF_SECRET_KEYS "$(openssl rand -base64 32 | tr '+/' '-_')"
+          set_kv worker.env WORKER_DATABASE_URL 'postgres://worker:worker@db:5432/wf?sslmode=disable'
+          set_kv worker.env WORKER_IDENTITY_SECRET_KEYS "$ring"
+          # SMTP — закрытый порт петли контейнера без TLS и логина: старт соединение не проверяет, писем нет
+          for f in admin-api.env:ADMIN worker.env:WORKER; do
+            file=${f%%:*} p=${f#*:}
+            set_kv "$file" "${p}_MAIL_SMTP_ADDR" '127.0.0.1:1'
+            set_kv "$file" "${p}_MAIL_SMTP_TLS" none
+            set_kv "$file" "${p}_MAIL_FROM" '"WF <noreply@wf.test>"'
+            sed -i "/^${p}_MAIL_SMTP_USERNAME=/d;/^${p}_MAIL_SMTP_PASSWORD=/d" "$file"
+          done
+          set_kv .env WF_IMAGE wf-backend
+          set_kv .env WF_API_DOMAIN api.wf.test
+          set_kv .env WF_ADMIN_DOMAIN admin.wf.test
+          set_kv .env WF_ACME_EMAIL ci@wf.test
+      # прод-файл держит встроенный режим выключенным: config на шаблоне .env.example, с оверлеем CI — тоже
+      - name: compose config — API_EMBED_WORKER у api = "false"
+        run: |
+          for files in '-f compose.yaml' '-f compose.yaml -f compose.ci.yaml'; do
+            # shellcheck disable=SC2086
+            docker compose --env-file .env.example $files config --format json |
+              jq -e '.services.api.environment.API_EMBED_WORKER == "false"' >/dev/null ||
+              { echo "::error::$files: у api API_EMBED_WORKER не \"false\""; exit 1; }
+          done
+      - name: подъём и исполнение фона — отдельный worker, затем встроенный в api
+        run: |
+          fail() { echo "::error::server ($run): $1"; exit 1; }
+          # журналы стека — при любом ненулевом выходе
+          trap 'rc=$?; [ "$rc" -eq 0 ] || docker compose $files logs --no-color || true; exit "$rc"' EXIT
+          # check <сервис с фоном>: /readyz через Caddy, журнал «воркер запущен», исполнилась периодика
+          check() {
+            local bg=$1 ok=
+            # migrate — первым и успешно (up --wait ждёт здоровья, migrate — выхода)
+            docker compose $files up -d --wait --wait-timeout 180 || fail "up --wait"
+            [ "$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose $files ps -aq migrate)")" = 0 ] ||
+              fail "migrate не 0"
+            docker compose $files exec -T caddy cat /data/caddy/pki/authorities/local/root.crt >root.crt
+            for host in api.wf.test admin.wf.test; do
+              ok=
+              for _ in $(seq 1 30); do
+                if curl -fsS --cacert root.crt --resolve "$host:443:127.0.0.1" "https://$host/readyz"; then
+                  ok=1
+                  break
+                fi
+                sleep 2
+              done
+              [ -n "$ok" ] || fail "https://$host/readyz за 60 с"
+            done
+            ok=
+            for _ in $(seq 1 30); do
+              if docker compose $files logs --no-color "$bg" | grep -q 'воркер запущен'; then
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            [ -n "$ok" ] || fail "в журнале $bg нет «воркер запущен» за 60 с"
+            if [ "$bg" = api ]; then
+              docker compose $files logs --no-color api | grep 'воркер запущен' | grep -q '"component":"worker"' ||
+                fail "«воркер запущен» у api без component=worker"
+            fi
+            # выборы лидера и RunOnStart периодики — до 120 с
+            ok=
+            for _ in $(seq 1 60); do
+              n=$(docker compose $files exec -T db psql -U postgres -d wf -tAc \
+                "SELECT count(*) FROM river_job WHERE kind = 'ratelimit.cleanup' AND state = 'completed'")
+              if [ "${n:-0}" -ge 1 ]; then ok=1; break; fi
+              sleep 2
+            done
+            [ -n "$ok" ] || fail "ratelimit.cleanup не дошла до completed за 120 с"
+          }
+          run=worker files='-f compose.yaml -f compose.ci.yaml'
+          check worker
+          docker compose $files down -v
+          run=embed files='-f compose.yaml -f compose.ci.yaml -f compose.ci-embed.yaml'
+          [ -z "$(docker compose $files config --services | grep -x worker)" ] || fail "сервис worker не выключен"
+          check api
+          docker compose $files down -v

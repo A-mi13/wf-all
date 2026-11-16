@@ -9,7 +9,8 @@
 | Go | 1.27.1 | `toolchain` в `backend/go.mod`, `backend/tools/go.mod`, `tools/go.mod`, `tools/lint/go.mod`, `tools/oasdiff/go.mod` |
 | Node.js | 26.10.0 | `devEngines.runtime` в корневом `package.json` |
 | pnpm | 12.6.0 | `packageManager` в корневом `package.json` |
-| PostgreSQL / PostGIS | 18.6 / 3.6.2 | `scripts/pg.sh` (локально, zip), `postgis/postgis:18-3.6` в CI |
+| PostgreSQL / PostGIS | 18.6 / 3.6.2 | `scripts/pg.sh` (локально, zip); `postgis/postgis:18-3.6` — CI и вариант базы на сервере (`deploy/server`: `compose.ci.yaml`, закомментированный `db` в `compose.yaml`) |
+| Caddy | 2.11.9 | образ `caddy:2.11.9-alpine` в `deploy/server/compose.yaml` (TLS и маршрут своего сервера); проверено 16.11.2026 по `caddy:2-alpine` |
 | Next.js / React | 16.4.3 / 19.3.1 | `apps/web/package.json`, catalog (`pnpm-workspace.yaml`) |
 | Vite / Vitest | 8.3.5 / 5.0.5 | catalog (`pnpm-workspace.yaml`) |
 | Playwright | 1.64.1 (Chromium 156.0.8078.4, WebKit 27.2) | `apps/web/package.json`, `apps/admin/package.json` (одна версия на репо: CI-кеш браузеров — по ней) |

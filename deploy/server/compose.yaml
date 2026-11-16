@@ -1,0 +1,131 @@
+# Свой сервер (спека 2026-11-16-embedded-worker §5): тот же образ, что на dev-стенде Render, — migrate, api, admin-api,
+# worker и Caddy (TLS и маршрутизация по доменам). Переход со стенда — правкой конфигурации, без правок кода:
+# подготовка, выкатка и порядок перехода — README.md рядом.
+#
+# Запуск из этого каталога: docker compose up -d (переменные уровня compose — .env, шаблон .env.example;
+# переменные бинарников — <сервис>.env, шаблоны <сервис>.env.example). База по умолчанию — Neon (строки в *.env);
+# вариант «база на сервере» — закомментированный сервис db ниже и раздел README.
+# Проверка в CI и локально — поверх этого файла compose.ci.yaml (база в compose, local_certs) и compose.ci-embed.yaml
+# (второй прогон: api со встроенным воркером); страж файлов — server_compose_test.go (config).
+
+name: wf
+
+# Общее для бинарников бэкенда: один образ, команда контейнера выбирает процесс (backend/Dockerfile).
+x-backend:
+  &backend # тег релиза из реестра; сервер — на том же коммите, что стенд (README, «Переход со стенда»)
+  image: ${WF_IMAGE:?WF_IMAGE — образ бэкенда с тегом релиза, см. .env.example}
+  restart: unless-stopped
+  # окно между SIGTERM и SIGKILL — как у Render (config.StopWindow 30 с); бюджет процессов — 25 с (config.StopBudget)
+  stop_grace_period: 30s
+  networks: [wf]
+
+# Живость — /healthz (процесс жив, базу не трогает), не /readyz: частые пробы не будят Neon free (m6).
+# В образе alpine нет curl — busybox wget.
+x-health: &health
+  interval: 15s
+  timeout: 5s
+  retries: 3
+  start_period: 60s
+
+services:
+  # Миграции и права ролей (grants) — разово перед сервисами; они стартуют только после успешного выхода.
+  migrate:
+    <<: *backend
+    command: ['migrate', 'up']
+    env_file: migrate.env
+    restart: 'no'
+
+  api:
+    <<: *backend
+    command: ['api']
+    env_file: api.env
+    environment:
+      # Встроенный воркер в проде запрещён (README, «Встроенный режим — только стенд»): фон исполняет отдельный
+      # сервис worker. Значение здесь перекрывает api.env; страж — TestServerComposeNoEmbeddedWorker и job server
+      # в .github/workflows/image.yml.
+      API_EMBED_WORKER: 'false'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      <<: *health
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/healthz']
+    # порты наружу не публикуются: снаружи — только Caddy
+
+  admin-api:
+    <<: *backend
+    command: ['admin-api']
+    env_file: admin-api.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      <<: *health
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8081/healthz']
+
+  # Фон: River, relay outbox, периодика. HTTP нет — без healthcheck; журнал старта — «воркер запущен».
+  worker:
+    <<: *backend
+    command: ['worker']
+    env_file: worker.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    # тег — docs/versions.md
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      # на сервере — 80/443; переменные — для локальной проверки, где порты хоста могут быть заняты
+      - '${WF_HTTP_PORT:-80}:80'
+      - '${WF_HTTPS_PORT:-443}:443'
+      - '${WF_HTTPS_PORT:-443}:443/udp'
+    environment:
+      WF_API_DOMAIN: ${WF_API_DOMAIN:?WF_API_DOMAIN — домен API, см. .env.example}
+      WF_ADMIN_DOMAIN: ${WF_ADMIN_DOMAIN:?WF_ADMIN_DOMAIN — домен админки, см. .env.example}
+      WF_ACME_EMAIL: ${WF_ACME_EMAIL:?WF_ACME_EMAIL — почта для ACME, см. .env.example}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # сертификаты и ключ ACME-учётки: том не удалять (лимиты выдачи Let's Encrypt)
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      admin-api:
+        condition: service_healthy
+    networks: [wf]
+
+  # Вариант «база на сервере» (не по умолчанию; README, «База на сервере»): раскомментировать, строки *.env — к db:5432,
+  # sslmode=disable (трафик внутри сети wf), migrate — depends_on db service_healthy, как в compose.ci.yaml.
+  # db:
+  #   image: postgis/postgis:18-3.6
+  #   restart: unless-stopped
+  #   stop_grace_period: 30s
+  #   environment:
+  #     POSTGRES_PASSWORD: <пароль-суперпользователя>
+  #   volumes:
+  #     - db_data:/var/lib/postgresql
+  #     # роли migrator/api/admin/worker и расширения; пароли ролей в 20_wf.sql — dev, на сервере сменить (README)
+  #     - ../dev/initdb:/docker-entrypoint-initdb.d:ro
+  #   healthcheck:
+  #     test: ['CMD', 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'wf']
+  #     interval: 2s
+  #     timeout: 3s
+  #     retries: 30
+  #   networks: [wf]
+
+# Фиксированная подсеть: её доверяют API_TRUSTED_PROXIES и ADMIN_TRUSTED_PROXIES (*.env.example) — X-Forwarded-For
+# принимается только от Caddy. Меняешь подсеть — меняй и их.
+networks:
+  wf:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+
+volumes:
+  caddy_data:
+  caddy_config:
+  # db_data:

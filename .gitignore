@@ -5,6 +5,10 @@ design/_export/
 .env
 # временные файлы ./task setup и scripts/env-keys.sh — с настоящими ключами
 .env.tmp*
+# рабочие env сервисов своего сервера (api.env, worker.env, …) — с секретами; шаблоны — *.env.example
+deploy/server/*.env
+# корень локального CA Caddy — пишут проверка в CI и README «Проверка локально»
+deploy/server/root.crt
 .tools/
 .task/
 node_modules/

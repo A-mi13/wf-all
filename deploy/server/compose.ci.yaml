@@ -1,0 +1,30 @@
+# Проверка compose.yaml в CI (job server в .github/workflows/image.yml) и локально (README, «Проверка локально»):
+# поверх основного файла — база в compose вместо Neon и сертификаты своего CA Caddy вместо ACME.
+# docker compose -f compose.yaml -f compose.ci.yaml …
+
+services:
+  # PostGIS той же линии, что CI бэкенда (docs/versions.md); роли и расширения — deploy/dev/initdb. Наружу не
+  # публикуется: внутри сети wf — db:5432.
+  db:
+    image: postgis/postgis:18-3.6
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ../dev/initdb:/docker-entrypoint-initdb.d:ro
+    # по TCP: на время initdb сервер слушает только сокет — готовность по TCP значит, что роли и база wf уже созданы
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'wf']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [wf]
+
+  migrate:
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    environment:
+      # глобальный блок Caddyfile: сертификаты локального CA (корень — /data/caddy/pki/authorities/local/root.crt)
+      WF_CADDY_CI_GLOBAL: local_certs

@@ -1,0 +1,21 @@
+# Caddy перед api и admin-api (спека 2026-11-16-embedded-worker §5): TLS автоматически (ACME), маршрут — по домену.
+# Домены и почта ACME — переменные compose (.env рядом с compose.yaml).
+#
+# Клиентский IP: Caddy без trusted_proxies ставит в X-Forwarded-For адрес своего пира (присланный клиентом заголовок
+# не продлевает) — api и admin-api верят ему только от подсети сети wf (API_TRUSTED_PROXIES, ADMIN_TRUSTED_PROXIES),
+# *_CLIENT_IP_HEADER пусто. С CDN впереди — trusted_proxies в блоке servers ниже (сети CDN) и *_CLIENT_IP_HEADER
+# у сервисов (README, «Клиентский IP»).
+{
+	email {$WF_ACME_EMAIL}
+	# Только проверка в CI и локально (compose.ci.yaml): local_certs — сертификаты своего CA вместо ACME.
+	# На сервере переменная не задаётся — строка пустая.
+	{$WF_CADDY_CI_GLOBAL}
+}
+
+{$WF_API_DOMAIN} {
+	reverse_proxy api:8080
+}
+
+{$WF_ADMIN_DOMAIN} {
+	reverse_proxy admin-api:8081
+}
