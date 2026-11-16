@@ -189,23 +189,40 @@ func (a *App) dummyPassword(ctx context.Context, pw string) error {
 // identity.account_blocked (blocked_until из ограничения бана) или errBlockedAsExpired; 2FA включена и не пройдена →
 // mfa_required (mfa_token на 5 минут, methods, reset_at); pending_deletion → deletion_pending (restore_token на 10
 // минут, без сессии); иначе — сессия (mfa_at = now при mfaDone), связь с устройством, security_events (login), хук
-// отмены сброса 2FA при mfaDone. deleted сюда не доходит (errAccountDeleted). Вызывающий держит lockUser; строка
+// отмены сброса 2FA при mfaDone. deleted и pending_deletion с наступившим purge_at (срок отмены вышел, анонимизация
+// ещё не прошла — §3.11 п. 2, m4 ревью 2) сюда не доходят (errAccountDeleted). Вызывающий держит lockUser; строка
 // перечитывается под замком — статус между шагами мог смениться.
 func (a *App) finishLogin(ctx context.Context, tx pgx.Tx, u userRow, c Client, deviceID uuid.UUID,
 	method domain.AuthMethod, mfaDone, blockedAsExpired bool) (LoginOutcome, error) {
+	return a.finishLoginAs(ctx, tx, u, c, deviceID, method, mfaDone, blockedAsExpired, journalLogin)
+}
+
+// loginJournal — запись журнала безопасности о выданной сессии: вход (login, meta с признаком второго фактора) или
+// регистрация (signup: устройство отмечается signed_up, meta без mfa — как до перевода регистрации на ядро, m1 ревью 2).
+type loginJournal int
+
+const (
+	journalLogin loginJournal = iota
+	journalSignup
+)
+
+// finishLoginAs — finishLogin с видом журнала; единственное место, где выдаётся сессия (страж
+// TestIssueSessionOnlyInFinishLogin).
+func (a *App) finishLoginAs(ctx context.Context, tx pgx.Tx, u userRow, c Client, deviceID uuid.UUID,
+	method domain.AuthMethod, mfaDone, blockedAsExpired bool, journal loginJournal) (LoginOutcome, error) {
 	u, err := a.lockUser(ctx, tx, u.ID)
 	if err != nil {
 		return LoginOutcome{}, err
 	}
 	q := identitydb.New(tx)
 	brief := UserBrief{ID: u.ID, Nickname: u.Nickname, Status: string(u.Status), Locale: u.Locale}
-	switch u.Status {
-	case identitydb.UserStatusBanned:
+	switch {
+	case u.Status == identitydb.UserStatusBanned:
 		if blockedAsExpired {
 			return LoginOutcome{}, errBlockedAsExpired
 		}
 		return LoginOutcome{}, a.accountBlocked(ctx, q, u.ID)
-	case identitydb.UserStatusDeleted:
+	case u.Status == identitydb.UserStatusDeleted || a.purgeDue(u.Status, u.PurgeAt):
 		return LoginOutcome{}, errAccountDeleted
 	}
 	var dev *uuid.UUID
@@ -242,12 +259,16 @@ func (a *App) finishLogin(ctx context.Context, tx pgx.Tx, u userRow, c Client, d
 	if err != nil {
 		return LoginOutcome{}, err
 	}
-	if err := a.linkDevice(ctx, tx, deviceID, u.ID, false); err != nil {
+	signup := journal == journalSignup
+	if err := a.linkDevice(ctx, tx, deviceID, u.ID, signup); err != nil {
 		return LoginOutcome{}, err
 	}
-	if _, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: u.ID, Kind: domain.SecLogin, SessionID: issued.SessionID,
-		DeviceID: deviceID, IP: c.IP, UserAgent: c.UserAgent,
-		Meta: map[string]any{"method": string(method), "mfa": mfaDone, "client_kind": string(c.Kind)}}); err != nil {
+	ev := SecurityEvent{UserID: u.ID, Kind: domain.SecLogin, SessionID: issued.SessionID, DeviceID: deviceID, IP: c.IP,
+		UserAgent: c.UserAgent, Meta: map[string]any{"method": string(method), "mfa": mfaDone, "client_kind": string(c.Kind)}}
+	if signup {
+		ev.Kind, ev.Meta = domain.SecSignup, map[string]any{"method": string(method), "client_kind": string(c.Kind)}
+	}
+	if _, err := a.securityEvent(ctx, tx, ev); err != nil {
 		return LoginOutcome{}, err
 	}
 	if mfaDone {
@@ -256,6 +277,12 @@ func (a *App) finishLogin(ctx context.Context, tx pgx.Tx, u userRow, c Client, d
 		}
 	}
 	return LoginOutcome{Status: StatusAuthenticated, Issued: &issued, User: brief}, nil
+}
+
+// purgeDue — срок отмены удаления вышел: pending_deletion и purge_at ≤ now (ровно purge_at — уже нельзя, §3.11 п. 2).
+// Такой аккаунт до прогона анонимизации для входа и отмены — как удалённый.
+func (a *App) purgeDue(status identitydb.UserStatus, purgeAt *time.Time) bool {
+	return status == identitydb.UserStatusPendingDeletion && purgeAt != nil && !a.clock.Now().Before(*purgeAt)
 }
 
 // mfaStep — шаг 2FA: mfa_token, способы (passkey — при ключах у аккаунта и флаге auth_passkeys_login) и срок живого

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"testing"
@@ -247,4 +248,81 @@ func TestLogout(t *testing.T) {
 	if n := count(t, e.owner, `SELECT count(*) FROM outbox WHERE event_type = $1`, identity.EventSessionsRevoked); n != 1 {
 		t.Fatalf("событий %d", n)
 	}
+}
+
+// m5 ревью 2: устройство сессии с MAC под старым ключом кольца — успешная ротация refresh с тем же install_id (у веба —
+// метка BFF) переписывает MAC текущим ключом; после удаления старого ключа из кольца повтор в окне с того же
+// устройства — тот же преемник, а не отзыв. Чужой install_id и другой вид клиента MAC не трогают.
+func TestRefreshRekeysDeviceMAC(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+	old := e.devKeys[0]
+	cur := genKey(t)
+	type devRow struct {
+		keyID string
+		mac   []byte
+	}
+	deviceOfSession := func(sid uuid.UUID) devRow {
+		var r devRow
+		if err := e.owner.QueryRow(ctx, `SELECT d.key_id, d.install_mac FROM sessions s JOIN devices d ON d.id = s.device_id
+			WHERE s.id = $1`, sid).Scan(&r.keyID, &r.mac); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	for name, c := range map[string]struct {
+		client  Client
+		install string
+	}{
+		"мобильный": {iphone, installID},
+		"веб":       {web("label-rekey"), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e.a.devices = newRing(t, old)
+			_, is := loggedIn(t, e, "rekey_"+uuid.NewString()[:8], c.client)
+			oldID := e.a.devices.CurrentID()
+			e.a.devices = newRing(t, cur, old)
+			p1, err := e.a.Refresh(ctx, is.Tokens.Refresh, c.install, c.client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			platform, presented, _, _, _, _ := deviceOf(c.client)
+			if c.client.Kind != domain.ClientWeb {
+				presented = c.install
+			}
+			want, err := e.a.deviceMAC(e.a.devices.CurrentID(), platform, presented)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := deviceOfSession(is.SessionID); got.keyID != e.a.devices.CurrentID() || !bytes.Equal(got.mac, want) {
+				t.Fatalf("MAC не переписан текущим ключом: key_id %s (старый %s)", got.keyID, oldID)
+			}
+			e.a.devices = newRing(t, cur) // старый ключ убран из кольца
+			p2, err := e.a.Refresh(ctx, is.Tokens.Refresh, c.install, c.client)
+			if err != nil || p2.Refresh != p1.Refresh {
+				t.Fatalf("повтор в окне после удаления ключа: %+v %v", p2, err)
+			}
+			if r := revokedReason(t, e, is.SessionID); r != "" {
+				t.Fatalf("сессия отозвана: %q", r)
+			}
+		})
+	}
+	t.Run("чужой install_id и другой вид клиента — MAC не трогается", func(t *testing.T) {
+		for _, other := range []struct {
+			client  Client
+			install string
+		}{{iphone, "11111111-2222-3333-4444-555555555555"}, {web("label-rekey"), ""}} {
+			e.a.devices = newRing(t, old)
+			_, is := loggedIn(t, e, "rekey_no_"+uuid.NewString()[:8], iphone)
+			oldID := e.a.devices.CurrentID()
+			e.a.devices = newRing(t, cur, old)
+			if _, err := e.a.Refresh(ctx, is.Tokens.Refresh, other.install, other.client); err != nil {
+				t.Fatal(err)
+			}
+			if got := deviceOfSession(is.SessionID); got.keyID != oldID {
+				t.Fatalf("MAC переписан по чужому устройству: %s", got.keyID)
+			}
+		}
+	})
 }

@@ -85,8 +85,10 @@ func (a *App) Login(ctx context.Context, email, pw string, c Client) (AuthOutcom
 
 	user, err := identitydb.New(a.pool).LoginFindUser(ctx, norm)
 	switch {
-	case errors.Is(err, pgx.ErrNoRows) || (err == nil && user.Status == identitydb.UserStatusDeleted):
-		// нет аккаунта и анонимизированный — одна ветка: та же работа argon2, журнала нет (§9.1)
+	case errors.Is(err, pgx.ErrNoRows) || (err == nil && (user.Status == identitydb.UserStatusDeleted ||
+		a.purgeDue(user.Status, user.PurgeAt))):
+		// нет аккаунта, анонимизированный и с вышедшим сроком отмены удаления (m4 ревью 2) — одна ветка: та же работа
+		// argon2, журнала нет (§9.1)
 		if err := a.dummyPassword(ctx, pw); err != nil {
 			return AuthOutcome{}, err
 		}
@@ -174,23 +176,23 @@ func (a *App) DocumentsRequired(ctx context.Context, userID uuid.UUID) (bool, er
 	return a.documentsRequired(ctx, identitydb.New(a.pool), userID)
 }
 
-// documentsRequired — DocumentsRequired запросом q (пул или tx вызывающего).
+// documentsRequired — DocumentsRequired запросом q (пул или tx вызывающего). Правило одно с me (m2 ревью 2):
+// последняя принятая версия документа (latestConsents) ≠ текущей — принять нужно (consentsOutdated).
 func (a *App) documentsRequired(ctx context.Context, q *identitydb.Queries, userID uuid.UUID) (bool, error) {
-	rows, err := q.LoginConsents(ctx, userID)
+	accepted, err := a.latestConsents(ctx, q, userID)
 	if err != nil {
-		return false, fmt.Errorf("identity: согласия: %w", err)
+		return false, err
 	}
-	for _, doc := range a.legal.Items() {
-		found := false
-		for _, r := range rows {
-			if r.Document == string(doc.Document) && r.Version == doc.Version {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return true, nil
+	return a.consentsOutdated(accepted), nil
+}
+
+// consentsOutdated — хотя бы у одного документа API_LEGAL_DOCUMENTS последняя принятая версия не текущая (или не
+// принята никакая): вход, сброс пароля, второй шаг, отмена удаления и me считают одним правилом.
+func (a *App) consentsOutdated(accepted map[domain.Document]string) bool {
+	for _, d := range a.legal.Items() {
+		if ver, ok := accepted[d.Document]; !ok || ver != d.Version {
+			return true
 		}
 	}
-	return false, nil
+	return false
 }

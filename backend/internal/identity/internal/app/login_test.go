@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"wf/backend/internal/identity"
+	"wf/backend/internal/identity/internal/store/identitydb"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/humancheck"
 	"wf/backend/internal/platform/password"
@@ -375,5 +376,39 @@ func TestLoginLimiterFailureFailsClosed(t *testing.T) {
 				t.Fatalf("журнал %d", n)
 			}
 		})
+	}
+}
+
+// m2 ревью 2: «документы нужно принять» — одно правило для входа и me: последняя принятая версия (accepted_at).
+// terms принят в текущей 2026-11-01, позже — в другой версии (откат конфига): и вход, и me требуют принятия.
+func TestDocumentsRequiredSameAsMe(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid := loginUser(t, e, "docs_same")
+	t1 := e.clock.Now().Add(-48 * time.Hour)
+	for _, c := range []struct {
+		doc, ver string
+		at       time.Time
+	}{
+		{"terms", "2026-11-01", t1}, {"terms", "2026-12-01", t1.Add(time.Hour)}, {"privacy", "2026-11-01", t1},
+	} {
+		if _, err := e.owner.Exec(context.Background(), `INSERT INTO consents (user_id, document, version, accepted_at, client_kind)
+			VALUES ($1, $2, $3, $4, 'mobile')`, uid, c.doc, c.ver, c.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := e.a.Login(context.Background(), "docs_same@example.com", "secret", iphone)
+	if err != nil || out.Status != StatusAuthenticated {
+		t.Fatalf("%+v %v", out, err)
+	}
+	me, err := e.a.me(context.Background(), identitydb.New(e.a.pool), uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !me.DocumentsAcceptanceRequired || out.DocumentsRequired != me.DocumentsAcceptanceRequired {
+		t.Fatalf("вход %v, me %v — правила разошлись", out.DocumentsRequired, me.DocumentsAcceptanceRequired)
+	}
+	if req, err := e.a.DocumentsRequired(context.Background(), uid); err != nil || !req {
+		t.Fatalf("DocumentsRequired: %v %v", req, err)
 	}
 }

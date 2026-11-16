@@ -7,56 +7,29 @@ package identitydb
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
-const loginConsents = `-- name: LoginConsents :many
-SELECT document::text AS document, version FROM consents WHERE user_id = $1
-`
-
-type LoginConsentsRow struct {
-	Document string
-	Version  string
-}
-
-// принятые версии документов аккаунта: documents_acceptance_required результата входа (§3.16)
-func (q *Queries) LoginConsents(ctx context.Context, userID uuid.UUID) ([]LoginConsentsRow, error) {
-	rows, err := q.db.Query(ctx, loginConsents, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []LoginConsentsRow
-	for rows.Next() {
-		var i LoginConsentsRow
-		if err := rows.Scan(&i.Document, &i.Version); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const loginFindUser = `-- name: LoginFindUser :one
 
-SELECT id, status FROM users WHERE email = $1
+SELECT id, status, purge_at FROM users WHERE email = $1
 `
 
 type LoginFindUserRow struct {
-	ID     uuid.UUID
-	Status UserStatus
+	ID      uuid.UUID
+	Status  UserStatus
+	PurgeAt *time.Time
 }
 
 // Вход по почте и паролю (спека identity §3.2; план I-2, Task 11). Аккаунт ищется пулом без замка — argon2 вне
 // транзакции (R31); замок users и перепроверка хэша — в транзакции входа.
-// почта — каноническая форма emailaddr.Normalize (users.email citext)
+// почта — каноническая форма emailaddr.Normalize (users.email citext); purge_at — срок отмены удаления (вышел — как
+// deleted, m4 ревью 2)
 func (q *Queries) LoginFindUser(ctx context.Context, email string) (LoginFindUserRow, error) {
 	row := q.db.QueryRow(ctx, loginFindUser, email)
 	var i LoginFindUserRow
-	err := row.Scan(&i.ID, &i.Status)
+	err := row.Scan(&i.ID, &i.Status, &i.PurgeAt)
 	return i, err
 }

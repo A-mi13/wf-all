@@ -72,6 +72,37 @@ func (q *Queries) RefreshLockToken(ctx context.Context, id uuid.UUID) (RefreshTo
 	return i, err
 }
 
+const refreshRekeyDevice = `-- name: RefreshRekeyDevice :execrows
+UPDATE devices AS dv SET install_mac = $1, key_id = $2
+WHERE dv.id = $3 AND dv.key_id = $4 AND dv.install_mac = $5
+  AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.platform = dv.platform AND d.install_mac = $1)
+`
+
+type RefreshRekeyDeviceParams struct {
+	InstallMac []byte
+	KeyID      string
+	ID         uuid.UUID
+	OldKeyID   string
+	OldMac     []byte
+}
+
+// m5 ревью 2: MAC устройства под старым ключом кольца, сверенный при ротации refresh, — переписать текущим ключом
+// (иначе после удаления ключа из кольца повтор в окне считается чужим). Условно: строка ещё под тем же ключом и MAC,
+// пары (platform, новый MAC) нет у другой строки — 23505 оборвал бы ротацию; не переписалось — ротация не страдает.
+func (q *Queries) RefreshRekeyDevice(ctx context.Context, arg RefreshRekeyDeviceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, refreshRekeyDevice,
+		arg.InstallMac,
+		arg.KeyID,
+		arg.ID,
+		arg.OldKeyID,
+		arg.OldMac,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const refreshRotate = `-- name: RefreshRotate :exec
 UPDATE refresh_tokens
 SET used_at = $1, successor_id = $2, successor_enc = $3, successor_until = $4

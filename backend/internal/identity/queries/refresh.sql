@@ -25,3 +25,11 @@ SELECT platform, install_mac, key_id FROM devices WHERE id = $1;
 
 -- name: RefreshTouchDevice :exec
 UPDATE devices SET last_seen_at = @now WHERE id = @id;
+
+-- name: RefreshRekeyDevice :execrows
+-- m5 ревью 2: MAC устройства под старым ключом кольца, сверенный при ротации refresh, — переписать текущим ключом
+-- (иначе после удаления ключа из кольца повтор в окне считается чужим). Условно: строка ещё под тем же ключом и MAC,
+-- пары (platform, новый MAC) нет у другой строки — 23505 оборвал бы ротацию; не переписалось — ротация не страдает.
+UPDATE devices AS dv SET install_mac = @install_mac, key_id = @key_id
+WHERE dv.id = @id AND dv.key_id = @old_key_id AND dv.install_mac = @old_mac
+  AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.platform = dv.platform AND d.install_mac = @install_mac);

@@ -4,6 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"go/ast"
+	"go/parser"
+	gotoken "go/token"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -555,5 +560,47 @@ func TestMfaChallengeMethods(t *testing.T) {
 	}
 	if got := methods().ResetAt; got == nil || !got.Equal(at) {
 		t.Fatalf("reset_at %v", got)
+	}
+}
+
+// m1 ревью 2 (R6): сессию выдаёт только ядро входа — issueSession вызывается из одной функции finishLoginAs
+// (регистрация, вход, сброс пароля, второй шаг, отмена удаления идут через неё).
+func TestIssueSessionOnlyInFinishLogin(t *testing.T) {
+	t.Parallel()
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := gotoken.NewFileSet()
+	var callers []string
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := parser.ParseFile(fset, f, src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range file.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok {
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "issueSession" {
+						callers = append(callers, f+":"+fn.Name.Name)
+					}
+				}
+				return true
+			})
+		}
+	}
+	if !slices.Equal(callers, []string{"login_core.go:finishLoginAs"}) {
+		t.Fatalf("issueSession вызывают %v — сессия только через finishLogin", callers)
 	}
 }

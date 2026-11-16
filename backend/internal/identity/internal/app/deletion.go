@@ -17,6 +17,7 @@ import (
 	"wf/backend/internal/identity"
 	"wf/backend/internal/identity/internal/domain"
 	"wf/backend/internal/identity/internal/store/identitydb"
+	"wf/backend/internal/platform/audit"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/httpx"
@@ -99,7 +100,8 @@ func sameNickname(confirm, nick string) bool {
 }
 
 // cancelMfaResetsBySystem — живой сброс 2FA поддержкой отменяется системой (m4): событие mfa_reset_cancelled
-// (версия агрегата 2), письма нет. Строки mfa_resets — после users и sessions (R30).
+// (версия агрегата 2) и аудит identity.mfa_reset_cancelled с автором system (§8.3, m4 ревью 3), письма нет. Строки
+// mfa_resets — после users и sessions (R30).
 func (a *App) cancelMfaResetsBySystem(ctx context.Context, q *identitydb.Queries, userID uuid.UUID) error {
 	now := a.clock.Now()
 	rows, err := q.DeletionCancelMfaResets(ctx, identitydb.DeletionCancelMfaResetsParams{Now: &now, UserID: userID})
@@ -111,14 +113,19 @@ func (a *App) cancelMfaResetsBySystem(ctx context.Context, q *identitydb.Queries
 			r.ExecuteAt)); err != nil {
 			return err
 		}
+		if err := audit.Write(ctx, audit.Entry{ActorRole: roleSystem, ActorLabel: roleSystem,
+			Action: ActionMfaResetCancelled, ObjectType: objectUser, ObjectID: userID,
+			After: map[string]any{"reset_id": r.ID, "cancelled_by": roleSystem}}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // CancelDeletion — отмена удаления по restore_token (§3.11 п. 2): takeChallenge(deletion_restore) приёмом R30 (users
 // раньше FOR UPDATE вызова) — нет, истёк или погашен → 410 restore_token_invalid; мобильный без device → 422; аккаунт
-// уже не pending_deletion (анонимизирован) → 410; клиент не тот, что на первом шаге (stepClientMatches: вид клиента,
-// устройство мобильного) → 410 без записей. Иначе прежний статус (active | suspended — решение пользователя
+// уже не pending_deletion (анонимизирован) или purge_at наступил (срок вышел, m4 ревью 2) → 410; клиент не тот, что
+// на первом шаге (stepClientMatches: вид клиента, устройство мобильного) → 410 без записей. Иначе прежний статус (active | suspended — решение пользователя
 // 15.11), поля удаления — NULL, событие
 // user_deletion_cancelled, журнал и письмо account_restored, аудит, токен погашен и сессия через finishLogin (способ и
 // второй фактор — из data вызова); documents_acceptance_required — в той же транзакции (m1).
@@ -146,8 +153,8 @@ func (a *App) CancelDeletion(ctx context.Context, raw string, c Client) (AuthOut
 		if err != nil {
 			return err
 		}
-		if u.Status != identitydb.UserStatusPendingDeletion {
-			return errRestoreTokenInvalid
+		if u.Status != identitydb.UserStatusPendingDeletion || a.purgeDue(u.Status, u.PurgeAt) {
+			return errRestoreTokenInvalid // m4 ревью 2: ровно purge_at и позже — срок отмены вышел
 		}
 		var data challengeData
 		if err := json.Unmarshal(ch.Data, &data); err != nil {

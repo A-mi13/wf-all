@@ -2,9 +2,6 @@
 -- транзакции (R31); замок users и перепроверка хэша — в транзакции входа.
 
 -- name: LoginFindUser :one
--- почта — каноническая форма emailaddr.Normalize (users.email citext)
-SELECT id, status FROM users WHERE email = @email;
-
--- name: LoginConsents :many
--- принятые версии документов аккаунта: documents_acceptance_required результата входа (§3.16)
-SELECT document::text AS document, version FROM consents WHERE user_id = @user_id;
+-- почта — каноническая форма emailaddr.Normalize (users.email citext); purge_at — срок отмены удаления (вышел — как
+-- deleted, m4 ревью 2)
+SELECT id, status, purge_at FROM users WHERE email = @email;

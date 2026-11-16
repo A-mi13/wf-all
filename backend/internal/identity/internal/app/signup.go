@@ -297,8 +297,9 @@ func eventPlatform(c Client) string {
 
 // ConfirmSignup — аккаунт и сессия по коду (§3.1 п. 3): сверка без погашения (CodeVerifyOnly; неудача коммитится);
 // ник перепроверяется — занят: 409 без траты попытки и без погашения (клиент присылает новый nickname); затем одна tx:
-// погашение кода, users, credentials, consents, устройство (signups + 1, signed_up), сессия, журнал signup, событие
-// identity.user_registered, аудит. Гонка почты (23505 users_email_key) — 409 email_taken, ника — 409 nickname_taken.
+// погашение кода, users, credentials, consents, устройство (signups + 1), сессия через ядро входа (finishLoginAs:
+// журнал signup, signed_up), событие identity.user_registered, аудит. Гонка почты (23505 users_email_key) — 409
+// email_taken, ника — 409 nickname_taken.
 func (a *App) ConfirmSignup(ctx context.Context, in ConfirmInput, c Client) (AuthOutcome, error) {
 	if err := a.requireDevice(c); err != nil {
 		return AuthOutcome{}, err
@@ -376,17 +377,13 @@ func (a *App) ConfirmSignup(ctx context.Context, in ConfirmInput, c Client) (Aut
 		if err := a.countSignup(ctx, tx, dev); err != nil {
 			return err
 		}
-		issued, err := a.issueSession(ctx, tx, uid, dev, c, domain.MethodPassword, nil)
-		if err != nil {
+		// сессия — через ядро входа (R6, m1 ревью 2): журнал signup, устройство signed_up; новый аккаунт — active без 2FA
+		if out.LoginOutcome, err = a.finishLoginAs(ctx, tx, u, c, dev, domain.MethodPassword, false, false,
+			journalSignup); err != nil {
 			return err
 		}
-		if err := a.linkDevice(ctx, tx, dev, uid, true); err != nil {
-			return err
-		}
-		if _, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: uid, Kind: domain.SecSignup, SessionID: issued.SessionID,
-			DeviceID: dev, IP: c.IP, UserAgent: c.UserAgent,
-			Meta: map[string]any{"method": string(domain.MethodPassword), "client_kind": string(c.Kind)}}); err != nil {
-			return err
+		if out.Status != StatusAuthenticated {
+			return fmt.Errorf("identity: регистрация без сессии: %s", out.Status)
 		}
 		if _, err := events.Publish(ctx, identity.UserRegistered(identity.UserRef{ID: uid, Version: u.Version}, city,
 			string(domain.MethodPassword), eventPlatform(c))); err != nil {
@@ -396,8 +393,6 @@ func (a *App) ConfirmSignup(ctx context.Context, in ConfirmInput, c Client) (Aut
 			"client_kind": string(c.Kind)}); err != nil {
 			return err
 		}
-		out.LoginOutcome = LoginOutcome{Status: StatusAuthenticated, Issued: &issued,
-			User: UserBrief{ID: uid, Nickname: nick, Status: string(u.Status), Locale: u.Locale}}
 		// согласия аккаунта — ровно принятые при старте: устарели к подтверждению — экран согласия (m6, §3.16)
 		out.DocumentsRequired = a.legal.Check(p.Accepted) != nil
 		return nil

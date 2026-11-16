@@ -28,7 +28,8 @@ var errRefreshInvalid = httpx.NewError(http.StatusUnauthorized, identity.CodeRef
 // UPDATE с перепроверкой (порядок «сессия → users» на ветке повтора дал бы 40P01 с deleteAccount). Сессия отозвана,
 // истекла (now ≥ idle или absolute, часы приложения) или аккаунт не active|suspended — 401 identity.refresh_invalid.
 // Токен не использован — новый токен, used_at/successor_id/successor_enc (token.SealSuccessor)/successor_until =
-// now + 15 с, продление только idle (не дальше absolute), last_seen_at сессии и устройства, новый access.
+// now + 15 с, продление только idle (не дальше absolute), last_seen_at сессии и устройства, новый access; MAC
+// устройства сессии под старым ключом кольца — текущим (rekeyDevice, m5 ревью 2).
 // Использован, now < successor_until и устройство то же (HMAC platform ‖ install_id мобильного — платформа из строки
 // devices сессии, или метка BFF веба) — тот же преемник (token.OpenSuccessor). Иначе — повтор: отзыв сессии
 // (refresh_reuse), security_events, письмо session_revoked_suspicious, коммит и 401.
@@ -76,8 +77,10 @@ func (a *App) Refresh(ctx context.Context, raw, installID string, c Client) (Tok
 			return errRefreshInvalid
 		}
 		if tok.UsedAt == nil {
-			pair, err = a.rotate(ctx, tx, sess, tok, raw)
-			return err
+			if pair, err = a.rotate(ctx, tx, sess, tok, raw); err != nil {
+				return err
+			}
+			return a.rekeyDevice(ctx, tx, sess, installID, c)
 		}
 		same, err := a.sameDevice(ctx, tx, sess, installID, c)
 		if err != nil {
@@ -157,28 +160,57 @@ func (a *App) rotate(ctx context.Context, tx pgx.Tx, sess sessionRow, tok identi
 // devices) от platform ‖ install_id тела (мобильный) или метки BFF (веб) равен install_mac. Сессия без устройства
 // (веб без метки, R18) — сравнить не с чем: «другое» (BFF сам схлопывает обновления сессии).
 func (a *App) sameDevice(ctx context.Context, tx pgx.Tx, sess sessionRow, installID string, c Client) (bool, error) {
+	_, _, same, err := a.sessionDevice(ctx, tx, sess, installID, c)
+	return same, err
+}
+
+// sessionDevice — строка devices сессии и предъявленный идентификатор (install_id мобильного или метка BFF веба);
+// same — устройство то же (правила sameDevice). same=false — строка и идентификатор не используются.
+func (a *App) sessionDevice(ctx context.Context, tx pgx.Tx, sess sessionRow, installID string,
+	c Client) (dev identitydb.RefreshDeviceRow, presented string, same bool, err error) {
 	if sess.DeviceID == nil || domain.ClientKind(sess.ClientKind) != c.Kind {
-		return false, nil
+		return dev, "", false, nil
 	}
-	presented := installID
+	presented = installID
 	if c.Kind == domain.ClientWeb {
 		presented = c.BFFDevice
 	}
 	if presented == "" {
-		return false, nil
+		return dev, "", false, nil
 	}
-	dev, err := identitydb.New(tx).RefreshDevice(ctx, *sess.DeviceID)
+	dev, err = identitydb.New(tx).RefreshDevice(ctx, *sess.DeviceID)
 	if err != nil {
-		return false, fmt.Errorf("identity: устройство сессии: %w", err)
+		return dev, "", false, fmt.Errorf("identity: устройство сессии: %w", err)
 	}
 	if !a.devices.Has(dev.KeyID) {
-		return false, nil
+		return dev, "", false, nil
 	}
 	mac, err := a.deviceMAC(dev.KeyID, dev.Platform, presented)
 	if err != nil {
-		return false, err
+		return dev, "", false, err
 	}
-	return hmac.Equal(mac, dev.InstallMac), nil
+	return dev, presented, hmac.Equal(mac, dev.InstallMac), nil
+}
+
+// rekeyDevice — m5 ревью 2: ротация с устройства сессии, MAC которого сверен под старым ключом кольца, переписывает
+// MAC текущим ключом (devices — после refresh_tokens, R30). Без этого после удаления старого ключа из кольца
+// повтор в окне гонки с того же устройства считался бы чужим и отзывал сессию. Чужой идентификатор, другой вид
+// клиента, ключ уже текущий — ничего; условная запись не переписалась (строку сменили, MAC занят) — тоже ничего.
+func (a *App) rekeyDevice(ctx context.Context, tx pgx.Tx, sess sessionRow, installID string, c Client) error {
+	dev, presented, same, err := a.sessionDevice(ctx, tx, sess, installID, c)
+	cur := a.devices.CurrentID()
+	if err != nil || !same || dev.KeyID == cur {
+		return err
+	}
+	mac, err := a.deviceMAC(cur, dev.Platform, presented)
+	if err != nil {
+		return err
+	}
+	if _, err := identitydb.New(tx).RefreshRekeyDevice(ctx, identitydb.RefreshRekeyDeviceParams{InstallMac: mac,
+		KeyID: cur, ID: *sess.DeviceID, OldKeyID: dev.KeyID, OldMac: dev.InstallMac}); err != nil {
+		return fmt.Errorf("identity: MAC устройства текущим ключом: %w", err)
+	}
+	return nil
 }
 
 // refreshReused — повтор: сессия отозвана (refresh_reuse, событие и версия — revokeSession), журнал, письмо;

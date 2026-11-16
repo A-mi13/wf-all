@@ -144,11 +144,9 @@ func (a *App) me(ctx context.Context, q *identitydb.Queries, userID uuid.UUID) (
 		if ver, ok := accepted[d.Document]; ok {
 			dv.AcceptedVersion = &ver
 		}
-		if dv.AcceptedVersion == nil || *dv.AcceptedVersion != d.Version {
-			v.DocumentsAcceptanceRequired = true
-		}
 		v.Documents = append(v.Documents, dv)
 	}
+	v.DocumentsAcceptanceRequired = a.consentsOutdated(accepted) // одно правило со входом (m2 ревью 2)
 	return v, nil
 }
 

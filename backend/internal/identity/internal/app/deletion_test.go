@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -231,6 +232,18 @@ func TestDeleteAccountClosesCodesAndReset(t *testing.T) {
 	if n := count(t, e.owner, `SELECT count(*) FROM river_job WHERE args->>'mail' = $1`, MailMfaResetCancelled); n != 0 {
 		t.Fatal("письмо об отмене сброса системой")
 	}
+	mfaResetCancelledBySystemAudit(t, e, uid)
+}
+
+// mfaResetCancelledBySystemAudit — m4 ревью 3, §8.3: системная отмена сброса 2FA — аудит identity.mfa_reset_cancelled
+// с автором system, объект — аккаунт, cancelled_by = system.
+func mfaResetCancelledBySystemAudit(t *testing.T, e *env, uid uuid.UUID) {
+	t.Helper()
+	if n := count(t, e.owner, `SELECT count(*) FROM audit_log WHERE action = $1 AND actor_role = 'system'
+		AND actor_user_id IS NULL AND actor_staff_id IS NULL AND object_id = $2 AND after->>'cancelled_by' = 'system'
+		AND after->>'reset_id' IS NOT NULL`, ActionMfaResetCancelled, uid); n != 1 {
+		t.Fatalf("аудит системной отмены сброса 2FA: %d", n)
+	}
 }
 
 // §3.11 п. 2: вход в период — deletion_pending без сессии; cancelDeletion — active, сессия, событие, письмо, аудит.
@@ -456,7 +469,9 @@ func TestAnonymizeMailAfterCleanup(t *testing.T) {
 }
 
 // Гонка отмены и анонимизации при purge_at = now: отмена держит строку users — анонимизация её пропускает
-// (SKIP LOCKED, не ждёт); анонимизация первой — отмена отвечает 410. Ровно один исход.
+// (SKIP LOCKED, не ждёт), а отмена ровно в purge_at — уже 410 (срок вышел, m4 ревью 2): аккаунт остаётся
+// pending_deletion и анонимизируется следующим прогоном; анонимизация первой — отмена отвечает 410. Восстановления
+// после срока нет ни в одном порядке.
 func TestAnonymizeVsCancelRace(t *testing.T) {
 	t.Parallel()
 	t.Run("отмена держит замок", func(t *testing.T) {
@@ -496,16 +511,19 @@ func TestAnonymizeVsCancelRace(t *testing.T) {
 			anonN, anonErr = anonymizeDone(w, 10)
 			close(anonDone)
 		})
-		got, err := e.a.CancelDeletion(context.Background(), out.RestoreToken, web("a"))
+		_, err = e.a.CancelDeletion(context.Background(), out.RestoreToken, web("a"))
 		wg.Wait()
-		if anonErr != nil || err != nil || got.Status != StatusAuthenticated {
-			t.Fatalf("отмена %+v %v, анонимизация %d %v", got, err, anonN, anonErr)
+		if anonErr != nil || problemCode(err) != identity.CodeRestoreTokenInvalid {
+			t.Fatalf("отмена ровно в purge_at: %v, анонимизация %d %v", err, anonN, anonErr)
 		}
 		if anonWaited {
 			t.Fatal("анонимизация ждала замок отмены — нет SKIP LOCKED")
 		}
-		if anonN != 0 || count(t, e.owner, `SELECT count(*) FROM users WHERE id = $1 AND status = 'active'`, uid) != 1 {
-			t.Fatalf("два исхода: анонимизировано %d, статус не active", anonN)
+		if anonN != 0 || count(t, e.owner, `SELECT count(*) FROM users WHERE id = $1 AND status = 'pending_deletion'`, uid) != 1 {
+			t.Fatalf("анонимизировано под замком отмены %d или статус сменился", anonN)
+		}
+		if n, err := anonymizeDone(w, 10); err != nil || n != 1 {
+			t.Fatalf("следующий прогон анонимизации: %d %v", n, err)
 		}
 	})
 	t.Run("анонимизация первой", func(t *testing.T) {
@@ -707,6 +725,7 @@ func TestAnonymizeCancelsMfaReset(t *testing.T) {
 	if n := count(t, e.owner, `SELECT count(*) FROM river_job WHERE args->>'mail' = $1`, MailMfaResetCancelled); n != 0 {
 		t.Fatal("письмо об отмене сброса системой")
 	}
+	mfaResetCancelledBySystemAudit(t, e, uid)
 }
 
 // m8: batch = 2, две отравленные строки старше нормальной — первая пачка выбирает обе и обе падают; со skip упавших
@@ -775,5 +794,64 @@ func TestCancelDeletionClientMismatch(t *testing.T) {
 	}
 	if res, err := e.a.CancelDeletion(context.Background(), out.RestoreToken, iphone); err != nil || res.Status != StatusAuthenticated {
 		t.Fatalf("исходное устройство: %+v %v", res, err)
+	}
+}
+
+// m4 ревью 2, §3.11 п. 2: восстановить можно только «в течение срока» — ровно purge_at (анонимизация ещё не прошла)
+// вход отвечает как для удалённого: finishLogin — errAccountDeleted, Login — 400 invalid_credentials без restore_token
+// и без журнала неудачи (как у deleted); секундой раньше — deletion_pending.
+func TestLoginAfterPurgeAt(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid, sid := delSeed(t, e, "purged_login")
+	if _, err := e.a.DeleteAccount(context.Background(), sid, "purged_login"); err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Advance(domain.DeletionGrace - time.Second)
+	if out, err := finish(t, e, uid, web("a"), false, false); err != nil || out.Status != StatusDeletionPending {
+		t.Fatalf("за секунду до purge_at: %+v %v", out, err)
+	}
+	restores := func() int {
+		return count(t, e.owner, `SELECT count(*) FROM auth_challenges WHERE user_id = $1 AND purpose = 'deletion_restore'`, uid)
+	}
+	before := restores()
+	e.clock.Advance(time.Second)
+	if _, err := finish(t, e, uid, web("a"), false, false); !errors.Is(err, errAccountDeleted) {
+		t.Fatalf("ровно purge_at: %v", err)
+	}
+	for _, pw := range []string{"pw", "wrong"} {
+		out, err := e.a.Login(context.Background(), "purged_login@example.com", pw, web("a"))
+		if problemCode(err) != identity.CodeInvalidCredentials || out.RestoreToken != "" {
+			t.Fatalf("вход %q после purge_at: %+v %v", pw, out, err)
+		}
+	}
+	if n := restores(); n != before {
+		t.Fatalf("restore_token после purge_at: %d → %d", before, n)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM security_events WHERE user_id = $1 AND kind = 'login_failed'`, uid); n != 0 {
+		t.Fatalf("журнал неудачи у аккаунта после purge_at: %d", n)
+	}
+}
+
+// m4 ревью 2: restore_token, выданный до purge_at и ещё живой, ровно в purge_at не восстанавливает — 410
+// restore_token_invalid, аккаунт остаётся pending_deletion.
+func TestCancelDeletionAfterPurgeAt(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	uid, sid := delSeed(t, e, "purged_cancel")
+	if _, err := e.a.DeleteAccount(context.Background(), sid, "purged_cancel"); err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Advance(domain.DeletionGrace - 5*time.Minute)
+	out, err := finish(t, e, uid, web("a"), false, false)
+	if err != nil || out.RestoreToken == "" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	e.clock.Advance(5 * time.Minute)
+	if _, err := e.a.CancelDeletion(context.Background(), out.RestoreToken, web("a")); problemCode(err) != identity.CodeRestoreTokenInvalid {
+		t.Fatalf("ровно purge_at: %v", err)
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM users WHERE id = $1 AND status = 'pending_deletion'`, uid); n != 1 {
+		t.Fatal("аккаунт восстановлен после purge_at")
 	}
 }

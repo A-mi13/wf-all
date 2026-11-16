@@ -258,6 +258,7 @@ func TestConfirmSignupHappy(t *testing.T) {
 			AND payload->>'platform' = 'android' AND payload->>'method' = 'password'`: 1,
 		`SELECT count(*) FROM audit_log WHERE action = 'identity.user_registered' AND actor_user_id = $1`: 1,
 		`SELECT count(*) FROM security_events WHERE user_id = $1 AND kind = 'signup'`:                     1,
+		`SELECT count(*) FROM security_events WHERE user_id = $1 AND kind = 'login'`:                      0,
 	} {
 		if n := count(t, e.owner, q, uid); n != want {
 			t.Errorf("%s: %d, ждали %d", q, n, want)
