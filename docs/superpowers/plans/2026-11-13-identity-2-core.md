@@ -1591,7 +1591,9 @@ identity в admin-api — `mail.SendArgs` в очередь `mail` (исполн
   ника, IP; `river_job.args` без почты.
 - `identity-freeze.test.mjs` — зелёный (контракт не правился, кроме enum флагов).
 - `TestConfirmEmailChangeVsDeleteNoDeadlock`, `TestConfirmResetVsDeleteNoDeadlock` (N1, пакет `app`, реальная база) →
-  `confirmEmailChange` / `confirmPasswordReset` (tx2) останавливается на `hooks.afterRowFound` (строка кода найдена);
+  `confirmEmailChange` / `confirmPasswordReset` (tx1 — исполнено так: в tx2 `lockUser` берётся до строки кода, барьер
+  там держал бы `users`; гонку «удаление между tx1 и tx2» закрывает `TestConfirmResetDeleteBetweenTx` — хэшер с
+  барьером на `Hash`) останавливается на `hooks.afterRowFound` (строка кода найдена);
   `deleteAccount` той же учётки проходит целиком (берёт `users`, гасит коды); затем подтверждение продолжается →
   ни одного `40P01`: удаление `200`, подтверждение `410 identity.code_expired`, почта и пароль прежние. Барьер
   детерминирован (канал), повторы не нужны.

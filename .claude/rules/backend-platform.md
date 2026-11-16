@@ -26,7 +26,10 @@ paths:
 - Периодика платформы — только `platform/periodic.Jobs()` (новый срез и новые задачи на вызов): её подключают и воркер, и
   admin-api — лидер River один на схему и ставит периодику по своему списку (P27), исполняет воркер (River не проверяет
   исполнителя у периодической вставки; страж `TestLeaderWithoutWorkersEnqueuesPlatformJobs` под ролью `admin`). Новая
-  чистка платформы — в `Jobs()`, не в `cmd/worker`. Чистки, которым нужны права `admin` (`staff_*`, `approvals`,
+  чистка платформы — в `Jobs()`, не в `cmd/worker`. Периодика модуля — его `jobs.Periodic()`, у обоих бинарников:
+  `append(periodic.Jobs(), identityjobs.Periodic()...)` в `cmd/worker` и `cmd/admin-api` (платформа модули не
+  импортирует, поэтому `TestLeaderWithoutWorkers…` её не видит; страж — `TestPeriodicSameInBothBinaries` в обоих
+  бинарниках против общего эталона; план I-2, R7). Чистки, которым нужны права `admin` (`staff_*`, `approvals`,
   `staff_idempotency_keys`, `staff_rate_limits`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +
   `ExpireDue` + `PurgeDecided` + `idempotency.DeleteExpired(…, Staff)` + `ratelimit.DeleteExpired(…, Staff)`).
   Исполняющий клиент River — только `queue.ClientConfig(очереди, исполнители, периодика, журнал)` у обоих бинарников
@@ -112,7 +115,9 @@ paths:
   рядом), `Open(ct, key_id, aad)`; пустой aad — `keys.ErrNoAAD`. Хэш-коды — `MAC(key_id, метка, сообщение)` (своя
   метка на назначение, сравнение — `hmac.Equal`). Новые строки — `CurrentID()`; старый ключ убирают из окружения,
   когда счёт строк с этим `key_id` = 0; `Has` — есть ли ключ в кольце. Перешифровка секретов сотрудников и
-  двухфазная ротация `ADMIN_STAFF_SECRET_KEYS` — `admin-api staff rekey` (`docs/deploy-dev.md`, раздел «admin-api»).
+  двухфазная ротация `ADMIN_STAFF_SECRET_KEYS` — `admin-api staff rekey` (`docs/deploy-dev.md`, раздел «admin-api»);
+  кольца identity — `api identity rekey [--dry-run]` под ролью api (у воркера нет прав на секреты; R28 плана I-2,
+  `backend-identity.md`).
 - Когда требовать PoW — `risk.Assessor`; требование — `humancheck.Require` (403 с задачей).
 - Тесты механизмов с SQL — под ролью прода: `dbtest.NewPoolsAs(t, "api"|"worker"|"admin")`.
 - Пагинация — пакет `page`, свой курсор модули не пишут: v1 `Encode/Decode` — keyset по `(created_at, id)`;

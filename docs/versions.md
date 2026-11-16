@@ -49,6 +49,7 @@
 | oasdiff | 1.34.1 | `tools/oasdiff/go.mod` (отдельный модуль, см. ловушки) |
 | go-pgquery (pg_query в wasm) | v0.0.0-20250409022910-10ac41983c07 | `backend/go.mod` — та же версия, что у sqlc в `backend/tools/go.mod` |
 | maxminddb-golang/v2 | 2.9.0 | `backend/go.mod` (чтение MMDB DB-IP «IP to City Lite» — `internal/platform/ipgeo`, спека identity §5.9); та же версия — косвенно в `backend/tools/go.mod` |
+| disposable-email-domains (список одноразовых доменов, CC0 1.0) | коммит `206a1b0` от 2026-11-08 | вшитый `backend/internal/identity/internal/domain/disposable.txt` (источник, коммит и дата — в шапке файла; обновление — заменить строки и шапку) |
 | mmdbwriter | 1.2.0 | `backend/tools/go.mod` (только генератор фикстуры `backend/tools/ipgeofixture`; в `backend/go.mod` не входит) |
 
 ## Исключения

@@ -31,7 +31,7 @@
 | Декомпозиция | Эта спека — архитектура; дальше спека на каждый модуль (§13); UI админки, веб и Flutter — свои спеки |
 | Устройство модуля | Модульный монолит, инкапсуляция через `internal/` (проверяет компилятор) + archtest + владение таблицами (§3, §4) |
 | Связь модулей | Синхронно — через интерфейс корневого пакета; чтение для лент и пересчётов — через экспортированные представления владельца; реакции — через события outbox; транзакция между модулями — только из списка §4.4 |
-| Вход | Почта + пароль, код из письма при регистрации и восстановлении. Соцвходы — позже, таблица `user_identities` сразу. 2FA игроков — позже |
+| Вход | Почта + пароль, код из письма при регистрации и восстановлении. 2FA игроков (TOTP + резервные коды) — в первой версии (сделана планом I-2); соцвходы Apple/Google и ключи доступа — тоже в первой версии, план I-3 (спека identity §1.5, §3) |
 | Капитанство | Подтверждённая почта вместо телефона; телефон — необязательный контакт (§7.1) |
 | Антибот | Слои: rate limit, блок-лист одноразовых доменов, ловушки форм, уровни доверия, PoW-капча по протоколу ALTCHA при подозрении; сторонний провайдер — реализация того же интерфейса (§6.7) |
 | Устройства | ≤ 2 регистраций на мобильное устройство; входы — мягкий лимит с флагом; связанные аккаунты видны модератору, их голоса и оценки друг другу не засчитываются (§7.3) |
@@ -86,12 +86,12 @@ backend/internal/<модуль>/
 | --- | --- | --- |
 | `geo` | countries, regions, cities, districts, country_names, region_names, city_names, city_slug_history; источник GeoNames: geonames_places, geonames_place_names, geonames_admin1, geonames_admin1_names, geonames_imports; экспортированное представление geo_read_city_settings | справочник, статусы городов, названия по локалям, валюта и возрастные пороги страны, импорт GeoNames и активация городов (спека `geo`) |
 | `staff` | staff_accounts, staff_roles, staff_role_cities, staff_mfa, staff_recovery_codes, staff_invites, staff_sessions; функция-триггер staff_role_cities_check | учётки сотрудников админки, роли и города модератора, приглашения, вход с TOTP, сессии admin-api, управление сотрудниками, исполнители подтверждений `staff.*`, письма и чистка сотрудников (спека сотрудников `docs/superpowers/specs/2026-10-06-staff-admin-geo2-design.md`) |
-| `identity` | users (ядро аккаунта), credentials, auth_codes, sessions, security_events, devices, device_accounts, user_identities, role_assignments, user_restrictions, nickname_reservations, nickname_changes, reserved_nicknames | регистрация, вход, сессии, устройства и связанные аккаунты, допуск к капитанству в городе, ограничения доступа, ники, удаление аккаунта |
+| `identity` | users (ядро аккаунта), credentials, auth_codes, auth_challenges, sessions, refresh_tokens, security_events, devices, device_accounts, user_identities, passkeys, user_mfa, user_recovery_codes, mfa_resets, consents, role_assignments, user_restrictions, captain_applications, nickname_reservations, nickname_changes, reserved_nicknames; экспортированные представления identity_read_users, identity_read_linked_accounts, identity_read_captain_permits, identity_read_restrictions (миграции `0024`–`0026`, спека identity §5) | регистрация, вход, 2FA и её сброс поддержкой, сессии, устройства и связанные аккаунты, согласие с документами, заявка и допуск к капитанству в городе, ограничения доступа, ники, удаление аккаунта (спека `docs/superpowers/specs/2026-11-13-identity-design.md`) |
 | `media` | media_objects | загрузка, проверка типа по содержимому, перекодирование, отдача с отдельного домена |
 | `economy` | wallets, ledger_entries, subscriptions, catalog_items, user_inventory, team_inventory, achievements, user_achievements, lootbox_*, quests, user_quests, referrals | очки и кредиты (двойная запись), каталог (аватары-архетипы, гербы, рамки), инвентарь, права на платные опции, подписки через IAP, достижения, задания, рефералы |
 | `players` | player_profiles | карточка игрока: позиции, заявленный и подтверждённый уровень, нога, рост, номер, клуб, девиз, выбранный аватар, предпочитаемое время |
 | `pitches` | pitches | поля, покрытия, обувь, дубли в радиусе 150 м, слияние, модерация |
-| `teams` | teams, team_slug_history, team_members, team_join_requests, captaincy_transfers, captain_applications | команды, нейминг, состав, заявки и приглашения, капитанство (заявка, испытательный срок, передача, вице, пропажа капитана, смена города капитаном) |
+| `teams` | teams, team_slug_history, team_members, team_join_requests, captaincy_transfers | команды, нейминг, состав, заявки и приглашения, капитанство (испытательный срок, передача, вице, пропажа капитана, смена города капитаном); заявка в капитаны — у `identity` (спека identity §2.3) |
 | `matches` | matches, match_slots, match_participants, match_comments, challenges, challenge_responses, position_reservations | матчи трёх типов, видимость, слоты и позиции, запись, лист ожидания, явка, возрастные пороги, расчёт аренды, жизненный цикл, вызовы, сменный вратарь, брони позиций, комментарии |
 | `results` | match_reports, match_events, match_votes, match_ratings | протокол в три экрана, подтверждение соперником, окно оспаривания, споры, голосование, оценки, античит протокола |
 | `stats` | player_stats_daily, team_stats_daily, team_ratings, team_stat_resets | агрегаты, Elo, паспорт команды, городские таблицы, вес разнообразия состава |
@@ -217,12 +217,14 @@ geo ← identity ← media ← economy ← players ← pitches ← teams ← mat
 
 Имя — `<модуль>.<факт в прошедшем времени>`. Payload — только идентификаторы и
 непрофильные значения; персональных данных (почта, телефон, дата рождения) в событиях
-нет. Полный каталог — в спеке каждого модуля (`geo` — спека `geo` §6); опорные события:
+нет. Полный каталог — в спеке каждого модуля (`geo` — спека `geo` §6, `identity` — спека identity §8.1); опорные
+события:
 
 | Событие | Кто слушает |
 | --- | --- |
 | `identity.user_registered` | notify, economy (рефералы, стартовый аватар) |
-| `identity.user_deleted` | все модули с данными пользователя — анонимизация своих строк |
+| `identity.user_deletion_scheduled`, `identity.user_deletion_cancelled` | модули прячут и возвращают данные игрока на период отмены (§7.6) |
+| `identity.user_deleted` | все модули с данными пользователя — анонимизация своих строк (в момент анонимизации, §7.6) |
 | `teams.member_joined`, `teams.member_left` | notify, stats |
 | `teams.captain_changed` | notify, stats |
 | `pitches.merged` | matches (перевесить матчи) |
@@ -300,10 +302,11 @@ strict-хендлер. Ошибки механизмов — `httpx.ProblemError
   аккаунта, `revoked_at` сессии, ограничения и роли (кэш в процессе — не дольше 5 секунд,
   промахи одной сессии схлопываются, размер ограничен — `auth.NewCachedLoader`).
   Бан, «выйти везде» и смена пароля действуют в пределах секунд для всех ручек.
-- **refresh** — 256 бит из CSPRNG, в `sessions` хранится SHA-256. Срок скользящий: 60
-  дней бездействия, абсолютный максимум семьи — 180 дней. Ротация при каждом
-  использовании.
-- **Повтор refresh** отзывает семью (`family_id`) и пишет `security_events`.
+- **refresh** — 256 бит из CSPRNG, хранится SHA-256. Строка `sessions` — вход (семья): `sid` в JWT не меняется
+  ротацией; сами токены — `refresh_tokens` (спека identity §5.3). Срок скользящий: телефон — 90 дней бездействия,
+  не дольше 365 дней; веб — 30 / 180 (спека identity §3.7). Ротация при каждом использовании. Живых сессий у
+  аккаунта не больше 100: сверх — старшие по `last_seen_at` отзываются.
+- **Повтор refresh** отзывает сессию (семью) и пишет `security_events`.
 - **Окно гонки 15 секунд:** если отозванный ротацией токен повторно предъявлен тем же
   устройством (`device_id`) в течение 15 секунд, сервер возвращает **того же** уже
   выданного преемника, без нового ветвления. Преемник хранится зашифрованным
@@ -506,7 +509,8 @@ strict-хендлер. Ошибки механизмов — `httpx.ProblemError
   почты» и «неверный пароль», на «нет почты» выполняется фиктивный argon2 для выравнивания
   времени; регистрация и восстановление всегда отвечают «код отправлен», владельцу
   существующего аккаунта уходит письмо «у вас уже есть аккаунт».
-- Восстановление — код из письма; после смены пароля отзываются все сессии. Смена почты —
+- Восстановление — код из письма; после смены пароля отзываются все сессии. При включённой 2FA сброс по почте
+  требует второй фактор (захват почты не даёт аккаунт; спека identity §3.4). Смена почты —
   код на новую почту и уведомление на старую.
 - Почта обязательна (`users.email NOT NULL`); CHECK `users_contact_present` снимается.
 - Условия заявки в капитаны: подтверждённая почта, возраст на дату заявки не ниже
@@ -576,13 +580,16 @@ strict-хендлер. Ошибки механизмов — `httpx.ProblemError
 
 ### 7.6. Удаление аккаунта
 
+- Запрос удаления — статус `pending_deletion` на 30 дней (период отмены): аккаунт скрыт, сессии отозваны, событие
+  `identity.user_deletion_scheduled`; вход в период предлагает восстановление, отмена возвращает прежний статус
+  (спека identity §3.11).
 - Строка `users` не удаляется никогда: FK `ON DELETE RESTRICT` (`teams.captain_id`,
   `matches.created_by`, `match_reports.submitted_by`, `competitions.organizer_id` и др.)
-  держат её как «надгробие». Статус `deleted`, почта заменяется на необратимую заглушку,
-  ник уходит в карантин 90 дней, профиль обезличивается, игрок показывается как
-  «Удалённый игрок».
-- Каждый модуль анонимизирует свои строки по `identity.user_deleted` и сверочной задаче
-  (§6.5).
+  держат её как «надгробие». По истечении периода — необратимая анонимизация (задача воркера): статус `deleted`,
+  почта заменяется на необратимую заглушку, все персональные данные затираются, ник уходит в карантин 90 дней,
+  игрок показывается как «Удалённый игрок».
+- Каждый модуль анонимизирует свои строки по `identity.user_deleted` — оно публикуется в момент анонимизации, не
+  запроса — и сверочной задаче (§6.5).
 - `audit_log` только добавляется, поэтому персональные данные в него не пишутся
   (маскирование в `before`/`after`); срок хранения IP — вопрос к юристу.
 - Персональных данных нет в payload событий и в аргументах задач River; завершённые задачи
@@ -867,7 +874,7 @@ River-клиент admin-api под ролью `admin` (5 исполнителе
 | Модуль | Изменение |
 | --- | --- |
 | platform | `outbox`: `id` → uuid (UUIDv7), + `schema_version`, `aggregate_version`, `occurred_at`, `trace`; − `attempts`, `last_error` (повторы ведёт River); триггер `NOTIFY`. Новые: `event_inbox`, `event_cursors`, `rate_limits` и `humancheck_spent` (`UNLOGGED`). Миграция `0020`: таблица `approvals`; `audit_log` + `actor_staff_id`, `actor_label`, `scope_city_id`, CHECK акторов и частичные индексы для журнала |
-| identity | `users.email NOT NULL`, − CHECK `users_contact_present`; новые `credentials`, `auth_codes`, `security_events`, `user_identities`, `devices`, `device_accounts`, `user_restrictions`; `sessions` + `device_id`, поля окна гонки (сессии сотрудников — свои, `staff_sessions`; `audience` не нужен); `role_assignments`: `role_name` — только `captain`, `role_scope` — только `city` (миграция `0020`) |
+| identity | `role_assignments`: `role_name` — только `captain`, `role_scope` — только `city` (миграция `0020`). План I-2: `0024_identity_status` — значение `pending_deletion` в `user_status` (отдельной миграцией без транзакции); `0025_identity` — `users.email NOT NULL`, − CHECK `users_contact_present`, + `version`, CHECK `users_email_format`, поля удаления; новые `credentials`, `auth_codes`, `auth_challenges`, `refresh_tokens`, `security_events`, `user_identities`, `passkeys`, `user_mfa`, `user_recovery_codes`, `mfa_resets`, `consents`, `devices`, `device_accounts`, `user_restrictions`, `staff_player_links` (владелец — `staff`); `sessions` перестроена (строка = вход; сессии сотрудников — свои, `staff_sessions`); `captain_applications` переходит к `identity`; `0026_identity_deletion` — `users.status_before_deletion`, `birth_date` NULL только у `deleted`, затирание ПД удалённых до неё (спека identity §5.1–§5.3) |
 | staff | миграция `0020_staff.sql`: `staff_accounts`, `staff_roles`, `staff_role_cities`, `staff_mfa`, `staff_recovery_codes`, `staff_invites`, `staff_sessions` (спека сотрудников §3.1) |
 | players | `player_profiles`; игровые поля переносятся из `users` одной миграцией «создать → скопировать → удалить» |
 | media | `media_objects`; `pitches.photo_urls`, `catalog_items.asset_url`, `ad_placements.image_url` → ссылки на `media_objects` (в спеках владельцев) |
@@ -929,7 +936,9 @@ River-клиент admin-api под ролью `admin` (5 исполнителе
    outbox, relay, inbox, курсоры, переигровка; rate limit, антибот, риск; часы, ID, почта,
    файлы, серверные локали, аудит; `grants.sql`; очереди воркера; миграции платформы.
 1. `geo` — от него зависит регистрация (город, порог возраста).
-2. `identity` — регистрация, вход, сессии, устройства и роли игроков. Сотрудники сделаны до него
+2. `identity` — регистрация, вход, сессии, устройства и роли игроков (спека
+   `docs/superpowers/specs/2026-11-13-identity-design.md`, этапы — её §15; планы: I-1 контракт, I-2 ядро и 2FA, I-3
+   соцвходы, ключи доступа и целостность устройств, I-4 капитанство и админка). Сотрудники сделаны до него
    отдельным модулем `staff` (спека сотрудников, план A): вход с TOTP, приглашения, роли, подтверждение
    вдвоём, живая админка.
 3. `media`

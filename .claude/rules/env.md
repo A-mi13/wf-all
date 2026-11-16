@@ -20,5 +20,9 @@ paths:
   перешифровка (для `ADMIN_STAFF_SECRET_KEYS` — `admin-api staff rekey`), затем старый убрать.
 - Кольцо identity — одно значение у `API_IDENTITY_SECRET_KEYS` и `WORKER_IDENTITY_SECRET_KEYS` (письма с кодами
   собирает воркер); `scripts/env-keys.sh` выдаёт обоим один ключ. admin-api кольца identity не получает (спека §5.5).
+  Ротация: новый ключ первым у api и воркера одновременно → `api identity rekey` (сначала `--dry-run`) → старый ключ
+  убрать, когда под ним нет резервных кодов (отчёт rekey) и прошло ≥ 7 дней; нечитаемые строки (код выхода 1) —
+  вернуть ключ в кольцо. `API_IDENTITY_DEVICE_KEYS` — новый первым, HMAC устройств не пересчитывается
+  (`docs/deploy-dev.md`, «Ротация `API_IDENTITY_SECRET_KEYS`»).
 - Ключи сотрудников есть только у admin-api (`ADMIN_STAFF_SECRET_KEYS`); воркеру их не заводить (решение D3).
 - Во фронт-сборку попадают только публичные значения (`VITE_*`, `NEXT_PUBLIC_*`).

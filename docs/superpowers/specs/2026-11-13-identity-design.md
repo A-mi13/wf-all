@@ -31,6 +31,32 @@
 | К6 | Стирание `meta_enc` | воркеру — `UPDATE (meta_enc)` колоночно (контроллер) | §5.5 |
 | К7 | Удаление `teams.captains.approve` | перечислить стражи в §16 (контроллер) | §16 |
 
+### 0.1. Поправки плана I-2 (реализация 14–16.11.2026)
+
+Решения плана `docs/superpowers/plans/2026-11-13-identity-2-core.md` («Решения плана»), уточняющие спеку; пометка в
+тексте — «план I-2».
+
+| # | Поправка | Где |
+| --- | --- | --- |
+| R2 | Устройство в I-2 — минимум сессии: `devices`/`device_accounts`, HMAC `install_id`, `device_required`, лимит двух регистраций с мобильного; аттестация (порт `Attestor` — «выключено»), письмо `new_device`, `device_shared`, связанные аккаунты — I-3 | §3.8 |
+| R3 | Ветки I-3 в операциях I-2: `completeMfa` с `passkey` → `passkey_invalid`, `reauthenticate` с `passkey`/`social` → `reauth_invalid`; `methods` без `passkey` | §3.3, §3.13 |
+| R4 | `getAuthMethods` — через порт `ProviderReadiness` («нет провайдеров» до I-3) | §4.4 |
+| R7 | Периодика identity — у `cmd/worker` и `cmd/admin-api` (лидером River бывает любой), исполняет воркер | §5.10 |
+| R16 | Неудачи свежего входа — `sessions.reauth_failures` + `reauth_failed_at`, окно 15 минут от первой; не ключ лимитера | §3.13, §5.3 |
+| R17 | Сверх 100 живых сессий — старшие по `last_seen_at` отзываются с причиной `revoked` | §3.7 |
+| R18 | `sessions.device_id` — `NULL` допустим (веб без метки BFF) | §5.3 |
+| R24 | CHECK `users_email_format` принимает и заглушку `deleted+<uuid>@invalid` | §5.7 |
+| R25 | Разбор UA — свой в домене (десять семейств браузеров и ОС), без библиотеки | §3.7 |
+| R26 | `signup_account_exists` — одно на старт; повтор отправки приманки письма не шлёт | §3.14 |
+| R27 | Свежесть вторым фактором (`disableTotp`) — `sessions.mfa_at` не старше 10 минут | §3.13 |
+| R28 | Ротация — `api identity rekey`, не `worker`: `worker` не читает секреты `user_mfa`/`credentials`/`user_recovery_codes`/`passkeys`; `apple_refresh_enc` читает — для отзыва у Apple (I-3) | §5.4, §5.5 |
+| R29 | `banned` без `account_blocked` в контракте: `startPasswordReset` — приманка без письма; бан между шагами — `410` кода или `mfa_token` | §3.4, §3.3 |
+| R30 | Порядок замков `users` → `sessions` → `refresh_tokens` → `devices` → `user_mfa`/`user_recovery_codes` → `mfa_resets` → `auth_codes`/`auth_challenges`; аккаунт по строке кода — строка без замка → `users` → строка `FOR UPDATE` | `.claude/rules/backend-identity.md`, `app/app.go` |
+| R31 | argon2 (проверка и хэш нового пароля) — вне транзакции; в tx — сверка, что хэш не изменился | §3.2, §3.4, §3.10 |
+| I3 | Письмо `account_deleted` — адрес из новой записи журнала, которую пишет анонимизация | §3.11 |
+| 15.11 | Анонимизация затирает все ПД; отмена удаления возвращает прежний статус (`status_before_deletion`) — решения пользователя | §3.11 |
+| 14.11 | Бан = ограничение `user_restrictions` с `capability = login` | §5.3 |
+
 ## 1. Зачем, цели, границы
 
 ### 1.1. Зачем
@@ -465,7 +491,8 @@ deletion_restore`) → прежний статус из `status_before_deletion`
 - допуски капитана отзываются; живой сброс 2FA отменяется системой, у всех сбросов аккаунта `mfa_resets.reason`
   (свободный текст сотрудника) → заглушка `---` (NOT NULL, CHECK 3–500), `ticket` → NULL (решение пользователя 15.11);
 - событие `identity.user_deleted` (только сейчас — решение пользователя 13.11), письмо `identity.account_deleted`
-  (адрес — зашифрован в `security_events` в момент запроса, стирается чисткой после письма), аудит `system`.
+  (адрес — в `meta_enc` **новой** записи `security_events (account_deleted)`, которую анонимизация пишет до замены
+  почты: `meta_enc` записи запроса чистка стирает через 7 дней, раньше конца периода — план I-2, I3), аудит `system`.
 
 Права воркера для анонимизации — §5.5. Аккаунты, удалённые до миграции `0026`, её накат затирает тем же списком (без
 письма, события, аудита и карантина ника — `backend/migrations/0026_identity_deletion.sql`).
@@ -672,7 +699,7 @@ CREATE TYPE identity_provider AS ENUM ('apple', 'google');
 | `auth_challenges` | `id`, `purpose`, `token_hash bytea NULL UNIQUE`, `user_id NULL` → users, `session_id NULL` → sessions, `data jsonb NULL` (несекретное: сессия WebAuthn, провайдер), `data_enc bytea NULL`, `key_id NULL`, `attempts smallint`, `expires_at`, `consumed_at NULL`, `created_at` | `data_enc` ⇒ `key_id`; `attempts` 0–5; индекс `(expires_at)` |
 | `devices` | `id`, `platform`, `install_mac bytea`, `key_id text`, `model NULL`, `os_version NULL`, `app_version NULL`, `signups smallint DEFAULT 0`, `attest_key_id bytea NULL`, `attest_public_key bytea NULL`, `attest_counter bigint NULL`, `attested_at NULL`, `first_seen_at`, `last_seen_at` | UNIQUE `(platform, install_mac)`; UNIQUE `attest_key_id`; `signups` 0–3; строки ≤ 64 |
 | `device_accounts` | `device_id` → devices, `user_id` → users, `signed_up bool`, `first_seen_at`, `last_seen_at` | PK `(device_id, user_id)`; индексы `(user_id)`, `(device_id, last_seen_at)` |
-| `sessions` | `id` (= `sid` JWT), `user_id` → users, `device_id` → devices, `client_kind`, `auth_method`, `mfa_at NULL`, `reauth_at NULL`, `reauth_failures smallint`, `ip inet`, `ip_city text NULL`, `user_agent NULL` (≤ 512), `app_version NULL`, `created_at`, `last_seen_at`, `idle_expires_at`, `absolute_expires_at`, `revoked_at NULL`, `revoked_reason NULL` | индекс `(user_id) WHERE revoked_at IS NULL`; индекс `(absolute_expires_at)`; `revoked_reason` ∈ `logout, revoked, revoked_others, password_changed, password_reset, refresh_reuse, account_deleted, banned, expired` |
+| `sessions` | `id` (= `sid` JWT), `user_id` → users, `device_id NULL` → devices (веб без метки BFF; мобильный без `device` до сессии не доходит — план I-2, R18), `client_kind`, `auth_method`, `mfa_at NULL`, `reauth_at NULL`, `reauth_failures smallint`, `reauth_failed_at NULL` (окно 15 минут от первой неудачи свежего входа, истекло — счёт с нуля, успех обнуляет — план I-2, R16), `ip inet`, `ip_city text NULL`, `user_agent NULL` (≤ 512), `app_version NULL`, `created_at`, `last_seen_at`, `idle_expires_at`, `absolute_expires_at`, `revoked_at NULL`, `revoked_reason NULL` | индекс `(user_id) WHERE revoked_at IS NULL`; индекс `(absolute_expires_at)`; `revoked_reason` ∈ `logout, revoked, revoked_others, password_changed, password_reset, refresh_reuse, account_deleted, banned, expired` |
 | `refresh_tokens` | `id`, `session_id` → sessions `ON DELETE CASCADE`, `token_hash bytea UNIQUE`, `created_at`, `used_at NULL`, `successor_id NULL`, `successor_enc bytea NULL`, `successor_until NULL` | `successor_enc` ⇔ `successor_until`; индекс `(session_id)` |
 | `user_mfa` | `user_id` PK, `secret_enc bytea`, `key_id`, `confirmed_at NULL`, `last_used_step bigint NULL`, `failures smallint DEFAULT 0`, `failures_notified_at NULL`, `created_at` | — |
 | `user_recovery_codes` | `user_id`, `code_mac bytea`, `key_id`, `used_at NULL`, `created_at` | PK `(user_id, code_mac)` |
@@ -706,9 +733,15 @@ CREATE TYPE identity_provider AS ENUM ('apple', 'google');
 | Почта для письма после смены или удаления | `security_events.meta_enc`, стирается чисткой через 7 дней | кольцо секретов |
 | Почта в ключе лимита | HMAC (`ratelimit.EmailKey`), метка `identity-ratelimit` | кольцо секретов |
 
-Ротация кольца секретов — команда `worker identity rekey` перешифровывает `*_enc`; HMAC пересчитать нельзя — строки
-со старым `key_id` проверяются, пока ключ в кольце (коды живут минуты, резервные коды — до перевыпуска: старый ключ
-убирается из кольца только после перевыпуска или по истечении — порядок в `docs/deploy-dev.md`).
+Ротация кольца секретов — команда `api identity rekey [--dry-run]` (план I-2, R28: под ролью `api` — `worker` не читает
+секреты `user_mfa`, `credentials`, `user_recovery_codes`, `passkeys` и не пишет `user_mfa`; `apple_refresh_enc` он
+читает — для отзыва у Apple в I-3, §5.5). Перешифровываются только долгоживущие секреты — `user_mfa.secret_enc`
+(в том числе неподтверждённые) и `user_identities.apple_refresh_enc` — пачками без замка `users`, условным `UPDATE`
+(тот же `key_id` и шифротекст: параллельная запись сценария не перетирается). Короткоживущие (`auth_codes`,
+`auth_challenges`, `security_events.meta_enc` ≤ 7 дней) истекают сами. HMAC (коды, резервные коды, ключ лимита)
+пересчитать нельзя — строки со старым `key_id` проверяются, пока ключ в кольце: старый ключ убирается, когда под ним
+не осталось `user_recovery_codes` (отчёт команды) и не раньше 7 дней после ротации. Нечитаемые строки — код выхода 1;
+обрыв печатает частичный итог. Аудита у команды нет. Порядок — `docs/deploy-dev.md`.
 
 ### 5.5. Права ролей БД (`grants.sql`)
 
@@ -736,6 +769,11 @@ CREATE TYPE identity_provider AS ENUM ('apple', 'google');
 
 Страж — `grants_test.go`: под `admin` нельзя прочитать `credentials`, `user_mfa`, `auth_codes`, `user_identities`,
 `passkeys`; под `worker` — `credentials.password_hash`, `user_mfa.secret_enc`.
+
+Секреты и `worker` (план I-2, R28; решение контроллера 16.11): `worker` не читает секреты `user_mfa`, `credentials`,
+`user_recovery_codes`, `passkeys`; `user_identities.apple_refresh_enc` читает — для отзыва токена Apple при отвязке и
+удалении (I-3). Поэтому ротация кольца — команда `api` (§5.4), а не воркера: `UPDATE` секретов `user_mfa` у `worker`
+нет.
 
 ### 5.6. Экспортированные представления
 
@@ -792,6 +830,25 @@ CountryCode}, bool)`; реализация — файл MMDB «IP to City Lite»
 | сверка удаления | `deleted` с недочищенными секретами — дочистить (спека бэкенда §6.5) |
 | отзыв токенов Apple | после отвязки или удаления, повтор с паузой |
 | DeviceCheck | обновление битов после регистрации, повтор с паузой |
+
+Уточнения плана I-2 (реализация — `app/cleanup.go`, задача `identity.maintenance` раз в 10 минут):
+
+- Граница строгая: строка, срок которой наступил ровно сейчас, остаётся до следующего запуска.
+- Шаги независимы: ошибка одного не прерывает остальные (итог — все ошибки вместе), прерывает только отмена.
+- `auth_codes` и `nickname_reservations` — по одному оператору на строку вне транзакции: `FOR UPDATE` роли `worker`
+  недоступен (§5.5), а пачка в одной транзакции под замком сценария (`RevokeUserCodes` и гашение кодов удалением;
+  смена ника) давала `40P01`.
+  `auth_challenges` — одним оператором без пачки: `worker` видит только `expires_at`, `consumed_at`, не `id`.
+- Снятие истёкших ограничений и сверка удаления — по аккаунту: своя транзакция, `users` первым `FOR NO KEY UPDATE
+  SKIP LOCKED` (занят сценарием — следующий запуск); пачки — по возрастанию `id` курсором (`id > последнего
+  обработанного, занятого или упавшего`), без растущего списка пропусков; упавший аккаунт — в журнал, задача
+  завершается ошибкой (видна, River повторит), сделанное закоммичено. Сверка удаления `auth_challenges` не трогает
+  (их чистит срок).
+- Брошенные неподтверждённые `user_mfa` (настройка TOTP без `confirmTotp`) по сроку **не** чистятся: строка одна на
+  аккаунт (PK `user_id`), следующий `setupTotp` её перезаписывает, `rekey` перешифровывает, анонимизация удаляет;
+  чистка потребовала бы расширить права `worker` на `user_mfa` (решение контроллера 16.11).
+- Периодика — у обоих бинарников, которые бывают лидером River (`cmd/worker`, `cmd/admin-api`); исполняет воркер.
+  Смена лидера сбивает интервал: сброс 2FA может исполниться до ~20 минут позже `execute_at`.
 
 ## 6. Публичный контракт
 
@@ -1229,6 +1286,27 @@ Payload — только идентификаторы, `v = 1`, без почт�
 Код истёк или погашен к моменту отправки — `mail.ErrSkip`. Сборка писем с кодами требует кольца секретов у воркера
 (`WORKER_IDENTITY_SECRET_KEYS`).
 
+Уточнения плана I-2 (реализация — `identity/mail`, Composer только читает под ролью `worker`):
+
+- Язык: письмо регистрации — `locale` из `payload_enc` кода (аккаунта ещё нет), приманки — язык владельца адреса,
+  остальные — `users.locale`.
+- `signup_account_exists` владельцу в `pending_deletion` — вариант текста `text_pending` («аккаунт ожидает удаления —
+  войдите, чтобы отменить», §3.11).
+- `password_changed` уходит и по записи `password_reset` (сброс кодом), не только `password_changed`.
+- `password_reset_code` не уходит аккаунту в `banned` и коду, выданному на почту, которая больше не почта аккаунта
+  (смена почты после старта сброса) — как проверка при подтверждении (R29, I2).
+- `account_deletion_scheduled` — только пока аккаунт в `pending_deletion` (River не гарантирует порядок: отмена могла
+  опередить письмо).
+- `email_changed` и `account_deleted` берут адрес из `meta_enc` записи журнала (стёрт чисткой — `ErrSkip`), прочие —
+  `users.email`; анонимизированному получателю — `ErrSkip`, кроме `account_deleted`.
+- `ErrSkip` — только когда повтор не поможет (строки нет, вид не тот, код закрыт или истёк — ровно срок уже истёк,
+  ключ вне кольца, аккаунт `deleted`). Нарушенный контракт производителя (нет нужного ключа `meta`) и сбой базы —
+  ошибка: повторы, затем видимая «мёртвая» задача, а не тихая отмена.
+- Время в письмах — в поясе получателя (решение пользователя 16.11): `users.timezone` → пояс города аккаунта
+  (экспортированное представление `geo_read_city_settings`) → UTC; пустое, `Local` и незагружаемое имя — следующий
+  шаг цепочки (не ошибка). Формат — `2026-11-16 15:00 (Europe/Moscow)`, без пояса — `(UTC)`. У `account_deleted` пояс
+  и город затёрты анонимизацией — даты в тексте нет.
+
 ### 8.3. Аудит (`platform/audit`, в транзакции)
 
 | Действие | Автор | Объект | Примечание |
@@ -1444,6 +1522,8 @@ backend/internal/identity/
   internal/attest/          App Attest, Play Integrity, DeviceCheck
   internal/store/           sqlc identitydb + репозиторий
   httpapi/  admin/  jobs/  queries/
+  mail/                     Composer писем I-2 (воркер, только чтение)
+  rekey/                    api identity rekey — сборщик вне корня модуля (N2)
 backend/internal/platform/otp/        TOTP и резервные коды (из staff/internal/domain/{totp,codes}.go)
 backend/internal/platform/emailaddr/  нормализация почты (из staff/internal/domain/email.go)
 backend/internal/platform/ipgeo/      город по IP
@@ -1542,7 +1622,18 @@ backend/internal/platform/flags/      + Rules (GlobalOnly, Requires)
 
 ## 17. Открытые вопросы (продуктовые развилки)
 
-Все вопросы закрыты (§0). В7 (домен продукта, rpId) решён 13.11: домен задаётся конфигурацией деплоя, а не настройкой админки — смена домена обнуляет ключи доступа и требует нового релиза приложения (associated domains / assetlinks в сборке); выбор самого домена — вместе с брендом, до включения `auth_passkeys` на проде.
+**Требования к плану I-4 (из реализации I-2; план I-2, «Передача следующим планам»):**
+
+- **Истечение временного бана возвращает статус.** Чистка снимает истёкшую строку ограничения `login` (`lifted_at`,
+  §5.10), а `users.status` остаётся `banned` — по §5.3 «нет строки — бессрочно» бан становится вечным. I-4 (вместе со
+  спекой `moderation`, `intx.SetRestrictionsInTx`) обязан при снятии последнего живого ограничения `login` вернуть
+  статус `banned` → `active` в той же транзакции, с событием и аудитом.
+- **Бан поверх `pending_deletion` теряет удаление**: решить, что сильнее (бан ждёт анонимизации или прерывает
+  период), и не затирать `status_before_deletion`/`purge_at` молча.
+- **`status_before_deletion` устаревает**: снятие ограничения в период удаления меняет «прежний» статус — отмена
+  удаления должна вернуть актуальный, а не снимок момента запроса.
+
+Все продуктовые вопросы закрыты (§0). В7 (домен продукта, rpId) решён 13.11: домен задаётся конфигурацией деплоя, а не настройкой админки — смена домена обнуляет ключи доступа и требует нового релиза приложения (associated domains / assetlinks в сборке); выбор самого домена — вместе с брендом, до включения `auth_passkeys` на проде.
 
 ## 18. Не проверено — проверить первыми шагами плана
 
