@@ -21,7 +21,14 @@ paths:
 - **Ядро входа (R6)** — `app/login_core.go`: `checkPassword` (argon2 без tx и соединения, R31; в tx — сверка, что хэш
   не изменился), `verifySecondFactor`, `finishLogin`. Порядок `finishLogin`: `banned` → 2FA → `pending_deletion` →
   сессия — `restore_token` не раскрывается до второго фактора. Неудачи (попытки, счётчики, письма) коммитятся до ответа
-  ошибкой. Новый способ входа — через эти три примитива, не своей копией.
+  ошибкой. Новый способ входа — через эти три примитива, не своей копией. `finishLogin` — обёртка над
+  `finishLoginAs(…, journal)`: регистрация идёт через ядро с `journalSignup`; сессию выдаёт только `finishLoginAs`
+  (страж `TestIssueSessionOnlyInFinishLogin`). `pending_deletion` с `purge_at ≤ now` для входа и отмены удаления —
+  как удалённый (`purgeDue`). Согласия — одно правило для входа и `me`: последняя принятая версия
+  (`latestConsents`) ≠ текущей → принять (`consentsOutdated`).
+- **2FA.** `user_mfa.failures` насыщается (`least(failures, 32766) + 1`). `SetupTotp`, `ConfirmTotp`, `DisableTotp`
+  и `reauthenticate` вторым фактором, как и вход вторым фактором (`onSecondFactorLogin`), отменяют живой сброс 2FA
+  владельцем (`cancelResetsByOwner`).
 - **Бан** = ограничение `user_restrictions` с `capability = login` (спека §5.3): `blocked_until` — самое позднее
   `until` живых строк, нет строки или бессрочная — без поля. Операции без `account_blocked` в контракте отвечают
   `410` кода или `mfa_token` (R29).
@@ -53,21 +60,25 @@ paths:
   `api`): `dbtest.NewPoolsAs` или `roleApp` (`SET ROLE`).
 - **Письма** (`identity/mail`, спека §8.2): Composer на каждый вид `app.MailKinds()`, только чтение под `worker`,
   повтор собирает то же письмо; логгера нет, кодов и адресов в ошибках нет. `mail.ErrSkip` — только когда повтор не
-  поможет (строки нет, код погашен/истёк — ровно срок истёк, ключ вне кольца, аккаунт `deleted`); сбой базы и
-  нарушенный контракт производителя (нет ключа `meta`) — ошибка: повтор, затем видимая «мёртвая» задача. Время — `mailZone`: `users.timezone` → пояс города
+  поможет (строки нет, код погашен/истёк — ровно срок истёк, шифротекст не расшифровывается — `keys.ErrDecrypt`,
+  аккаунт `deleted`); ключ строки вне кольца воркера (`keys.ErrUnknownKey` — при ротации api мог получить ключ раньше),
+  сбой базы и нарушенный контракт производителя (нет ключа `meta`) — ошибка: повтор, затем видимая «мёртвая» задача.
+  Отмена сброса 2FA при уже снятой 2FA (`has_mfa = false`) — текст `text_disabled`. Время — `mailZone`: `users.timezone` → пояс города
   (`geo_read_city_settings`) → UTC, пустое/`Local`/битое имя — следующий шаг; формат `2026-11-16 15:00
   (Europe/Moscow)` (решение пользователя 16.11).
 - **Чистка** (`app/cleanup.go`, спека §5.10): граница строгая (ровно срок — остаётся), шаги независимы
   (`errors.Join`). Работа над аккаунтом (снятие ограничений, сверка удаления) — `eachAccount`: tx на аккаунт, `users`
   `SKIP LOCKED`, пачки курсором `id > @after` (обработанный, занятый и упавший сдвигают курсор), упавший — в журнал,
-  итог `errCleanupRowsFailed`. Коды и брони ника — по одному оператору вне tx (пачкой под замком сценария —
+  итог `errCleanupRowsFailed`. У `deleted` истёкшие ограничения снимаются молча (только `lifted_at`, без `version` и
+  события). Коды и брони ника — по одному оператору вне tx (пачкой под замком сценария —
   `40P01`; стражи `TestCleanupCodesNoDeadlock`, `TestCleanupNicknameReservationsNoDeadlock`). Анонимизация — `SAVEPOINT` на аккаунт, упавшие исключаются до конца
   прогона.
 - **Ротация кольца** — `api identity rekey [--dry-run]` (R28, `cmd/api/rekey.go` → `identity/rekey.Run` →
   `App.Rekey`) под ролью api: `user_mfa.secret_enc` (и неподтверждённые) и `user_identities.apple_refresh_enc`
   пачками без замка `users`; запись — условный `UPDATE` (тот же `key_id` и шифротекст): параллельная запись
-  сценария не перетирается. Нечитаемые — код выхода 1; обрыв печатает частичный итог. MAC не пересчитываются.
-  Порядок ротации — `docs/deploy-dev.md`.
+  сценария не перетирается. Нечитаемые — код выхода 1; обрыв печатает частичный итог. MAC кодов не пересчитываются;
+  MAC устройства (`API_IDENTITY_DEVICE_KEYS`) переписывается текущим ключом лениво — при refresh (`rekeyDevice`) и
+  входе (`upsertDevice`). Порядок ротации — `docs/deploy-dev.md`.
 - **Стражи:** `TestNoStubOperations` (`httpapi/public/nostub_test.go`, `pendingOps` по `pending_*_test.go`);
   `identity_core_test.go` (`TestCoreOpsNotStub` — 32 операции и `pendingOps` 18/9 точными множествами,
   `TestCoreIDOR`, `TestCoreCacheControl`, `TestCoreAnonymousNoIdempotency`, `TestCoreNoPIIInEvents`);

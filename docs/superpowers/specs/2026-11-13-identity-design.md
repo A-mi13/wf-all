@@ -42,13 +42,14 @@
 | R3 | Ветки I-3 в операциях I-2: `completeMfa` с `passkey` → `passkey_invalid`, `reauthenticate` с `passkey`/`social` → `reauth_invalid`; `methods` без `passkey` | §3.3, §3.13 |
 | R4 | `getAuthMethods` — через порт `ProviderReadiness` («нет провайдеров» до I-3) | §4.4 |
 | R7 | Периодика identity — у `cmd/worker` и `cmd/admin-api` (лидером River бывает любой), исполняет воркер | §5.10 |
-| R16 | Неудачи свежего входа — `sessions.reauth_failures` + `reauth_failed_at`, окно 15 минут от первой; не ключ лимитера | §3.13, §5.3 |
+| R16 | Неудачи свежего входа — `sessions.reauth_failures` + `reauth_failed_at`, окно 15 минут от первой; не ключ лимитера (`user:reauth:<sid>` убран) | §3.13, §5.3, §6.4 |
 | R17 | Сверх 100 живых сессий — старшие по `last_seen_at` отзываются с причиной `revoked` | §3.7 |
 | R18 | `sessions.device_id` — `NULL` допустим (веб без метки BFF) | §5.3 |
 | R24 | CHECK `users_email_format` принимает и заглушку `deleted+<uuid>@invalid` | §5.7 |
 | R25 | Разбор UA — свой в домене (десять семейств браузеров и ОС), без библиотеки | §3.7 |
 | R26 | `signup_account_exists` — одно на старт; повтор отправки приманки письма не шлёт | §3.14 |
 | R27 | Свежесть вторым фактором (`disableTotp`) — `sessions.mfa_at` не старше 10 минут | §3.13 |
+| W5, 16.11 | Живой сброс 2FA владельцем отменяют также `reauthenticate` вторым фактором, `setupTotp`, `confirmTotp`, `disableTotp`; явная `cancelMyMfaReset` — только сессией со вторым фактором (решение пользователя 16.11), повтор — `204` | §3.15 |
 | R28 | Ротация — `api identity rekey`, не `worker`: `worker` не читает секреты `user_mfa`/`credentials`/`user_recovery_codes`/`passkeys`; `apple_refresh_enc` читает — для отзыва у Apple (I-3) | §5.4, §5.5 |
 | R29 | `banned` без `account_blocked` в контракте: `startPasswordReset` — приманка без письма; бан между шагами — `410` кода или `mfa_token` | §3.4, §3.3 |
 | R30 | Порядок замков `users` → `sessions` → `refresh_tokens` → `devices` → `user_mfa`/`user_recovery_codes` → `mfa_resets` → `auth_codes`/`auth_challenges`; аккаунт по строке кода — строка без замка → `users` → строка `FOR UPDATE` | `.claude/rules/backend-identity.md`, `app/app.go` |
@@ -463,7 +464,8 @@ Apple; client id iOS, Android, web для Google), `exp`, `nonce`. Из токе
   решает судьбу команды капитана); письмо `identity.account_deletion_scheduled` (дата, «передумали — просто войдите»);
   аудит.
 
-**2. Отмена.** Любой успешный вход в течение срока (пароль, соцвход, ключ доступа — после 2FA, если она включена)
+**2. Отмена.** Граница — строго до `purge_at`: в момент `purge_at` и позже вход и `cancelDeletion` отвечают как
+удалённому аккаунту, даже если анонимизация ещё не прошла (план I-2, `purgeDue`). Любой успешный вход в течение срока (пароль, соцвход, ключ доступа — после 2FA, если она включена)
 отвечает `200 AuthResult {status: deletion_pending, deletion: {restore_token, purge_at}}` — сессия **не** создаётся.
 `cancelDeletion {restore_token, device}` (анонимно; токен — 256 бит, 10 минут, `auth_challenges`, `purpose =
 deletion_restore`) → прежний статус из `status_before_deletion` (`suspended` остаётся `suspended` — решение
@@ -534,7 +536,10 @@ deletion_restore`) → прежний статус из `status_before_deletion`
   `200 {reauth_until}`. Для `passkey` — сначала `startReauthPasskey` → задача только с ключами аккаунта.
 - **2FA включена** → годится только второй фактор (TOTP, резервный код, ключ доступа): пароль известен атакующему —
   это и есть сценарий захвата. Без 2FA — пароль, ключ доступа или соцвход привязанного провайдера.
-- Неудача → `400 identity.reauth_invalid {attempts_left}`; лимит — 5 неудач на сессию за 15 минут, затем `429`.
+- Неудача → `400 identity.reauth_invalid {attempts_left}`; лимит — 5 неудач на сессию за 15 минут, затем `429`
+  (счётчик — колонки `sessions.reauth_failures`/`reauth_failed_at`, не ключ лимитера — план I-2, R16).
+- Свежий вход вторым фактором (TOTP, резервный код) отменяет живой сброс 2FA поддержкой — как вход вторым фактором
+  (§3.15 п. 4; план I-2).
 - Операция без свежего входа → `403 identity.reauth_required`. Вход сам по себе ставит `reauth_at` (только что вошёл —
   свежий).
 
@@ -566,7 +571,11 @@ deletion_restore`) → прежний статус из `status_before_deletion`
    `approvals.Fail` → `409 platform.approval_stale`.
 4. Отмена в течение 7 дней:
    - владелец: любой успешный вход **со вторым фактором** (TOTP, резервный код, ключ доступа) отменяет сброс
-     автоматически — владелец доказал, что факторы при нём; явно — `cancelMyMfaReset` (с замком);
+     автоматически — владелец доказал, что факторы при нём; так же — свежий вход вторым фактором (`reauthenticate`),
+     `setupTotp`, `confirmTotp`, `disableTotp` (план I-2). Явно — `cancelMyMfaReset` (с замком): только сессией,
+     прошедшей второй фактор, иначе `403 identity.reauth_required` (решение пользователя 16.11). Повтор после отмены
+     владельцем за жизнь этой сессии (отменён не раньше `sessions.created_at`, и после него новый сброс не назначен) —
+     `204`, иначе `404 identity.mfa_reset_not_found`;
    - сотрудник: `cancelMfaReset {resetId}` (право `identity.mfa.reset`, сразу — отмена привилегий не даёт);
    - письмо `identity.mfa_reset_cancelled`, событие `identity.mfa_reset_cancelled`.
 5. По `execute_at` задача `maintenance` воркера: удаляет `user_mfa` и `user_recovery_codes` (ключи доступа остаются —
@@ -597,6 +606,8 @@ deletion_restore`) → прежний статус из `status_before_deletion`
 - Сервер работу с устаревшим согласием **не** блокирует (решение автора спеки: блокировка всех ручек ломала бы
   фоновые запросы; требование показать экран — клиенту). Если юрист потребует жёсткой блокировки — правка конвейера
   отдельной задачей.
+- Правило «принять нужно» одно для входа (`documents_acceptance_required` в `AuthResult`) и `Me`: последняя принятая
+  версия каждого документа (по `accepted_at`) ≠ текущей (план I-2).
 
 ## 4. Флаги способов входа
 
@@ -1031,7 +1042,7 @@ app_attest_assertion | play_integrity`, `key_id` (App Attest, base64), `payload`
 | `account_secure` | 60/1m:20 | 10/1m:5 | — | чувствительные операции аккаунта |
 
 Ключи сценариев (в `app/`, через `Limiter`): `email:login:<hmac>` 30/1h; `email:auth_send:<hmac>` 5/1h на назначение;
-`user:mfa:<id>` 10 неудач/1h; `user:reauth:<sid>` 5 неудач/15m. Риск (`platform/risk`): `LoginFailed` (почта, IP),
+`user:mfa:<id>` 10 неудач/1h. Неудачи свежего входа — не ключ лимитера, а колонки сессии (§3.13; план I-2, R16). Риск (`platform/risk`): `LoginFailed` (почта, IP),
 `Signup` (подсеть), `NewDevice` (аккаунт) — превышение требует PoW. Пороги `risk.DefaultPolicies` не меняются.
 
 ### 6.5. Коды ошибок
@@ -1300,8 +1311,10 @@ Payload — только идентификаторы, `v = 1`, без почт�
 - `email_changed` и `account_deleted` берут адрес из `meta_enc` записи журнала (стёрт чисткой — `ErrSkip`), прочие —
   `users.email`; анонимизированному получателю — `ErrSkip`, кроме `account_deleted`.
 - `ErrSkip` — только когда повтор не поможет (строки нет, вид не тот, код закрыт или истёк — ровно срок уже истёк,
-  ключ вне кольца, аккаунт `deleted`). Нарушенный контракт производителя (нет нужного ключа `meta`) и сбой базы —
-  ошибка: повторы, затем видимая «мёртвая» задача, а не тихая отмена.
+  шифротекст не расшифровывается — `keys.ErrDecrypt`, аккаунт `deleted`). Ключа строки нет в кольце воркера
+  (`keys.ErrUnknownKey`: при ротации api мог получить новый ключ раньше воркера), нарушенный контракт производителя
+  (нет нужного ключа `meta`) и сбой базы — ошибка: повторы, затем видимая «мёртвая» задача, а не тихая отмена.
+- `mfa_reset_cancelled` при уже снятой 2FA (строки `user_mfa` нет) — вариант текста `text_disabled`.
 - Время в письмах — в поясе получателя (решение пользователя 16.11): `users.timezone` → пояс города аккаунта
   (экспортированное представление `geo_read_city_settings`) → UTC; пустое, `Local` и незагружаемое имя — следующий
   шаг цепочки (не ошибка). Формат — `2026-11-16 15:00 (Europe/Moscow)`, без пояса — `(UTC)`. У `account_deleted` пояс
@@ -1314,7 +1327,7 @@ Payload — только идентификаторы, `v = 1`, без почт�
 | `identity.user_registered`, `identity.user_deletion_requested`, `identity.user_deletion_cancelled` | игрок | user | — |
 | `identity.user_deleted` (анонимизация) | `system` | user | — |
 | `identity.mfa_reset_requested` | сотрудник | user | через `approvals`; причина и номер обращения — в `meta` без ПД |
-| `identity.mfa_reset_cancelled`, `identity.mfa_reset_executed` | игрок, сотрудник или `system` | user | — |
+| `identity.mfa_reset_cancelled`, `identity.mfa_reset_executed` | игрок, сотрудник или `system` | user | `system` — системная отмена (запрос удаления, анонимизация, исполнитель по сроку при снятой 2FA) и исполнение |
 | `identity.documents_accepted` | игрок | user | версии |
 | `identity.login_failed` | `anonymous` | — | только для существующего аккаунта: `object_id` не пишется, чтобы журнал не стал оракулом (решение автора спеки); подробности — `security_events` |
 | `identity.password_changed`, `identity.password_reset`, `identity.email_changed`, `identity.nickname_changed`, `identity.mfa_enabled`, `identity.mfa_disabled`, `identity.identity_linked/unlinked`, `identity.passkey_added/removed`, `identity.sessions_revoked` | игрок | user | `before`/`after` без ПД (маскирование `audit.Mask`) |
@@ -1632,6 +1645,13 @@ backend/internal/platform/flags/      + Rules (GlobalOnly, Requires)
   период), и не затирать `status_before_deletion`/`purge_at` молча.
 - **`status_before_deletion` устаревает**: снятие ограничения в период удаления меняет «прежний» статус — отмена
   удаления должна вернуть актуальный, а не снимок момента запроса.
+- **Связь инициатора сброса 2FA с игроком.** Исполнитель `identity.mfa_reset` проверяет `self_action` только у
+  подтверждающего (`mfa_reset_admin.go`); связь инициатора проверена при запросе и дальше не перепроверяется. С ручкой
+  `putStaffPlayerLink` (I-4) связь, заведённая между запросом и подтверждением, прошла бы: ручка должна поднимать
+  `staff_accounts.version` (тогда `InitiatorCheck` отсечёт запрос) или исполнитель — перепроверять связь инициатора.
+- **Статус в `requireFresh` и `deleteAccount`.** Они не проверяют `users.status`: бан в окне кэша загрузчика (≤ 5 с)
+  доводит запрос до записи, которую CHECK отвергает (`23514` → `500`). С появлением бана (I-4) статус не
+  `active | suspended` под замком должен давать `401` (`errSessionGone`), как мёртвая сессия.
 
 Все продуктовые вопросы закрыты (§0). В7 (домен продукта, rpId) решён 13.11: домен задаётся конфигурацией деплоя, а не настройкой админки — смена домена обнуляет ключи доступа и требует нового релиза приложения (associated domains / assetlinks в сборке); выбор самого домена — вместе с брендом, до включения `auth_passkeys` на проде.
 
