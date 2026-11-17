@@ -324,7 +324,8 @@ platform/queue/... ./internal/geo/... ./internal/archtest/...` зелёные; d
 **Ловушки и стыки.**
 - `RunService` сам открывает пул api и зовёт `slog.SetDefault`; второй пул — в `run` до `RunService` (`defer` снаружи):
   иначе пул закроется раньше остановки фона.
-- Relay держит `LISTEN` на отдельном соединении вне пула (+1 к `WORKER_DB_MAX_CONNS`); River — свой `LISTEN` в пуле.
+- Relay держит `LISTEN` на отдельном соединении вне пула (+1 к `WORKER_DB_MAX_CONNS`); River тоже уводит своё
+  соединение `LISTEN` из пула (`Hijack` в `riverpgxv5`) — ещё +1 (итоговое ревью, m-b2).
   `WORKER_DATABASE_URL` на Neon — прямой хост (без `-pooler`): через PgBouncer `LISTEN` не работает.
 - Фон вернулся до отмены — `RunService` гасит HTTP (`errBackgroundStopped`); `workerhost.Run` возвращает `nil` только
   при отменённом ctx, иначе — ошибку.
@@ -468,8 +469,9 @@ MAINTENANCE: '1'` (7 слотов ≤ 10 − 3), `WORKER_GEO_IMPORT_ENABLED: 'fa
   `WorkerIdentity` с префиксом `WORKER_` из окружения `wf-api` с `apiFill` разбираются; `GeoImportEnabled == false`;
   `queue.Slots(queue.Config(q))` без `import` ≤ `WORKER_DB_MAX_CONNS − queue.PoolReserve`; `WORKER_MAIL_SMTP_TLS =
   mandatory`; в `apiFill` кольца api и воркера равны (страж заглушек, кольцо стенда — в панели).
-- `TestRenderYAMLPools` → `wf-api` = `API_DB_MAX_CONNS` + при флаге `WORKER_DB_MAX_CONNS` + 1 (`LISTEN` relay вне
-  пула); сумма с мигратором, admin-api и `operatorCommandsReserve` ≤ 108.
+- `TestRenderYAMLPools` → `wf-api` = `API_DB_MAX_CONNS` + при флаге `WORKER_DB_MAX_CONNS` + 2 (`LISTEN` relay и River
+  вне пула; итоговое ревью m-b2 — было +1); `wf-admin-api` = `ADMIN_DB_MAX_CONNS` + 1 (`LISTEN` River); сумма с
+  мигратором и `operatorCommandsReserve` ≤ 108.
 - `TestRenderYAMLStopBudget` → при флаге `config.APIEmbeddedStopTime(API_SHUTDOWN_TIMEOUT)` ≤ `StopBudget`;
   `API_SHUTDOWN_TIMEOUT` задан в файле.
 - `TestRenderYAMLSecretsNotInFile` → секреты и адреса воркера только `sync: false` (слова уже ловят `DATABASE_URL`,
@@ -515,8 +517,8 @@ MAINTENANCE: '1'` (7 слотов ≤ 10 − 3), `WORKER_GEO_IMPORT_ENABLED: 'fa
 - `WORKER_IDENTITY_SECRET_KEYS` значением в файле → `TestRenderYAMLSecretsNotInFile` красный.
 - `API_SHUTDOWN_TIMEOUT: 12s` → `TestRenderYAMLStopBudget` красный.
 - `WORKER_QUEUE_EVENTS: '5'` → `TestRenderYAMLEmbeddedWorker` красный.
-- граничное `WORKER_DB_MAX_CONNS: '58'` в `render.yaml` (сумма с `+1` LISTEN = 109 > 108) → `TestRenderYAMLPools`
-  обязан покраснеть (KILLED); зелёный — значит `+1` не учтён.
+- граничное `WORKER_DB_MAX_CONNS: '56'` в `render.yaml` (сумма с `LISTEN` вне пулов, +2 у api и +1 у admin, = 109 >
+  108) → `TestRenderYAMLPools` обязан покраснеть (KILLED); зелёный — значит `LISTEN` не учтён.
 - `WORKER_RELAY_BATCH` у `wf-admin-api` → `TestRenderYAMLKnownKeys` красный.
 - `API_EMBED_WORKER: "true"` в `compose.yaml` → `TestServerComposeNoEmbeddedWorker` красный.
 
@@ -524,7 +526,8 @@ MAINTENANCE: '1'` (7 слотов ≤ 10 − 3), `WORKER_GEO_IMPORT_ENABLED: 'fa
 описывают встроенный режим, сон, порядок выкатки, побудку; `git grep -nE "воркера нет|Воркер на стенде не запущен|воркера
 на Render нет" -- docs render.yaml .claude CLAUDE.md` — пусто (кроме исторических планов и спек).
 
-**Ловушки.** Пулы Neon (112 − 4): api 10 + воркер 10 + 1 + мигратор 10 + admin 10 + 20 = 61. Импорт на стенде выключен
+**Ловушки.** Пулы Neon (112 − 4): api 10 + воркер 10 + 2 + мигратор 10 + admin 10 + 1 + 20 = 63 (`LISTEN` relay и
+River вне пулов — итоговое ревью m-b2). Импорт на стенде выключен
 — `WORKER_QUEUE_IMPORT` в файле не задаётся. `backend.yml` paths + `deploy/server/**` — страж читает эти файлы.
 
 **Не трогай.** Go вне `config/*_test.go`; `deploy/server/**` (только читать; правка — исполнителю Task 5 через
@@ -666,7 +669,11 @@ sslmode=require`); все обязательные ключи каждого б�
    `wf-admin-api`: `ADMIN_WAKE_API_URL=https://wf-api-o3rn.onrender.com`. Роль `worker` на Neon уже есть
    (`docs/deploy-dev.md`, «Роль worker»): сверить права (`has_table_privilege('worker', 'outbox', 'UPDATE')`).
 3. Мерж (после итогового ревью и `./task ci`, пуш и PR — по просьбе пользователя) → деплой → журнал `wf-api`:
-   «воркер запущен» с `component=worker`, выборы лидера, `completed` у периодики.
+   «воркер запущен» с `component=worker`, выборы лидера, `completed` у периодики. Затем — оба сервиса (`wf-api` и
+   `wf-admin-api`) live на новом коммите (журналы деплоя) и повтор `SELECT kind, queue, state, count(*) FROM river_job
+   WHERE kind = 'geo.import' GROUP BY 1, 2, 3`: при упавшем деплое admin-api старый инстанс ставит `geo.import` в
+   `maintenance`, встроенный воркер исполнит её сразу (итоговое ревью m-b3) — ждущие отменить запросом шага 1,
+   деплой admin-api починить.
 4. Регистрация на стенде → письмо с кодом пришло → `confirmSignup` → 201.
 5. Побудка: дождаться сна `wf-api` (≥ 15 мин без запросов), мутация в админке → в журнале `wf-api` «воркер запущен» в
    течение минуты. План Б (не проснулся): журнал `wf-admin-api` — предупреждение побудки (срок, адрес, статус); проверить

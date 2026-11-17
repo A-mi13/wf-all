@@ -20,9 +20,10 @@
 River держит её бодрой (опросы и `LISTEN`) — вычислительные часы Neon идут. Данные — только тестовые.
 
 Деплой ждёт все проверки коммита в `main` (`autoDeployTrigger: checksPass` в `render.yaml`), а не только
-`backend.yml`: любая правка `backend/**` запускает и `admin.yml` с живым e2e админки (job `e2e`, до 25 минут).
-Пока он идёт, новый образ API не выкатывается; красный e2e деплой API не выпускает — чинить или
-перезапускать прогон в GitHub Actions.
+`backend.yml`: любая правка `backend/**` запускает и `admin.yml` с живым e2e админки (job `e2e`, до 25 минут), и
+`image.yml` с job `server` (свой сервер: тянет `caddy` и `postgis` с Docker Hub, поднимает compose дважды, до 20
+минут). Пока они идут, новый образ API не выкатывается; красный e2e или `server` (в том числе флейк Docker Hub)
+деплой API не выпускает — чинить или перезапускать прогон в GitHub Actions.
 
 ## Переменные окружения сервиса `wf-api`
 
@@ -51,7 +52,7 @@ River держит её бодрой (опросы и `LISTEN`) — вычисл
 | `WORKER_IDENTITY_SECRET_KEYS` | **то же значение**, что `API_IDENTITY_SECRET_KEYS` (одно кольцо: письма с кодами собирает воркер); api сверяет кольца на старте — другие ключи или другой порядок — отказ старта; `sync: false` |
 | `WORKER_MAIL_SMTP_ADDR`, `WORKER_MAIL_FROM`, `WORKER_MAIL_SMTP_USERNAME`, `WORKER_MAIL_SMTP_PASSWORD` | SMTP писем игрокам (Resend: `smtp.resend.com:2587` — на Render free открыт только STARTTLS-порт 2587); `sync: false` — в панели |
 | `WORKER_MAIL_SMTP_TLS` | `mandatory` (в `render.yaml`) |
-| `WORKER_DB_MAX_CONNS`, `WORKER_QUEUE_*` | `10` и по `1` на очередь (в `render.yaml`): 7 слотов ≤ 10 − 3; сумма пулов стенда с `+1` `LISTEN` — страж `TestRenderYAMLPools` |
+| `WORKER_DB_MAX_CONNS`, `WORKER_QUEUE_*` | `10` и по `1` на очередь (в `render.yaml`): 7 слотов ≤ 10 − 3; сумма пулов стенда — страж `TestRenderYAMLPools`: `LISTEN` relay и River держат соединения вне пула (River уводит своё из пула — `Hijack`), поэтому у `wf-api` +2 сверх двух пулов, у `wf-admin-api` +1 |
 | `WORKER_GEO_IMPORT_ENABLED` | `false` (в `render.yaml`) — очереди `import` нет, импорт из админки не исполнится (раздел «Импорт городов GeoNames»); `WORKER_QUEUE_IMPORT` не задаётся |
 | `WORKER_LOG_LEVEL`, `WORKER_LOG_FORMAT` | не задаются: во встроенном режиме **не действуют** (читаются и проверяются, но журнал — общий с api: `API_LOG_*`, строки фона — с `component=worker`) |
 
@@ -211,8 +212,13 @@ transaction mode он несовместим (спека бэкенда §6.5).
    отменить **обязательно** (спека §8.2); устаревшие `mail.send` (коды регистраций, пришедшие бы тестерам с
    опозданием) — с согласия пользователя; повторить запрос непосредственно перед мержем и не запускать импорт из
    админки, пока идёт выкатка (иначе новая `geo.import` в `maintenance` исполнится сразу после старта);
-2. задать `WORKER_*` у `wf-api` в панели (до мержа: с флагом `true` api без них не стартует);
-3. мерж → деплой → журнал: «воркер запущен», лидер, периодика;
+2. задать `WORKER_*` у `wf-api` в панели (до мержа: с флагом `true` api без них не стартует) и
+   `ADMIN_WAKE_API_URL=https://<имя wf-api>.onrender.com` у `wf-admin-api` (без него побудка молча выключена — письма
+   из админки ждут пробуждения api); сверить права роли `worker` для фона — запрос `relay_ok` в разделе «Роль `worker`»;
+3. мерж → деплой → журнал: «воркер запущен», лидер, периодика; затем проверить, что **оба** сервиса (`wf-api` и
+   `wf-admin-api`) live на новом коммите, и повторить запрос шага 1 по `geo.import`: упавший деплой одного admin-api
+   оставляет старый инстанс, а он ставит `geo.import` в `maintenance`, которую встроенный воркер исполнит сразу
+   (ждущие — отменить, деплой admin-api — починить);
 4. регистрация на стенде → письмо с кодом пришло → `confirmSignup` → 201.
 
 Разовые команды воркера (импорт городов) оператор по-прежнему запускает со своей машины против Neon — раздел
@@ -271,11 +277,12 @@ Deploy latest commit (старт идёт через `migrate-then-api`); в л�
 
 ```sql
 SELECT has_table_privilege('worker', 'geonames_places', 'INSERT') AS import_ok,
-       has_table_privilege('worker', 'countries', 'UPDATE')       AS countries_write;
+       has_table_privilege('worker', 'countries', 'UPDATE')       AS countries_write,
+       has_table_privilege('worker', 'outbox', 'UPDATE')          AS relay_ok;
 ```
 
-Ожидаемо: `import_ok = t`, `countries_write = f`. `import_ok = f` — `migrate up` ещё не прошёл после
-создания роли.
+Ожидаемо: `import_ok = t`, `countries_write = f`, `relay_ok = t` (relay встроенного воркера отмечает события).
+`import_ok = f` или `relay_ok = f` — `migrate up` ещё не прошёл после создания роли.
 
 ### До мержа миграции в `main`
 
@@ -467,7 +474,8 @@ SELECT has_table_privilege('admin', 'staff_accounts', 'INSERT') AS admin_staff,
 ```
 
 Ожидаемо: `admin_staff = t`, `admin_approvals = t`, `api_staff = f`. `admin_staff = f` — `migrate up` ещё не
-прошёл после создания роли. Подключение admin-api — прямое (River использует `LISTEN`).
+прошёл после создания роли. Подключение admin-api — прямое (River использует `LISTEN` — соединение вне пула, +1 к
+`ADMIN_DB_MAX_CONNS` в сумме соединений Neon).
 
 | Переменная | Значение |
 | --- | --- |

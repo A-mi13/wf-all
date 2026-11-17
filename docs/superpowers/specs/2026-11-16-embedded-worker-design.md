@@ -1,6 +1,6 @@
 # Воркер: встроенный режим api (стенд) и свой сервер — без переделок при переходе
 
-Дата: 16.11.2026. Ред. 3 — Approved (ревью: I1–I9, m1–m8; раунд 2: N1–N3, m-r2-1…3; раунд 3: minor 1–5 внесены). Основание — решение пользователя 16.11: фонового воркера на
+Дата: 16.11.2026. Ред. 3 — Approved (ревью: I1–I9, m1–m8; раунд 2: N1–N3, m-r2-1…3; раунд 3: minor 1–5 внесены; 17.11 сведена с решениями плана R1, R5, R6, R14, R16 и итоговым ревью m-b2). Основание — решение пользователя 16.11: фонового воркера на
 Render бесплатно нет (render.com/docs/free: бесплатные инстансы — web, Postgres, Key Value); фон должен работать на
 бесплатном стенде **сейчас**, переход на свой сервер с доменом — **правкой конфигурации, без правок кода**.
 
@@ -29,7 +29,9 @@ Render бесплатно нет (render.com/docs/free: бесплатные и�
   `config.WorkerIdentity`, relay, GeoNames, SMTP, кольцо, локали), `waitSchema`, клиент вставки, `subscriptions()`,
   `mails()`, `allWorkers`/`realWorkers`, `riverConfig`, relay и остановка.
 - API (имена — в плане):
-  - `Prepare(environ, log) (Prepared, error)` — всё до базы; ошибка — отказ старта вызывающего до базы;
+  - `Load` + `Prepare(base, environ, log) (Prepared, error)` (решение плана R1: журнал отдельного воркера строится из
+    `WORKER_LOG_*` до `Prepare`, разовым командам нужен `Base` без почты и кольца) — всё до базы; ошибка — отказ старта
+    вызывающего до базы;
   - `Run(ctx, prepared, pool, log, stop Stop) error`, `Stop{Relay, Soft time.Duration}` (жёсткая — `config.HardStop`):
     сроки — параметр (отдельный воркер — `config.WorkerRelayStop`/`WorkerRiverSoftStop`, встроенный — свои, §3);
     отмена ctx (в том числе во время `waitSchema`) — **`nil`**, не ошибка: обычная остановка не даёт выход с кодом 1.
@@ -45,16 +47,17 @@ Render бесплатно нет (render.com/docs/free: бесплатные и�
 - `true`:
   - до базы — `workerhost.Prepare` с переменными **`WORKER_*`**; нет `WORKER_DATABASE_URL`, почты или кольца — отказ
     старта api до базы; `WORKER_IDENTITY_SECRET_KEYS` не равно `API_IDENTITY_SECRET_KEYS` — отказ старта (m1:
-    одно кольцо, `env.md`; полуротация в панели иначе ломает письма с кодами); сравниваются разобранные списки ключей
-    (разделитель окружения), не сырые строки; неудачный деплой на Render старый инстанс не гасит — безопасно;
+    одно кольцо, `env.md`; полуротация в панели иначе ломает письма с кодами); сравниваются ID раскодированных
+    ключей в порядке списка (решение плана R6: тот же ключ в base64 и base64url — одно кольцо, другой порядок —
+    другой текущий ключ, отказ), не сырые строки; неудачный деплой на Render старый инстанс не гасит — безопасно;
   - **второй пул** открывает `run` после `Prepare` (`WORKER_DATABASE_URL`, роль `worker`, прямое подключение без
     pooler — relay и River держат `LISTEN`), закрывается после остановки фона (`defer` вне `RunService`); пул api —
     по-прежнему роль `api`;
   - запуск через `server.RunService`: `Background` = `workerhost.Run` на пуле воркера; журнал фона — журнал api с
     меткой `component=worker` (без второго `slog.SetDefault`);
   - **бюджет остановки** ≤ `config.StopBudget` (25 с из окна Render 30 с): дренаж HTTP `API_SHUTDOWN_TIMEOUT` +
-    relay + River мягко + жёстко 5 с. Встроенный режим — свои константы (ориентир: дренаж 8 + relay 2 + мягко 10 +
-    жёстко 5 = 25) и `config.APIEmbeddedStopTime(drain)`; на стенде `API_SHUTDOWN_TIMEOUT=8s` явно; страж — по образцу
+    relay + River мягко + жёстко 5 с. Встроенный режим — свои константы (решение плана R5: relay 2, мягко 8 —
+    дренаж по умолчанию 10 + 2 + 8 + 5 = 25, стенд 8 + 2 + 8 + 5 = 23) и `config.APIEmbeddedStopTime(drain)`; на стенде `API_SHUTDOWN_TIMEOUT=8s` явно; страж — по образцу
     `TestAdminShutdownBudget`.
 - `api identity rekey` и прочие разовые команды `cmd/api` флаг не читают.
 - **Сон бесплатного сервиса (допущение только стенда, I4, m5):**
@@ -80,7 +83,8 @@ Render бесплатно нет (render.com/docs/free: бесплатные и�
   `WORKER_MAIL_SMTP_PASSWORD` (как у admin-api: адрес, отправитель и логин — тоже в панели).
 - Стражи `render_stand_test.go`: `TestRenderYAMLKnownKeys` — префикс `WORKER_` у `wf-api` с полями `config.Worker`,
   `config.Mail`, `config.WorkerIdentity`; `apiPanel`/`apiFill` — новые ключи панели; `TestRenderYAMLPools` — пул
-  `wf-api` плюс `WORKER_DB_MAX_CONNS` и +1 соединение `LISTEN` relay (вне пула) при флаге; `TestRenderYAMLStopBudget` — полная сумма встроенного режима;
+  `wf-api` плюс `WORKER_DB_MAX_CONNS` и +2 соединения `LISTEN` вне пула при флаге (relay и River — River уводит
+  своё из пула, `Hijack`; итоговое ревью m-b2), у `wf-admin-api` +1 (`LISTEN` River); `TestRenderYAMLStopBudget` — полная сумма встроенного режима;
   `TestRenderYAMLSecretsNotInFile` — секреты и адреса воркера только `sync: false`; `TestRenderYAMLNoWorker` — верен.
   Комментарии «Task 21» в `render.yaml` и тесте — на эту спеку.
 - **Порядок выкатки** (пользователь в панели, контроллер проверяет):
@@ -124,7 +128,9 @@ Render бесплатно нет (render.com/docs/free: бесплатные и�
 - `cmd/api`, **поведенческие** (I6), на `dbtest` с флагом `true`:
   - периодическая задача с `RunOnStart` (например, `ratelimit.cleanup`) доходит до `completed`;
   - зависшая в `running` задача чужого вида (`staff.mail`) после рескьюера — `retryable`, не `discarded`;
-  - соединение фона — под ролью `worker` (`current_user` в исполнителе-подсадке или `pg_stat_activity`);
+  - соединение фона — под ролью `worker`: поведенчески через relay outbox — у `api` на `outbox` только `INSERT`, отметку
+    публикации может сделать только `worker` (решение плана R14; `current_user`/`pg_stat_activity` не годятся — в
+    тестах роль задаётся `-c role=…`, сессионный пользователь у обоих пулов один);
   - флаг `false` — `WORKER_*` не читаются, старт без них; `true` без них или с другим кольцом — отказ до базы;
   - бюджет остановки встроенного режима; фон с ошибкой гасит HTTP; SIGTERM во время `waitSchema` — выход без ошибки.
 - archtest и depguard: границы `cmd/api` — без изменений, зелёные; `workerhost` виден транзитивным стражам.

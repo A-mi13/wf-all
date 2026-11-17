@@ -54,8 +54,10 @@ paths:
   исполнители, заглушки `AddForeign`, `riverConfig`). Два способа запуска: отдельный `cmd/worker` (прод, сроки
   `workerhost.ServiceStop`) и встроенный режим `cmd/api` (`API_EMBED_WORKER=true`, только dev-стенд: те же `WORKER_*`
   до базы, сверка кольца identity с `API_IDENTITY_SECRET_KEYS` по ID ключей, второй пул под ролью `worker`, журнал api с
-  `component=worker`). `slog.SetDefault` — только в бинарнике. Отмена ctx при открытии пула и в `Run` до `Start` River —
-  `nil` (штатная остановка, код 0).
+  `component=worker`). `slog.SetDefault` — только в бинарнике. Отмена ctx при открытии пула воркера (`cmd/worker`,
+  `wpool` встроенного режима) и в `Run` до `Start` River — `nil` (штатная остановка, код 0). Пул api/admin-api в
+  `server.RunService` так не умеет: SIGTERM до порта (`db.Open`, `Ready`, `Listen`) даёт код 1 — известное ограничение,
+  отдельная задача платформы (итоговое ревью встроенного воркера, m9).
 - Виды задач исполняющих бинарников — списки `queue.WorkerKinds()` и `queue.AdminKinds()` (имя и срок исполнителя).
   Рескьюер лидера River (задача `running` дольше часа) ищет исполнителя вида в СВОЁМ клиенте и без него выбрасывает
   задачу (`discarded`), поэтому каждый бинарник регистрирует виды другого заглушками `queue.AddForeign` (срок — как у

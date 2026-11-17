@@ -92,7 +92,7 @@ services:
       - key: API_SHUTDOWN_TIMEOUT
         value: 8s
       # пул роли worker: 7 слотов очередей ≤ 10 − 3 (queue.WarnPool); сумма пулов стенда — TestRenderYAMLPools
-      # (+1 соединение LISTEN relay вне пула)
+      # (+2 соединения вне пула: LISTEN relay и LISTEN River — River уводит своё из пула, Hijack)
       - key: WORKER_DB_MAX_CONNS
         value: '10'
       - key: WORKER_QUEUE_EVENTS
@@ -189,7 +189,7 @@ services:
       # ждать схему от wf-api — меньше 15 минут, которые Render ждёт проверку здоровья при деплое (R3)
       - key: ADMIN_DB_SCHEMA_WAIT
         value: 10m
-      # 5 писем staff + LISTEN + тикер + HTTP; сумма пулов стенда — против max_connections Neon (TestRenderYAMLPools)
+      # 5 писем staff + тикер + HTTP (+1 LISTEN River вне пула); сумма пулов стенда — против max_connections Neon (TestRenderYAMLPools)
       - key: ADMIN_DB_MAX_CONNS
         value: '10'
       # письма — только по TLS (R8); Resend на Render free — только STARTTLS-порт 2587 (25/465/587 закрыты)
