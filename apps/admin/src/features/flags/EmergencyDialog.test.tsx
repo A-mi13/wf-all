@@ -37,6 +37,8 @@ describe('выключение аварийного флага', () => {
         'Только этим способом входят 12 игроков — им останется «Забыли пароль?»',
       ),
     ).toBeInTheDocument();
+    // число приходит после открытия окна — живой областью (читалка объявит его, m3 ревью T9)
+    expect(within(dialog).getByRole('status')).toHaveTextContent('входят 12 игроков');
     expect(seen.usage).toBe(1);
     expect(calls).toHaveLength(0);
     await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
@@ -44,6 +46,23 @@ describe('выключение аварийного флага', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.body).toEqual({ version: 1, enabled_globally: false });
     expect(screen.queryByRole('dialog', { name: TITLE })).toBeNull();
+  });
+
+  test('в статистике нет строки способа — «неизвестно», а не «0 игроков»; выключить можно', async () => {
+    const { calls, user } = setup({
+      usage: { items: USAGE.items.filter((i) => i.method !== 'apple') },
+    });
+    await user.click(await sw('Вход через Apple: везде'));
+    const dialog = await screen.findByRole('dialog', { name: TITLE });
+    expect(
+      await within(dialog).findByText(
+        'Сколько игроков входят только этим способом, неизвестно. Выключить можно и без числа.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Только этим способом/)).toBeNull();
+    expect(within(dialog).getByRole('status')).toHaveTextContent('неизвестно');
+    await user.click(within(dialog).getByRole('button', { name: 'Выключить' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
   });
 
   test('«Отменить» — без запроса, флаг включён', async () => {

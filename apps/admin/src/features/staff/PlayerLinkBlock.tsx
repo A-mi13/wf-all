@@ -116,6 +116,8 @@ function LinkDialog({ target, onClose }: { target: StaffAccount; onClose: () => 
   const toast = useToast();
   const formId = useId();
   const lookup = usePlayerLookup(`staff-link:${target.id}`);
+  // введены почта или причина, игрок ещё не найден — закрытие окна спрашивает (найден — терять нечего)
+  const [dirty, setDirty] = useState(false);
   const found = lookup.asked && !lookup.busy ? lookup.query.data : undefined;
   const put = useLinkAction((userId: string, key: string, api) =>
     unwrap(
@@ -132,6 +134,7 @@ function LinkDialog({ target, onClose }: { target: StaffAccount; onClose: () => 
       title={t('dialog_title')}
       description={t('dialog_text')}
       dismissible={!put.isPending}
+      dirty={dirty && !found}
       footer={
         found ? (
           <Button
@@ -162,7 +165,7 @@ function LinkDialog({ target, onClose }: { target: StaffAccount; onClose: () => 
           <FormError error={put.error} />
         </div>
       ) : (
-        <LookupForm lookup={lookup} formId={formId} footer />
+        <LookupForm lookup={lookup} formId={formId} footer onDirty={setDirty} />
       )}
     </Modal>
   );

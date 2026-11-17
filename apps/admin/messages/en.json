@@ -1245,7 +1245,8 @@
     "emergency": {
       "text": "Sign-in with this method turns off for all players at once.",
       "count": "{count, plural, one {# player signs} other {# players sign}} in only this way — they will be left with “Forgot password?”",
-      "error": "Could not load how many players sign in only this way. You can still turn it off."
+      "error": "Could not load how many players sign in only this way. You can still turn it off.",
+      "unknown": "How many players sign in only this way is unknown. You can still turn it off."
     }
   },
   "geo": {
@@ -1732,7 +1733,8 @@
       "reason": "Reason for viewing",
       "reason_hint": "For example, a ticket number. Do not enter the player’s personal data",
       "reason_invalid": "Remove line breaks and control characters",
-      "submit": "Find"
+      "submit": "Find",
+      "found": "Player found: {nickname}"
     },
     "card": {
       "id": "Player id",

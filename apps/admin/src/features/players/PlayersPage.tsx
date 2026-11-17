@@ -32,6 +32,10 @@ export function PlayersPage() {
           <p className={styles.text}>{t('lookup.text')}</p>
           <LookupForm lookup={lookup} />
         </section>
+        {/* карточка появляется после ответа, фокус остаётся на «Найти» — находку объявляет живая строка */}
+        <p role="status" className={styles.srOnly}>
+          {found ? t('lookup.found', { nickname: found.nickname }) : ''}
+        </p>
         {busy && <Skeleton.Card />}
         {found && <PlayerCard key={found.id} player={found} onCancelled={onCancelled} />}
       </div>

@@ -23,7 +23,8 @@ export function useRequestMfaReset(userId: string) {
         }),
       );
     },
-    { gcTime: 0, onSuccess: () => void invalidateApprovals() },
+    // и после ошибки: при неизвестном исходе (5xx, обрыв) запрос мог быть создан — счётчик не ждёт опроса
+    { gcTime: 0, onSettled: () => void invalidateApprovals() },
   );
 }
 

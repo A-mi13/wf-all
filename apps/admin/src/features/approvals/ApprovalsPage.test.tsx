@@ -1174,7 +1174,8 @@ test('identity.mfa_reset: игрок, обращение, причина; на �
   expect(within(row!).getByText('0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90')).toBeInTheDocument();
   expect(within(row!).getByText('SUP-4812')).toBeInTheDocument();
   expect(within(row!).getByText('Потерял телефон, личность проверена')).toBeInTheDocument();
-  expect(within(row!).getByText('и ещё 1 поле: extra')).toBeInTheDocument();
+  // вне списка «термин — значение»: у строки нет своего <dt> (m7 ревью T9)
+  expect(within(row!).getByText('и ещё 1 поле: extra').closest('dl')).toBeNull();
   expect(within(row!).queryByText('Кому')).toBeNull();
   expect(within(row!).getByRole('button', { name: 'Подтвердить' })).toBeInTheDocument();
   expect(row).not.toHaveTextContent(DESKTOP_ONLY);

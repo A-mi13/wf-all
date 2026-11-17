@@ -29,15 +29,21 @@ export function LookupForm({
   lookup,
   formId,
   footer = false,
+  onDirty,
 }: {
   lookup: PlayerLookup;
   formId?: string;
   footer?: boolean;
+  // признак «введено» для dirty окна (закрытие с введённым спрашивает); при размонтировании — false
+  onDirty?: (dirty: boolean) => void;
 }) {
   const t = useTranslations('players.lookup');
   const form = useForm<Values>({ defaultValues: { email: '', reason: '' } });
   const { query, busy, asked } = lookup;
   const error = asked && query.isError && !busy ? query.error : null;
+  const { isDirty } = form.formState;
+  useEffect(() => onDirty?.(isDirty), [isDirty, onDirty]);
+  useEffect(() => () => onDirty?.(false), [onDirty]);
 
   // поля заголовков из ответа сервера — к полям формы (фокус — на первое)
   useEffect(() => {

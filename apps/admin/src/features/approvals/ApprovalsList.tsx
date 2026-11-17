@@ -429,28 +429,33 @@ function Subject({ approval: a, me }: { approval: Approval; me: Me }) {
   );
 }
 
+// «и ещё N полей» — отдельной строкой после списка: у неё нет своего термина (<dt>).
 function MfaResetSubject({ summary: m }: { summary: MfaResetSummary }) {
   const t = useTranslations('approvals.summary');
   return (
-    <dl className={styles.facts} aria-label={t('label')}>
-      <dt>{t('identity.player')}</dt>
-      <dd>{m.userId ?? t('none')}</dd>
-      {m.ticket && (
-        <>
-          <dt>{t('identity.ticket')}</dt>
-          <dd>{m.ticket}</dd>
-        </>
-      )}
-      {m.reason && (
-        <>
-          <dt>{t('identity.reason')}</dt>
-          <dd>{m.reason}</dd>
-        </>
-      )}
+    <>
+      <dl className={styles.facts} aria-label={t('label')}>
+        <dt>{t('identity.player')}</dt>
+        <dd>{m.userId ?? t('none')}</dd>
+        {m.ticket && (
+          <>
+            <dt>{t('identity.ticket')}</dt>
+            <dd>{m.ticket}</dd>
+          </>
+        )}
+        {m.reason && (
+          <>
+            <dt>{t('identity.reason')}</dt>
+            <dd>{m.reason}</dd>
+          </>
+        )}
+      </dl>
       {m.others.length > 0 && (
-        <dd>{t('identity.others', { count: m.others.length, keys: m.others.join(', ') })}</dd>
+        <p className={styles.muted}>
+          {t('identity.others', { count: m.others.length, keys: m.others.join(', ') })}
+        </p>
       )}
-    </dl>
+    </>
   );
 }
 

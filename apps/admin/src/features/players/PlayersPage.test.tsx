@@ -13,6 +13,7 @@ import {
 } from '../../test/identity';
 import { problem } from '../../test/problem';
 import { sectionsServer } from '../../test/sections';
+import { http, server } from '../../test/server';
 
 // «Игроки» (спека identity §7.4 «Поддержка: сброс 2FA»; план I-4, Task 9, R19, R20): поиск по почте с причиной —
 // заголовками в percent-encoding, только по явной отправке, без перезапросов по фокусу окна и сети (каждое чтение —
@@ -57,6 +58,10 @@ describe('поиск', () => {
       { email: encodeURIComponent(PLAYER_EMAIL), reason: encodeURIComponent(REASON) },
     ]);
     expect(within(c).getByText('Активен')).toBeInTheDocument();
+    // карточка появляется после ответа — живая строка объявляет находку (m5 ревью T9)
+    expect(screen.getAllByRole('status').map((el) => el.textContent)).toContain(
+      'Найден игрок kosta_10',
+    );
     expect(within(c).getByText('2FA включена')).toBeInTheDocument();
     expect(await within(c).findByText(/Ставрополь/)).toBeInTheDocument();
     // подсказка о ПД у причины (R41)
@@ -203,6 +208,36 @@ describe('сброс 2FA', () => {
     expect(seen.cancels[0]?.resetId).toBe(SCHEDULED_RESET.id);
     expect(seen.lookups).toHaveLength(1);
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  });
+
+  test('исход запроса неизвестен (500) — счётчик подтверждений всё равно перечитан', async () => {
+    sectionsServer();
+    identityServer({
+      applications: [],
+      players: { [PLAYER_EMAIL]: player() },
+      resetAnswer: () => problem(500, 'internal'),
+    });
+    let approvals = 0;
+    server.use(
+      http.get('/v1/approvals', () => {
+        approvals++;
+        return undefined;
+      }),
+    );
+    renderApp('/players', { me: mePlayers });
+    const user = userEvent.setup();
+    await search();
+    const c = await card();
+    await user.click(within(c).getByRole('button', { name: 'Запросить сброс 2FA' }));
+    const d = await screen.findByRole('dialog', { name: 'Сброс 2FA: kosta_10' });
+    fireEvent.change(within(d).getByLabelText('Почему и как проверена личность'), {
+      target: { value: 'Потерял телефон' },
+    });
+    await waitFor(() => expect(approvals).toBeGreaterThan(0));
+    const before = approvals;
+    await user.click(within(d).getByRole('button', { name: 'Отправить на подтверждение' }));
+    await within(d).findByRole('alert');
+    await waitFor(() => expect(approvals).toBeGreaterThan(before));
   });
 
   test('без identity.mfa.reset — ни запроса, ни отмены', async () => {

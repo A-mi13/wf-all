@@ -105,6 +105,21 @@ describe('связать', () => {
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
   });
 
+  test('введены почта и причина — закрытие окна спрашивает; после «Уйти» окно закрыто, запроса нет', async () => {
+    const { identity, user } = setup();
+    const b = await block();
+    await user.click(within(b).getByRole('button', { name: 'Связать' }));
+    const m = await screen.findByRole('dialog', { name: 'Связь с учёткой игрока' });
+    fireEvent.change(within(m).getByLabelText('Почта игрока'), { target: { value: PLAYER_EMAIL } });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await screen.findByRole('dialog', { name: 'Уйти без сохранения?' });
+    await user.click(screen.getByRole('button', { name: 'Уйти' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Связь с учёткой игрока' })).toBeNull(),
+    );
+    expect(identity.lookups).toEqual([]);
+  });
+
   test('409 player_link_taken — текст в окне, окно открыто', async () => {
     const { user } = setup({ linkAnswer: () => problem(409, 'staff.player_link_taken') });
     const b = await block();

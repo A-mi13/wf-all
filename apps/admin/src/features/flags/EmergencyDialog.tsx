@@ -75,6 +75,12 @@ function UsageLine({ method }: { method: Method }) {
         </Button>
       </div>
     );
+  // нет строки способа (сервер старше или новее админки) — число неизвестно, а не «0 игроков»: окно не должно
+  // утверждать, что выключение никого не заденет. Число приходит после открытия окна — живая строка (role=status).
   const row = usage.data.items.find((i) => i.method === method);
-  return <p className={styles.usageText}>{t('count', { count: row?.only_method ?? 0 })}</p>;
+  return (
+    <p role="status" className={styles.usageText}>
+      {row ? t('count', { count: row.only_method }) : t('unknown')}
+    </p>
+  );
 }
