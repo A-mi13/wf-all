@@ -117,6 +117,14 @@ export const KEYS = [
   'players.reset.request',
   'audit.actions.identity.captain_application_approved',
   'audit.actions.identity.pii_read',
+  // заголовки разделов обхода prod.spec (e2e/sections.ts; итоговое ревью I-4, I1)
+  'nav.staff',
+  'nav.me',
+  'nav.countries',
+  'nav.versions',
+  'nav.flags',
+  'captains.title',
+  'players.title',
 ] as const;
 
 export type Key = (typeof KEYS)[number];

@@ -8,6 +8,7 @@ import { identityServer, USAGE } from '../../test/identity';
 import { stubMedia } from '../../test/media';
 import { problem } from '../../test/problem';
 import { sectionsServer } from '../../test/sections';
+import { http, server } from '../../test/server';
 
 // Аварийный выключатель входа (спека identity §4.3, §7.5; план I-4, Task 9): выключение auth_*_login — диалог с
 // числом «входят только так» из getAuthMethodsUsage; ошибка статистики — «Повторить» без числа, выключить можно
@@ -89,6 +90,40 @@ describe('выключение аварийного флага', () => {
     expect(off).toBeEnabled();
     await user.click(off);
     await waitFor(() => expect(calls).toHaveLength(1));
+  });
+
+  // m1 итогового ревью I-4: повторное открытие в пределах gcTime показывало число прошлого открытия как текущее (и
+  // объявляло его живой областью), пока шло перечитывание, — в аварию ложная уверенность. Число — только свежий ответ.
+  test('повторное открытие — числа прошлого открытия нет до нового ответа', async () => {
+    const { seen, user } = setup();
+    const all = await sw('Вход через Apple: везде');
+    await user.click(all);
+    let dialog = await screen.findByRole('dialog', { name: TITLE });
+    expect(await within(dialog).findByText(/входят 12 игроков/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Отменить' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: TITLE })).toBeNull());
+
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    server.use(
+      http.get('/v1/identity/auth-methods/usage', async ({ response }) => {
+        seen.usage++;
+        await gate;
+        return response(200).json({
+          items: USAGE.items.map((i) => (i.method === 'apple' ? { ...i, only_method: 7 } : i)),
+        });
+      }),
+    );
+    await user.click(all);
+    dialog = await screen.findByRole('dialog', { name: TITLE });
+    await waitFor(() => expect(seen.usage).toBe(2));
+    expect(within(dialog).queryByText(/входят 12/)).toBeNull();
+    expect(within(dialog).queryByRole('status')).toBeNull();
+    release();
+    expect(await within(dialog).findByText(/входят 7 игроков/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('status')).toHaveTextContent('входят 7 игроков');
   });
 
   test('палец — тот же диалог вместо шторки, один', async () => {

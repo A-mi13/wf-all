@@ -48,10 +48,18 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
 peer → IP-аллоулист (`ADMIN_IP_ALLOWLIST`; пусто — выключен; вне списка — `403 auth.ip_not_allowed` на всё, включая
 статику и `/docs`) → склейка `Accept-Language` → лимит тела → таймаут → `httpx.Routes` → `Cache-Control: no-store` на
 ответах маршрутов контракта → сессия сотрудника по cookie (только маршруты контракта) → CSRF → `httpx.ValidateRequests`
-(вход — `auth.AuthenticatedStaff`) → права `x-permission` → `ratelimit.Middleware` → побудка api (`wake.go`) →
+(вход — `auth.AuthenticatedStaff`) → права `x-permission` → `ratelimit.MiddlewareBy(…, rateClass)` → побудка api (`wake.go`) →
 `idempotency.Middleware` → strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка — `internal/httpapi/admin` (`handler.go`, звенья — по
 файлам `allowlist.go`, `session.go`, `csrf.go`, `permission.go`, `static.go`).
 
+- **Лимиты** (итоговое ревью I-4, I1): умолчания admin-api — `ratelimit.AdminRules()` (`DefaultRules` со всплеском
+  `default.user` 120: полная загрузка раздела одним сотрудником; public — 60), `ADMIN_RATE_LIMITS` — поверх них
+  (`rateRules` в `cmd/admin-api`, страж `TestRunUsesAdminRules`). Фоновый GET (`X-WF-Background: 1`, ровно «1») операции
+  без своего `x-rate-limit` считается классом `staff_background` (`ratelimit.ClassStaffBackground`: сотрудник 60/мин,
+  всплеск 30; IP как у default) — опрос счётчиков не тратит обычный лимит. Класс решает заголовок, а не операция
+  (`rateClass` в `session.go`); мутация с заголовком и операция со своим классом (`staff_auth`) — как есть. Без
+  правила `staff_background` — отказ старта. Стражи — `TestBackgroundRequestsOwnRateClass`,
+  `TestBackgroundClassOnlyForGET`, `TestBackgroundKeepsOwnClass`, `TestAdminRules` (`ratelimit`).
 - **Побудка api** (`wake.go`, только dev-стенд, `ADMIN_WAKE_API_URL`; спека встроенного воркера §8.1): звено снаружи
   `idempotency.Middleware` (не `db.WithTxHook`: хук на ctx один — перекрыл бы хук идемпотентности); после `next` на
   ответ 2xx мутирующей операции контракта (метод не GET/HEAD/OPTIONS) — `Waker.Poke`: фоновый `GET <url>/healthz` на

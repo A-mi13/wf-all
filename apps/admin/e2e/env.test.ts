@@ -12,7 +12,6 @@ import {
   cleanEnv,
   cookieName,
   DEFAULT_PROJECTS,
-  E2E_ADMIN_RATE_LIMITS,
   E2E_FLAG_CITIES,
   enabledProjects,
   fixtureArgs,
@@ -32,7 +31,7 @@ import {
   viteEnv,
   workerEnv,
 } from './env';
-import { PROD_SECTIONS } from './sections';
+import { PROD_SECTIONS, TITLE_NOT_NAV_LABEL } from './sections';
 
 // Ключ прогона — как его выдаёт scripts/e2e-admin.sh: 32 байта в base64url.
 const KEY = Buffer.alloc(32, 7).toString('base64url');
@@ -89,14 +88,13 @@ describe('окружение e2e', () => {
     });
   });
 
-  // Прогон 17.11 (план I-4, Task 11): обход разделов prod.spec одним сотрудником упирался во всплеск default.user —
-  // его прогон расширяет; лимиты входа (staff_auth) и по IP не трогает.
-  it('лимиты admin-api: шире только default.user, вход и IP — по умолчанию', () => {
+  // Итоговое ревью I-4 (I1): лимиты admin-api в прогоне — умолчания (ratelimit.AdminRules: фоновые GET — свой класс,
+  // всплеск default.user 120). Обход разделов prod.spec — живой страж этих умолчаний: расширенный лимит прогона
+  // спрятал бы их поломку.
+  it('лимиты admin-api — по умолчанию у всех пар', () => {
     vi.stubEnv('WF_E2E_ADMIN_DATABASE_URL', DB_URL);
     vi.stubEnv('WF_E2E_STAFF_SECRET_KEYS', KEY);
-    const rules = adminApiEnv(PAIRS.prod).ADMIN_RATE_LIMITS ?? '';
-    expect(rules).toBe(E2E_ADMIN_RATE_LIMITS);
-    expect(rules.split(',').map((r) => r.split('=')[0])).toEqual(['default.user']);
+    for (const p of Object.values(PAIRS)) expect(adminApiEnv(p).ADMIN_RATE_LIMITS).toBe('');
   });
 
   it('без подготовки скриптом (нет базы и ключа e2e) — понятная ошибка', () => {
@@ -252,9 +250,18 @@ describe('окружение e2e', () => {
   });
 
   it('обход прод-проекта — все разделы меню', () => {
-    expect([...PROD_SECTIONS].sort()).toEqual(
+    expect(PROD_SECTIONS.map((s) => s.path).sort()).toEqual(
       NAV.flatMap((g) => g.items.map((i) => i.path)).sort(),
     );
+  });
+
+  // Обход сверяет h1 по имени (I1: у RateLimitedState и ForbiddenState тоже есть h1): заголовок раздела — подпись
+  // пункта меню, кроме страниц со своим заголовком (TITLE_NOT_NAV_LABEL).
+  it('обход прод-проекта — заголовок каждого раздела', () => {
+    const labels = new Map(NAV.flatMap((g) => g.items).map((i) => [i.path, i.labelKey]));
+    for (const s of PROD_SECTIONS) {
+      expect(s.titleKey, s.path).toBe(TITLE_NOT_NAV_LABEL[s.path] ?? labels.get(s.path));
+    }
   });
 
   // План B, Task 23: импорт и активация поверх настоящего воркера и HTTPS-фикстуры GeoNames. Корневой Taskfile грузит

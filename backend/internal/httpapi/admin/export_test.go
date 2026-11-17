@@ -11,6 +11,10 @@ import (
 // ApproveStaffCodes — коды staff.*, которыми отвечает approve (страж сверки с x-error-codes).
 var ApproveStaffCodes = approveStaffCodes
 
+// RateClass — выбор класса лимита запроса (rateClass): GET со своим x-rate-limit в контракте нет, проверяется
+// напрямую.
+var RateClass = rateClass
+
 // NewHandlerWithSpec — конвейер на подменённом контракте: отказ старта на испорченном бандле
 // (только тесты).
 var NewHandlerWithSpec = newHandler

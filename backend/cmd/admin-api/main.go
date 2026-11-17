@@ -77,6 +77,19 @@ const (
 // Остановка — дренаж HTTP (ADMIN_SHUTDOWN_TIMEOUT) + config.AdminRiverSoftStop + config.HardStop (queue.Stop) в пределах
 // config.StopBudget (план C, R4; TestAdminShutdownBudget): по умолчанию 10 + 10 + 5 = 25 с из окна Render 30 с.
 
+// rateRules — лимиты admin-api: ADMIN_RATE_LIMITS поверх своих умолчаний ratelimit.AdminRules (всплеск
+// default.user под полную загрузку раздела, класс фоновых GET), проверенные до подключения к базе.
+func rateRules(overrides string) (ratelimit.Rules, error) {
+	rules, err := ratelimit.ParseRules(overrides, ratelimit.AdminRules())
+	if err != nil {
+		return nil, err
+	}
+	if err := rules.Validate(); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
 // run без аргументов — сервер; staff … — команда оператора. Ошибка использования (errUsage) — код выхода 2.
 func run(ctx context.Context, args, environ []string, out, logOut io.Writer) error {
 	// команда разбирается первой: опечатка оператора — usage, а не поднятый сервер и не подключение к базе
@@ -89,11 +102,8 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		return err
 	}
 	// лимиты и доверие к заголовкам проверяются до подключения к базе
-	rules, err := ratelimit.ParseRules(cfg.RateLimits, ratelimit.DefaultRules())
+	rules, err := rateRules(cfg.RateLimits)
 	if err != nil {
-		return err
-	}
-	if err := rules.Validate(); err != nil {
 		return err
 	}
 	// BFF у админки нет: её фронт ходит в API напрямую

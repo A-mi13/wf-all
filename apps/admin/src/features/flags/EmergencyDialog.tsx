@@ -60,6 +60,9 @@ function UsageLine({ method }: { method: Method }) {
     queryKey: USAGE_KEY,
     queryFn: () => unwrap(api.GET('/v1/identity/auth-methods/usage')),
     staleTime: 0,
+    // закрытое окно забывает число: повторное открытие показывает скелетон до свежего ответа, а не прошлое число
+    // как текущее (живой областью) на время перечитывания — в аварию это ложная уверенность (ревью I-4, m1)
+    gcTime: 0,
     retry: false,
     refetchOnWindowFocus: false,
   });

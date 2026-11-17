@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { type BrowserContext, expect, type Page, test } from '@playwright/test';
+import { type BrowserContext, expect, type Page, type Response, test } from '@playwright/test';
 import { E2E_FLAG_CITIES, pairOf, ROOT } from './env';
 import { t } from './keys';
 import { PROD_SECTIONS } from './sections';
@@ -136,13 +136,32 @@ test('под сотрудником: разделы меню и панель п�
   await expect(palette).toHaveCount(0);
   await collect();
 
-  // каждый раздел — полной загрузкой по глубокой ссылке: admin-api отдаёт index.html для пути SPA
+  // каждый раздел — полной загрузкой по глубокой ссылке: admin-api отдаёт index.html для пути SPA. Отказы API за
+  // весь обход (429 лимита, 403 права, 5xx ручки раздела) — в список: h1 есть и у состояния вместо страницы
+  // (RateLimitedState, ForbiddenState), а ошибка данных уходит в блок под PageHeader (итоговое ревью I-4, I1).
+  // Тишина сети перед переходом дальше: поздний ответ счётчика меню попадает в свой раздел.
+  const failed: string[] = [];
+  let current = '';
+  const onResponse = (r: Response) => {
+    const u = new URL(r.url());
+    if (u.pathname.startsWith('/v1/') && r.status() >= 400) {
+      failed.push(`${current}: ${r.status()} ${r.request().method()} ${u.pathname}`);
+    }
+  };
+  page.on('response', onResponse);
   for (const section of PROD_SECTIONS) {
-    await page.goto(section);
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-    expect(new URL(page.url()).pathname, section).toBe(section);
+    current = section.path;
+    await page.goto(section.path);
+    await page.waitForLoadState('networkidle');
+    await expect(
+      page.getByRole('heading', { level: 1, name: t(section.titleKey), exact: true }),
+      section.path,
+    ).toBeVisible();
+    expect(new URL(page.url()).pathname, section.path).toBe(section.path);
     await collect();
   }
+  page.off('response', onResponse);
+  expect(failed, 'отказы API при обходе разделов').toEqual([]);
   await page.goto('/staff');
   await page.getByRole('button', { name: t('staff.invite.open') }).click();
   await expect(page.getByRole('dialog')).toBeVisible();

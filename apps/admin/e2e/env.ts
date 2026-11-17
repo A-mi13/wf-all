@@ -188,8 +188,6 @@ function runDatabaseUrl(name: string): string {
   return v;
 }
 
-export const E2E_ADMIN_RATE_LIMITS = 'default.user=600/1m:200';
-
 // Окружение admin-api пары: сервер и подкоманды оператора (staff bootstrap) — одно и то же.
 export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
   return {
@@ -203,11 +201,9 @@ export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
     ADMIN_DOCS_ENABLED: 'false',
     ADMIN_TRUSTED_PROXIES: '',
     ADMIN_CLIENT_IP_HEADER: '',
-    // Лимит на сотрудника (default.user: 300/мин, всплеск 60) — шире: prod.spec за ~2 с полной загрузкой обходит все
-    // разделы меню одним сотрудником, и после разделов I-4 (счётчик «Капитанов» на каждой загрузке, «Капитаны» и
-    // «Игроки» в обходе — ~70 запросов) всплеск 60 кончался — раздел отвечал «Слишком много запросов» (прогон 17.11).
-    // Человек так не ходит; лимитер включён, классы входа (staff_auth) и IP — по умолчанию.
-    ADMIN_RATE_LIMITS: E2E_ADMIN_RATE_LIMITS,
+    // Лимиты — умолчания admin-api (ratelimit.AdminRules: фоновые GET с X-WF-Background — свой класс, всплеск
+    // default.user 120): обход разделов prod.spec — живой страж этих умолчаний (итоговое ревью I-4, I1)
+    ADMIN_RATE_LIMITS: '',
     ADMIN_ORIGIN: origin(p),
     ADMIN_STAFF_SECRET_KEYS: runKey('WF_E2E_STAFF_SECRET_KEYS'),
     ADMIN_IP_ALLOWLIST: '',

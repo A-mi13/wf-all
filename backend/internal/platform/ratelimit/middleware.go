@@ -18,6 +18,15 @@ import (
 // Маршрут не из контракта не считается. Хранилище недоступно — запрос проходит, ошибка — в
 // лог: без базы не работает и остальное, а 500 на каждый запрос ничего не защищает.
 func Middleware(l Limiter, r Rules, log *slog.Logger) func(http.Handler) http.Handler {
+	return MiddlewareBy(l, r, log, nil)
+}
+
+// ClassFunc — класс запроса по классу операции (x-rate-limit или default): admin-api переводит фоновые GET
+// сотрудника в ClassStaffBackground по заголовку. Вернуть класс, которого нет в правилах, — ошибка в лог и default.
+type ClassFunc func(r *http.Request, class string) string
+
+// MiddlewareBy — Middleware с выбором класса запроса (classOf nil — класс операции).
+func MiddlewareBy(l Limiter, r Rules, log *slog.Logger, classOf ClassFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			rt, ok := httpx.RouteFrom(req.Context())
@@ -28,6 +37,9 @@ func Middleware(l Limiter, r Rules, log *slog.Logger) func(http.Handler) http.Ha
 			class := rt.Extension("x-rate-limit")
 			if class == "" {
 				class = DefaultClass
+			}
+			if classOf != nil {
+				class = classOf(req, class)
 			}
 			cp, ok := r[class]
 			if !ok {
