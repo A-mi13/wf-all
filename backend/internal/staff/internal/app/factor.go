@@ -123,7 +123,7 @@ func (a *App) withFactor(ctx context.Context, s *auth.Staff, step string, m staf
 	)
 	err := db.InTx(dctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		acct, err := q.LockAccount(ctx, s.StaffID)
+		acct, err := lockAccount(ctx, q, s.StaffID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return auth.ErrSessionInvalid
 		}

@@ -89,7 +89,7 @@ func (a *App) Login(ctx context.Context, email, pw string, m staff.Meta) (LoginR
 	var raw string
 	err = db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		locked, err := q.LockAccount(ctx, acct.ID)
+		locked, err := lockAccount(ctx, q, acct.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errLoginStale
 		}

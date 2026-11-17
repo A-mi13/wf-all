@@ -41,3 +41,16 @@ func (q *Queries) LockAccountForShare(ctx context.Context, staffID uuid.UUID) (u
 	err := row.Scan(&id)
 	return id, err
 }
+
+const lockedAccountVersion = `-- name: LockedAccountVersion :one
+SELECT version FROM staff_accounts WHERE id = $1::uuid
+`
+
+// Версия учётки (после LockAccountForShare, своим оператором): вызывающий сверяет её с auth.Staff.Version загрузки
+// сессии — роль, города, выключение и сброс поднимают версию (m1 ревью Task 4 плана I-4).
+func (q *Queries) LockedAccountVersion(ctx context.Context, staffID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, lockedAccountVersion, staffID)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
+}

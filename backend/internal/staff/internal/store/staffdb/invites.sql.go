@@ -30,6 +30,24 @@ func (q *Queries) AcceptInvitePassword(ctx context.Context, arg AcceptInvitePass
 	return err
 }
 
+const acquireAccountByEmail = `-- name: AcquireAccountByEmail :one
+
+SELECT id FROM staff_accounts WHERE email = $1::citext FOR UPDATE
+`
+
+// Приглашения и оператор (спека сотрудников §4.2–4.4, §4.11). Код приглашения — только шифротекст
+// (keys.Ring, aad = id приглашения). Сценарии с приглашением сначала берут замок учётки
+// (LockAccount / LockAccountByEmail), затем строку приглашения: учётка сериализует принятие,
+// recovery-codes/ack, повторные отправки, выпуск нового приглашения и перешифровку.
+// Замок учётки по почте ОТДЕЛЬНЫМ оператором — первым шагом lockAccountByEmail (причина — у AcquireAccount в
+// auth.sql: роль соединённой строки после ожидания замка была бы из старого снимка). Нет — ErrNoRows.
+func (q *Queries) AcquireAccountByEmail(ctx context.Context, email string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, acquireAccountByEmail, email)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const activateAccount = `-- name: ActivateAccount :exec
 UPDATE staff_accounts
 SET status = 'active', mfa_failures = 0, last_login_at = $1::timestamptz
@@ -486,7 +504,6 @@ func (q *Queries) ListStoredKeyIDs(ctx context.Context) ([]string, error) {
 }
 
 const lockAccountByEmail = `-- name: LockAccountByEmail :one
-
 SELECT a.id, a.status::text AS status, a.display_name, a.locale, a.version, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id
@@ -503,11 +520,8 @@ type LockAccountByEmailRow struct {
 	Role        string
 }
 
-// Приглашения и оператор (спека сотрудников §4.2–4.4, §4.11). Код приглашения — только шифротекст
-// (keys.Ring, aad = id приглашения). Сценарии с приглашением сначала берут замок учётки
-// (LockAccount / LockAccountByEmail), затем строку приглашения: учётка сериализует принятие,
-// recovery-codes/ack, повторные отправки, выпуск нового приглашения и перешифровку.
-// Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор.
+// Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор. Только после
+// AcquireAccountByEmail (lockAccountByEmail).
 func (q *Queries) LockAccountByEmail(ctx context.Context, email string) (LockAccountByEmailRow, error) {
 	row := q.db.QueryRow(ctx, lockAccountByEmail, email)
 	var i LockAccountByEmailRow

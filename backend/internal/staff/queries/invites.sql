@@ -3,8 +3,14 @@
 -- (LockAccount / LockAccountByEmail), затем строку приглашения: учётка сериализует принятие,
 -- recovery-codes/ack, повторные отправки, выпуск нового приглашения и перешифровку.
 
+-- name: AcquireAccountByEmail :one
+-- Замок учётки по почте ОТДЕЛЬНЫМ оператором — первым шагом lockAccountByEmail (причина — у AcquireAccount в
+-- auth.sql: роль соединённой строки после ожидания замка была бы из старого снимка). Нет — ErrNoRows.
+SELECT id FROM staff_accounts WHERE email = sqlc.arg(email)::citext FOR UPDATE;
+
 -- name: LockAccountByEmail :one
--- Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор.
+-- Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор. Только после
+-- AcquireAccountByEmail (lockAccountByEmail).
 SELECT a.id, a.status::text AS status, a.display_name, a.locale, a.version, r.role::text AS role
 FROM staff_accounts a
 JOIN staff_roles r ON r.staff_id = a.id

@@ -12,6 +12,21 @@ import (
 	"github.com/google/uuid"
 )
 
+const acquireAccount = `-- name: AcquireAccount :one
+SELECT id FROM staff_accounts WHERE id = $1::uuid FOR UPDATE
+`
+
+// Замок учётки FOR UPDATE ОТДЕЛЬНЫМ оператором — первым шагом lockAccount и lockAccounts (цель). Один оператор
+// «FOR UPDATE OF a + JOIN staff_roles» после ожидания замка (READ COMMITTED) перечитывает только строку учётки, а
+// роль берёт из снимка до ожидания: роль, сменённую под замком соседа, он бы не увидел (TestStaleRole*). Следующий
+// оператор (LockAccount, ManageLockAccount) берёт новый снимок уже под замком и не ждёт. Учётки нет — ErrNoRows.
+func (q *Queries) AcquireAccount(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, acquireAccount, id)
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const addFactorFailure = `-- name: AddFactorFailure :one
 UPDATE staff_accounts SET mfa_failures = mfa_failures + 1
 WHERE id = $1
@@ -131,7 +146,8 @@ type LockAccountRow struct {
 
 // Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
 // снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите,
-// почта — аккаунт в ссылке otpauth (настройка 2FA).
+// почта — аккаунт в ссылке otpauth (настройка 2FA). Только после AcquireAccount (lockAccount): сам по себе после
+// ожидания замка отдал бы роль из старого снимка.
 func (q *Queries) LockAccount(ctx context.Context, id uuid.UUID) (LockAccountRow, error) {
 	row := q.db.QueryRow(ctx, lockAccount, id)
 	var i LockAccountRow

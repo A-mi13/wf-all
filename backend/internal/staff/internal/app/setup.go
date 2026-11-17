@@ -28,7 +28,7 @@ func (a *App) lockSetup(ctx context.Context, q *staffdb.Queries, s *auth.Staff) 
 	if s.Stage != auth.StageSetup {
 		return staffdb.LockAccountRow{}, sess, time.Time{}, staff.ErrWrongStage
 	}
-	acct, err := q.LockAccount(ctx, s.StaffID)
+	acct, err := lockAccount(ctx, q, s.StaffID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return acct, sess, time.Time{}, auth.ErrSessionInvalid
 	}

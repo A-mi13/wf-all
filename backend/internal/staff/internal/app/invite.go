@@ -200,7 +200,7 @@ func (a *App) ResendInviteSelf(ctx context.Context, email string, m staff.Meta) 
 	// одно письмо
 	return db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		acct, err := q.LockAccountByEmail(ctx, norm)
+		acct, err := lockAccountByEmail(ctx, q, norm)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -306,7 +306,7 @@ func (a *App) ResendInvite(ctx context.Context, s *auth.Staff, staffID uuid.UUID
 // staff.not_found, не invited — staff.wrong_stage; pause — отказ раньше 60 с с выпуска последнего
 // приглашения (*staff.ResendTooSoonError; анонимные самоотправки паузу админа не двигают). Назначение — последнего приглашения учётки (нет приглашений — invite).
 func (a *App) lockForResend(ctx context.Context, q *staffdb.Queries, staffID uuid.UUID, pause bool) (string, error) {
-	acct, err := q.LockAccount(ctx, staffID)
+	acct, err := lockAccount(ctx, q, staffID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", staff.ErrNotFound
 	}
@@ -479,7 +479,7 @@ func selfResendable(expires, lastSent time.Time, sends int32, now time.Time) boo
 // неудачи (ответ тот же staff.ErrInviteInvalid).
 func (a *App) lockAcceptable(ctx context.Context, q *staffdb.Queries, email string) (staffdb.LockAccountByEmailRow, staffdb.LockLiveInviteRow, bool, error) {
 	var inv staffdb.LockLiveInviteRow
-	acct, err := q.LockAccountByEmail(ctx, email)
+	acct, err := lockAccountByEmail(ctx, q, email)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return acct, inv, false, nil
 	}

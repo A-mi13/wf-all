@@ -12,3 +12,8 @@ SELECT id FROM staff_accounts WHERE id = sqlc.arg(staff_id)::uuid FOR SHARE;
 -- name: LinkedPlayerOf :one
 -- Связь сотрудника (после LockAccountForShare); связи нет — ErrNoRows.
 SELECT user_id FROM staff_player_links WHERE staff_id = sqlc.arg(staff_id)::uuid;
+
+-- name: LockedAccountVersion :one
+-- Версия учётки (после LockAccountForShare, своим оператором): вызывающий сверяет её с auth.Staff.Version загрузки
+-- сессии — роль, города, выключение и сброс поднимают версию (m1 ревью Task 4 плана I-4).
+SELECT version FROM staff_accounts WHERE id = sqlc.arg(staff_id)::uuid;

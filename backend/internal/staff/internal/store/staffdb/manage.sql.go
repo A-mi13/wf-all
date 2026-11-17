@@ -348,7 +348,8 @@ type ManageLockAccountRow struct {
 	Role        string
 }
 
-// Цель управления под замком (выключение, сброс, роль, сессии, приглашение).
+// Цель управления под замком (выключение, сброс, роль, сессии, приглашение). Только после AcquireAccount
+// (lockAccounts): замок — отдельным оператором, роль — этим, уже со снимком под замком.
 func (q *Queries) ManageLockAccount(ctx context.Context, id uuid.UUID) (ManageLockAccountRow, error) {
 	row := q.db.QueryRow(ctx, manageLockAccount, id)
 	var i ManageLockAccountRow
@@ -480,7 +481,8 @@ type ManageShareAccountRow struct {
 }
 
 // Автор, инициатор или подтверждающий под разделяемым замком: пока действие идёт, его нельзя
-// выключить, сбросить или сменить ему роль (M-4, m4).
+// выключить, сбросить или сменить ему роль (M-4, m4). Только после LockAccountForShare (lockAccounts): иначе после
+// ожидания замка роль — из снимка до смены роли соседом, и понижённый подтверждающий проходил checkActor.
 func (q *Queries) ManageShareAccount(ctx context.Context, id uuid.UUID) (ManageShareAccountRow, error) {
 	row := q.db.QueryRow(ctx, manageShareAccount, id)
 	var i ManageShareAccountRow
