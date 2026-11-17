@@ -43,7 +43,7 @@ func Load(environ []string, geoHTTP *http.Client) (Base, error) {
 	if err != nil {
 		return Base{}, err
 	}
-	if err := errors.Join(validateRelay(cfg.Relay), validateGeoNames(cfg.GeoNames)); err != nil {
+	if err := errors.Join(cfg.Relay.Validate(), validateGeoNames(cfg.GeoNames)); err != nil {
 		return Base{}, err
 	}
 	geoClient, err := geoNamesClient(geoHTTP, cfg.GeoNames)
@@ -65,7 +65,7 @@ type Prepared struct {
 // Prepare — проверки режима сервиса до базы (разовым командам не нужны): очереди ≥ 1 (R4), почта WORKER_MAIL_*
 // (предупреждения SMTP — в log), кольцо WORKER_IDENTITY_SECRET_KEYS, тексты писем.
 func Prepare(b Base, environ []string, log *slog.Logger) (Prepared, error) {
-	if err := validateQueues(b.Config); err != nil {
+	if err := b.Config.ValidateQueues(); err != nil {
 		return Prepared{}, err
 	}
 	mc, err := config.Load[config.Mail]("WORKER_", environ)
@@ -160,7 +160,9 @@ func Run(ctx context.Context, p Prepared, pool *pgxpool.Pool, log *slog.Logger, 
 			log.Warn("events: relay", "err", err)
 		}
 	})
-	log.Info("воркер запущен", "queues", cfg.Queues, "geo_import", cfg.GeoImportEnabled)
+	// сроки остановки — в строке старта: по журналу видно, какой бюджет у процесса (отдельный или встроенный режим)
+	log.Info("воркер запущен", "queues", cfg.Queues, "geo_import", cfg.GeoImportEnabled,
+		"stop_relay", stop.Relay.String(), "stop_soft", stop.Soft.String())
 	<-ctx.Done()
 	wg.Wait() // relay больше не ставит задачи (или не уложился в stop.Relay)
 	// relay + мягкая River + жёсткая (queue.Stop) — в пределах config.StopBudget

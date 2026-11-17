@@ -29,14 +29,19 @@ const (
 )
 
 // ValidateWakeURL — ADMIN_WAKE_API_URL до подключения к базе: пусто — побудка выключена; иначе https, хост, без пути
-// (кроме «/»), запроса, фрагмента и userinfo.
+// (кроме «/»), запроса, фрагмента и userinfo. Значение в ошибку не попадает (текст уходит в журнал деплоя): только
+// хост и причина — в userinfo, пути и запросе бывает пароль или токен.
 func ValidateWakeURL(s string) error {
 	if s == "" {
 		return nil
 	}
 	u, err := url.Parse(s)
 	if err != nil {
-		return fmt.Errorf("admin: ADMIN_WAKE_API_URL %q: %w", s, err)
+		// url.Error цитирует адрес целиком — только причина
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			err = ue.Err
+		}
+		return fmt.Errorf("admin: ADMIN_WAKE_API_URL не разбирается: %w", err)
 	}
 	var errs []error
 	if u.Scheme != "https" {
@@ -50,7 +55,7 @@ func ValidateWakeURL(s string) error {
 		errs = append(errs, errors.New("только схема, хост и порт — без пути, запроса, фрагмента и логина"))
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("admin: ADMIN_WAKE_API_URL %q: %w", s, errors.Join(errs...))
+		return fmt.Errorf("admin: ADMIN_WAKE_API_URL (хост %q): %w", u.Host, errors.Join(errs...))
 	}
 	return nil
 }

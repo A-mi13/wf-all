@@ -3,6 +3,7 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -657,6 +658,10 @@ const (
 	// operatorCommandsReserve — команды оператора со своей машины (admin-api staff …, worker geo import) с пулами по
 	// умолчанию config.DB (10 + 10)
 	operatorCommandsReserve = 20
+	// riverListenConns — LISTEN исполняющего клиента River сверх его пула (ревью m-b2): riverpgxv5 v0.50 Listener.Connect
+	// берёт соединение из пула и делает poolConn.Hijack() — оно уходит из учёта pgxpool, и пул снова может открыть
+	// MaxConns. Клиент только для вставки (queue.InsertConfig) нотификатора не заводит — без надбавки.
+	riverListenConns = 1
 )
 
 // apiFill — заглушки переменных wf-api из панели и generateValue.
@@ -702,6 +707,11 @@ func TestRenderYAMLEmbeddedWorker(t *testing.T) {
 		t.Fatal("wf-api: API_EMBED_WORKER не true — фона на стенде нет")
 	}
 	w, m, _ := workerOf(t)
+	// те же проверки до базы, что у workerhost.Load/Prepare на старте api (ревью infra m4): очередь 0 или пачка relay 0
+	// иначе прошли бы CI и уронили бы старт на Render
+	if err := errors.Join(w.Relay.Validate(), w.ValidateQueues()); err != nil {
+		t.Errorf("render.yaml: WORKER_* wf-api не пройдут проверку старта: %v", err)
+	}
 	if w.GeoImportEnabled {
 		t.Error("WORKER_GEO_IMPORT_ENABLED на стенде должен быть false (§8.2)")
 	}
@@ -753,14 +763,15 @@ func TestRenderYAMLPools(t *testing.T) {
 	}
 	api := apiConfig(t).DB.MaxConns
 	if apiConfig(t).EmbedWorker {
-		// второй пул встроенного воркера и соединение LISTEN relay (вне пула)
+		// второй пул встроенного воркера, соединение LISTEN relay (своё, pgx.ConnectConfig) и LISTEN River
 		w, _, _ := workerOf(t)
-		api += w.DB.MaxConns + 1
+		api += w.DB.MaxConns + 1 + riverListenConns
 	}
 	pools := map[string]int32{
 		"wf-api":         api,
 		"wf-api migrate": migratorConfig(t).DB.MaxConns,
-		"wf-admin-api":   adminConfig(t).DB.MaxConns,
+		// исполняющий клиент River admin-api (очередь staff) — свой LISTEN вне пула
+		"wf-admin-api": adminConfig(t).DB.MaxConns + riverListenConns,
 	}
 	sum := int32(operatorCommandsReserve)
 	for name, n := range pools {

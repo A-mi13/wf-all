@@ -203,17 +203,32 @@ func TestWakeNilWaker(t *testing.T) {
 // Троттлинг: не чаще gap и не больше одного запроса в полёте.
 func TestWakeThrottled(t *testing.T) {
 	t.Parallel()
+	// 3 с — запас на ожидание первого запроса под нагрузкой полного прогона (проверка ниже — до истечения gap)
+	const gap = 3 * time.Second
 	s := newHealthStub(t, nil)
-	w := waker(t, s, s.srv.URL, 200*time.Millisecond, nil)
+	w := waker(t, s, s.srv.URL, gap, nil)
+	start := time.Now()
 	for range 10 {
 		w.Poke()
 	}
 	waitRequests(t, s, 1)
-	time.Sleep(50 * time.Millisecond)
-	if n := s.n.Load(); n != 1 {
-		t.Fatalf("10 Poke подряд — %d запросов, ждали 1", n)
+	// промежуток: первый запрос завершён (в полёте нет — CAS busy не отсекает), Poke внутри gap запроса не шлёт
+	for !admin.WakeIdle(w) {
+		time.Sleep(5 * time.Millisecond)
 	}
-	time.Sleep(300 * time.Millisecond)
+	w.Poke()
+	if !admin.WakeIdle(w) {
+		t.Fatal("Poke внутри промежутка начал запрос")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := s.n.Load(); n != 1 {
+		t.Fatalf("Poke внутри промежутка %s — %d запросов, ждали 1", gap, n)
+	}
+	if el := time.Since(start); el >= gap {
+		t.Fatalf("проверка промежутка заняла %s ≥ %s — машина слишком медленная, проверка не доказательна", el, gap)
+	}
+	// промежуток вышел — следующий Poke будит
+	time.Sleep(time.Until(start.Add(gap + 50*time.Millisecond)))
 	w.Poke()
 	waitRequests(t, s, 2)
 
@@ -326,6 +341,18 @@ func TestValidateWakeURL(t *testing.T) {
 		"https://u:p@h", "ftp://h", "https://h#f", "wf-api.onrender.com"} {
 		if err := admin.ValidateWakeURL(bad); err == nil || !strings.Contains(err.Error(), "ADMIN_WAKE_API_URL") {
 			t.Errorf("%q: err = %v, ждали отказ с ADMIN_WAKE_API_URL", bad, err)
+		}
+	}
+	// значение в ошибке — без userinfo, пути, запроса и фрагмента: текст уходит в stderr (журнал деплоя Render)
+	for _, bad := range []string{"https://u:secret@h", "https://secret@h", "http://u:secret@h", "https://h/secret",
+		"https://h?k=secret", "https://h#secret", "https://u:secret@h/%zz", "https://u:sec ret@h"} {
+		err := admin.ValidateWakeURL(bad)
+		if err == nil || !strings.Contains(err.Error(), "ADMIN_WAKE_API_URL") {
+			t.Errorf("%q: err = %v, ждали отказ с ADMIN_WAKE_API_URL", bad, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "sec ret") {
+			t.Errorf("%q: секрет в тексте ошибки: %v", bad, err)
 		}
 	}
 }

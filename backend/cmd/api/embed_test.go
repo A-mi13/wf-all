@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wf/backend/cmd/internal/workerhost"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events"
@@ -374,15 +375,21 @@ func TestEmbeddedStopDuringSchemaWait(t *testing.T) {
 	}
 }
 
-// Журнал встроенного воркера — журнал api (service=api) с component=worker.
+// Журнал встроенного воркера — журнал api (service=api) с component=worker; сроки остановки в строке старта — сроки
+// embeddedStop (ревью m-b1: run передаёт в workerhost.Run именно их, а не ServiceStop — иначе 33 с > окна Render).
 func TestEmbeddedLogComponent(t *testing.T) {
 	t.Parallel()
 	e := newEmbedEnv(t)
 	e.start()
-	e.waitFor("строка «воркер запущен»", 60*time.Second, func() bool {
+	stop := embeddedStop()
+	if stop == workerhost.ServiceStop {
+		t.Fatal("embeddedStop() = ServiceStop — проверка места вызова вакуумна")
+	}
+	wantStop := `"stop_relay":"` + stop.Relay.String() + `","stop_soft":"` + stop.Soft.String() + `"`
+	e.waitFor("строка «воркер запущен» со сроками embeddedStop", 60*time.Second, func() bool {
 		for line := range strings.SplitSeq(e.log.String(), "\n") {
 			if strings.Contains(line, "воркер запущен") && strings.Contains(line, `"component":"worker"`) &&
-				strings.Contains(line, `"service":"api"`) {
+				strings.Contains(line, `"service":"api"`) && strings.Contains(line, wantStop) {
 				return true
 			}
 		}
