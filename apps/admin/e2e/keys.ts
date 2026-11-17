@@ -87,6 +87,36 @@ export const KEYS = [
   'audit.actions.geo.import',
   'audit.actions.geo.import_requested',
   'audit.actions.geo.city_activated',
+  // капитанская заявка поверх публичного api (план I-4, Task 11, captaincy.spec.ts)
+  'nav.captains',
+  'nav.players',
+  'nav.counts.captains', // счётчик очереди в имени ссылки меню (ICU plural)
+  'captains.table.label',
+  'captains.table.open_label', // «Открыть заявку: {name}»
+  'captains.check_state.ok',
+  'captains.check_state.failed',
+  'captains.check_state.unavailable',
+  'captains.contact.show',
+  'captains.contact.title',
+  'captains.contact.reason',
+  'captains.contact.submit',
+  'captains.approve.submit',
+  'captains.approve.title',
+  'captains.toasts.approved',
+  'captains.result.approved',
+  'captains.reject.submit',
+  'captains.reject.title',
+  'captains.reject.code',
+  'captains.reject.comment',
+  'captains.rejection.other',
+  'captains.toasts.rejected',
+  'players.lookup.email',
+  'players.lookup.reason',
+  'players.lookup.submit',
+  'players.card.mfa_off',
+  'players.reset.request',
+  'audit.actions.identity.captain_application_approved',
+  'audit.actions.identity.pii_read',
 ] as const;
 
 export type Key = (typeof KEYS)[number];

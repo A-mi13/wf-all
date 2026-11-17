@@ -6,11 +6,13 @@ import { NAV } from '../src/app/nav';
 import { MATRIX_VIRTUALIZE_FROM } from '../src/ui/virtual/matrix';
 import {
   adminApiEnv,
+  apiEnv,
   apiOrigin,
   browserOf,
   cleanEnv,
   cookieName,
   DEFAULT_PROJECTS,
+  E2E_ADMIN_RATE_LIMITS,
   E2E_FLAG_CITIES,
   enabledProjects,
   fixtureArgs,
@@ -19,10 +21,13 @@ import {
   GEOFIXTURE_CA,
   GEOFIXTURE_URL,
   geoProject,
+  identityProject,
   mailpitEnv,
   origin,
   PAIRS,
   pairOf,
+  PUBLIC_API,
+  PUBLIC_API_URL,
   ROOT,
   viteEnv,
   workerEnv,
@@ -50,7 +55,7 @@ describe('окружение e2e', () => {
     vi.unstubAllEnvs();
   });
 
-  it('cleanEnv убирает dev-настройки админки (ADMIN_*, адрес прокси Vite), прочее оставляет', () => {
+  it('cleanEnv убирает dev-настройки админки и api (ADMIN_*, API_*, адрес прокси Vite), прочее оставляет', () => {
     const env = cleanEnv({
       ADMIN_ORIGIN: 'http://127.0.0.1:5173',
       ADMIN_MAIL_SMTP_USERNAME: 'dev',
@@ -58,7 +63,7 @@ describe('окружение e2e', () => {
       PATH: '/bin',
       API_HTTP_ADDR: '127.0.0.1:8080',
     });
-    expect(env).toEqual({ PATH: '/bin', API_HTTP_ADDR: '127.0.0.1:8080' });
+    expect(env).toEqual({ PATH: '/bin' });
   });
 
   it('admin-api получает только значения e2e: свой порт, origin Vite пары, Mailpit e2e, база и ключ прогона', () => {
@@ -82,6 +87,16 @@ describe('окружение e2e', () => {
       ADMIN_ORIGIN: 'http://127.0.0.1:5174',
       ADMIN_COOKIE_SECURE: 'true',
     });
+  });
+
+  // Прогон 17.11 (план I-4, Task 11): обход разделов prod.spec одним сотрудником упирался во всплеск default.user —
+  // его прогон расширяет; лимиты входа (staff_auth) и по IP не трогает.
+  it('лимиты admin-api: шире только default.user, вход и IP — по умолчанию', () => {
+    vi.stubEnv('WF_E2E_ADMIN_DATABASE_URL', DB_URL);
+    vi.stubEnv('WF_E2E_STAFF_SECRET_KEYS', KEY);
+    const rules = adminApiEnv(PAIRS.prod).ADMIN_RATE_LIMITS ?? '';
+    expect(rules).toBe(E2E_ADMIN_RATE_LIMITS);
+    expect(rules.split(',').map((r) => r.split('=')[0])).toEqual(['default.user']);
   });
 
   it('без подготовки скриптом (нет базы и ключа e2e) — понятная ошибка', () => {
@@ -352,7 +367,9 @@ describe('окружение e2e', () => {
 
   it('скрипт: порт фикстуры — в проверке занятых, воркер и фикстура собраны до Playwright, база воркера — вне MSYS', () => {
     const sh = readFileSync(path.join(ROOT, 'scripts', 'e2e-admin.sh'), 'utf8');
-    expect(sh).toMatch(new RegExp(`^ports="18026 11026 ${GEOFIXTURE.port}"$`, 'm'));
+    expect(sh).toMatch(
+      new RegExp(`^ports="18026 11026 ${GEOFIXTURE.port} ${PUBLIC_API.port}"$`, 'm'),
+    );
     const run = sh.indexOf('pnpm exec playwright test');
     for (const build of ['./cmd/worker', './cmd/geofixture']) {
       const at = sh.indexOf(`go build -o "../.tools/e2e/${build.slice(6)}$exe" ${build}`);
@@ -362,11 +379,130 @@ describe('окружение e2e', () => {
     expect(sh).toMatch(/^export WF_E2E_WORKER_DATABASE_URL="postgres:\/\/worker:worker@/m);
     expect(sh).toMatch(/MSYS2_ENV_CONV_EXCL="[^"]*WF_E2E_WORKER_DATABASE_URL/);
     // кольцо identity воркера: одноразовый ключ base64url (без «/» — MSYS не перепишет), исключён из конверсии
-    expect(sh).toMatch(/^WF_E2E_IDENTITY_SECRET_KEYS=\$\(node -e .*base64url/m);
+    expect(sh).toMatch(/^run_key\(\) \{ node -e .*base64url/m);
+    expect(sh).toMatch(/^WF_E2E_IDENTITY_SECRET_KEYS=\$\(run_key\)$/m);
     expect(sh).toMatch(/^export WF_E2E_IDENTITY_SECRET_KEYS$/m);
     expect(sh).toMatch(/MSYS2_ENV_CONV_EXCL="[^"]*WF_E2E_IDENTITY_SECRET_KEYS/);
     // dev WORKER_* убираются из окружения прогона, как ADMIN_*
-    expect(sh).toMatch(/ADMIN_\* \| WORKER_\* \| WF_ADMIN_API_ORIGIN\) unset/);
+    expect(sh).toMatch(/ADMIN_\* \| WORKER_\* \| API_\* \| WF_ADMIN_API_ORIGIN\) unset/);
+  });
+
+  // План I-4, Task 11: публичный api прогона. Ключи прогона — одноразовые WF_E2E_* скрипта, только api под именами
+  // API_*; кольцо identity — одно с воркером (письма с кодами, которые ставит api, собирает воркер); dev API_* из
+  // backend/.env (база wf, dev-ключи) до api не доходят.
+  const API_DB = 'postgres://api:api@127.0.0.1:15432/wf_e2e?sslmode=disable';
+  const API_KEYS = {
+    WF_E2E_JWT_SEEDS: Buffer.alloc(32, 1).toString('base64url'),
+    WF_E2E_HUMANCHECK_KEYS: Buffer.alloc(32, 2).toString('base64url'),
+    WF_E2E_DEVICE_KEYS: Buffer.alloc(32, 3).toString('base64url'),
+  };
+  const stubApi = () => {
+    vi.stubEnv('WF_E2E_API_DATABASE_URL', API_DB);
+    vi.stubEnv('WF_E2E_IDENTITY_SECRET_KEYS', IDENTITY_KEY);
+    for (const [k, v] of Object.entries(API_KEYS)) vi.stubEnv(k, v);
+  };
+
+  it('api получает только значения e2e: свой порт, база под ролью api, ключи прогона, кольцо воркера, без dev API_*', () => {
+    stubApi();
+    vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', WORKER_DB);
+    vi.stubEnv('API_DATABASE_URL', 'postgres://api:api@localhost:15432/wf?sslmode=disable');
+    vi.stubEnv('API_DOCS_ENABLED', 'true');
+    vi.stubEnv('API_IDENTITY_SECRET_KEYS', 'dev-ring');
+    vi.stubEnv('API_EMBED_WORKER', 'true');
+    vi.stubEnv('API_BFF_SECRETS', 'dev-bff-secret');
+    const env = apiEnv();
+    expect(PUBLIC_API_URL).toBe(`http://127.0.0.1:${PUBLIC_API.port}`);
+    expect(env).toMatchObject({
+      API_HTTP_ADDR: `127.0.0.1:${PUBLIC_API.port}`,
+      API_DATABASE_URL: API_DB,
+      API_DOCS_ENABLED: 'false',
+      API_EMBED_WORKER: 'false',
+      API_BFF_SECRETS: '',
+      API_JWT_SEEDS: API_KEYS.WF_E2E_JWT_SEEDS,
+      API_HUMANCHECK_KEYS: API_KEYS.WF_E2E_HUMANCHECK_KEYS,
+      API_IDENTITY_DEVICE_KEYS: API_KEYS.WF_E2E_DEVICE_KEYS,
+      API_IDENTITY_SECRET_KEYS: IDENTITY_KEY,
+      API_RATE_LIMITS: '',
+    });
+    // кольцо identity — то же, что у воркера (иначе письма с кодами не собираются)
+    expect(env.API_IDENTITY_SECRET_KEYS).toBe(workerEnv().WORKER_IDENTITY_SECRET_KEYS);
+    // документы — https с версиями (API_LEGAL_DOCUMENTS: пусто или не https — отказ старта)
+    expect(env.API_LEGAL_DOCUMENTS).toMatch(
+      /^terms=[\d.]+\|https:\/\/[^,]+,privacy=[\d.]+\|https:\/\//,
+    );
+    // сырые WF_E2E_* затёрты; каждое значение прогона — ровно один раз, под своим именем API_*
+    for (const k of ['WF_E2E_API_DATABASE_URL', ...Object.keys(API_KEYS)]) expect(env[k]).toBe('');
+    for (const v of [API_DB, IDENTITY_KEY, ...Object.values(API_KEYS)]) {
+      expect(Object.values(env).filter((x) => x === v)).toHaveLength(1);
+    }
+    // чужого api не получает: ни ключа сотрудников, ни баз admin-api и воркера
+    expect(Object.values(env)).not.toContain(WORKER_DB);
+    expect(Object.values(env).filter((v) => v?.includes('wf?sslmode'))).toEqual([]);
+  });
+
+  it('база и ключи api прогона — только у api: Vite, Mailpit, фикстура, воркер и admin-api их не наследуют', () => {
+    stubApi();
+    vi.stubEnv('WF_E2E_ADMIN_DATABASE_URL', DB_URL);
+    vi.stubEnv('WF_E2E_STAFF_SECRET_KEYS', KEY);
+    vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', WORKER_DB);
+    for (const env of [
+      viteEnv(PAIRS.chromium),
+      mailpitEnv(),
+      fixtureEnv(),
+      workerEnv(),
+      adminApiEnv(PAIRS.prod),
+    ]) {
+      for (const k of ['WF_E2E_API_DATABASE_URL', ...Object.keys(API_KEYS)])
+        expect(env[k]).toBe('');
+      for (const v of [API_DB, ...Object.values(API_KEYS)])
+        expect(Object.values(env)).not.toContain(v);
+    }
+    // api не получает ключа сотрудников и баз других ролей
+    const env = apiEnv();
+    expect(Object.values(env)).not.toContain(KEY);
+    expect(Object.values(env)).not.toContain(DB_URL);
+  });
+
+  it('ключ api прогона переписан или короче 32 байт, адрес базы не postgres:// — ошибка без значения', () => {
+    stubApi();
+    for (const name of Object.keys(API_KEYS)) {
+      for (const bad of ['C:/Program Files/Git/abc', Buffer.alloc(16, 1).toString('base64url')]) {
+        vi.stubEnv(name, bad);
+        const message = errorOf(() => apiEnv());
+        expect(message).toMatch(new RegExp(`${name}.*base64url`));
+        expect(message).not.toContain(bad);
+      }
+      vi.stubEnv(name, API_KEYS[name as keyof typeof API_KEYS]);
+    }
+    const bad = 'C:/Program Files/Git/api:api@127.0.0.1:15432/wf_e2e';
+    vi.stubEnv('WF_E2E_API_DATABASE_URL', bad);
+    const message = errorOf(() => apiEnv());
+    expect(message).toMatch(/WF_E2E_API_DATABASE_URL.*postgres:/);
+    expect(message).not.toContain('Program Files');
+  });
+
+  it('сценарии api — один проект: prod, без него chromium, без обоих — нет', () => {
+    expect(identityProject(['chromium', 'webkit', 'prod'])).toBe('prod');
+    expect(identityProject(['chromium', 'webkit'])).toBe('chromium');
+    expect(identityProject(['webkit'])).toBeUndefined();
+  });
+
+  it('скрипт: api собран с тегом wf_e2e до Playwright, ключи api — одноразовые base64url вне MSYS, база — роль api', () => {
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'e2e-admin.sh'), 'utf8');
+    const run = sh.indexOf('pnpm exec playwright test');
+    for (const cmd of ['api', 'admin-api']) {
+      const at = sh.indexOf(`go build -tags wf_e2e -o "../.tools/e2e/${cmd}$exe" ./cmd/${cmd})`);
+      expect(at, cmd).toBeGreaterThan(-1);
+      expect(run).toBeGreaterThan(at);
+    }
+    expect(sh).toMatch(/^run_key\(\) \{ node -e .*base64url/m);
+    for (const name of Object.keys(API_KEYS)) {
+      expect(sh).toMatch(new RegExp(`^${name}=\\$\\(run_key\\)$`, 'm'));
+      expect(sh).toMatch(new RegExp(`MSYS2_ENV_CONV_EXCL="[^"]*${name}`));
+    }
+    expect(sh).toMatch(/^export WF_E2E_JWT_SEEDS WF_E2E_HUMANCHECK_KEYS WF_E2E_DEVICE_KEYS$/m);
+    expect(sh).toMatch(/^export WF_E2E_API_DATABASE_URL="postgres:\/\/api:api@/m);
+    expect(sh).toMatch(/MSYS2_ENV_CONV_EXCL="[^"]*WF_E2E_API_DATABASE_URL/);
   });
 
   it('имя cookie — как httpapi/admin.CookieName: __Host- только с Secure', () => {

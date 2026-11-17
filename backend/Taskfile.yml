@@ -50,6 +50,9 @@ tasks:
     # пакет, job CI (.github/workflows/backend.yml) выше него.
     cmds:
       - go test ./... -count=1 -p 4 -parallel 1 -timeout 30m
+      # тест тестовых портов капитанства живого e2e (//go:build wf_e2e) без тега не собирается — отдельной командой
+      # (m6 ревью W1 I-4; страж TestE2ECaptainChecksTestInCI)
+      - go test -tags wf_e2e -run TestCaptainChecksE2EBuild -count=1 ./cmd/api ./cmd/admin-api
 
   test:watch:
     desc: Цикл TDD — перезапуск тестов бэкенда при изменении Go, SQL и go.mod

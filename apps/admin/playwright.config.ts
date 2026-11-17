@@ -2,6 +2,8 @@ import { defineConfig, type PlaywrightTestConfig } from '@playwright/test';
 import {
   ADMIN_API_BIN,
   adminApiEnv,
+  API_BIN,
+  apiEnv,
   apiOrigin,
   browserOf,
   cleanEnv,
@@ -11,6 +13,7 @@ import {
   GEOFIXTURE_BIN,
   GEOFIXTURE_URL,
   geoProject,
+  identityProject,
   MAILPIT,
   MAILPIT_BIN,
   MAILPIT_URL,
@@ -18,6 +21,7 @@ import {
   origin,
   PAIRS,
   type ProjectName,
+  PUBLIC_API_URL,
   viteEnv,
   WORKER_BIN,
   workerEnv,
@@ -73,6 +77,16 @@ const servers: NonNullable<PlaywrightTestConfig['webServer']> = [
     timeout: 60_000,
     stdout: 'ignore',
   },
+  // Публичный api (план I-4, Task 11): сборка с тегом wf_e2e (тестовые порты условий капитанства), база wf_e2e под
+  // ролью api, письма с кодами ставит в очередь mail — шлёт воркер выше (кольцо identity общее); готовность — /readyz
+  {
+    command: `"${API_BIN}"`,
+    url: `${PUBLIC_API_URL}/readyz`,
+    env: apiEnv() as Record<string, string>,
+    reuseExistingServer: false,
+    timeout: 60_000,
+    stdout: 'ignore',
+  },
 ];
 for (const name of projects) {
   const pair = PAIRS[name];
@@ -106,6 +120,10 @@ const specs: Record<ProjectName, string[]> = {
 };
 const geo = geoProject(projects);
 if (geo) specs[geo].push('geo.spec.ts');
+// Ядро identity через публичный api и капитанская заявка через api и админку (план I-4, Task 11) — тоже в одном
+// проекте: игроки и заявки в общей базе, счётчик очереди «Капитаны» — один на прогон.
+const identity = identityProject(projects);
+if (identity) specs[identity].push('identity-api.spec.ts', 'captaincy.spec.ts');
 
 export default defineConfig({
   testDir: './e2e',

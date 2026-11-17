@@ -15,6 +15,8 @@ export const MAILPIT_BIN = path.join(ROOT, '.tools', 'bin', `mailpit${exe}`);
 // воркер и HTTPS-фикстура GeoNames (план B, Task 23) — их тоже собирает scripts/e2e-admin.sh
 export const WORKER_BIN = path.join(ROOT, '.tools', 'e2e', `worker${exe}`);
 export const GEOFIXTURE_BIN = path.join(ROOT, '.tools', 'e2e', `geofixture${exe}`);
+// публичный api (план I-4, Task 11) — тоже собирает scripts/e2e-admin.sh, с тегом wf_e2e (тестовые порты капитанства)
+export const API_BIN = path.join(ROOT, '.tools', 'e2e', `api${exe}`);
 
 export const MAILPIT = { ui: 18026, smtp: 11026 } as const;
 export const MAILPIT_URL = `http://127.0.0.1:${MAILPIT.ui}`;
@@ -93,6 +95,21 @@ export function geoProject(projects: readonly ProjectName[]): ProjectName | unde
   return (['prod', 'chromium'] as const).find((p) => projects.includes(p));
 }
 
+// Сценарии публичного api (план I-4, Task 11: ядро identity и капитанская заявка через api и админку) — в одном
+// проекте, как geo: игроки и заявки живут в общей базе, счётчик очереди «Капитаны» — общий на прогон. prod — Chromium
+// под настоящей CSP, без него — chromium; без обоих — не идут.
+export function identityProject(projects: readonly ProjectName[]): ProjectName | undefined {
+  return geoProject(projects);
+}
+
+// Публичный api прогона (cmd/api с тегом wf_e2e): свой порт, база wf_e2e под ролью api, без встроенного воркера —
+// письма с кодами ставит в очередь mail, отправляет воркер прогона (кольцо identity общее).
+export const PUBLIC_API = { port: 18184 } as const;
+export const PUBLIC_API_URL = `http://127.0.0.1:${PUBLIC_API.port}`;
+// Документы прогона (API_LEGAL_DOCUMENTS): версии и ссылки — не секрет; регистрация берёт их из getLegalDocuments.
+export const E2E_LEGAL_DOCUMENTS =
+  'terms=1.0.0|https://wf-e2e.test/legal/terms,privacy=1.0.0|https://wf-e2e.test/legal/privacy';
+
 // Проекты прогона: WF_E2E_PROJECTS (через запятую), по умолчанию DEFAULT_PROJECTS. CI — chromium,prod
 // (браузер WebKit на раннере требует системных библиотек через apt).
 export function enabledProjects(env: NodeJS.ProcessEnv = process.env): ProjectName[] {
@@ -103,12 +120,13 @@ export function enabledProjects(env: NodeJS.ProcessEnv = process.env): ProjectNa
   return names as ProjectName[];
 }
 
-// Окружение процесса без dev-настроек админки и воркера: ADMIN_*, WORKER_* (backend/.env — база dev и настоящий GeoNames)
-// и адрес прокси Vite.
+// Окружение процесса без dev-настроек админки, воркера и api: ADMIN_*, WORKER_*, API_* (backend/.env — база dev,
+// настоящий GeoNames, dev-ключи) и адрес прокси Vite.
+const DEV_PREFIXES = ['ADMIN_', 'WORKER_', 'API_'] as const;
 export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return Object.fromEntries(
     Object.entries(env).filter(
-      ([k]) => !k.startsWith('ADMIN_') && !k.startsWith('WORKER_') && k !== 'WF_ADMIN_API_ORIGIN',
+      ([k]) => !DEV_PREFIXES.some((p) => k.startsWith(p)) && k !== 'WF_ADMIN_API_ORIGIN',
     ),
   );
 }
@@ -118,12 +136,18 @@ export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 // (DEFAULT_ENVIRONMENT_VARIABLES, process.env, env сервера), поэтому «не передать» нельзя — значения
 // затираются пустыми (ревью Task 16, M7): ни Vite, ни Mailpit, ни дочерние процессы их не видят.
 // База воркера (WF_E2E_WORKER_DATABASE_URL) — так же: только воркеру, под именем WORKER_DATABASE_URL; кольцо
-// identity (WF_E2E_IDENTITY_SECRET_KEYS, план I-2) — только воркеру, под именем WORKER_IDENTITY_SECRET_KEYS.
+// identity (WF_E2E_IDENTITY_SECRET_KEYS, план I-2) — воркеру и api (одно кольцо: письма с кодами api собирает воркер)
+// под именами WORKER_IDENTITY_SECRET_KEYS и API_IDENTITY_SECRET_KEYS. База, сид токенов, ключи антибота и устройств
+// api (план I-4, Task 11) — только api, под именами API_*.
 const RUN_SECRETS = {
   WF_E2E_STAFF_SECRET_KEYS: '',
   WF_E2E_ADMIN_DATABASE_URL: '',
   WF_E2E_WORKER_DATABASE_URL: '',
   WF_E2E_IDENTITY_SECRET_KEYS: '',
+  WF_E2E_API_DATABASE_URL: '',
+  WF_E2E_JWT_SEEDS: '',
+  WF_E2E_HUMANCHECK_KEYS: '',
+  WF_E2E_DEVICE_KEYS: '',
 } as const;
 
 function required(name: string): string {
@@ -164,6 +188,8 @@ function runDatabaseUrl(name: string): string {
   return v;
 }
 
+export const E2E_ADMIN_RATE_LIMITS = 'default.user=600/1m:200';
+
 // Окружение admin-api пары: сервер и подкоманды оператора (staff bootstrap) — одно и то же.
 export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
   return {
@@ -177,7 +203,11 @@ export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
     ADMIN_DOCS_ENABLED: 'false',
     ADMIN_TRUSTED_PROXIES: '',
     ADMIN_CLIENT_IP_HEADER: '',
-    ADMIN_RATE_LIMITS: '',
+    // Лимит на сотрудника (default.user: 300/мин, всплеск 60) — шире: prod.spec за ~2 с полной загрузкой обходит все
+    // разделы меню одним сотрудником, и после разделов I-4 (счётчик «Капитанов» на каждой загрузке, «Капитаны» и
+    // «Игроки» в обходе — ~70 запросов) всплеск 60 кончался — раздел отвечал «Слишком много запросов» (прогон 17.11).
+    // Человек так не ходит; лимитер включён, классы входа (staff_auth) и IP — по умолчанию.
+    ADMIN_RATE_LIMITS: E2E_ADMIN_RATE_LIMITS,
     ADMIN_ORIGIN: origin(p),
     ADMIN_STAFF_SECRET_KEYS: runKey('WF_E2E_STAFF_SECRET_KEYS'),
     ADMIN_IP_ALLOWLIST: '',
@@ -215,6 +245,36 @@ export function workerEnv(): NodeJS.ProcessEnv {
     WORKER_MAIL_SMTP_ADDR: `127.0.0.1:${MAILPIT.smtp}`,
     WORKER_MAIL_FROM: 'WhereFootball e2e <noreply@wf-e2e.test>',
     WORKER_MAIL_SMTP_TLS: 'none',
+  };
+}
+
+// Окружение публичного api (план I-4, Task 11): база прогона под ролью api, одноразовые ключи прогона, кольцо identity —
+// то же, что у воркера; без встроенного воркера (фон — воркер прогона), без прокси, BFF, базы города по IP и
+// /.well-known; лимиты — по умолчанию (риск входа и регистрации, PoW — решает клиент e2e/api.ts).
+export function apiEnv(): NodeJS.ProcessEnv {
+  return {
+    ...cleanEnv(),
+    ...RUN_SECRETS,
+    API_HTTP_ADDR: `127.0.0.1:${PUBLIC_API.port}`,
+    API_DATABASE_URL: runDatabaseUrl('WF_E2E_API_DATABASE_URL'),
+    API_LOG_FORMAT: 'text',
+    API_LOG_LEVEL: 'warn',
+    API_DOCS_ENABLED: 'false',
+    API_JWT_SEEDS: runKey('WF_E2E_JWT_SEEDS'),
+    API_HUMANCHECK_KEYS: runKey('WF_E2E_HUMANCHECK_KEYS'),
+    API_IDENTITY_SECRET_KEYS: runKey('WF_E2E_IDENTITY_SECRET_KEYS'),
+    API_IDENTITY_DEVICE_KEYS: runKey('WF_E2E_DEVICE_KEYS'),
+    API_IDENTITY_TOTP_ISSUER: 'WF e2e',
+    API_LEGAL_DOCUMENTS: E2E_LEGAL_DOCUMENTS,
+    API_EMBED_WORKER: 'false',
+    API_TRUSTED_PROXIES: '',
+    API_CLIENT_IP_HEADER: '',
+    API_BFF_NETS: '',
+    API_BFF_SECRETS: '',
+    API_IPGEO_DB: '',
+    API_WELLKNOWN_APPLE_APP_IDS: '',
+    API_WELLKNOWN_ANDROID: '',
+    API_RATE_LIMITS: '',
   };
 }
 

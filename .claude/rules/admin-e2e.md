@@ -26,6 +26,17 @@ paths:
   GeoNames 18190 (HTTPS, тестовый ключ `httptest`, PEM корня `.tools/e2e/geofixture-ca.pem` → `WORKER_GEONAMES_CA_FILE`,
   готовность `/readyz`) → воркер (`workerEnv`: база `wf_e2e` под `worker`, источник — только фикстура, Mailpit e2e;
   готовность — строка «воркер запущен») → пары; dev `WORKER_*` вычищаются, `WF_E2E_WORKER_DATABASE_URL` — только воркеру.
+- Публичный api (план I-4, Task 11): скрипт собирает `api` и `admin-api` с тегом `wf_e2e` (тестовые порты условий
+  капитанства «выполнено»; прод-образ и стенд — без тега, страж `TestProdBuildWithoutE2ETag` в `config`, тест портов в
+  CI — команда `backend:test`, страж `TestE2ECaptainChecksTestInCI`). Сервер — после воркера: `apiEnv()` (127.0.0.1:18184,
+  готовность `/readyz`, база `wf_e2e` под ролью `api`, одноразовые `WF_E2E_JWT_SEEDS`/`HUMANCHECK_KEYS`/`DEVICE_KEYS`/
+  `API_DATABASE_URL` → `API_*` только у api, кольцо identity — то же `WF_E2E_IDENTITY_SECRET_KEYS`, что у воркера: письма
+  с кодами собирает воркер; `API_EMBED_WORKER=false`, документы — `E2E_LEGAL_DOCUMENTS`); dev `API_*` вычищаются, как
+  `ADMIN_*`/`WORKER_*`. Клиент — `e2e/api.ts` (`PublicApi` на `APIRequestContext`: `device` android в теле, Bearer, ключ
+  идемпотентности на мутациях с замком, `403 humancheck.required` — решает PoW и повторяет, политику не ослабляет).
+- Лимит admin-api в прогоне — `E2E_ADMIN_RATE_LIMITS` (`default.user=600/1m:200`): обход разделов `prod.spec` одним
+  сотрудником (~70 запросов за 2 с после разделов I-4) кончал всплеск 60 и получал «Слишком много запросов»; вход
+  (`staff_auth`) и IP — по умолчанию (страж `env.test.ts`).
 - Пары admin-api на одной базе все исполняют очередь staff: письмо может уйти из пары другого браузера со ссылкой на
   чужой origin — сценарии берут из письма только код.
 - Проекты по умолчанию — `chromium,webkit,prod` (одно умолчание в `e2e/env.ts` и скрипте, страж `env.test.ts`), поэтому
@@ -51,6 +62,13 @@ paths:
   526815 (Свердловская область) пилотом, slug `mikhaylovsk` (тёзка из сида — `mihaylovsk`, R13) → журнал
   (`geo.import_requested` — владелец, `geo.import` — система, `geo.city_activated` — владелец); один проект — `geoProject`
   (prod, без него chromium), без `securitypolicyviolation` на всём пути.
+- `identity-api.spec.ts` и `captaincy.spec.ts` (план I-4, Task 11) — один проект `identityProject` (как geo: prod, без
+  него chromium). Ядро identity через api: регистрация с кодом из Mailpit → refresh → logout (refresh после — 401
+  `refresh_invalid`) → вход → удаление → вход `deletion_pending` → `cancelDeletion`. Капитанство: два игрока через api
+  (город `stavropol` сида), заявка первого → владелец: «Капитаны» (счётчик 1 в имени ссылки — ветка `one` ICU), карточка
+  (4 условия «выполнено»), контакты с причиной, «Одобрить» → `permits` игрока, журнал `captain_application_approved` и
+  `pii_read` (без почты); второй — «Отклонить» «Другое» с комментарием → письмо → повторная подача `409
+  application_cooldown`; «Игроки» — поиск по почте → карточка без 2FA; без `securitypolicyviolation`.
 - TOTP — `TotpDevice` (код шага один раз, иначе ждёт следующий), письма — `waitForMail` (фон admin-api шлёт не сразу);
   «письмо одно» — принято не раньше подтверждения и `expectMailCountStable` (~3 с опроса), а не одна проверка «сейчас
   одно».

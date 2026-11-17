@@ -65,6 +65,25 @@ describe('ключи локалей e2e', () => {
     );
   });
 
+  it('капитанская заявка (план I-4, Task 11): подписи сценария captaincy.spec входят в список', () => {
+    expect(KEYS).toEqual(
+      expect.arrayContaining([
+        'nav.captains',
+        'nav.counts.captains',
+        'captains.table.open_label',
+        'captains.check_state.ok',
+        'captains.contact.show',
+        'captains.approve.submit',
+        'captains.reject.submit',
+        'captains.rejection.other',
+        'players.lookup.submit',
+        'players.card.mfa_off',
+        'audit.actions.identity.captain_application_approved',
+        'audit.actions.identity.pii_read',
+      ]),
+    );
+  });
+
   it('t — текст ru по ключу', () => {
     expect(t('auth.login.submit')).toBe(ru.auth.login.submit);
     expect(t('roles.admin')).toBe(ru.roles.admin);
