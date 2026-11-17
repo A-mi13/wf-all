@@ -392,3 +392,19 @@ func TestEmbeddedLogComponent(t *testing.T) {
 		t.Fatalf("остановка: %v", err)
 	}
 }
+
+// Ревью n1: SIGTERM, пока открывается второй пул (холодный старт Neon, ping — секунды), — штатная остановка: run = nil,
+// а не «db: ping: context canceled» с кодом 1. Без отмены та же недостижимая база — ошибка подключения.
+func TestEmbedStopDuringWorkerDBOpen(t *testing.T) {
+	t.Parallel()
+	env := append(append(apiBase(), "API_HTTP_ADDR=127.0.0.1:0", unreachableAPI, "API_EMBED_WORKER=true",
+		"WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1"), workerEnvNoDB...)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := run(ctx, env, io.Discard); err != nil {
+		t.Fatalf("отмена во время открытия пула воркера: %v", err)
+	}
+	if err := run(context.Background(), env, io.Discard); err == nil || !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("без отмены err = %v, ждали ошибку подключения", err)
+	}
+}

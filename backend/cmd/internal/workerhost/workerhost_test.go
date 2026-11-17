@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,5 +169,67 @@ func TestGeoImportDisabledJobWaits(t *testing.T) {
 		}
 	case <-time.After(40 * time.Second):
 		t.Fatal("Run не остановился")
+	}
+}
+
+// cancelOn — журнал, который отменяет ctx на записи с сообщением, начинающимся с prefix, и копит сообщения.
+type cancelOn struct {
+	prefix string
+	cancel context.CancelFunc
+	mu     *sync.Mutex
+	msgs   *[]string
+}
+
+func (h cancelOn) Enabled(context.Context, slog.Level) bool { return true }
+func (h cancelOn) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	*h.msgs = append(*h.msgs, r.Message)
+	h.mu.Unlock()
+	if strings.HasPrefix(r.Message, h.prefix) {
+		h.cancel()
+	}
+	return nil
+}
+func (h cancelOn) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h cancelOn) WithGroup(string) slog.Handler      { return h }
+
+// R11, ревью m3: ctx отменён после сборки клиента River, но до Start (здесь — на предупреждении WarnPool: пул 2 меньше
+// слотов) — Run = nil, River не стартует: строки «воркер запущен» нет.
+func TestRunCancelledAfterBuild(t *testing.T) {
+	t.Parallel()
+	url := dbtest.NewURL(t)
+	p, err := prepare(t, "WORKER_DATABASE_URL="+url, "WORKER_DB_MAX_CONNS=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := openPool(t, url)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var (
+		mu   sync.Mutex
+		msgs []string
+	)
+	log := slog.New(cancelOn{prefix: "слотов очередей River", cancel: cancel, mu: &mu, msgs: &msgs})
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, p, pool, log, ServiceStop) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run, отменённый до Start: %v", err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("Run не вернулся")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	warned := false
+	for _, m := range msgs {
+		warned = warned || strings.HasPrefix(m, "слотов очередей River")
+		if strings.HasPrefix(m, "воркер запущен") {
+			t.Fatal("River стартовал после отмены до Start: в журнале «воркер запущен»")
+		}
+	}
+	if !warned {
+		t.Fatalf("предупреждения WarnPool не было — отмена не сработала в нужной фазе: %q", msgs)
 	}
 }

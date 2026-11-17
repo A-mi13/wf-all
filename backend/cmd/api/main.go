@@ -148,6 +148,10 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	// второй пул — роль worker; закрывается после возврата RunService, т. е. после остановки фона
 	wpool, err := db.Open(ctx, p.DB())
 	if err != nil {
+		// SIGTERM во время подключения (холодный старт Neon) — штатная остановка, как отмена фона (R11)
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 	defer wpool.Close()

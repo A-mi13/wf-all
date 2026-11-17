@@ -83,6 +83,10 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 	slog.SetDefault(log)
 	pool, err := db.Open(ctx, p.DB())
 	if err != nil {
+		// SIGTERM во время подключения (холодный старт Neon) — штатная остановка, как отмена в Run (R11)
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 	defer pool.Close()
