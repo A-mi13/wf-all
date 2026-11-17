@@ -11,7 +11,7 @@
 | pnpm | 12.6.0 | `packageManager` в корневом `package.json` |
 | PostgreSQL / PostGIS | 18.6 / 3.6.2 | `scripts/pg.sh` (локально, zip); `postgis/postgis:18-3.6` — CI и вариант базы на сервере (`deploy/server`: `compose.ci.yaml`, закомментированный `db` в `compose.yaml`) |
 | Caddy | 2.11.9 | образ `caddy:2.11.9-alpine` в `deploy/server/compose.yaml` (TLS и маршрут своего сервера); проверено 16.11.2026 по `caddy:2-alpine` |
-| Next.js / React | 16.4.3 / 19.3.1 | `apps/web/package.json`, catalog (`pnpm-workspace.yaml`) |
+| Next.js / React | 16.4.6 / 19.3.1 | `apps/web/package.json`, catalog (`pnpm-workspace.yaml`) |
 | Vite / Vitest | 8.3.5 / 5.0.5 | catalog (`pnpm-workspace.yaml`) |
 | Playwright | 1.64.1 (Chromium 156.0.8078.4, WebKit 27.2) | `apps/web/package.json`, `apps/admin/package.json` (одна версия на репо: CI-кеш браузеров — по ней) |
 | TypeScript | 6.0.3 (приложения, пакеты) / 5.9.3 (генератор) | catalog и `catalogs.contracts` (`pnpm-workspace.yaml`); почему не 7 — в исключениях |
@@ -59,7 +59,7 @@
 | --- | --- | --- | --- | --- |
 | TypeScript (приложения) | 6.0.3 | 7.0.2 | typescript-eslint 8.72 поддерживает TS < 6.1 (проверено 27.10.2026); у 7.x нет классического JS API | когда typescript-eslint и eslint-config-next объявят поддержку TS 7 |
 | TypeScript (генератор) | 5.9.3 | 7.0.2 | openapi-typescript 7.13 требует `typescript ^5.x` | когда openapi-typescript поднимет peer |
-| ESLint | 9.39.5 | 10.13.0 | eslint-config-next 16.4.3 тянет eslint-plugin-react 7.37.5 (peer ESLint ≤ 9.7; проверено 27.10.2026) | когда eslint-config-next перейдёт на ESLint 10 |
+| ESLint | 9.39.5 | 10.13.0 | eslint-config-next 16.4.6 тянет eslint-plugin-react 7.37.5 (peer ESLint ≤ 9.7; проверено 27.10.2026) | когда eslint-config-next перейдёт на ESLint 10 |
 | Vite внутри Ladle | 6.4.5 | 8.3.5 | Ladle 5.1.1 — последний выпуск (`latest`, проверено 10.11.2026); поддержка Vite 8 влита в main (tajo/ladle#635, #636, #639), но не выпущена. Только витрина: свой `.ladle/vite.config.ts`, свой кэш `node_modules/.vite-ladle` | с выходом Ladle 5.2/6.0 на Vite 8 |
 
 ## Ловушки
