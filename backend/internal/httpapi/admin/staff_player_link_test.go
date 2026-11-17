@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -119,5 +120,44 @@ func TestMfaResetInitiatorLinkedBetweenRequestAndApprove(t *testing.T) {
 	}
 	if e.count(`SELECT count(*) FROM mfa_resets`) != 0 {
 		t.Fatal("сброс назначен по запросу инициатора, связанного с игроком")
+	}
+}
+
+// TestPutPlayerLinkDeletedBeforeResponse — m2 ревью Task 6: PUT связи закоммитился, и до сборки его ответа DELETE из
+// второй вкладки снял связь. PUT обязан ответить 200 тем, что сделал (ответ — из данных транзакции, не перечтением),
+// а повтор ключа — тем же ответом.
+func TestPutPlayerLinkDeletedBeforeResponse(t *testing.T) {
+	t.Parallel()
+	e := newIdentityStaffEnv(t)
+	owner := e.firstLogin("olga.v@wf.example", string(perm.Owner))
+	sup := e.firstLogin("sup@wf.example", string(perm.Support))
+	p := e.player("link_cut")
+
+	var fired atomic.Bool // не sync.Once: коммит DELETE зовёт тот же шов изнутри (Once — взаимная блокировка)
+	deleted := false
+	f := func(context.Context) {
+		if fired.CompareAndSwap(false, true) { // коммит PUT: вторая вкладка снимает связь до ответа PUT
+			rec := e.send(http.MethodDelete, playerLinkPath(sup.id), owner.token, uuid.NewString(), "")
+			deleted = rec.Code == http.StatusNoContent
+		}
+	}
+	e.commits.onCommit.Store(&f)
+	key := uuid.NewString()
+	rec := e.send(http.MethodPut, playerLinkPath(sup.id), owner.token, key, playerLinkBody(p))
+	e.commits.onCommit.Store(nil)
+	if !deleted {
+		t.Fatal("шов не сработал: DELETE не исполнился между коммитом и ответом PUT")
+	}
+	wantStatus(t, rec, http.StatusOK)
+	var got struct {
+		UserID   uuid.UUID `json:"user_id"`
+		Nickname string    `json:"nickname"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.UserID != p || got.Nickname != "link_cut" {
+		t.Fatalf("ответ PUT: %v %s", err, rec.Body.String())
+	}
+	again := e.send(http.MethodPut, playerLinkPath(sup.id), owner.token, key, playerLinkBody(p))
+	if !replayed(again) || again.Code != http.StatusOK || !sameJSON(t, again, rec) {
+		t.Fatalf("повтор ключа: %d %s", again.Code, again.Body.String())
 	}
 }

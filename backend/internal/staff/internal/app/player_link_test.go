@@ -302,6 +302,12 @@ func TestDeletePlayerLink(t *testing.T) {
 		!strings.Contains(m.Text, "del_p") || !strings.Contains(m.Text, "Ольга В.") {
 		t.Fatalf("письмо: %+v %v", m, err)
 	}
+	// игрок удалён (анонимизирован) — письмо о снятии всё равно уходит (спека §7.6), ник — заглушкой локали (m3 ревью)
+	e.exec(`UPDATE users SET status = 'deleted', deleted_at = now() WHERE id = $1`, p)
+	if m, err := e.app.ComposePlayerLink(ctx, ref, sm.ID, staff.MailPlayerUnlinked); err != nil ||
+		!strings.Contains(m.Text, "(аккаунт удалён)") || strings.Contains(m.Text, "del_p") || m.To != "sup@wf.example" {
+		t.Fatalf("письмо об удалённом игроке: %+v %v", m, err)
+	}
 	// повтор — 204 без записи и письма
 	if err := e.app.DeletePlayerLink(ctx, owner, sm.ID, metaWeb); err != nil {
 		t.Fatal(err)

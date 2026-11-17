@@ -34,8 +34,9 @@ paths:
   без записи. Изменение — `staff_accounts.version + 1` (R14): `InitiatorCheck` отсекает **все** ожидающие запросы
   сотрудника (`initiator_changed`) — принято, операция редкая (`TestMfaResetInitiatorLinkedBetweenRequestAndApprove`);
   аудит `staff.player_linked`/`staff.player_unlinked` (`before`/`after` `{user_id}`), письмо того же вида сотруднику —
-  ref = id записи аудита (`ComposePlayerLink`: ник через порт, игрока нет — `ErrSkip`). Ответ PUT собирается после
-  коммита на `WithoutCancel` со своим сроком (как `committedAccount`). Карточка (`Account`) несёт `PlayerLink` только
+  ref = id записи аудита (`ComposePlayerLink`: ник через порт; игрок удалён — письмо всё равно уходит, вместо ника
+  `staff.player_deleted`). Ответ PUT — из данных транзакции (ник — из вызова порта до неё), без перечтения после коммита:
+  DELETE из второй вкладки между коммитом и ответом не даёт 500 (`TestPutPlayerLinkDeletedBeforeResponse`). Карточка (`Account`) несёт `PlayerLink` только
   при `staff.player_links.manage = allow`, ник — через порт на каждое чтение (удалён — пустой ник, связь видна, чтобы
   её снять); список поле не несёт (`TestStaffCardPlayerLinkOwnerOnly`).
 - **Блокировки строк — всегда в порядке учётка → сессия → `staff_mfa` → резервные коды** (`LockAccount`,

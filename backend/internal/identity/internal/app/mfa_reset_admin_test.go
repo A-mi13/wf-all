@@ -37,6 +37,20 @@ type resetEnv struct {
 	adm *App
 	reg *approvals.Registry
 	svc *approvals.Service
+	// links — текущие связи сотрудников с игроками (порт StaffLinks; учёток staff в базе теста нет)
+	links *fakeLinks
+}
+
+// fakeLinks — порт identity.StaffLinks теста: связь по id сотрудника, задаётся тестом в любой момент.
+type fakeLinks struct{ m sync.Map }
+
+func (f *fakeLinks) set(staffID, userID uuid.UUID) { f.m.Store(staffID, userID) }
+
+func (f *fakeLinks) LinkedUser(_ context.Context, _ pgx.Tx, staffID uuid.UUID) (uuid.UUID, error) {
+	if u, ok := f.m.Load(staffID); ok {
+		return u.(uuid.UUID), nil
+	}
+	return uuid.Nil, nil
 }
 
 // roleApp — NewMaintenance на той же базе под ролью role (admin | worker), без кольца секретов (как admin-api, N3)
@@ -77,6 +91,8 @@ func newResetEnv(t *testing.T) *resetEnv {
 	t.Helper()
 	e := newEnv(t)
 	adm := roleApp(t, e, "admin", false)
+	links := &fakeLinks{}
+	adm.staffLinks = links // admin-api: связь подтверждающего перечитывается в tx решения (R38)
 	reg := approvals.NewRegistry()
 	svc := approvals.New(adm.pool, e.clock, reg)
 	reg.Register(adm.MfaResetAction())
@@ -85,7 +101,7 @@ func newResetEnv(t *testing.T) *resetEnv {
 	if err := reg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	return &resetEnv{env: e, adm: adm, reg: reg, svc: svc}
+	return &resetEnv{env: e, adm: adm, reg: reg, svc: svc, links: links}
 }
 
 // staffMember — активный сотрудник роли role со связью linked (uuid.Nil — без связи).
@@ -320,7 +336,10 @@ func TestMfaResetApproverLinkedFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := r.approve(staffMember(perm.Admin, "Борис", uid), ap.ID)
+	// связь появилась после загрузки сессии: в снимке её нет, исполнитель перечитывает её в tx решения
+	b := staffMember(perm.Admin, "Борис", uuid.Nil)
+	r.links.set(b.StaffID, uid)
+	out, err := r.approve(b, ap.ID)
 	if status, code := problemStatus(err); status != http.StatusConflict || code != identity.CodeSelfAction {
 		t.Fatalf("подтверждающий связан с игроком: %v", err)
 	}

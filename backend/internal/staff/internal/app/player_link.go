@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -37,7 +36,6 @@ const (
 	actionPlayerLinked    = "staff.player_linked"
 	actionPlayerUnlinked  = "staff.player_unlinked"
 	playerLinksUserKey    = "staff_player_links_user_id_key" // UNIQUE (user_id): учётка игрока — у одного сотрудника
-	playerLinkReread      = 5 * time.Second                  // срок сборки ответа после коммита (как committedAccount)
 	playerLinkAuditUserID = "user_id"
 	pgUniqueViolation     = "23505"
 )
@@ -50,8 +48,9 @@ var errNoPlayers = errors.New("staff: нет порта учёток игрок�
 // staff.not_found, игрока нет или удалён — 422 staff.player_not_found; та же связь — без изменений (без версии,
 // аудита, письма); учётка игрока у другого сотрудника — 409 staff.player_link_taken (и 23505 при гонке); иначе
 // вставка или замена, версия цели + 1, аудит staff.player_linked (after {user_id}, before — прежняя связь), письмо
-// staff.player_linked сотруднику. Ответ собирается после коммита на ctx без отмены (обрыв клиента не даёт 500 при
-// выполненном действии).
+// staff.player_linked сотруднику. Ответ — из данных транзакции (ник — из вызова порта до неё), без перечтения после
+// коммита: DELETE из второй вкладки или обрыв клиента между коммитом и ответом не дают 500 при выполненном действии
+// (m2 ревью Task 6, TestPutPlayerLinkDeletedBeforeResponse).
 func (a *App) PutPlayerLink(ctx context.Context, by *auth.Staff, staffID, userID uuid.UUID, m staff.Meta) (staff.PlayerLink, error) {
 	if by == nil || by.Decide(permPlayerLinks, uuid.Nil) != auth.Allow {
 		return staff.PlayerLink{}, errForbidden
@@ -59,10 +58,11 @@ func (a *App) PutPlayerLink(ctx context.Context, by *auth.Staff, staffID, userID
 	if a.players == nil {
 		return staff.PlayerLink{}, errNoPlayers
 	}
-	_, exists, err := a.players.Player(ctx, userID)
+	nick, exists, err := a.players.Player(ctx, userID)
 	if err != nil {
 		return staff.PlayerLink{}, fmt.Errorf("staff: учётка игрока: %w", err)
 	}
+	var out staff.PlayerLink
 	err = db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
 		locked, err := lockAccounts(ctx, q, staffID, by.StaffID)
@@ -85,7 +85,13 @@ func (a *App) PutPlayerLink(ctx context.Context, by *auth.Staff, staffID, userID
 			return err
 		}
 		if hasCur && cur.UserID == userID {
-			return nil // та же связь — без изменений
+			// та же связь — без изменений; ответ — строка связи этой же транзакции (кем и когда связана)
+			link, ok, err := a.playerLinkRow(ctx, q, staffID, nick)
+			if err == nil && !ok {
+				err = fmt.Errorf("staff: связь %s пропала под замком", staffID)
+			}
+			out = link
+			return err
 		}
 		holder, err := q.PlayerLinkHolder(ctx, userID)
 		switch {
@@ -107,22 +113,15 @@ func (a *App) PutPlayerLink(ctx context.Context, by *auth.Staff, staffID, userID
 		if hasCur {
 			before = map[string]any{playerLinkAuditUserID: cur.UserID}
 		}
+		out = staff.PlayerLink{UserID: userID, Nickname: nick, LinkedAt: now.UTC(),
+			LinkedByLabel: accountLabel(actorAcct.name, actorAcct.email)}
 		return a.playerLinkChanged(ctx, tx, q, by, actorAcct, staffID, actionPlayerLinked, staff.MailPlayerLinked,
 			before, map[string]any{playerLinkAuditUserID: userID}, m)
 	})
 	if err != nil {
 		return staff.PlayerLink{}, err
 	}
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), playerLinkReread)
-	defer cancel()
-	link, ok, err := a.playerLinkView(rctx, staffdb.New(a.pool), staffID)
-	if err != nil {
-		return staff.PlayerLink{}, err
-	}
-	if !ok {
-		return staff.PlayerLink{}, fmt.Errorf("staff: связь %s не найдена после коммита", staffID)
-	}
-	return link, nil
+	return out, nil
 }
 
 // DeletePlayerLink — deleteStaffPlayerLink: право, замки и автор — как PutPlayerLink; сотрудника нет — 404; связи нет
@@ -174,6 +173,21 @@ func (a *App) playerLinkChanged(ctx context.Context, tx pgx.Tx, q *staffdb.Queri
 // ника нет, пустая строка: связь видна владельцу, чтобы её снять), подпись — текущее имя автора, без имени — почта.
 // Связи нет — ok = false.
 func (a *App) playerLinkView(ctx context.Context, q *staffdb.Queries, staffID uuid.UUID) (staff.PlayerLink, bool, error) {
+	if a.players == nil {
+		return staff.PlayerLink{}, false, errNoPlayers
+	}
+	link, ok, err := a.playerLinkRow(ctx, q, staffID, "")
+	if err != nil || !ok {
+		return link, ok, err
+	}
+	if link.Nickname, _, err = a.players.Player(ctx, link.UserID); err != nil {
+		return staff.PlayerLink{}, false, fmt.Errorf("staff: ник игрока: %w", err)
+	}
+	return link, true, nil
+}
+
+// playerLinkRow — строка связи сотрудника с подписью автора и ником nick (без порта); нет — ok = false.
+func (a *App) playerLinkRow(ctx context.Context, q *staffdb.Queries, staffID uuid.UUID, nick string) (staff.PlayerLink, bool, error) {
 	r, err := q.PlayerLinkCard(ctx, staffID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return staff.PlayerLink{}, false, nil
@@ -181,23 +195,22 @@ func (a *App) playerLinkView(ctx context.Context, q *staffdb.Queries, staffID uu
 	if err != nil {
 		return staff.PlayerLink{}, false, err
 	}
-	if a.players == nil {
-		return staff.PlayerLink{}, false, errNoPlayers
+	return staff.PlayerLink{UserID: r.UserID, Nickname: nick, LinkedAt: r.CreatedAt.UTC(),
+		LinkedByLabel: accountLabel(r.ByName, r.ByEmail)}, true, nil
+}
+
+// accountLabel — подпись сотрудника: имя без крайних пробелов, без имени — почта.
+func accountLabel(name, email string) string {
+	if l := label(name); l != "" {
+		return l
 	}
-	nick, _, err := a.players.Player(ctx, r.UserID)
-	if err != nil {
-		return staff.PlayerLink{}, false, fmt.Errorf("staff: ник игрока: %w", err)
-	}
-	byLabel := label(r.ByName)
-	if byLabel == "" {
-		byLabel = r.ByEmail
-	}
-	return staff.PlayerLink{UserID: r.UserID, Nickname: nick, LinkedAt: r.CreatedAt.UTC(), LinkedByLabel: byLabel}, true, nil
+	return email
 }
 
 // ComposePlayerLink — письмо staff.player_linked | staff.player_unlinked получателю recipient: ref — запись аудита
 // действия (кто — подпись автора записи, какой игрок — user_id из after или before, ник — через порт). mail.ErrSkip:
-// записи нет, она другого действия или о другом сотруднике, получатель выключен, учётки игрока больше нет.
+// записи нет, она другого действия или о другом сотруднике, получатель выключен. Учётки игрока больше нет (удалена) —
+// письмо уходит, вместо ника — staff.player_deleted (m3 ревью Task 6).
 func (a *App) ComposePlayerLink(ctx context.Context, ref, recipient uuid.UUID, kind string) (mail.Message, error) {
 	want := map[string]string{staff.MailPlayerLinked: actionPlayerLinked, staff.MailPlayerUnlinked: actionPlayerUnlinked}[kind]
 	rec, ok, err := audit.Get(ctx, a.pool, ref)
@@ -239,9 +252,13 @@ func (a *App) ComposePlayerLink(ctx context.Context, ref, recipient uuid.UUID, k
 	if err != nil {
 		return mail.Message{}, err
 	}
+	to := mailTo{email: r.Email, locale: mailLocale(r.Locale)}
 	if !exists {
-		return mail.Message{}, mail.ErrSkip
+		// учётку игрока удалили — сотруднику всё равно сообщают об изменении связи (спека §7.6), ник — заглушкой
+		if nick, err = a.locales.Text(to.locale, "staff.player_deleted", nil); err != nil {
+			return mail.Message{}, err
+		}
 	}
 	args := map[string]any{"name": strings.TrimSpace(who.DisplayName), "owner": rec.ActorLabel, "nickname": nick}
-	return a.compose(mailTo{email: r.Email, locale: mailLocale(r.Locale)}, kind, args)
+	return a.compose(to, kind, args)
 }
