@@ -34,13 +34,15 @@ const (
 	MailMfaResetDone             = "identity.mfa_reset_done"             // ref — mfa_resets.id
 )
 
-// MailKinds — все виды писем I-2 (сверка с Composer воркера — Task 19).
+// MailKinds — все виды писем I-2 и I-4 (сверка с Composer воркера — Task 19 плана I-2, TestComposersCoverKinds).
 func MailKinds() []string {
 	return []string{MailSignupCode, MailSignupAccountExists, MailPasswordResetCode, MailEmailChangeCode,
 		MailEmailChangeTaken, MailEmailChanged, MailPasswordChanged, MailSessionRevokedSuspicious, MailMfaEnabled,
 		MailMfaDisabled, MailRecoveryCodeUsed, MailRecoveryCodesRegenerated, MailMfaFailures,
 		MailAccountDeletionScheduled, MailAccountRestored, MailAccountDeleted, MailMfaResetScheduled,
-		MailMfaResetCancelled, MailMfaResetDone}
+		MailMfaResetCancelled, MailMfaResetDone,
+		// I-4 (Task 4): решение по заявке в капитаны, ref — captain_applications.id
+		MailCaptainApplicationApproved, MailCaptainApplicationRejected}
 }
 
 // enqueueMail — задача письма в tx действия (очередь mail, исполняет воркер): в аргументах только вид и ref, адреса

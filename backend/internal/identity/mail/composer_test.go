@@ -787,3 +787,79 @@ func (e *env) footer(t *testing.T, loc string) string {
 	}
 	return s
 }
+
+// captainApp — решённая заявка аккаунта uid в городе посева stavropol: status approved | rejected | pending.
+func (e *env) captainApp(t *testing.T, uid uuid.UUID, status, code string, comment *string) uuid.UUID {
+	t.Helper()
+	id := uuid.Must(uuid.NewV7())
+	e.exec(t, `INSERT INTO captain_applications (id, user_id, city_id, status, reviewed_at, reviewed_by_label,
+			rejection_code, comment, created_at, updated_at)
+		SELECT $1, $2, c.id, $3::application_status, CASE WHEN $3 = 'pending' THEN NULL ELSE $4::timestamptz END,
+			CASE WHEN $3 = 'pending' THEN NULL ELSE 'Модератор' END, NULLIF($5, ''), $6, $4, $4
+		FROM cities c WHERE c.slug = 'stavropol'`, id, uid, status, testNow, code, comment)
+	return id
+}
+
+// Письма решения по заявке (спека §8.2; план I-4, Task 4): по captain_applications.id — адрес и язык игрока, ник,
+// город заявки; отказ — причина текстом локали identity.captain_rejection.<код> и комментарий модератора; вид не
+// совпал со статусом заявки, заявки нет, аккаунт анонимизирован — ErrSkip; период удаления — письмо идёт.
+func TestComposeCaptainDecision(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for _, loc := range i18n.Supported {
+		u := e.user(t, "cap-"+loc+"@example.com", loc)
+		ok := e.captainApp(t, u, "approved", "", nil)
+		m := e.mustSend(t, app.MailCaptainApplicationApproved, ok)
+		want := e.text(t, loc, "captain_application_approved", "text", map[string]any{"nickname": "cap-" + loc,
+			"city": "Ставрополь", "has_comment": "no", "comment": ""})
+		if m.To != "cap-"+loc+"@example.com" || !strings.HasPrefix(m.Text, want) || !strings.HasSuffix(m.Text, e.footer(t, loc)+"\n") {
+			t.Fatalf("%s: одобрение: %+v", loc, m)
+		}
+		e.mustSkip(t, app.MailCaptainApplicationRejected, ok)
+
+		// одобрение с комментарием модератора (спека §8.2: «решение и комментарий» у обоих видов; I1 ревью Task 4)
+		okComment := "Знаю по турниру"
+		okc := e.captainApp(t, u, "approved", "", &okComment)
+		m = e.mustSend(t, app.MailCaptainApplicationApproved, okc)
+		want = e.text(t, loc, "captain_application_approved", "text", map[string]any{"nickname": "cap-" + loc,
+			"city": "Ставрополь", "has_comment": "yes", "comment": okComment})
+		if !strings.HasPrefix(m.Text, want) {
+			t.Fatalf("%s: одобрение с комментарием: %q", loc, m.Text)
+		}
+		mustContain(t, "комментарий одобрения", m.Text, okComment)
+
+		comment := "Расскажите подробнее"
+		no := e.captainApp(t, u, "rejected", "other", &comment)
+		m = e.mustSend(t, app.MailCaptainApplicationRejected, no)
+		reason, err := e.cat.Text(loc, "identity.captain_rejection.other", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = e.text(t, loc, "captain_application_rejected", "text", map[string]any{"nickname": "cap-" + loc,
+			"city": "Ставрополь", "reason": reason, "has_comment": "yes", "comment": comment})
+		if !strings.HasPrefix(m.Text, want) {
+			t.Fatalf("%s: отказ other: %q", loc, m.Text)
+		}
+		mustContain(t, "комментарий", m.Text, comment)
+		mustContain(t, "причина", m.Text, reason)
+		e.mustSkip(t, app.MailCaptainApplicationApproved, no)
+
+		plain := e.captainApp(t, u, "rejected", "insufficient_info", nil)
+		m = e.mustSend(t, app.MailCaptainApplicationRejected, plain)
+		reason, _ = e.cat.Text(loc, "identity.captain_rejection.insufficient_info", nil)
+		want = e.text(t, loc, "captain_application_rejected", "text", map[string]any{"nickname": "cap-" + loc,
+			"city": "Ставрополь", "reason": reason, "has_comment": "no", "comment": ""})
+		if !strings.HasPrefix(m.Text, want) {
+			t.Fatalf("%s: отказ без комментария: %q", loc, m.Text)
+		}
+	}
+	u := e.user(t, "cap-pd@example.com", "ru")
+	ok := e.captainApp(t, u, "approved", "", nil)
+	open := e.captainApp(t, u, "pending", "", nil)
+	e.mustSkip(t, app.MailCaptainApplicationApproved, open)
+	e.pendingDeletion(t, u)
+	e.mustSend(t, app.MailCaptainApplicationApproved, ok)
+	e.anonymized(t, u)
+	e.mustSkip(t, app.MailCaptainApplicationApproved, ok)
+	e.mustSkip(t, app.MailCaptainApplicationRejected, uuid.Must(uuid.NewV7()))
+}

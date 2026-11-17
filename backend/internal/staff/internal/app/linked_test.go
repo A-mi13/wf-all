@@ -35,7 +35,7 @@ func TestStaffLinkedPlayerTx(t *testing.T) {
 		var got uuid.UUID
 		err := db.InTx(ctx, e.deps.Pool, func(ctx context.Context, tx pgx.Tx) error {
 			var err error
-			got, err = staff.LinkedPlayerTx(ctx, tx, id)
+			got, _, err = staff.LinkedPlayerTx(ctx, tx, id)
 			return err
 		})
 		return got, err
@@ -65,7 +65,7 @@ func TestStaffLinkedPlayerTx(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx1.Rollback(ctx) }()
-	if got, err := staff.LinkedPlayerTx(ctx, tx1, linked.ID); err != nil || got != player {
+	if got, _, err := staff.LinkedPlayerTx(ctx, tx1, linked.ID); err != nil || got != player {
 		t.Fatalf("в tx1: %v %v", got, err)
 	}
 	var pgErr *pgconn.PgError
@@ -106,8 +106,14 @@ func TestStaffLinkedPlayerTxSeesLinkCommittedWhileWaiting(t *testing.T) {
 		VALUES ($1, $2, $1, now())`, m.ID, player); err != nil {
 		t.Fatal(err)
 	}
+	var want int64 // связь поднимает версию учётки (R14): порт обязан отдать версию после ожидания
+	if err := hold.QueryRow(ctx, `UPDATE staff_accounts SET version = version + 1 WHERE id = $1 RETURNING version`,
+		m.ID).Scan(&want); err != nil {
+		t.Fatal(err)
+	}
 	var (
 		got     uuid.UUID
+		ver     int64
 		readErr error
 		done    = make(chan struct{})
 	)
@@ -115,7 +121,7 @@ func TestStaffLinkedPlayerTxSeesLinkCommittedWhileWaiting(t *testing.T) {
 		defer close(done)
 		readErr = db.InTx(ctx, e.deps.Pool, func(ctx context.Context, tx pgx.Tx) error {
 			var err error
-			got, err = staff.LinkedPlayerTx(ctx, tx, m.ID)
+			got, ver, err = staff.LinkedPlayerTx(ctx, tx, m.ID)
 			return err
 		})
 	}()
@@ -124,7 +130,7 @@ func TestStaffLinkedPlayerTxSeesLinkCommittedWhileWaiting(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-done
-	if readErr != nil || got != player {
-		t.Fatalf("связь после ожидания замка: %v %v, ждали %v", got, readErr, player)
+	if readErr != nil || got != player || ver != want {
+		t.Fatalf("связь после ожидания замка: %v v%d %v, ждали %v v%d", got, ver, readErr, player, want)
 	}
 }

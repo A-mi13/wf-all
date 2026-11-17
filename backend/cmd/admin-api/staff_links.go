@@ -13,6 +13,6 @@ import (
 // связь сотрудника с игроком в транзакции решения по заявке читается через сборку.
 type staffLinks struct{}
 
-func (staffLinks) LinkedUser(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) (uuid.UUID, error) {
+func (staffLinks) LinkedUser(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) (uuid.UUID, int64, error) {
 	return staff.LinkedPlayerTx(ctx, tx, staffID)
 }

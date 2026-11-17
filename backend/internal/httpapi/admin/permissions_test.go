@@ -313,7 +313,10 @@ var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "
 	// сброс 2FA поддержкой — настоящий хендлер identity (liveIdentity, план I-2 Task 17): игрока anyID нет — 404 сценария
 	"requestMfaReset": {}, "cancelMfaReset": {},
 	// поиск игрока (почты из opsHeaders нет — 404 сценария) и статистика способов входа (200) — план I-4, Task 5
-	"findPlayerByEmail": {}, "getAuthMethodsUsage": {}}
+	"findPlayerByEmail": {}, "getAuthMethodsUsage": {},
+	// заявки в капитаны — план I-4, Task 4: заявки anyID нет — 404 сценария; поддержка на решениях — 403 конвейера
+	"listCaptainApplications": {}, "getCaptainApplication": {}, "getCaptainApplicationContact": {},
+	"approveCaptainApplication": {}, "rejectCaptainApplication": {}}
 
 func TestPermissionsAllOperations(t *testing.T) {
 	t.Parallel()

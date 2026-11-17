@@ -87,7 +87,7 @@
       },
       "captain_application_approved": {
         "subject": "You are a captain in {city}",
-        "text": "{nickname}, your captain application in {city} has been approved. You can now build a team and create matches.\n\nA probation period applies at first: your match reports start counting towards the city rankings after three played matches."
+        "text": "{nickname}, your captain application in {city} has been approved. You can now build a team and create matches.{has_comment, select, yes {\n\nModerator comment: {comment}} other {}}\n\nA probation period applies at first: your match reports start counting towards the city rankings after three played matches."
       },
       "captain_application_rejected": {
         "subject": "Captain application declined",

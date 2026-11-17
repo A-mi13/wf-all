@@ -36,11 +36,13 @@ const (
 var RequiredCaptainChecks = []string{CheckProfileComplete, CheckCityCaptaincy}
 
 // StaffLinks — текущая связь «сотрудник → учётка игрока» в транзакции вызывающего (R38 плана I-4): строка
-// staff_accounts сотрудника FOR SHARE, затем staff_player_links; uuid.Nil — связи нет. Замок сериализует решение по
-// заявке с PutPlayerLink/DeletePlayerLink (FOR UPDATE той же строки). Реализация — staff.LinkedPlayerTx, адаптер —
-// cmd/admin-api (identity staff не импортирует: staff — слой 0, но сборка межмодульных портов — в cmd).
+// staff_accounts сотрудника FOR SHARE, затем его версия и staff_player_links; uuid.Nil — связи нет. Замок сериализует
+// решение по заявке с PutPlayerLink/DeletePlayerLink, сменой роли и городов, выключением (FOR UPDATE той же строки);
+// версия, прочитанная под замком, ≠ auth.Staff.Version — права снимка сессии устарели (решение по заявке — 403).
+// Реализация — staff.LinkedPlayerTx, адаптер — cmd/admin-api (identity staff не импортирует: staff — слой 0, но сборка
+// межмодульных портов — в cmd).
 type StaffLinks interface {
-	LinkedUser(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) (uuid.UUID, error)
+	LinkedUser(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) (user uuid.UUID, version int64, err error)
 }
 
 // UnavailableCheck — порт «модуль ещё не построен»: всегда checks_unavailable, к базе не обращается.

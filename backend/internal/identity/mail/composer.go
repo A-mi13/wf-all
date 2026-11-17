@@ -78,25 +78,27 @@ func Register(r *pmail.Registry, d ComposerDeps) error {
 		}
 	}
 	table := map[string]composeFunc{
-		app.MailSignupCode:               code(identitydb.AuthCodePurposeSignup, false),
-		app.MailSignupAccountExists:      code(identitydb.AuthCodePurposeSignup, true),
-		app.MailPasswordResetCode:        code(identitydb.AuthCodePurposePasswordReset, false),
-		app.MailEmailChangeCode:          code(identitydb.AuthCodePurposeEmailChange, false),
-		app.MailEmailChangeTaken:         code(identitydb.AuthCodePurposeEmailChange, true),
-		app.MailEmailChanged:             event(domain.SecEmailChanged),
-		app.MailPasswordChanged:          event(domain.SecPasswordChanged, domain.SecPasswordReset),
-		app.MailSessionRevokedSuspicious: event(domain.SecRefreshReuse),
-		app.MailMfaEnabled:               event(domain.SecMfaEnabled),
-		app.MailMfaDisabled:              event(domain.SecMfaDisabled),
-		app.MailRecoveryCodeUsed:         event(domain.SecRecoveryCodeUsed),
-		app.MailRecoveryCodesRegenerated: event(domain.SecRecoveryCodesRegenerated),
-		app.MailMfaFailures:              event(domain.SecMfaFailures),
-		app.MailAccountDeletionScheduled: event(domain.SecAccountDeletionScheduled),
-		app.MailAccountRestored:          event(domain.SecAccountRestored),
-		app.MailAccountDeleted:           event(domain.SecAccountDeleted),
-		app.MailMfaResetScheduled:        c.mfaReset,
-		app.MailMfaResetCancelled:        c.mfaReset,
-		app.MailMfaResetDone:             c.mfaReset,
+		app.MailSignupCode:                 code(identitydb.AuthCodePurposeSignup, false),
+		app.MailSignupAccountExists:        code(identitydb.AuthCodePurposeSignup, true),
+		app.MailPasswordResetCode:          code(identitydb.AuthCodePurposePasswordReset, false),
+		app.MailEmailChangeCode:            code(identitydb.AuthCodePurposeEmailChange, false),
+		app.MailEmailChangeTaken:           code(identitydb.AuthCodePurposeEmailChange, true),
+		app.MailEmailChanged:               event(domain.SecEmailChanged),
+		app.MailPasswordChanged:            event(domain.SecPasswordChanged, domain.SecPasswordReset),
+		app.MailSessionRevokedSuspicious:   event(domain.SecRefreshReuse),
+		app.MailMfaEnabled:                 event(domain.SecMfaEnabled),
+		app.MailMfaDisabled:                event(domain.SecMfaDisabled),
+		app.MailRecoveryCodeUsed:           event(domain.SecRecoveryCodeUsed),
+		app.MailRecoveryCodesRegenerated:   event(domain.SecRecoveryCodesRegenerated),
+		app.MailMfaFailures:                event(domain.SecMfaFailures),
+		app.MailAccountDeletionScheduled:   event(domain.SecAccountDeletionScheduled),
+		app.MailAccountRestored:            event(domain.SecAccountRestored),
+		app.MailAccountDeleted:             event(domain.SecAccountDeleted),
+		app.MailMfaResetScheduled:          c.mfaReset,
+		app.MailMfaResetCancelled:          c.mfaReset,
+		app.MailMfaResetDone:               c.mfaReset,
+		app.MailCaptainApplicationApproved: c.captainDecision,
+		app.MailCaptainApplicationRejected: c.captainDecision,
 	}
 	for _, kind := range app.MailKinds() {
 		fn, ok := table[kind]
@@ -359,6 +361,51 @@ func (c *composers) mfaReset(ctx context.Context, kind string, ref uuid.UUID) (p
 		args["time"] = formatTime(*row.ExecutedAt, zone)
 	}
 	return c.compose(row.Email, mailLocale(row.Locale), mailName(kind), text, args)
+}
+
+// captainDecision — письмо решения по заявке в капитаны по captain_applications.id (I-4, Task 4; спека §8.2): адрес,
+// язык и ник заявителя, город заявки (название на языке страны города — geo_read_city_settings.city_name), комментарий
+// модератора (у обоих видов), у отказа — причина текстом identity.captain_rejection.<код>. Заявки нет, статус заявки не тот, что у
+// вида письма, аккаунт анонимизирован — ErrSkip; период удаления — письмо идёт (аккаунт ещё есть).
+func (c *composers) captainDecision(ctx context.Context, kind string, ref uuid.UUID) (pmail.Message, error) {
+	row, err := c.q.MailCaptainApplication(ctx, ref)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pmail.Message{}, skip("заявки нет")
+	}
+	if err != nil {
+		return pmail.Message{}, fmt.Errorf("identity: письмо %s: заявка: %w", kind, err)
+	}
+	if row.UserStatus == identitydb.UserStatusDeleted {
+		return pmail.Message{}, skip("аккаунт удалён")
+	}
+	want := identitydb.ApplicationStatusApproved
+	if kind == app.MailCaptainApplicationRejected {
+		want = identitydb.ApplicationStatusRejected
+	}
+	if row.Status != want {
+		return pmail.Message{}, skip("заявка не в статусе письма")
+	}
+	locale := mailLocale(row.Locale)
+	args := map[string]any{"nickname": row.Nickname, "city": ""}
+	if row.CityName != nil {
+		args["city"] = *row.CityName
+	}
+	if kind == app.MailCaptainApplicationRejected {
+		if row.RejectionCode == nil {
+			return pmail.Message{}, fmt.Errorf("identity: письмо %s: отказ без кода причины", kind)
+		}
+		reason, err := c.d.Catalog.Text(locale, "identity.captain_rejection."+*row.RejectionCode, nil)
+		if err != nil {
+			return pmail.Message{}, err
+		}
+		args["reason"] = reason
+	}
+	// комментарий модератора — у обоих видов (спека §8.2: «решение и комментарий»)
+	args["has_comment"], args["comment"] = "no", ""
+	if row.Comment != nil && strings.TrimSpace(*row.Comment) != "" {
+		args["has_comment"], args["comment"] = "yes", *row.Comment
+	}
+	return c.compose(row.Email, locale, mailName(kind), "text", args)
 }
 
 // compose — письмо identity.mail.<name>.subject и .<text> с подписью mail.footer.

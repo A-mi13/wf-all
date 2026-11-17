@@ -41,16 +41,24 @@ type resetEnv struct {
 	links *fakeLinks
 }
 
-// fakeLinks — порт identity.StaffLinks теста: связь по id сотрудника, задаётся тестом в любой момент.
-type fakeLinks struct{ m sync.Map }
+// fakeLinks — порт identity.StaffLinks теста: связь и версия учётки по id сотрудника, задаются тестом в любой момент;
+// версия по умолчанию — 1, как у staffMember.
+type fakeLinks struct{ m, ver sync.Map }
 
 func (f *fakeLinks) set(staffID, userID uuid.UUID) { f.m.Store(staffID, userID) }
 
-func (f *fakeLinks) LinkedUser(_ context.Context, _ pgx.Tx, staffID uuid.UUID) (uuid.UUID, error) {
-	if u, ok := f.m.Load(staffID); ok {
-		return u.(uuid.UUID), nil
+// setVersion — версия учётки сотрудника «в базе» (изменили после загрузки сессии — больше, чем auth.Staff.Version).
+func (f *fakeLinks) setVersion(staffID uuid.UUID, v int64) { f.ver.Store(staffID, v) }
+
+func (f *fakeLinks) LinkedUser(_ context.Context, _ pgx.Tx, staffID uuid.UUID) (uuid.UUID, int64, error) {
+	v := int64(1)
+	if got, ok := f.ver.Load(staffID); ok {
+		v = got.(int64)
 	}
-	return uuid.Nil, nil
+	if u, ok := f.m.Load(staffID); ok {
+		return u.(uuid.UUID), v, nil
+	}
+	return uuid.Nil, v, nil
 }
 
 // roleApp — NewMaintenance на той же базе под ролью role (admin | worker), без кольца секретов (как admin-api, N3)

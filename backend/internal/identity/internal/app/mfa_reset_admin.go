@@ -187,7 +187,7 @@ func (a *App) execMfaReset(ctx context.Context, tx pgx.Tx, raw json.RawMessage, 
 	}
 	// связь подтверждающего — перечитанная в транзакции решения (FOR SHARE его учётки, как R38 у заявок), не снимок
 	// загрузки сессии: владелец мог связать его с игроком между загрузкой и решением
-	linked, err := a.approverLink(ctx, tx, approver)
+	linked, _, err := a.approverLink(ctx, tx, approver) // роль и статус — у хука LockActors (checkActor)
 	if err != nil {
 		return err
 	}
@@ -237,17 +237,17 @@ func (a *App) execMfaReset(ctx context.Context, tx pgx.Tx, raw json.RawMessage, 
 	return a.enqueueMail(ctx, tx, MailMfaResetScheduled, resetID)
 }
 
-// approverLink — текущая связь сотрудника с игроком в tx решения (порт StaffLinks, R38 плана I-4). Сборка без порта —
-// ошибка (fail-closed: снимок сессии не подменяет перечтение).
-func (a *App) approverLink(ctx context.Context, tx pgx.Tx, st *auth.Staff) (uuid.UUID, error) {
+// approverLink — текущая связь сотрудника с игроком и версия его учётки в tx решения (порт StaffLinks, R38 плана I-4;
+// версия — m1 ревью Task 4). Сборка без порта — ошибка (fail-closed: снимок сессии не подменяет перечтение).
+func (a *App) approverLink(ctx context.Context, tx pgx.Tx, st *auth.Staff) (uuid.UUID, int64, error) {
 	if a.staffLinks == nil {
-		return uuid.Nil, errors.New("identity: нет порта StaffLinks для решения")
+		return uuid.Nil, 0, errors.New("identity: нет порта StaffLinks для решения")
 	}
-	u, err := a.staffLinks.LinkedUser(ctx, tx, st.StaffID)
+	u, v, err := a.staffLinks.LinkedUser(ctx, tx, st.StaffID)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("identity: связь подтверждающего: %w", err)
+		return uuid.Nil, 0, fmt.Errorf("identity: связь подтверждающего: %w", err)
 	}
-	return u, nil
+	return u, v, nil
 }
 
 // CancelMfaResetByStaff — cancelMfaReset (§3.15 п. 4): право identity.mfa.reset не Deny (NeedsApproval — разрешение:

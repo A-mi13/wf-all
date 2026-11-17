@@ -22,6 +22,17 @@ JOIN users u ON u.id = e.user_id
 LEFT JOIN geo_read_city_settings c ON c.city_id = u.city_id
 WHERE e.id = @id;
 
+-- name: MailCaptainApplication :one
+-- Письмо решения по заявке (I-4, Task 4): статус и решение заявки, адрес, язык, ник и статус заявителя, название
+-- города заявки (geo_read_city_settings.city_name — название на языке страны города: переводов city_names
+-- экспортированное представление geo не отдаёт).
+SELECT a.status, a.rejection_code, a.comment, u.email, u.locale, u.nickname, u.status AS user_status,
+       c.city_name
+FROM captain_applications a
+JOIN users u ON u.id = a.user_id
+LEFT JOIN geo_read_city_settings c ON c.city_id = a.city_id
+WHERE a.id = @id;
+
 -- name: MailMfaReset :one
 -- has_mfa — есть ли подтверждённая 2FA (у worker — SELECT user_id, confirmed_at, §5.5; как в исполнении сброса):
 -- неподтверждённая настройка SetupTotp — не 2FA; отмена из DisableTotp снимает 2FA в той же tx — письму об отмене

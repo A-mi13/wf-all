@@ -38,7 +38,7 @@ func (allowCheck) Check(context.Context, pgx.Tx, uuid.UUID, uuid.UUID) (string, 
 // staffLinksTx — порт identity.StaffLinks над настоящим staff.LinkedPlayerTx (как адаптер cmd/admin-api).
 type staffLinksTx struct{}
 
-func (staffLinksTx) LinkedUser(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) (uuid.UUID, error) {
+func (staffLinksTx) LinkedUser(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) (uuid.UUID, int64, error) {
 	return staff.LinkedPlayerTx(ctx, tx, staffID)
 }
 

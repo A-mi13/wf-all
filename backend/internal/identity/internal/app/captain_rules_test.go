@@ -26,8 +26,8 @@ var discard = slog.New(slog.DiscardHandler)
 // noLinks — порт связи сотрудника без связей (сборка NewAdmin в тестах конструктора).
 type noLinks struct{}
 
-func (noLinks) LinkedUser(context.Context, pgx.Tx, uuid.UUID) (uuid.UUID, error) {
-	return uuid.Nil, nil
+func (noLinks) LinkedUser(context.Context, pgx.Tx, uuid.UUID) (uuid.UUID, int64, error) {
+	return uuid.Nil, 1, nil
 }
 
 // Неверный набор портов условий — отказ сборки api и admin-api (К1): один порт, повтор; NewAdmin — и без StaffLinks.
