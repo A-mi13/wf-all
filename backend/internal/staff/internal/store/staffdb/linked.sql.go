@@ -11,21 +11,33 @@ import (
 	"github.com/google/uuid"
 )
 
-const linkedPlayerForShare = `-- name: LinkedPlayerForShare :one
+const linkedPlayerOf = `-- name: LinkedPlayerOf :one
+SELECT user_id FROM staff_player_links WHERE staff_id = $1::uuid
+`
 
-SELECT l.user_id
-FROM staff_accounts a
-LEFT JOIN staff_player_links l ON l.staff_id = a.id
-WHERE a.id = $1::uuid
-FOR SHARE OF a
+// Связь сотрудника (после LockAccountForShare); связи нет — ErrNoRows.
+func (q *Queries) LinkedPlayerOf(ctx context.Context, staffID uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, linkedPlayerOf, staffID)
+	var user_id uuid.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
+const lockAccountForShare = `-- name: LockAccountForShare :one
+
+SELECT id FROM staff_accounts WHERE id = $1::uuid FOR SHARE
 `
 
 // Связь «сотрудник → учётка игрока» для чужой транзакции (порт identity.StaffLinks, план I-4 R38): строка учётки
-// сотрудника FOR SHARE (сериализует с PutPlayerLink/DeletePlayerLink — у них FOR UPDATE той же строки), связь — из
-// staff_player_links; связи нет — user_id NULL; сотрудника нет — ни одной строки.
-func (q *Queries) LinkedPlayerForShare(ctx context.Context, staffID uuid.UUID) (*uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, linkedPlayerForShare, staffID)
-	var user_id *uuid.UUID
-	err := row.Scan(&user_id)
-	return user_id, err
+// сотрудника FOR SHARE (сериализует с PutPlayerLink/DeletePlayerLink — у них FOR UPDATE той же строки), затем связь из
+// staff_player_links — ОТДЕЛЬНЫМ оператором. Один оператор «FOR SHARE OF a + LEFT JOIN связи» после ожидания замка
+// перечитывает (READ COMMITTED) только заблокированную строку учётки, а связь берёт из снимка до ожидания: связь,
+// заведённая во время решения, не видна (TestStaffLinkedPlayerTxSeesLinkCommittedWhileWaiting). Второй оператор берёт
+// новый снимок уже под замком.
+// Учётка сотрудника под FOR SHARE до конца tx вызывающего; сотрудника нет — ErrNoRows.
+func (q *Queries) LockAccountForShare(ctx context.Context, staffID uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockAccountForShare, staffID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }

@@ -93,10 +93,8 @@ type Querier interface {
 	InsertRoleCities(ctx context.Context, arg InsertRoleCitiesParams) error
 	// Сессии сотрудников (спека сотрудников §4.7). Токен — только SHA-256 (token_hash).
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
-	// Связь «сотрудник → учётка игрока» для чужой транзакции (порт identity.StaffLinks, план I-4 R38): строка учётки
-	// сотрудника FOR SHARE (сериализует с PutPlayerLink/DeletePlayerLink — у них FOR UPDATE той же строки), связь — из
-	// staff_player_links; связи нет — user_id NULL; сотрудника нет — ни одной строки.
-	LinkedPlayerForShare(ctx context.Context, staffID uuid.UUID) (*uuid.UUID, error)
+	// Связь сотрудника (после LockAccountForShare); связи нет — ErrNoRows.
+	LinkedPlayerOf(ctx context.Context, staffID uuid.UUID) (uuid.UUID, error)
 	// Кому письмо staff.bootstrapped: активные владельцы.
 	ListActiveOwners(ctx context.Context) ([]uuid.UUID, error)
 	// Перешифровка: приглашения с кодом не на текущем ключе (код есть только у живых).
@@ -124,6 +122,14 @@ type Querier interface {
 	// recovery-codes/ack, повторные отправки, выпуск нового приглашения и перешифровку.
 	// Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор.
 	LockAccountByEmail(ctx context.Context, email string) (LockAccountByEmailRow, error)
+	// Связь «сотрудник → учётка игрока» для чужой транзакции (порт identity.StaffLinks, план I-4 R38): строка учётки
+	// сотрудника FOR SHARE (сериализует с PutPlayerLink/DeletePlayerLink — у них FOR UPDATE той же строки), затем связь из
+	// staff_player_links — ОТДЕЛЬНЫМ оператором. Один оператор «FOR SHARE OF a + LEFT JOIN связи» после ожидания замка
+	// перечитывает (READ COMMITTED) только заблокированную строку учётки, а связь берёт из снимка до ожидания: связь,
+	// заведённая во время решения, не видна (TestStaffLinkedPlayerTxSeesLinkCommittedWhileWaiting). Второй оператор берёт
+	// новый снимок уже под замком.
+	// Учётка сотрудника под FOR SHARE до конца tx вызывающего; сотрудника нет — ErrNoRows.
+	LockAccountForShare(ctx context.Context, staffID uuid.UUID) (uuid.UUID, error)
 	// Код приглашения под замком (перешифровка после замка учётки).
 	LockInviteCode(ctx context.Context, id uuid.UUID) (LockInviteCodeRow, error)
 	// Живое (не погашенное и не принятое-и-закрытое) приглашение учётки под замком; срок проверяет

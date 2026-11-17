@@ -79,3 +79,52 @@ func TestStaffLinkedPlayerTx(t *testing.T) {
 		t.Fatalf("FOR UPDATE после коммита: %v", err)
 	}
 }
+
+// Связь, заведённая, пока LinkedPlayerTx ждал замок учётки (R38: решение по заявке ∥ PutPlayerLink): держатель берёт
+// учётку FOR UPDATE (как lockAccounts у PutPlayerLink), вставляет связь и коммитит после того, как LinkedPlayerTx встал
+// на замок, — LinkedPlayerTx обязан вернуть новую связь. Один оператор «FOR SHARE OF a + LEFT JOIN связи» её не видел:
+// READ COMMITTED после ожидания перечитывает только заблокированную строку, соединённая берётся из старого снимка.
+func TestStaffLinkedPlayerTxSeesLinkCommittedWhileWaiting(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+	m := e.addMember("waiting@wf.example", memberOpts{})
+	var player uuid.UUID
+	if err := e.owner.QueryRow(ctx, `INSERT INTO users (email, email_verified_at, nickname, birth_date, locale)
+		VALUES ('waiting.player@example.com', now(), 'waiting_player', '2000-01-01', 'ru') RETURNING id`).Scan(&player); err != nil {
+		t.Fatal(err)
+	}
+	hold, err := e.owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = hold.Rollback(ctx) }()
+	if _, err := hold.Exec(ctx, `SELECT 1 FROM staff_accounts WHERE id = $1 FOR UPDATE`, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hold.Exec(ctx, `INSERT INTO staff_player_links (staff_id, user_id, created_by, created_at)
+		VALUES ($1, $2, $1, now())`, m.ID, player); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		got     uuid.UUID
+		readErr error
+		done    = make(chan struct{})
+	)
+	go func() {
+		defer close(done)
+		readErr = db.InTx(ctx, e.deps.Pool, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			got, err = staff.LinkedPlayerTx(ctx, tx, m.ID)
+			return err
+		})
+	}()
+	e.waitLockWaiters(1)
+	if err := hold.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if readErr != nil || got != player {
+		t.Fatalf("связь после ожидания замка: %v %v, ждали %v", got, readErr, player)
+	}
+}
