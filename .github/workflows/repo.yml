@@ -25,6 +25,8 @@ jobs:
       - run: |
           mkdir -p .tools/bin
           go -C tools build -o ../.tools/bin/ github.com/go-task/task/v3/cmd/task github.com/zricethezav/gitleaks/v8 github.com/rhysd/actionlint/cmd/actionlint
+      # тот же shellcheck, что локально (scripts/install-shellcheck.sh), а не образ раннера
+      - run: bash scripts/install-shellcheck.sh
       - run: ./task secrets workflows
       # тесты скриптов репозитория (снимки, проверка dist, подсадка, эталон визуального сравнения) — только node:*
       - run: ./task scripts:test

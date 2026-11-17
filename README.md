@@ -95,7 +95,8 @@ playwright install chromium webkit`; без WebKit — `WF_E2E_PROJECTS=chromium
 
 ## База без Docker
 
-На машине разработчика Docker/WSL не работает, поэтому `scripts/pg.sh` разворачивает
+Для тестов Docker не нужен (Docker Desktop на машине разработчика работает с 16.11.2026 — им проверяется
+`deploy/server`, WSL — нет): `scripts/pg.sh` разворачивает
 PostgreSQL + PostGIS из официальных zip-архивов прямо в `.tools/pg` — без прав
 администратора и без установки службы. Системный PostgreSQL (если он есть) не трогается.
 

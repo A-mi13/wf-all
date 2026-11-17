@@ -605,3 +605,12 @@ func TestRunWarnsOpportunisticSMTPInServiceLog(t *testing.T) {
 		t.Fatalf("нет предупреждения opportunistic в журнале сервиса: %q", out)
 	}
 }
+
+// Адрес побудки api (ADMIN_WAKE_API_URL) проверяется до подключения к базе: не https — отказ старта с именем ключа.
+func TestRunRejectsBadWakeURL(t *testing.T) {
+	t.Parallel()
+	err := run(context.Background(), nil, offlineEnv("ADMIN_WAKE_API_URL=http://x"), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "ADMIN_WAKE_API_URL") {
+		t.Fatalf("err = %v, ждали отказ с ADMIN_WAKE_API_URL", err)
+	}
+}

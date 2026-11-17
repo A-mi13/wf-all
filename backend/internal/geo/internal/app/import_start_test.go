@@ -117,7 +117,7 @@ func TestStartImport(t *testing.T) {
 	}
 	if got := slices.Sorted(maps.Keys(args)); !slices.Equal(got, []string{"country", "started_by", "v"}) ||
 		args["country"] != "RU" || args["started_by"] != s.StaffID.String() || args["v"] != 1.0 ||
-		kind != "geo.import" || queueName != queue.Maintenance {
+		kind != "geo.import" || queueName != queue.Import {
 		t.Fatalf("задача: %s %s %s", raw, kind, queueName)
 	}
 	if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'geo.import_requested' AND actor_staff_id = $1
@@ -489,7 +489,7 @@ func TestGetGeoImportJob(t *testing.T) {
 		return err
 	}))
 	wc, err := river.NewClient(riverpgxv5.New(e.owner), &river.Config{
-		Queues: map[string]river.QueueConfig{queue.Maintenance: {MaxWorkers: 1}}, Workers: workers,
+		Queues: map[string]river.QueueConfig{queue.Import: {MaxWorkers: 1}}, Workers: workers,
 		FetchCooldown: 10 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
 	})
 	if err != nil {

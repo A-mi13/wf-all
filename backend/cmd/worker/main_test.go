@@ -420,3 +420,19 @@ func TestRunWarnsOpportunisticSMTPInServiceLog(t *testing.T) {
 		t.Fatalf("нет предупреждения opportunistic в журнале воркера: %q", out)
 	}
 }
+
+// Ревью m4: SIGTERM, пока открывается пул (холодный старт Neon, ping — секунды), — штатная остановка: run = nil
+// (код выхода 0), а не «db: ping: context canceled». Без отмены та же недостижимая база — ошибка подключения.
+func TestRunStopsDuringDBOpen(t *testing.T) {
+	t.Parallel()
+	env := append(slices.Clone(mailEnv), "WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := run(ctx, nil, env, io.Discard, io.Discard); err != nil {
+		t.Fatalf("отмена во время открытия пула: %v", err)
+	}
+	if err := run(context.Background(), nil, env, io.Discard, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("без отмены err = %v, ждали ошибку подключения", err)
+	}
+}

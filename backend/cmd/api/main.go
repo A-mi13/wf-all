@@ -18,6 +18,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"wf/backend/cmd/internal/workerhost"
 	"wf/backend/internal/geo"
 	"wf/backend/internal/httpapi/public"
 	"wf/backend/internal/identity"
@@ -26,10 +27,12 @@ import (
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
+	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/flags"
 	"wf/backend/internal/platform/humancheck"
 	"wf/backend/internal/platform/ipgeo"
 	"wf/backend/internal/platform/keys"
+	"wf/backend/internal/platform/logx"
 	"wf/backend/internal/platform/password"
 	"wf/backend/internal/platform/peer"
 	"wf/backend/internal/platform/queue"
@@ -95,43 +98,74 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// закрывается после возврата RunHTTP — HTTP уже дренирован (фона у api нет): запрос в полёте не читает
+	// закрывается после возврата RunHTTP/RunService — HTTP уже дренирован, фон остановлен: запрос в полёте не читает
 	// закрытый mmap (иначе SIGSEGV maxminddb)
 	defer func() { _ = closeGeo.Close() }()
-	return server.RunHTTP(ctx, "api", server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB}, logOut,
-		func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error) {
-			// PoW — проверка решения по риску в сценариях identity (humancheck.Require)
-			pow, err := humancheck.NewPoW(pool, clock.System, humancheck.PoWConfig{
-				Keys: cfg.Humancheck.Keys, TTL: cfg.Humancheck.TTL, MaxNumber: cfg.Humancheck.MaxNumber,
-			})
-			if err != nil {
-				return nil, err
-			}
-			tokens := token.NewIssuer(jwtKeys, clock.System)
-			limiter := ratelimit.NewPG(pool, clock.System, ratelimit.Players)
-			idh, err := buildIdentity(log, pool, identity.Deps{Clock: clock.System, Secrets: secrets, Devices: devices,
-				Limiter: limiter, LimiterTx: func(tx pgx.Tx) ratelimit.Limiter { return ratelimit.NewPG(tx, clock.System, ratelimit.Players) },
-				Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool), IPGeo: loc, Legal: legal,
-				Tokens: tokens, TOTPIssuer: cfg.Identity.TOTPIssuer})
-			if err != nil {
-				return nil, err
-			}
-			return public.NewHandler(log, public.Options{
-				Docs:           cfg.HTTP.DocsEnabled,
-				RequestTimeout: cfg.HTTP.RequestTimeout,
-				Peer:           pc,
-				DB:             pool,
-				Tokens:         tokens,
-				Identity:       idh,
-				WellKnown:      wellKnown,
-				// загрузчик identity (статус, отзыв, сроки, ограничения, допуски) под кэшем 5 с: отзыв действует ≤ 5 с
-				Sessions:    auth.NewCachedLoader(identity.NewSessionLoader(pool, clock.System), 5*time.Second, clock.System, 100_000),
-				Limiter:     limiter,
-				RateRules:   rules,
-				Geo:         geo.New(pool),
-				AppVersions: appversion.NewReader(pool),
-			})
+	hc := server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB}
+	build := func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error) {
+		// PoW — проверка решения по риску в сценариях identity (humancheck.Require)
+		pow, err := humancheck.NewPoW(pool, clock.System, humancheck.PoWConfig{
+			Keys: cfg.Humancheck.Keys, TTL: cfg.Humancheck.TTL, MaxNumber: cfg.Humancheck.MaxNumber,
 		})
+		if err != nil {
+			return nil, err
+		}
+		tokens := token.NewIssuer(jwtKeys, clock.System)
+		limiter := ratelimit.NewPG(pool, clock.System, ratelimit.Players)
+		idh, err := buildIdentity(log, pool, identity.Deps{Clock: clock.System, Secrets: secrets, Devices: devices,
+			Limiter: limiter, LimiterTx: func(tx pgx.Tx) ratelimit.Limiter { return ratelimit.NewPG(tx, clock.System, ratelimit.Players) },
+			Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool), IPGeo: loc, Legal: legal,
+			Tokens: tokens, TOTPIssuer: cfg.Identity.TOTPIssuer})
+		if err != nil {
+			return nil, err
+		}
+		return public.NewHandler(log, public.Options{
+			Docs:           cfg.HTTP.DocsEnabled,
+			RequestTimeout: cfg.HTTP.RequestTimeout,
+			Peer:           pc,
+			DB:             pool,
+			Tokens:         tokens,
+			Identity:       idh,
+			WellKnown:      wellKnown,
+			// загрузчик identity (статус, отзыв, сроки, ограничения, допуски) под кэшем 5 с: отзыв действует ≤ 5 с
+			Sessions:    auth.NewCachedLoader(identity.NewSessionLoader(pool, clock.System), 5*time.Second, clock.System, 100_000),
+			Limiter:     limiter,
+			RateRules:   rules,
+			Geo:         geo.New(pool),
+			AppVersions: appversion.NewReader(pool),
+		})
+	}
+	if !cfg.EmbedWorker {
+		// прод: фон — отдельный процесс worker, WORKER_* api не читает
+		return server.RunHTTP(ctx, "api", hc, logOut, build)
+	}
+	// журнал предупреждений старта — тот же формат и вывод, что у сервиса (RunService создаёт свой позже)
+	startLog := logx.New(logOut, cfg.Log).With("service", "api")
+	p, err := prepareEmbedded(cfg, secrets, environ, startLog)
+	if err != nil {
+		return err
+	}
+	// второй пул — роль worker; закрывается после возврата RunService, т. е. после остановки фона
+	wpool, err := db.Open(ctx, p.DB())
+	if err != nil {
+		// SIGTERM во время подключения (холодный старт Neon) — штатная остановка, как отмена фона (R11)
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	defer wpool.Close()
+	return server.RunService(ctx, "api", hc, logOut, func(log *slog.Logger, pool *pgxpool.Pool) (server.Service, error) {
+		h, err := build(log, pool)
+		if err != nil {
+			return server.Service{}, err
+		}
+		wlog := log.With("component", "worker")
+		// фон — только на wpool: пул api в воркер не попадает (у роли api нет прав фона, R14)
+		return server.Service{Handler: h, Background: func(ctx context.Context) error {
+			return workerhost.Run(ctx, p, wpool, wlog, embeddedStop())
+		}}, nil
+	})
 }
 
 // buildIdentity — ручки identity на пуле api (план I-2, Task 8): хэшер argon2id под семафором по числу ядер (R13),

@@ -110,8 +110,15 @@ tasks:
     cmds: ['{{.TOOLS}}/gitleaks git --redact --verbose']
 
   workflows:
-    desc: actionlint по .github/workflows
-    cmds: ['{{.TOOLS}}/actionlint']
+    desc: actionlint по .github/workflows (со shellcheck из .tools/bin — без него скрипты run не проверяются)
+    cmds:
+      # без shellcheck actionlint молча пропускает скрипты run: — отказ, а не ложный зелёный (PR #17)
+      - |
+        '{{.TOOLS}}/shellcheck' --version >/dev/null 2>&1 || {
+          echo 'нет .tools/bin/shellcheck — bash scripts/install-shellcheck.sh (без него actionlint не проверяет скрипты run:)'
+          exit 1
+        }
+      - "'{{.TOOLS}}/actionlint' -shellcheck='{{.TOOLS}}/shellcheck'"
 
   ci:
     desc: Всё, что проверяет CI, — локально

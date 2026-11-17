@@ -48,10 +48,15 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
 peer → IP-аллоулист (`ADMIN_IP_ALLOWLIST`; пусто — выключен; вне списка — `403 auth.ip_not_allowed` на всё, включая
 статику и `/docs`) → склейка `Accept-Language` → лимит тела → таймаут → `httpx.Routes` → `Cache-Control: no-store` на
 ответах маршрутов контракта → сессия сотрудника по cookie (только маршруты контракта) → CSRF → `httpx.ValidateRequests`
-(вход — `auth.AuthenticatedStaff`) → права `x-permission` → `ratelimit.Middleware` → `idempotency.Middleware` →
-strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка — `internal/httpapi/admin` (`handler.go`, звенья — по
+(вход — `auth.AuthenticatedStaff`) → права `x-permission` → `ratelimit.Middleware` → побудка api (`wake.go`) →
+`idempotency.Middleware` → strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка — `internal/httpapi/admin` (`handler.go`, звенья — по
 файлам `allowlist.go`, `session.go`, `csrf.go`, `permission.go`, `static.go`).
 
+- **Побудка api** (`wake.go`, только dev-стенд, `ADMIN_WAKE_API_URL`; спека встроенного воркера §8.1): звено снаружи
+  `idempotency.Middleware` (не `db.WithTxHook`: хук на ctx один — перекрыл бы хук идемпотентности); после `next` на
+  ответ 2xx мутирующей операции контракта (метод не GET/HEAD/OPTIONS) — `Waker.Poke`: фоновый `GET <url>/healthz` на
+  `context.Background()` со сроком 60 с, не чаще раза в 5 с и один в полёте, ошибки — в журнал (только хост). Пусто —
+  выключено; `admin.ValidateWakeURL` (https, без пути, запроса и логина) — до базы. Команды оператора не будят.
 - **Сессия** (P7, R9): имя cookie — только `admin.CookieName(secure)` (`__Host-wf_admin_session`; без
   `ADMIN_COOKIE_SECURE` — dev-имя `wf_admin_session`). Cookie есть → сначала `Limiter.Over(ratelimit.IPKey("staff_auth",
   ip))`: исчерпан — `429 ratelimit.exceeded` без проверки cookie. Невалидный токен (`auth.ErrSessionInvalid` или

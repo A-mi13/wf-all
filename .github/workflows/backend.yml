@@ -19,6 +19,8 @@ on:
       - 'package.json'
       - 'deploy/dev/initdb/**'
       - 'render.yaml'
+      # их читают стражи своего сервера (server_compose_test.go, config)
+      - 'deploy/server/**'
       # их читает TestRenderYAMLBuild (config); сам образ проверяет workflow image.yml
       - '.dockerignore'
       - '.github/workflows/image.yml'

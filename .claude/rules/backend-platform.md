@@ -20,26 +20,26 @@ paths:
   `staff/jobs.Cleaner.Tick`). Операция с `x-idempotency: no-store` (ответ с секретами) хранит только хэш и статус: повтор —
   `409 idempotency.replay_unavailable`; `Cache-Control: no-store` ставит хендлер.
 - События — только id и непрофильные значения, без персональных данных; у агрегата `version`, подписчик в режиме `LatestState` отбрасывает устаревшие версии (§6.5).
-- Подписчик события — `events.Subscription` с явным `Delivery` (`EveryEvent` | `LatestState`), регистрируется в `subscriptions()` в `cmd/worker/main.go`; обработчик идемпотентен по `event_inbox` сам собой, пишет только в своей транзакции `tx`. Доставка на подписку, которой нет в реестре этого воркера (воркер другого релиза при выкатке), — обычная ошибка с повтором, а затем «мёртвая» задача (видна, переигрывается), не отмена; отменяется только задача на событие, уже удалённое чисткой. Переигровка — `worker events replay --type T --subscriber S --since RFC3339`.
+- Подписчик события — `events.Subscription` с явным `Delivery` (`EveryEvent` | `LatestState`), регистрируется в `Subscriptions()` в `cmd/internal/workerhost/registry.go`; обработчик идемпотентен по `event_inbox` сам собой, пишет только в своей транзакции `tx`. Доставка на подписку, которой нет в реестре этого воркера (воркер другого релиза при выкатке), — обычная ошибка с повтором, а затем «мёртвая» задача (видна, переигрывается), не отмена; отменяется только задача на событие, уже удалённое чисткой. Переигровка — `worker events replay --type T --subscriber S --since RFC3339`.
   Импорт городов оператором — `worker geo import --country RU`: синхронно в процессе, без задачи River, под ролью `worker`; время журнала — часы машины оператора со сдвигом к `now()` базы (`geojobs.OperatorClock`), не `clock.System` ноутбука; задача `geo.import` ставится только через `jobs.NewImportArgs`.
-- Задача River объявляет очередь из `platform/queue` (`events`, `lifecycle`, `notify`, `mail`, `stats`, `media`, `maintenance`) в `InsertOpts`; очереди `default` нет. Аргументы — с полем версии `V`, без ПД, уникальность — `UniqueOpts`. River в воркере работает на неотменяемом ctx: по SIGTERM сначала останавливается relay, затем `queue.Stop` — мягкая остановка (25 с) и, не уложившись, `StopAndCancel` (5 с): сумма укладывается в 30 с между SIGTERM и SIGKILL. `WORKER_RELAY_BATCH` ≥ 1 и `WORKER_RELAY_POLL` > 0 проверяются на старте воркера.
+- Задача River объявляет очередь из `platform/queue` (`events`, `lifecycle`, `notify`, `mail`, `stats`, `media`, `maintenance`, `import` — импорт GeoNames, до 30 мин: не держит слоты `maintenance`; `WORKER_GEO_IMPORT_ENABLED=false` — очереди нет в карте River, вид зарегистрирован, задача ждёт) в `InsertOpts`; очереди `default` нет. Аргументы — с полем версии `V`, без ПД, уникальность — `UniqueOpts`. River в воркере работает на неотменяемом ctx: по SIGTERM сначала останавливается relay, затем `queue.Stop` — мягкая остановка (15 с, `WorkerRiverSoftStop`) и, не уложившись, `StopAndCancel` (5 с): relay 5 + 15 + 5 = 25 с ≤ `StopBudget` между SIGTERM и SIGKILL. `WORKER_RELAY_BATCH` ≥ 1 и `WORKER_RELAY_POLL` > 0 проверяются на старте воркера.
 - Периодика платформы — только `platform/periodic.Jobs()` (новый срез и новые задачи на вызов): её подключают и воркер, и
   admin-api — лидер River один на схему и ставит периодику по своему списку (P27), исполняет воркер (River не проверяет
   исполнителя у периодической вставки; страж `TestLeaderWithoutWorkersEnqueuesPlatformJobs` под ролью `admin`). Новая
   чистка платформы — в `Jobs()`, не в `cmd/worker`. Периодика модуля — его `jobs.Periodic()`, у обоих бинарников:
-  `append(periodic.Jobs(), identityjobs.Periodic()...)` в `cmd/worker` и `cmd/admin-api` (платформа модули не
-  импортирует, поэтому `TestLeaderWithoutWorkers…` её не видит; страж — `TestPeriodicSameInBothBinaries` в обоих
-  бинарниках против общего эталона; план I-2, R7). Чистки, которым нужны права `admin` (`staff_*`, `approvals`,
+  `append(periodic.Jobs(), identityjobs.Periodic()...)` в `cmd/internal/workerhost` и `cmd/admin-api` (платформа модули не
+  импортирует, поэтому `TestLeaderWithoutWorkers…` её не видит; страж — `TestPeriodicSameInBothBinaries` в
+  `workerhost` и `cmd/admin-api` против общего эталона; план I-2, R7). Чистки, которым нужны права `admin` (`staff_*`, `approvals`,
   `staff_idempotency_keys`, `staff_rate_limits`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +
   `ExpireDue` + `PurgeDecided` + `idempotency.DeleteExpired(…, Staff)` + `ratelimit.DeleteExpired(…, Staff)`).
   Исполняющий клиент River — только `queue.ClientConfig(очереди, исполнители, периодика, журнал)` у обоих бинарников
-  (`riverConfig` в `cmd/worker` и `cmd/admin-api`), клиент только для вставки — `queue.InsertConfig(журнал)`; свой
+  (`riverConfig` в `cmd/internal/workerhost` и `cmd/admin-api`), клиент только для вставки — `queue.InsertConfig(журнал)`; свой
   `river.Config{…}` вне `platform/queue` (литерал, `new`, переменная типа) не собирать — страж
   `archtest.TestRiverConfigOnlyInQueue` (тесты `*_test.go` — исключение): общая часть —
   `queue.MaintenanceConfig` (сроки чистки выполненных, отменённых и «мёртвых» задач, порог рескьюера — умолчания River
   v0.47–v0.50, заданные явно), потому что обслуживание делает лидер схемы, а лидером может стать любой из двух. Стражи —
   `TestMaintenanceConfig`, `TestMaintenanceMatchesRiverDefaults` (сверка с `WithDefaults` River),
-  `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance`, `TestAdminRiverMaintenance` (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
+  `TestMaintenanceDiff` (`queue`), `TestWorkerRiverMaintenance` (`workerhost`), `TestAdminRiverMaintenance` (все поля `river.Config`, кроме `Queues`, `Workers`, `PeriodicJobs`, `Logger`, равны у обоих). При подъёме River —
   changelog (`JobSnooze`, `UniqueOpts`, рескьюер, `AddWorkerArgs`) и линия миграций `riverpgxv5`; разошедшееся умолчание
   красит `TestMaintenanceMatchesRiverDefaults`, миграцию схемы линии без нашего `00NN_river_vK.sql` —
   `TestRiverMigrationLineCovered` (`queue`; через `rivermigrate.AllVersions`; v1 — таблица версий River `river_migration`, у нас её нет: версии ведёт goose;
@@ -48,7 +48,16 @@ paths:
   Background}`. Фон стартует после сборки и открытия порта на ctx без отмены сервиса; остановка — дренаж HTTP, затем отмена
   фона и ожидание (фон сам мягко останавливает River — `queue.Stop`), последним — закрытие пула. Фон вернулся до отмены
   (ошибка или nil) — HTTP гасится, `RunService` возвращает ошибку (стражи `service_test.go`). `RunHTTP` — обёртка без фона
-  (`cmd/api`). У admin-api: HTTP-дренаж `ADMIN_SHUTDOWN_TIMEOUT` (10 с по умолчанию, стенд 8 с) + River мягко `config.AdminRiverSoftStop` (10 с) + жёстко `config.HardStop` (5 с) ≤ `config.StopBudget` (25 с из окна Render 30 с; стражи `TestAdminShutdownBudget`, `TestRenderYAMLStopBudget`). Воркер: relay со сроком `config.WorkerRelayStop` (5 с, `events.ErrRelayStopTimeout`), River мягко 15 с + жёстко 5 с. `HTTPConfig.Ready` — до порта (admin-api: `migrate.WaitSchema`, `<PREFIX>_DB_SCHEMA_WAIT` 10 мин; 42501/42P01 — «отстаёт»; команды оператора — одна проверка). Слоты очередей > пул − 3 — WARN `queue.WarnPool` при старте.
+  (`cmd/api` без встроенного воркера). У admin-api: HTTP-дренаж `ADMIN_SHUTDOWN_TIMEOUT` (10 с по умолчанию, стенд 8 с) + River мягко `config.AdminRiverSoftStop` (10 с) + жёстко `config.HardStop` (5 с) ≤ `config.StopBudget` (25 с из окна Render 30 с; стражи `TestAdminShutdownBudget`, `TestRenderYAMLStopBudget`). Воркер: relay со сроком `config.WorkerRelayStop` (5 с, `events.ErrRelayStopTimeout`), River мягко 15 с + жёстко 5 с. Api со встроенным воркером (`API_EMBED_WORKER=true`, только dev-стенд): `RunService` с `Background` = `workerhost.Run`, дренаж `API_SHUTDOWN_TIMEOUT` (стенд 8 с) + relay `config.APIEmbeddedRelayStop` (2 с) + River мягко `config.APIEmbeddedRiverSoftStop` (8 с) + жёстко 5 с = `config.APIEmbeddedStopTime(drain)` ≤ `StopBudget` (стражи `TestEmbeddedShutdownBudget`, `TestRenderYAMLStopBudget`). `HTTPConfig.Ready` — до порта (admin-api: `migrate.WaitSchema`, `<PREFIX>_DB_SCHEMA_WAIT` 10 мин; 42501/42P01 — «отстаёт»; команды оператора — одна проверка). Слоты очередей > пул − 3 — WARN `queue.WarnPool` при старте.
+- Код воркера — только `backend/cmd/internal/workerhost` (спека `2026-11-16-embedded-worker-design.md` §2): `Load` и
+  `Prepare` — проверки до базы, `Run` — ожидание схемы, River, relay, остановка по `Stop`; реестры (`Subscriptions`,
+  исполнители, заглушки `AddForeign`, `riverConfig`). Два способа запуска: отдельный `cmd/worker` (прод, сроки
+  `workerhost.ServiceStop`) и встроенный режим `cmd/api` (`API_EMBED_WORKER=true`, только dev-стенд: те же `WORKER_*`
+  до базы, сверка кольца identity с `API_IDENTITY_SECRET_KEYS` по ID ключей, второй пул под ролью `worker`, журнал api с
+  `component=worker`). `slog.SetDefault` — только в бинарнике. Отмена ctx при открытии пула воркера (`cmd/worker`,
+  `wpool` встроенного режима) и в `Run` до `Start` River — `nil` (штатная остановка, код 0). Пул api/admin-api в
+  `server.RunService` так не умеет: SIGTERM до порта (`db.Open`, `Ready`, `Listen`) даёт код 1 — известное ограничение,
+  отдельная задача платформы (итоговое ревью встроенного воркера, m9).
 - Виды задач исполняющих бинарников — списки `queue.WorkerKinds()` и `queue.AdminKinds()` (имя и срок исполнителя).
   Рескьюер лидера River (задача `running` дольше часа) ищет исполнителя вида в СВОЁМ клиенте и без него выбрасывает
   задачу (`discarded`), поэтому каждый бинарник регистрирует виды другого заглушками `queue.AddForeign` (срок — как у

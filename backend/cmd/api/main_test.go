@@ -8,6 +8,7 @@ import (
 )
 
 func TestRunFailsWithoutConfig(t *testing.T) {
+	t.Parallel()
 	err := run(context.Background(), nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "API_") {
 		t.Fatalf("err = %v", err)
@@ -17,6 +18,7 @@ func TestRunFailsWithoutConfig(t *testing.T) {
 // Висячая запятая в списке сетей даёт пустой элемент — отказ старта до подключения к базе
 // (адрес базы недостижим: иначе ошибка была бы о подключении).
 func TestRunRejectsEmptyNetElement(t *testing.T) {
+	t.Parallel()
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_TRUSTED_PROXIES=10.0.0.0/8,"}
 	env = append(env, identityEnv...)
@@ -29,6 +31,7 @@ func TestRunRejectsEmptyNetElement(t *testing.T) {
 // Заголовок CDN без прокси хостинга — отказ старта до подключения к базе: API_CLIENT_IP_HEADER
 // доходит до peer.Config.
 func TestRunRejectsClientIPHeaderWithoutProxies(t *testing.T) {
+	t.Parallel()
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_CLIENT_IP_HEADER=CF-Connecting-IP"}
 	env = append(env, identityEnv...)
@@ -40,6 +43,7 @@ func TestRunRejectsClientIPHeaderWithoutProxies(t *testing.T) {
 
 // Битые сиды JWT — отказ старта до подключения к базе.
 func TestRunRejectsBadJWTSeeds(t *testing.T) {
+	t.Parallel()
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=short", "API_HUMANCHECK_KEYS=" + testSeed}
 	env = append(env, identityEnv...)
@@ -57,6 +61,7 @@ const testSeed = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 // Битые ключи PoW (не base64 или короче 32 байт) — отказ старта до подключения к базе.
 func TestRunRejectsBadHumancheckKeys(t *testing.T) {
+	t.Parallel()
 	for _, k := range []string{"не-base64", "c2hvcnQ="} {
 		env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 			"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + k}
@@ -81,6 +86,7 @@ func identityEnvWith(key, value string) []string {
 
 // Битое кольцо identity (не base64; пустые элементы списка) — отказ старта до подключения к базе (план I-2, Task 8).
 func TestRunRejectsBadIdentityRings(t *testing.T) {
+	t.Parallel()
 	for _, key := range []string{"API_IDENTITY_SECRET_KEYS", "API_IDENTITY_DEVICE_KEYS"} {
 		for _, v := range []string{"abc", ","} {
 			env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
@@ -95,6 +101,7 @@ func TestRunRejectsBadIdentityRings(t *testing.T) {
 
 // Негодный API_LEGAL_DOCUMENTS — отказ старта до подключения к базе.
 func TestRunRejectsBadLegalDocuments(t *testing.T) {
+	t.Parallel()
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed}
 	env = append(env, identityEnvWith("API_LEGAL_DOCUMENTS", "terms=1.0.0|http://example.com/terms")...)
@@ -105,6 +112,7 @@ func TestRunRejectsBadLegalDocuments(t *testing.T) {
 
 // Файла базы города по IP нет — отказ старта до подключения к базе.
 func TestRunRejectsMissingIPGeoDB(t *testing.T) {
+	t.Parallel()
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_IPGEO_DB=nope/missing.mmdb"}
 	env = append(env, identityEnv...)
@@ -115,6 +123,7 @@ func TestRunRejectsMissingIPGeoDB(t *testing.T) {
 
 // Битый API_WELLKNOWN_ANDROID (отпечаток не SHA-256) — ошибка старта до подключения к базе, не паника.
 func TestRunRejectsBadWellKnownAndroid(t *testing.T) {
+	t.Parallel()
 	env := []string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
 		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_WELLKNOWN_ANDROID=app.wf=AA:BB"}
 	env = append(env, identityEnv...)

@@ -30,6 +30,17 @@ func TestLoadAPIWithDefaults(t *testing.T) {
 	if c.HTTP.DocsEnabled {
 		t.Fatal("DocsEnabled по умолчанию включён")
 	}
+	// встроенный воркер — только по явному флагу (dev-стенд); прод — отдельный процесс worker
+	if c.EmbedWorker {
+		t.Fatal("EmbedWorker по умолчанию включён")
+	}
+}
+
+// R5: остановка api со встроенным воркером — дренаж + relay + мягкая River + жёсткая.
+func TestAPIEmbeddedStopTime(t *testing.T) {
+	if got, want := config.APIEmbeddedStopTime(7*time.Second), 7*time.Second+2*time.Second+8*time.Second+config.HardStop; got != want {
+		t.Fatalf("APIEmbeddedStopTime(7s) = %s, ждали %s", got, want)
+	}
 }
 
 // adminEnv — обязательные переменные admin-api с правками: "KEY=value" заменяет или добавляет,
@@ -125,14 +136,26 @@ func TestLoadWorkerQueuesAndRelay(t *testing.T) {
 	c, err := config.Load[config.Worker]("WORKER_", []string{
 		"WORKER_DATABASE_URL=postgres://w@localhost/wf",
 		"WORKER_MAIL_SMTP_ADDR=127.0.0.1:11025", "WORKER_MAIL_FROM=WF <noreply@wf.local>",
-		"WORKER_QUEUE_MAIL=7",
+		"WORKER_QUEUE_MAIL=7", "WORKER_QUEUE_IMPORT=3",
 		"WORKER_RELAY_POLL=2s",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Queues.Mail != 7 || c.Queues.Events != 10 || c.Queues.Maintenance != 2 {
+	if c.Queues.Mail != 7 || c.Queues.Events != 10 || c.Queues.Maintenance != 2 || c.Queues.Import != 3 {
 		t.Fatalf("очереди: %+v", c.Queues)
+	}
+	// импорт GeoNames по умолчанию включён (R3); стенд выключает его WORKER_GEO_IMPORT_ENABLED=false
+	if !c.GeoImportEnabled {
+		t.Fatal("GeoImportEnabled по умолчанию — false")
+	}
+	d, err := config.Load[config.Worker]("WORKER_", []string{"WORKER_DATABASE_URL=postgres://w@localhost/wf",
+		"WORKER_GEO_IMPORT_ENABLED=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Queues.Import != 1 || d.GeoImportEnabled {
+		t.Fatalf("умолчание очереди import %d, флаг импорта %v", d.Queues.Import, d.GeoImportEnabled)
 	}
 	if c.Relay.Poll != 2*time.Second || c.Relay.Batch != 100 {
 		t.Fatalf("relay: %+v", c.Relay)
@@ -393,4 +416,22 @@ func TestAdminHasNoIdentityKeys(t *testing.T) {
 		}
 	}
 	walk(reflect.TypeFor[config.Admin]())
+}
+
+// Побудка api из admin-api (спека встроенного воркера §8.1): по умолчанию выключена (пусто), адрес — как задан.
+func TestLoadAdminWakeAPIURL(t *testing.T) {
+	c, err := config.Load[config.Admin]("ADMIN_", adminEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WakeAPIURL != "" {
+		t.Fatalf("WakeAPIURL по умолчанию %q", c.WakeAPIURL)
+	}
+	c, err = config.Load[config.Admin]("ADMIN_", adminEnv("ADMIN_WAKE_API_URL=https://wf-api.onrender.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WakeAPIURL != "https://wf-api.onrender.com" {
+		t.Fatalf("WakeAPIURL = %q", c.WakeAPIURL)
+	}
 }

@@ -58,6 +58,8 @@ type Options struct {
 	// операции тега platform listApprovals, approve, reject, cancel. Обязателен вместе с собранным Staff
 	// (подпись решившего — Staff.Label) и только с ним: nil при нулевом Staff — эти операции отвечают 501.
 	Approvals ApprovalService
+	// Wake — побудка api после успешных мутаций (ADMIN_WAKE_API_URL, NewWaker); nil — выключена.
+	Wake *Waker
 }
 
 // ApprovalService — решения и списки подтверждений вдвоём (реализует *approvals.Service; интерфейс —
@@ -195,6 +197,8 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		httpx.ValidateRequests(httpx.ValidateOptions{Authenticated: auth.AuthenticatedStaff}),
 		permissions(perms, log),
 		ratelimit.Middleware(o.Limiter, o.RateRules, log),
+		// побудка api — снаружи идемпотентности: видит итоговый статус, хук транзакции не трогает
+		wake(o.Wake),
 		// ключи и ответы мутаций админки (ПД сотрудников) — своя таблица, права только роли admin (I-1)
 		idempotency.Middleware(o.DB, idempotency.Config{Table: idempotency.Staff}, log),
 	)
