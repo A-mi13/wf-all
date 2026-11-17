@@ -61,8 +61,8 @@ func (a *App) resetRiskKeys(email string) ([]string, error) {
 }
 
 // StartPasswordReset — код сброса (§3.4 п. 1): форма почты (400) → PoW по риску LoginFailed (почта и IP запроса) →
-// лимит по почте → аккаунт active | suspended | pending_deletion до purge_at — настоящий код с user_id; нет, deleted,
-// заблокирован (R29, R36: banned или бан поверх удаления) или pending_deletion с purge_at ≤ now (purgeDue) — приманка без
+// лимит по почте → аккаунт active | suspended | pending_deletion до purge_at | banned с истёкшим баном (R12) — настоящий
+// код с user_id; нет, deleted, заблокирован (R29, R36: живой бан или бан поверх удаления) или pending_deletion с purge_at ≤ now (purgeDue) — приманка без
 // user_id. Работа обеих веток одинакова (m12): строка auth_codes и задача письма
 // password_reset_code (Composer на приманке отвечает mail.ErrSkip, Task 19). Ответ одинаков.
 func (a *App) StartPasswordReset(ctx context.Context, email string) (CodeSent, error) {
@@ -113,10 +113,12 @@ func (a *App) StartPasswordReset(ctx context.Context, email string) (CodeSent, e
 			return err
 		}
 		// pending_deletion с вышедшим сроком отмены (purgeDue) — как удалённый: приманка (добор F п. 4); заблокированный
-		// (R36: banned или бан поверх удаления) — приманка, письма нет
+		// (R36: живой бан или бан поверх удаления) — приманка, письма нет; banned с истёкшим баном до чистки — не
+		// заблокирован (R12): настоящий код, как у active (m3 раунда F ревью Г)
 		if found && !blocked && !a.purgeDue(u.Status, u.PurgeAt) {
 			switch u.Status {
-			case identitydb.UserStatusActive, identitydb.UserStatusSuspended, identitydb.UserStatusPendingDeletion:
+			case identitydb.UserStatusActive, identitydb.UserStatusSuspended, identitydb.UserStatusPendingDeletion,
+				identitydb.UserStatusBanned:
 				p.Decoy, p.UserID = false, u.ID
 			}
 		}

@@ -864,3 +864,95 @@ func TestApproveVsDeleteAccount(t *testing.T) {
 		}
 	})
 }
+
+// Решение по заявке и смена города (teams, ChangeCityInTx; m1 итогового ревью А) — ровно один исход, без 40P01:
+// решение первым — заявка остаётся approved/rejected (допуск прежнего города при одобрении жив), письма
+// withdrawn_city нет, город сменён; смена города первой — withdrawn с письмом, решение 409 closed, допусков нет.
+func TestDecideVsChangeCity(t *testing.T) {
+	t.Parallel()
+	decide := func(c *capEnv, app uuid.UUID, kind string) error {
+		owner := staffMember(perm.Owner, "Ольга", uuid.Nil)
+		if kind == "approve" {
+			_, err := c.adm.ApproveCaptainApplication(context.Background(), owner, app, nil)
+			return err
+		}
+		_, err := c.adm.RejectCaptainApplication(context.Background(), owner, app, "insufficient_info", nil)
+		return err
+	}
+	withdrawnMail := func(t *testing.T, c *capEnv, app uuid.UUID) int {
+		return count(t, c.owner, `SELECT count(*) FROM river_job WHERE args->>'mail' = $1 AND args->>'ref' = $2::text`,
+			MailCaptainApplicationWithdrawnCity, app)
+	}
+	for _, kind := range []string{"approve", "reject"} {
+		t.Run(kind+"/решение первым", func(t *testing.T) {
+			t.Parallel()
+			c := newCapEnv(t)
+			uid := c.player(t, "dvc_a_"+kind, c.c.main)
+			app := c.pending(t, uid, c.c.main, testNow.Add(-time.Hour))
+			inside, resume := decideBarrier(c.adm)
+			var wg sync.WaitGroup
+			var dErr, cErr error
+			wg.Go(func() { dErr = decide(c, app, kind) })
+			waitInside(t, inside, resume, &wg)
+			wg.Go(func() { cErr = changeCity(c.env, uid, c.c.other) })
+			waited := lockWaiters(t, c.owner, 1)
+			close(resume)
+			wg.Wait()
+			if !waited {
+				t.Fatalf("смена города не ждала замка заявки: %v %v", dErr, cErr)
+			}
+			if dErr != nil || cErr != nil {
+				t.Fatalf("решение %v, смена города %v", dErr, cErr)
+			}
+			want := map[string]string{"approve": "approved", "reject": "rejected"}[kind]
+			if s := appStatus(t, c, app); s != want {
+				t.Fatal(s)
+			}
+			if n := withdrawnMail(t, c, app); n != 0 {
+				t.Fatal("письмо withdrawn_city после решения")
+			}
+			permits := map[string]int{"approve": 1, "reject": 0}[kind]
+			if n := count(t, c.owner, `SELECT count(*) FROM role_assignments WHERE user_id = $1 AND scope_id = $2
+				AND revoked_at IS NULL`, uid, c.c.main); n != permits {
+				t.Fatalf("живых допусков прежнего города %d", n)
+			}
+			if n := count(t, c.owner, `SELECT count(*) FROM users WHERE id = $1 AND city_id = $2`, uid, c.c.other); n != 1 {
+				t.Fatal("город не сменён")
+			}
+		})
+		t.Run(kind+"/смена города первой", func(t *testing.T) {
+			t.Parallel()
+			c := newCapEnv(t)
+			ctx := context.Background()
+			uid := c.player(t, "dvc_b_"+kind, c.c.main)
+			app := c.pending(t, uid, c.c.main, testNow.Add(-time.Hour))
+			hold := holdApplication(t, c, app)
+			var wg sync.WaitGroup
+			var dErr, cErr error
+			wg.Go(func() { cErr = changeCity(c.env, uid, c.c.other) })
+			waited := lockWaiters(t, c.owner, 1)
+			wg.Go(func() { dErr = decide(c, app, kind) })
+			waited = waited && lockWaiters(t, c.owner, 2)
+			if err := hold.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			wg.Wait()
+			if !waited {
+				t.Fatalf("не встали в очередь: %v %v", cErr, dErr)
+			}
+			if cErr != nil {
+				t.Fatalf("смена города: %v", cErr)
+			}
+			wantProblem(t, "решение", dErr, http.StatusConflict, identity.CodeApplicationClosed)
+			if s := appStatus(t, c, app); s != "withdrawn" {
+				t.Fatal(s)
+			}
+			if n := withdrawnMail(t, c, app); n != 1 {
+				t.Fatal("нет письма withdrawn_city")
+			}
+			if n := count(t, c.owner, `SELECT count(*) FROM role_assignments WHERE user_id = $1`, uid); n != 0 {
+				t.Fatal("допуск после отзыва сменой города")
+			}
+		})
+	}
+}

@@ -149,11 +149,11 @@ func (q *Queries) OpenCaptainApplication(ctx context.Context, arg OpenCaptainApp
 
 const userBlocked = `-- name: UserBlocked :one
 
-SELECT (u.status = 'banned'
-        OR (u.status = 'pending_deletion' AND u.status_before_deletion = 'banned' AND EXISTS (
+SELECT ((u.status = 'banned' OR (u.status = 'pending_deletion' AND u.status_before_deletion = 'banned'))
+        AND EXISTS (
             SELECT 1 FROM user_restrictions r
              WHERE r.user_id = u.id AND r.capability = 'login' AND r.lifted_at IS NULL
-               AND (r.until IS NULL OR $1::timestamptz < r.until))))::boolean AS blocked
+               AND (r.until IS NULL OR $1::timestamptz < r.until)))::boolean AS blocked
   FROM users u
  WHERE u.id = $2
 `
@@ -166,8 +166,9 @@ type UserBlockedParams struct {
 // Правило условий капитанства (план I-4, Task 2, R5) и предикат «заблокирован» (R36). Чтения без замков: замки держит
 // вызывающий. Всё — на соединении транзакции вызывающего (настройки города — экспортированное представление geo, не
 // второе соединение пула; C1 волны 4 плана I-2).
-// «Заблокирован» — одно правило для всех мест (R36): banned ИЛИ период удаления поверх бана (status_before_deletion =
-// banned, R11) с живой строкой login (снята — lifted_at; срочная — живёт строго до until).
+// «Заблокирован» — одно правило для всех мест (R36): banned (или период удаления поверх бана — status_before_deletion =
+// banned, R11) с живой строкой login (снята — lifted_at; срочная — живёт строго до until). Бан истёк, чистка ещё не
+// прошла — не блок (R12; m1 итогового ревью Г): статус вернёт expireBanTx (чистка, вход, отмена удаления).
 func (q *Queries) UserBlocked(ctx context.Context, arg UserBlockedParams) (bool, error) {
 	row := q.db.QueryRow(ctx, userBlocked, arg.Now, arg.ID)
 	var blocked bool

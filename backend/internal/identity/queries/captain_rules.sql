@@ -3,13 +3,14 @@
 -- второе соединение пула; C1 волны 4 плана I-2).
 
 -- name: UserBlocked :one
--- «Заблокирован» — одно правило для всех мест (R36): banned ИЛИ период удаления поверх бана (status_before_deletion =
--- banned, R11) с живой строкой login (снята — lifted_at; срочная — живёт строго до until).
-SELECT (u.status = 'banned'
-        OR (u.status = 'pending_deletion' AND u.status_before_deletion = 'banned' AND EXISTS (
+-- «Заблокирован» — одно правило для всех мест (R36): banned (или период удаления поверх бана — status_before_deletion =
+-- banned, R11) с живой строкой login (снята — lifted_at; срочная — живёт строго до until). Бан истёк, чистка ещё не
+-- прошла — не блок (R12; m1 итогового ревью Г): статус вернёт expireBanTx (чистка, вход, отмена удаления).
+SELECT ((u.status = 'banned' OR (u.status = 'pending_deletion' AND u.status_before_deletion = 'banned'))
+        AND EXISTS (
             SELECT 1 FROM user_restrictions r
              WHERE r.user_id = u.id AND r.capability = 'login' AND r.lifted_at IS NULL
-               AND (r.until IS NULL OR sqlc.arg(now)::timestamptz < r.until))))::boolean AS blocked
+               AND (r.until IS NULL OR sqlc.arg(now)::timestamptz < r.until)))::boolean AS blocked
   FROM users u
  WHERE u.id = sqlc.arg(id);
 

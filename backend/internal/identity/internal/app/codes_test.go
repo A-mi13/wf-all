@@ -289,6 +289,36 @@ func TestEmailChangeCodePerUser(t *testing.T) {
 	}
 }
 
+// I1 итогового ревью Г: вставка кода не повторяет предикат уникального индекса (ON CONFLICT DO NOTHING без цели) —
+// следующая правка индексов не даёт 42P10 на любом старте кода, как старый бинарник на схеме 0027. Индексы живых кодов
+// пересозданы с более узким предикатом (лишнее условие по created_at, смысл тот же): старты сброса пароля и смены почты проходят, живой код по-прежнему один.
+func TestStartCodeArbiterIndependentOfIndex(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	acctExec(t, e, `DROP INDEX auth_codes_live_key`)
+	acctExec(t, e, `DROP INDEX auth_codes_live_email_change_key`)
+	acctExec(t, e, `CREATE UNIQUE INDEX auth_codes_live_key ON auth_codes (purpose, email)
+		WHERE purpose <> 'email_change' AND consumed_at IS NULL AND revoked_at IS NULL AND created_at > '2000-01-01'`)
+	acctExec(t, e, `CREATE UNIQUE INDEX auth_codes_live_email_change_key ON auth_codes (purpose, user_id, email)
+		WHERE purpose = 'email_change' AND consumed_at IS NULL AND revoked_at IS NULL AND created_at > '2000-01-01'`)
+	uid := seedUser(t, e.owner, "arbiter", "ru")
+	first := resetCodeOf(t, e, uid, "arbiter@example.com", false)
+	second := resetCodeOf(t, e, uid, "arbiter@example.com", false)
+	if codeAlive(t, e, first.CodeID) || !codeAlive(t, e, second.CodeID) {
+		t.Fatal("сброс пароля: живой код не один")
+	}
+	sid := issue(t, e, uid, web("a")).SessionID
+	for range 2 {
+		if _, err := e.a.StartEmailChange(context.Background(), sid, "arbiter_new@example.com", web("req")); err != nil {
+			t.Fatalf("смена почты: %v", err)
+		}
+	}
+	if n := count(t, e.owner, `SELECT count(*) FROM auth_codes WHERE purpose = 'email_change' AND consumed_at IS NULL
+		AND revoked_at IS NULL`); n != 1 {
+		t.Fatalf("живых кодов смены почты %d", n)
+	}
+}
+
 // §3.14: паузы 60/120/300 с, раньше — 429 resend_too_soon с Retry-After до паузы; четвёртая отправка последняя —
 // дальше 410; resend_available_at после последней — expires_at. Приманка — те же паузы и ответы, писем не шлёт.
 func TestResendSchedule(t *testing.T) {

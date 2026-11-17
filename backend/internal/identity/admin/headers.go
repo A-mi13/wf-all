@@ -49,13 +49,24 @@ func decodeHeader(raw, field string) (string, error) {
 }
 
 // visibleText — нет управляющих (C0, C1, DEL, перевод строки) и невидимых символов (emailaddr.IsInvisible: Cf, ZWSP,
-// bidi, BOM, заполнители): NUL Postgres в text не примет (500), невидимые дают пустую на вид запись журнала (I1 ревью
-// W1). Иначе — 422 format по field.
+// bidi, BOM, заполнители), разделителей строки и абзаца (U+2028, U+2029 — Zl, Zp: перевод строки в журнале), и не
+// строка из одних комбинирующих знаков (Mn, Me, Mc) с пробелами — она проходит минимум длины, а на вид пуста (m2
+// итогового ревью Б). NUL Postgres в text не примет (500), невидимые дают пустую на вид запись журнала (I1 ревью W1).
+// Иначе — 422 format по field. Пустая строка и одни пробелы — не здесь (minLength вызывающего).
 func visibleText(s, field string) error {
+	marks, base := false, false
 	for _, r := range s {
-		if unicode.IsControl(r) || emailaddr.IsInvisible(r) {
+		switch {
+		case unicode.IsControl(r) || emailaddr.IsInvisible(r) || unicode.In(r, unicode.Zl, unicode.Zp):
 			return headerProblem{status: http.StatusUnprocessableEntity, field: field, rule: "format"}
+		case unicode.IsMark(r):
+			marks = true
+		case !unicode.IsSpace(r):
+			base = true
 		}
+	}
+	if marks && !base {
+		return headerProblem{status: http.StatusUnprocessableEntity, field: field, rule: "format"}
 	}
 	return nil
 }

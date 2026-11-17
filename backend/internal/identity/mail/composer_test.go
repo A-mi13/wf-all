@@ -428,6 +428,9 @@ func TestComposePasswordResetCodeBlocked(t *testing.T) {
 	banned := e.code(t, codeRow{purpose: "password_reset", email: "ban@example.com", userID: &b, code: "123123"})
 	e.mustSend(t, app.MailPasswordResetCode, banned) // контрольная: до бана письмо уходит
 	e.exec(t, `UPDATE users SET status = 'banned' WHERE id = $1`, b)
+	// бан по R42 — со строкой login (без неё бан истёк, R12: письмо уходит)
+	e.exec(t, `INSERT INTO user_restrictions (id, user_id, capability, source_id, created_at)
+		VALUES (gen_random_uuid(), $1, 'login', gen_random_uuid(), now())`, b)
 	e.mustSkip(t, app.MailPasswordResetCode, banned)
 
 	m := e.user(t, "move@example.com", "ru")
@@ -797,7 +800,27 @@ func (e *env) captainApp(t *testing.T, uid uuid.UUID, status, code string, comme
 		SELECT $1, $2, c.id, $3::application_status, CASE WHEN $3 = 'pending' THEN NULL ELSE $4::timestamptz END,
 			CASE WHEN $3 = 'pending' THEN NULL ELSE 'Модератор' END, NULLIF($5, ''), $6, $4, $4
 		FROM cities c WHERE c.slug = 'stavropol'`, id, uid, status, testNow, code, comment)
+	if status == "approved" {
+		// у одобренной — живой допуск по заявке (письмо «вы капитан» — только при нём, решение пользователя 17.11);
+		// прежний живой допуск игрока в городе снят: один живой допуск на город
+		e.exec(t, `UPDATE role_assignments SET revoked_at = $3 WHERE user_id = $1 AND revoked_at IS NULL
+			AND scope_id = (SELECT city_id FROM captain_applications WHERE id = $2)`, uid, id, testNow)
+		e.exec(t, `INSERT INTO role_assignments (user_id, role, scope_type, scope_id, application_id)
+			SELECT user_id, 'captain', 'city', city_id, id FROM captain_applications WHERE id = $1`, id)
+	}
 	return id
+}
+
+// m3 итогового ревью А (решение пользователя 17.11): допуск по одобренной заявке отозван до сборки письма — письма
+// «вы капитан» нет (ErrSkip); живой допуск — письмо идёт.
+func TestComposeCaptainApprovedPermitRevoked(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	u := e.user(t, "cap-revoked@example.com", "ru")
+	ok := e.captainApp(t, u, "approved", "", nil)
+	e.mustSend(t, app.MailCaptainApplicationApproved, ok)
+	e.exec(t, `UPDATE role_assignments SET revoked_at = $2 WHERE application_id = $1`, ok, testNow)
+	e.mustSkip(t, app.MailCaptainApplicationApproved, ok)
 }
 
 // Письма решения по заявке (спека §8.2; план I-4, Task 4): по captain_applications.id — адрес и язык игрока, ник,

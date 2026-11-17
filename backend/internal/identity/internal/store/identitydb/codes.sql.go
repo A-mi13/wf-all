@@ -90,7 +90,7 @@ INSERT INTO auth_codes (id, purpose, email, user_id, decoy, code_mac, code_enc, 
                         expires_at, ip, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
         $10)
-ON CONFLICT (purpose, email) WHERE purpose <> 'email_change' AND consumed_at IS NULL AND revoked_at IS NULL DO NOTHING
+ON CONFLICT DO NOTHING
 `
 
 type InsertCodeParams struct {
@@ -108,56 +108,12 @@ type InsertCodeParams struct {
 	Ip         netip.Addr
 }
 
-// кроме смены почты; 0 строк — живой код вставила параллельная транзакция: вызывающий гасит его и повторяет вставку.
-// Арбитр — предикат auth_codes_live_key дословно (иначе Postgres не выведет индекс: 42P10)
+// все назначения; 0 строк — живой код вставила параллельная транзакция: вызывающий гасит его и повторяет вставку.
+// Один живой код держат индексы auth_codes_live_key и auth_codes_live_email_change_key (0027, R40). Арбитр — без цели
+// (I1 итогового ревью Г): вставка не повторяет предикат индекса, правка индексов не даёт 42P10 (как старый бинарник с
+// арбитром (purpose, email) на схеме 0027; страж TestStartCodeArbiterIndependentOfIndex)
 func (q *Queries) InsertCode(ctx context.Context, arg InsertCodeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertCode,
-		arg.ID,
-		arg.Purpose,
-		arg.Email,
-		arg.UserID,
-		arg.Decoy,
-		arg.CodeMac,
-		arg.CodeEnc,
-		arg.PayloadEnc,
-		arg.KeyID,
-		arg.Now,
-		arg.ExpiresAt,
-		arg.Ip,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const insertEmailChangeCode = `-- name: InsertEmailChangeCode :execrows
-INSERT INTO auth_codes (id, purpose, email, user_id, decoy, code_mac, code_enc, payload_enc, key_id, last_sent_at,
-                        expires_at, ip, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-        $10)
-ON CONFLICT (purpose, user_id, email) WHERE purpose = 'email_change' AND consumed_at IS NULL AND revoked_at IS NULL
-DO NOTHING
-`
-
-type InsertEmailChangeCodeParams struct {
-	ID         uuid.UUID
-	Purpose    AuthCodePurpose
-	Email      string
-	UserID     *uuid.UUID
-	Decoy      bool
-	CodeMac    []byte
-	CodeEnc    []byte
-	PayloadEnc []byte
-	KeyID      *string
-	Now        time.Time
-	ExpiresAt  time.Time
-	Ip         netip.Addr
-}
-
-// смена почты (purpose = email_change): то же, что InsertCode, арбитр — auth_codes_live_email_change_key
-func (q *Queries) InsertEmailChangeCode(ctx context.Context, arg InsertEmailChangeCodeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, insertEmailChangeCode,
 		arg.ID,
 		arg.Purpose,
 		arg.Email,

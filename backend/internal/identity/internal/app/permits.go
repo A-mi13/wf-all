@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -71,6 +72,11 @@ func (a *App) revokePermitsTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, 
 	if !by.System {
 		staff = &by.StaffID
 	}
+	// пустая причина (и из одних пробелов) — NULL «без причины», не '' (m2 итогового ревью В)
+	var why *string
+	if strings.TrimSpace(reason) != "" {
+		why = &reason
+	}
 	for _, r := range rows {
 		if r.CityID == nil {
 			continue // CHECK role_scope_id_present: у городского допуска город есть
@@ -80,7 +86,7 @@ func (a *App) revokePermitsTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, 
 				return n, errPermitWithoutApplication
 			}
 			if _, err := q.PermitRevokeOrphan(ctx, identitydb.PermitRevokeOrphanParams{Now: &now, StaffID: staff,
-				Reason: &reason, UserID: userID, CityID: *r.CityID}); err != nil {
+				Reason: why, UserID: userID, CityID: *r.CityID}); err != nil {
 				return n, fmt.Errorf("identity: отзыв допуска: %w", err)
 			}
 			a.log.WarnContext(ctx, "identity: допуск капитана без заявки отозван без события (R25)",
@@ -91,7 +97,7 @@ func (a *App) revokePermitsTx(ctx context.Context, tx pgx.Tx, userID uuid.UUID, 
 		if _, err := q.PermitLockApplication(ctx, app); err != nil {
 			return n, fmt.Errorf("identity: заявка допуска: %w", err)
 		}
-		revoked, err := q.PermitRevoke(ctx, identitydb.PermitRevokeParams{Now: &now, StaffID: staff, Reason: &reason,
+		revoked, err := q.PermitRevoke(ctx, identitydb.PermitRevokeParams{Now: &now, StaffID: staff, Reason: why,
 			UserID: userID, CityID: *r.CityID, ApplicationID: app})
 		if err != nil {
 			return n, fmt.Errorf("identity: отзыв допуска: %w", err)

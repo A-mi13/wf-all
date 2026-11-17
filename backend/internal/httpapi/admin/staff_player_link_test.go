@@ -11,10 +11,12 @@ import (
 
 	"github.com/google/uuid"
 
+	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/identity"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
+	"wf/backend/internal/platform/testkit/apitest"
 	"wf/backend/internal/staff"
 )
 
@@ -45,6 +47,7 @@ func playerLinkBody(uid uuid.UUID) string { return `{"user_id":"` + uid.String()
 func TestStaffPlayerLinkHTTP(t *testing.T) {
 	t.Parallel()
 	e := newIdentityStaffEnv(t)
+	e.v = apitest.New(t, oapi.GetSpec) // ответы — сверка с контрактом (m3 итогового ревью Б)
 	owner := e.firstLogin("olga.v@wf.example", string(perm.Owner))
 	adm := e.firstLogin("admin@wf.example", string(perm.Admin))
 	sup := e.firstLogin("sup@wf.example", string(perm.Support))

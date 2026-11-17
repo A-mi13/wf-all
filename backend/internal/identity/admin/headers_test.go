@@ -38,6 +38,7 @@ func TestDecodeAccessReason(t *testing.T) {
 		"%D1%8F%D1%8F%D1%8F":          "яяя", // 3 руны, 6 байт
 		strings.Repeat("%D1%8F", 200): strings.Repeat("я", 200),
 		"ticket-42%3A%20%D0%BF%D0%BE%D1%87%D1%82%D0%B0": "ticket-42: почта",
+		"cafe%CC%81": "café", // комбинирующий знак при букве — видимый текст
 	}
 	for raw, want := range ok {
 		if got, err := decodeAccessReason(raw); err != nil || got != want {
@@ -54,7 +55,9 @@ func TestDecodeAccessReason(t *testing.T) {
 	}
 	// управляющие и невидимые символы (I1 ревью W1): NUL в audit_log.reason — 500 Postgres, ZWSP — пустая на вид причина
 	for _, raw := range []string{"%00%00%00", "abc%0Adef", "abc%1B", "%E2%80%8B%E2%80%8B%E2%80%8B", "ab%E2%80%8B",
-		"abc%C2%85", "%E2%80%AEabc", "abc%EF%BB%BF"} {
+		"abc%C2%85", "%E2%80%AEabc", "abc%EF%BB%BF",
+		// m2 итогового ревью Б: разделители строки и абзаца (Zl, Zp), строка из одних комбинирующих знаков (Mn, Me)
+		"abc%E2%80%A8def", "abc%E2%80%A9def", "%CC%81%CC%81%CC%81", "%20%CC%81%CC%81%CC%81%20", "%E2%83%9D%E2%83%9D%E2%83%9D"} {
 		_, err := decodeAccessReason(raw)
 		p := problemOf(t, err)
 		if p.Status != http.StatusUnprocessableEntity || len(p.Errors) != 1 || p.Errors[0].Field != field ||

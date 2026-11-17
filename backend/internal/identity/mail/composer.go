@@ -376,7 +376,8 @@ func (c *composers) mfaReset(ctx context.Context, kind string, ref uuid.UUID) (p
 // captainDecision — письмо решения по заявке в капитаны по captain_applications.id (I-4, Task 4; спека §8.2): адрес,
 // язык и ник заявителя, город заявки (название на языке страны города — geo_read_city_settings.city_name), комментарий
 // модератора (у обоих видов), у отказа — причина текстом identity.captain_rejection.<код>. Заявки нет, статус заявки не тот, что у
-// вида письма, аккаунт анонимизирован — ErrSkip; период удаления — письмо идёт (аккаунт ещё есть).
+// вида письма, у одобрения нет живого допуска по заявке (отозван до сборки письма), аккаунт анонимизирован — ErrSkip;
+// период удаления — письмо идёт (аккаунт ещё есть).
 func (c *composers) captainDecision(ctx context.Context, kind string, ref uuid.UUID) (pmail.Message, error) {
 	row, err := c.q.MailCaptainApplication(ctx, ref)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -394,6 +395,9 @@ func (c *composers) captainDecision(ctx context.Context, kind string, ref uuid.U
 	}
 	if row.Status != want {
 		return pmail.Message{}, skip("заявка не в статусе письма")
+	}
+	if kind == app.MailCaptainApplicationApproved && !row.PermitLive {
+		return pmail.Message{}, skip("допуск по заявке отозван") // решение пользователя 17.11: не «вы капитан» без допуска
 	}
 	locale := mailLocale(row.Locale)
 	args := map[string]any{"nickname": row.Nickname, "city": ""}

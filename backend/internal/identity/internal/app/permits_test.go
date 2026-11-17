@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,19 @@ func TestRevokeRoleInTx(t *testing.T) {
 	}
 	if _, v := permitEvent(t, e, other); v != 3 {
 		t.Fatalf("версия второй заявки %d", v)
+	}
+
+	// m2 итогового ревью В: пустая причина (и из одних пробелов) — NULL «без причины», не ''
+	for i, reason := range []string{"", "  "} {
+		u := seedUser(t, e.owner, fmt.Sprintf("revoke_noreason_%d", i), "ru")
+		a := grantPermit(t, e, u, cities.main)
+		if err := revokeRole(e, u, cities.main, RevokeBy{System: true}, reason); err != nil {
+			t.Fatal(err)
+		}
+		if n := count(t, e.owner, `SELECT count(*) FROM role_assignments WHERE application_id = $1
+			AND revoked_at IS NOT NULL AND revoke_reason IS NULL`, a); n != 1 {
+			t.Fatalf("причина %q не NULL", reason)
+		}
 	}
 
 	// R25: допуск без заявки — ошибка инварианта, ничего не записано

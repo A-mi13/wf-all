@@ -193,6 +193,9 @@ func TestCompleteMfaBannedBurnsToken(t *testing.T) {
 	e := newEnv(t)
 	uid, secret, tok := mfaLogin(t, e, "mfa_banned")
 	setStatus(t, e, uid, "banned")
+	// бан по R42 — со строкой login (без неё бан истёк, R12)
+	acctExec(t, e, `INSERT INTO user_restrictions (id, user_id, capability, source_id, created_at)
+		VALUES (gen_random_uuid(), $1, 'login', gen_random_uuid(), now())`, uid)
 	if _, err := complete(e, tok, SecondFactor{TOTP: wrongCode(totpNow(e, secret))}); problemCode(err) != identity.CodeMfaExpired {
 		t.Fatalf("бан: %v", err)
 	}

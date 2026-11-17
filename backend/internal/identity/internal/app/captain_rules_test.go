@@ -200,6 +200,9 @@ func TestEvaluateCaptaincy(t *testing.T) {
 		{name: "banned", reasons: []string{"restricted"}, checkOf: map[string]string{"restrictions": "failed"},
 			prepare: func(t *testing.T, _ *env, uid uuid.UUID, _ captainCities) {
 				exec(t, `UPDATE users SET status = 'banned' WHERE id = $1`, uid)
+				// бан по R42 — со строкой login (без неё бан истёк, R12)
+				exec(t, `INSERT INTO user_restrictions (id, user_id, capability, source_id, created_at)
+					VALUES (gen_random_uuid(), $1, 'login', gen_random_uuid(), now())`, uid)
 			}},
 		{name: "удаление поверх живого бана", reasons: []string{"restricted"},
 			checkOf: map[string]string{"restrictions": "failed"},

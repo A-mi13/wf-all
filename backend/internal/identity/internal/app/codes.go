@@ -174,19 +174,14 @@ func (a *App) startCode(ctx context.Context, tx pgx.Tx, p StartCode) (CodeSent, 
 	if err := q.LockCodeSlot(ctx, identitydb.LockCodeSlotParams{Purpose: string(p.Purpose), Email: p.Email}); err != nil {
 		return CodeSent{}, fmt.Errorf("identity: очередь стартов кода: %w", err)
 	}
-	// смена почты — один живой код на (аккаунт, почта) (R40): отзыв только своего кода, арбитр вставки — свой индекс
-	insert := q.InsertCode
-	if p.Purpose == identitydb.AuthCodePurposeEmailChange {
-		insert = func(ctx context.Context, arg identitydb.InsertCodeParams) (int64, error) {
-			return q.InsertEmailChangeCode(ctx, identitydb.InsertEmailChangeCodeParams(arg))
-		}
-	}
+	// смена почты — один живой код на (аккаунт, почта) (R40): отзыв только своего кода; вставка — без цели арбитра,
+	// уникальность держат оба индекса живых кодов
 	for range 2 {
 		if err := q.RevokeLiveCode(ctx, identitydb.RevokeLiveCodeParams{Now: &now, Purpose: p.Purpose, Email: p.Email,
 			UserID: params.UserID}); err != nil {
 			return CodeSent{}, fmt.Errorf("identity: отзыв прежнего кода: %w", err)
 		}
-		n, err := insert(ctx, params)
+		n, err := q.InsertCode(ctx, params)
 		if err != nil {
 			return CodeSent{}, fmt.Errorf("identity: код: %w", err)
 		}

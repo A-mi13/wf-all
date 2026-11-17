@@ -25,9 +25,11 @@ WHERE e.id = @id;
 -- name: MailCaptainApplication :one
 -- Письмо решения по заявке (I-4, Task 4): статус и решение заявки, адрес, язык, ник и статус заявителя, название
 -- города заявки (geo_read_city_settings.city_name — название на языке страны города: переводов city_names
--- экспортированное представление geo не отдаёт).
+-- экспортированное представление geo не отдаёт). permit_live — живой допуск по заявке: без него письма «вы капитан»
+-- нет (допуск отозван до сборки письма; решение пользователя 17.11).
 SELECT a.status, a.rejection_code, a.comment, u.email, u.locale, u.nickname, u.status AS user_status,
-       c.city_name
+       c.city_name,
+       EXISTS (SELECT 1 FROM role_assignments r WHERE r.application_id = a.id AND r.revoked_at IS NULL) AS permit_live
 FROM captain_applications a
 JOIN users u ON u.id = a.user_id
 LEFT JOIN geo_read_city_settings c ON c.city_id = a.city_id
