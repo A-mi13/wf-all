@@ -7,10 +7,12 @@
 package staff
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/netip"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -35,6 +37,16 @@ type Deps struct {
 	Origin  string                // ADMIN_ORIGIN — ссылка на админку в письмах
 	Locales *i18n.Catalog         // backend/locales — тексты писем
 	Log     *slog.Logger
+	// Players — ник и существование учётки игрока для связи «сотрудник → игрок» (план I-4, R15): адаптер над
+	// identity.Service в cmd/admin-api — staff (слой 0) identity не импортирует. nil — ручки связи и поле
+	// player_link карточки отвечают ошибкой (сборка без порта).
+	Players PlayerDirectory
+}
+
+// PlayerDirectory — учётки игроков глазами staff: ник и существует ли учётка. ok = false — учётки нет или она
+// deleted; pending_deletion — ok (R15 плана I-4).
+type PlayerDirectory interface {
+	Player(ctx context.Context, userID uuid.UUID) (nickname string, ok bool, err error)
 }
 
 // Meta — откуда пришёл запрос сотрудника: адрес клиента (peer) и User-Agent как есть — в сессию и

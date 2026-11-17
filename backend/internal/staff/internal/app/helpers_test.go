@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"io"
 	"log/slog"
 	"net/netip"
@@ -99,6 +100,7 @@ func newEnv(t *testing.T) *env {
 	d := staff.Deps{
 		Pool: pools.As, Clock: clk, Keys: ring, Hasher: h, Limiter: ratelimit.NewPG(pools.As, clk, ratelimit.Staff),
 		River: rc, Rand: rand.Reader, Origin: testOrigin, Locales: cat, Log: slog.New(slog.DiscardHandler),
+		Players: dbPlayers{pool: pools.Owner},
 	}
 	return &env{t: t, owner: pools.Owner, clock: clk, ring: ring, app: app.New(d), deps: d}
 }
@@ -283,4 +285,17 @@ func (e *env) audits(action string) []auditRow {
 		e.t.Fatal(err)
 	}
 	return out
+}
+
+// dbPlayers — порт staff.PlayerDirectory тестов: учётка игрока прямо из users (как адаптер cmd/admin-api над
+// identity.Service: нет или deleted — ok = false).
+type dbPlayers struct{ pool *pgxpool.Pool }
+
+func (p dbPlayers) Player(ctx context.Context, userID uuid.UUID) (string, bool, error) {
+	var nick, status string
+	err := p.pool.QueryRow(ctx, `SELECT nickname, status::text FROM users WHERE id = $1`, userID).Scan(&nick, &status)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && status == "deleted" {
+		return "", false, nil
+	}
+	return nick, err == nil, err
 }

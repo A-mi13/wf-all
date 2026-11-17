@@ -154,12 +154,15 @@ type App struct {
 	log     *slog.Logger
 	// approvals — подтверждения вдвоём; задаёт RegisterApprovals (сборка admin-api, 10c)
 	approvals *approvals.Service
+	// players — ник и существование учётки игрока (связь «сотрудник → игрок», план I-4 R15); nil — ручки связи
+	// отвечают ошибкой
+	players staff.PlayerDirectory
 }
 
 // New — сценарии на зависимостях admin-api.
 func New(d staff.Deps) *App {
 	return &App{
 		pool: d.Pool, clock: d.Clock, keys: d.Keys, hasher: d.Hasher, limiter: d.Limiter, river: d.River,
-		rand: d.Rand, origin: d.Origin, locales: d.Locales, log: d.Log,
+		rand: d.Rand, origin: d.Origin, locales: d.Locales, log: d.Log, players: d.Players,
 	}
 }

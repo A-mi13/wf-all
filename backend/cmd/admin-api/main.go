@@ -227,6 +227,8 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 	d := staff.Deps{
 		Pool: pool, Clock: clock.System, Keys: ring, Hasher: hasher, Limiter: ratelimit.NewPG(pool, clock.System, ratelimit.Staff),
 		River: ins, Rand: rand.Reader, Origin: cfg.Origin, Locales: cat, Log: log,
+		// ник и существование учётки игрока для связи «сотрудник → игрок» (R15 плана I-4)
+		Players: players{svc: identity.New(pool)},
 	}
 	h := staffadmin.New(d, staffadmin.Cookie{Name: admin.CookieName(cfg.CookieSecure), Secure: cfg.CookieSecure})
 	reg := approvals.NewRegistry()

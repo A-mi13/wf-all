@@ -14,6 +14,10 @@ const (
 	MailLocked        = "staff.locked"         // ref — сессия, на которой закрылась учётка; recipient — владелец или админ
 	MailBootstrapped  = "staff.bootstrapped"   // ref — новая учётка владельца; recipient — активный владелец
 	MailAdminDisabled = "staff.admin_disabled" // ref — запись аудита staff.disabled; recipient — активный владелец
+	// связь «сотрудник → учётка игрока» (план I-4, Task 6): ref — запись аудита staff.player_linked |
+	// staff.player_unlinked, recipient — сотрудник, чью связь изменили
+	MailPlayerLinked   = "staff.player_linked"
+	MailPlayerUnlinked = "staff.player_unlinked"
 )
 
 // MailArgs — задача staff.mail (D3): письмо сотруднику собирает и отправляет admin-api по id — в

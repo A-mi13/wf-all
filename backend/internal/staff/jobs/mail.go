@@ -80,6 +80,8 @@ func (w *MailWorker) compose(ctx context.Context, a staff.MailArgs) (mail.Messag
 		return w.app.ComposeBootstrapped(ctx, a.Ref, a.Recipient)
 	case staff.MailAdminDisabled:
 		return w.app.ComposeAdminDisabled(ctx, a.Ref, a.Recipient)
+	case staff.MailPlayerLinked, staff.MailPlayerUnlinked:
+		return w.app.ComposePlayerLink(ctx, a.Ref, a.Recipient, a.Mail)
 	}
 	return mail.Message{}, fmt.Errorf("%w %q", errUnknownKind, a.Mail)
 }

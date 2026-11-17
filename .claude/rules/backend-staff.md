@@ -24,7 +24,20 @@ paths:
   §7.6, R8 плана I-2): `LoadStaff` читает её тем же запросом `LoadSession` (LEFT JOIN) в `auth.Staff.LinkedUserID`
   (`uuid.Nil` — связи нет; страж `TestLoadStaffLinkedUser`). Поле только читается: модули отказывают в действиях над
   своей учёткой (`identity.self_action` — запрос, подтверждение и отмена сброса 2FA). Ручки связи
-  (`putStaffPlayerLink`/`deleteStaffPlayerLink`) — этап 9 identity (I-4); до них связь заводит только тест.
+  (`putStaffPlayerLink`/`deleteStaffPlayerLink`, `internal/app/player_link.go`, план I-4 Task 6) — только
+  `staff.player_links.manage = allow` (владелец): одна `db.InTx`, `lockAccounts` (цель `FOR UPDATE`, автор `FOR
+  SHARE`) и `checkActor` под замком, без `lockOwners`. Порт `staff.PlayerDirectory` (`Deps.Players`, адаптер над
+  `identity.Service.User` — `cmd/admin-api/players_port.go`; нет или `deleted` — `ok = false`) зовётся **до**
+  транзакции: второе соединение пула под замком при исчерпанном пуле ждало бы вечно; нет игрока — `422
+  player_not_found` (после 404 сотрудника). Учётка у другого — `409 player_link_taken`, и при гонке — 23505
+  `staff_player_links_user_id_key` (страж `TestPutPlayerLinkRace`). Та же связь — без изменений; связи нет у DELETE —
+  без записи. Изменение — `staff_accounts.version + 1` (R14): `InitiatorCheck` отсекает **все** ожидающие запросы
+  сотрудника (`initiator_changed`) — принято, операция редкая (`TestMfaResetInitiatorLinkedBetweenRequestAndApprove`);
+  аудит `staff.player_linked`/`staff.player_unlinked` (`before`/`after` `{user_id}`), письмо того же вида сотруднику —
+  ref = id записи аудита (`ComposePlayerLink`: ник через порт, игрока нет — `ErrSkip`). Ответ PUT собирается после
+  коммита на `WithoutCancel` со своим сроком (как `committedAccount`). Карточка (`Account`) несёт `PlayerLink` только
+  при `staff.player_links.manage = allow`, ник — через порт на каждое чтение (удалён — пустой ник, связь видна, чтобы
+  её снять); список поле не несёт (`TestStaffCardPlayerLinkOwnerOnly`).
 - **Блокировки строк — всегда в порядке учётка → сессия → `staff_mfa` → резервные коды** (`LockAccount`,
   `LockSession`, `LockMFA`, `LockUnusedRecoveryCodes`). Иначе блокировка (гасит все сессии под замком учётки) и
   разблокировка в другой вкладке взаимно ждут.
@@ -262,7 +275,7 @@ paths:
   ключа в записи нет (`TestOperatorKeysLostAudited`, `TestOperatorLostWholeKey`).
 - **Фон (§4.10, Task 10c; `staff/jobs`):** `MailWorker` (`AddWorkers(w, d, sender)` — исполняющий River-клиент
   admin-api на очереди `staff`): вид → составитель (`invite`/`access_reset` → `ComposeInvite(…, kind)`, `locked`,
-  `bootstrapped`, `admin_disabled`); `mail.ErrSkip` — `river.JobCancel` (без повторов) и строка журнала с видом и id,
+  `bootstrapped`, `admin_disabled`, `player_linked`/`player_unlinked` → `ComposePlayerLink`); `mail.ErrSkip` — `river.JobCancel` (без повторов) и строка журнала с видом и id,
   без почты; неизвестный вид, `V != 1` и ошибка SMTP — обычная ошибка (повтор: при скользящем деплое письмо нового вида
   возьмёт экземпляр нового релиза); таймаут задачи — минута.
   `Deps.River` сценариев — отдельный клиент только для вставки (иначе цикл «исполнителю нужны Deps»). `Cleaner`:

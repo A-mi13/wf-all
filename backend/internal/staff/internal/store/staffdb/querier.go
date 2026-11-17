@@ -188,6 +188,19 @@ type Querier interface {
 	// Повторная отправка самим (§4.3 п.3): тот же код (строка не перешифровывается — решение
 	// пользователя 14.10.2026), отправка +1, срок не меняется.
 	MarkInviteResent(ctx context.Context, arg MarkInviteResentParams) (int32, error)
+	// связь для карточки: учётка игрока, когда и кем (текущие имя и почта автора; учётки сотрудников не удаляются,
+	// LEFT JOIN — защита в глубину: created_by без внешнего ключа)
+	PlayerLinkCard(ctx context.Context, staffID uuid.UUID) (PlayerLinkCardRow, error)
+	// снять связь; вернуть снятую учётку игрока (нет связи — пусто)
+	PlayerLinkDelete(ctx context.Context, staffID uuid.UUID) ([]uuid.UUID, error)
+	// сотрудник, связанный с учёткой игрока; нет — ни одной строки
+	PlayerLinkHolder(ctx context.Context, userID uuid.UUID) (uuid.UUID, error)
+	// Связь «сотрудник → учётка игрока» (спека identity §7.6; план I-4, Task 6). Учётка сотрудника уже под замком
+	// сценария (lockAccounts: FOR UPDATE) — строка связи этого сотрудника меняется только под ним.
+	// текущая связь сотрудника; нет — ни одной строки
+	PlayerLinkOf(ctx context.Context, staffID uuid.UUID) (PlayerLinkOfRow, error)
+	// вставка или замена связи сотрудника; учётка игрока у другого сотрудника — 23505 staff_player_links_user_id_key
+	PlayerLinkPut(ctx context.Context, arg PlayerLinkPutParams) error
 	RekeyInvite(ctx context.Context, arg RekeyInviteParams) error
 	RekeyMFA(ctx context.Context, arg RekeyMFAParams) error
 	// Гашение живого приглашения учётки перед выпуском нового: код стирается (CHECK
