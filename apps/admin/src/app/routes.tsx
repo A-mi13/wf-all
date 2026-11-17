@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-router';
 import { parseApprovalsSearch } from '../features/approvals/search';
 import { parseAuditSearch } from '../features/audit/search';
+import { parseCaptainsSearch } from '../features/captains/search';
 import { parseImportsSearch } from '../features/geo/importsSearch';
 import { parseFlagsSearch } from '../features/flags/search';
 import { parseCitiesSearch } from '../features/geo/search';
@@ -96,6 +97,20 @@ export const routeTree = rootRoute.addChildren([
       path: paths.root,
       ...section,
       component: lazyRouteComponent(() => import('../features/home/HomePage'), 'HomePage'),
+    }),
+    createRoute({
+      getParentRoute: () => shellRoute,
+      path: paths.captains,
+      // статус и город очереди — фильтры; карточка заявки — панель ?application=<id> (I-4, R21)
+      validateSearch: (s: Record<string, unknown>) => ({
+        ...parseCaptainsSearch(s),
+        ...panelSearch(['application'])(s),
+      }),
+      ...section,
+      component: lazyRouteComponent(
+        () => import('../features/captains/CaptainsPage'),
+        'CaptainsPage',
+      ),
     }),
     createRoute({
       getParentRoute: () => shellRoute,

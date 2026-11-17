@@ -3,6 +3,8 @@ import type { Me } from '../app/permissions';
 import { SHOWCASE_NOW } from '../showcase/params';
 import { approvalsServer } from '../test/approvals';
 import { geoImport } from '../test/geo';
+import { CITY_OTHER } from '../test/me';
+import { captainApplication, identityServer, UNAVAILABLE } from '../test/identity';
 import { problem } from '../test/problem';
 import { http, server } from '../test/server';
 import { approval } from '../test/staff';
@@ -14,13 +16,17 @@ import { approval } from '../test/staff';
 //   ожидании — ошибка (плитка «Не загрузилось» и строка ошибки в списке дел);
 // - palette-error — палитра: поиск городов отвечает 503 (ошибка одной группы, остальные живы);
 // - imports-empty, imports-error — «Импорт GeoNames» (G9 Task 20): журнал пуст (иллюстрация и «Запустить импорт») или
-//   отвечает 503 (ошибка с кодом и «Повторить»).
+//   отвечает 503 (ошибка с кодом и «Повторить»);
+// - captains-busy — «Капитаны» (I-4 Task 8): очередь из нескольких заявок разных городов, решённые во вкладках, у
+//   карточки — условия как в проде до модулей players/teams (профиль и капитанство «проверить нельзя»), прошлая
+//   отклонённая заявка; роли — права раздела (модератору — scoped, docs/05).
 // «Ищем…» снимком не показать: скрипт снимков ждёт тишины сети (висящий запрос её не даёт) — состояние держат тесты.
 export const SHOTS_FIXTURES = [
   'home-busy',
   'palette-error',
   'imports-empty',
   'imports-error',
+  'captains-busy',
 ] as const;
 export type ShotsFixture = (typeof SHOTS_FIXTURES)[number];
 
@@ -93,6 +99,74 @@ export function applyShotsFixture(name: string | null, me: Me | null): Me | null
         ),
       );
       return me;
+    case 'captains-busy':
+      identityServer({
+        applications: [
+          captainApplication({ created_at: ago(26 * 60 * MIN) }),
+          captainApplication({
+            id: '0193a1c9-7f80-7d91-8a1b-000000000002',
+            user_id: '0193a1c1-5d2e-7a10-8b3c-000000000002',
+            nickname: 'misha_gk',
+            city_id: CITY_OTHER,
+            age_years: 19,
+            account_age_days: 12,
+            has_phone: false,
+            note: null,
+            contact_link: null,
+            created_at: ago(5 * 60 * MIN),
+          }),
+          captainApplication({
+            id: '0193a1c9-7f80-7d91-8a1b-000000000003',
+            user_id: '0193a1c1-5d2e-7a10-8b3c-000000000003',
+            nickname: 'vova.sever',
+            age_years: 34,
+            account_age_days: 1204,
+            created_at: ago(40 * MIN),
+          }),
+          captainApplication({
+            id: '0193a1c9-7f80-7d91-8a1b-000000000004',
+            user_id: '0193a1c1-5d2e-7a10-8b3c-000000000004',
+            nickname: 'old_rejected',
+            status: 'rejected',
+            created_at: ago(9 * 24 * 60 * MIN),
+            decided_at: ago(8 * 24 * 60 * MIN),
+            decided_by_label: 'Ольга В.',
+            rejection_code: 'insufficient_info',
+            comment: 'Расскажите, где и когда собираете игры',
+          }),
+        ],
+        checks: UNAVAILABLE,
+        linkedAccounts: 1,
+        history: [
+          captainApplication({
+            id: '0193a1c9-7f80-7d91-8a1b-000000000005',
+            status: 'rejected',
+            created_at: ago(30 * 24 * 60 * MIN),
+            decided_at: ago(29 * 24 * 60 * MIN),
+            decided_by_label: 'Игорь Л.',
+            rejection_code: 'contact_unreachable',
+          }),
+        ],
+      });
+      return (
+        me && {
+          ...me,
+          permissions: {
+            ...me.permissions,
+            ...(me.role === 'moderator'
+              ? {
+                  'identity.captain_applications.read': 'scoped',
+                  'identity.captain_applications.decide': 'scoped',
+                  'identity.pii.read': 'scoped',
+                }
+              : {
+                  'identity.captain_applications.read': 'allow',
+                  'identity.captain_applications.decide': 'allow',
+                  'identity.pii.read': 'allow',
+                }),
+          },
+        }
+      );
     case 'imports-error':
       server.use(
         http.get('/v1/geo/imports', ({ response }) => response.untyped(problem(503, 'internal'))),

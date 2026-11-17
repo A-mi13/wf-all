@@ -1,6 +1,7 @@
 import type { IconName } from '@wf/icons';
 import { approvalsCommands } from '../features/approvals/commands';
 import { auditCommands } from '../features/audit/commands';
+import { captainsCommands } from '../features/captains/commands';
 import { geoCommands } from '../features/geo/commands';
 import { meCommands } from '../features/me/commands';
 import { staffCommands } from '../features/staff/commands';
@@ -140,6 +141,7 @@ const COMMON: Command[] = [
 // Порядок — порядок групп палитры при пустом запросе: разделы как в меню, затем действия.
 export const COMMANDS: readonly Command[] = [
   ...COMMON.filter((c) => c.group === 'section'),
+  ...captainsCommands,
   ...auditCommands,
   ...staffCommands,
   ...approvalsCommands,

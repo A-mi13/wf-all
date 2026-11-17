@@ -66,7 +66,8 @@
       "flags": "feature toggles",
       "invite": "new staff member",
       "activate": "launch new city",
-      "add_country": "new country add create"
+      "add_country": "new country add create",
+      "captains": "captains captain applications queue review"
     },
     "offline": "No connection — search unavailable"
   },
@@ -77,7 +78,8 @@
     "groups": {
       "overview": "Overview",
       "security": "Security",
-      "directories": "Directories"
+      "directories": "Directories",
+      "players": "Players"
     },
     "home": "Home",
     "audit": "Audit log",
@@ -90,7 +92,8 @@
     "more_title": "Sections and access",
     "logout": "Sign out",
     "counts": {
-      "approvals": "{count, plural, one {# request awaits a decision} other {# requests await a decision}}"
+      "approvals": "{count, plural, one {# request awaits a decision} other {# requests await a decision}}",
+      "captains": "{count, plural, one {# application awaits a decision} other {# applications await a decision}}"
     },
     "cities": "Cities and launch",
     "countries": "Countries",
@@ -98,7 +101,8 @@
     "versions": "App versions",
     "flags": "Feature flags",
     "account": "Profile and settings",
-    "account_open": "Profile and settings: {name}"
+    "account_open": "Profile and settings: {name}",
+    "captains": "Captains"
   },
   "home": {
     "subtitle": "What needs attention",
@@ -130,6 +134,13 @@
       "import_stuck": "Open import {country}: running over 30 min",
       "waitlist": "View cities on the waitlist",
       "codes": "{count, plural, one {# recovery code left} other {# recovery codes left}}"
+    },
+    "attention": {
+      "captains": {
+        "title": "Captain applications",
+        "todo": "{count, plural, one {Review # captain application} other {Review # captain applications}}",
+        "todo_many": "Review captain applications: more than 99"
+      }
     }
   },
   "pages": {
@@ -940,7 +951,8 @@
       "approvals": "Approvals",
       "directories": "Directories",
       "flags": "Flags",
-      "versions": "Versions"
+      "versions": "Versions",
+      "players": "Players"
     },
     "table": {
       "label": "Log records",
@@ -967,7 +979,8 @@
       "directories": "directory",
       "flags": "flag",
       "other": "system",
-      "versions": "versions"
+      "versions": "versions",
+      "players": "player"
     },
     "actions": {
       "staff": {
@@ -990,7 +1003,9 @@
         "invited": "Staff member invited",
         "role_changed": "Role and cities changed",
         "disabled": "Account disabled",
-        "access_reset": "Access reset"
+        "access_reset": "Access reset",
+        "player_linked": "Player account linked",
+        "player_unlinked": "Player account unlinked"
       },
       "platform": {
         "approval_requested": "Approval request created",
@@ -1013,6 +1028,33 @@
         "district_updated": "District changed",
         "country_created": "Country created",
         "country_updated": "Country changed"
+      },
+      "identity": {
+        "user_registered": "Player signed up",
+        "login_failed": "Player sign-in failed",
+        "password_changed": "Player changed password",
+        "password_reset": "Player password reset",
+        "email_changed": "Player changed email",
+        "nickname_changed": "Player changed nickname",
+        "documents_accepted": "Player accepted documents",
+        "mfa_enabled": "Player enabled 2FA",
+        "mfa_disabled": "Player disabled 2FA",
+        "sessions_revoked": "Player sessions ended",
+        "user_deletion_requested": "Player requested account deletion",
+        "user_deletion_cancelled": "Player cancelled account deletion",
+        "user_deleted": "Player account deleted",
+        "mfa_reset_requested": "Player 2FA reset requested",
+        "mfa_reset_cancelled": "Player 2FA reset cancelled",
+        "mfa_reset_executed": "Player 2FA reset",
+        "captain_application_submitted": "Captain application submitted",
+        "captain_application_withdrawn": "Captain application withdrawn",
+        "captain_application_approved": "Captain application approved",
+        "captain_application_rejected": "Captain application rejected",
+        "captain_permit_revoked": "Captain permit revoked",
+        "pii_read": "Player personal data viewed",
+        "player_lookup": "Player looked up by email",
+        "ban_expired": "Player ban expired",
+        "city_changed": "Player changed city"
       }
     },
     "objects": {
@@ -1025,7 +1067,10 @@
       "country": "country",
       "district": "district",
       "feature_flag": "feature flag",
-      "app_versions": "app versions"
+      "app_versions": "app versions",
+      "user": "player",
+      "captain_application": "captain application",
+      "mfa_reset": "player 2FA reset"
     },
     "details": {
       "show": "Details",
@@ -1519,5 +1564,129 @@
     "slug": "The part of the city page link on the website: lowercase Latin letters, digits and hyphens only.",
     "recovery_codes": "One-time sign-in codes for when the authenticator app is not at hand: each works once.",
     "feature_flag": "A switch that turns a feature on everywhere or in selected cities without releasing a new app version."
+  },
+  "captains": {
+    "title": "Captain applications",
+    "subtitle": "Manual review of players who want to organise teams",
+    "tabs": {
+      "label": "Application status",
+      "pending": "Awaiting decision",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "withdrawn": "Withdrawn"
+    },
+    "result": {
+      "pending": "Awaiting decision",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "withdrawn": "Withdrawn"
+    },
+    "table": {
+      "label": "Captain applications",
+      "nickname": "Player",
+      "city": "City",
+      "age": "Age",
+      "account_age": "Account age",
+      "submitted": "Submitted",
+      "decided": "Decided",
+      "decided_by": "Decided by",
+      "result": "Result",
+      "age_value": "{count, plural, one {# year} other {# years}}",
+      "account_age_value": "{count, plural, one {# day} other {# days}}",
+      "city_filter": "City",
+      "city_all": "All cities",
+      "open": "Open",
+      "open_label": "Open application: {name}",
+      "system": "player or system",
+      "actions": "Actions"
+    },
+    "card": {
+      "title": "Application decision",
+      "form": "Application",
+      "format": "Games",
+      "pitch": "Where to play",
+      "frequency": "How often",
+      "contact_link": "Contact link",
+      "note": "From the player",
+      "submitted": "Submitted",
+      "phone_given": "Phone provided",
+      "phone_missing": "No phone provided",
+      "applicant": "Applicant",
+      "checks": "Conditions now",
+      "history": "Previous applications",
+      "history_empty": "No other applications",
+      "linked_accounts": "Linked accounts",
+      "contacts": "Contacts",
+      "decision": "Result",
+      "decided": "{result} · {who} · <time></time>",
+      "rejection": "Reason: {reason}",
+      "comment": "Comment: {comment}",
+      "not_found_title": "Application not found",
+      "not_found_text": "It does not exist or belongs to a city you have no access to."
+    },
+    "checks": {
+      "age": "Age meets the country threshold",
+      "restrictions": "No captaincy restriction",
+      "profile": "Profile complete",
+      "captaincy": "Not a captain of another team in the city"
+    },
+    "check_state": {
+      "ok": "met",
+      "failed": "not met",
+      "unavailable": "cannot be checked"
+    },
+    "unavailable_hint": "This check arrives with the profile and teams modules — approval is not possible",
+    "approve": {
+      "title": "Approve application",
+      "text": "The player gets a captain permit in the city and an email.",
+      "comment": "Comment for the player",
+      "submit": "Approve",
+      "disabled_hint": "You can approve once all conditions are met"
+    },
+    "reject": {
+      "title": "Reject application",
+      "text": "The player gets an email with the reason and can apply again in 7 days.",
+      "code": "Reason",
+      "comment": "Comment for the player",
+      "submit": "Reject"
+    },
+    "rejection": {
+      "profile_incomplete": "Profile incomplete",
+      "insufficient_info": "Not enough about the team and pitch",
+      "contact_unreachable": "Could not reach the player",
+      "suspicious_activity": "Suspected multi-accounting or manipulation",
+      "duplicate_account": "Another captain account exists",
+      "other": "Other"
+    },
+    "ineligible": "Cannot approve — conditions not met:",
+    "reasons": {
+      "too_young": "below the country age threshold",
+      "restricted": "captaincy is restricted",
+      "profile_incomplete": "profile incomplete",
+      "captain_elsewhere_in_city": "already captain of another team in the city",
+      "already_permitted": "already has a permit in the city",
+      "checks_unavailable": "conditions cannot be checked right now"
+    },
+    "contact": {
+      "title": "Applicant contacts",
+      "text": "Viewing is logged together with the reason.",
+      "reason": "Reason for viewing",
+      "reason_hint": "For example, a ticket number. Do not include the player’s personal data",
+      "reason_invalid": "Remove line breaks and control characters",
+      "show": "Show contacts",
+      "submit": "Show",
+      "email": "Email",
+      "phone": "Phone",
+      "phone_none": "not provided",
+      "copy_email": "Copy email",
+      "copy_phone": "Copy phone"
+    },
+    "toasts": {
+      "approved": "Application approved",
+      "rejected": "Application rejected",
+      "closed": "Application already decided or withdrawn — card refreshed"
+    },
+    "empty": "Queue is empty",
+    "empty_text": "New applications will appear here."
   }
 }

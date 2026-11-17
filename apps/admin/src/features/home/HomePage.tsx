@@ -18,6 +18,7 @@ import {
   useNow,
 } from '../../ui';
 import { useIncomingApprovals } from '../approvals/queries';
+import { READ_PERMISSION as CAPTAINS_READ, useCaptainQueue } from '../captains/queries';
 import styles from './HomePage.module.css';
 import {
   CODES_WARN,
@@ -44,8 +45,8 @@ const count = (page: Page | undefined) =>
     : { value: null, more: false };
 
 // Главная «Что требует внимания» (спека UI-фундамента §4.13): плитки в фиксированном порядке (место не прыгает
-// между заходами) — входящие подтверждения, мои запросы, сбои импорта GeoNames, города в ожидании; без права плитки
-// нет и запроса нет (enabled). Под плитками — список дел из тех же данных и личное (резервные коды ≤ 3); пусто —
+// между заходами) — входящие подтверждения, мои запросы, заявки капитанов (I-4), сбои импорта GeoNames, города в
+// ожидании; без права плитки нет и запроса нет (enabled). Под плитками — список дел из тех же данных и личное (резервные коды ≤ 3); пусто —
 // «Всё спокойно». Ошибка плитки — в ней самой; список дел без упавших плиток строится из остальных, а «Всё
 // спокойно» при ошибке не говорится (неизвестно). Ссылки — через объект search роутера (адрес — buildLocation).
 export function HomePage() {
@@ -57,12 +58,15 @@ export function HomePage() {
   const now = useNow('minute').getTime();
   const canImports = useCan('geo.imports.read');
   const canCities = useCan('geo.cities.read');
+  const canCaptains = useCan(CAPTAINS_READ);
 
   const incoming = useIncomingApprovals();
   const mine = useMyPendingApprovals();
   const imports = useRecentImports(canImports);
   const waitlist = useWaitlistCities(canCities);
   const mfa = useMfaStatus();
+  // ожидающие заявки в капитаны — та же подписка, что счётчик меню (ключ общий; без права запроса нет)
+  const captains = useCaptainQueue();
 
   const link = (to: string, search?: Record<string, unknown>) => ({
     href: router.buildLocation({ to, search }).href,
@@ -112,6 +116,19 @@ export function HomePage() {
     );
   }
 
+  // заявки в капитаны
+  const caps = count(captains.data);
+  if (caps.value) {
+    add(
+      'captains',
+      caps.more || caps.value > 99
+        ? t('attention.captains.todo_many')
+        : t('attention.captains.todo', { count: caps.value }),
+      'warning',
+      link(paths.captains),
+    );
+  }
+
   // импорт: по последним 5 записям журнала — последний по стране упал или идёт дольше 30 мин
   const alerts = imports.data ? importAlerts(imports.data.items, now) : [];
   for (const a of alerts) {
@@ -136,6 +153,7 @@ export function HomePage() {
   const shown: Query[] = [incoming, mine, mfa];
   if (canImports) shown.push(imports);
   if (canCities) shown.push(waitlist);
+  if (canCaptains) shown.push(captains);
   const loading = shown.some((q) => q.isPending);
   // упавшие источники (и без своей плитки — резервные коды): строка «Не загрузилось · Повторить» в списке дел
   const failed = shown.filter((q) => q.isError);
@@ -174,6 +192,18 @@ export function HomePage() {
               note={nearest && my.value ? rich('mine.nearest', nearest) : undefined}
             />
           </li>
+          {canCaptains && (
+            <li>
+              <AttentionTile
+                {...link(paths.captains)}
+                {...tile(captains)}
+                title={t('attention.captains.title')}
+                value={caps.value}
+                more={caps.more}
+                tone="warning"
+              />
+            </li>
+          )}
           {canImports && (
             <li>
               <AttentionTile

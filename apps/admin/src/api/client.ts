@@ -33,6 +33,12 @@ export class ApiError extends Error {
   // экран просит новый код («Вход подтверждён…»). Без метки (разблокировку отклонили: выход,
   // блокировка) экран молчит — страница уходит на вход.
   readonly replaySkipped?: true;
+  // Причины отказа машинными значениями (Problem.reasons; план I-4): у identity.captain_ineligible — невыполненные
+  // условия заявки, у identity.password_weak — одно значение. Список открытый — экран показывает незнакомое общим
+  // текстом кода. Только непустой массив строк, иначе поля нет.
+  readonly reasons?: string[];
+  // Когда действие станет доступно (Problem.available_at, UTC): пауза заявки после отказа, смена ника.
+  readonly availableAt?: string;
 
   constructor(init: {
     status: number;
@@ -42,6 +48,8 @@ export class ApiError extends Error {
     attemptsLeft?: number;
     jobId?: number;
     replaySkipped?: boolean;
+    reasons?: string[];
+    availableAt?: string;
   }) {
     super(`${init.status} ${init.code}`);
     this.name = 'ApiError';
@@ -52,6 +60,8 @@ export class ApiError extends Error {
     if (init.attemptsLeft !== undefined) this.attemptsLeft = init.attemptsLeft;
     if (init.jobId !== undefined) this.jobId = init.jobId;
     if (init.replaySkipped) this.replaySkipped = true;
+    if (init.reasons) this.reasons = init.reasons;
+    if (init.availableAt !== undefined) this.availableAt = init.availableAt;
   }
 }
 
@@ -104,6 +114,10 @@ const nonNegative = (v: unknown): number | undefined =>
 const jobIdOf = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : undefined;
 
+const stringsOf = (v: unknown): string[] | undefined =>
+  Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string') ? v : undefined;
+const stringOf = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+
 async function readProblem(res: Response): Promise<Partial<Problem> | null> {
   try {
     const body: unknown = await res.clone().json();
@@ -131,6 +145,8 @@ async function toApiError(res: Response, replaySkipped = false): Promise<ApiErro
     attemptsLeft: nonNegative(p?.attempts_left),
     jobId: jobIdOf(p?.job_id),
     replaySkipped,
+    reasons: stringsOf(p?.reasons),
+    availableAt: stringOf(p?.available_at),
   });
 }
 

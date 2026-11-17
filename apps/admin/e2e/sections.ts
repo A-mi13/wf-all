@@ -3,6 +3,7 @@
 // (иконки, права, сборку Vite); сверка с NAV — e2e/env.test.ts (новый раздел без строки здесь — падение).
 export const PROD_SECTIONS = [
   '/',
+  '/captains',
   '/audit',
   '/staff',
   '/approvals',

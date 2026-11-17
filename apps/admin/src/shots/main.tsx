@@ -22,6 +22,7 @@ import { ShotsRoot } from './ShotsRoot';
 // ?shots-story=<путь от src без .stories.tsx>:<экспорт> — снимок истории компонента вместо приложения.
 // ?shots-fixture=<набор> — данные состояния (fixtures.ts); ?shots-palette=<текст> — после первой отрисовки открыть
 // палитру (Ctrl+K — тем же путём, что сотрудник) и ввести текст: результаты, ошибка группы, «Ничего не нашлось».
+// ?shots-click=<подпись кнопки> — после отрисовки нажать кнопку (окно панели: «Одобрить», «Показать контакты»).
 
 // Секрет-фикстура экрана настройки 2FA (как в тестах SetupMfaPage) — не настоящий.
 const MFA_SECRET = 'JBSWY3DPEHPK3PXP';
@@ -113,6 +114,18 @@ if (paletteText !== null) {
   );
   field.dispatchEvent(new Event('input', { bubbles: true }));
   await new Promise((r) => setTimeout(r, SEARCH_DEBOUNCE_MS + 100));
+  await settle();
+}
+// ?shots-click=<подпись кнопки> — после отрисовки нажать кнопку с этим текстом (окна панелей: «Одобрить», «Отклонить»,
+// «Показать контакты»); нет такой — ошибка (снимок не «молча без окна»).
+const clickText = params.get('shots-click');
+if (clickText !== null) {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent?.trim() === clickText,
+  );
+  if (!button) throw new Error(`shots: нет кнопки «${clickText}»`);
+  button.click();
+  await nextFrame();
   await settle();
 }
 document.documentElement.setAttribute('data-shots-ready', '');

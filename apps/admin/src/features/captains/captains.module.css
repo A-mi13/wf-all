@@ -1,0 +1,166 @@
+/* «Капитаны» (I-4, Task 8): очередь заявок (DataTable; на телефоне строки — карточки), карточка заявки панелью
+   справа (на телефоне — во всю ширину по правилам Drawer), диалоги контактов и решений. Цвета — только токены. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-5);
+}
+
+.name {
+  color: var(--wf-color-text);
+  font-weight: 700;
+}
+
+.muted {
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+  overflow-wrap: anywhere;
+}
+
+/* Тело панели: блоки сверху вниз, прокручивается только содержимое (подвал закреплён у Drawer) */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-5);
+  font-family: var(--wf-font-body);
+}
+
+/* фокус программно — после решения или показа контактов (кнопка исчезла), без рамки */
+.panel:focus,
+.focusTarget:focus {
+  outline: none;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  padding-top: var(--wf-space-4);
+  border-top: 1px solid var(--wf-color-border);
+}
+
+.block:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.heading {
+  margin: 0;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+  font-weight: 700;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--wf-space-1) var(--wf-space-3);
+  margin: 0;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.facts dt {
+  color: var(--wf-color-text-subtle);
+  font-weight: 600;
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Свободный текст игрока и комментарии решений: переводы строк и табуляция — как ввели, без разметки */
+.pre {
+  white-space: pre-wrap;
+}
+
+.copyable {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-1);
+  min-width: 0;
+}
+
+/* Условия: подпись слева, чип состояния справа */
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wf-space-3);
+}
+
+.note {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+.text {
+  margin: 0;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+  margin: 0;
+  padding-inline-start: var(--wf-space-5);
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.historyItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-1);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wf-space-2);
+}
+
+/* Подвал карточки: кнопки решения и пояснение, почему «Одобрить» недоступна */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--wf-space-2);
+}
+
+/* подсказка — своей строкой, кнопки — одной строкой под ней */
+.footer .note {
+  flex-basis: 100%;
+  text-align: end;
+}

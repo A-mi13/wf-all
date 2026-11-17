@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { KEYS as APPROVALS_KEYS, parseApprovalsSearch } from '../features/approvals/search';
 import { KEYS as AUDIT_KEYS, parseAuditSearch } from '../features/audit/search';
+import { KEYS as CAPTAINS_KEYS, parseCaptainsSearch } from '../features/captains/search';
 import { KEYS as CITIES_KEYS, parseCitiesSearch } from '../features/geo/search';
 import { KEYS as IMPORTS_KEYS, parseImportsSearch } from '../features/geo/importsSearch';
 import { KEYS as STAFF_KEYS, parseStaffSearch } from '../features/staff/search';
@@ -47,6 +48,7 @@ describe('ключи панелей и фильтров', () => {
       'edit',
       'start',
       'import',
+      'application',
     ]);
   });
 
@@ -55,6 +57,7 @@ describe('ключи панелей и фильтров', () => {
       [paths.audit]: ['tab', 'action', 'actor', 'object_type', 'object_id', 'from', 'to'],
       [paths.staff]: ['q', 'status', 'role'],
       [paths.approvals]: ['box'],
+      [paths.captains]: ['status', 'city'],
       [paths.cities]: ['q', 'status', 'country', 'region_id'],
       [paths.imports]: ['country', 'job'],
       [paths.flags]: ['q', 'status', 'flag'],
@@ -105,6 +108,12 @@ describe('парсер возвращает только свои KEYS (n7)', ()
       keys: APPROVALS_KEYS,
       parse: parseApprovalsSearch,
       input: { box: 'mine' },
+    },
+    {
+      name: '/captains',
+      keys: CAPTAINS_KEYS,
+      parse: parseCaptainsSearch,
+      input: { status: 'approved', city: '0192f1c4-0000-7b21-9c5d-0000000000ad' },
     },
     {
       name: '/geo/cities',
@@ -170,6 +179,7 @@ describe('маршруты с search-параметрами — в FILTER_SEARCH
       [
         paths.approvals,
         paths.audit,
+        paths.captains,
         paths.cities,
         paths.countries,
         paths.flags,

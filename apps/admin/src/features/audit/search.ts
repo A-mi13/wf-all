@@ -10,9 +10,11 @@ import { dayStartUtc } from '../../i18n/zone';
 // Вкладки по разделам → начало кода действия (`<модуль>.<действие>`, действия аудита бэкенда:
 // staff.* — модуль сотрудников, platform.approval_* — решения подтверждений, geo.* — справочники
 // (города, районы, страны, импорт GeoNames); platform.flag_* — флаги функций, platform.app_versions_* —
-// версии приложения (план B, R15: действия флагов — platform.flag_changed, не flags.*)).
+// версии приложения (план B, R15: действия флагов — platform.flag_changed, не flags.*)); identity.* — игроки
+// (вход, аккаунт, заявки в капитаны, чтение ПД, сброс 2FA — план I-4).
 export const AUDIT_SECTIONS = {
   staff: 'staff.',
+  players: 'identity.',
   approvals: 'platform.approval_',
   directories: 'geo.',
   flags: 'platform.flag_',
@@ -21,6 +23,7 @@ export const AUDIT_SECTIONS = {
 export type AuditSection = keyof typeof AUDIT_SECTIONS;
 export const SECTIONS: readonly AuditSection[] = [
   'staff',
+  'players',
   'approvals',
   'directories',
   'flags',

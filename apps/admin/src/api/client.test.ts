@@ -194,6 +194,52 @@ describe('Problem → ApiError', () => {
     expect(err.jobId).toBeUndefined();
   });
 
+  // План I-4, Task 8: причины отказа (identity.captain_ineligible) и срок паузы — из Problem.
+  const approve = () =>
+    createApi(TEST_API).POST('/v1/identity/captain-applications/{applicationId}/approve', {
+      params: {
+        path: { applicationId: '0193a1c9-7f80-7d91-8a1b-000000000001' },
+        header: { 'Idempotency-Key': KEY },
+      },
+      body: {},
+    });
+
+  test('reasons и available_at из Problem — ApiError.reasons, availableAt', async () => {
+    server.use(
+      http.post('/v1/identity/captain-applications/{applicationId}/approve', ({ response }) =>
+        response.untyped(
+          problem(409, 'identity.captain_ineligible', {
+            reasons: ['too_young', 'from_future'],
+            available_at: '2026-12-13T09:30:00Z',
+          }),
+        ),
+      ),
+    );
+    const err = await caught(approve());
+    expect(err).toMatchObject({
+      code: 'identity.captain_ineligible',
+      reasons: ['too_young', 'from_future'],
+      availableAt: '2026-12-13T09:30:00Z',
+    });
+  });
+
+  test.each([
+    ['полей нет', {}],
+    ['reasons не массив', { reasons: 'too_young' }],
+    ['не строки', { reasons: [1, null], available_at: 5 }],
+  ])('reasons, available_at: %s — undefined', async (_, extra) => {
+    server.use(
+      http.post('/v1/identity/captain-applications/{applicationId}/approve', ({ response }) =>
+        response.untyped(
+          problem(409, 'identity.captain_ineligible', extra as Record<string, unknown>),
+        ),
+      ),
+    );
+    const err = await caught(approve());
+    expect(err.reasons).toBeUndefined();
+    expect(err.availableAt).toBeUndefined();
+  });
+
   test('ответ не Problem (прокси отдал HTML) — код internal со статусом ответа', async () => {
     server.use(
       http.get('/v1/staff/me', ({ response }) =>
