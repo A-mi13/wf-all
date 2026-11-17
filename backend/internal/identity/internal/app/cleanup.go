@@ -185,7 +185,8 @@ func cleanupSteps() []cleanupStep {
 
 // liftExpiredRestrictions — истёкшие ограничения (until ≤ now) снимаются по аккаунтам: на аккаунт — своя tx, users
 // первым FOR NO KEY UPDATE SKIP LOCKED (R30; занят сценарием — пропуск до следующего запуска), lifted_at, версия
-// аккаунта + 1 и событие identity.restrictions_changed (статус и оставшиеся закрытые возможности) в той же tx; у
+// аккаунта + 1 и событие identity.restrictions_changed (статус и оставшиеся закрытые возможности) в той же tx; снята
+// последняя живая login у забаненного — статус active и аудит identity.ban_expired (R12); у
 // удалённого (deleted) — только lifted_at, без версии и события.
 // Упавший аккаунт — в журнал и позади курсора до конца прогона (не заслоняет остальных); failed — их число.
 func (a *App) liftExpiredRestrictions(ctx context.Context, now time.Time, batch int32) (lifted, failed int, err error) {
@@ -263,15 +264,18 @@ func (a *App) liftRestrictions(ctx context.Context, userID uuid.UUID, now time.T
 		if err != nil {
 			return fmt.Errorf("identity: действующие ограничения: %w", err)
 		}
+		// R12: снята последняя живая строка login у забаненного — expireBanTx (статус, событие, аудит); иначе — версия
+		// и событие
+		ok = true
+		if done, err := a.expireBanTx(ctx, q, userID, u.Status, u.StatusBeforeDeletion, live); err != nil || done {
+			return err
+		}
 		ver, err := q.BumpUserVersion(ctx, userID)
 		if err != nil {
 			return fmt.Errorf("identity: версия аккаунта: %w", err)
 		}
-		if _, err := events.Publish(ctx, identity.RestrictionsChanged(identity.UserRef{ID: userID, Version: ver}, u.Status, live)); err != nil {
-			return err
-		}
-		ok = true
-		return nil
+		_, err = events.Publish(ctx, identity.RestrictionsChanged(identity.UserRef{ID: userID, Version: ver}, u.Status, live))
+		return err
 	})
 	return ok, err
 }

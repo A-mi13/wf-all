@@ -359,3 +359,32 @@ func (failingCheck) Name() string { return identity.CheckProfileComplete }
 func (c failingCheck) Check(context.Context, pgx.Tx, uuid.UUID, uuid.UUID) (string, bool, error) {
 	return "", false, c.err
 }
+
+// m1 ревью W1, К1: App без портов условий (NewTx, NewMaintenance) или с неполным набором не считает порты пройденными —
+// каждое имя RequiredCaptainChecks без порта — unavailable и причина checks_unavailable (отказ, не доступ).
+func TestEvaluateCaptaincyMissingPortsFailClosed(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	cities := seedCaptainCities(t, e)
+	uid := seedUser(t, e.owner, "cap_noports", "ru")
+	for name, checks := range map[string][]identity.CaptainCheck{
+		"без портов":       nil,
+		"без порта города": {identitytest.AllowCheck(identity.CheckProfileComplete)},
+	} {
+		e.a.captainChecks = checks
+		var v captaincyVerdict
+		if err := e.inTx(t, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			v, err = e.a.evaluateCaptaincy(ctx, tx, uid, cities.main, evalNow)
+			return err
+		}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if v.Eligible() || !slices.Contains(v.Reasons, "checks_unavailable") || v.Checks[checkCaptaincy] != checkUnavailable {
+			t.Fatalf("%s: вердикт %+v", name, v)
+		}
+		if checks == nil && v.Checks[checkProfile] != checkUnavailable {
+			t.Fatalf("%s: профиль %q", name, v.Checks[checkProfile])
+		}
+	}
+}

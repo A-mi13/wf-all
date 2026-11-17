@@ -86,8 +86,10 @@ ORDER BY r.user_id
 LIMIT @batch;
 
 -- name: CleanupLockUser :one
--- воркер: аккаунт под замком (R30: users первым) или ничего — занят сценарием игрока, возьмёт следующий запуск
-SELECT id, status::text AS status FROM users WHERE id = @id FOR NO KEY UPDATE SKIP LOCKED;
+-- воркер: аккаунт под замком (R30: users первым) или ничего — занят сценарием игрока, возьмёт следующий запуск;
+-- status_before_deletion — истечение бана в периоде удаления (R11, R12)
+SELECT id, status::text AS status, coalesce(status_before_deletion::text, '')::text AS status_before_deletion
+FROM users WHERE id = @id FOR NO KEY UPDATE SKIP LOCKED;
 
 -- name: CleanupLiftRestrictions :many
 -- снятие истёкших ограничений аккаунта (users уже под замком)

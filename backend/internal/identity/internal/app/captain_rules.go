@@ -116,9 +116,17 @@ func (a *App) evaluateCaptaincy(ctx context.Context, tx pgx.Tx, userID, cityID u
 		reasons[domain.ReasonRestricted] = true
 	}
 
-	// порты модулей выше
-	for _, c := range a.captainChecks {
-		key := checkKeys[c.Name()]
+	// порты модулей выше — по обязательным именам (К1, m1 ревью W1): у App без портов (NewTx, NewMaintenance) или с
+	// неполным набором имя без порта — «проверка недоступна», а не «пройдено»
+	for _, name := range identity.RequiredCaptainChecks {
+		key := checkKeys[name]
+		i := slices.IndexFunc(a.captainChecks, func(c identity.CaptainCheck) bool { return c.Name() == name })
+		if i < 0 {
+			v.Checks[key] = checkUnavailable
+			reasons[domain.ReasonChecksUnavailable] = true
+			continue
+		}
+		c := a.captainChecks[i]
 		reason, ok, err := c.Check(ctx, tx, userID, cityID)
 		switch {
 		case err != nil:

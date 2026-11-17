@@ -42,7 +42,9 @@ func MailKinds() []string {
 		MailAccountDeletionScheduled, MailAccountRestored, MailAccountDeleted, MailMfaResetScheduled,
 		MailMfaResetCancelled, MailMfaResetDone,
 		// I-4 (Task 4): решение по заявке в капитаны, ref — captain_applications.id
-		MailCaptainApplicationApproved, MailCaptainApplicationRejected}
+		MailCaptainApplicationApproved, MailCaptainApplicationRejected,
+		// I-4 (Task 7, R39): отзыв заявки сменой города, ref — captain_applications.id
+		MailCaptainApplicationWithdrawnCity}
 }
 
 // enqueueMail — задача письма в tx действия (очередь mail, исполняет воркер): в аргументах только вид и ref, адреса

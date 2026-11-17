@@ -33,7 +33,8 @@ var (
 // DeleteAccount — запрос удаления (§3.11 п. 1): свежий вход (requireFresh: users, затем sessions — R30), ник
 // подтверждения (NFKC, без учёта регистра) ≠ текущему → 422 confirm_mismatch без изменений. Одна tx: статус
 // pending_deletion (прежний статус — в status_before_deletion) с purge_at = now + 30 дней, событие
-// user_deletion_scheduled; все сессии (account_deleted); открытая заявка в капитаны — withdrawn; живой сброс 2FA —
+// user_deletion_scheduled; все сессии (account_deleted); открытая заявка в капитаны — withdrawn (событие
+// captain_application_withdrawn, R24); живой сброс 2FA —
 // cancelled_by = system (событие mfa_reset_cancelled, без письма); живые коды аккаунта — revoked; живые restore_token
 // прошлых периодов — погашены (m3); журнал с адресом в meta_enc и письмо account_deletion_scheduled; аудит.
 func (a *App) DeleteAccount(ctx context.Context, sessionID uuid.UUID, confirmNickname string) (purgeAt time.Time, err error) {
@@ -65,8 +66,15 @@ func (a *App) DeleteAccount(ctx context.Context, sessionID uuid.UUID, confirmNic
 		if _, err := a.revokeSessions(ctx, tx, u.ID, uuid.Nil, domain.RevokedAccountDeleted); err != nil {
 			return err
 		}
-		if err := q.DeletionWithdrawApplications(ctx, identitydb.DeletionWithdrawApplicationsParams{Now: &now, UserID: u.ID}); err != nil {
+		apps, err := q.DeletionWithdrawApplications(ctx, identitydb.DeletionWithdrawApplicationsParams{Now: &now, UserID: u.ID})
+		if err != nil {
 			return fmt.Errorf("identity: заявка в капитаны: %w", err)
+		}
+		for _, ap := range apps { // R24: подписчики (teams) узнают об отзыве заявки
+			if _, err := events.Publish(ctx, identity.CaptainApplicationWithdrawn(
+				identity.ApplicationRef{ID: ap.ID, Version: ap.Version}, u.ID, ap.CityID)); err != nil {
+				return err
+			}
 		}
 		if err := a.cancelMfaResetsBySystem(ctx, q, u.ID); err != nil {
 			return err
@@ -156,6 +164,28 @@ func (a *App) CancelDeletion(ctx context.Context, raw string, c Client) (AuthOut
 		if u.Status != identitydb.UserStatusPendingDeletion || a.purgeDue(u.Status, u.PurgeAt) {
 			return errRestoreTokenInvalid // m4 ревью 2: ровно purge_at и позже — срок отмены вышел
 		}
+		// R11, R36: пока жив бан поверх удаления, восстановление закрыто — ответ как у недействительного токена
+		// (account_blocked в контракте операции нет, R29), без записей: токен остаётся
+		if blocked, err := a.blocked(ctx, identitydb.New(tx), u, a.clock.Now()); err != nil {
+			return err
+		} else if blocked {
+			return errRestoreTokenInvalid
+		}
+		// I1 ревью T7: бан истёк по времени, а чистка ещё не прошла — то же правило R12, что в чистке (status_before_deletion
+		// banned → active, событие, аудит ban_expired), иначе DeletionRestore вернул бы banned
+		q := identitydb.New(tx)
+		now := a.clock.Now()
+		live, err := q.RestrictionsLiveCapabilities(ctx, identitydb.RestrictionsLiveCapabilitiesParams{UserID: u.ID, Now: now})
+		if err != nil {
+			return fmt.Errorf("identity: действующие ограничения: %w", err)
+		}
+		before := ""
+		if u.StatusBeforeDeletion != nil {
+			before = string(*u.StatusBeforeDeletion)
+		}
+		if _, err := a.expireBanTx(ctx, q, u.ID, string(u.Status), before, live); err != nil {
+			return err
+		}
 		var data challengeData
 		if err := json.Unmarshal(ch.Data, &data); err != nil {
 			return fmt.Errorf("identity: данные вызова: %w", err)
@@ -165,7 +195,6 @@ func (a *App) CancelDeletion(ctx context.Context, raw string, c Client) (AuthOut
 		} else if !same {
 			return errRestoreTokenInvalid // m2 ревью W5-А: без записей, токен остаётся у клиента первого шага
 		}
-		q := identitydb.New(tx)
 		ver, err := q.DeletionRestore(ctx, u.ID)
 		if err != nil {
 			return fmt.Errorf("identity: отмена удаления: %w", err)

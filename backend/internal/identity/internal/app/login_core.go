@@ -185,7 +185,7 @@ func (a *App) dummyPassword(ctx context.Context, pw string) error {
 	return a.passwordDummy(ctx, pw)
 }
 
-// finishLogin — завершение входа по статусу аккаунта (§3.2, §3.11; порядок R6): banned → 403
+// finishLogin — завершение входа по статусу аккаунта (§3.2, §3.11; порядок R6): заблокирован (R36) → 403
 // identity.account_blocked (blocked_until из ограничения бана) или errBlockedAsExpired; 2FA включена и не пройдена →
 // mfa_required (mfa_token на 5 минут, methods, reset_at); pending_deletion → deletion_pending (restore_token на 10
 // минут, без сессии); иначе — сессия (mfa_at = now при mfaDone), связь с устройством, security_events (login), хук
@@ -216,8 +216,12 @@ func (a *App) finishLoginAs(ctx context.Context, tx pgx.Tx, u userRow, c Client,
 	}
 	q := identitydb.New(tx)
 	brief := UserBrief{ID: u.ID, Nickname: u.Nickname, Status: string(u.Status), Locale: u.Locale}
+	blocked, err := a.blocked(ctx, q, u, a.clock.Now())
+	if err != nil {
+		return LoginOutcome{}, err
+	}
 	switch {
-	case u.Status == identitydb.UserStatusBanned:
+	case blocked: // R36: banned или бан поверх периода удаления (R11) — не deletion_pending
 		if blockedAsExpired {
 			return LoginOutcome{}, errBlockedAsExpired
 		}

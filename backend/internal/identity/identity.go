@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -162,9 +163,20 @@ type UserSummary struct {
 	Nickname, Status, Locale string
 }
 
+// CaptainPermit — живой допуск капитана игрока в городе (спека §10.1): ApplicationID — одобренная заявка допуска
+// (R25), Probationary — испытательный срок заявки.
+type CaptainPermit struct {
+	CityID        uuid.UUID
+	GrantedAt     time.Time
+	ApplicationID uuid.UUID
+	Probationary  bool
+}
+
 // Service — синхронный API модуля для других модулей (спека §10.1).
 type Service interface {
 	User(ctx context.Context, id uuid.UUID) (UserSummary, error)
+	// CaptainPermits — живые допуски капитана игрока по городам (нет — пусто, не ошибка).
+	CaptainPermits(ctx context.Context, userID uuid.UUID) ([]CaptainPermit, error)
 }
 
 // New — Service на пуле вызывающего.
@@ -187,4 +199,25 @@ func (s *service) User(ctx context.Context, id uuid.UUID) (UserSummary, error) {
 		u.CityID = *r.CityID
 	}
 	return u, nil
+}
+
+// CaptainPermits — живые допуски игрока из экспортированного представления identity_read_captain_permits (по времени
+// выдачи); отозванные не видны.
+func (s *service) CaptainPermits(ctx context.Context, userID uuid.UUID) ([]CaptainPermit, error) {
+	rows, err := identitydb.New(s.pool).ReadCaptainPermits(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("identity: допуски капитана: %w", err)
+	}
+	out := make([]CaptainPermit, 0, len(rows))
+	for _, r := range rows {
+		p := CaptainPermit{GrantedAt: r.GrantedAt, Probationary: r.IsProbationary}
+		if r.CityID != nil {
+			p.CityID = *r.CityID
+		}
+		if r.ApplicationID != nil {
+			p.ApplicationID = *r.ApplicationID
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }

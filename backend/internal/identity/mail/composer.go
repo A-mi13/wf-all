@@ -78,27 +78,28 @@ func Register(r *pmail.Registry, d ComposerDeps) error {
 		}
 	}
 	table := map[string]composeFunc{
-		app.MailSignupCode:                 code(identitydb.AuthCodePurposeSignup, false),
-		app.MailSignupAccountExists:        code(identitydb.AuthCodePurposeSignup, true),
-		app.MailPasswordResetCode:          code(identitydb.AuthCodePurposePasswordReset, false),
-		app.MailEmailChangeCode:            code(identitydb.AuthCodePurposeEmailChange, false),
-		app.MailEmailChangeTaken:           code(identitydb.AuthCodePurposeEmailChange, true),
-		app.MailEmailChanged:               event(domain.SecEmailChanged),
-		app.MailPasswordChanged:            event(domain.SecPasswordChanged, domain.SecPasswordReset),
-		app.MailSessionRevokedSuspicious:   event(domain.SecRefreshReuse),
-		app.MailMfaEnabled:                 event(domain.SecMfaEnabled),
-		app.MailMfaDisabled:                event(domain.SecMfaDisabled),
-		app.MailRecoveryCodeUsed:           event(domain.SecRecoveryCodeUsed),
-		app.MailRecoveryCodesRegenerated:   event(domain.SecRecoveryCodesRegenerated),
-		app.MailMfaFailures:                event(domain.SecMfaFailures),
-		app.MailAccountDeletionScheduled:   event(domain.SecAccountDeletionScheduled),
-		app.MailAccountRestored:            event(domain.SecAccountRestored),
-		app.MailAccountDeleted:             event(domain.SecAccountDeleted),
-		app.MailMfaResetScheduled:          c.mfaReset,
-		app.MailMfaResetCancelled:          c.mfaReset,
-		app.MailMfaResetDone:               c.mfaReset,
-		app.MailCaptainApplicationApproved: c.captainDecision,
-		app.MailCaptainApplicationRejected: c.captainDecision,
+		app.MailSignupCode:                      code(identitydb.AuthCodePurposeSignup, false),
+		app.MailSignupAccountExists:             code(identitydb.AuthCodePurposeSignup, true),
+		app.MailPasswordResetCode:               code(identitydb.AuthCodePurposePasswordReset, false),
+		app.MailEmailChangeCode:                 code(identitydb.AuthCodePurposeEmailChange, false),
+		app.MailEmailChangeTaken:                code(identitydb.AuthCodePurposeEmailChange, true),
+		app.MailEmailChanged:                    event(domain.SecEmailChanged),
+		app.MailPasswordChanged:                 event(domain.SecPasswordChanged, domain.SecPasswordReset),
+		app.MailSessionRevokedSuspicious:        event(domain.SecRefreshReuse),
+		app.MailMfaEnabled:                      event(domain.SecMfaEnabled),
+		app.MailMfaDisabled:                     event(domain.SecMfaDisabled),
+		app.MailRecoveryCodeUsed:                event(domain.SecRecoveryCodeUsed),
+		app.MailRecoveryCodesRegenerated:        event(domain.SecRecoveryCodesRegenerated),
+		app.MailMfaFailures:                     event(domain.SecMfaFailures),
+		app.MailAccountDeletionScheduled:        event(domain.SecAccountDeletionScheduled),
+		app.MailAccountRestored:                 event(domain.SecAccountRestored),
+		app.MailAccountDeleted:                  event(domain.SecAccountDeleted),
+		app.MailMfaResetScheduled:               c.mfaReset,
+		app.MailMfaResetCancelled:               c.mfaReset,
+		app.MailMfaResetDone:                    c.mfaReset,
+		app.MailCaptainApplicationApproved:      c.captainDecision,
+		app.MailCaptainApplicationRejected:      c.captainDecision,
+		app.MailCaptainApplicationWithdrawnCity: c.captainWithdrawnCity,
 	}
 	for _, kind := range app.MailKinds() {
 		fn, ok := table[kind]
@@ -212,10 +213,19 @@ func (c *composers) code(ctx context.Context, kind string, ref uuid.UUID, purpos
 		if u.Status == identitydb.UserStatusDeleted {
 			return pmail.Message{}, skip("аккаунт удалён")
 		}
-		// сброс кодом этому аккаунту уже не сменит пароль (как resetBlocked app: бан или почта сменилась, I2) —
-		// письмо с кодом не нужно
-		if purpose == identitydb.AuthCodePurposePasswordReset && (u.Status == identitydb.UserStatusBanned || u.Email != row.Email) {
-			return pmail.Message{}, skip("сброс заблокирован")
+		// сброс кодом этому аккаунту уже не сменит пароль (как resetBlocked app: заблокирован — тот же запрос
+		// UserBlocked, R36, — или почта сменилась, I2) — письмо с кодом не нужно
+		if purpose == identitydb.AuthCodePurposePasswordReset {
+			if u.Email != row.Email {
+				return pmail.Message{}, skip("сброс заблокирован")
+			}
+			blocked, err := c.q.UserBlocked(ctx, identitydb.UserBlockedParams{ID: *row.UserID, Now: c.d.Clock.Now()})
+			if err != nil {
+				return pmail.Message{}, fmt.Errorf("identity: письмо %s: заблокирован ли аккаунт: %w", kind, err)
+			}
+			if blocked {
+				return pmail.Message{}, skip("сброс заблокирован")
+			}
 		}
 		locale = mailLocale(u.Locale)
 	}
@@ -406,6 +416,33 @@ func (c *composers) captainDecision(ctx context.Context, kind string, ref uuid.U
 		args["has_comment"], args["comment"] = "yes", *row.Comment
 	}
 	return c.compose(row.Email, locale, mailName(kind), "text", args)
+}
+
+// captainWithdrawnCity — письмо об отзыве заявки сменой города по captain_applications.id (I-4, Task 7; R39): адрес,
+// язык и ник игрока, название прежнего города (город заявки) и нового (текущий город игрока; названия — на языке страны
+// города, geo_read_city_settings.city_name). Заявки нет, она не withdrawn, аккаунт анонимизирован — ErrSkip.
+func (c *composers) captainWithdrawnCity(ctx context.Context, kind string, ref uuid.UUID) (pmail.Message, error) {
+	row, err := c.q.MailCaptainWithdrawnCity(ctx, ref)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pmail.Message{}, skip("заявки нет")
+	}
+	if err != nil {
+		return pmail.Message{}, fmt.Errorf("identity: письмо %s: заявка: %w", kind, err)
+	}
+	if row.UserStatus == identitydb.UserStatusDeleted {
+		return pmail.Message{}, skip("аккаунт удалён")
+	}
+	if row.Status != identitydb.ApplicationStatusWithdrawn {
+		return pmail.Message{}, skip("заявка не отозвана")
+	}
+	args := map[string]any{"nickname": row.Nickname, "from_city": "", "to_city": ""}
+	if row.FromCity != nil {
+		args["from_city"] = *row.FromCity
+	}
+	if row.ToCity != nil {
+		args["to_city"] = *row.ToCity
+	}
+	return c.compose(row.Email, mailLocale(row.Locale), mailName(kind), "text", args)
 }
 
 // compose — письмо identity.mail.<name>.subject и .<text> с подписью mail.footer.

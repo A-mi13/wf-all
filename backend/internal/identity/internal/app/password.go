@@ -62,7 +62,8 @@ func (a *App) resetRiskKeys(email string) ([]string, error) {
 
 // StartPasswordReset — код сброса (§3.4 п. 1): форма почты (400) → PoW по риску LoginFailed (почта и IP запроса) →
 // лимит по почте → аккаунт active | suspended | pending_deletion до purge_at — настоящий код с user_id; нет, deleted,
-// banned (R29) или pending_deletion с purge_at ≤ now (purgeDue) — приманка без user_id. Работа обеих веток одинакова (m12): строка auth_codes и задача письма
+// заблокирован (R29, R36: banned или бан поверх удаления) или pending_deletion с purge_at ≤ now (purgeDue) — приманка без
+// user_id. Работа обеих веток одинакова (m12): строка auth_codes и задача письма
 // password_reset_code (Composer на приманке отвечает mail.ErrSkip, Task 19). Ответ одинаков.
 func (a *App) StartPasswordReset(ctx context.Context, email string) (CodeSent, error) {
 	norm, ok := emailaddr.Normalize(email)
@@ -91,13 +92,29 @@ func (a *App) StartPasswordReset(ctx context.Context, email string) (CodeSent, e
 	}
 	var sent CodeSent
 	err = db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
-		u, err := identitydb.New(tx).LoginFindUser(ctx, norm)
+		q := identitydb.New(tx)
+		u, err := q.LoginFindUser(ctx, norm)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("identity: аккаунт по почте: %w", err)
 		}
 		p := StartCode{Purpose: identitydb.AuthCodePurposePasswordReset, Email: norm, Decoy: true, Client: Client{IP: ip}}
-		// pending_deletion с вышедшим сроком отмены (purgeDue) — как удалённый: приманка (добор F п. 4)
-		if err == nil && !a.purgeDue(u.Status, u.PurgeAt) {
+		found := err == nil
+		// «заблокирован» (R36) — ровно один запрос UserBlocked в обеих ветках (m12, m3 ревью T7: лишний запрос только
+		// у существующего аккаунта был бы оракулом по времени): нет аккаунта — тот же запрос по uuid.Nil (строки нет)
+		probe := userRow{ID: uuid.Nil, Status: identitydb.UserStatusActive}
+		if found && u.Status != identitydb.UserStatusDeleted {
+			probe = userRow{ID: u.ID, Status: u.Status}
+		}
+		blocked, err := a.blocked(ctx, q, probe, a.clock.Now())
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			blocked = false
+		case err != nil:
+			return err
+		}
+		// pending_deletion с вышедшим сроком отмены (purgeDue) — как удалённый: приманка (добор F п. 4); заблокированный
+		// (R36: banned или бан поверх удаления) — приманка, письма нет
+		if found && !blocked && !a.purgeDue(u.Status, u.PurgeAt) {
 			switch u.Status {
 			case identitydb.UserStatusActive, identitydb.UserStatusSuspended, identitydb.UserStatusPendingDeletion:
 				p.Decoy, p.UserID = false, u.ID
@@ -111,11 +128,14 @@ func (a *App) StartPasswordReset(ctx context.Context, email string) (CodeSent, e
 	return sent, err
 }
 
-// resetBlocked — аккаунт не может сменить пароль сбросом кодом row (R29: banned; deleted — анонимизирован) или код
-// выдан на почту, которая больше не почта аккаунта (I2: смена почты; защита в глубину к RevokeUserCodes — код,
-// вставленный стартом сброса, прочитавшим аккаунт до коммита смены).
-func resetBlocked(u userRow, row codeRow) bool {
-	return u.Status == identitydb.UserStatusBanned || u.Status == identitydb.UserStatusDeleted || u.Email != row.Email
+// resetBlocked — аккаунт не может сменить пароль сбросом кодом row (R29, R36: заблокирован — a.blocked; deleted —
+// анонимизирован) или код выдан на почту, которая больше не почта аккаунта (I2: смена почты; защита в глубину к
+// RevokeUserCodes — код, вставленный стартом сброса, прочитавшим аккаунт до коммита смены).
+func (a *App) resetBlocked(ctx context.Context, tx pgx.Tx, u userRow, row codeRow) (bool, error) {
+	if u.Status == identitydb.UserStatusDeleted || u.Email != row.Email {
+		return true, nil
+	}
+	return a.blocked(ctx, identitydb.New(tx), u, a.clock.Now())
 }
 
 // ConfirmPasswordReset — новый пароль по коду (§3.4 п. 2; C1, N4, N10, R29, R31). До tx — устройство и
@@ -160,7 +180,9 @@ func (a *App) ConfirmPasswordReset(ctx context.Context, in ResetInput, c Client)
 		if err != nil {
 			return err
 		}
-		if resetBlocked(u, row) {
+		if blocked, err := a.resetBlocked(ctx, tx, u, row); err != nil {
+			return err
+		} else if blocked {
 			return errCodeExpired
 		}
 		userID = u.ID
@@ -219,7 +241,12 @@ func (a *App) ConfirmPasswordReset(ctx context.Context, in ResetInput, c Client)
 		if err != nil {
 			return err
 		}
-		if a.codeClosed(row) || row.UserID == nil || *row.UserID != userID || resetBlocked(u, row) {
+		if a.codeClosed(row) || row.UserID == nil || *row.UserID != userID {
+			return errCodeExpired
+		}
+		if blocked, err := a.resetBlocked(ctx, tx, u, row); err != nil {
+			return err
+		} else if blocked {
 			return errCodeExpired
 		}
 		if err := a.consumeCode(ctx, tx, row.ID); err != nil {
