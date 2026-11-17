@@ -78,7 +78,8 @@ type App struct {
 type hooks struct {
 	// afterRowFound — строка кода, вызова или токена найдена без замка, до lockUser (kind — вид строки).
 	afterRowFound func(kind string)
-	// afterFirstLock — сразу после первого оператора с замком сценария (не внутри lockUser, R3-5).
+	// afterFirstLock — после первого оператора с замком сценария (не внутри lockUser, R3-5); место вызова
+	// выбирает сценарий: подача заявки — после замка аккаунта и правила условий (opSubmitCaptainApplication).
 	afterFirstLock func(op string)
 }
 

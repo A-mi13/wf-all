@@ -106,7 +106,7 @@ const deviceJSON = `{"platform":"ios","install_id":"6F9619FF-8B86-4D01-B42D-00CF
 // удаляет последняя задача последнего плана identity. Части — по файлам-владельцам областей pending_<область>_test.go
 // (план I-2, Task 8, R5): параллельные задачи правят только свой файл.
 var pendingOps = slices.Concat(pendingSignup, pendingLogin, pendingSessions, pendingPassword, pendingAccount,
-	pendingDeletion, pendingMfa, pendingMfaReset, pendingI3, pendingI4)
+	pendingDeletion, pendingMfa, pendingMfaReset, pendingI3)
 
 // pendingOpsAtFreezeSHA256 — SHA-256 pendingOpsAtFreeze (TestPendingOpsExpire).
 const pendingOpsAtFreezeSHA256 = "e7325137ad6accfe367f7e23094a8c5eab0080f12a0c2bfbcfb8bda1cbd1251e"
