@@ -94,11 +94,12 @@ peer → IP-аллоулист (`ADMIN_IP_ALLOWLIST`; пусто — выклю�
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
-  собранных staff, geo и подтверждениях отвечает не 501; список `pendingOps` плана B удалён в Task 16), кроме операций
-  identity: `public.Server` встраивает `identity/httpapi.Handler`, `admin.Server` — `*identity/admin.Handler` (с Task 17
-  плана I-2) через псевдоним `identityHandler` — нулевой отвечает `501 http.not_implemented`; временные `pendingOps` и
-  `pendingOpsAtFreeze` с хэшем в `nostub_test.go` обоих пакетов, страж истечения `TestPendingOpsExpire` (план identity
-  I-1, R2, R17); список уменьшается этапами реализации, удаляет его последний план identity. Тест прав admin передаёт
+  собранных staff, geo, identity и подтверждениях отвечает не 501; список `pendingOps` плана B удалён в его Task 16,
+  список identity admin — в Task 12 плана I-4, R1: admin строгий, без списка). `public.Server` встраивает
+  `identity/httpapi.Handler`, `admin.Server` — `*identity/admin.Handler` (с Task 17 плана I-2) через псевдоним
+  `identityHandler` — нулевой отвечает `501 http.not_implemented`. В public временный `pendingOps` = ровно `pendingI3`
+  (14 операций I-3; `TestCoreOpsNotStub`) с `pendingOpsAtFreeze`, хэшем и стражем истечения `TestPendingOpsExpire`
+  (план identity I-1, R2, R17) — их удаляет последняя задача плана I-3. Тест прав admin передаёт
   обязательные заголовки операций (`opsHeaders`: `X-WF-Lookup-Email`, `X-WF-Access-Reason` — иначе валидатор отвечает 400
   до права); кодировку заголовков стережёт `TestLookupHeadersEncoding`.
   нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —

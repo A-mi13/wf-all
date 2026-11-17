@@ -68,12 +68,9 @@ var wantPendingI3 = []string{
 	"startPasskeyRegistration", "startReauthPasskey", "unlinkIdentity",
 }
 
-// wantPendingPublic — что может оставаться заглушкой public после I-2: 14 операций I-3 и 4 операции I-4 (R1).
-var wantPendingPublic = []string{
-	"completeSocialSignup", "createDeviceChallenge", "createSocialNonce", "deletePasskey", "getMyCaptaincy",
-	"linkIdentity", "listMyCaptainApplications", "passkeyLogin", "registerPasskey", "renamePasskey",
-	"socialLogin", "startMfaPasskey", "startPasskeyLogin", "startPasskeyRegistration", "startReauthPasskey",
-	"submitCaptainApplication", "unlinkIdentity", "withdrawCaptainApplication",
+// i4PublicOps — 4 операции public плана I-4 (капитанство игрока): реализованы, не заглушки (R1 плана I-4).
+var i4PublicOps = []string{
+	"getMyCaptaincy", "listMyCaptainApplications", "submitCaptainApplication", "withdrawCaptainApplication",
 }
 
 // allowCaptainChecks — оба порта условий капитанства выполнены (тесты httpapi не импортируют identity/identitytest —
@@ -407,11 +404,20 @@ func coreScenario(t *testing.T) *coreEnv {
 	return e
 }
 
-// TestCoreOpsNotStub — каждая из 32 операций I-2 на собранном сервере отвечает успехом (не 501); заглушки public —
-// подмножество I-3 ∪ I-4, из них ровно 14 операций I-3 (R1 плана I-4); операции identity контракта = I-2 ⊔ I-3 ⊔ I-4.
+// TestCoreOpsNotStub — каждая из 36 операций I-2 и I-4 на собранном сервере отвечает успехом (не 501); заглушки
+// public — ровно 14 операций I-3 (pendingOps = pendingI3, R1 плана I-4, Task 12); операции identity контракта =
+// I-2 ⊔ I-4 ⊔ I-3.
 func TestCoreOpsNotStub(t *testing.T) {
 	t.Parallel()
 	e := coreScenario(t)
+	// капитанство игрока (I-4) — своим игроком в живом городе: подать, увидеть, отозвать
+	_, capTok := captaincyPlayer(t, e, "core_cap", captaincyCity(t, e))
+	e.ok(t, "getMyCaptaincy", e.do(t, http.MethodGet, "/v1/me/captaincy", "", capTok))
+	capApp := str(t, e.ok(t, "submitCaptainApplication", e.do(t, http.MethodPost, "/v1/captain-applications",
+		`{"proposed_format":"6×6 по средам"}`, capTok)), "id")
+	e.ok(t, "listMyCaptainApplications", e.do(t, http.MethodGet, "/v1/me/captain-applications", "", capTok))
+	e.ok(t, "withdrawCaptainApplication", e.do(t, http.MethodPost, "/v1/captain-applications/"+capApp+"/withdraw", "",
+		capTok))
 	seen := map[string]bool{}
 	for _, c := range e.calls {
 		if c.rec.Code == http.StatusNotImplemented || strings.Contains(c.rec.Body.String(), `"code":"`+httpx.CodeNotImplemented+`"`) {
@@ -419,25 +425,18 @@ func TestCoreOpsNotStub(t *testing.T) {
 		}
 		seen[c.op] = true
 	}
-	for _, op := range i2PublicOps {
+	for _, op := range slices.Concat(i2PublicOps, i4PublicOps) {
 		if !seen[op] {
 			t.Errorf("%s: сценарий её не прошёл", op)
 		}
 	}
-	// пока I-4 в работе — подмножество (R1 плана I-4): операции I-4 уходят из pendingOps по задачам, все 14 I-3 — на
-	// месте; точное равенство pendingI3 — Task 12. Заглушки admin сторожит свой TestNoStubOperations.
-	for _, op := range pendingOps {
-		if !slices.Contains(wantPendingPublic, op) {
-			t.Errorf("pendingOps public: %s — не операция I-3 или I-4", op)
-		}
-	}
-	if got, want := sortedSet(pendingI3), sortedSet(wantPendingI3); !slices.Equal(got, want) {
+	// после I-4 — точное равенство (R1 плана I-4, Task 12): заглушки public — ровно 14 операций I-3, пустые списки
+	// областей I-2 ничего не добавляют; заглушек admin нет вовсе (его TestNoStubOperations — строгий)
+	if got, want := sortedSet(pendingI3), sortedSet(wantPendingI3); !slices.Equal(got, want) || len(pendingI3) != 14 {
 		t.Errorf("pendingI3:\n%v\nждали ровно 14 операций I-3:\n%v", got, want)
 	}
-	for _, op := range pendingI3 {
-		if !slices.Contains(pendingOps, op) {
-			t.Errorf("pendingOps public: нет %s — операция I-3 реализована раньше плана I-3?", op)
-		}
+	if got := sortedSet(pendingOps); !slices.Equal(got, sortedSet(wantPendingI3)) || len(pendingOps) != len(got) {
+		t.Errorf("pendingOps public:\n%v\nждали ровно pendingI3 (14 операций I-3, без повторов):\n%v", pendingOps, wantPendingI3)
 	}
 	spec, err := oapi.GetSpec()
 	if err != nil {
@@ -451,8 +450,8 @@ func TestCoreOpsNotStub(t *testing.T) {
 			}
 		}
 	}
-	if got, want := sortedSet(identityOps), sortedSet(slices.Concat(i2PublicOps, wantPendingPublic)); !slices.Equal(got, want) {
-		t.Errorf("операции identity контракта:\n%v\nждали I-2 + заглушки:\n%v", got, want)
+	if got, want := sortedSet(identityOps), sortedSet(slices.Concat(i2PublicOps, i4PublicOps, wantPendingI3)); !slices.Equal(got, want) {
+		t.Errorf("операции identity контракта:\n%v\nждали I-2 + I-4 + заглушки I-3:\n%v", got, want)
 	}
 }
 
@@ -686,6 +685,24 @@ func TestCoreIDOR(t *testing.T) {
 	same("cancelMyMfaReset", e.do(t, http.MethodDelete, "/v1/me/mfa-reset", "", a), missing)
 	if n := count(t, e.pool, `SELECT count(*) FROM mfa_resets WHERE id = $1 AND cancelled_at IS NULL`, rid); n != 1 {
 		t.Error("чужой сброс отменён")
+	}
+	// заявка в капитаны (план I-4, ревью Task 3): отзыв чужой — как несуществующей, чужая не видна ни в списке, ни на
+	// экране капитанства
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET city_id = $2 WHERE id = $1`, bID, captaincyCity(t, e)); err != nil {
+		t.Fatal(err)
+	}
+	bApp := str(t, e.ok(t, "submit b", e.do(t, http.MethodPost, "/v1/captain-applications", `{"note":"по средам"}`, b)), "id")
+	same("withdrawCaptainApplication", e.do(t, http.MethodPost, "/v1/captain-applications/"+bApp+"/withdraw", "", a),
+		e.do(t, http.MethodPost, "/v1/captain-applications/"+uuid.Must(uuid.NewV7()).String()+"/withdraw", "", a))
+	if n := count(t, e.pool, `SELECT count(*) FROM captain_applications WHERE id = $1 AND status = 'pending'`,
+		uuid.MustParse(bApp)); n != 1 {
+		t.Error("чужая заявка отозвана")
+	}
+	if items := e.ok(t, "list a", e.do(t, http.MethodGet, "/v1/me/captain-applications", "", a))["items"].([]any); len(items) != 0 {
+		t.Errorf("чужая заявка в списке: %v", items)
+	}
+	if open := e.ok(t, "captaincy a", e.do(t, http.MethodGet, "/v1/me/captaincy", "", a))["open_application"]; open != nil {
+		t.Errorf("чужая заявка на экране капитанства: %v", open)
 	}
 }
 

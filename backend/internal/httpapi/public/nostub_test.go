@@ -102,9 +102,10 @@ const deviceJSON = `{"platform":"ios","install_id":"6F9619FF-8B86-4D01-B42D-00CF
 
 // pendingOps — операции контракта, которые собранный сервер ещё не исполняет: отвечают 501 http.not_implemented
 // (контракт identity заморожен до кода, этапы спеки выкатываются по очереди — план I-1, R1, R2). Реализовали
-// операцию — убрать её отсюда (TestNoStubOperations падает «убрать из pendingOps»). Список и TestPendingOpsExpire
-// удаляет последняя задача последнего плана identity. Части — по файлам-владельцам областей pending_<область>_test.go
-// (план I-2, Task 8, R5): параллельные задачи правят только свой файл.
+// операцию — убрать её отсюда (TestNoStubOperations падает «убрать из pendingOps»). Части — по файлам-владельцам
+// областей pending_<область>_test.go (план I-2, Task 8, R5): параллельные задачи правят только свой файл. После плана
+// I-4 (Task 12, R1) непуст только pendingI3: pendingOps = pendingI3 ровно (TestCoreOpsNotStub). Список,
+// pendingOpsAtFreeze и TestPendingOpsExpire удаляет последняя задача плана I-3.
 var pendingOps = slices.Concat(pendingSignup, pendingLogin, pendingSessions, pendingPassword, pendingAccount,
 	pendingDeletion, pendingMfa, pendingMfaReset, pendingI3)
 

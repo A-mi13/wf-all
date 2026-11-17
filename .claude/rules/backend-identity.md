@@ -82,8 +82,11 @@ paths:
   сценария не перетирается. Нечитаемые — код выхода 1; обрыв печатает частичный итог. MAC кодов не пересчитываются;
   MAC устройства (`API_IDENTITY_DEVICE_KEYS`) переписывается текущим ключом лениво — при refresh (`rekeyDevice`) и
   входе (`upsertDevice`). Порядок ротации — `docs/deploy-dev.md`.
-- **Стражи:** `TestNoStubOperations` (`httpapi/public/nostub_test.go`, `pendingOps` по `pending_*_test.go`);
-  `identity_core_test.go` (`TestCoreOpsNotStub` — 32 операции и `pendingOps` 18/9 точными множествами,
-  `TestCoreIDOR`, `TestCoreCacheControl`, `TestCoreAnonymousNoIdempotency`, `TestCoreNoPIIInEvents`);
+- **Стражи:** `TestNoStubOperations` (`httpapi/public/nostub_test.go`, `pendingOps` по `pending_*_test.go`; после
+  I-4 непуст только `pendingI3` — 14 операций I-3; admin — строгий, без списка: план I-4, Task 12, R1);
+  `identity_core_test.go` (`TestCoreOpsNotStub` — 36 операций I-2 и I-4 не 501, `pendingOps` public = `pendingI3`
+  точно, операции identity контракта = I-2 ⊔ I-4 ⊔ I-3; `TestCoreIDOR` — сессия, код почты, сброс 2FA и заявка в
+  капитаны чужого = несуществующее; `TestCoreCacheControl`, `TestCoreAnonymousNoIdempotency`, `TestCoreNoPIIInEvents`);
   `app/lock_order_test.go` (`*VsDeleteNoDeadlock`, `TestConfirmResetDeleteBetweenTx` — барьер `hooks.afterRowFound`,
-  ожидание ≤ 2 с). Реализовал операцию — убери её из `pending_*`.
+  ожидание ≤ 2 с). Реализовал операцию I-3 — убери её из `pending_i3_test.go`; список, `pendingOpsAtFreeze` и
+  `TestPendingOpsExpire` public удаляет последняя задача I-3.
