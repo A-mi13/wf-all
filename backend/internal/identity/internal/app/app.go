@@ -45,7 +45,8 @@ import (
 	"wf/backend/internal/platform/token"
 )
 
-// App — сценарии identity. Собирается New (api) или NewMaintenance (воркер, admin-api, rekey).
+// App — сценарии identity. Собирается New (api), NewAdmin (admin-api), NewTx (identity/intx) или NewMaintenance
+// (воркер, rekey).
 type App struct {
 	pool       *pgxpool.Pool
 	clock      clock.Clock
@@ -67,6 +68,10 @@ type App struct {
 	totpIssuer string
 	log        *slog.Logger
 	hooks      *hooks // точки синхронизации тестов; nil в проде
+	// captainChecks — порты условий капитанства (New, NewAdmin; ровно RequiredCaptainChecks)
+	captainChecks []identity.CaptainCheck
+	// staffLinks — текущая связь сотрудника с игроком в tx решения (NewAdmin, R38)
+	staffLinks identity.StaffLinks
 }
 
 // hooks — точки синхронизации тестов пакета app (N1, N6). Ставит только тест; вызовы — владельцы сценариев.
@@ -112,12 +117,58 @@ func New(d identity.Deps) (*App, error) {
 		slices.Sort(missing)
 		return nil, fmt.Errorf("%w: %v", errMissingDeps, missing)
 	}
+	if err := identity.ValidateCaptainChecks(d.CaptainChecks); err != nil {
+		return nil, err
+	}
 	return &App{
 		pool: d.Pool, clock: d.Clock, secrets: d.Secrets, devices: d.Devices, hasher: d.Hasher, limiter: d.Limiter,
 		limiterTx: d.LimiterTx,
 		risk:      d.Risk, human: d.Human, geo: d.Geo, flags: d.Flags, ipgeo: d.IPGeo, legal: d.Legal, tokens: d.Tokens,
 		river: d.River, attestor: d.Attestor, providers: d.Providers, totpIssuer: d.TOTPIssuer, log: d.Log,
+		captainChecks: slices.Clone(d.CaptainChecks),
 	}, nil
+}
+
+// NewAdmin — сценарии admin-api (план I-4, Task 2): заявки в капитаны, поиск игрока, статистика способов входа и
+// сброс 2FA поддержкой. Обязательны Pool, Clock, River, Geo, StaffLinks, Log; порты условий — ровно
+// RequiredCaptainChecks (иначе отказ старта, К1). Кольца identity у admin-api нет (N3): secrets nil.
+func NewAdmin(d identity.AdminDeps) (*App, error) {
+	var missing []string
+	for name, ok := range map[string]bool{
+		"Pool": d.Pool != nil, "Clock": d.Clock != nil, "River": d.River != nil, "Geo": d.Geo != nil,
+		"StaffLinks": d.StaffLinks != nil, "Log": d.Log != nil,
+	} {
+		if !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return nil, fmt.Errorf("%w: NewAdmin %v", errMissingDeps, missing)
+	}
+	if err := identity.ValidateCaptainChecks(d.CaptainChecks); err != nil {
+		return nil, err
+	}
+	return &App{pool: d.Pool, clock: d.Clock, river: d.River, geo: d.Geo, log: d.Log, ipgeo: ipgeo.None,
+		captainChecks: slices.Clone(d.CaptainChecks), staffLinks: d.StaffLinks}, nil
+}
+
+// TxDeps — зависимости сценариев identity/intx (методы в транзакции вызывающего модуля): без портов условий — intx
+// правило капитанства не считает (I7в ревью плана I-4).
+type TxDeps struct {
+	Pool  *pgxpool.Pool
+	Clock clock.Clock
+	River *river.Client[pgx.Tx]
+	Geo   geo.Service
+	Log   *slog.Logger
+}
+
+// NewTx — сценарии для identity/intx; все зависимости обязательны.
+func NewTx(d TxDeps) (*App, error) {
+	if d.Pool == nil || d.Clock == nil || d.River == nil || d.Geo == nil || d.Log == nil {
+		return nil, fmt.Errorf("%w: NewTx — Pool, Clock, River, Geo, Log", errMissingDeps)
+	}
+	return &App{pool: d.Pool, clock: d.Clock, river: d.River, geo: d.Geo, log: d.Log, ipgeo: ipgeo.None}, nil
 }
 
 // NewMaintenance — сценарии воркера, admin-api и rekey (анонимизация, исполнение и назначение сброса 2FA, чистка,

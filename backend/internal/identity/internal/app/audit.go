@@ -28,6 +28,20 @@ const (
 	ActionMfaResetExecuted      = "identity.mfa_reset_executed" // system
 )
 
+// Действия аудита I-4 (план I-4, Task 2; спека §8.3). ПД (почта, причина доступа) — не в before/after: причина
+// доступа — audit.Entry.Reason (R10).
+const (
+	ActionCaptainApplicationSubmitted = "identity.captain_application_submitted"
+	ActionCaptainApplicationWithdrawn = "identity.captain_application_withdrawn"
+	ActionCaptainApplicationApproved  = "identity.captain_application_approved"
+	ActionCaptainApplicationRejected  = "identity.captain_application_rejected"
+	ActionCaptainPermitRevoked        = "identity.captain_permit_revoked"
+	ActionPiiRead                     = "identity.pii_read"      // контакты заявителя, найденный игрок (audit.WriteRead)
+	ActionPlayerLookup                = "identity.player_lookup" // поиск без результата, без object_id (R10)
+	ActionBanExpired                  = "identity.ban_expired"   // system в чистке (R12)
+	ActionCityChanged                 = "identity.city_changed"
+)
+
 // Автор и объект записей identity.
 const (
 	rolePlayer    = "player"
@@ -35,6 +49,9 @@ const (
 	roleSystem    = "system"
 	objectUser    = "user"
 )
+
+// ObjectCaptainApplication — тип объекта записей заявок в капитаны (I-4).
+const ObjectCaptainApplication = "captain_application"
 
 // auditUser — действие игрока над своим аккаунтом (автор и объект — userID). before/after — без ПД: audit.Mask
 // маскирует по словам ключа, свободный текст не класть.

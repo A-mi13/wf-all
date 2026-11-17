@@ -29,7 +29,28 @@ var (
 	sess2   = uuid.MustParse("01930000-0000-7000-8000-000000000012")
 	at      = time.Date(2026, 12, 14, 9, 30, 0, 0, time.UTC)
 	user    = identity.UserRef{ID: userID, Version: 7}
+	appID   = uuid.MustParse("01930000-0000-7000-8000-000000000021")
+	city2   = uuid.MustParse("01930000-0000-7000-8000-000000000022")
+	app1    = identity.ApplicationRef{ID: appID, Version: 1}
+	app2    = identity.ApplicationRef{ID: appID, Version: 2}
 )
+
+// Решение «одобрено» — rejection_code null (не пустая строка и не пропуск ключа): подписчик различает решения по
+// decision, а не по наличию ключа.
+func TestCaptainApplicationDecidedApproved(t *testing.T) {
+	t.Parallel()
+	raw, err := json.Marshal(identity.CaptainApplicationDecided(app2, userID, cityID, "approved", "").Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := m["rejection_code"]; !ok || v != nil || m["decision"] != "approved" {
+		t.Fatalf("payload %s", raw)
+	}
+}
 
 // allEvents — по конструктору на событие каталога I-2 (спека §8.1); имя — golden-файл.
 func allEvents() map[string]events.Event {
@@ -47,6 +68,13 @@ func allEvents() map[string]events.Event {
 		"restrictions_changed":    identity.RestrictionsChanged(user, "active", []string{"match_join"}),
 		"mfa_reset_scheduled":     identity.MfaResetScheduled(reset, userID, at),
 		"mfa_reset_cancelled":     identity.MfaResetCancelled(identity.MfaResetRef{ID: resetID, Version: 2}, userID, at),
+		// I-4: агрегат captain_application (К2: admin-api не меняет users.version)
+		"captain_application_submitted": identity.CaptainApplicationSubmitted(app1, userID, cityID),
+		"captain_application_withdrawn": identity.CaptainApplicationWithdrawn(identity.ApplicationRef{ID: appID, Version: 2}, userID, cityID),
+		"captain_application_decided":   identity.CaptainApplicationDecided(app2, userID, cityID, "rejected", "insufficient_info"),
+		"captain_permit_granted":        identity.CaptainPermitGranted(app2, userID, cityID),
+		"captain_permit_revoked":        identity.CaptainPermitRevoked(identity.ApplicationRef{ID: appID, Version: 3}, userID, cityID),
+		"city_changed":                  identity.CityChanged(user, cityID, city2),
 	}
 }
 

@@ -53,7 +53,23 @@ type Deps struct {
 	Attestor   Attestor          // до I-3 — AttestOff (R2)
 	Providers  ProviderReadiness // до I-3 — NoProviders (R4)
 	TOTPIssuer string            // API_IDENTITY_TOTP_ISSUER
-	Log        *slog.Logger
+	// CaptainChecks — порты условий капитанства, ровно RequiredCaptainChecks (app.New: иначе отказ старта; К1)
+	CaptainChecks []CaptainCheck
+	Log           *slog.Logger
+}
+
+// AdminDeps — зависимости админских сценариев identity у admin-api (app.NewAdmin; план I-4, Task 2): пул роли admin
+// (К2 — users и sessions не пишет), часы, клиент River только для вставки (письма — очередь mail), geo на пуле admin,
+// порты условий капитанства (перепроверка при одобрении, галочки карточки) и связь «сотрудник → игрок» (R38).
+// Кольца identity у admin-api нет (N3).
+type AdminDeps struct {
+	Pool          *pgxpool.Pool
+	Clock         clock.Clock
+	River         *river.Client[pgx.Tx]
+	Geo           geo.Service
+	CaptainChecks []CaptainCheck
+	StaffLinks    StaffLinks
+	Log           *slog.Logger
 }
 
 // WorkerDeps — зависимости задач identity у воркера (письма, анонимизация, исполнение сброса 2FA, чистка): без

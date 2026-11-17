@@ -34,6 +34,8 @@ tasks:
     desc: golangci-lint
     cmds:
       - '{{.TOOLS}}/golangci-lint run ./...'
+      # файлы портов капитанства живого e2e (//go:build wf_e2e) golangci-lint без тега не видит — vet с тегом (m8 плана I-4)
+      - go vet -tags wf_e2e ./cmd/api ./cmd/admin-api
 
   test:
     desc: Все тесты бэкенда (нужен Postgres — ./task infra:up). Цикл TDD — ./task backend:test:watch

@@ -85,15 +85,10 @@ func TestNoStubOperations(t *testing.T) {
 // pendingOps — операции контракта admin, которые собранный сервер ещё не исполняет: отвечают 501
 // http.not_implemented (контракт identity заморожен до кода, этапы спеки выкатываются по очереди — план I-1, R1, R2).
 // Реализовали операцию — убрать её отсюда (TestNoStubOperations падает «убрать из pendingOps»). Список и
-// TestPendingOpsExpire удаляет последняя задача последнего плана identity.
-var pendingOps = []string{
-	// Task 4: заявки в капитаны, поиск игрока, сброс 2FA, статистика способов входа — этап 9 спеки identity
-	"listCaptainApplications", "getCaptainApplication", "getCaptainApplicationContact", "approveCaptainApplication",
-	"rejectCaptainApplication", "getAuthMethodsUsage", "findPlayerByEmail",
-	// requestMfaReset, cancelMfaReset — реализованы (план I-2, Task 17)
-	// связь «сотрудник → учётка игрока» (тег staff, §7.6, R15) — этап 9
-	"putStaffPlayerLink", "deleteStaffPlayerLink",
-}
+// TestPendingOpsExpire удаляет последняя задача последнего плана identity (план I-4, Task 12). Раскладка — по файлам
+// областей pending_{captains,players,staff_link}_test.go (R16 плана I-4): параллельные задачи не правят один литерал;
+// requestMfaReset, cancelMfaReset реализованы планом I-2 (Task 17).
+var pendingOps = slices.Concat(pendingCaptains, pendingPlayers, pendingStaffLink)
 
 // pendingOpsAtFreezeSHA256 — SHA-256 pendingOpsAtFreeze (TestPendingOpsExpire).
 const pendingOpsAtFreezeSHA256 = "0f7a931752bda90d7f417c20d4780f855b5a49c8eff3d2ecf914a353881cef68"

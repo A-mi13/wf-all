@@ -236,8 +236,11 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 	gh := geoadmin.New(geo.New(pool), gd)
 	gh.RegisterApprovals(reg, svc)
 	// identity: письма — mail.SendArgs в очередь mail тем же клиентом вставки (исполняет воркер, R21); кольца identity
-	// у admin-api нет (N3); действие identity.mfa_reset (LockActors) — в том же реестре до Validate
-	ih, err := identityadmin.New(identity.New(pool), identityadmin.Deps{Pool: pool, Clock: d.Clock, River: ins, Log: log})
+	// у admin-api нет (N3); geo — на пуле admin; порты условий капитанства — captainChecks (прод — «недоступно», К1);
+	// связь «сотрудник → игрок» в tx решения — staffLinks (R38); действие identity.mfa_reset (LockActors) — в том же
+	// реестре до Validate
+	ih, err := identityadmin.New(identity.New(pool), identityadmin.Deps{Pool: pool, Clock: d.Clock, River: ins,
+		Geo: geo.New(pool), CaptainChecks: captainChecks(), StaffLinks: staffLinks{}, Log: log})
 	if err != nil {
 		return assembly{}, err
 	}

@@ -106,7 +106,7 @@ func newCodeEnv(t *testing.T, withSession func(pool *pgxpool.Pool, issuer *token
 	ih, err := identityhttp.New(identity.Deps{Pool: pool, Clock: clock.System, Secrets: secrets, Devices: codeRing(t),
 		Hasher: hasher, Limiter: limiter, LimiterTx: pgLimiterTx, Risk: assessor, Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool),
 		IPGeo: ipgeo.None, Legal: legal, Tokens: tokens, River: ins, Attestor: identity.AttestOff{},
-		Providers: identity.NoProviders{}, TOTPIssuer: "WF test", Log: log})
+		Providers: identity.NoProviders{}, TOTPIssuer: "WF test", Log: log, CaptainChecks: allowCaptainChecks()})
 	if err != nil {
 		t.Fatal(err)
 	}

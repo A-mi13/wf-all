@@ -93,6 +93,10 @@ type Querier interface {
 	InsertRoleCities(ctx context.Context, arg InsertRoleCitiesParams) error
 	// Сессии сотрудников (спека сотрудников §4.7). Токен — только SHA-256 (token_hash).
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
+	// Связь «сотрудник → учётка игрока» для чужой транзакции (порт identity.StaffLinks, план I-4 R38): строка учётки
+	// сотрудника FOR SHARE (сериализует с PutPlayerLink/DeletePlayerLink — у них FOR UPDATE той же строки), связь — из
+	// staff_player_links; связи нет — user_id NULL; сотрудника нет — ни одной строки.
+	LinkedPlayerForShare(ctx context.Context, staffID uuid.UUID) (*uuid.UUID, error)
 	// Кому письмо staff.bootstrapped: активные владельцы.
 	ListActiveOwners(ctx context.Context) ([]uuid.UUID, error)
 	// Перешифровка: приглашения с кодом не на текущем ключе (код есть только у живых).

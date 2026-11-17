@@ -292,7 +292,7 @@ func liveIdentity(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *identityad
 	if err != nil {
 		t.Fatal(err)
 	}
-	ih, err := identityadmin.New(identity.New(pool), identityadmin.Deps{Pool: pool, Clock: clk, River: rc, Log: quiet()})
+	ih, err := identityadmin.New(identity.New(pool), identityDeps(pool, clk, rc))
 	if err != nil {
 		t.Fatal(err)
 	}

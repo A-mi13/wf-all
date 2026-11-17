@@ -5,14 +5,10 @@ import (
 	"encoding/base32"
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +61,14 @@ var i2AnonymousOps = []string{
 	"resendAuthCode", "startPasswordReset", "startSignup",
 }
 
-// wantPendingPublic — что остаётся заглушкой public после I-2: 14 операций I-3 и 4 операции I-4 (R1).
+// wantPendingI3 — 14 операций плана I-3 (соцвходы, ключи доступа, аттестация): заглушки до его задач (R1 плана I-4).
+var wantPendingI3 = []string{
+	"completeSocialSignup", "createDeviceChallenge", "createSocialNonce", "deletePasskey", "linkIdentity",
+	"passkeyLogin", "registerPasskey", "renamePasskey", "socialLogin", "startMfaPasskey", "startPasskeyLogin",
+	"startPasskeyRegistration", "startReauthPasskey", "unlinkIdentity",
+}
+
+// wantPendingPublic — что может оставаться заглушкой public после I-2: 14 операций I-3 и 4 операции I-4 (R1).
 var wantPendingPublic = []string{
 	"completeSocialSignup", "createDeviceChallenge", "createSocialNonce", "deletePasskey", "getMyCaptaincy",
 	"linkIdentity", "listMyCaptainApplications", "passkeyLogin", "registerPasskey", "renamePasskey",
@@ -73,11 +76,23 @@ var wantPendingPublic = []string{
 	"submitCaptainApplication", "unlinkIdentity", "withdrawCaptainApplication",
 }
 
-// wantPendingAdmin — заглушки admin после I-2: 7 операций identity и связь «сотрудник → учётка игрока» (I-4, R1, R8).
-var wantPendingAdmin = []string{
-	"approveCaptainApplication", "deleteStaffPlayerLink", "findPlayerByEmail", "getAuthMethodsUsage",
-	"getCaptainApplication", "getCaptainApplicationContact", "listCaptainApplications", "putStaffPlayerLink",
-	"rejectCaptainApplication",
+// allowCaptainChecks — оба порта условий капитанства выполнены (тесты httpapi не импортируют identity/identitytest —
+// archtest; свой литерал порта, I7б ревью плана I-4).
+func allowCaptainChecks() []identity.CaptainCheck {
+	out := make([]identity.CaptainCheck, 0, len(identity.RequiredCaptainChecks))
+	for _, n := range identity.RequiredCaptainChecks {
+		out = append(out, allowCheck(n))
+	}
+	return out
+}
+
+// allowCheck — порт условия капитанства, условие выполнено.
+type allowCheck string
+
+func (c allowCheck) Name() string { return string(c) }
+
+func (allowCheck) Check(context.Context, pgx.Tx, uuid.UUID, uuid.UUID) (string, bool, error) {
+	return "", true, nil
 }
 
 // coreEnv — public API на настоящих сценариях identity: часы теста у сценариев, токенов и загрузчика (пауза повторной
@@ -143,7 +158,7 @@ func newCoreEnv(t *testing.T) *coreEnv {
 		Hasher: hasher, Limiter: ratelimit.Unlimited, LimiterTx: func(pgx.Tx) ratelimit.Limiter { return ratelimit.Unlimited },
 		Risk: assessor, Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool), IPGeo: ipgeo.None, Legal: legal,
 		Tokens: tokens, River: ins, Attestor: identity.AttestOff{}, Providers: identity.NoProviders{}, TOTPIssuer: "WF test",
-		Log: log})
+		Log: log, CaptainChecks: allowCaptainChecks()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,8 +407,8 @@ func coreScenario(t *testing.T) *coreEnv {
 	return e
 }
 
-// TestCoreOpsNotStub — каждая из 32 операций I-2 на собранном сервере отвечает успехом (не 501); заглушки после I-2 —
-// точно 18 операций public (I-3 и I-4) и 9 admin; операции identity контракта = I-2 ⊔ заглушки.
+// TestCoreOpsNotStub — каждая из 32 операций I-2 на собранном сервере отвечает успехом (не 501); заглушки public —
+// подмножество I-3 ∪ I-4, из них ровно 14 операций I-3 (R1 плана I-4); операции identity контракта = I-2 ⊔ I-3 ⊔ I-4.
 func TestCoreOpsNotStub(t *testing.T) {
 	t.Parallel()
 	e := coreScenario(t)
@@ -409,11 +424,20 @@ func TestCoreOpsNotStub(t *testing.T) {
 			t.Errorf("%s: сценарий её не прошёл", op)
 		}
 	}
-	if got, want := sortedSet(pendingOps), sortedSet(wantPendingPublic); !slices.Equal(got, want) {
-		t.Errorf("pendingOps public после I-2:\n%v\nждали (I-3 + I-4):\n%v", got, want)
+	// пока I-4 в работе — подмножество (R1 плана I-4): операции I-4 уходят из pendingOps по задачам, все 14 I-3 — на
+	// месте; точное равенство pendingI3 — Task 12. Заглушки admin сторожит свой TestNoStubOperations.
+	for _, op := range pendingOps {
+		if !slices.Contains(wantPendingPublic, op) {
+			t.Errorf("pendingOps public: %s — не операция I-3 или I-4", op)
+		}
 	}
-	if got, want := sortedSet(adminPendingOps(t)), sortedSet(wantPendingAdmin); !slices.Equal(got, want) {
-		t.Errorf("pendingOps admin после I-2:\n%v\nждали:\n%v", got, want)
+	if got, want := sortedSet(pendingI3), sortedSet(wantPendingI3); !slices.Equal(got, want) {
+		t.Errorf("pendingI3:\n%v\nждали ровно 14 операций I-3:\n%v", got, want)
+	}
+	for _, op := range pendingI3 {
+		if !slices.Contains(pendingOps, op) {
+			t.Errorf("pendingOps public: нет %s — операция I-3 реализована раньше плана I-3?", op)
+		}
 	}
 	spec, err := oapi.GetSpec()
 	if err != nil {
@@ -437,45 +461,6 @@ func sortedSet(s []string) []string {
 	out := slices.Clone(s)
 	slices.Sort(out)
 	return slices.Compact(out)
-}
-
-// adminPendingOps — литерал pendingOps стража заглушек admin (internal/httpapi/admin/nostub_test.go): пакет теста
-// другой, импорт его недоступен — разбор исходника.
-func adminPendingOps(t *testing.T) []string {
-	t.Helper()
-	f, err := parser.ParseFile(token.NewFileSet(), "../admin/nostub_test.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ops []string
-	found := false
-	ast.Inspect(f, func(n ast.Node) bool {
-		vs, ok := n.(*ast.ValueSpec)
-		if !ok || len(vs.Names) != 1 || vs.Names[0].Name != "pendingOps" || len(vs.Values) != 1 {
-			return true
-		}
-		lit, ok := vs.Values[0].(*ast.CompositeLit)
-		if !ok {
-			t.Fatalf("pendingOps admin — не литерал среза: страж читает только литерал")
-		}
-		found = true
-		for _, el := range lit.Elts {
-			bl, ok := el.(*ast.BasicLit)
-			if !ok {
-				t.Fatalf("pendingOps admin: элемент не строка")
-			}
-			s, err := strconv.Unquote(bl.Value)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ops = append(ops, s)
-		}
-		return false
-	})
-	if !found {
-		t.Fatal("pendingOps admin не найден")
-	}
-	return ops
 }
 
 // TestCoreCacheControl — у каждого 2xx с телом операций I-2 Cache-Control равен значению контракта (план I-1, R5);
