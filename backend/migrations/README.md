@@ -283,10 +283,15 @@ I-2. Форма почты — всё, что выдаёт `emailaddr.Normalize`
 `captain_applications_queue_idx`, отдельного индекса по городу и статусу нет. CHECK `users_status_before_deletion`
 пересоздан с тем же именем и `banned` (бан поверх удаления). Живые коды: `auth_codes_live_key` сужен до `purpose <>
 'email_change'`, у смены почты — `auth_codes_live_email_change_key (purpose, user_id, email)`: чужой живой код на тот же
-адрес не гасится, подтверждение выбирает одного уникальностью `users.email`; арбитры `ON CONFLICT` вставок
-(`queries/codes.sql`: `InsertCode`, `InsertEmailChangeCode`) повторяют предикаты индексов дословно — иначе `42P10`.
-Откат возвращает схему `0026` в точности и отказывает с понятным текстом при строках `status_before_deletion = banned`
-и при почте с несколькими живыми кодами смены почты (тест `migrations/identity_0027_test.go`).
+адрес не гасится, подтверждение выбирает одного уникальностью `users.email`; вставка кода (`queries/codes.sql`,
+`InsertCode`) — `ON CONFLICT DO NOTHING` без цели: предикаты индексов она не повторяет (страж
+`TestStartCodeArbiterIndependentOfIndex`). Откат возвращает схему `0026` в точности и отказывает с понятным текстом при
+строках `status_before_deletion = banned` и при почте с несколькими живыми кодами смены почты (тест
+`migrations/identity_0027_test.go`). **Старый бинарник на схеме `0027` несовместим:** его `InsertCode` с арбитром
+`ON CONFLICT (purpose, email) WHERE consumed_at IS NULL AND revoked_at IS NULL` не находит индекса — `42P10` на любом
+старте кода (регистрация, сброс пароля, смена почты → 500). Откат релиза I-4 — только вместе с `migrate down` до
+`0026` (сначала снять `banned` в `status_before_deletion` и дубли живых кодов `email_change` — откат миграции назовёт
+их); окно выкатки (секунды, пока старый инстанс ещё обслуживает трафик) — принятые отказы стартов кода.
 
 **Запланированные изменения.** Спека бэкенда (`docs/superpowers/specs/2026-10-01-backend-architecture-design.md`,
 §11) перечисляет миграции, которые добавят план «фундамента» и спеки модулей: таблицы входа и устройств, `player_profiles`,
