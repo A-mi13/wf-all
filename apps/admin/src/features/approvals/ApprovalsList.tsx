@@ -34,7 +34,7 @@ import {
 import { approvalsListKey, useFindApproval, useSettleDecision } from './queries';
 import { RejectDialog } from './RejectDialog';
 import type { ApprovalBox } from './search';
-import { summarizePayload } from './summary';
+import { type MfaResetSummary, summarizePayload } from './summary';
 import styles from './approvals.module.css';
 
 type Approval = components['schemas']['Approval'];
@@ -369,6 +369,8 @@ function Subject({ approval: a, me }: { approval: Approval; me: Me }) {
   const s = summarizePayload(a.payload, a.action);
   const reason = s.reason && (tr.has(s.reason) ? tr(s.reason) : s.reason);
   // Правила и создание страны (geo.*): цели-сотрудника нет — «Страна» вместо «Кому».
+  // Сброс 2FA игрока (identity.mfa_reset, R28): цель — игрок, не сотрудник: «Игрок <id>», обращение, причина.
+  if (s.mfaReset) return <MfaResetSubject summary={s.mfaReset} />;
   const country = countryText(s);
   if (country)
     return (
@@ -422,6 +424,31 @@ function Subject({ approval: a, me }: { approval: Approval; me: Me }) {
           <dt>{t('comment')}</dt>
           <dd>{s.comment}</dd>
         </>
+      )}
+    </dl>
+  );
+}
+
+function MfaResetSubject({ summary: m }: { summary: MfaResetSummary }) {
+  const t = useTranslations('approvals.summary');
+  return (
+    <dl className={styles.facts} aria-label={t('label')}>
+      <dt>{t('identity.player')}</dt>
+      <dd>{m.userId ?? t('none')}</dd>
+      {m.ticket && (
+        <>
+          <dt>{t('identity.ticket')}</dt>
+          <dd>{m.ticket}</dd>
+        </>
+      )}
+      {m.reason && (
+        <>
+          <dt>{t('identity.reason')}</dt>
+          <dd>{m.reason}</dd>
+        </>
+      )}
+      {m.others.length > 0 && (
+        <dd>{t('identity.others', { count: m.others.length, keys: m.others.join(', ') })}</dd>
       )}
     </dl>
   );

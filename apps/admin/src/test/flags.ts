@@ -1,4 +1,5 @@
 import type { components } from '../api/gen/admin';
+import { flag } from './geo';
 import { problem } from './problem';
 import { http, server } from './server';
 
@@ -55,3 +56,24 @@ export function flagsServer(start: FeatureFlag[]) {
   );
   return { state, calls, answers };
 }
+
+// Флаги способов входа (план I-4, R3): только «везде» (global_only), Google требует Apple, аварийный выключатель
+// входа через Apple включён везде (по умолчанию в проде).
+export const AUTH_FLAGS: FeatureFlag[] = [
+  flag({
+    key: 'auth_apple',
+    description: 'Регистрация через Apple',
+    rules: { global_only: true, requires: null },
+  }),
+  flag({
+    key: 'auth_google',
+    description: 'Регистрация через Google',
+    rules: { global_only: true, requires: 'auth_apple' },
+  }),
+  flag({
+    key: 'auth_apple_login',
+    description: 'Вход через Apple',
+    enabled_globally: true,
+    rules: { global_only: true, requires: null },
+  }),
+];

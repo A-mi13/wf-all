@@ -4,6 +4,7 @@
 export const PROD_SECTIONS = [
   '/',
   '/captains',
+  '/players',
   '/audit',
   '/staff',
   '/approvals',

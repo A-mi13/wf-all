@@ -9,6 +9,9 @@ import { useApi } from '../../api/context';
 export const ROLES_KEY = ['staff', 'roles'] as const;
 export const ACCOUNTS_KEY = ['staff', 'accounts'] as const;
 export const accountKey = (id: string) => [...ACCOUNTS_KEY, 'card', id] as const;
+// Все действия панели сотрудника (и связь с учёткой игрока, I-4) — под одним ключом мутаций: пока любое идёт,
+// панель не закрывается.
+export const ACCOUNT_ACTION_KEY = ['staff', 'account-action'] as const;
 export const accountSessionsKey = (id: string) => [...ACCOUNTS_KEY, 'sessions', id] as const;
 
 // Матрица ролей — одна на экран (матрица и «Правило двух рук» читают один запрос).

@@ -2,12 +2,13 @@ import type { components } from '../api/gen/admin';
 import type { Me } from '../app/permissions';
 import { SHOWCASE_NOW } from '../showcase/params';
 import { approvalsServer } from '../test/approvals';
-import { geoImport } from '../test/geo';
+import { FLAGS, geoImport } from '../test/geo';
 import { CITY_OTHER } from '../test/me';
-import { captainApplication, identityServer, UNAVAILABLE } from '../test/identity';
+import { AUTH_FLAGS, flagsServer } from '../test/flags';
+import { captainApplication, identityServer, UNAVAILABLE, USAGE } from '../test/identity';
 import { problem } from '../test/problem';
 import { http, server } from '../test/server';
-import { approval } from '../test/staff';
+import { account, approval } from '../test/staff';
 
 // Наборы данных режима shots (?shots-fixture=…, ревью UF4-H m3 и UF4-P m9): состояния, которых нет на моках
 // sectionsServer по умолчанию. Вызывается до монтирования приложения; me — роль из адреса, набор может добавить ей
@@ -20,6 +21,10 @@ import { approval } from '../test/staff';
 // - captains-busy — «Капитаны» (I-4 Task 8): очередь из нескольких заявок разных городов, решённые во вкладках, у
 //   карточки — условия как в проде до модулей players/teams (профиль и капитанство «проверить нельзя»), прошлая
 //   отклонённая заявка; роли — права раздела (модератору — scoped, docs/05).
+// - identity-support — I-4 Task 9: флаги со способами входа (только «везде», «требует», аварийный включён везде),
+//   статистика способов входа, у сотрудника карточки (account() по умолчанию) — связь с учёткой игрока; права —
+//   ПД, сброс 2FA (вдвоём), связь (владелец), флаги. Карточку найденного игрока снимком не показать: поиск — по
+//   вводу почты и причины (только в памяти экрана), его держат тесты.
 // «Ищем…» снимком не показать: скрипт снимков ждёт тишины сети (висящий запрос её не даёт) — состояние держат тесты.
 export const SHOTS_FIXTURES = [
   'home-busy',
@@ -27,6 +32,7 @@ export const SHOTS_FIXTURES = [
   'imports-empty',
   'imports-error',
   'captains-busy',
+  'identity-support',
 ] as const;
 export type ShotsFixture = (typeof SHOTS_FIXTURES)[number];
 
@@ -167,6 +173,37 @@ export function applyShotsFixture(name: string | null, me: Me | null): Me | null
           },
         }
       );
+    case 'identity-support': {
+      identityServer({ applications: [], usage: USAGE });
+      flagsServer([...FLAGS, ...AUTH_FLAGS]);
+      const linked = account({
+        player_link: {
+          user_id: '0193a1c1-5d2e-7a10-8b3c-000000000001',
+          nickname: 'kosta_10',
+          linked_at: ago(3 * 24 * 60 * MIN),
+          linked_by_label: 'Ольга В.',
+        },
+      });
+      server.use(
+        http.get('/v1/staff/accounts/{staffId}', ({ params, response }) =>
+          params.staffId === linked.id ? response(200).json(linked) : undefined,
+        ),
+      );
+      return (
+        me && {
+          ...me,
+          permissions: {
+            ...me.permissions,
+            'identity.pii.read': me.role === 'moderator' ? 'scoped' : 'allow',
+            ...(me.role === 'owner'
+              ? { 'identity.mfa.reset': 'dual', 'staff.player_links.manage': 'allow' }
+              : {}),
+            'platform.flags.read': 'allow',
+            ...(me.role === 'moderator' ? {} : { 'platform.flags.manage': 'allow' }),
+          },
+        }
+      );
+    }
     case 'imports-error':
       server.use(
         http.get('/v1/geo/imports', ({ response }) => response.untyped(problem(503, 'internal'))),

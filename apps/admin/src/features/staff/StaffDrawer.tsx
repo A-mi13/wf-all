@@ -32,7 +32,14 @@ import { useSessionLabel } from '../me/sessionLabel';
 import { useInvalidateApprovals } from '../approvals/queries';
 import { cityLabel, useCityNames } from './cities';
 import { CityField } from './CityField';
-import { ACCOUNTS_KEY, accountKey, accountSessionsKey, useRoleLabel } from './queries';
+import { PlayerLinkBlock } from './PlayerLinkBlock';
+import {
+  ACCOUNT_ACTION_KEY,
+  ACCOUNTS_KEY,
+  accountKey,
+  accountSessionsKey,
+  useRoleLabel,
+} from './queries';
 import {
   DISABLE_PERMISSIONS,
   RESET_PERMISSIONS,
@@ -50,8 +57,9 @@ const REASONS: readonly Reason[] = ['left_team', 'security', 'role_change', 'oth
 // Предел комментария к причине — StaffConfirmedAction.comment (maxLength: 500).
 const COMMENT_MAX = 500;
 
-// Все действия панели — под одним префиксом: пока любое идёт, панель не закрывается.
-const ACTION_KEY = ['staff', 'account-action'] as const;
+// Все действия панели — под одним префиксом (ACCOUNT_ACTION_KEY, и связь с учёткой игрока): пока любое идёт,
+// панель не закрывается.
+const ACTION_KEY = ACCOUNT_ACTION_KEY;
 
 // Строка сотрудника (*; спека §9.4 п. 5, §2.5–2.6, §4.9): карточка (getStaffAccount) и действия,
 // разрешённые по me.permissions с учётом роли цели (roles.ts): переотправить приглашение (204; 429 —
@@ -226,6 +234,8 @@ function StaffPanel({
       )}
 
       {actions.resend && <ResendBlock target={a} />}
+      {/* связь с учёткой игрока — только владелец (staff.player_links.manage; блок сам проверяет право) */}
+      <PlayerLinkBlock target={a} />
       {actions.roleOptions.length > 0 && (
         <RoleBlock
           key={a.version}

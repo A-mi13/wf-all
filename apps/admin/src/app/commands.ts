@@ -4,6 +4,7 @@ import { auditCommands } from '../features/audit/commands';
 import { captainsCommands } from '../features/captains/commands';
 import { geoCommands } from '../features/geo/commands';
 import { meCommands } from '../features/me/commands';
+import { playersCommands } from '../features/players/commands';
 import { staffCommands } from '../features/staff/commands';
 import type { Locale } from '../i18n/messages';
 import type { Density } from '../ui/table/prefs';
@@ -142,6 +143,7 @@ const COMMON: Command[] = [
 export const COMMANDS: readonly Command[] = [
   ...COMMON.filter((c) => c.group === 'section'),
   ...captainsCommands,
+  ...playersCommands,
   ...auditCommands,
   ...staffCommands,
   ...approvalsCommands,

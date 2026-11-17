@@ -67,7 +67,8 @@
       "invite": "new staff member",
       "activate": "launch new city",
       "add_country": "new country add create",
-      "captains": "captains captain applications queue review"
+      "captains": "captains captain applications queue review",
+      "players": "support email 2fa reset player lookup"
     },
     "offline": "No connection — search unavailable"
   },
@@ -102,7 +103,8 @@
     "flags": "Feature flags",
     "account": "Profile and settings",
     "account_open": "Profile and settings: {name}",
-    "captains": "Captains"
+    "captains": "Captains",
+    "players": "Players"
   },
   "home": {
     "subtitle": "What needs attention",
@@ -549,6 +551,12 @@
           "6": "Sat",
           "7": "Sun"
         }
+      },
+      "identity": {
+        "player": "Player",
+        "ticket": "Ticket",
+        "reason": "Reason",
+        "others": "{count, plural, one {and # more field} other {and # more fields}}: {keys}"
       }
     },
     "failure": {
@@ -934,6 +942,23 @@
         "confirm_now": "Disable",
         "done": "Account disabled."
       }
+    },
+    "player_link": {
+      "title": "Player account",
+      "none": "Not linked",
+      "text": "The link grants no sign-in: the staff member does not decide applications or reset 2FA of their own player account.",
+      "player": "Player",
+      "linked_by": "Linked by",
+      "link": "Link",
+      "relink": "Link another",
+      "unlink": "Remove link",
+      "dialog_title": "Link to a player account",
+      "dialog_text": "Find the account by email. The search is logged together with the reason.",
+      "confirm": "Link {name} to player account {nickname}?",
+      "linked": "Linked to {nickname}",
+      "unlink_title": "Remove the link between {name} and {nickname}?",
+      "unlink_text": "The staff member gets an email; the action is logged.",
+      "unlinked": "Link removed"
     }
   },
   "reasons": {
@@ -1213,7 +1238,15 @@
       "off": "Off"
     },
     "cities": "Cities: {flag}",
-    "open_cities": "Cities"
+    "open_cities": "Cities",
+    "global_only": "Everywhere only",
+    "requires": "Requires “{flag}”",
+    "required_by": "Required by “{flags}”",
+    "emergency": {
+      "text": "Sign-in with this method turns off for all players at once.",
+      "count": "{count, plural, one {# player signs} other {# players sign}} in only this way — they will be left with “Forgot password?”",
+      "error": "Could not load how many players sign in only this way. You can still turn it off."
+    }
   },
   "geo": {
     "status": {
@@ -1688,5 +1721,50 @@
     },
     "empty": "Queue is empty",
     "empty_text": "New applications will appear here."
+  },
+  "players": {
+    "title": "Players",
+    "subtitle": "Find a player by email and reset 2FA",
+    "lookup": {
+      "title": "Search by email",
+      "text": "Every search is logged together with the reason.",
+      "email": "Player email",
+      "reason": "Reason for viewing",
+      "reason_hint": "For example, a ticket number. Do not enter the player’s personal data",
+      "reason_invalid": "Remove line breaks and control characters",
+      "submit": "Find"
+    },
+    "card": {
+      "id": "Player id",
+      "copy_id": "Copy player id",
+      "city": "City",
+      "city_unknown": "—",
+      "status": "Status",
+      "created": "Created",
+      "mfa": "2FA",
+      "mfa_on": "2FA is on",
+      "mfa_off": "2FA is off",
+      "reset_at": "Reset scheduled for {time}"
+    },
+    "status": {
+      "active": "Active",
+      "suspended": "Suspended",
+      "banned": "Banned",
+      "pending_deletion": "Being deleted",
+      "unknown": "Other status"
+    },
+    "reset": {
+      "request": "Request 2FA reset",
+      "title": "2FA reset: {name}",
+      "text": "For a player who lost all second factors, once identity is verified by the procedure. After a second staff member approves — a 7-day wait with an email to the player: any sign-in with a second factor cancels the reset.",
+      "reason": "Why and how identity was verified",
+      "reason_hint": "Goes to the log and the approval request. Do not enter the player’s personal data",
+      "ticket": "Ticket number",
+      "cancel": "Cancel reset",
+      "cancel_title": "Cancel 2FA reset for {name}?",
+      "cancel_text": "The player keeps 2FA and gets an email about the cancellation.",
+      "cancelled": "2FA reset cancelled",
+      "journal": "The action is logged."
+    }
   }
 }

@@ -1140,3 +1140,43 @@ test.each([
   const [row] = rows(await table('Входящие запросы'));
   expect(row).toHaveTextContent(text);
 });
+
+// Сброс 2FA игрока (план I-4, R28): «Игрок <id>», обращение и причина первого сотрудника из payload; карточку
+// сотрудника по target_id (это игрок) не запрашивает; на телефоне решение доступно (не staff.*, R27).
+test('identity.mfa_reset: игрок, обращение, причина; на телефоне — решения есть', async () => {
+  stubMedia({ width: 390, pointer: 'coarse' });
+  const { seen } = staffServer();
+  approvalsServer({
+    incoming: [
+      approval({
+        id: '0192f1e2-4c5d-7e6f-a081-0000000000b1',
+        action: 'identity.mfa_reset',
+        permission: 'identity.mfa.reset',
+        target_id: '0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90',
+        payload: {
+          v: 1,
+          init_id: IGOR.id,
+          init_ver: 2,
+          init_label: IGOR.label,
+          user_id: '0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90',
+          reason: 'Потерял телефон, личность проверена',
+          ticket: 'SUP-4812',
+          extra: 'x',
+        },
+        requested_by: IGOR,
+      }),
+    ],
+  });
+  renderApp('/approvals', { me: meOwner });
+  const [row] = rows(await table('Входящие запросы'));
+  expect(row).toHaveTextContent('Сброс 2FA');
+  expect(within(row!).getByText('Игрок')).toBeInTheDocument();
+  expect(within(row!).getByText('0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90')).toBeInTheDocument();
+  expect(within(row!).getByText('SUP-4812')).toBeInTheDocument();
+  expect(within(row!).getByText('Потерял телефон, личность проверена')).toBeInTheDocument();
+  expect(within(row!).getByText('и ещё 1 поле: extra')).toBeInTheDocument();
+  expect(within(row!).queryByText('Кому')).toBeNull();
+  expect(within(row!).getByRole('button', { name: 'Подтвердить' })).toBeInTheDocument();
+  expect(row).not.toHaveTextContent(DESKTOP_ONLY);
+  expect(seen.cards).toEqual([]);
+});

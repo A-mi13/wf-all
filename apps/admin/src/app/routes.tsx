@@ -114,6 +114,13 @@ export const routeTree = rootRoute.addChildren([
     }),
     createRoute({
       getParentRoute: () => shellRoute,
+      // поиск игрока: ни фильтров, ни панелей — почта и причина только в памяти экрана (R19)
+      path: paths.players,
+      ...section,
+      component: lazyRouteComponent(() => import('../features/players/PlayersPage'), 'PlayersPage'),
+    }),
+    createRoute({
+      getParentRoute: () => shellRoute,
       path: paths.audit,
       // вкладка, фильтры, период и раскрытая запись журнала — search-параметры (перезагрузка, «Назад»)
       validateSearch: (s: Record<string, unknown>) => ({

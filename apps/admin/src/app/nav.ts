@@ -29,6 +29,13 @@ export const NAV: NavGroup[] = [
         icon: 'captain',
         countLabelKey: 'nav.counts.captains',
       },
+      // поддержка: поиск игрока по почте и сброс 2FA (R20); moderation расширит раздел карточкой игрока
+      {
+        path: paths.players,
+        labelKey: 'nav.players',
+        permission: 'identity.pii.read',
+        icon: 'team',
+      },
     ],
   },
   {

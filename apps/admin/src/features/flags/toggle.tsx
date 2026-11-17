@@ -7,6 +7,8 @@ import { useUndoable } from '../../api/undo';
 import { useCan } from '../../app/session';
 import { Button, Sheet, useErrorText, useIsCoarse, useToast } from '../../ui';
 import { FLAGS_KEY } from '../geo/queries';
+import { emergencyMethod } from './authFlags';
+import { EmergencyDialog } from './EmergencyDialog';
 import { FLAG_CITIES_MAX, type FlagToggle, useFlagUndo, useToggleFlag } from './mutations';
 import { ALL_CITIES_KEY } from './useAllCities';
 
@@ -39,7 +41,9 @@ const BUSY_GLOBAL = '*';
 // по ответу прямого), не оптимистично (клетка — по ответу), подтверждение шторкой на грубом указателе (§3.5,
 // m-5: промах пальцем включил бы функцию городу; на компьютере — без окна). Ошибки: 409 flag_stale — тост
 // «изменили», флаги перечитаны, повтора нет; 422 flag_city_not_found — тост, города перечитаны; 400 при включении
-// города — предел 1000 городов; неизвестный исход — флаги перечитаны (повтор того же — тем же ключом).
+// города — предел 1000 городов; неизвестный исход — флаги перечитаны (повтор того же — тем же ключом); 409
+// flag_requires и 422 flag_global_only — тост errors.platform.*. Выключение аварийного флага входа (auth_*_login,
+// план I-4) — окно EmergencyDialog с числом «входят только так» на любом устройстве (вместо шторки и «сразу»).
 export function useFlagToggle() {
   const t = useTranslations('flagsPage');
   const ta = useTranslations('actions');
@@ -52,6 +56,12 @@ export function useFlagToggle() {
   const undoable = useUndoable(useToggleFlag(), useFlagUndo());
   const [busy, setBusy] = useState<Readonly<Record<string, string>>>({});
   const [ask, setAsk] = useState<{ v: FlagToggle; title: string; success: string } | null>(null);
+  // выключение аварийного флага входа — своё окно с числом «входят только так» (вместо шторки и вместо «сразу»)
+  const [emergency, setEmergency] = useState<{
+    v: FlagToggle;
+    title: string;
+    success: string;
+  } | null>(null);
   // ответ пришёл после ухода со страницы — ошибку снятый экран не показывает (тост «Отменить» живёт сам)
   const alive = useRef(true);
   useEffect(() => {
@@ -134,33 +144,48 @@ export function useFlagToggle() {
       target.kind === 'global' ? { flag: name } : { flag: name, city: target.cityName };
     const which = target.kind === 'global' ? 'all' : 'city';
     const success = t(`toast.${which}_${on ? 'on' : 'off'}`, values);
+    const title = t(`confirm.${which}_${on ? 'on' : 'off'}`, values);
+    if (target.kind === 'global' && !on && emergencyMethod(flag.key))
+      return setEmergency({ v, title, success });
     if (!coarse) return run(v, success);
-    setAsk({ v, title: t(`confirm.${which}_${on ? 'on' : 'off'}`, values), success });
+    setAsk({ v, title, success });
   };
 
   const on = ask?.v.change.on ?? true;
   const sheet = (
-    <Sheet
-      open={ask !== null}
-      onClose={() => setAsk(null)}
-      title={ask?.title ?? ''}
-      description={t('confirm.text')}
-      footer={
-        <>
-          <Button variant="secondary" onClick={() => setAsk(null)}>
-            {ta('cancel')}
-          </Button>
-          <Button
-            onClick={() => {
-              if (ask) run(ask.v, ask.success);
-              setAsk(null);
-            }}
-          >
-            {on ? t('confirm.on') : t('confirm.off')}
-          </Button>
-        </>
-      }
-    />
+    <>
+      <EmergencyDialog
+        open={emergency !== null}
+        title={emergency?.title ?? ''}
+        method={emergency ? emergencyMethod(emergency.v.key) : undefined}
+        onClose={() => setEmergency(null)}
+        onConfirm={() => {
+          if (emergency) run(emergency.v, emergency.success);
+          setEmergency(null);
+        }}
+      />
+      <Sheet
+        open={ask !== null}
+        onClose={() => setAsk(null)}
+        title={ask?.title ?? ''}
+        description={t('confirm.text')}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAsk(null)}>
+              {ta('cancel')}
+            </Button>
+            <Button
+              onClick={() => {
+                if (ask) run(ask.v, ask.success);
+                setAsk(null);
+              }}
+            >
+              {on ? t('confirm.on') : t('confirm.off')}
+            </Button>
+          </>
+        }
+      />
+    </>
   );
 
   return { canManage, cell, toggle, sheet };

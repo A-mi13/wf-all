@@ -10,6 +10,8 @@ export const paths = {
   audit: '/audit',
   // «Капитаны» (I-4): очередь заявок в капитаны; карточка — панель ?application=<id>
   captains: '/captains',
+  // «Игроки» (I-4, R20): поиск игрока по почте и сброс 2FA; почта и причина — только в памяти экрана, не в адресе
+  players: '/players',
   // «Справочники» (план B): города и страница города, страны, импорт GeoNames, версии, флаги
   cities: '/geo/cities',
   city: '/geo/cities/$cityId',

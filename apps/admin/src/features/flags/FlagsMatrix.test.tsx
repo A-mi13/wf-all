@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { HttpResponse } from 'msw';
 import { afterEach, describe, expect, test } from 'vitest';
 import { renderApp } from '../../test/app';
-import { flagsServer } from '../../test/flags';
+import { AUTH_FLAGS, flagsServer } from '../../test/flags';
 import { flag, meDirectoriesAdmin } from '../../test/geo';
 import { CITY_OTHER, CITY_OWN } from '../../test/me';
 import { problem } from '../../test/problem';
@@ -277,5 +277,26 @@ describe('ограничения клеток', () => {
     );
     await user.click(await sw('Подписки: Ставрополь'));
     expect(await screen.findByText('больше 1000 городов — включите везде')).toBeInTheDocument();
+  });
+});
+
+// Правила флагов из контракта (план I-4, R3; спека identity §4.3): global_only — строка только с «Везде», без
+// городских клеток; requires — «требует …» у зависимого и «нужен для …» у того, от кого зависят.
+describe('правила флагов', () => {
+  test('global_only — только «Везде», городских клеток нет; у обычного флага — есть', async () => {
+    setup([flag(), ...AUTH_FLAGS]);
+    expect(await sw('Регистрация через Apple: везде')).toBeInTheDocument();
+    expect(await sw('Подписки: Ставрополь')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('switch', { name: 'Регистрация через Apple: Ставрополь' }),
+    ).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Вход через Apple: Пятигорск' })).toBeNull();
+    expect(screen.getAllByText('Только везде')).toHaveLength(3);
+  });
+
+  test('requires — «Требует» у зависимого, «Нужен для» у того, от кого зависят', async () => {
+    setup(AUTH_FLAGS);
+    expect(await screen.findByText('Требует «Регистрация через Apple»')).toBeInTheDocument();
+    expect(screen.getByText('Нужен для «Регистрация через Google»')).toBeInTheDocument();
   });
 });
