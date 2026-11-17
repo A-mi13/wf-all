@@ -256,7 +256,9 @@ Enter), получает фокус при возврате, если фокус
 (`?shots-role=owner|admin|moderator|setup|anonymous`, `?shots-locale=en`, `?shots-story=<путь>:<экспорт>`; у `anonymous`
 язык задаёт `--locale` скрипта — язык браузера; `?shots-fixture=home-busy|palette-error` — данные состояния
 (`SHOTS_FIXTURES` в `src/shots/fixtures.ts`: главная с делами и ошибкой, 503 поиска городов в палитре);
-`?shots-palette=<текст>` — после первой отрисовки открыть палитру и ввести текст). База моков — только `TEST_API` из `src/test/base.ts`; фикстуры для
+`?shots-palette=<текст>` — после первой отрисовки открыть палитру и ввести текст; `?shots-click=<подпись кнопки>` — после
+отрисовки нажать кнопку с этим текстом, чтобы снять окно, например «Одобрить», «Показать контакты»; кнопки нет — ошибка, а
+не снимок без окна). База моков — только `TEST_API` из `src/test/base.ts`; фикстуры для
 браузера не тянут `vitest`, `@testing-library`, `node:*` (`src/test/{app,render,setup}.tsx` из `src/shots` не
 импортировать). Страж `src/shots/shots.test.ts`: граф импортов от `src/main.tsx` (и динамические `import()`) без `msw`,
 `src/shots`, `src/test`; глобальные стили — только через `src/app/styles.ts`. `ShotsRoot` фиксирует «сейчас»

@@ -23,7 +23,11 @@ paths:
 - **Связь «сотрудник → учётка игрока»** (`staff_player_links`, таблица staff из миграции identity 0025; спека identity
   §7.6, R8 плана I-2): `LoadStaff` читает её тем же запросом `LoadSession` (LEFT JOIN) в `auth.Staff.LinkedUserID`
   (`uuid.Nil` — связи нет; страж `TestLoadStaffLinkedUser`). Поле только читается: модули отказывают в действиях над
-  своей учёткой (`identity.self_action` — запрос, подтверждение и отмена сброса 2FA). Ручки связи
+  своей учёткой (`identity.self_action` — запрос, подтверждение и отмена сброса 2FA). Решения identity по заявкам и
+  исполнитель `identity.mfa_reset` берут связь не из снимка, а портом `identity.StaffLinks` → `staff.LinkedPlayerTx(ctx,
+  tx, staffID) (user, version, err)` в своей транзакции (R38 плана I-4; `FOR SHARE` учётки, затем версия и связь
+  отдельными операторами; адаптер — `cmd/admin-api/staff_links.go`); решение по заявке сверяет `version` с
+  `auth.Staff.Version`. Ручки связи
   (`putStaffPlayerLink`/`deleteStaffPlayerLink`, `internal/app/player_link.go`, план I-4 Task 6) — только
   `staff.player_links.manage = allow` (владелец): одна `db.InTx`, `lockAccounts` (цель `FOR UPDATE`, автор `FOR
   SHARE`) и `checkActor` под замком, без `lockOwners`. Порт `staff.PlayerDirectory` (`Deps.Players`, адаптер над
@@ -201,7 +205,9 @@ paths:
   `TestExecInviteRejectsCityShape`, `TestExecInviteShapeBeforeLocks`).
   - **Порядок замков (m7, M-4):** `lockOwners` (`pg_advisory_xact_lock(ownersLockKey)` — только где возможен страж
     последнего владельца: выключение, сброс, смена роли, `OperatorDisable`; всегда первым) → `lockAccounts` — учётки
-    по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`) → сессии → `staff_mfa` →
+    по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`; замок — отдельным оператором
+    `AcquireAccount`/`LockAccountForShare`, роль и поля учётки — следующим: `lockAccount`, `lockAccountByEmail`,
+    `lockAccounts`; правило — `backend-schema.md`, стражи `TestStaleRole*`) → сессии → `staff_mfa` →
     коды → приглашения. Автор и подтверждающий — `checkActor` под замком: учётка не active/закрыта, сессия погашена
     или истекла — `auth.ErrSessionInvalid`, заменена (`revoked_reason = replaced`) — `auth.ErrSessionReplaced`
     (конвейер и `staffadmin.Problem`: 401 без стирания новой cookie; окно `replacedGrace` не проверяется), роль
@@ -212,7 +218,8 @@ paths:
     в `disable` (и `OperatorDisable`), понижении (`applyRole`), сбросе; кроме `OperatorResetAccess` (выход из тупика).
     В пути подтверждения он защита в глубину: инициатор и подтверждающий — активные владельцы под замком, поэтому
     `last_owner` там недостижим; достижим у оператора (`TestLastOwnerConcurrent`, `-count=30`).
-  - **Версия учётки** растёт при выключении, сбросе, смене роли/городов, повторном приглашении (и `LockOut`).
+  - **Версия учётки** растёт при выключении, сбросе, смене роли/городов, повторном приглашении, внесении и снятии связи
+    с учёткой игрока (R14 плана I-4: отсекает и запросы, где сотрудник — цель) (и `LockOut`).
     payload каждого действия — `v`, `init_id`, `init_ver` (+ цель и её `version`). `checkInitiator`
     (`InitiatorCheck`) — без замка; исполнитель (`execLocks`) повторяет её под `FOR SHARE` и перепроверяет
     подтверждающего; инициатор изменился — `ErrInitiatorChanged` (`initiator_changed`), цель другой версии —

@@ -101,7 +101,10 @@ peer → IP-аллоулист (`ADMIN_IP_ALLOWLIST`; пусто — выклю�
   (14 операций I-3; `TestCoreOpsNotStub`) с `pendingOpsAtFreeze`, хэшем и стражем истечения `TestPendingOpsExpire`
   (план identity I-1, R2, R17) — их удаляет последняя задача плана I-3. Тест прав admin передаёт
   обязательные заголовки операций (`opsHeaders`: `X-WF-Lookup-Email`, `X-WF-Access-Reason` — иначе валидатор отвечает 400
-  до права); кодировку заголовков стережёт `TestLookupHeadersEncoding`.
+  до права); кодировку заголовков стережёт `TestLookupHeadersEncoding`. Значения `X-WF-Lookup-Email` и
+  `X-WF-Access-Reason` (ПД не в URL — план I-1, R19) декодирует модуль, а не конвейер (`identity/admin/headers.go`:
+  percent-decoding, битая кодировка — 400, управляющие и невидимые — 422 `format`); в журнал сервера и ошибки они не
+  попадают — причина только в `audit_log.reason`, почта — нигде (спека identity §7.1).
   нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
   `501 http.not_implemented` без паники. Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод
   ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`)

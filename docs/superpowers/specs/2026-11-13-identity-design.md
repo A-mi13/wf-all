@@ -58,6 +58,43 @@
 | 15.11 | Анонимизация затирает все ПД; отмена удаления возвращает прежний статус (`status_before_deletion`) — решения пользователя | §3.11 |
 | 14.11 | Бан = ограничение `user_restrictions` с `capability = login` | §5.3 |
 
+### 0.2. Поправки плана I-4 (реализация 16–17.11.2026)
+
+Решения плана `docs/superpowers/plans/2026-11-16-identity-4-captaincy-admin.md` («Решения плана», «Решения
+пользователя»), уточняющие спеку; пометка в тексте — «план I-4». Ответы пользователя Q1–Q6 — 16.11.2026.
+
+| # | Поправка | Где |
+| --- | --- | --- |
+| R2 | Миграция `0027`: статистика способов входа — агрегирующее представление `identity_read_auth_method_usage` (без `user_id`, исполняется правами владельца), а не права `admin` на секретные таблицы; индексы очереди и истории заявок; CHECK `status_before_deletion` принимает `banned` (R11) | §5.5, §5.6 |
+| R5, Q4 | Одно правило условий (`evaluateCaptaincy`) для экрана игрока, подачи, карточки и одобрения; пауза 7 дней — **по игроку** (последний отказ в любом городе), не по городу; открытая заявка — `eligible = false` без причины. Город правила читается в транзакции сценария. Пустой набор портов (сборка без портов, `app.NewTx`) — `checks_unavailable`, а не «условий нет» | §3.12, §10.3 |
+| R6 | Одобрение под ролью `admin` без замка `users`: замок — строка заявки `FOR UPDATE`; заявитель в `pending_deletion` — `409 application_closed`. Гонку «одобрение ∥ ограничение `captain`» замок не закрывает — допуск снимает `moderation` через `RevokeRoleInTx` | §7.1 |
+| R8, R39, Q6 | Смена города (`ChangeCityInTx`) отзывает открытую заявку: `withdrawn` с событием, **без** паузы 7 дней, письмо `identity.captain_application_withdrawn_city`; допуски прежнего города не трогаются (решает `teams`) | §3.12, §8.2, §10.2 |
+| R9 | Очередь: `pending` — старые сверху, прочие — по времени решения, новые сверху; заявки `deleted`-аккаунтов не видны нигде (карточка — 404); модератор чужого города — 404, фильтр чужого города — пустая страница; история в карточке — все прошлые заявки игрока | §7.1 |
+| R10 | Контакты заявителя и найденный игрок — `identity.pii_read` (`audit.WriteRead`, причина — `Entry.Reason`); поиск без результата — `identity.player_lookup` без `object_id`; почты в записи нет; модератору «нет» и «чужой город» неотличимы | §7.1, §8.3 |
+| R11, Q1 | Бан поверх удаления: `status` остаётся `pending_deletion`, `purge_at` не меняется, бан — в `status_before_deletion = banned` и строке `login`; пока бан жив — вход `403 account_blocked`, отменить удаление нельзя; бан истёк — `status_before_deletion → active`, вход снова даёт `deletion_pending` | §3.11, §17 |
+| R12 | Истечение бана возвращает статус одним правилом (`banExpired`): снята последняя живая строка `login` → `banned → active` (в периоде удаления — `status_before_deletion`), `version + 1`, событие `restrictions_changed`. В чистке и в отмене удаления (бан истёк, чистка ещё не прошла) — одна функция `expireBanTx` с аудитом `identity.ban_expired` от `system`; в `SetRestrictionsInTx` аудит пишет вызывающий. Бан поверх `suspended` затирает `suspended`: по R12 статус после бана — `active` | §5.10, §10.2, §17 |
+| R13 | `SetRestrictionsInTx` проверен под ролью `api`; у `admin` нет `UPDATE` на `users`/`sessions` (К2) — роль исполнения санкций решает спека `moderation` | §10.2 |
+| R14 | PUT и DELETE связи «сотрудник → игрок» поднимают `staff_accounts.version`: `InitiatorCheck` отсекает запрос сброса 2FA, созданный до связи, — и вообще все ожидающие запросы этого сотрудника (`initiator_changed`), в том числе где он цель; принято | §7.6, §17 |
+| R15 | Ник для связи — порт `staff.PlayerDirectory` (адаптер над `identity.Service.User` в `cmd/admin-api`); `deleted` — `422 staff.player_not_found`, `pending_deletion` — можно | §7.6 |
+| R24 | Запрос удаления отзывает заявки с событием `captain_application_withdrawn`, анонимизация отзывает допуски с `captain_permit_revoked` (на агрегате заявки) | §8.1 |
+| R25 | Допуск капитана всегда с заявкой: `RevokeRoleInTx` на допуске без заявки — ошибка инварианта; анонимизация такой допуск снимает без события (с записью в журнал сервера) | §10.2 |
+| R26 | `contact_link`: схема `https` в любом регистре приводится к `https://` до записи. Через HTTP ветка недостижима — `pattern` контракта `^https://` чувствителен к регистру (`400`); действует ниже контракта (`intx`, тесты) | §3.12 |
+| R36 | Один предикат «заблокирован»: `status = banned` или (`pending_deletion` ∧ `status_before_deletion = banned` ∧ живая строка `login`) — вход, второй фактор, сброс пароля (приманка), отмена удаления, письма, правило условий (`restricted`) | §3.2, §3.11, §3.12 |
+| R37 | Скоуп модератора — по `auth.GrantScoped`, не по числу городов: модератору без городов — никто | §7.1 |
+| R38 | `self_action` — по связи, **перечитанной в транзакции решения**: порт `identity.StaffLinks` → `staff.LinkedPlayerTx` (строка учётки сотрудника `FOR SHARE`, затем отдельными операторами версия учётки и связь). Применяется к решениям по заявкам и к исполнителю `identity.mfa_reset` (подтверждающий; связь из снимка сессии не используется). Решение по заявке сверяет и версию учётки с `auth.Staff.Version` загрузки сессии: роль, города или выключение сменились — `403`. `requestMfaReset`/`cancelMfaReset` берут связь из снимка сессии (запрос перепроверяется при подтверждении, отмена безвредна). Код staff в транзакции identity — межмодульная транзакция вне списка §4.4 спеки бэкенда; исключение по прецеденту хука `LockActors` подтверждений | §7.6, спека бэкенда §4.4 |
+| R40, Q5 | «Один живой код» смены почты — по `(purpose, user_id, email)`: чужой живой код на тот же адрес не гасится; подтверждение выбирает одного уникальностью `users.email` | §3.9 |
+| R41 | Причина доступа к ПД в `audit_log.reason` неизменяема и переживает анонимизацию — журнал доступа неизменяем по назначению; защита у источника: под полем причины в админке подсказка «не указывайте персональные данные игрока» | §7.1, §8.3 |
+| R42 | Живая строка `login` ⇔ заблокирован: `SetRestrictionsInTx` отказывает (`ErrLoginNeedsBan`), если после применения есть живая `login`, а статус (у `pending_deletion` — `status_before_deletion`) не `banned` | §10.2 |
+| Q2 | Срезы public и admin заморожены до последней задачи I-3 | §15 |
+| Q3 | На стенде капитанство отвечает `checks_unavailable` до модулей `players`/`teams`; тестовой сборки стенда нет — тег `wf_e2e` только для e2e | §10.3 |
+| T2 | Ключи писем staff — `staff.<письмо>.{subject,body}`, как у существующих писем staff (не `…mail.<письмо>.{subject,text}` identity) | §7.6 |
+| T3, T2 | Свободные поля без управляющих и невидимых символов: заявка — §3.12; причина доступа и почта поиска — `422 validation.failed` с правилом `format` по полю заголовка | §3.12, §7.1 |
+| T4 | Повторное одобрение при живом допуске в городе — `409 identity.captain_ineligible` с причиной `already_permitted` (уникальность `role_assignments`); код причины отказа — в `after.reason_code` аудита (`code` маскирует `audit.Mask`); комментарий модератора — в обоих письмах решения, в аудит и события не идёт | §7.1, §8.2, §8.3 |
+| T4 | Город в письме решения — название на языке страны города (`geo_read_city_settings.city_name`): экспортированного представления названий на других языках у `geo` нет — **открытый вопрос** (§17) | §8.2 |
+| T5 | Игрок с `users.city_id = NULL` поиском по почте не находится ни для одной роли (`404`): нулевой uuid сотруднику — ложные данные, а `city_id` в контракте обязателен. В ответах самому игроку (`Me.city_id`, `eligibility.city_id`) нулевой uuid значит «города нет» (прецедент `getMe`) | §7.1, §3.12 |
+| T7 | `identity/intx`: tx — параметром, на том же соединении, что транзакция `db.InTx` в ctx (события и аудит берут tx из ctx); SAVEPOINT вызывающего (`tx.Begin`, исполнитель подтверждений) законен; чужое соединение или ctx без транзакции — `ErrTxMismatch` до записей. Вызывающий берёт `users` первым: `SetRestrictionsInTx`, `ChangeCityInTx` — раньше `RevokeRoleInTx` | §10.2 |
+| T9 | Админка: поиск игрока — новый ключ запроса на каждую отправку; отмена сброса обновляет карточку по ответу без повторного поиска; аварийное окно без строки способа в статистике — «число неизвестно», а не 0 | §7.4, §7.5 |
+
 ## 1. Зачем, цели, границы
 
 ### 1.1. Зачем
@@ -500,6 +537,12 @@ deletion_restore`) → прежний статус из `status_before_deletion`
 Права воркера для анонимизации — §5.5. Аккаунты, удалённые до миграции `0026`, её накат затирает тем же списком (без
 письма, события, аудита и карантина ника — `backend/migrations/0026_identity_deletion.sql`).
 
+Бан и удаление (план I-4, решение пользователя Q1; R11, R12, R36): удаление сильнее по статусу — бан в периоде
+удаления не прерывает его (`purge_at` не меняется), а пишется в `status_before_deletion = banned` и строку `login`.
+Пока бан жив, вход отвечает `403 account_blocked`, отменить удаление нельзя; бан истёк (в том числе до прохода чистки)
+— `status_before_deletion → active`, вход снова предлагает восстановление. Запрос удаления отзывает открытую заявку в
+капитаны (событие `captain_application_withdrawn`), анонимизация — допуски (`captain_permit_revoked`, R24).
+
 ### 3.12. Заявка в капитаны и её рассмотрение
 
 Условия (спека бэкенда §7.1): подтверждённая почта; возраст на дату заявки ≥ `min_signup_age` страны города;
@@ -526,6 +569,23 @@ deletion_restore`) → прежний статус из `status_before_deletion`
    `409 identity.application_cooldown {available_at}`; одна открытая заявка на город. Отзыв своей заявки паузы не
    ставит. `getMyCaptaincy.eligibility` показывает `available_at`.
 8. Испытательный срок — `is_probationary = true` у одобренной заявки; снимает `teams` (спека `teams`).
+
+Уточнения плана I-4 (§0.2):
+
+- Пауза 7 дней — по игроку: последний отказ в любом городе (решение пользователя Q4, R5); иначе её обходила бы смена
+  города. Одно правило условий (`evaluateCaptaincy`) для экрана, подачи, карточки и одобрения; ответ подачи — первая
+  ошибка по порядку «причины → открытая заявка → пауза».
+- Город заявки — текущий город игрока, читается в транзакции сценария. Города нет (`users.city_id = NULL` — город удалён
+  из справочника) или страна города выключена — `checks_unavailable`; в `eligibility.city_id` тогда нулевой uuid
+  («города нет», как `Me.city_id`).
+- Смена города (`ChangeCityInTx`) отзывает открытую заявку: `withdrawn`, без паузы, письмо
+  `identity.captain_application_withdrawn_city` (решение пользователя Q6, R8, R39).
+- Свободные поля: `proposed_format`, `proposed_pitch`, `play_frequency`, `note` — без управляющих символов (в `note`
+  допустимы `\n` и `\t`, `\r` — нет); `contact_link` — без пробелов и невидимых символов. Поле только из пробелов или
+  невидимых — `400 validation.failed` с `minLength`, прочее — с `pattern`. Схема `https` ссылки в любом регистре
+  приводится к `https://` (R26) — ниже контракта: через HTTP `HTTPS://…` отвергает `pattern` (`400`).
+- Подача и отзыв ограничены только общим классом лимита: цикл «подать — отозвать» плодит заявки и записи журнала
+  модератора — вопрос спеки `moderation` (§17).
 
 ### 3.13. Свежий вход (повторная проверка)
 
@@ -780,6 +840,10 @@ CREATE TYPE identity_provider AS ENUM ('apple', 'google');
 | `nickname_changes`, `reserved_nicknames` | DML | `SELECT, DELETE` | `SELECT` |
 | представления `identity_read_*` | `SELECT` | `SELECT` | `SELECT` |
 
+Статистика способов входа для `getAuthMethodsUsage` (план I-4, R2): `admin` читает агрегирующее представление
+`identity_read_auth_method_usage` (`0027`, ветка представлений `grants.sql`, исполняется правами владельца), а не
+`user_identities`, `passkeys` и `credentials` — права `admin` на секретные таблицы не расширяются (К2).
+
 Страж — `grants_test.go`: под `admin` нельзя прочитать `credentials`, `user_mfa`, `auth_codes`, `user_identities`,
 `passkeys`; под `worker` — `credentials.password_hash`, `user_mfa.secret_enc`.
 
@@ -796,6 +860,7 @@ CREATE TYPE identity_provider AS ENUM ('apple', 'google');
 | `identity_read_linked_accounts` | `user_id`, `linked_user_id`, `device_id`, `last_seen_at` (пара — в обе стороны) | `results` (подсчёт голосов), `moderation` |
 | `identity_read_captain_permits` | `user_id`, `city_id`, `granted_at`, `application_id`, `is_probationary` (живые допуски) | `teams` |
 | `identity_read_restrictions` | `user_id`, `capability`, `until` (действующие) | `moderation`, отчёты |
+| `identity_read_auth_method_usage` (`0027`, план I-4 R2) | `method` (`apple`, `google`, `passkeys`), `only_method`, `linked` — агрегаты без `user_id` | `identity` в admin-api (экран флагов) |
 
 Приватного (почта, телефон, дата рождения) в представлениях нет (спека бэкенда §4.2). Возраст на дату матча для
 `matches` — производная (`age_years()` внутри представления) — вводит спека `matches`.
@@ -1159,6 +1224,20 @@ CSRF, `x-permission`, идемпотентность — admin-api как ест
 решении, пустой список. Коды: `identity.application_not_found` 404, `identity.application_closed` 409,
 `identity.captain_ineligible` 409 (+`reasons`), `validation.failed`.
 
+Уточнения плана I-4 (§0.2):
+
+- Скоуп модератора — по `auth.GrantScoped` (R37): модератору без городов не видна ни одна заявка и ни один игрок.
+  Очередь — R9; заявки `deleted`-аккаунтов не видны нигде.
+- Заголовки `X-WF-Access-Reason` и `X-WF-Lookup-Email` декодирует модуль (`identity/admin`): после декодирования без
+  управляющих и невидимых символов, иначе `422 validation.failed` с правилом `format` по полю заголовка; причина — только
+  в `audit_log.reason`, неизменяема и переживает анонимизацию (R41).
+- Поиск по почте: игрок без города (`users.city_id = NULL`) не находится ни для одной роли — `404`, как несуществующий
+  (нулевой uuid сотруднику был бы ложными данными). Поиск без результата — аудит `identity.player_lookup` (R10).
+- Одобрение при живом допуске в городе — `409 identity.captain_ineligible` с `already_permitted`. Комментарий решения
+  проверяется так же, как свободные поля заявки (§3.12); `\r` — `400`.
+- Решение по заявке перечитывает связь и версию учётки сотрудника в своей транзакции (R38): связь с заявителем —
+  `409 identity.self_action`, версия учётки не та, что при загрузке сессии (роль, города, выключение, связь), — `403`.
+
 **Одобрение** — одна транзакция: `SELECT … FOR UPDATE` заявки; `pending` (иначе `application_closed`); перепроверка
 условий портами и своими правилами; `role_assignments (captain, city, application_id, granted_by_staff_id)`; заявка
 `approved`, `reviewed_*`, `version + 1`; события `identity.captain_application_decided`,
@@ -1210,11 +1289,22 @@ CSRF, `x-permission`, идемпотентность — admin-api как ест
 Экран капитанов — по правилам `admin-ui` (свои контролы, возврат из вложенных, мобильная вёрстка 390); решения на
 телефоне не скрываются (не `staff.*`). Снимки — `./task admin:shots`.
 
+Реализация плана I-4 (правило `.claude/rules/admin-identity.md`): «Сброс 2FA» — раздел «Игроки» (`/players`, право
+`identity.pii.read`). Почта, причина, контакты и найденный игрок — только в памяти экрана (не в адресе, storage,
+черновиках, кэше запросов). Каждая отправка поиска — новый ключ запроса (повтор того же поиска — новая запись журнала);
+отмена сброса обновляет карточку по ответу, без повторного поиска. «Одобрить» недоступна, пока хоть одно условие не
+`ok`. Новые действия не «только с компьютера» (R27). Сводка подтверждения `identity.mfa_reset` — «Игрок <id>»,
+обращение и причина из payload (R28).
+
 ### 7.5. Правки платформы флагов в админке
 
 `AdminFlagCodes` += `platform.flag_global_only` (422), `platform.flag_requires` (409); `x-error-codes`
 `updateFeatureFlag`; enum `FeatureFlagKey` += шесть ключей (`TestFlagKeysMatchContract`); тексты в
 `apps/admin/messages`. Город в `GlobalOnly`-флаге UI не предлагает, сервер всё равно отвергает.
+
+План I-4: правила флагов — в контракте (`FeatureFlag.rules {global_only, requires}`, admin 0.4.0, R3), админка копии
+не держит. Окно выключения аварийного флага берёт число `only_method` из `getAuthMethodsUsage`; нет строки способа или
+ошибка запроса — текст «число неизвестно», а не 0, и выключить всё равно можно.
 
 ### 7.6. Связь «сотрудник → учётка игрока» (U5; решение контроллера 13.11, К3)
 
@@ -1233,6 +1323,14 @@ CSRF, `x-permission`, идемпотентность — admin-api как ест
   `cancelMfaReset`; исполнитель `identity.mfa_reset` при подтверждении — тоже (подтверждающий связан с игроком →
   `approvals.Fail`). Чтение своей карточки не запрещается.
 - Правило переходит в `docs/05` §5.3 (U5): для identity — выполнено; `moderation` и `teams` применяют то же поле.
+- План I-4 (§0.2): решения по заявкам и исполнитель `identity.mfa_reset` берут связь не из `auth.Staff.LinkedUserID`, а
+  перечитывают её в своей транзакции портом `identity.StaffLinks` → `staff.LinkedPlayerTx(ctx, tx, staffID) (user,
+  version, err)` (R38): владелец мог связать сотрудника с игроком между загрузкой сессии и решением. Запрос и отмена
+  сброса 2FA — по снимку сессии. Внесение и снятие связи поднимают `staff_accounts.version` (R14) и тем отсекают все
+  ожидающие подтверждения, где сотрудник инициатор (`initiator_changed`) или цель (`approval_stale`), а решения по заявкам, начатые до изменения, получают `403`.
+  Письмо о снятии связи уходит и при удалённом игроке (вместо ника — «удалённый игрок»). Связь видна только владельцу
+  (`staff.player_links.manage`); в журнале действий она видна и админу (аудит `staff.player_linked`/`…_unlinked`).
+  Ключи писем — `staff.<письмо>.{subject,body}`.
 
 ## 8. События, письма, аудит
 
@@ -1267,6 +1365,11 @@ Payload — только идентификаторы, `v = 1`, без почт�
 
 Подписчиков в этой спеке нет (кроме своих задач чистки). Golden-файлы payload — тест событий.
 
+План I-4: запрос удаления публикует `captain_application_withdrawn` по каждой отозванной заявке, анонимизация —
+`captain_permit_revoked` по каждому снятому допуску (R24); снятие допуска и отзыв заявки — на агрегате заявки.
+`restrictions_changed` у аккаунта в периоде удаления несёт `status = pending_deletion`: что бан наложен, подписчик из
+события не узнаёт — вопрос спеки `moderation` (§17).
+
 ### 8.2. Письма (`platform/mail`, очередь `mail`, воркер)
 
 Вид — `identity.<письмо>`; `mail.Composer` модуля по `ref` находит адрес и язык (`users.locale`) и собирает текст из
@@ -1294,7 +1397,8 @@ Payload — только идентификаторы, `v = 1`, без почт�
 | `identity.account_restored` | `security_events.id` | владелец | удаление отменено |
 | `identity.mfa_reset_scheduled`, `identity.mfa_reset_cancelled`, `identity.mfa_reset_done` | `mfa_resets.id` | владелец | сброс 2FA поддержкой: назначен (дата, как отменить), отменён, выполнен |
 | `identity.account_deleted` | `security_events.id` (адрес — `meta_enc`) | бывший владелец | аккаунт удалён |
-| `identity.captain_application_approved`, `…_rejected` | `captain_applications.id` | заявитель | решение и комментарий |
+| `identity.captain_application_approved`, `…_rejected` | `captain_applications.id` | заявитель | решение и комментарий (в обоих письмах; план I-4); город — название на языке страны города |
+| `identity.captain_application_withdrawn_city` | `captain_applications.id` | заявитель | заявка отозвана сменой города — подайте заново в новом городе (план I-4, R39) |
 
 Код истёк или погашен к моменту отправки — `mail.ErrSkip`. Сборка писем с кодами требует кольца секретов у воркера
 (`WORKER_IDENTITY_SECRET_KEYS`).
@@ -1336,8 +1440,14 @@ Payload — только идентификаторы, `v = 1`, без почт�
 | `identity.login_failed` | `anonymous` | — | только для существующего аккаунта: `object_id` не пишется, чтобы журнал не стал оракулом (решение автора спеки); подробности — `security_events` |
 | `identity.password_changed`, `identity.password_reset`, `identity.email_changed`, `identity.nickname_changed`, `identity.mfa_enabled`, `identity.mfa_disabled`, `identity.identity_linked/unlinked`, `identity.passkey_added/removed`, `identity.sessions_revoked` | игрок | user | `before`/`after` без ПД (маскирование `audit.Mask`) |
 | `identity.captain_application_submitted/withdrawn` | игрок | captain_application | `scope_city_id` |
-| `identity.captain_application_approved/rejected` | сотрудник | captain_application | `scope_city_id`, код причины |
-| `identity.pii_read` | сотрудник | user | аудит чтения (`audit.WriteRead`), причина в `meta` |
+| `identity.captain_application_approved/rejected` | сотрудник | captain_application | `scope_city_id`, код причины — `after.reason_code` (`code` маскирует `audit.Mask`); комментария нет |
+| `identity.pii_read` | сотрудник | user | аудит чтения (`audit.WriteRead`), причина — `audit_log.reason` (неизменяема, R41) |
+| `identity.player_lookup` (план I-4, R10) | сотрудник | user, без `object_id` | поиск по почте без результата, `after {found: false}`; почты нет |
+| `identity.ban_expired` (план I-4, R12) | `system` | user | бан истёк в чистке или при отмене удаления |
+| `identity.city_changed` (план I-4) | игрок | user | смена города через `ChangeCityInTx` |
+
+`RevokeRoleInTx` и `SetRestrictionsInTx` аудит не пишут — запись своего действия делает вызывающий (`teams`,
+`moderation`); исключение — смена города: её автор — сам игрок, запись пишет `ChangeCityInTx`.
 
 `security_events` — журнал безопасности аккаунта (виды: `signup`, `login`, `login_failed`, `new_device`,
 `refresh_reuse`, `password_changed`, `password_reset`, `email_changed`, `mfa_*`, `recovery_code_used`, `identity_*`,
@@ -1445,10 +1555,27 @@ Payload — только идентификаторы, `v = 1`, без почт�
 | Метод | Вызывающий | Что |
 | --- | --- | --- |
 | `RevokeRoleInTx(ctx, tx, userID, cityID, by RevokeBy, reason)` | `teams`, `moderation` | отзыв допуска капитана; событие `captain_permit_revoked` |
-| `SetRestrictionsInTx(ctx, tx, userID, RestrictionsChange)` | `moderation` (спека `moderation`; в этом этапе только интерфейс и реализация с тестами, вызовов из admin-api нет — решение контроллера 13.11, К2) | статус (`active\|suspended\|banned`) и ограничения возможностей; бан отзывает все сессии; событие `restrictions_changed` |
+| `SetRestrictionsInTx(ctx, tx, userID, RestrictionsChange) (RestrictionsResult, error)` | `moderation` (спека `moderation`; в этом этапе только интерфейс и реализация с тестами, вызовов из admin-api нет — решение контроллера 13.11, К2) | статус (`active\|suspended\|banned`) и ограничения возможностей; бан отзывает все сессии; событие `restrictions_changed` |
 | `ChangeCityInTx(ctx, tx, userID, cityID)` | `teams` | смена города; событие `city_changed` |
 
 `GrantRoleInTx` из §4.4 удаляется (одобрение — внутри identity, §2.3). Страж §12.3 сверяет пары.
+
+Реализация плана I-4 (`identity/intx`, сборка `intx.New(Deps{Pool, Clock, Geo, River, Log})`; вызывающих пока нет,
+кроме тестов):
+
+- **Транзакция.** `tx` — параметром и на том же соединении, что транзакция `db.InTx` в ctx: события и аудит берут tx из
+  ctx, запросы — из параметра. SAVEPOINT вызывающего (`tx.Begin` — так исполнитель `platform/approvals` получает tx)
+  законен; tx другого `db.InTx` или ctx без транзакции — `ErrTxMismatch` до любых записей.
+- **Порядок замков (R7).** Вызывающий берёт `users` первым: `SetRestrictionsInTx`, `ChangeCityInTx` — раньше
+  `RevokeRoleInTx` (строка заявки, затем допуск); обратный порядок против анонимизации даёт `40P01`.
+- **Ошибки** (`errors.Is`): `ErrUserNotFound`, `ErrUserDeleted`, `ErrPermitNotFound`, `ErrCityNotFound`,
+  `ErrBanNeedsLogin` (бан без строки `login`), `ErrLoginNeedsBan` (R42). `SetRestrictionsInTx` применяет изменение под
+  SAVEPOINT — отказ не оставляет записей в tx вызывающего.
+- **Статус.** Бан отзывает все сессии; в периоде удаления меняется только `status_before_deletion`, `purge_at` не
+  трогается (R11); снятие последней живой `login` → `active` (R12). Допуск без заявки — ошибка инварианта (R25).
+  `ChangeCityInTx` отзывает открытую заявку (R39), пишет аудит `identity.city_changed` и событие `city_changed`.
+- **Правило условий** в `intx` не считается (сборка `app.NewTx` без портов); если посчитается — без портов отказывает
+  `checks_unavailable` (К1).
 
 ### 10.3. Порты условий капитанства
 
@@ -1609,6 +1736,11 @@ backend/internal/platform/flags/      + Rules (GlobalOnly, Requires)
 
 Этапы 4–8 можно вести двумя исполнителями параллельно по непересекающимся путям после этапа 3.
 
+Порядок планов (решение пользователя 16.11): I-4 (этап 9 — капитанство и админка) идёт **раньше** I-3 (устройства,
+соцвходы, ключи доступа — к подготовке выпуска в сторы). После I-4 в public заглушками остаются ровно 14 операций I-3,
+в admin заглушек нет; оба среза заморожены до последней задачи I-3 (Q2) — там же решение о страже
+`identity-freeze.test.mjs`. Требования I-4 из §17 закрыты планом I-4 (R11, R12, R14, R36, R42; Task 1, 6, 7).
+
 ## 16. Обновление документов (в коммитах плана)
 
 - Спека бэкенда: §2 (соцвходы и 2FA — сейчас), §4.1 (`captain_applications` и новые таблицы — identity), §4.4 (без
@@ -1639,7 +1771,10 @@ backend/internal/platform/flags/      + Rules (GlobalOnly, Requires)
 
 ## 17. Открытые вопросы (продуктовые развилки)
 
-**Требования к плану I-4 (из реализации I-2; план I-2, «Передача следующим планам»):**
+**Требования к плану I-4 (из реализации I-2; план I-2, «Передача следующим планам») — закрыты планом I-4:**
+истечение бана — R12 (Task 7); бан поверх удаления — R11, R36, R42 (решение пользователя Q1; Task 1, 7);
+`status_before_deletion` всегда актуален — R11 (Task 7); связь инициатора сброса 2FA — подъём версии учётки, R14
+(Task 6); статус в `requireFresh` и `deleteAccount` — Task 7. Текст требований — ниже, для истории.
 
 - **Истечение временного бана возвращает статус.** Чистка снимает истёкшую строку ограничения `login` (`lifted_at`,
   §5.10), а `users.status` остаётся `banned` — по §5.3 «нет строки — бессрочно» бан становится вечным. I-4 (вместе со
@@ -1656,6 +1791,20 @@ backend/internal/platform/flags/      + Rules (GlobalOnly, Requires)
 - **Статус в `requireFresh` и `deleteAccount`.** Они не проверяют `users.status`: бан в окне кэша загрузчика (≤ 5 с)
   доводит запрос до записи, которую CHECK отвергает (`23514` → `500`). С появлением бана (I-4) статус не
   `active | suspended` под замком должен давать `401` (`errSessionGone`), как мёртвая сессия.
+
+**Открытые вопросы после I-4** (не блокируют; адресат — указан):
+
+- **Спека `moderation`: `restrictions_changed` в периоде удаления.** Бан поверх `pending_deletion` публикует событие со
+  `status = pending_deletion` — подписчик (`moderation`, `notify`) не узнаёт, что аккаунт забанен. Решить, нужен ли
+  `status_before_deletion` в payload (контракт событий — `events.go`, golden-файлы).
+- **Спека `moderation`: бан затирает `suspended`.** Бан поверх `suspended`, затем истечение бана по R12 возвращает
+  `active` — приостановка теряется (это статус, не строка ограничения). По R12 так задумано; спека `moderation`
+  фиксирует, держать ли приостановку строкой ограничения. Там же — снятие приостановки в периоде удаления (сброс
+  `status_before_deletion` по образцу R12) и лимит цикла «подать — отозвать» заявку в капитаны (сейчас — только общий
+  класс лимита).
+- **Спека `geo`: название города на языке получателя.** Письма решения по заявке берут `geo_read_city_settings.city_name`
+  (язык страны города): экспортированного представления названий на других языках (`geo_read_city_names`) нет. Завести
+  представление в `geo` или принять — решение пользователя.
 
 Все продуктовые вопросы закрыты (§0). В7 (домен продукта, rpId) решён 13.11: домен задаётся конфигурацией деплоя, а не настройкой админки — смена домена обнуляет ключи доступа и требует нового релиза приложения (associated domains / assetlinks в сборке); выбор самого домена — вместе с брендом, до включения `auth_passkeys` на проде.
 
