@@ -21,6 +21,7 @@ var identityTables = []string{
 	"security_events", "user_restrictions", "role_assignments", "captain_applications", "nickname_reservations",
 	"nickname_changes", "reserved_nicknames", "staff_player_links",
 	"identity_read_users", "identity_read_linked_accounts", "identity_read_captain_permits", "identity_read_restrictions",
+	"identity_read_auth_method_usage",
 }
 
 // identityMatrix — права ролей на уровне таблицы по §5.5 построчно: S — SELECT, I — INSERT, U — UPDATE, D — DELETE;
@@ -53,6 +54,8 @@ var identityMatrix = map[string][3]string{ // api, worker, admin
 	"identity_read_linked_accounts": {"S", "S", "S"},
 	"identity_read_captain_permits": {"S", "S", "S"},
 	"identity_read_restrictions":    {"S", "S", "S"},
+	// 0027 (R2): ветка представлений grants.sql, без правки
+	"identity_read_auth_method_usage": {"S", "S", "S"},
 }
 
 // identityColumnGrants — колоночные права §5.5: «роль таблица право» → колонки с правом; у остальных колонок таблицы
@@ -221,6 +224,36 @@ func TestIdentitySecretsHidden(t *testing.T) {
 		{"worker", "SELECT public_key FROM passkeys", false},
 		{"worker", "SELECT user_id FROM credentials", true},
 		{"worker", "SELECT user_id, confirmed_at FROM user_mfa", true}, // есть ли подтверждённая 2FA (письмо и исполнение сброса)
+	} {
+		t.Run(c.role+": "+c.sql, func(t *testing.T) {
+			err := asRole(ctx, t, db, c.role, c.sql)
+			var pg *pgconn.PgError
+			denied := errors.As(err, &pg) && pg.Code == "42501"
+			switch {
+			case c.allowed && err != nil:
+				t.Fatalf("ждали доступ, получили: %v", err)
+			case !c.allowed && !denied:
+				t.Fatalf("ждали отказ в правах (42501), получили: %v", err)
+			}
+		})
+	}
+}
+
+// R2 плана I-4: admin читает статистику способов входа (представление 0027 исполняется правами владельца — с
+// security_invoker чтение упало бы на user_identities), а сами таблицы способов — нет.
+func TestGrantsAdminReadsUsageNotSecrets(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+	grantAllThenApply(t, db)
+	for _, c := range []struct {
+		role, sql string
+		allowed   bool
+	}{
+		{"admin", "SELECT method, only_method, linked FROM identity_read_auth_method_usage", true},
+		{"admin", "SELECT 1 FROM user_identities", false},
+		{"admin", "SELECT 1 FROM passkeys", false},
+		{"admin", "SELECT 1 FROM credentials", false},
 	} {
 		t.Run(c.role+": "+c.sql, func(t *testing.T) {
 			err := asRole(ctx, t, db, c.role, c.sql)

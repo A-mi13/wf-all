@@ -14,7 +14,7 @@
 openapi: 3.0.3
 info:
   title: WF admin API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     API админки (admin-api); потребитель — только apps/admin, с того же origin, что и сам API.
 
@@ -828,6 +828,8 @@ components:
       $ref: './platform/schemas.yaml#/FeatureFlagKey'
     FeatureFlag:
       $ref: './platform/schemas.yaml#/FeatureFlag'
+    FeatureFlagRules:
+      $ref: './platform/schemas.yaml#/FeatureFlagRules'
     FeatureFlagList:
       $ref: './platform/schemas.yaml#/FeatureFlagList'
     FeatureFlagPatch:

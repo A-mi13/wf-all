@@ -165,6 +165,45 @@ func TestListFeatureFlags(t *testing.T) {
 	}
 }
 
+// R3 плана I-4: правила флага — в ответе listFeatureFlags из flags.RuleOf (админка копии не держит); флаг без
+// правила — {global_only: false, requires: null}, null — значением, не пропуском поля. Ответ сверяется с контрактом.
+func TestFlagRulesInList(t *testing.T) {
+	t.Parallel()
+	e := newGeoStaffEnv(t)
+	e.v = apitest.New(t, oapi.GetSpec)
+	sup := e.firstLogin("support@wf.example", string(perm.Support))
+	rec := e.get("/v1/flags", sup.token)
+	wantStatus(t, rec, http.StatusOK)
+	var raw struct {
+		Items []struct {
+			Key   string                     `json:"key"`
+			Rules map[string]json.RawMessage `json:"rules"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range raw.Items {
+		got[f.Key] = fmt.Sprintf("%s %s", f.Rules["global_only"], f.Rules["requires"])
+	}
+	for key, want := range map[string]string{
+		"auth_google":   `true "auth_apple"`,
+		"auth_apple":    `true null`,
+		"subscriptions": `false null`,
+	} {
+		if got[key] != want {
+			t.Errorf("%s.rules = %q, ждали %q", key, got[key], want)
+		}
+	}
+	for _, f := range raw.Items {
+		r := flags.RuleOf(f.Key)
+		if want := fmt.Sprint(r.GlobalOnly); string(f.Rules["global_only"]) != want {
+			t.Errorf("%s: global_only %s, flags.RuleOf %s", f.Key, f.Rules["global_only"], want)
+		}
+	}
+}
+
 func flagBody(version int64, globally *bool, cities ...uuid.UUID) string {
 	b := map[string]any{"version": version}
 	if globally != nil {

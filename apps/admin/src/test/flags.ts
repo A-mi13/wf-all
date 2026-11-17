@@ -42,6 +42,7 @@ export function flagsServer(start: FeatureFlag[]) {
             errors: [{ field: 'body.enabled_city_ids', code: 'max_items' }],
           }),
         );
+      // rules — прежние (спред cur): правку правил PATCH не принимает
       const next: FeatureFlag = {
         ...cur,
         enabled_globally: body.enabled_globally ?? cur.enabled_globally,

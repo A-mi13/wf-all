@@ -42,6 +42,7 @@ PostGIS обязателен двум миграциям: `0005_pitches.sql` (п
 0024_identity_status.sql  user_status += pending_deletion (без транзакции: новое значение enum нельзя использовать в той же транзакции)
 0025_identity.sql        identity целиком (спека identity §5): users и sessions по §5.2–5.3, пароли, коды из письма, токены шагов, устройства, refresh-токены, 2FA, привязки провайдеров, ключи доступа, события безопасности, ограничения, согласия, сбросы 2FA; role_assignments и captain_applications — авторы-сотрудники; staff_player_links (staff); представления identity_read_*; флаги способов входа auth_*
 0026_identity_deletion.sql  удаление аккаунта: users.status_before_deletion (отмена возвращает прежний статус), birth_date NULL только у удалённого; затирание ПД удалённых до 0026
+0027_identity_captaincy.sql  капитанство и админка (план I-4): представление identity_read_auth_method_usage (статистика способов входа без user_id), индексы очереди и истории заявок, banned в status_before_deletion, живой код смены почты по (purpose, user_id, email)
 ```
 
 Правка миграции: пока она не слита в `main` и не накатана на стенд (стенд накатывает `migrate up` из `main`,
@@ -108,7 +109,7 @@ bash scripts/pg.sh psql -d postgres -c "CREATE DATABASE wf OWNER migrator"
 | Запись журнала с двумя авторами, без роли, служебная роль у автора, сотрудник без снимка имени | `CHECK` `audit_log_one_actor`, `audit_log_service_actor`, `audit_log_staff_actor` |
 | Аккаунт без подтверждённой почты, почта не в канонической форме (с `0025`) | `users.email`, `email_verified_at` `NOT NULL`; `CHECK` `users_email_format` (форма `emailaddr` или заглушка `deleted+<uuid>@invalid`) |
 | Сроки удаления без статуса `pending_deletion` и наоборот | `CHECK` `users_deletion_pending` |
-| Два живых кода из письма на одну почту и назначение; секрет у приманки; код без HMAC; шифротекст без ключа; код у погашенного; больше 5 попыток или 4 отправок | частичный уникальный индекс `auth_codes_live_key`; `CHECK` `auth_codes_decoy_no_secret`, `auth_codes_real_has_mac`, `auth_codes_secret_key`, `auth_codes_closed_no_code`, `auth_codes_attempts_check`, `auth_codes_sends_check` |
+| Два живых кода из письма на одну почту и назначение (у смены почты — на один аккаунт и почту, с `0027`); секрет у приманки; код без HMAC; шифротекст без ключа; код у погашенного; больше 5 попыток или 4 отправок | частичные уникальные индексы `auth_codes_live_key`, `auth_codes_live_email_change_key`; `CHECK` `auth_codes_decoy_no_secret`, `auth_codes_real_has_mac`, `auth_codes_secret_key`, `auth_codes_closed_no_code`, `auth_codes_attempts_check`, `auth_codes_sends_check` |
 | Причина отзыва сессии не из списка, отозванная без причины | `CHECK` `sessions_revoked_reason_check`, `sessions_revoked_pair` |
 | Один refresh-токен в двух семьях; преемник без срока окна гонки | `UNIQUE` `refresh_tokens_token_hash_key`; `CHECK` `refresh_tokens_successor_pair` |
 | Два живых сброса 2FA у аккаунта; сброс и исполнен, и отменён; два сброса по одному подтверждению | частичный уникальный индекс `mfa_resets_live_key`; `CHECK` `mfa_resets_one_outcome`; `UNIQUE` `mfa_resets_approval_key` |
@@ -272,6 +273,20 @@ I-2. Форма почты — всё, что выдаёт `emailaddr.Normalize`
 сессии, журнал безопасности, допуски, сбросы 2FA), но без письма, события, аудита и карантина ника, — необратимо.
 Откат отказывает с понятным текстом при строках без даты рождения (затёртым её не вернуть); прежний статус строк
 периода удаления теряется (тест `migrations/identity_0026_test.go`).
+**`0027`** (план I-4, Task 1; R2, R11, R40). `identity_read_auth_method_usage` — статистика способов входа для экрана
+флагов: три строки `apple`, `google`, `passkeys` (`linked` — у скольких способ есть, `only_method` — входят только им:
+нет пароля и других способов), `deleted` не учитываются, ни одного `user_id`. Исполняется правами владельца — без
+`security_invoker` (с ним чтение под `admin` упало бы на `credentials`): так admin-api видит агрегат, не получая прав на
+секретные таблицы (§5.5, К2); права — ветка представлений `grants.sql` без правки. Индексы заявок
+`captain_applications_status_idx (status, created_at, id)` — очередь всех городов и фильтр статуса,
+`captain_applications_user_idx (user_id, created_at DESC)` — история игрока и пауза 7 дней; очередь модератора — прежний
+`captain_applications_queue_idx`, отдельного индекса по городу и статусу нет. CHECK `users_status_before_deletion`
+пересоздан с тем же именем и `banned` (бан поверх удаления). Живые коды: `auth_codes_live_key` сужен до `purpose <>
+'email_change'`, у смены почты — `auth_codes_live_email_change_key (purpose, user_id, email)`: чужой живой код на тот же
+адрес не гасится, подтверждение выбирает одного уникальностью `users.email`; арбитры `ON CONFLICT` вставок
+(`queries/codes.sql`: `InsertCode`, `InsertEmailChangeCode`) повторяют предикаты индексов дословно — иначе `42P10`.
+Откат возвращает схему `0026` в точности и отказывает с понятным текстом при строках `status_before_deletion = banned`
+и при почте с несколькими живыми кодами смены почты (тест `migrations/identity_0027_test.go`).
 
 **Запланированные изменения.** Спека бэкенда (`docs/superpowers/specs/2026-10-01-backend-architecture-design.md`,
 §11) перечисляет миграции, которые добавят план «фундамента» и спеки модулей: таблицы входа и устройств, `player_profiles`,

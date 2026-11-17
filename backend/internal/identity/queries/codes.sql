@@ -3,17 +3,29 @@
 -- lockUser и FOR UPDATE строки с перепроверкой (R30).
 
 -- name: RevokeLiveCode :exec
--- один живой код на (назначение, почта): новый старт гасит прежний
+-- один живой код на (назначение, почта), у смены почты — на (аккаунт, почта) (0027, R40): новый старт гасит прежний;
+-- чужой живой код смены почты на тот же адрес не гасится
 UPDATE auth_codes SET revoked_at = @now, code_enc = NULL
-WHERE purpose = @purpose AND email = @email AND consumed_at IS NULL AND revoked_at IS NULL;
+WHERE purpose = @purpose AND email = @email AND consumed_at IS NULL AND revoked_at IS NULL
+  AND (purpose <> 'email_change' OR user_id = sqlc.narg(user_id)::uuid);
 
 -- name: InsertCode :execrows
--- 0 строк — живой код вставила параллельная транзакция: вызывающий гасит его и повторяет вставку
+-- кроме смены почты; 0 строк — живой код вставила параллельная транзакция: вызывающий гасит его и повторяет вставку.
+-- Арбитр — предикат auth_codes_live_key дословно (иначе Postgres не выведет индекс: 42P10)
 INSERT INTO auth_codes (id, purpose, email, user_id, decoy, code_mac, code_enc, payload_enc, key_id, last_sent_at,
                         expires_at, ip, created_at)
 VALUES (@id, @purpose, @email, @user_id, @decoy, @code_mac, @code_enc, @payload_enc, @key_id, @now, @expires_at, @ip,
         @now)
-ON CONFLICT (purpose, email) WHERE consumed_at IS NULL AND revoked_at IS NULL DO NOTHING;
+ON CONFLICT (purpose, email) WHERE purpose <> 'email_change' AND consumed_at IS NULL AND revoked_at IS NULL DO NOTHING;
+
+-- name: InsertEmailChangeCode :execrows
+-- смена почты (purpose = email_change): то же, что InsertCode, арбитр — auth_codes_live_email_change_key
+INSERT INTO auth_codes (id, purpose, email, user_id, decoy, code_mac, code_enc, payload_enc, key_id, last_sent_at,
+                        expires_at, ip, created_at)
+VALUES (@id, @purpose, @email, @user_id, @decoy, @code_mac, @code_enc, @payload_enc, @key_id, @now, @expires_at, @ip,
+        @now)
+ON CONFLICT (purpose, user_id, email) WHERE purpose = 'email_change' AND consumed_at IS NULL AND revoked_at IS NULL
+DO NOTHING;
 
 -- name: FindCode :one
 SELECT id, purpose, user_id FROM auth_codes WHERE id = $1;

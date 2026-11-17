@@ -245,6 +245,50 @@ func TestStartCodeOneLive(t *testing.T) {
 	_ = second
 }
 
+// R40 (решение пользователя Q5): живой код смены почты — один на (аккаунт, почта). Старт B на адрес X не гасит код A
+// на тот же X; повторный старт A гасит только прежний код A; подтверждение выбирает одного уникальностью users.email
+// (второй — 409 email_taken). Сброс пароля — по-прежнему один живой код на (назначение, почта), чей бы ни был.
+func TestEmailChangeCodePerUser(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := context.Background()
+	ua := seedUser(t, e.owner, "per_user_a", "ru")
+	ub := seedUser(t, e.owner, "per_user_b", "ru")
+	sa := issue(t, e, ua, web("a")).SessionID
+	sb := issue(t, e, ub, web("b")).SessionID
+	const target = "per_user_x@example.com"
+	a1, err := e.a.StartEmailChange(ctx, sa, target, web("req"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b1, err := e.a.StartEmailChange(ctx, sb, target, web("req"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !codeAlive(t, e, a1.CodeID) || !codeAlive(t, e, b1.CodeID) {
+		t.Fatal("старт B погасил код A на тот же адрес")
+	}
+	a2, err := e.a.StartEmailChange(ctx, sa, target, web("req"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codeAlive(t, e, a1.CodeID) || !codeAlive(t, e, a2.CodeID) || !codeAlive(t, e, b1.CodeID) {
+		t.Fatal("повторный старт A: гаснет только прежний код A")
+	}
+	if me, err := e.a.ConfirmEmailChange(ctx, ua, a2.CodeID, plainCode(t, e, a2.CodeID)); err != nil || me.Email != target {
+		t.Fatalf("подтверждение A: %+v %v", me, err)
+	}
+	if _, err := e.a.ConfirmEmailChange(ctx, ub, b1.CodeID, plainCode(t, e, b1.CodeID)); problemCode(err) != identity.CodeEmailTaken {
+		t.Fatalf("подтверждение B после A: %v", err)
+	}
+
+	r1 := resetCodeOf(t, e, ua, "per_user_reset@example.com", false)
+	r2 := resetCodeOf(t, e, ub, "per_user_reset@example.com", false)
+	if codeAlive(t, e, r1.CodeID) || !codeAlive(t, e, r2.CodeID) {
+		t.Fatal("сброс пароля: второй старт на ту же почту гасит первый")
+	}
+}
+
 // §3.14: паузы 60/120/300 с, раньше — 429 resend_too_soon с Retry-After до паузы; четвёртая отправка последняя —
 // дальше 410; resend_available_at после последней — expires_at. Приманка — те же паузы и ответы, писем не шлёт.
 func TestResendSchedule(t *testing.T) {

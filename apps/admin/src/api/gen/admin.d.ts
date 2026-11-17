@@ -3459,6 +3459,7 @@ export interface components {
         /** @description Флаг функции. Функция включена в городе, если флаг включён везде или город в enabled_city_ids */
         FeatureFlag: {
             key: components["schemas"]["FeatureFlagKey"];
+            rules: components["schemas"]["FeatureFlagRules"];
             /**
              * @description Описание флага для разработчика (из миграции); экрану — подпись из локалей
              * @example Очки, кредиты, косметика
@@ -3488,6 +3489,16 @@ export interface components {
              * @example 2026-10-27T15:40:00Z
              */
             updated_at: string;
+        };
+        /** @description Правила флага — единственный источник для экрана флагов (админка своей копии правил не держит). Флаг без правил — global_only false и requires null */
+        FeatureFlagRules: {
+            /**
+             * @description У флага не бывает списка городов — только «везде» (способы входа auth_*: до входа город неизвестен); непустой enabled_city_ids в updateFeatureFlag — 422 platform.flag_global_only
+             * @example true
+             */
+            global_only: boolean;
+            /** @description Флаг, без которого этот не включается (и который нельзя выключить, пока этот включён) — иначе 409 platform.flag_requires; null — зависимости нет. Пример — auth_google требует auth_apple */
+            requires: (string & components["schemas"]["FeatureFlagKey"]) | null;
         };
         /** @description Все флаги функций по ключу */
         FeatureFlagList: {

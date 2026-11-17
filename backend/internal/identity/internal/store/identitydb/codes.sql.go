@@ -90,7 +90,7 @@ INSERT INTO auth_codes (id, purpose, email, user_id, decoy, code_mac, code_enc, 
                         expires_at, ip, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
         $10)
-ON CONFLICT (purpose, email) WHERE consumed_at IS NULL AND revoked_at IS NULL DO NOTHING
+ON CONFLICT (purpose, email) WHERE purpose <> 'email_change' AND consumed_at IS NULL AND revoked_at IS NULL DO NOTHING
 `
 
 type InsertCodeParams struct {
@@ -108,9 +108,56 @@ type InsertCodeParams struct {
 	Ip         netip.Addr
 }
 
-// 0 строк — живой код вставила параллельная транзакция: вызывающий гасит его и повторяет вставку
+// кроме смены почты; 0 строк — живой код вставила параллельная транзакция: вызывающий гасит его и повторяет вставку.
+// Арбитр — предикат auth_codes_live_key дословно (иначе Postgres не выведет индекс: 42P10)
 func (q *Queries) InsertCode(ctx context.Context, arg InsertCodeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertCode,
+		arg.ID,
+		arg.Purpose,
+		arg.Email,
+		arg.UserID,
+		arg.Decoy,
+		arg.CodeMac,
+		arg.CodeEnc,
+		arg.PayloadEnc,
+		arg.KeyID,
+		arg.Now,
+		arg.ExpiresAt,
+		arg.Ip,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertEmailChangeCode = `-- name: InsertEmailChangeCode :execrows
+INSERT INTO auth_codes (id, purpose, email, user_id, decoy, code_mac, code_enc, payload_enc, key_id, last_sent_at,
+                        expires_at, ip, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+        $10)
+ON CONFLICT (purpose, user_id, email) WHERE purpose = 'email_change' AND consumed_at IS NULL AND revoked_at IS NULL
+DO NOTHING
+`
+
+type InsertEmailChangeCodeParams struct {
+	ID         uuid.UUID
+	Purpose    AuthCodePurpose
+	Email      string
+	UserID     *uuid.UUID
+	Decoy      bool
+	CodeMac    []byte
+	CodeEnc    []byte
+	PayloadEnc []byte
+	KeyID      *string
+	Now        time.Time
+	ExpiresAt  time.Time
+	Ip         netip.Addr
+}
+
+// смена почты (purpose = email_change): то же, что InsertCode, арбитр — auth_codes_live_email_change_key
+func (q *Queries) InsertEmailChangeCode(ctx context.Context, arg InsertEmailChangeCodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertEmailChangeCode,
 		arg.ID,
 		arg.Purpose,
 		arg.Email,
@@ -180,20 +227,28 @@ const revokeLiveCode = `-- name: RevokeLiveCode :exec
 
 UPDATE auth_codes SET revoked_at = $1, code_enc = NULL
 WHERE purpose = $2 AND email = $3 AND consumed_at IS NULL AND revoked_at IS NULL
+  AND (purpose <> 'email_change' OR user_id = $4::uuid)
 `
 
 type RevokeLiveCodeParams struct {
 	Now     *time.Time
 	Purpose AuthCodePurpose
 	Email   string
+	UserID  *uuid.UUID
 }
 
 // Коды из письма (спека identity §3.14; план I-2, Task 10): регистрация, сброс пароля, смена почты. Код — только
 // HMAC (code_mac) и шифротекст для письма (code_enc); приманка (decoy) — без секретов. Строка ищется без замка, затем
 // lockUser и FOR UPDATE строки с перепроверкой (R30).
-// один живой код на (назначение, почта): новый старт гасит прежний
+// один живой код на (назначение, почта), у смены почты — на (аккаунт, почта) (0027, R40): новый старт гасит прежний;
+// чужой живой код смены почты на тот же адрес не гасится
 func (q *Queries) RevokeLiveCode(ctx context.Context, arg RevokeLiveCodeParams) error {
-	_, err := q.db.Exec(ctx, revokeLiveCode, arg.Now, arg.Purpose, arg.Email)
+	_, err := q.db.Exec(ctx, revokeLiveCode,
+		arg.Now,
+		arg.Purpose,
+		arg.Email,
+		arg.UserID,
+	)
 	return err
 }
 

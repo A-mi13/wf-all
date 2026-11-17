@@ -128,7 +128,14 @@ func flagFields(f flags.Flag) map[string]any {
 	return map[string]any{"enabled_globally": f.EnabledGlobally, "enabled_city_ids": f.EnabledCityIDs}
 }
 
+// flagOut — флаг ответа; rules — из flags.RuleOf (единственный источник правил, R3 плана I-4): флаг без правила —
+// {global_only: false, requires: null}.
 func flagOut(f flags.Flag) oapi.FeatureFlag {
+	r := flags.RuleOf(f.Key)
+	rules := oapi.FeatureFlagRules{GlobalOnly: r.GlobalOnly}
+	if r.Requires != "" {
+		rules.Requires = new(oapi.FeatureFlagKey(r.Requires))
+	}
 	return oapi.FeatureFlag{Key: oapi.FeatureFlagKey(f.Key), Description: f.Description, EnabledGlobally: f.EnabledGlobally,
-		EnabledCityIds: f.EnabledCityIDs, Version: f.Version, UpdatedAt: f.UpdatedAt.UTC()}
+		EnabledCityIds: f.EnabledCityIDs, Version: f.Version, UpdatedAt: f.UpdatedAt.UTC(), Rules: rules}
 }
