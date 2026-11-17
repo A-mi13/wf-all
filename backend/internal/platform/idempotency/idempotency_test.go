@@ -107,6 +107,7 @@ func (p *probe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/v1/things/1")
 	w.Header().Set("Vary", "Accept-Language")
 	w.Header().Set("Content-Language", "en")
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Not-Saved", "1")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -275,10 +276,12 @@ func TestReplaySameRequest(t *testing.T) {
 			again.Header().Get("Content-Type") != "application/json" || again.Header().Get("Idempotency-Replayed") != "true" {
 			t.Fatalf("повтор: %d %v", again.Code, again.Header())
 		}
-		// заголовки ответа контракта (Vary, Content-Language — admin activateGeoCity) повтор отдаёт те же;
-		// несохраняемые — нет (список явный, не «все заголовки»)
+		// заголовки ответа контракта (Vary, Content-Language — admin activateGeoCity; Cache-Control — CachePrivate
+		// public, submitCaptainApplication и др.) повтор отдаёт те же; несохраняемые — нет (список явный, не «все
+		// заголовки»)
 		if again.Header().Get("Vary") != "Accept-Language" || again.Header().Get("Content-Language") != "en" ||
-			again.Header().Get("X-Not-Saved") != "" {
+			again.Header().Get("Cache-Control") != first.Header().Get("Cache-Control") ||
+			again.Header().Get("Cache-Control") != "private, no-store" || again.Header().Get("X-Not-Saved") != "" {
 			t.Fatalf("заголовки повтора: %v", again.Header())
 		}
 		var a, b map[string]any
