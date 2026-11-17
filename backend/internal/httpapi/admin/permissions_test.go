@@ -311,7 +311,9 @@ func liveIdentity(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *identityad
 // настоящие (liveGeo, Task 16): «проход» — не 401 и не 403 конвейера или сценария, исход — забота сценария.
 var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "listFeatureFlags": {}, "updateFeatureFlag": {},
 	// сброс 2FA поддержкой — настоящий хендлер identity (liveIdentity, план I-2 Task 17): игрока anyID нет — 404 сценария
-	"requestMfaReset": {}, "cancelMfaReset": {}}
+	"requestMfaReset": {}, "cancelMfaReset": {},
+	// поиск игрока (почты из opsHeaders нет — 404 сценария) и статистика способов входа (200) — план I-4, Task 5
+	"findPlayerByEmail": {}, "getAuthMethodsUsage": {}}
 
 func TestPermissionsAllOperations(t *testing.T) {
 	t.Parallel()
