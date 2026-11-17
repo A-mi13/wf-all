@@ -197,15 +197,15 @@ jobs:
         run: |
           fail() { echo "::error::server ($run): $1"; exit 1; }
           # журналы стека — при любом ненулевом выходе
-          trap 'rc=$?; [ "$rc" -eq 0 ] || docker compose $files logs --no-color || true; exit "$rc"' EXIT
+          trap 'rc=$?; [ "$rc" -eq 0 ] || docker compose "${files[@]}" logs --no-color || true; exit "$rc"' EXIT
           # check <сервис с фоном>: /readyz через Caddy, журнал «воркер запущен», исполнилась периодика
           check() {
             local bg=$1 ok=
             # migrate — первым и успешно (up --wait ждёт здоровья, migrate — выхода)
-            docker compose $files up -d --wait --wait-timeout 180 || fail "up --wait"
-            [ "$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose $files ps -aq migrate)")" = 0 ] ||
+            docker compose "${files[@]}" up -d --wait --wait-timeout 180 || fail "up --wait"
+            [ "$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose "${files[@]}" ps -aq migrate)")" = 0 ] ||
               fail "migrate не 0"
-            docker compose $files exec -T caddy cat /data/caddy/pki/authorities/local/root.crt >root.crt
+            docker compose "${files[@]}" exec -T caddy cat /data/caddy/pki/authorities/local/root.crt >root.crt
             for host in api.wf.test admin.wf.test; do
               ok=
               for _ in $(seq 1 30); do
@@ -219,7 +219,7 @@ jobs:
             done
             ok=
             for _ in $(seq 1 30); do
-              if docker compose $files logs --no-color "$bg" | grep -q 'воркер запущен'; then
+              if docker compose "${files[@]}" logs --no-color "$bg" | grep -q 'воркер запущен'; then
                 ok=1
                 break
               fi
@@ -227,24 +227,24 @@ jobs:
             done
             [ -n "$ok" ] || fail "в журнале $bg нет «воркер запущен» за 60 с"
             if [ "$bg" = api ]; then
-              docker compose $files logs --no-color api | grep 'воркер запущен' | grep -q '"component":"worker"' ||
+              docker compose "${files[@]}" logs --no-color api | grep 'воркер запущен' | grep -q '"component":"worker"' ||
                 fail "«воркер запущен» у api без component=worker"
             fi
             # выборы лидера и RunOnStart периодики — до 120 с
             ok=
             for _ in $(seq 1 60); do
               # || true: под bash -e сбой exec (db ещё не принимает) оборвал бы цикл — это повтор, не отказ
-              n=$(docker compose $files exec -T db psql -U postgres -d wf -tAc \
+              n=$(docker compose "${files[@]}" exec -T db psql -U postgres -d wf -tAc \
                 "SELECT count(*) FROM river_job WHERE kind = 'ratelimit.cleanup' AND state = 'completed'") || true
               if [ "${n:-0}" -ge 1 ]; then ok=1; break; fi
               sleep 2
             done
             [ -n "$ok" ] || fail "ratelimit.cleanup не дошла до completed за 120 с"
           }
-          run=worker files='-f compose.yaml -f compose.ci.yaml'
+          run=worker files=(-f compose.yaml -f compose.ci.yaml)
           check worker
-          docker compose $files down -v
-          run=embed files='-f compose.yaml -f compose.ci.yaml -f compose.ci-embed.yaml'
-          [ -z "$(docker compose $files config --services | grep -x worker)" ] || fail "сервис worker не выключен"
+          docker compose "${files[@]}" down -v
+          run=embed files=(-f compose.yaml -f compose.ci.yaml -f compose.ci-embed.yaml)
+          if docker compose "${files[@]}" config --services | grep -qx worker; then fail "сервис worker не выключен"; fi
           check api
-          docker compose $files down -v
+          docker compose "${files[@]}" down -v
