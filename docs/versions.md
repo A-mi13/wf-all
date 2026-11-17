@@ -43,6 +43,7 @@
 | altcha-lib-go | 1.0.0 | `backend/go.mod` (только тесты совместимости ALTCHA — `internal/platform/humancheck`) |
 | go-task / gitleaks / actionlint / Mailpit | 3.54.0 / 8.30.1 / 1.7.12 / 1.32.0 | `tools/go.mod` |
 | golangci-lint | 2.15.0 | `tools/lint/go.mod` |
+| shellcheck | 0.11.0 | `scripts/install-shellcheck.sh` (релиз GitHub, sha256; actionlint проверяет им скрипты `run:`; ставят `scripts/bootstrap.sh` и job `repo` в CI) |
 | lefthook | 2.2.2 | корневой `package.json` |
 | Образы Docker: golang / alpine / node | 1.27.1-alpine3.24 / 3.24.2 / 26.10.0-alpine3.24 | `backend/Dockerfile` (node — стадия сборки админки) |
 | Swagger UI (swagger-ui-dist, jsDelivr + SRI) | 5.33.1 | `SwaggerUIVersion` и хэши в `backend/internal/platform/apidocs/apidocs.go` |

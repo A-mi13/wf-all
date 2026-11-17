@@ -40,5 +40,7 @@ else
   build_tools
   echo "$stamp" >"$BIN/.stamp"
 fi
+# Отдельно — shellcheck (не Go-инструмент): релиз GitHub с проверкой sha256; сам пропускает, если версия уже стоит
+bash scripts/install-shellcheck.sh
 pnpm install
 echo "Готово. Дальше: ./task setup"

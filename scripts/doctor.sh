@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Проверка версий окружения. Используется как тест фазы 0 и в README.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 fail=0
 check() { # имя, ожидаемая версия, фактический вывод
   if [[ "$3" == *"$2"* ]]; then echo "ok   $1 $2"; else echo "FAIL $1: ждали $2, получили: $3"; fail=1; fi
@@ -19,6 +19,7 @@ if [[ "$what" == tools || "$what" == all ]]; then
   check golangci-lint 2.15.0 "$(.tools/bin/golangci-lint version 2>&1)"
   check gitleaks 8.30.1 "$(.tools/bin/gitleaks version 2>&1)"
   check actionlint 1.7.12 "$(.tools/bin/actionlint -version 2>&1)"
+  check shellcheck 0.11.0 "$(.tools/bin/shellcheck --version 2>&1)"
   check mailpit 1.32.0 "$(.tools/bin/mailpit version 2>&1)"
 fi
 exit $fail
