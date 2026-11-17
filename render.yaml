@@ -1,4 +1,5 @@
 # Dev-стенд на Render (бесплатный тариф): публичный API для нативного приложения (wf-api) и админка (wf-admin-api).
+# Фон — встроенный воркер wf-api (API_EMBED_WORKER, спека 2026-11-16-embedded-worker): сервиса worker на Render нет.
 # Образ — backend/Dockerfile, тот же, что потом пойдёт на свой сервер (docs/deploy-dev.md).
 # Секреты (строки подключения к Neon) задаются в настройках сервиса, не здесь: sync: false.
 services:
@@ -70,7 +71,7 @@ services:
         sync: false
       # Кольца identity (план I-2, R10): секреты (коды, TOTP, данные регистрации) и HMAC устройств — только из панели,
       # копия у контроллера вне репозитория. Не generateValue: перегенерация стёрла бы секреты TOTP и опознание
-      # устройств, а воркеру нужно то же кольцо (WORKER_IDENTITY_SECRET_KEYS — с сервисом воркера, Task 21)
+      # устройств, а встроенному воркеру нужно то же кольцо (WORKER_IDENTITY_SECRET_KEYS ниже)
       - key: API_IDENTITY_SECRET_KEYS
         sync: false
       - key: API_IDENTITY_DEVICE_KEYS
@@ -82,9 +83,58 @@ services:
       - key: API_LEGAL_DOCUMENTS
         value: terms=0.1.0|https://example.com/legal/terms,privacy=0.1.0|https://example.com/legal/privacy
       # API_IPGEO_DB и API_WELLKNOWN_* не задаются: файла DB-IP и приложений в сторах ещё нет (.well-known — 404)
+      # Фон стенда — встроенный воркер в процессе wf-api (спека 2026-11-16-embedded-worker; Task 21 плана I-2 заменён):
+      # фонового воркера на бесплатном тарифе Render нет. Только стенд — на своём сервере фон исполняет отдельный
+      # сервис worker (deploy/server). WORKER_* ниже читает только встроенный воркер (страж TestRenderYAMLEmbeddedWorker).
+      - key: API_EMBED_WORKER
+        value: 'true'
+      # остановка: дренаж 8 с + relay 2 + River мягко 8 + жёстко 5 = 23 с из бюджета 25 с (config.APIEmbeddedStopTime)
+      - key: API_SHUTDOWN_TIMEOUT
+        value: 8s
+      # пул роли worker: 7 слотов очередей ≤ 10 − 3 (queue.WarnPool); сумма пулов стенда — TestRenderYAMLPools
+      # (+1 соединение LISTEN relay вне пула)
+      - key: WORKER_DB_MAX_CONNS
+        value: '10'
+      - key: WORKER_QUEUE_EVENTS
+        value: '1'
+      - key: WORKER_QUEUE_LIFECYCLE
+        value: '1'
+      - key: WORKER_QUEUE_NOTIFY
+        value: '1'
+      - key: WORKER_QUEUE_MAIL
+        value: '1'
+      - key: WORKER_QUEUE_STATS
+        value: '1'
+      - key: WORKER_QUEUE_MEDIA
+        value: '1'
+      - key: WORKER_QUEUE_MAINTENANCE
+        value: '1'
+      # импорт GeoNames на бесплатном инстансе не идёт (память, сон): очереди import нет, задача из админки ждёт —
+      # импорт командой оператора (docs/deploy-dev.md); WORKER_QUEUE_IMPORT поэтому не задаётся
+      - key: WORKER_GEO_IMPORT_ENABLED
+        value: 'false'
+      # письма игрокам — только по TLS; Resend на Render free — STARTTLS-порт 2587
+      - key: WORKER_MAIL_SMTP_TLS
+        value: mandatory
+      # WORKER_LOG_* не задаются: журнал встроенного воркера — журнал api (component=worker)
+      # прямая строка Neon роли worker (не pooler: relay и River держат LISTEN)
+      - key: WORKER_DATABASE_URL
+        sync: false
+      # кольцо identity — то же значение, что API_IDENTITY_SECRET_KEYS (api сверяет кольца на старте)
+      - key: WORKER_IDENTITY_SECRET_KEYS
+        sync: false
+      - key: WORKER_MAIL_SMTP_ADDR
+        sync: false
+      - key: WORKER_MAIL_FROM
+        sync: false
+      - key: WORKER_MAIL_SMTP_USERNAME
+        sync: false
+      - key: WORKER_MAIL_SMTP_PASSWORD
+        sync: false
   # Админка (план C, Task 5): API сотрудников и собранная apps/admin с одного origin, тот же образ, что у wf-api.
   # Бесплатный тариф (ответ Q3): засыпает через 15 минут без запросов, письма очереди staff уходят при первом
-  # запросе после сна. Воркера на Render нет (Q1, R9). Миграции накатывает только wf-api; admin-api при старте ждёт
+  # запросе после сна. Фон — встроенный в wf-api; admin-api будит его после успешных мутаций (ADMIN_WAKE_API_URL).
+  # Миграции накатывает только wf-api; admin-api при старте ждёт
   # нужную версию схемы (ADMIN_DB_SCHEMA_WAIT, R3). Переменные sync: false — в панели сервиса, порядок — Task 7
   # плана C (до их заполнения admin-api не стартует: обязательные переменные).
   # Страж значений — render_stand_test.go (config).
@@ -160,4 +210,8 @@ services:
       - key: ADMIN_MAIL_SMTP_USERNAME
         sync: false
       - key: ADMIN_MAIL_SMTP_PASSWORD
+        sync: false
+      # побудка wf-api после успешных мутаций (спека встроенного воркера §8.1): фон спит вместе с api; адрес wf-api —
+      # https://<имя>.onrender.com без пути, в панели
+      - key: ADMIN_WAKE_API_URL
         sync: false

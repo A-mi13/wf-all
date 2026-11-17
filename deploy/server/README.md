@@ -23,7 +23,7 @@
 ## Подготовка сервера
 
 1. Docker Engine с плагином Compose v2.
-2. DNS: записи A/AAAA доменов API и админки — на адрес сервера.
+2. DNS: записи A доменов API и админки — на адрес сервера. AAAA — только с IPv6 в сети `wf` (раздел «Клиентский IP»).
 3. Открыты входящие 80/tcp (ACME HTTP-01 и редирект на HTTPS), 443/tcp и 443/udp (HTTP/3). Остальные порты наружу не
    нужны: `api`, `admin-api`, `worker` и база (если на сервере) не публикуются.
 4. Каталог `deploy/server` из того же коммита, что образ.
@@ -48,6 +48,15 @@ Caddy ставит в `X-Forwarded-For` адрес своего пира; api и
 (`172.29.0.0/24` — `networks.wf` в `compose.yaml` = `API_TRUSTED_PROXIES` = `ADMIN_TRUSTED_PROXIES`; меняешь одно —
 меняй всё). `*_CLIENT_IP_HEADER` пусто. С CDN впереди: в глобальном блоке `Caddyfile` — `servers { trusted_proxies
 static <сети CDN> }`, у сервисов — заголовок CDN (`CF-Connecting-IP` у Cloudflare) в `*_CLIENT_IP_HEADER`.
+
+- **IPv6.** Сеть `wf` — только IPv4. При записи AAAA и демоне Docker без IPv6 в сети подключение по IPv6 к :443
+  проксирует `docker-proxy`: Caddy видит пиром шлюз моста `172.29.0.1`, и **все** IPv6-клиенты получают один IP —
+  общая корзина лимитов (массовые 429 на входе и регистрации). Поэтому либо только записи A, либо `enable_ipv6` у сети
+  `wf` с v6-подсетью — и её же в `API_TRUSTED_PROXIES`/`ADMIN_TRUSTED_PROXIES`. Шлюз `.1` в доверенной подсети — не
+  Caddy: доверие к нему держится на том, что снаружи порты публикует только Caddy.
+- **Подсеть занята.** `172.29.0.0/24` может пересечься с другой сетью Docker на машине — `up` падает с `Pool overlaps
+  with other one on this address space`. Выбрать свободную подсеть и сменить её в трёх местах: `networks.wf` в
+  `compose.yaml`, `API_TRUSTED_PROXIES` в `api.env`, `ADMIN_TRUSTED_PROXIES` в `admin-api.env`.
 
 ## Выкатка и обновления
 

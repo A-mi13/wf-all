@@ -18,6 +18,7 @@ import (
 
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/peer"
+	"wf/backend/internal/platform/queue"
 )
 
 // envVar — переменная сервиса Blueprint: значение в файле (value), сгенерированное Render (generateValue) или
@@ -125,6 +126,8 @@ var adminFill = map[string]string{
 	"ADMIN_MAIL_FROM":          "WF <noreply@wf.example>",
 	"ADMIN_MAIL_SMTP_USERNAME": "resend",
 	"ADMIN_MAIL_SMTP_PASSWORD": "x",
+	// побудка wf-api после мутаций (спека встроенного воркера §8.1): адрес стенда — в панели
+	"ADMIN_WAKE_API_URL": "https://wf-api.onrender.com",
 }
 
 // adminConfig — конфигурация admin-api так, как её соберёт процесс на стенде.
@@ -523,8 +526,11 @@ func TestRenderYAMLSecretsNotInFile(t *testing.T) {
 	}
 }
 
-// apiPanel — переменные wf-api, которые задаются только в панели Render (sync: false).
-var apiPanel = []string{"API_DATABASE_URL", "MIGRATOR_DATABASE_URL", "API_IDENTITY_SECRET_KEYS", "API_IDENTITY_DEVICE_KEYS"}
+// apiPanel — переменные wf-api, которые задаются только в панели Render (sync: false); WORKER_* — встроенный воркер
+// (спека встроенного воркера §4): строка Neon роли worker, кольцо identity и SMTP.
+var apiPanel = []string{"API_DATABASE_URL", "MIGRATOR_DATABASE_URL", "API_IDENTITY_SECRET_KEYS", "API_IDENTITY_DEVICE_KEYS",
+	"WORKER_DATABASE_URL", "WORKER_IDENTITY_SECRET_KEYS", "WORKER_MAIL_SMTP_ADDR", "WORKER_MAIL_FROM",
+	"WORKER_MAIL_SMTP_USERNAME", "WORKER_MAIL_SMTP_PASSWORD"}
 
 // Ключи identity на стенде (план I-2, Task 4; R10, U2–U4): кольца — только из панели (sync: false — потеря кольца
 // стирает секреты TOTP и опознание устройств, generateValue их перегенерировал бы, и воркеру нужен тот же ключ);
@@ -553,7 +559,7 @@ func TestRenderYAMLIdentityEnv(t *testing.T) {
 			t.Errorf("wf-api: %s на стенде не задаётся (города по IP и приложений ещё нет)", k)
 		}
 	}
-	// кольца у admin-api нет (§5.5); воркер на стенде с кольцом — Task 21
+	// кольца у admin-api нет (§5.5); кольцо воркера — у wf-api (встроенный режим), WORKER_IDENTITY_SECRET_KEYS
 	for _, e := range service(t, "wf-admin-api").EnvVars {
 		if strings.Contains(e.Key, "IDENTITY") {
 			t.Errorf("wf-admin-api: %s — кольцо identity admin-api не получает", e.Key)
@@ -588,8 +594,8 @@ func TestRenderYAMLStaticDir(t *testing.T) {
 	}
 }
 
-// Воркера на Render нет (ответ Q1, R9): импорт geo — командой оператора. Подняли воркер — тест правится вместе с
-// решением пользователя.
+// Отдельного сервиса воркера на Render нет (фонового воркера на бесплатном тарифе нет): фон — встроенный в wf-api
+// (спека 2026-11-16-embedded-worker, TestRenderYAMLEmbeddedWorker); импорт geo — командой оператора.
 func TestRenderYAMLNoWorker(t *testing.T) {
 	for _, s := range blueprint(t) {
 		if s.Type == "worker" || strings.Contains(s.DockerCommand, "worker") || strings.Contains(s.Name, "worker") {
@@ -599,7 +605,8 @@ func TestRenderYAMLNoWorker(t *testing.T) {
 }
 
 // Остановка укладывается в окно Render (R4): admin-api — дренаж ADMIN_SHUTDOWN_TIMEOUT стенда + мягкая и жёсткая
-// остановка River ≤ config.StopBudget; wf-api — только дренаж HTTP. Окно не переопределено
+// остановка River ≤ config.StopBudget; wf-api со встроенным воркером — config.APIEmbeddedStopTime(API_SHUTDOWN_TIMEOUT)
+// (дренаж + relay + River мягко + жёстко), без него — только дренаж HTTP. Окно не переопределено
 // (maxShutdownDelaySeconds), значит, оно — config.StopWindow.
 func TestRenderYAMLStopBudget(t *testing.T) {
 	for _, s := range blueprint(t) {
@@ -614,8 +621,17 @@ func TestRenderYAMLStopBudget(t *testing.T) {
 	if st := config.AdminStopTime(c.HTTP.ShutdownTimeout); st > config.StopBudget {
 		t.Errorf("остановка admin-api на стенде %s > бюджета %s (дренаж %s)", st, config.StopBudget, c.HTTP.ShutdownTimeout)
 	}
-	if d := apiConfig(t).HTTP.ShutdownTimeout; d > config.StopBudget {
-		t.Errorf("дренаж wf-api %s > бюджета %s", d, config.StopBudget)
+	if _, ok := renderEnv(t)["API_SHUTDOWN_TIMEOUT"]; !ok {
+		t.Error("API_SHUTDOWN_TIMEOUT не задан в render.yaml — умолчание 10 с со встроенным воркером не укладывается в бюджет")
+	}
+	api := apiConfig(t)
+	st := api.HTTP.ShutdownTimeout
+	if api.EmbedWorker {
+		st = config.APIEmbeddedStopTime(api.HTTP.ShutdownTimeout)
+	}
+	if st > config.StopBudget {
+		t.Errorf("остановка wf-api на стенде %s > бюджета %s (дренаж %s, встроенный воркер %v)", st, config.StopBudget,
+			api.HTTP.ShutdownTimeout, api.EmbedWorker)
 	}
 }
 
@@ -649,6 +665,65 @@ var apiFill = map[string]string{
 	"API_IDENTITY_SECRET_KEYS": key32, "API_IDENTITY_DEVICE_KEYS": key32,
 	"API_DATABASE_URL":      "postgres://api@db.example/wf?sslmode=require",
 	"MIGRATOR_DATABASE_URL": "postgres://wf_owner@db.example/wf?sslmode=require",
+	// встроенный воркер: прямая строка роли worker, кольцо — то же, что API_IDENTITY_SECRET_KEYS (одно кольцо, env.md)
+	"WORKER_DATABASE_URL":         "postgres://worker@db.example/wf?sslmode=require",
+	"WORKER_IDENTITY_SECRET_KEYS": key32,
+	"WORKER_MAIL_SMTP_ADDR":       "smtp.resend.com:2587",
+	"WORKER_MAIL_FROM":            "WF <noreply@wf.example>",
+	"WORKER_MAIL_SMTP_USERNAME":   "resend",
+	"WORKER_MAIL_SMTP_PASSWORD":   "x",
+}
+
+// workerOf — настройки встроенного воркера wf-api (префикс WORKER_) так, как их соберёт процесс на стенде.
+func workerOf(t *testing.T) (config.Worker, config.Mail, config.WorkerIdentity) {
+	t.Helper()
+	environ := service(t, "wf-api").environ(t, apiFill)
+	w, err := config.Load[config.Worker]("WORKER_", environ)
+	if err != nil {
+		t.Fatalf("render.yaml: WORKER_* wf-api не разбираются: %v", err)
+	}
+	m, err := config.Load[config.Mail]("WORKER_", environ)
+	if err != nil {
+		t.Fatalf("render.yaml: WORKER_MAIL_* wf-api не разбираются: %v", err)
+	}
+	id, err := config.Load[config.WorkerIdentity]("WORKER_", environ)
+	if err != nil {
+		t.Fatalf("render.yaml: WORKER_IDENTITY_* wf-api не разбираются: %v", err)
+	}
+	return w, m, id
+}
+
+// Спека встроенного воркера §4: фон стенда — в процессе wf-api (бесплатного фонового воркера на Render нет).
+// Флаг включён; WORKER_* разбираются; импорт GeoNames выключен (§8.2: на бесплатном инстансе не идёт, импорт —
+// командой оператора), WORKER_QUEUE_IMPORT не задаётся; слоты прочих очередей ≤ пула воркера − запас (WarnPool);
+// письма — только TLS; журнал воркера — api (WORKER_LOG_* не задаются); кольца api и воркера в заглушках равны.
+func TestRenderYAMLEmbeddedWorker(t *testing.T) {
+	if !apiConfig(t).EmbedWorker {
+		t.Fatal("wf-api: API_EMBED_WORKER не true — фона на стенде нет")
+	}
+	w, m, _ := workerOf(t)
+	if w.GeoImportEnabled {
+		t.Error("WORKER_GEO_IMPORT_ENABLED на стенде должен быть false (§8.2)")
+	}
+	file := renderEnv(t)
+	for _, k := range []string{"WORKER_QUEUE_IMPORT", "WORKER_LOG_LEVEL", "WORKER_LOG_FORMAT"} {
+		if _, ok := file[k]; ok {
+			t.Errorf("wf-api: %s на стенде не задаётся (импорт выключен; журнал воркера — журнал api)", k)
+		}
+	}
+	served := queue.Config(w.Queues)
+	delete(served, queue.Import)
+	if slots, limit := queue.Slots(served), int(w.DB.MaxConns)-queue.PoolReserve; slots > limit {
+		t.Errorf("слоты очередей встроенного воркера %d > WORKER_DB_MAX_CONNS %d − %d", slots, w.DB.MaxConns,
+			queue.PoolReserve)
+	}
+	if file["WORKER_MAIL_SMTP_TLS"] != "mandatory" || m.TLS != "mandatory" {
+		t.Errorf("WORKER_MAIL_SMTP_TLS = %q, ждали mandatory в файле", file["WORKER_MAIL_SMTP_TLS"])
+	}
+	// страж заглушек: настоящее кольцо стенда — в панели, на старте api сверяет его с API_IDENTITY_SECRET_KEYS
+	if apiFill["API_IDENTITY_SECRET_KEYS"] != apiFill["WORKER_IDENTITY_SECRET_KEYS"] {
+		t.Error("apiFill: кольца identity api и воркера различаются — api со встроенным воркером не стартует")
+	}
 }
 
 // apiConfig, migratorConfig — wf-api и его migrate (migrate-then-api) так, как их соберёт процесс на стенде.
@@ -676,8 +751,14 @@ func TestRenderYAMLPools(t *testing.T) {
 	if _, ok := service(t, "wf-admin-api").fileEnv()["ADMIN_DB_MAX_CONNS"]; !ok {
 		t.Error("ADMIN_DB_MAX_CONNS не задан в render.yaml")
 	}
+	api := apiConfig(t).DB.MaxConns
+	if apiConfig(t).EmbedWorker {
+		// второй пул встроенного воркера и соединение LISTEN relay (вне пула)
+		w, _, _ := workerOf(t)
+		api += w.DB.MaxConns + 1
+	}
 	pools := map[string]int32{
-		"wf-api":         apiConfig(t).DB.MaxConns,
+		"wf-api":         api,
 		"wf-api migrate": migratorConfig(t).DB.MaxConns,
 		"wf-admin-api":   adminConfig(t).DB.MaxConns,
 	}
@@ -699,29 +780,60 @@ func TestRenderYAMLPools(t *testing.T) {
 	}
 }
 
-// Каждая переменная Blueprint читается своим процессом: опечатка в ключе (ADMIN_SHUTDOWN_TIMOUT) молча оставила бы
-// умолчание. Ключи — из тегов env структур config с префиксом процесса.
-func TestRenderYAMLKnownKeys(t *testing.T) {
-	known := map[string]bool{}
-	add := func(v any, prefix string) {
+// envKeys — параметры env структур config с префиксом prefix (ключ → параметры тега).
+func envKeys(t *testing.T, prefix string, vs ...any) map[string]env.FieldParams {
+	t.Helper()
+	out := map[string]env.FieldParams{}
+	for _, v := range vs {
 		ps, err := env.GetFieldParamsWithOptions(v, env.Options{Prefix: prefix})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, p := range ps {
-			known[p.Key] = true
+			out[p.Key] = p
 		}
 	}
-	add(&config.API{}, "API_")
-	add(&config.Migrator{}, "MIGRATOR_")
-	add(&config.Admin{}, "ADMIN_")
-	if !known["ADMIN_MAIL_SMTP_TLS"] || !known["API_TRUSTED_PROXIES"] {
+	return out
+}
+
+// workerKeys — ключи процесса воркера (отдельного или встроенного): Worker, Mail и WorkerIdentity с префиксом WORKER_.
+func workerKeys(t *testing.T) map[string]env.FieldParams {
+	t.Helper()
+	return envKeys(t, "WORKER_", &config.Worker{}, &config.Mail{}, &config.WorkerIdentity{})
+}
+
+// Каждая переменная Blueprint читается своим процессом: опечатка в ключе (ADMIN_SHUTDOWN_TIMOUT) молча оставила бы
+// умолчание. Ключи — из тегов env структур config с префиксом процесса, по сервисам: wf-api — api, его migrate
+// (migrate-then-api) и встроенный воркер; wf-admin-api — только ADMIN_ (WORKER_ у admin-api никто не прочтёт).
+func TestRenderYAMLKnownKeys(t *testing.T) {
+	merge := func(ms ...map[string]env.FieldParams) map[string]bool {
+		out := map[string]bool{}
+		for _, m := range ms {
+			for k := range m {
+				out[k] = true
+			}
+		}
+		return out
+	}
+	known := map[string]map[string]bool{
+		"wf-api": merge(envKeys(t, "API_", &config.API{}), envKeys(t, "MIGRATOR_", &config.Migrator{}),
+			workerKeys(t)),
+		"wf-admin-api": merge(envKeys(t, "ADMIN_", &config.Admin{})),
+	}
+	if !known["wf-admin-api"]["ADMIN_MAIL_SMTP_TLS"] || !known["wf-api"]["API_TRUSTED_PROXIES"] ||
+		!known["wf-api"]["WORKER_MAIL_SMTP_TLS"] || !known["wf-api"]["WORKER_IDENTITY_SECRET_KEYS"] {
 		t.Fatal("разбор тегов env не дал ожидаемых ключей")
 	}
 	for _, s := range blueprint(t) {
+		k, ok := known[s.Name]
+		if !ok {
+			t.Errorf("сервис %s: неизвестно, какие префиксы он читает", s.Name)
+			continue
+		}
 		for _, e := range s.EnvVars {
-			if !known[e.Key] {
-				t.Errorf("%s: %s — такого ключа нет в config (опечатка?)", s.Name, e.Key)
+			if !k[e.Key] {
+				t.Errorf("%s: %s — такого ключа нет в config процессов сервиса (опечатка или чужой префикс?)",
+					s.Name, e.Key)
 			}
 		}
 	}

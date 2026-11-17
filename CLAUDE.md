@@ -16,10 +16,10 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 8. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
 
 ## File structure
-- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc,geofixture}` (`permdoc` — кодогенерация таблицы прав, в образ не входит; `geofixture` — HTTPS-фикстура GeoNames для живого e2e, тоже вне образа), `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
+- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc,geofixture}` (`permdoc` — кодогенерация таблицы прав, в образ не входит; `geofixture` — HTTPS-фикстура GeoNames для живого e2e, тоже вне образа), `cmd/internal/workerhost` (код воркера: отдельный `worker` и встроенный режим `api` — только dev-стенд), `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
 - `contracts/` — OpenAPI: исходники `openapi/{public,admin}/` по модулям, бандлы `openapi/{public,admin}.yaml` (сгенерированы) — источник истины; `tokens/tokens.json`
 - `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`, `@wf/icons`
-- `deploy/dev/` — роли и расширения БД; dev-стенд (Neon + Render): `backend/Dockerfile`, `render.yaml`, `docs/deploy-dev.md`; `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
+- `deploy/dev/` — роли и расширения БД; dev-стенд (Neon + Render, фон — встроенный в `wf-api`): `backend/Dockerfile`, `render.yaml`, `docs/deploy-dev.md`; `deploy/server/` — свой сервер (`docker compose`: migrate, api, admin-api, worker, Caddy; `README.md`); `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
 - `design/` — бриф, `screens/*.dc.html`, `tools/extract-export.mjs`; `product/` — «почему так»
 - Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`,
   `docs/05-ролевая-модель.md` (роли игроков и сотрудников, матрица прав — генерируется `./task gen`)
@@ -51,7 +51,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 
 ## What NOT to do
 - Не урезать объём и не обходить доменные правила временно (автоодобрение и т. п.): строим весь продукт, включая турниры, рейтинги, подписки, кредиты, косметику, прогнозы, чат, второй язык; выключенное — за фича-флагами по городам (пользователь, 01.10.2026).
-- Системный PostgreSQL (служба `postgresql-x64-18`, :5432) не трогать. Docker/WSL на машине не работают — Docker только в CI.
+- Системный PostgreSQL (служба `postgresql-x64-18`, :5432) не трогать. Docker Desktop работает (16.11): `deploy/server` проверяется локально compose; WSL не работает; Docker не входит в `./task ci`.
 - Два pnpm-процесса одновременно не запускать, `pnpm install` — тем более. Скрипты не доустанавливают воркспейс (`verifyDepsBeforeRun: error`): `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` — сделать один `pnpm install`.
 - Временные worktree/копии проекта с установкой зависимостей и `rm -rf` вне проекта — запрещены (глобальный CLAUDE.md).
 - `apps/web/AGENTS.md` и `apps/web/CLAUDE.md` пишет `next dev` — не удалять и не править.
@@ -91,5 +91,10 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
   исходе, SURVIVED — тест вакуумен; один вызов укладывается в `--budget` 540 с (вызов Bash — с `timeout: 600000`),
   оборванный → `--recover`.
 - Кодогенерация — `./task gen`; сгенерированное коммитится (`gen:check` в CI сверяет).
+- Свой сервер локально (`deploy/server/README.md`, «Проверка локально»; только по просьбе или в воротах плана): образ
+  `docker build -f backend/Dockerfile -t wf-backend .`, затем из `deploy/server` `docker compose -p wf-srv -f compose.yaml
+  -f compose.ci.yaml config` / `up -d --wait` / `down -v` (встроенный режим — плюс `-f compose.ci-embed.yaml`); проект —
+  только свой `-p wf-srv`; рабочие `*.env` и `root.crt` после проверки удалить. Быстрый страж файлов без Docker —
+  `TestServerComposeNoEmbeddedWorker`, `TestServerEnvExamplesKnownKeys` (`config`).
 - Локальный Postgres 18 + PostGIS без Docker: `bash scripts/pg.sh install|init|start|stop|status|psql|port` → 127.0.0.1:`WF_PG_PORT` из `deploy/dev/.env` (по умолчанию 15432, `.tools/pg`).
 - `node --test` — только с глобом в кавычках: `node --test "dir/*.test.mjs"` (каталог на этой Node не сканируется).
