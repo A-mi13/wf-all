@@ -41,7 +41,7 @@ var (
 // 30/ч (429, ключ — HMAC «login ‖ почта», одинаков для несуществующих) → риск risk.LoginFailed по почте или IP —
 // humancheck.Require (403 с задачей) → аккаунт пулом без замка → пароль вне транзакции (checkPassword; «нет
 // аккаунта» и deleted — dummyPassword, та же работа argon2). Неудача — risk.Record по почте и IP, у существующего
-// аккаунта — security_events (login_failed) и аудит anonymous без object_id (коммитятся до ответа), ответ — один
+// аккаунта — security_events (login_failed), у любой — аудит anonymous без object_id (коммитятся до ответа), ответ — один
 // 400 identity.invalid_credentials. Успех — транзакция: lockUser (R30), хэш тот же, что проверен (иначе — неудача),
 // устройство, finishLogin (banned → 403, 2FA → mfa_required, pending_deletion → deletion_pending, иначе сессия и
 // documents_acceptance_required по согласиям в той же tx).
@@ -88,7 +88,7 @@ func (a *App) Login(ctx context.Context, email, pw string, c Client) (AuthOutcom
 	case errors.Is(err, pgx.ErrNoRows) || (err == nil && (user.Status == identitydb.UserStatusDeleted ||
 		a.purgeDue(user.Status, user.PurgeAt))):
 		// нет аккаунта, анонимизированный и с вышедшим сроком отмены удаления (m4 ревью 2) — одна ветка: та же работа
-		// argon2, журнала нет (§9.1)
+		// argon2 и та же транзакция неудачи с аудитом без object_id (§9.1, loginFailed)
 		if err := a.dummyPassword(ctx, pw); err != nil {
 			return AuthOutcome{}, err
 		}
@@ -146,18 +146,20 @@ func (a *App) Login(ctx context.Context, email, pw string, c Client) (AuthOutcom
 }
 
 // loginFailed — неудача входа: risk.LoginFailed по почте и IP (лимитер, вне транзакции; сбой — в журнал, ответ не
-// меняется), у существующего аккаунта — security_events (login_failed) и аудит anonymous без object_id в своей
-// транзакции (журнал не оракул существования). Ответ — всегда errInvalidCredentials.
+// меняется), затем одна транзакция: аудит anonymous без object_id — у любой почты, security_events (login_failed) — у
+// существующего аккаунта. Транзакция с коммитом — в обеих ветках (§9.1): без неё у «нет почты» коммит с fsync выдавал
+// существующую почту по времени ответа (TestLoginFailureSameWork, CI main 18.11); журнал не оракул — запись одна и та
+// же. Ответ — всегда errInvalidCredentials.
 func (a *App) loginFailed(ctx context.Context, userID uuid.UUID, riskKeys []string, c Client) error {
 	for _, k := range riskKeys {
 		if err := a.risk.Record(ctx, risk.LoginFailed, k); err != nil {
 			a.log.ErrorContext(ctx, "identity: учёт неудачного входа", "err", err)
 		}
 	}
-	if userID == uuid.Nil {
-		return errInvalidCredentials
-	}
 	if err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
+		if userID == uuid.Nil {
+			return a.auditAnonymous(ctx, ActionLoginFailed)
+		}
 		if _, err := a.securityEvent(ctx, tx, SecurityEvent{UserID: userID, Kind: domain.SecLoginFailed, IP: c.IP,
 			UserAgent: c.UserAgent, Meta: map[string]any{"method": string(domain.MethodPassword),
 				"client_kind": string(c.Kind)}}); err != nil {

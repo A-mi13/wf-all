@@ -47,7 +47,7 @@
 | R18 | `sessions.device_id` — `NULL` допустим (веб без метки BFF) | §5.3 |
 | R24 | CHECK `users_email_format` принимает и заглушку `deleted+<uuid>@invalid` | §5.7 |
 | R25 | Разбор UA — свой в домене (десять семейств браузеров и ОС), без библиотеки | §3.7 |
-| R26 | `signup_account_exists` — одно на старт; повтор отправки приманки письма не шлёт | §3.14 |
+| R26 | `signup_account_exists` — одно на старт; повтор отправки приманки письма не шлёт (с 18.11.2026 задача письма кода ставится и у приманки — её отбрасывает сборщик, §9.1) | §3.14 |
 | R27 | Свежесть вторым фактором (`disableTotp`) — `sessions.mfa_at` не старше 10 минут | §3.13 |
 | W5, 16.11 | Живой сброс 2FA владельцем отменяют также `reauthenticate` вторым фактором, `setupTotp`, `confirmTotp`, `disableTotp`; явная `cancelMyMfaReset` — только сессией со вторым фактором (решение пользователя 16.11), повтор — `204` | §3.15 |
 | R28 | Ротация — `api identity rekey`, не `worker`: `worker` не читает секреты `user_mfa`/`credentials`/`user_recovery_codes`/`passkeys`; `apple_refresh_enc` читает — для отзыва у Apple (I-3) | §5.4, §5.5 |
@@ -258,8 +258,8 @@
    спеки — `sleep` на сервере тратил бы наши ресурсы).
 4. Нет почты, нет пароля у аккаунта (только соцвход), неверный пароль, статус `deleted` → один ответ
    `400 identity.invalid_credentials`; на «нет почты» и «нет пароля» — `VerifyDummy` (время как у настоящей
-   проверки). Неудача пишет `risk.LoginFailed` по почте и IP и `security_events (login_failed)` для существующего
-   аккаунта.
+   проверки). Неудача пишет `risk.LoginFailed` по почте и IP, затем одну транзакцию: аудит `identity.login_failed` —
+   у любой почты, `security_events (login_failed)` — у существующего аккаунта (выравнивание по работе с базой, §9.1).
 5. Пароль верный, статус `banned` → `403 identity.account_blocked {blocked_until}` (раскрывает только тому, кто знает
    пароль). `suspended` — вход разрешён, возможности режут ограничения. `pending_deletion` — после пароля (и 2FA, если
    включена) ответ `deletion_pending` вместо сессии (§3.11).
@@ -1446,7 +1446,7 @@ Payload — только идентификаторы, `v = 1`, без почт�
 | `identity.mfa_reset_requested` | сотрудник | user | через `approvals`; причина и номер обращения — в `meta` без ПД |
 | `identity.mfa_reset_cancelled`, `identity.mfa_reset_executed` | игрок, сотрудник или `system` | user | `system` — системная отмена (запрос удаления, анонимизация, исполнитель по сроку при снятой 2FA) и исполнение |
 | `identity.documents_accepted` | игрок | user | версии |
-| `identity.login_failed` | `anonymous` | — | только для существующего аккаунта: `object_id` не пишется, чтобы журнал не стал оракулом (решение автора спеки); подробности — `security_events` |
+| `identity.login_failed` | `anonymous` | — | у любой неудачи входа, в том числе на несуществующую почту (18.11.2026: транзакция с коммитом в обеих ветках, §9.1); `object_id` не пишется, чтобы журнал не стал оракулом; подробности существующего аккаунта — `security_events` |
 | `identity.password_changed`, `identity.password_reset`, `identity.email_changed`, `identity.nickname_changed`, `identity.mfa_enabled`, `identity.mfa_disabled`, `identity.identity_linked/unlinked`, `identity.passkey_added/removed`, `identity.sessions_revoked` | игрок | user | `before`/`after` без ПД (маскирование `audit.Mask`) |
 | `identity.captain_application_submitted/withdrawn` | игрок | captain_application | `scope_city_id` |
 | `identity.captain_application_approved/rejected` | сотрудник | captain_application | `scope_city_id`, код причины — `after.reason_code` (`code` маскирует `audit.Mask`); комментария нет |
@@ -1469,15 +1469,15 @@ Payload — только идентификаторы, `v = 1`, без почт�
 
 | Ручка | Как не раскрываем |
 | --- | --- |
-| `login` | один код `invalid_credentials`; `VerifyDummy` на «нет почты» и «нет пароля»; лимит по почте одинаков для несуществующих |
+| `login` | один код `invalid_credentials`; `VerifyDummy` на «нет почты» и «нет пароля»; лимит по почте одинаков для несуществующих; работа с базой одинакова — те же запросы и одна транзакция с записью в журнал (разница — строка `security_events` внутри неё; страж `TestLoginFailureSameWork`, 18.11.2026: без транзакции у «нет почты» коммит выдавал почту по времени на медленном диске) |
 | `startSignup` | всегда `202 CodeSent`; приманка ведёт себя как настоящий код; хэш пароля считается в обеих ветках; письмо «уже есть аккаунт» уходит владельцу, а не в ответ |
 | `startPasswordReset` | всегда `202`; приманка без письма |
 | `startEmailChange` | всегда `202`; при занятой почте — письмо на новый адрес, а не ответ |
-| `resendAuthCode` | приманка отвечает теми же паузами |
+| `resendAuthCode` | приманка отвечает теми же паузами и делает ту же работу с базой: вхолостую замок аккаунта (строка без аккаунта — тот же запрос по нулевому id) и задача письма вида настоящего кода, которую сборщик отбрасывает («код другого вида») — письма нет; так же неверный код сброса (`confirmPasswordReset`) — страж `TestCodeDecoySameWork` (18.11.2026) |
 | соцвход | автопривязка не говорит «аккаунт найден» до успешного входа; `signup_required` только когда аккаунта нет — но это знает лишь владелец учётки провайдера с подтверждённой почтой |
 | `checkNickname` | ники публичны — не секрет |
 
-Время: тест измеряет медиану 50 запросов «есть / нет» на реальном argon2 и требует расхождения < 15 %
+Время: страж по устройству (`TestLoginFailureSameWork`: одинаковые запросы и коммит) и секундомер — медиана 50 запросов «есть / нет» на реальном argon2, расхождение < 15 %
 (как `TestVerifyDummyCostsLikeVerify`); отправка письма — задачей River, вне ответа.
 
 ### 9.2. Перебор
