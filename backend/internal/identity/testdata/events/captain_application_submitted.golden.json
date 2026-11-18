@@ -1,0 +1,12 @@
+{
+  "type": "identity.captain_application_submitted",
+  "schema_version": 1,
+  "aggregate_type": "captain_application",
+  "aggregate_id": "01930000-0000-7000-8000-000000000021",
+  "aggregate_version": 1,
+  "payload": {
+    "application_id": "01930000-0000-7000-8000-000000000021",
+    "user_id": "01930000-0000-7000-8000-000000000001",
+    "city_id": "01930000-0000-7000-8000-000000000002"
+  }
+}

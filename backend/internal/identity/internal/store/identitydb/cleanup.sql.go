@@ -280,19 +280,22 @@ func (q *Queries) CleanupLiveCapabilities(ctx context.Context, arg CleanupLiveCa
 }
 
 const cleanupLockUser = `-- name: CleanupLockUser :one
-SELECT id, status::text AS status FROM users WHERE id = $1 FOR NO KEY UPDATE SKIP LOCKED
+SELECT id, status::text AS status, coalesce(status_before_deletion::text, '')::text AS status_before_deletion
+FROM users WHERE id = $1 FOR NO KEY UPDATE SKIP LOCKED
 `
 
 type CleanupLockUserRow struct {
-	ID     uuid.UUID
-	Status string
+	ID                   uuid.UUID
+	Status               string
+	StatusBeforeDeletion string
 }
 
-// воркер: аккаунт под замком (R30: users первым) или ничего — занят сценарием игрока, возьмёт следующий запуск
+// воркер: аккаунт под замком (R30: users первым) или ничего — занят сценарием игрока, возьмёт следующий запуск;
+// status_before_deletion — истечение бана в периоде удаления (R11, R12)
 func (q *Queries) CleanupLockUser(ctx context.Context, id uuid.UUID) (CleanupLockUserRow, error) {
 	row := q.db.QueryRow(ctx, cleanupLockUser, id)
 	var i CleanupLockUserRow
-	err := row.Scan(&i.ID, &i.Status)
+	err := row.Scan(&i.ID, &i.Status, &i.StatusBeforeDeletion)
 	return i, err
 }
 

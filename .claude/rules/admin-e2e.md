@@ -26,6 +26,18 @@ paths:
   GeoNames 18190 (HTTPS, тестовый ключ `httptest`, PEM корня `.tools/e2e/geofixture-ca.pem` → `WORKER_GEONAMES_CA_FILE`,
   готовность `/readyz`) → воркер (`workerEnv`: база `wf_e2e` под `worker`, источник — только фикстура, Mailpit e2e;
   готовность — строка «воркер запущен») → пары; dev `WORKER_*` вычищаются, `WF_E2E_WORKER_DATABASE_URL` — только воркеру.
+- Публичный api (план I-4, Task 11): скрипт собирает `api` и `admin-api` с тегом `wf_e2e` (тестовые порты условий
+  капитанства «выполнено»; прод-образ и стенд — без тега, страж `TestProdBuildWithoutE2ETag` в `config`, тест портов в
+  CI — команда `backend:test`, страж `TestE2ECaptainChecksTestInCI`). Сервер — после воркера: `apiEnv()` (127.0.0.1:18184,
+  готовность `/readyz`, база `wf_e2e` под ролью `api`, одноразовые `WF_E2E_JWT_SEEDS`/`HUMANCHECK_KEYS`/`DEVICE_KEYS`/
+  `API_DATABASE_URL` → `API_*` только у api, кольцо identity — то же `WF_E2E_IDENTITY_SECRET_KEYS`, что у воркера: письма
+  с кодами собирает воркер; `API_EMBED_WORKER=false`, документы — `E2E_LEGAL_DOCUMENTS`); dev `API_*` вычищаются, как
+  `ADMIN_*`/`WORKER_*`/`MIGRATOR_*` и любая `*_DATABASE_URL` вне `WF_E2E_*` (`cleanEnv`: `./task ci` грузит
+  `backend/.env` целиком — 17.11 dev-строка мигратора доходила до api; новая роль базы не утечёт молча). Клиент — `e2e/api.ts` (`PublicApi` на `APIRequestContext`: `device` android в теле, Bearer, ключ
+  идемпотентности на мутациях с замком, `403 humancheck.required` — решает PoW и повторяет, политику не ослабляет).
+- Лимиты admin-api в прогоне — умолчания (`ADMIN_RATE_LIMITS` пустой у всех пар, страж `env.test.ts`): обход разделов
+  `prod.spec` — живой страж `ratelimit.AdminRules` и класса фоновых `staff_background` (`backend-http.md`); расширенный
+  лимит прогона спрятал бы их поломку (итоговое ревью I-4, I1).
 - Пары admin-api на одной базе все исполняют очередь staff: письмо может уйти из пары другого браузера со ссылкой на
   чужой origin — сценарии берут из письма только код.
 - Проекты по умолчанию — `chromium,webkit,prod` (одно умолчание в `e2e/env.ts` и скрипте, страж `env.test.ts`), поэтому
@@ -39,8 +51,11 @@ paths:
   подписи — `t(key, 'en')`; после принятия и 2FA — стартовая «Главная» `/` с `h1` `nav.home` и видимой «Выйти»);
   `stale-cookie.spec.ts` — вход с протухшей cookie в обоих браузерах.
 - `prod.spec.ts` — собранная админка: тема до первого кадра при явном выборе против эмулированной системной
-  (`data-theme` до модульных скриптов, фон = `tokens.color.bg[тема]`), обход всех разделов `NAV` (`e2e/sections.ts`,
-  первым — `/`, сверка с `NAV` — `env.test.ts`) и панели приглашения без `securitypolicyviolation`; обход начинается со
+  (`data-theme` до модульных скриптов, фон = `tokens.color.bg[тема]`), обход всех разделов `NAV` (`e2e/sections.ts`:
+  `{ path, titleKey }`, первым — `/`, сверка путей с `NAV` и заголовка с `labelKey` пункта — `env.test.ts`; исключения —
+  `TITLE_NOT_NAV_LABEL`): в каждом разделе — тишина сети (`networkidle`) и `h1` **по имени** (у `RateLimitedState` и
+  `ForbiddenState` тоже есть `h1`), за весь обход — ни одного ответа `/v1/*` ≥ 400 (слушатель `response`, список
+  «раздел: статус метод путь») и панели приглашения без `securitypolicyviolation`; обход начинается со
   стартовой: палитра открывается **кнопкой** «Искать везде» (`palette.open`), ввод в combobox `palette.input`, выбор
   раздела — переход; затем клавишей Ctrl+K (настоящий браузер со своим Ctrl+K) и Esc; новые всплывающие дописывают своё открытие в обход.
   Матрица флагов (`/flags`) — виртуализация столбцов под настоящей CSP, доказанная положительно: столбцов в DOM меньше
@@ -51,6 +66,13 @@ paths:
   526815 (Свердловская область) пилотом, slug `mikhaylovsk` (тёзка из сида — `mihaylovsk`, R13) → журнал
   (`geo.import_requested` — владелец, `geo.import` — система, `geo.city_activated` — владелец); один проект — `geoProject`
   (prod, без него chromium), без `securitypolicyviolation` на всём пути.
+- `identity-api.spec.ts` и `captaincy.spec.ts` (план I-4, Task 11) — один проект `identityProject` (как geo: prod, без
+  него chromium). Ядро identity через api: регистрация с кодом из Mailpit → refresh → logout (refresh после — 401
+  `refresh_invalid`) → вход → удаление → вход `deletion_pending` → `cancelDeletion`. Капитанство: два игрока через api
+  (город `stavropol` сида), заявка первого → владелец: «Капитаны» (счётчик 1 в имени ссылки — ветка `one` ICU), карточка
+  (4 условия «выполнено»), контакты с причиной, «Одобрить» → `permits` игрока, журнал `captain_application_approved` и
+  `pii_read` (без почты); второй — «Отклонить» «Другое» с комментарием → письмо → повторная подача `409
+  application_cooldown`; «Игроки» — поиск по почте → карточка без 2FA; без `securitypolicyviolation`.
 - TOTP — `TotpDevice` (код шага один раз, иначе ждёт следующий), письма — `waitForMail` (фон admin-api шлёт не сразу);
   «письмо одно» — принято не раньше подтверждения и `expectMailCountStable` (~3 с опроса), а не одна проверка «сейчас
   одно».

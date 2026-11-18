@@ -9,14 +9,29 @@ type GeoCity = components['schemas']['GeoCity'];
 export type FlagToggler = ReturnType<typeof useFlagToggle>;
 
 // Подпись строки флага: название (незнакомый ключ — сам ключ и «нет подписи»), пояснение, состояние клеток —
-// «включено везде» (городские неактивны) или предел контракта (включить следующий город нельзя).
-export function FlagHead({ flag }: { flag: FeatureFlag }) {
+// «включено везде» (городские неактивны) или предел контракта (включить следующий город нельзя); правила флага
+// из контракта (R3 плана I-4, своей копии правил нет): «только везде», «требует X» и обратное «нужен для Y» — по
+// requires других флагов списка (all).
+export function FlagHead({ flag, all }: { flag: FeatureFlag; all: readonly FeatureFlag[] }) {
   const t = useTranslations('flagsPage');
-  const { title, note, known } = useFlagLabel()(flag.key);
+  const label = useFlagLabel();
+  const { title, note, known } = label(flag.key);
+  const requiredBy = all.filter((f) => f.rules.requires === flag.key);
   return (
     <span className={styles.head}>
       <span className={styles.title}>{title}</span>
       <span className={styles.subtle}>{known ? note : t('no_title')}</span>
+      {flag.rules.global_only && <span className={styles.subtle}>{t('global_only')}</span>}
+      {flag.rules.requires && (
+        <span className={styles.subtle}>
+          {t('requires', { flag: label(flag.rules.requires).title })}
+        </span>
+      )}
+      {requiredBy.length > 0 && (
+        <span className={styles.subtle}>
+          {t('required_by', { flags: requiredBy.map((f) => label(f.key).title).join('», «') })}
+        </span>
+      )}
       {flag.enabled_globally && <span className={styles.subtle}>{t('on_everywhere')}</span>}
       {atLimit(flag) && <span className={styles.warning}>{t('limit')}</span>}
     </span>
@@ -43,7 +58,7 @@ export function FlagsMatrix({
         rows={flags}
         rowKey={(f) => f.key}
         corner={t('corner')}
-        rowHeader={(f) => <FlagHead flag={f} />}
+        rowHeader={(f) => <FlagHead flag={f} all={flags} />}
         fixed={[
           {
             id: 'everywhere',
@@ -65,6 +80,8 @@ export function FlagsMatrix({
         columnKey={(c) => c.id}
         columnHeader={(c) => c.name}
         cell={(f, c) => {
+          // флаг только «везде» (способы входа: до входа город неизвестен) — городских клеток нет
+          if (f.rules.global_only) return null;
           const target = { kind: 'city', cityId: c.id, cityName: c.name } as const;
           return (
             <Switch

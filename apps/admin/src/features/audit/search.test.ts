@@ -194,3 +194,53 @@ describe('период → UTC', () => {
     for (const code of actions) expect(code).not.toMatch(/[._]$/);
   });
 });
+
+// План I-4, Task 8: вкладка «Игроки» — все действия identity (префикс identity.), действие identity — в ней; у каждого
+// действия identity (I-2 и I-4, backend app/audit.go) и объектов игрока — подпись.
+describe('вкладка «Игроки»', () => {
+  test('префикс identity., запрос — action_prefix', () => {
+    expect(AUDIT_SECTIONS.players).toBe('identity.');
+    expect(parseAuditSearch({ tab: 'players', action: 'identity.pii_read' })).toEqual({
+      tab: 'players',
+      action: 'identity.pii_read',
+    });
+    expect(parseAuditSearch({ tab: 'players', action: 'staff.login' })).toEqual({ tab: 'players' });
+    expect(toAuditQuery({ tab: 'players' }, 'UTC')).toEqual({ action_prefix: 'identity.' });
+  });
+
+  test('подписи действий identity и объектов игрока', () => {
+    const identity = Object.keys(ru.audit.actions.identity);
+    for (const a of [
+      'user_registered',
+      'login_failed',
+      'password_changed',
+      'password_reset',
+      'email_changed',
+      'nickname_changed',
+      'documents_accepted',
+      'mfa_enabled',
+      'mfa_disabled',
+      'sessions_revoked',
+      'user_deletion_requested',
+      'user_deletion_cancelled',
+      'user_deleted',
+      'mfa_reset_requested',
+      'mfa_reset_cancelled',
+      'mfa_reset_executed',
+      'captain_application_submitted',
+      'captain_application_withdrawn',
+      'captain_application_approved',
+      'captain_application_rejected',
+      'captain_permit_revoked',
+      'pii_read',
+      'player_lookup',
+      'ban_expired',
+      'city_changed',
+    ])
+      expect(identity).toContain(a);
+    expect(Object.keys(ru.audit.objects)).toEqual(
+      expect.arrayContaining(['user', 'captain_application', 'mfa_reset']),
+    );
+    expect(ru.audit.tabs.players).toBe('Игроки');
+  });
+});

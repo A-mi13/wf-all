@@ -38,7 +38,35 @@ export type ApprovalSummary = {
   locale?: string; // язык новичка приглашения (IL2): ru | en, незнакомое — как есть
   country?: { code: string; changes: CountryChange[]; others: string[] };
   newCountry?: NewCountry;
+  mfaReset?: MfaResetSummary;
 };
+
+// Сброс 2FA игрока (identity.mfa_reset, план I-4 R28): игрок по id (операции «игрок по id» в контракте нет), обращение
+// и причина первого сотрудника; незнакомые поля и знакомые неверного типа — others (подтверждающий видит всё).
+export type MfaResetSummary = {
+  userId?: string;
+  ticket?: string;
+  reason?: string;
+  others: string[];
+};
+
+// Служебные поля payload сброса (версия формата, инициатор и его подпись) — не показываются.
+const MFA_RESET_SERVICE = ['v', 'init_id', 'init_ver', 'init_label'];
+const mfaResetField = (key: string) =>
+  key === 'user_id' ? 'userId' : key === 'ticket' || key === 'reason' ? key : undefined;
+
+function mfaReset(p: Record<string, unknown>): MfaResetSummary {
+  const out: MfaResetSummary = { others: [] };
+  for (const [key, value] of Object.entries(p)) {
+    if (MFA_RESET_SERVICE.includes(key)) continue;
+    const field = mfaResetField(key);
+    const v = text(value);
+    if (field && v !== undefined) out[field] = v;
+    else out.others.push(key);
+  }
+  out.others.sort();
+  return out;
+}
 
 const text = (v: unknown): string | undefined =>
   typeof v === 'string' && v.trim() !== '' ? v : undefined;
@@ -149,6 +177,10 @@ export function summarizePayload(
   action?: string,
 ): ApprovalSummary {
   const out: ApprovalSummary = {};
+  if (action === 'identity.mfa_reset') {
+    out.mfaReset = mfaReset(payload);
+    return out;
+  }
   if (action === 'geo.country_rules' || action === 'geo.country_create') {
     const code = text(payload.code);
     if (!code) return out;

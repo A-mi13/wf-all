@@ -185,7 +185,7 @@ func (a *App) dummyPassword(ctx context.Context, pw string) error {
 	return a.passwordDummy(ctx, pw)
 }
 
-// finishLogin — завершение входа по статусу аккаунта (§3.2, §3.11; порядок R6): banned → 403
+// finishLogin — завершение входа по статусу аккаунта (§3.2, §3.11; порядок R6): заблокирован (R36) → 403
 // identity.account_blocked (blocked_until из ограничения бана) или errBlockedAsExpired; 2FA включена и не пройдена →
 // mfa_required (mfa_token на 5 минут, methods, reset_at); pending_deletion → deletion_pending (restore_token на 10
 // минут, без сессии); иначе — сессия (mfa_at = now при mfaDone), связь с устройством, security_events (login), хук
@@ -215,9 +215,18 @@ func (a *App) finishLoginAs(ctx context.Context, tx pgx.Tx, u userRow, c Client,
 		return LoginOutcome{}, err
 	}
 	q := identitydb.New(tx)
+	// R12 (m1 итогового ревью Г): бан истёк по until, чистка ещё не прошла — статус возвращается здесь, под замком users,
+	// тем же expireBanTx, что в чистке и отмене удаления; иначе вход и me видели бы banned
+	if u, err = a.expireBanAtLogin(ctx, q, u); err != nil {
+		return LoginOutcome{}, err
+	}
 	brief := UserBrief{ID: u.ID, Nickname: u.Nickname, Status: string(u.Status), Locale: u.Locale}
+	blocked, err := a.blocked(ctx, q, u, a.clock.Now())
+	if err != nil {
+		return LoginOutcome{}, err
+	}
 	switch {
-	case u.Status == identitydb.UserStatusBanned:
+	case blocked: // R36: banned или бан поверх периода удаления (R11) — не deletion_pending
 		if blockedAsExpired {
 			return LoginOutcome{}, errBlockedAsExpired
 		}
@@ -277,6 +286,34 @@ func (a *App) finishLoginAs(ctx context.Context, tx pgx.Tx, u userRow, c Client,
 		}
 	}
 	return LoginOutcome{Status: StatusAuthenticated, Issued: &issued, User: brief}, nil
+}
+
+// expireBanAtLogin — R12 на входе: забаненный (в периоде удаления — по status_before_deletion) без живой строки login →
+// expireBanTx (active, версия, событие, аудит от system); u — с новым статусом. users под замком вызывающего.
+func (a *App) expireBanAtLogin(ctx context.Context, q *identitydb.Queries, u userRow) (userRow, error) {
+	before := ""
+	if u.StatusBeforeDeletion != nil {
+		before = string(*u.StatusBeforeDeletion)
+	}
+	if effectiveStatus(string(u.Status), before) != StatusBanned {
+		return u, nil
+	}
+	live, err := q.RestrictionsLiveCapabilities(ctx, identitydb.RestrictionsLiveCapabilitiesParams{UserID: u.ID,
+		Now: a.clock.Now()})
+	if err != nil {
+		return u, fmt.Errorf("identity: действующие ограничения: %w", err)
+	}
+	done, err := a.expireBanTx(ctx, q, u.ID, string(u.Status), before, live)
+	if err != nil || !done {
+		return u, err
+	}
+	if u.Status == identitydb.UserStatusBanned {
+		u.Status = identitydb.UserStatusActive
+	} else {
+		active := identitydb.UserStatusActive
+		u.StatusBeforeDeletion = &active
+	}
+	return u, nil
 }
 
 // purgeDue — срок отмены удаления вышел: pending_deletion и purge_at ≤ now (ровно purge_at — уже нельзя, §3.11 п. 2).

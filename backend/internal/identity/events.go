@@ -10,8 +10,8 @@ import (
 
 // События модуля identity (спека identity §8.1), часть I-2 — контракт для подписчиков будущих модулей. Payload —
 // только идентификаторы и непрофильные значения, схема v1 (SchemaVersion); почты, телефона, даты рождения, ника и IP
-// нет (TestEventPayloadsNoPII). События I-3/I-4 (identity_linked, passkey_*, captain_*, device_shared, city_changed) —
-// их планы.
+// нет (TestEventPayloadsNoPII). События I-4 (captain_*, city_changed) — план I-4, Task 2; события I-3
+// (identity_linked, passkey_*, device_shared) — его план.
 const (
 	EventUserRegistered        = "identity.user_registered"
 	EventUserDeletionScheduled = "identity.user_deletion_scheduled"
@@ -25,17 +25,27 @@ const (
 	EventRestrictionsChanged   = "identity.restrictions_changed"
 	EventMfaResetScheduled     = "identity.mfa_reset_scheduled"
 	EventMfaResetCancelled     = "identity.mfa_reset_cancelled"
-	AggregateUser              = "user"
-	AggregateMfaReset          = "mfa_reset"
-	maxSessionIDsInEvent       = 100 // спека §8.1: session_ids ≤ 100
-	eventSchemaVersion         = 1
+	// I-4 (спека §8.1): заявки и допуски — на агрегате captain_application (К2: admin-api не пишет users)
+	EventCaptainApplicationSubmitted = "identity.captain_application_submitted"
+	EventCaptainApplicationWithdrawn = "identity.captain_application_withdrawn"
+	EventCaptainApplicationDecided   = "identity.captain_application_decided"
+	EventCaptainPermitGranted        = "identity.captain_permit_granted"
+	EventCaptainPermitRevoked        = "identity.captain_permit_revoked"
+	EventCityChanged                 = "identity.city_changed"
+	AggregateUser                    = "user"
+	AggregateMfaReset                = "mfa_reset"
+	AggregateCaptainApplication      = "captain_application"
+	maxSessionIDsInEvent             = 100 // спека §8.1: session_ids ≤ 100
+	eventSchemaVersion               = 1
 )
 
-// EventTypes — все события I-2 (сверка каталога в тестах).
+// EventTypes — все события I-2 и I-4 (сверка каталога в тестах).
 func EventTypes() []string {
 	return []string{EventUserRegistered, EventUserDeletionScheduled, EventUserDeletionCancelled, EventUserDeleted,
 		EventUserEmailChanged, EventNicknameChanged, EventPasswordChanged, EventMfaChanged, EventSessionsRevoked,
-		EventRestrictionsChanged, EventMfaResetScheduled, EventMfaResetCancelled}
+		EventRestrictionsChanged, EventMfaResetScheduled, EventMfaResetCancelled,
+		EventCaptainApplicationSubmitted, EventCaptainApplicationWithdrawn, EventCaptainApplicationDecided,
+		EventCaptainPermitGranted, EventCaptainPermitRevoked, EventCityChanged}
 }
 
 // UserRef — агрегат user: id и users.version после изменения (растёт на каждое изменение аккаунта в той же tx).
@@ -172,4 +182,86 @@ func MfaResetScheduled(r MfaResetRef, userID uuid.UUID, executeAt time.Time) eve
 // сотрудником, запросом удаления аккаунта или исполнителем по сроку (2FA уже нет, аккаунт удаляется).
 func MfaResetCancelled(r MfaResetRef, userID uuid.UUID, executeAt time.Time) events.Event {
 	return mfaResetEvent(EventMfaResetCancelled, r, userID, executeAt)
+}
+
+// ApplicationRef — агрегат captain_application: captain_applications.id и .version после изменения (растёт на каждое
+// изменение заявки и на выдачу или отзыв допуска по ней в той же tx).
+type ApplicationRef struct {
+	ID      uuid.UUID
+	Version int64
+}
+
+// CaptainApplicationPayload — identity.captain_application_submitted и identity.captain_application_withdrawn.
+type CaptainApplicationPayload struct {
+	ApplicationID uuid.UUID `json:"application_id"`
+	UserID        uuid.UUID `json:"user_id"`
+	CityID        uuid.UUID `json:"city_id"`
+}
+
+// CaptainApplicationDecidedPayload — identity.captain_application_decided: decision — approved | rejected;
+// rejection_code — код §7.3 у отказа, null у одобрения (комментария модератора в событии нет).
+type CaptainApplicationDecidedPayload struct {
+	ApplicationID uuid.UUID `json:"application_id"`
+	UserID        uuid.UUID `json:"user_id"`
+	CityID        uuid.UUID `json:"city_id"`
+	Decision      string    `json:"decision"`
+	RejectionCode *string   `json:"rejection_code"`
+}
+
+// CaptainPermitPayload — identity.captain_permit_granted и identity.captain_permit_revoked.
+type CaptainPermitPayload struct {
+	UserID        uuid.UUID `json:"user_id"`
+	CityID        uuid.UUID `json:"city_id"`
+	ApplicationID uuid.UUID `json:"application_id"`
+}
+
+// CityChangedPayload — identity.city_changed.
+type CityChangedPayload struct {
+	UserID     uuid.UUID `json:"user_id"`
+	FromCityID uuid.UUID `json:"from_city_id"`
+	ToCityID   uuid.UUID `json:"to_city_id"`
+}
+
+func applicationEvent(typ string, r ApplicationRef, payload any) events.Event {
+	return events.Event{Type: typ, SchemaVersion: eventSchemaVersion, AggregateType: AggregateCaptainApplication,
+		AggregateID: r.ID, AggregateVersion: r.Version, Payload: payload}
+}
+
+// CaptainApplicationSubmitted — игрок подал заявку в капитаны.
+func CaptainApplicationSubmitted(r ApplicationRef, userID, cityID uuid.UUID) events.Event {
+	return applicationEvent(EventCaptainApplicationSubmitted, r,
+		CaptainApplicationPayload{ApplicationID: r.ID, UserID: userID, CityID: cityID})
+}
+
+// CaptainApplicationWithdrawn — заявка отозвана: игроком, удалением аккаунта или сменой города (R24, R39).
+func CaptainApplicationWithdrawn(r ApplicationRef, userID, cityID uuid.UUID) events.Event {
+	return applicationEvent(EventCaptainApplicationWithdrawn, r,
+		CaptainApplicationPayload{ApplicationID: r.ID, UserID: userID, CityID: cityID})
+}
+
+// CaptainApplicationDecided — модератор решил заявку: decision — approved | rejected, rejectionCode — код отказа
+// («» — null, у одобрения).
+func CaptainApplicationDecided(r ApplicationRef, userID, cityID uuid.UUID, decision, rejectionCode string) events.Event {
+	p := CaptainApplicationDecidedPayload{ApplicationID: r.ID, UserID: userID, CityID: cityID, Decision: decision}
+	if rejectionCode != "" {
+		p.RejectionCode = &rejectionCode
+	}
+	return applicationEvent(EventCaptainApplicationDecided, r, p)
+}
+
+// CaptainPermitGranted — допуск капитана в городе выдан одобрением заявки.
+func CaptainPermitGranted(r ApplicationRef, userID, cityID uuid.UUID) events.Event {
+	return applicationEvent(EventCaptainPermitGranted, r,
+		CaptainPermitPayload{UserID: userID, CityID: cityID, ApplicationID: r.ID})
+}
+
+// CaptainPermitRevoked — допуск отозван (RevokeRoleInTx, анонимизация — R24); агрегат — заявка допуска (R25).
+func CaptainPermitRevoked(r ApplicationRef, userID, cityID uuid.UUID) events.Event {
+	return applicationEvent(EventCaptainPermitRevoked, r,
+		CaptainPermitPayload{UserID: userID, CityID: cityID, ApplicationID: r.ID})
+}
+
+// CityChanged — текущий город игрока сменён (ChangeCityInTx).
+func CityChanged(u UserRef, from, to uuid.UUID) events.Event {
+	return userEvent(EventCityChanged, u, CityChangedPayload{UserID: u.ID, FromCityID: from, ToCityID: to})
 }

@@ -70,8 +70,10 @@ describe('реестр команд', () => {
       [
         'features/approvals/commands.ts',
         'features/audit/commands.ts',
+        'features/captains/commands.ts',
         'features/geo/commands.ts',
         'features/me/commands.ts',
+        'features/players/commands.ts',
         'features/staff/commands.ts',
       ].sort(),
     );
@@ -127,6 +129,8 @@ describe('реестр команд', () => {
       [paths.audit]: 'g a',
       [paths.staff]: 'g r',
       [paths.approvals]: 'g p',
+      [paths.captains]: 'g k',
+      [paths.players]: 'g u',
       [paths.me]: 'g m',
       [paths.cities]: 'g c',
       [paths.countries]: 'g o',

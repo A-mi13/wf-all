@@ -10,10 +10,18 @@ FROM staff_accounts a
 LEFT JOIN staff_mfa m ON m.staff_id = a.id
 WHERE a.email = sqlc.arg(email)::citext;
 
+-- name: AcquireAccount :one
+-- Замок учётки FOR UPDATE ОТДЕЛЬНЫМ оператором — первым шагом lockAccount и lockAccounts (цель). Один оператор
+-- «FOR UPDATE OF a + JOIN staff_roles» после ожидания замка (READ COMMITTED) перечитывает только строку учётки, а
+-- роль берёт из снимка до ожидания: роль, сменённую под замком соседа, он бы не увидел (TestStaleRole*). Следующий
+-- оператор (LockAccount, ManageLockAccount) берёт новый снимок уже под замком и не ждёт. Учётки нет — ErrNoRows.
+SELECT id FROM staff_accounts WHERE id = sqlc.arg(id)::uuid FOR UPDATE;
+
 -- name: LockAccount :one
 -- Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
 -- снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите,
--- почта — аккаунт в ссылке otpauth (настройка 2FA).
+-- почта — аккаунт в ссылке otpauth (настройка 2FA). Только после AcquireAccount (lockAccount): сам по себе после
+-- ожидания замка отдал бы роль из старого снимка.
 SELECT a.id, a.status, a.display_name, a.mfa_failures, a.locked_until, a.lock_notified_at, a.version,
        a.password_hash, a.locale, r.role::text AS role, a.email::text AS email
 FROM staff_accounts a

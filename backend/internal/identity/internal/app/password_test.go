@@ -73,13 +73,25 @@ func TestStartResetDecoy(t *testing.T) {
 	for _, s := range []string{"active", "suspended", "pending_deletion", "banned"} {
 		uid := seedUser(t, e.owner, "reset_"+s, "ru")
 		setStatus(t, e, uid, s)
+		if s == "banned" { // живой бан (R42 — со строкой login)
+			acctExec(t, e, `INSERT INTO user_restrictions (id, user_id, capability, source_id, created_at)
+				VALUES (gen_random_uuid(), $1, 'login', gen_random_uuid(), now())`, uid)
+		}
 	}
+	// m3 раунда F ревью Г: бан истёк по until, чистка и вход ещё не прошли — аккаунт не заблокирован (R12, R36):
+	// настоящий код с письмом, как у active (вход уже проходит)
+	expired := seedUser(t, e.owner, "reset_ban_expired", "ru")
+	setStatus(t, e, expired, "banned")
+	acctExec(t, e, `INSERT INTO user_restrictions (id, user_id, capability, until, source_id, created_at)
+		VALUES (gen_random_uuid(), $1, 'login', $2, gen_random_uuid(), $3)`, expired, e.clock.Now(),
+		e.clock.Now().Add(-48*time.Hour))
 	now := e.clock.Now()
 	for _, tc := range []struct {
 		email string
 		real  bool
 	}{{"reset_active@example.com", true}, {"reset_suspended@example.com", true},
-		{"reset_pending_deletion@example.com", true}, {"reset_banned@example.com", false}, {"nobody@example.com", false}} {
+		{"reset_pending_deletion@example.com", true}, {"reset_banned@example.com", false},
+		{"reset_ban_expired@example.com", true}, {"nobody@example.com", false}} {
 		codes := count(t, e.owner, `SELECT count(*) FROM auth_codes`)
 		jobs := mailJobs(t, e, MailPasswordResetCode)
 		sent := startReset(t, e, tc.email)
@@ -235,6 +247,9 @@ func TestConfirmResetBannedAfterStart(t *testing.T) {
 	live := issue(t, e, uid, web("old"))
 	sent := startReset(t, e, "reset_banned@example.com")
 	setStatus(t, e, uid, "banned")
+	// бан по R42 — со строкой login (без неё бан истёк, R12)
+	acctExec(t, e, `INSERT INTO user_restrictions (id, user_id, capability, source_id, created_at)
+		VALUES (gen_random_uuid(), $1, 'login', gen_random_uuid(), now())`, uid)
 	code := plainCode(t, e, sent.CodeID)
 	if _, err := confirmReset(e, sent, code, nil, resetNewPassword); problemCode(err) != identity.CodeCodeExpired {
 		t.Fatalf("верный код: %v", err)

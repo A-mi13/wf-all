@@ -48,10 +48,18 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
 peer → IP-аллоулист (`ADMIN_IP_ALLOWLIST`; пусто — выключен; вне списка — `403 auth.ip_not_allowed` на всё, включая
 статику и `/docs`) → склейка `Accept-Language` → лимит тела → таймаут → `httpx.Routes` → `Cache-Control: no-store` на
 ответах маршрутов контракта → сессия сотрудника по cookie (только маршруты контракта) → CSRF → `httpx.ValidateRequests`
-(вход — `auth.AuthenticatedStaff`) → права `x-permission` → `ratelimit.Middleware` → побудка api (`wake.go`) →
+(вход — `auth.AuthenticatedStaff`) → права `x-permission` → `ratelimit.MiddlewareBy(…, rateClass)` → побудка api (`wake.go`) →
 `idempotency.Middleware` → strict-хендлер. Без `auth.Middleware` и `humancheck`. Сборка — `internal/httpapi/admin` (`handler.go`, звенья — по
 файлам `allowlist.go`, `session.go`, `csrf.go`, `permission.go`, `static.go`).
 
+- **Лимиты** (итоговое ревью I-4, I1): умолчания admin-api — `ratelimit.AdminRules()` (`DefaultRules` со всплеском
+  `default.user` 120: полная загрузка раздела одним сотрудником; public — 60), `ADMIN_RATE_LIMITS` — поверх них
+  (`rateRules` в `cmd/admin-api`, страж `TestRunUsesAdminRules`). Фоновый GET (`X-WF-Background: 1`, ровно «1») операции
+  без своего `x-rate-limit` считается классом `staff_background` (`ratelimit.ClassStaffBackground`: сотрудник 60/мин,
+  всплеск 30; IP как у default) — опрос счётчиков не тратит обычный лимит. Класс решает заголовок, а не операция
+  (`rateClass` в `session.go`); мутация с заголовком и операция со своим классом (`staff_auth`) — как есть. Без
+  правила `staff_background` — отказ старта. Стражи — `TestBackgroundRequestsOwnRateClass`,
+  `TestBackgroundClassOnlyForGET`, `TestBackgroundKeepsOwnClass`, `TestAdminRules` (`ratelimit`).
 - **Побудка api** (`wake.go`, только dev-стенд, `ADMIN_WAKE_API_URL`; спека встроенного воркера §8.1): звено снаружи
   `idempotency.Middleware` (не `db.WithTxHook`: хук на ctx один — перекрыл бы хук идемпотентности); после `next` на
   ответ 2xx мутирующей операции контракта (метод не GET/HEAD/OPTIONS) — `Waker.Poke`: фоновый `GET <url>/healthz` на
@@ -94,13 +102,17 @@ peer → IP-аллоулист (`ADMIN_IP_ALLOWLIST`; пусто — выклю�
 - `admin.Server` встраивает `*staff/admin.Handler` и `*geo/admin.Handler` указателями через псевдонимы (`staffHandler`,
   `geoHandler`: оба типа называются `Handler`; методы — с указателем-получателем); `Options.Staff`/`Options.Geo`
   обязательны. Заглушек в собранном сервере нет (страж `TestNoStubOperations`: каждая операция контракта на
-  собранных staff, geo и подтверждениях отвечает не 501; список `pendingOps` плана B удалён в Task 16), кроме операций
-  identity: `public.Server` встраивает `identity/httpapi.Handler`, `admin.Server` — `*identity/admin.Handler` (с Task 17
-  плана I-2) через псевдоним `identityHandler` — нулевой отвечает `501 http.not_implemented`; временные `pendingOps` и
-  `pendingOpsAtFreeze` с хэшем в `nostub_test.go` обоих пакетов, страж истечения `TestPendingOpsExpire` (план identity
-  I-1, R2, R17); список уменьшается этапами реализации, удаляет его последний план identity. Тест прав admin передаёт
+  собранных staff, geo, identity и подтверждениях отвечает не 501; список `pendingOps` плана B удалён в его Task 16,
+  список identity admin — в Task 12 плана I-4, R1: admin строгий, без списка). `public.Server` встраивает
+  `identity/httpapi.Handler`, `admin.Server` — `*identity/admin.Handler` (с Task 17 плана I-2) через псевдоним
+  `identityHandler` — нулевой отвечает `501 http.not_implemented`. В public временный `pendingOps` = ровно `pendingI3`
+  (14 операций I-3; `TestCoreOpsNotStub`) с `pendingOpsAtFreeze`, хэшем и стражем истечения `TestPendingOpsExpire`
+  (план identity I-1, R2, R17) — их удаляет последняя задача плана I-3. Тест прав admin передаёт
   обязательные заголовки операций (`opsHeaders`: `X-WF-Lookup-Email`, `X-WF-Access-Reason` — иначе валидатор отвечает 400
-  до права); кодировку заголовков стережёт `TestLookupHeadersEncoding`.
+  до права); кодировку заголовков стережёт `TestLookupHeadersEncoding`. Значения `X-WF-Lookup-Email` и
+  `X-WF-Access-Reason` (ПД не в URL — план I-1, R19) декодирует модуль, а не конвейер (`identity/admin/headers.go`:
+  percent-decoding, битая кодировка — 400, управляющие и невидимые — 422 `format`); в журнал сервера и ошибки они не
+  попадают — причина только в `audit_log.reason`, почта — нигде (спека identity §7.1).
   нулевые хендлеры и нулевой `Server{}` (тесты конвейера; cmd/admin-api с 10c собирает настоящие) —
   `501 http.not_implemented` без паники. Strict-middleware — `o.Staff.Middleware()` (операции тега staff: перевод
   ошибок `staffadmin.Problem`, User-Agent и токен cookie в ctx, нулевой хендлер — 501; `.claude/rules/backend-staff.md`)

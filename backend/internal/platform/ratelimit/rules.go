@@ -72,7 +72,27 @@ func DefaultRules() Rules {
 			IP:   Policy{Limit: 30, Period: time.Minute, Burst: 15},
 			User: Policy{Limit: 20, Period: time.Minute, Burst: 10},
 		},
+		// фоновые GET сотрудника (X-WF-Background: 1 — счётчики меню, плитки главной): класс выбирает конвейер
+		// admin-api по заголовку, а не x-rate-limit операции (одна операция бывает фоновой и нет), — опрос не
+		// тратит обычный лимит сотрудника и ограничен своим
+		ClassStaffBackground: {
+			IP:   Policy{Limit: 600, Period: time.Minute, Burst: 120},
+			User: Policy{Limit: 60, Period: time.Minute, Burst: 30},
+		},
 	}
+}
+
+// ClassStaffBackground — класс фоновых GET сотрудника admin-api (X-WF-Background: 1).
+const ClassStaffBackground = "staff_background"
+
+// AdminRules — умолчания admin-api: общие правила, но всплеск default.user 120 — полная загрузка раздела
+// одним сотрудником (me, счётчики меню, 2–5 чтений раздела) упиралась во всплеск 60 public API.
+func AdminRules() Rules {
+	r := DefaultRules()
+	cp := r[DefaultClass]
+	cp.User.Burst = 120
+	r[DefaultClass] = cp
+	return r
 }
 
 // Validate — на старте api: класс default есть (ручки без x-rate-limit), все политики всех

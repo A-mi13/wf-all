@@ -403,10 +403,12 @@ FeatureFlag:
   type: object
   description: >-
     Флаг функции. Функция включена в городе, если флаг включён везде или город в enabled_city_ids
-  required: [key, description, enabled_globally, enabled_city_ids, version, updated_at]
+  required: [key, description, enabled_globally, enabled_city_ids, version, updated_at, rules]
   properties:
     key:
       $ref: '../root.yaml#/components/schemas/FeatureFlagKey'
+    rules:
+      $ref: '../root.yaml#/components/schemas/FeatureFlagRules'
     description:
       type: string
       description: Описание флага для разработчика (из миграции); экрану — подпись из локалей
@@ -433,6 +435,30 @@ FeatureFlag:
       format: date-time
       description: Когда флаг меняли последний раз
       example: '2026-10-27T15:40:00Z'
+FeatureFlagRules:
+  type: object
+  description: >-
+    Правила флага — единственный источник для экрана флагов (админка своей копии правил не держит).
+    Флаг без правил — global_only false и requires null
+  required: [global_only, requires]
+  properties:
+    global_only:
+      type: boolean
+      description: >-
+        У флага не бывает списка городов — только «везде» (способы входа auth_*: до входа город
+        неизвестен); непустой enabled_city_ids в updateFeatureFlag — 422 platform.flag_global_only
+      example: true
+    requires:
+      # обнуляемая ссылка: в OpenAPI 3.0 nullable без type не действует — type ключа (строка), а не object, как у
+      # ссылок на объект (Approval.decided_by)
+      type: string
+      nullable: true
+      description: >-
+        Флаг, без которого этот не включается (и который нельзя выключить, пока этот включён) —
+        иначе 409 platform.flag_requires; null — зависимости нет. Пример — auth_google требует
+        auth_apple
+      allOf:
+        - $ref: '../root.yaml#/components/schemas/FeatureFlagKey'
 FeatureFlagList:
   type: object
   description: Все флаги функций по ключу

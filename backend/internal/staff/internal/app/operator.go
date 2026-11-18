@@ -92,7 +92,7 @@ func (a *App) OperatorInviteResend(ctx context.Context, email string) (string, e
 	var code string
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		acct, err := q.LockAccountByEmail(ctx, norm)
+		acct, err := lockAccountByEmail(ctx, q, norm)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return staff.ErrNotFound
 		}
@@ -234,7 +234,7 @@ func (a *App) rekeyMFA(ctx context.Context, staffID uuid.UUID) (rekeyResult, err
 	res := rekeySkipped
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		if _, err := q.LockAccount(ctx, staffID); err != nil {
+		if _, err := lockAccount(ctx, q, staffID); err != nil {
 			return ignoreNoRows(err)
 		}
 		mfa, err := q.LockMFA(ctx, staffID)
@@ -266,7 +266,7 @@ func (a *App) rekeyInvite(ctx context.Context, staffID, inviteID uuid.UUID) (rek
 	res := rekeySkipped
 	err := db.InTx(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := staffdb.New(tx)
-		if _, err := q.LockAccount(ctx, staffID); err != nil {
+		if _, err := lockAccount(ctx, q, staffID); err != nil {
 			return ignoreNoRows(err)
 		}
 		row, err := q.LockInviteCode(ctx, inviteID)
@@ -307,7 +307,7 @@ func operatorTarget(ctx context.Context, q *staffdb.Queries, email string) (acct
 	if !ok {
 		return acct{}, staff.ErrNotFound
 	}
-	r, err := q.LockAccountByEmail(ctx, norm)
+	r, err := lockAccountByEmail(ctx, q, norm)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return acct{}, staff.ErrNotFound
 	}

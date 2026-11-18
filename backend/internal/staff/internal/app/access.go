@@ -262,7 +262,7 @@ func (a *App) SetLocale(ctx context.Context, s *auth.Staff, locale string, m sta
 // cookie): иначе «завершить остальные» по старой сессии погасил бы свежую. Учётка — роль и снимок
 // имени для аудита.
 func (a *App) lockSelf(ctx context.Context, q *staffdb.Queries, s *auth.Staff) (staffdb.LockAccountRow, error) {
-	acct, err := q.LockAccount(ctx, s.StaffID)
+	acct, err := lockAccount(ctx, q, s.StaffID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return acct, auth.ErrSessionInvalid
 	}

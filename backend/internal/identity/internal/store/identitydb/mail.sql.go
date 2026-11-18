@@ -12,6 +12,86 @@ import (
 	"github.com/google/uuid"
 )
 
+const mailCaptainApplication = `-- name: MailCaptainApplication :one
+SELECT a.status, a.rejection_code, a.comment, u.email, u.locale, u.nickname, u.status AS user_status,
+       c.city_name,
+       EXISTS (SELECT 1 FROM role_assignments r WHERE r.application_id = a.id AND r.revoked_at IS NULL) AS permit_live
+FROM captain_applications a
+JOIN users u ON u.id = a.user_id
+LEFT JOIN geo_read_city_settings c ON c.city_id = a.city_id
+WHERE a.id = $1
+`
+
+type MailCaptainApplicationRow struct {
+	Status        ApplicationStatus
+	RejectionCode *string
+	Comment       *string
+	Email         string
+	Locale        string
+	Nickname      string
+	UserStatus    UserStatus
+	CityName      *string
+	PermitLive    bool
+}
+
+// Письмо решения по заявке (I-4, Task 4): статус и решение заявки, адрес, язык, ник и статус заявителя, название
+// города заявки (geo_read_city_settings.city_name — название на языке страны города: переводов city_names
+// экспортированное представление geo не отдаёт). permit_live — живой допуск по заявке: без него письма «вы капитан»
+// нет (допуск отозван до сборки письма; решение пользователя 17.11).
+func (q *Queries) MailCaptainApplication(ctx context.Context, id uuid.UUID) (MailCaptainApplicationRow, error) {
+	row := q.db.QueryRow(ctx, mailCaptainApplication, id)
+	var i MailCaptainApplicationRow
+	err := row.Scan(
+		&i.Status,
+		&i.RejectionCode,
+		&i.Comment,
+		&i.Email,
+		&i.Locale,
+		&i.Nickname,
+		&i.UserStatus,
+		&i.CityName,
+		&i.PermitLive,
+	)
+	return i, err
+}
+
+const mailCaptainWithdrawnCity = `-- name: MailCaptainWithdrawnCity :one
+SELECT a.status, u.email, u.locale, u.nickname, u.status AS user_status, fc.city_name AS from_city,
+       tc.city_name AS to_city
+FROM captain_applications a
+JOIN users u ON u.id = a.user_id
+LEFT JOIN geo_read_city_settings fc ON fc.city_id = a.city_id
+LEFT JOIN geo_read_city_settings tc ON tc.city_id = u.city_id
+WHERE a.id = $1
+`
+
+type MailCaptainWithdrawnCityRow struct {
+	Status     ApplicationStatus
+	Email      string
+	Locale     string
+	Nickname   string
+	UserStatus UserStatus
+	FromCity   *string
+	ToCity     *string
+}
+
+// Письмо об отзыве заявки сменой города (I-4, Task 7; R39): статус заявки, адрес, язык, ник и статус игрока, названия
+// прежнего города (город заявки) и нового (текущий город игрока) — на языке страны города.
+func (q *Queries) MailCaptainWithdrawnCity(ctx context.Context, id uuid.UUID) (MailCaptainWithdrawnCityRow, error) {
+	row := q.db.QueryRow(ctx, mailCaptainWithdrawnCity, id)
+	var i MailCaptainWithdrawnCityRow
+	err := row.Scan(
+		&i.Status,
+		&i.Email,
+		&i.Locale,
+		&i.Nickname,
+		&i.UserStatus,
+		&i.FromCity,
+		&i.ToCity,
+	)
+	return i, err
+}
+
 const mailCode = `-- name: MailCode :one
 
 SELECT id, purpose, email, user_id, decoy, code_enc, payload_enc, key_id, expires_at, consumed_at, revoked_at

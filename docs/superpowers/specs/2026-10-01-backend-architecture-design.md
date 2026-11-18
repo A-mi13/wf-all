@@ -87,7 +87,7 @@ backend/internal/<модуль>/
 | --- | --- | --- |
 | `geo` | countries, regions, cities, districts, country_names, region_names, city_names, city_slug_history; источник GeoNames: geonames_places, geonames_place_names, geonames_admin1, geonames_admin1_names, geonames_imports; экспортированное представление geo_read_city_settings | справочник, статусы городов, названия по локалям, валюта и возрастные пороги страны, импорт GeoNames и активация городов (спека `geo`) |
 | `staff` | staff_accounts, staff_roles, staff_role_cities, staff_mfa, staff_recovery_codes, staff_invites, staff_sessions; функция-триггер staff_role_cities_check | учётки сотрудников админки, роли и города модератора, приглашения, вход с TOTP, сессии admin-api, управление сотрудниками, исполнители подтверждений `staff.*`, письма и чистка сотрудников (спека сотрудников `docs/superpowers/specs/2026-10-06-staff-admin-geo2-design.md`) |
-| `identity` | users (ядро аккаунта), credentials, auth_codes, auth_challenges, sessions, refresh_tokens, security_events, devices, device_accounts, user_identities, passkeys, user_mfa, user_recovery_codes, mfa_resets, consents, role_assignments, user_restrictions, captain_applications, nickname_reservations, nickname_changes, reserved_nicknames; экспортированные представления identity_read_users, identity_read_linked_accounts, identity_read_captain_permits, identity_read_restrictions (миграции `0024`–`0026`, спека identity §5) | регистрация, вход, 2FA и её сброс поддержкой, сессии, устройства и связанные аккаунты, согласие с документами, заявка и допуск к капитанству в городе, ограничения доступа, ники, удаление аккаунта (спека `docs/superpowers/specs/2026-11-13-identity-design.md`) |
+| `identity` | users (ядро аккаунта), credentials, auth_codes, auth_challenges, sessions, refresh_tokens, security_events, devices, device_accounts, user_identities, passkeys, user_mfa, user_recovery_codes, mfa_resets, consents, role_assignments, user_restrictions, captain_applications, nickname_reservations, nickname_changes, reserved_nicknames; экспортированные представления identity_read_users, identity_read_linked_accounts, identity_read_captain_permits, identity_read_restrictions, identity_read_auth_method_usage (миграции `0024`–`0027`, спека identity §5) | регистрация, вход, 2FA и её сброс поддержкой, сессии, устройства и связанные аккаунты, согласие с документами, заявка и допуск к капитанству в городе, ограничения доступа, ники, удаление аккаунта (спека `docs/superpowers/specs/2026-11-13-identity-design.md`) |
 | `media` | media_objects | загрузка, проверка типа по содержимому, перекодирование, отдача с отдельного домена |
 | `economy` | wallets, ledger_entries, subscriptions, catalog_items, user_inventory, team_inventory, achievements, user_achievements, lootbox_*, quests, user_quests, referrals | очки и кредиты (двойная запись), каталог (аватары-архетипы, гербы, рамки), инвентарь, права на платные опции, подписки через IAP, достижения, задания, рефералы |
 | `players` | player_profiles | карточка игрока: позиции, заявленный и подтверждённый уровень, нога, рост, номер, клуб, девиз, выбранный аватар, предпочитаемое время |
@@ -176,8 +176,7 @@ geo ← identity ← media ← economy ← players ← pitches ← teams ← mat
 
 | Сценарий | Вызывающий → вызываемый |
 | --- | --- |
-| Одобрение заявки на капитанство (роль `captain` со скоупом `city`) | `teams` → `identity/intx.GrantRoleInTx` |
-| Отзыв капитанского допуска | `teams` → `identity/intx.RevokeRoleInTx` |
+| Отзыв капитанского допуска | `teams`, `moderation` → `identity/intx.RevokeRoleInTx` |
 | Санкции и их снятие (статус, блокировки возможностей) | `moderation` → `identity/intx.SetRestrictionsInTx` |
 | Смена города | `teams` → `identity/intx.ChangeCityInTx` |
 | Запись на матч с платной бронью позиции | `matches` → `economy/intx.ConsumeEntitlementInTx` |
@@ -188,6 +187,12 @@ geo ← identity ← media ← economy ← players ← pitches ← teams ← mat
 
 - Список расширяется только правкой этой спеки (или спеки модуля со ссылкой сюда) —
   страж §12.3.
+- Одобрение заявки в капитаны — внутри `identity` (заявки — его таблица, спека identity §2.3), поэтому
+  `GrantRoleInTx` нет. Сигнатуры и обязанности вызывающего `identity/intx` — спека identity §10.2.
+- **Исключение (план I-4, R38):** порт `identity.StaffLinks` — код `staff` (`staff.LinkedPlayerTx`: связь сотрудника с
+  учёткой игрока и версия его учётки под `FOR SHARE`) исполняется в транзакции `identity` при решении по заявке в
+  капитаны и в исполнителе `identity.mfa_reset`. Пары `intx` нет: порт объявляет `identity`, адаптер собирает
+  `cmd/admin-api`. Прецедент — хук `LockActors` подтверждений (код `staff` в транзакции `platform/approvals`).
 - Обычные методы Service **не присоединяются** к транзакции из `ctx`: каждый открывает
   свою. Это исключает невидимое вхождение в чужую транзакцию и самоблокировку через пул.
   В `ctx` транзакцию читают только `events.Publish` и `audit.Write`; идемпотентность получает
@@ -882,7 +887,7 @@ River-клиент admin-api под ролью `admin` (5 исполнителе
 | Модуль | Изменение |
 | --- | --- |
 | platform | `outbox`: `id` → uuid (UUIDv7), + `schema_version`, `aggregate_version`, `occurred_at`, `trace`; − `attempts`, `last_error` (повторы ведёт River); триггер `NOTIFY`. Новые: `event_inbox`, `event_cursors`, `rate_limits` и `humancheck_spent` (`UNLOGGED`). Миграция `0020`: таблица `approvals`; `audit_log` + `actor_staff_id`, `actor_label`, `scope_city_id`, CHECK акторов и частичные индексы для журнала |
-| identity | `role_assignments`: `role_name` — только `captain`, `role_scope` — только `city` (миграция `0020`). План I-2: `0024_identity_status` — значение `pending_deletion` в `user_status` (отдельной миграцией без транзакции); `0025_identity` — `users.email NOT NULL`, − CHECK `users_contact_present`, + `version`, CHECK `users_email_format`, поля удаления; новые `credentials`, `auth_codes`, `auth_challenges`, `refresh_tokens`, `security_events`, `user_identities`, `passkeys`, `user_mfa`, `user_recovery_codes`, `mfa_resets`, `consents`, `devices`, `device_accounts`, `user_restrictions`, `staff_player_links` (владелец — `staff`); `sessions` перестроена (строка = вход; сессии сотрудников — свои, `staff_sessions`); `captain_applications` переходит к `identity`; `0026_identity_deletion` — `users.status_before_deletion`, `birth_date` NULL только у `deleted`, затирание ПД удалённых до неё (спека identity §5.1–§5.3) |
+| identity | `role_assignments`: `role_name` — только `captain`, `role_scope` — только `city` (миграция `0020`). План I-2: `0024_identity_status` — значение `pending_deletion` в `user_status` (отдельной миграцией без транзакции); `0025_identity` — `users.email NOT NULL`, − CHECK `users_contact_present`, + `version`, CHECK `users_email_format`, поля удаления; новые `credentials`, `auth_codes`, `auth_challenges`, `refresh_tokens`, `security_events`, `user_identities`, `passkeys`, `user_mfa`, `user_recovery_codes`, `mfa_resets`, `consents`, `devices`, `device_accounts`, `user_restrictions`, `staff_player_links` (владелец — `staff`); `sessions` перестроена (строка = вход; сессии сотрудников — свои, `staff_sessions`); `captain_applications` переходит к `identity`; `0026_identity_deletion` — `users.status_before_deletion`, `birth_date` NULL только у `deleted`, затирание ПД удалённых до неё (спека identity §5.1–§5.3). План I-4: `0027_identity_captaincy` — представление `identity_read_auth_method_usage`, индексы очереди и истории заявок, `banned` в `status_before_deletion`, живой код смены почты по `(purpose, user_id, email)` (спека identity §0.2) |
 | staff | миграция `0020_staff.sql`: `staff_accounts`, `staff_roles`, `staff_role_cities`, `staff_mfa`, `staff_recovery_codes`, `staff_invites`, `staff_sessions` (спека сотрудников §3.1) |
 | players | `player_profiles`; игровые поля переносятся из `users` одной миграцией «создать → скопировать → удалить» |
 | media | `media_objects`; `pitches.photo_urls`, `catalog_items.asset_url`, `ad_placements.image_url` → ссылки на `media_objects` (в спеках владельцев) |

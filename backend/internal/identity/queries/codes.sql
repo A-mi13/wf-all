@@ -3,17 +3,22 @@
 -- lockUser и FOR UPDATE строки с перепроверкой (R30).
 
 -- name: RevokeLiveCode :exec
--- один живой код на (назначение, почта): новый старт гасит прежний
+-- один живой код на (назначение, почта), у смены почты — на (аккаунт, почта) (0027, R40): новый старт гасит прежний;
+-- чужой живой код смены почты на тот же адрес не гасится
 UPDATE auth_codes SET revoked_at = @now, code_enc = NULL
-WHERE purpose = @purpose AND email = @email AND consumed_at IS NULL AND revoked_at IS NULL;
+WHERE purpose = @purpose AND email = @email AND consumed_at IS NULL AND revoked_at IS NULL
+  AND (purpose <> 'email_change' OR user_id = sqlc.narg(user_id)::uuid);
 
 -- name: InsertCode :execrows
--- 0 строк — живой код вставила параллельная транзакция: вызывающий гасит его и повторяет вставку
+-- все назначения; 0 строк — живой код вставила параллельная транзакция: вызывающий гасит его и повторяет вставку.
+-- Один живой код держат индексы auth_codes_live_key и auth_codes_live_email_change_key (0027, R40). Арбитр — без цели
+-- (I1 итогового ревью Г): вставка не повторяет предикат индекса, правка индексов не даёт 42P10 (как старый бинарник с
+-- арбитром (purpose, email) на схеме 0027; страж TestStartCodeArbiterIndependentOfIndex)
 INSERT INTO auth_codes (id, purpose, email, user_id, decoy, code_mac, code_enc, payload_enc, key_id, last_sent_at,
                         expires_at, ip, created_at)
 VALUES (@id, @purpose, @email, @user_id, @decoy, @code_mac, @code_enc, @payload_enc, @key_id, @now, @expires_at, @ip,
         @now)
-ON CONFLICT (purpose, email) WHERE consumed_at IS NULL AND revoked_at IS NULL DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 -- name: FindCode :one
 SELECT id, purpose, user_id FROM auth_codes WHERE id = $1;

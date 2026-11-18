@@ -6,6 +6,7 @@ import type { Me } from '../../app/permissions';
 import { renderApp } from '../../test/app';
 import { approvalsServer } from '../../test/approvals';
 import { geoImport, geoServer } from '../../test/geo';
+import { captainApplication, identityServer } from '../../test/identity';
 import { stubMedia } from '../../test/media';
 import { meModerator, meOwner } from '../../test/me';
 import { problem } from '../../test/problem';
@@ -333,5 +334,55 @@ describe('карманное устройство', () => {
     renderApp('/', { me: meOwner });
     const link = await screen.findByRole('link', { name: 'Ждут вашего решения 1' });
     expect(link).not.toHaveAccessibleDescription('Решать с компьютера');
+  });
+});
+
+// План I-4, Task 8: плитка «Заявки капитанов» — по праву чтения заявок, тот же запрос, что счётчик меню (ключ
+// общий: одна подписка); ошибка — «Повторить» в самой плитке; дело «Разобрать N заявок».
+describe('заявки капитанов', () => {
+  const meCaps: Me = {
+    ...meOwner,
+    permissions: { ...meOwner.permissions, 'identity.captain_applications.read': 'allow' },
+  };
+  const apps = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      captainApplication({ id: `0193a1c9-7f80-7d91-8a1b-${String(i + 50).padStart(12, '0')}` }),
+    );
+
+  test('плитка с числом и строка дел; запрос очереди — один', async () => {
+    const { seen } = identityServer({ applications: apps(3) });
+    renderApp('/', { me: meCaps });
+    expect(await screen.findByRole('link', { name: 'Заявки капитанов 3' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('link', { name: 'Разобрать 3 заявки капитанов' }),
+    ).toHaveAttribute('href', '/captains');
+    expect(seen.lists).toHaveLength(1);
+    expect(seen.background).toEqual(['1']);
+  });
+
+  test('ошибка — «Не загрузилось · Повторить» в плитке; повтор перечитывает', async () => {
+    const ctl = { fail: true };
+    identityServer({ applications: apps(2) });
+    server.use(
+      http.get('/v1/identity/captain-applications', ({ response }) =>
+        ctl.fail ? response.untyped(problem(500, 'internal')) : undefined,
+      ),
+    );
+    renderApp('/', { me: meCaps });
+    const grid = await tiles();
+    // упала только очередь заявок: ошибка — одна, в её плитке
+    expect(await grid.findByText('Не загрузилось')).toBeInTheDocument();
+    expect(grid.queryByRole('link', { name: /^Заявки капитанов/ })).toBeNull();
+    ctl.fail = false;
+    await userEvent.setup().click(grid.getByRole('button', { name: 'Повторить' }));
+    expect(await screen.findByRole('link', { name: 'Заявки капитанов 2' })).toBeInTheDocument();
+  });
+
+  test('без права — ни плитки, ни запроса', async () => {
+    const { seen } = identityServer({ applications: apps(3) });
+    renderApp('/', { me: meOwner });
+    await screen.findByRole('link', { name: /^Ждут вашего решения/ });
+    expect(screen.queryByText('Заявки капитанов')).toBeNull();
+    expect(seen.lists).toEqual([]);
   });
 });

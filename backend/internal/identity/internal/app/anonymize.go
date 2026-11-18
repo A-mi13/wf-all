@@ -140,8 +140,10 @@ func (a *App) anonymize(ctx context.Context, tx pgx.Tx, q *identitydb.Queries, r
 			return fmt.Errorf("identity: удаление секретов, привязок и следов: %w", err)
 		}
 	}
-	if err := q.DeletionRevokePermits(ctx, identitydb.DeletionRevokePermitsParams{Now: &now, UserID: r.ID}); err != nil {
-		return fmt.Errorf("identity: допуски капитана: %w", err)
+	// допуски капитана — revoked (account_deleted) с событием captain_permit_revoked на каждый (R24): тем же путём,
+	// что RevokeRoleInTx (строка заявки раньше строки допуска, R7)
+	if _, err := a.revokePermitsTx(ctx, tx, r.ID, nil, RevokeBy{System: true}, revokeReasonAccountDeleted, false); err != nil {
+		return err
 	}
 	// сброс 2FA, назначенный в период отмены (admin-api не видит статус удаления), — отменён системой
 	if err := a.cancelMfaResetsBySystem(ctx, q, r.ID); err != nil {

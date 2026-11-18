@@ -61,6 +61,19 @@ type AccountView struct {
 	LockedUntil *time.Time
 	Version     int64
 	Invite      *InviteState // nil — живого приглашения нет
+	// PlayerLink — связь с учёткой игрока: только в карточке и только тому, у кого staff.player_links.manage = allow
+	// (контракт R15 I-1); nil — связи нет или поле не положено
+	PlayerLink *PlayerLink
+}
+
+// PlayerLink — связь «сотрудник → учётка игрока» (схема StaffPlayerLink; спека identity §7.6): ник — через порт
+// PlayerDirectory на каждое чтение (ник меняется в identity), LinkedByLabel — текущая подпись сотрудника, который
+// связал (имя, без имени — почта).
+type PlayerLink struct {
+	UserID        uuid.UUID
+	Nickname      string
+	LinkedAt      time.Time
+	LinkedByLabel string
 }
 
 // InviteState — живое приглашение учётки (схема StaffInviteState и служебные поля карточки).

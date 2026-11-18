@@ -1,0 +1,121 @@
+/* «Игроки» (I-4, Task 9; дорисовано * по UI-фундаменту — макета нет): форма поиска по почте и карточка найденного
+   игрока. Область страницы — контейнер: на широкой форма и карточка рядом, на узкой — друг под другом. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-5);
+  container-type: inline-size;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--wf-space-4);
+  align-items: start;
+}
+
+@container (min-width: 720px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.panel,
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+  min-width: 0;
+  padding: var(--wf-space-5);
+  border: 1px solid var(--wf-color-border);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-color-bg-elevated);
+}
+
+/* фокус программно — после действия (кнопка исчезла), без рамки */
+.card:focus {
+  outline: none;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wf-space-4);
+}
+
+.text {
+  margin: 0;
+  color: var(--wf-color-text-subtle);
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+.cardTitle {
+  margin: 0;
+  color: var(--wf-color-text);
+  font-size: var(--wf-text-lg);
+  line-height: var(--wf-text-lg-line);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--wf-space-2) var(--wf-space-3);
+  margin: 0;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-text-sm-line);
+}
+
+.facts dt {
+  color: var(--wf-color-text-subtle);
+  font-weight: 600;
+}
+
+.facts dd {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--wf-space-1);
+  margin: 0;
+  min-width: 0;
+  color: var(--wf-color-text);
+  overflow-wrap: anywhere;
+}
+
+.facts dd.copyable {
+  flex-direction: row;
+  align-items: center;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--wf-text-xs);
+  line-height: var(--wf-text-xs-line);
+}
+
+.reset {
+  color: var(--wf-color-warning);
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wf-space-3);
+}
+
+/* только для читалки: живая строка «Найден игрок …» */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

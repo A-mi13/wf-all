@@ -9,10 +9,11 @@ SET status = 'pending_deletion', status_before_deletion = status, deletion_reque
 WHERE id = @id
 RETURNING version;
 
--- name: DeletionWithdrawApplications :exec
--- открытая заявка в капитаны — withdrawn (допуски не трогаются до анонимизации)
+-- name: DeletionWithdrawApplications :many
+-- открытая заявка в капитаны — withdrawn (допуски не трогаются до анонимизации); событие на каждую (R24)
 UPDATE captain_applications SET status = 'withdrawn', closed_at = @now, version = version + 1
-WHERE user_id = @user_id AND status = 'pending';
+WHERE user_id = @user_id AND status = 'pending'
+RETURNING id, city_id, version;
 
 -- name: DeletionCancelMfaResets :many
 -- живой сброс 2FA поддержкой — отменён системой (m4)
@@ -119,7 +120,3 @@ DELETE FROM consents WHERE user_id = $1;
 -- name: DeletionDeleteCodes :exec
 -- коды аккаунта и коды на его почту (приманки регистрации) хранят адрес открыто
 DELETE FROM auth_codes WHERE user_id = @user_id OR email = @email;
-
--- name: DeletionRevokePermits :exec
-UPDATE role_assignments SET revoked_at = @now, revoke_reason = 'account_deleted'
-WHERE user_id = @user_id AND revoked_at IS NULL;

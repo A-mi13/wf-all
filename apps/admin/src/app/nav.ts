@@ -18,6 +18,26 @@ export const NAV: NavGroup[] = [
     labelKey: 'nav.groups.overview',
     items: [{ path: paths.root, labelKey: 'nav.home', permission: null, icon: 'home' }],
   },
+  // «Игроки» (план I-4, R20): очереди и поддержка игроков — сразу после обзора, как «Очереди» макета 07.
+  {
+    labelKey: 'nav.groups.players',
+    items: [
+      {
+        path: paths.captains,
+        labelKey: 'nav.captains',
+        permission: 'identity.captain_applications.read',
+        icon: 'captain',
+        countLabelKey: 'nav.counts.captains',
+      },
+      // поддержка: поиск игрока по почте и сброс 2FA (R20); moderation расширит раздел карточкой игрока
+      {
+        path: paths.players,
+        labelKey: 'nav.players',
+        permission: 'identity.pii.read',
+        icon: 'team',
+      },
+    ],
+  },
   {
     labelKey: 'nav.groups.security',
     items: [

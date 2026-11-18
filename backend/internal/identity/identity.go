@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -53,7 +54,23 @@ type Deps struct {
 	Attestor   Attestor          // до I-3 — AttestOff (R2)
 	Providers  ProviderReadiness // до I-3 — NoProviders (R4)
 	TOTPIssuer string            // API_IDENTITY_TOTP_ISSUER
-	Log        *slog.Logger
+	// CaptainChecks — порты условий капитанства, ровно RequiredCaptainChecks (app.New: иначе отказ старта; К1)
+	CaptainChecks []CaptainCheck
+	Log           *slog.Logger
+}
+
+// AdminDeps — зависимости админских сценариев identity у admin-api (app.NewAdmin; план I-4, Task 2): пул роли admin
+// (К2 — users и sessions не пишет), часы, клиент River только для вставки (письма — очередь mail), geo на пуле admin,
+// порты условий капитанства (перепроверка при одобрении, галочки карточки) и связь «сотрудник → игрок» (R38).
+// Кольца identity у admin-api нет (N3).
+type AdminDeps struct {
+	Pool          *pgxpool.Pool
+	Clock         clock.Clock
+	River         *river.Client[pgx.Tx]
+	Geo           geo.Service
+	CaptainChecks []CaptainCheck
+	StaffLinks    StaffLinks
+	Log           *slog.Logger
 }
 
 // WorkerDeps — зависимости задач identity у воркера (письма, анонимизация, исполнение сброса 2FA, чистка): без
@@ -146,9 +163,20 @@ type UserSummary struct {
 	Nickname, Status, Locale string
 }
 
+// CaptainPermit — живой допуск капитана игрока в городе (спека §10.1): ApplicationID — одобренная заявка допуска
+// (R25), Probationary — испытательный срок заявки.
+type CaptainPermit struct {
+	CityID        uuid.UUID
+	GrantedAt     time.Time
+	ApplicationID uuid.UUID
+	Probationary  bool
+}
+
 // Service — синхронный API модуля для других модулей (спека §10.1).
 type Service interface {
 	User(ctx context.Context, id uuid.UUID) (UserSummary, error)
+	// CaptainPermits — живые допуски капитана игрока по городам (нет — пусто, не ошибка).
+	CaptainPermits(ctx context.Context, userID uuid.UUID) ([]CaptainPermit, error)
 }
 
 // New — Service на пуле вызывающего.
@@ -171,4 +199,25 @@ func (s *service) User(ctx context.Context, id uuid.UUID) (UserSummary, error) {
 		u.CityID = *r.CityID
 	}
 	return u, nil
+}
+
+// CaptainPermits — живые допуски игрока из экспортированного представления identity_read_captain_permits (по времени
+// выдачи); отозванные не видны.
+func (s *service) CaptainPermits(ctx context.Context, userID uuid.UUID) ([]CaptainPermit, error) {
+	rows, err := identitydb.New(s.pool).ReadCaptainPermits(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("identity: допуски капитана: %w", err)
+	}
+	out := make([]CaptainPermit, 0, len(rows))
+	for _, r := range rows {
+		p := CaptainPermit{GrantedAt: r.GrantedAt, Probationary: r.IsProbationary}
+		if r.CityID != nil {
+			p.CityID = *r.CityID
+		}
+		if r.ApplicationID != nil {
+			p.ApplicationID = *r.ApplicationID
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }

@@ -94,7 +94,8 @@ func (a *App) Accounts(ctx context.Context, s *auth.Staff, f staff.AccountFilter
 	return views, next, nil
 }
 
-// Account — карточка сотрудника (getStaffAccount): право staff.accounts.read; нет — staff.not_found.
+// Account — карточка сотрудника (getStaffAccount): право staff.accounts.read; нет — staff.not_found; связь с учёткой
+// игрока (player_link) — только при staff.player_links.manage = allow.
 func (a *App) Account(ctx context.Context, s *auth.Staff, staffID uuid.UUID) (staff.AccountView, error) {
 	if s.Decide(permAccountsRead, uuid.Nil) != auth.Allow {
 		return staff.AccountView{}, errForbidden
@@ -112,6 +113,16 @@ func (a *App) Account(ctx context.Context, s *auth.Staff, staffID uuid.UUID) (st
 		Version: r.Version}})
 	if err != nil {
 		return staff.AccountView{}, err
+	}
+	// связь с учёткой игрока — только тому, кто ею управляет (владелец; контракт R15 I-1), ник — через порт
+	if s.Decide(permPlayerLinks, uuid.Nil) == auth.Allow {
+		link, ok, err := a.playerLinkView(ctx, q, staffID)
+		if err != nil {
+			return staff.AccountView{}, err
+		}
+		if ok {
+			views[0].PlayerLink = &link
+		}
 	}
 	return views[0], nil
 }

@@ -1,6 +1,7 @@
 import { Outlet } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { useIncomingApprovalsCount } from '../features/approvals/queries';
+import { useCaptainQueueCount } from '../features/captains/queries';
 import { LocaleSwitcher } from '../features/me/LocaleSwitcher';
 import { AppShell } from '../ui';
 import { forgetTablePositions } from '../ui/table/restore';
@@ -27,6 +28,8 @@ function ActiveShell({ me }: { me: Me }) {
   const logout = useLogout();
   // число у «Подтверждений» — фоновый опрос (features/approvals/queries.ts)
   const incoming = useIncomingApprovalsCount();
+  // число у «Капитанов» — ожидающие заявки, тот же фоновый опрос (features/captains/queries.ts); без права — нет
+  const captains = useCaptainQueueCount();
   // строки, с которых уходили в карточки (возврат «Назад» — фокус), — только этого сотрудника
   useEffect(() => forgetTablePositions, []);
   // палитра (Ctrl/⌘+K, «Искать везде») — под key={me.id}: другой сотрудник получает её закрытой и чистой
@@ -35,7 +38,7 @@ function ActiveShell({ me }: { me: Me }) {
       <AppShell
         groups={NAV}
         account={account}
-        counts={{ [paths.approvals]: incoming }}
+        counts={{ [paths.approvals]: incoming, [paths.captains]: captains }}
         onLogout={() => logout.mutate()}
         loggingOut={logout.isPending}
         profileMenu={<LocaleSwitcher />}

@@ -292,7 +292,7 @@ func liveIdentity(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *identityad
 	if err != nil {
 		t.Fatal(err)
 	}
-	ih, err := identityadmin.New(identity.New(pool), identityadmin.Deps{Pool: pool, Clock: clk, River: rc, Log: quiet()})
+	ih, err := identityadmin.New(identity.New(pool), identityDeps(pool, clk, rc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,12 @@ func liveIdentity(t *testing.T, pool *pgxpool.Pool, clk clock.Clock) *identityad
 // настоящие (liveGeo, Task 16): «проход» — не 401 и не 403 конвейера или сценария, исход — забота сценария.
 var liveOps = map[string]struct{}{"listAppVersions": {}, "putAppVersions": {}, "listFeatureFlags": {}, "updateFeatureFlag": {},
 	// сброс 2FA поддержкой — настоящий хендлер identity (liveIdentity, план I-2 Task 17): игрока anyID нет — 404 сценария
-	"requestMfaReset": {}, "cancelMfaReset": {}}
+	"requestMfaReset": {}, "cancelMfaReset": {},
+	// поиск игрока (почты из opsHeaders нет — 404 сценария) и статистика способов входа (200) — план I-4, Task 5
+	"findPlayerByEmail": {}, "getAuthMethodsUsage": {},
+	// заявки в капитаны — план I-4, Task 4: заявки anyID нет — 404 сценария; поддержка на решениях — 403 конвейера
+	"listCaptainApplications": {}, "getCaptainApplication": {}, "getCaptainApplicationContact": {},
+	"approveCaptainApplication": {}, "rejectCaptainApplication": {}}
 
 func TestPermissionsAllOperations(t *testing.T) {
 	t.Parallel()

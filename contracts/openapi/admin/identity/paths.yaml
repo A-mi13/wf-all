@@ -1,7 +1,8 @@
 # Операции модуля identity контракта admin (спека identity §7.1; план I-1, Task 4, Приложение 1): заявки в
 # капитаны, поиск игрока по почте для поддержки, сброс 2FA через поддержку, статистика способов входа. Тег identity —
-# реализует internal/identity/admin (встроен в internal/httpapi/admin.Server); до реализации этапа 9 операция
-# отвечает 501 http.not_implemented. Город заявки не в пути: скоуп модератора (право scoped) проверяет сценарий.
+# реализует internal/identity/admin (встроен в internal/httpapi/admin.Server); все операции реализованы (план I-4,
+# заглушек 501 нет — страж TestNoStubOperations). Город заявки не в пути: скоуп модератора (право scoped) проверяет
+# сценарий.
 
 captain-applications:
   get:

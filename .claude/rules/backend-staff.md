@@ -23,8 +23,26 @@ paths:
 - **Связь «сотрудник → учётка игрока»** (`staff_player_links`, таблица staff из миграции identity 0025; спека identity
   §7.6, R8 плана I-2): `LoadStaff` читает её тем же запросом `LoadSession` (LEFT JOIN) в `auth.Staff.LinkedUserID`
   (`uuid.Nil` — связи нет; страж `TestLoadStaffLinkedUser`). Поле только читается: модули отказывают в действиях над
-  своей учёткой (`identity.self_action` — запрос, подтверждение и отмена сброса 2FA). Ручки связи
-  (`putStaffPlayerLink`/`deleteStaffPlayerLink`) — этап 9 identity (I-4); до них связь заводит только тест.
+  своей учёткой (`identity.self_action` — запрос, подтверждение и отмена сброса 2FA). Решения identity по заявкам и
+  исполнитель `identity.mfa_reset` берут связь не из снимка, а портом `identity.StaffLinks` → `staff.LinkedPlayerTx(ctx,
+  tx, staffID) (user, version, err)` в своей транзакции (R38 плана I-4; `FOR SHARE` учётки, затем версия и связь
+  отдельными операторами; адаптер — `cmd/admin-api/staff_links.go`); решение по заявке сверяет `version` с
+  `auth.Staff.Version`. Ручки связи
+  (`putStaffPlayerLink`/`deleteStaffPlayerLink`, `internal/app/player_link.go`, план I-4 Task 6) — только
+  `staff.player_links.manage = allow` (владелец): одна `db.InTx`, `lockAccounts` (цель `FOR UPDATE`, автор `FOR
+  SHARE`) и `checkActor` под замком, без `lockOwners`. Порт `staff.PlayerDirectory` (`Deps.Players`, адаптер над
+  `identity.Service.User` — `cmd/admin-api/players_port.go`; нет или `deleted` — `ok = false`) зовётся **до**
+  транзакции: второе соединение пула под замком при исчерпанном пуле ждало бы вечно; нет игрока — `422
+  player_not_found` (после 404 сотрудника). Учётка у другого — `409 player_link_taken`, и при гонке — 23505
+  `staff_player_links_user_id_key` (страж `TestPutPlayerLinkRace`). Та же связь — без изменений; связи нет у DELETE —
+  без записи. Изменение — `staff_accounts.version + 1` (R14): `InitiatorCheck` отсекает **все** ожидающие запросы
+  сотрудника (`initiator_changed`) — принято, операция редкая (`TestMfaResetInitiatorLinkedBetweenRequestAndApprove`);
+  аудит `staff.player_linked`/`staff.player_unlinked` (`before`/`after` `{user_id}`), письмо того же вида сотруднику —
+  ref = id записи аудита (`ComposePlayerLink`: ник через порт; игрок удалён — письмо всё равно уходит, вместо ника
+  `staff.player_deleted`). Ответ PUT — из данных транзакции (ник — из вызова порта до неё), без перечтения после коммита:
+  DELETE из второй вкладки между коммитом и ответом не даёт 500 (`TestPutPlayerLinkDeletedBeforeResponse`). Карточка (`Account`) несёт `PlayerLink` только
+  при `staff.player_links.manage = allow`, ник — через порт на каждое чтение (удалён — пустой ник, связь видна, чтобы
+  её снять); список поле не несёт (`TestStaffCardPlayerLinkOwnerOnly`).
 - **Блокировки строк — всегда в порядке учётка → сессия → `staff_mfa` → резервные коды** (`LockAccount`,
   `LockSession`, `LockMFA`, `LockUnusedRecoveryCodes`). Иначе блокировка (гасит все сессии под замком учётки) и
   разблокировка в другой вкладке взаимно ждут.
@@ -187,7 +205,9 @@ paths:
   `TestExecInviteRejectsCityShape`, `TestExecInviteShapeBeforeLocks`).
   - **Порядок замков (m7, M-4):** `lockOwners` (`pg_advisory_xact_lock(ownersLockKey)` — только где возможен страж
     последнего владельца: выключение, сброс, смена роли, `OperatorDisable`; всегда первым) → `lockAccounts` — учётки
-    по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`) → сессии → `staff_mfa` →
+    по возрастанию id (цель `FOR UPDATE`, автор/инициатор/подтверждающий `FOR SHARE`; замок — отдельным оператором
+    `AcquireAccount`/`LockAccountForShare`, роль и поля учётки — следующим: `lockAccount`, `lockAccountByEmail`,
+    `lockAccounts`; правило — `backend-schema.md`, стражи `TestStaleRole*`) → сессии → `staff_mfa` →
     коды → приглашения. Автор и подтверждающий — `checkActor` под замком: учётка не active/закрыта, сессия погашена
     или истекла — `auth.ErrSessionInvalid`, заменена (`revoked_reason = replaced`) — `auth.ErrSessionReplaced`
     (конвейер и `staffadmin.Problem`: 401 без стирания новой cookie; окно `replacedGrace` не проверяется), роль
@@ -198,7 +218,8 @@ paths:
     в `disable` (и `OperatorDisable`), понижении (`applyRole`), сбросе; кроме `OperatorResetAccess` (выход из тупика).
     В пути подтверждения он защита в глубину: инициатор и подтверждающий — активные владельцы под замком, поэтому
     `last_owner` там недостижим; достижим у оператора (`TestLastOwnerConcurrent`, `-count=30`).
-  - **Версия учётки** растёт при выключении, сбросе, смене роли/городов, повторном приглашении (и `LockOut`).
+  - **Версия учётки** растёт при выключении, сбросе, смене роли/городов, повторном приглашении, внесении и снятии связи
+    с учёткой игрока (R14 плана I-4: отсекает и запросы, где сотрудник — цель) (и `LockOut`).
     payload каждого действия — `v`, `init_id`, `init_ver` (+ цель и её `version`). `checkInitiator`
     (`InitiatorCheck`) — без замка; исполнитель (`execLocks`) повторяет её под `FOR SHARE` и перепроверяет
     подтверждающего; инициатор изменился — `ErrInitiatorChanged` (`initiator_changed`), цель другой версии —
@@ -262,7 +283,7 @@ paths:
   ключа в записи нет (`TestOperatorKeysLostAudited`, `TestOperatorLostWholeKey`).
 - **Фон (§4.10, Task 10c; `staff/jobs`):** `MailWorker` (`AddWorkers(w, d, sender)` — исполняющий River-клиент
   admin-api на очереди `staff`): вид → составитель (`invite`/`access_reset` → `ComposeInvite(…, kind)`, `locked`,
-  `bootstrapped`, `admin_disabled`); `mail.ErrSkip` — `river.JobCancel` (без повторов) и строка журнала с видом и id,
+  `bootstrapped`, `admin_disabled`, `player_linked`/`player_unlinked` → `ComposePlayerLink`); `mail.ErrSkip` — `river.JobCancel` (без повторов) и строка журнала с видом и id,
   без почты; неизвестный вид, `V != 1` и ошибка SMTP — обычная ошибка (повтор: при скользящем деплое письмо нового вида
   возьмёт экземпляр нового релиза); таймаут задачи — минута.
   `Deps.River` сценариев — отдельный клиент только для вставки (иначе цикл «исполнителю нужны Deps»). `Cleaner`:

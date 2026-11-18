@@ -11,7 +11,8 @@ type GeoCity = components['schemas']['GeoCity'];
 
 // Телефон (спека UI-фундамента §3.5): не матрица, а список флагов; флаг раскрывается — его города (поиск и статус —
 // те же параметры адреса, что у матрицы) с переключателем в строке; раскрытый флаг — ?flag= (принцип 10).
-// Длинный список городов — content-visibility строк (CSS), без JS.
+// Длинный список городов — content-visibility строк (CSS), без JS. Флаг только «везде» (rules.global_only, R3
+// плана I-4) городами не раскрывается.
 export function FlagsList({
   flags,
   cities,
@@ -39,7 +40,7 @@ export function FlagsList({
         return (
           <li key={f.key} aria-label={title} className={styles.item}>
             <div className={styles.itemHead}>
-              <FlagHead flag={f} />
+              <FlagHead flag={f} all={flags} />
               {f.enabled_globally ? (
                 <StatusChip tone="success">{t('state.everywhere')}</StatusChip>
               ) : count > 0 ? (
@@ -59,16 +60,19 @@ export function FlagsList({
                 hideLabel
               />
             </div>
-            <Button
-              variant="link"
-              aria-expanded={expanded}
-              aria-controls={expanded ? listId : undefined}
-              aria-label={t('cities', { flag: title })}
-              onClick={() => onOpen(expanded ? undefined : f.key)}
-            >
-              {t('open_cities')}
-            </Button>
-            {expanded && (
+            {/* флаг только «везде» городами не раскрывается */}
+            {!f.rules.global_only && (
+              <Button
+                variant="link"
+                aria-expanded={expanded}
+                aria-controls={expanded ? listId : undefined}
+                aria-label={t('cities', { flag: title })}
+                onClick={() => onOpen(expanded ? undefined : f.key)}
+              >
+                {t('open_cities')}
+              </Button>
+            )}
+            {expanded && !f.rules.global_only && (
               <ul id={listId} aria-label={t('cities', { flag: title })} className={styles.cities}>
                 {cities.map((c) => {
                   const target = { kind: 'city', cityId: c.id, cityName: c.name } as const;

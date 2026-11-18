@@ -1,10 +1,14 @@
 package admin_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
+	"wf/backend/internal/identity"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
@@ -51,5 +55,70 @@ func TestLookupHeadersEncoding(t *testing.T) {
 		if c.errField != "" && !strings.Contains(body, `"field":"`+c.errField+`"`) {
 			t.Errorf("%s: нет поля %s в ошибке — %s", c.name, c.errField, body)
 		}
+	}
+}
+
+// lookupHeaders — заголовки поиска: почта и причина в percent-encoding.
+func lookupHeaders(email string) []string {
+	return []string{"X-WF-Lookup-Email", email, "X-WF-Access-Reason", accessReason}
+}
+
+// TestFindPlayerByEmailHTTP — поиск игрока через весь конвейер на настоящем identity (план I-4, Task 5): закодированные
+// почта (в любом регистре) и причина — 200 по контракту с Cache-Control private, no-store; нет почты, модератор
+// чужого города — 404 user_not_found; почта не адрес после декодирования — 422 по полю заголовка, битая кодировка —
+// 400; статистика способов входа — 200, три строки.
+func TestFindPlayerByEmailHTTP(t *testing.T) {
+	t.Parallel()
+	e := newIdentityStaffEnv(t)
+	own, other := e.city("lookup-own"), e.city("lookup-other")
+	owner := e.owners(1)[0]
+	mod := e.firstLoginModerator("mod@wf.example", own)
+	uid := e.player("lookup_http")
+	e.exec(`UPDATE users SET city_id = $2 WHERE id = $1`, uid, other)
+	const path = "/v1/identity/users/lookup"
+
+	rec := e.send(http.MethodGet, path, owner.token, "", "", lookupHeaders("Lookup_HTTP%40Example.com")...)
+	wantStatus(t, rec, http.StatusOK)
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-store" {
+		t.Fatalf("Cache-Control: %q", cc)
+	}
+	var got struct {
+		ID         uuid.UUID `json:"id"`
+		Nickname   string    `json:"nickname"`
+		CityID     uuid.UUID `json:"city_id"`
+		Status     string    `json:"status"`
+		MfaEnabled bool      `json:"mfa_enabled"`
+		MfaReset   *struct{} `json:"mfa_reset"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.ID != uid || got.Nickname != "lookup_http" ||
+		got.CityID != other || got.Status != "active" || !got.MfaEnabled || got.MfaReset != nil ||
+		!strings.Contains(rec.Body.String(), `"mfa_reset":null`) {
+		t.Fatalf("ответ: %v %s", err, rec.Body.String())
+	}
+
+	wantProblem(t, e.send(http.MethodGet, path, owner.token, "", "", lookupHeaders("nobody%40example.com")...),
+		http.StatusNotFound, identity.CodeUserNotFound)
+	wantProblem(t, e.send(http.MethodGet, path, mod.token, "", "", lookupHeaders("lookup_http%40example.com")...),
+		http.StatusNotFound, identity.CodeUserNotFound)
+
+	for _, c := range []struct {
+		email  string
+		status int
+	}{{"not-an-email", http.StatusUnprocessableEntity}, {"%D0%", http.StatusBadRequest}} {
+		rec := e.send(http.MethodGet, path, owner.token, "", "", lookupHeaders(c.email)...)
+		wantProblem(t, rec, c.status, httpx.CodeValidationFailed)
+		if !strings.Contains(rec.Body.String(), `"field":"header.X-WF-Lookup-Email"`) {
+			t.Fatalf("%s: нет поля заголовка — %s", c.email, rec.Body.String())
+		}
+	}
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action IN ('identity.pii_read', 'identity.player_lookup')`); n != 3 {
+		t.Fatalf("записей поиска %d, ждали 3 (найден, нет, чужой город)", n)
+	}
+
+	rec = e.send(http.MethodGet, "/v1/identity/auth-methods/usage", mod.token, "", "")
+	wantStatus(t, rec, http.StatusOK)
+	if !strings.Contains(rec.Body.String(), `{"linked":0,"method":"apple","only_method":0}`) ||
+		rec.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("статистика: %s", rec.Body.String())
 	}
 }

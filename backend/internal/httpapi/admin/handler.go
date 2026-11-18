@@ -102,6 +102,10 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	if !ok {
 		return nil, fmt.Errorf("admin: нет правила rate limit класса %s (отказы сессии сотрудника)", classStaffAuth)
 	}
+	// класс фоновых GET выбирает конвейер (rateClass): без правила Middleware считал бы их по default с ошибкой в лог
+	if _, ok := o.RateRules[ratelimit.ClassStaffBackground]; !ok {
+		return nil, fmt.Errorf("admin: нет правила rate limit класса %s (фоновые запросы сотрудника)", ratelimit.ClassStaffBackground)
+	}
 	// cookie ставит хендлер staff, читает и стирает конвейер: имя и Secure — одни и те же (ревью 10a m2).
 	// Нулевой хендлер (тесты конвейера; cmd/admin-api собирает настоящий) cookie не ставит — сверять нечего.
 	if c, ok := o.Staff.CookieConfig(); ok && (c.Name != CookieName(o.CookieSecure) || c.Secure != o.CookieSecure) {
@@ -196,7 +200,8 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		// 401 без сессии на операциях с security; WWW-Authenticate у cookie-сессии нет
 		httpx.ValidateRequests(httpx.ValidateOptions{Authenticated: auth.AuthenticatedStaff}),
 		permissions(perms, log),
-		ratelimit.Middleware(o.Limiter, o.RateRules, log),
+		// класс фоновых GET — по заголовку X-WF-Background (rateClass)
+		ratelimit.MiddlewareBy(o.Limiter, o.RateRules, log, rateClass),
 		// побудка api — снаружи идемпотентности: видит итоговый статус, хук транзакции не трогает
 		wake(o.Wake),
 		// ключи и ответы мутаций админки (ПД сотрудников) — своя таблица, права только роли admin (I-1)

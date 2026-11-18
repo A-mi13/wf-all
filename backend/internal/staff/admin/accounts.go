@@ -9,6 +9,7 @@ import (
 	"wf/backend/internal/httpapi/admin/oapi"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
 	"wf/backend/internal/staff"
 )
@@ -260,6 +261,10 @@ func accountOut(v staff.AccountView) oapi.StaffAccount {
 	if i := v.Invite; i != nil {
 		out.Invite = &oapi.StaffInviteState{Purpose: oapi.StaffInviteStatePurpose(i.Purpose), ExpiresAt: i.ExpiresAt.UTC(), Expired: i.Expired}
 	}
+	if l := v.PlayerLink; l != nil {
+		pl := playerLinkOut(*l)
+		out.PlayerLink = &pl
+	}
 	return out
 }
 
@@ -272,14 +277,38 @@ func utcPtr(t *time.Time) *time.Time {
 }
 
 // PutStaffPlayerLink — PUT /v1/staff/accounts/{staffId}/player-link: связь «сотрудник → учётка игрока» (спека
-// identity §7.6; план I-1, R15). Контракт заморожен до кода: операция отвечает 501 и стоит в pendingOps стража
-// TestNoStubOperations (internal/httpapi/admin) до этапа 9 спеки identity (ник игрока — порт identity при сборке).
-func (h *Handler) PutStaffPlayerLink(context.Context, oapi.PutStaffPlayerLinkRequestObject) (oapi.PutStaffPlayerLinkResponseObject, error) {
-	return nil, errNotImplemented
+// identity §7.6; план I-4, Task 6) — 200 {user_id, nickname, linked_at, linked_by_label}; повтор той же связи — 200
+// без изменений.
+func (h *Handler) PutStaffPlayerLink(ctx context.Context, req oapi.PutStaffPlayerLinkRequestObject) (oapi.PutStaffPlayerLinkResponseObject, error) {
+	s, err := current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, httpx.NewFieldError("body", "required") // валидатор контракта отверг бы раньше
+	}
+	l, err := h.app.PutPlayerLink(ctx, s, req.StaffId, req.Body.UserId, meta(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return oapi.PutStaffPlayerLink200JSONResponse(playerLinkOut(l)), nil
 }
 
 // DeleteStaffPlayerLink — DELETE /v1/staff/accounts/{staffId}/player-link: снять связь «сотрудник → учётка игрока»
-// (спека identity §7.6; план I-1, R15) — 501 до этапа 9, как PutStaffPlayerLink.
-func (h *Handler) DeleteStaffPlayerLink(context.Context, oapi.DeleteStaffPlayerLinkRequestObject) (oapi.DeleteStaffPlayerLinkResponseObject, error) {
-	return nil, errNotImplemented
+// (спека identity §7.6; план I-4, Task 6) — 204, в том числе когда связи не было.
+func (h *Handler) DeleteStaffPlayerLink(ctx context.Context, req oapi.DeleteStaffPlayerLinkRequestObject) (oapi.DeleteStaffPlayerLinkResponseObject, error) {
+	s, err := current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.app.DeletePlayerLink(ctx, s, req.StaffId, meta(ctx)); err != nil {
+		return nil, err
+	}
+	return oapi.DeleteStaffPlayerLink204Response{}, nil
+}
+
+// playerLinkOut — StaffPlayerLink: время — UTC.
+func playerLinkOut(l staff.PlayerLink) oapi.StaffPlayerLink {
+	return oapi.StaffPlayerLink{UserId: l.UserID, Nickname: l.Nickname, LinkedAt: l.LinkedAt.UTC(),
+		LinkedByLabel: l.LinkedByLabel}
 }

@@ -17,6 +17,7 @@ import (
 
 	"wf/backend/internal/geo"
 	"wf/backend/internal/identity"
+	"wf/backend/internal/identity/identitytest"
 	"wf/backend/internal/identity/internal/domain"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/flags"
@@ -131,7 +132,8 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 	d := identity.Deps{Pool: pools.As, Clock: c, Secrets: newRing(t, genKey(t)), Devices: newRing(t, devKey),
 		Hasher: &fakeHasher{}, Limiter: ratelimit.Unlimited, LimiterTx: unlimitedTx, Risk: assessor, Human: fakeHuman{},
 		Geo: geo.New(pools.As), Flags: flags.NewStore(pools.As), IPGeo: ipgeo.None, Legal: legal, Tokens: tokens,
-		River: ins, Attestor: identity.AttestOff{}, Providers: identity.NoProviders{}, TOTPIssuer: "WF test", Log: log}
+		River: ins, Attestor: identity.AttestOff{}, Providers: identity.NoProviders{}, TOTPIssuer: "WF test",
+		CaptainChecks: identitytest.AllowAll(), Log: log}
 	for _, o := range opts {
 		o(&d)
 	}

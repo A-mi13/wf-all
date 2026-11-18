@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"wf/backend/internal/geo"
 	"wf/backend/internal/identity"
 	identityadmin "wf/backend/internal/identity/admin"
 	"wf/backend/internal/platform/approvals"
@@ -29,7 +30,8 @@ func TestAssembleRegistersIdentityActions(t *testing.T) {
 	// identity.mfa_reset — LockActors: без хука замка акторов staff реестр не проходит Validate (fail-closed)
 	reg := approvals.NewRegistry()
 	ih, err := identityadmin.New(identity.New(a.deps.Pool), identityadmin.Deps{Pool: a.deps.Pool, Clock: clock.System,
-		River: a.deps.River, Log: a.deps.Log})
+		River: a.deps.River, Geo: geo.New(a.deps.Pool), CaptainChecks: captainChecks(), StaffLinks: staffLinks{},
+		Log: a.deps.Log})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -115,7 +115,7 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 		idh, err := buildIdentity(log, pool, identity.Deps{Clock: clock.System, Secrets: secrets, Devices: devices,
 			Limiter: limiter, LimiterTx: func(tx pgx.Tx) ratelimit.Limiter { return ratelimit.NewPG(tx, clock.System, ratelimit.Players) },
 			Human: pow, Geo: geo.New(pool), Flags: flags.NewStore(pool), IPGeo: loc, Legal: legal,
-			Tokens: tokens, TOTPIssuer: cfg.Identity.TOTPIssuer})
+			Tokens: tokens, TOTPIssuer: cfg.Identity.TOTPIssuer, CaptainChecks: captainChecks()})
 		if err != nil {
 			return nil, err
 		}

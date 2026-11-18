@@ -84,8 +84,28 @@ type acct struct {
 	lockedUntil               *time.Time
 }
 
+// lockAccount — своя или целевая учётка FOR UPDATE двумя операторами: AcquireAccount берёт замок (может ждать),
+// LockAccount читает учётку с ролью уже под замком новым снимком. Один оператор «FOR UPDATE OF a + JOIN
+// staff_roles» после ожидания (READ COMMITTED) перечитывает только строку учётки: роль, сменённую держателем замка,
+// он отдал бы старой — в аудит и в checkActor (TestStaleRole*). Учётки нет — pgx.ErrNoRows.
+func lockAccount(ctx context.Context, q *staffdb.Queries, id uuid.UUID) (staffdb.LockAccountRow, error) {
+	if _, err := q.AcquireAccount(ctx, id); err != nil {
+		return staffdb.LockAccountRow{}, err
+	}
+	return q.LockAccount(ctx, id)
+}
+
+// lockAccountByEmail — lockAccount по нормализованной почте (принятие приглашения, оператор).
+func lockAccountByEmail(ctx context.Context, q *staffdb.Queries, email string) (staffdb.LockAccountByEmailRow, error) {
+	if _, err := q.AcquireAccountByEmail(ctx, email); err != nil {
+		return staffdb.LockAccountByEmailRow{}, err
+	}
+	return q.LockAccountByEmail(ctx, email)
+}
+
 // lockAccounts — замки учёток в порядке возрастания id: target — FOR UPDATE (uuid.Nil — нет цели),
-// shared — FOR SHARE (uuid.Nil и повтор пропускаются). Учётки, которой нет, в карте нет.
+// shared — FOR SHARE (uuid.Nil и повтор пропускаются). Учётки, которой нет, в карте нет. Замок и чтение — двумя
+// операторами, как lockAccount.
 func lockAccounts(ctx context.Context, q *staffdb.Queries, target uuid.UUID, shared ...uuid.UUID) (map[uuid.UUID]acct, error) {
 	ids := make([]uuid.UUID, 0, len(shared)+1)
 	for _, u := range append(slices.Clone(shared), target) {
@@ -100,13 +120,18 @@ func lockAccounts(ctx context.Context, q *staffdb.Queries, target uuid.UUID, sha
 			a   acct
 			err error
 		)
+		// замок — отдельным оператором, роль и прочее — следующим, уже со снимком под замком (см. lockAccount)
 		if u == target {
 			var r staffdb.ManageLockAccountRow
-			r, err = q.ManageLockAccount(ctx, u)
+			if _, err = q.AcquireAccount(ctx, u); err == nil {
+				r, err = q.ManageLockAccount(ctx, u)
+			}
 			a = acct{id: r.ID, status: r.Status, role: r.Role, name: r.DisplayName, email: r.Email, locale: r.Locale, version: r.Version, lockedUntil: r.LockedUntil}
 		} else {
 			var r staffdb.ManageShareAccountRow
-			r, err = q.ManageShareAccount(ctx, u)
+			if _, err = q.LockAccountForShare(ctx, u); err == nil {
+				r, err = q.ManageShareAccount(ctx, u)
+			}
 			a = acct{id: r.ID, status: r.Status, role: r.Role, name: r.DisplayName, email: r.Email, locale: r.Locale, version: r.Version, lockedUntil: r.LockedUntil}
 		}
 		switch {

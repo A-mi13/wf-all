@@ -428,6 +428,9 @@ func TestComposePasswordResetCodeBlocked(t *testing.T) {
 	banned := e.code(t, codeRow{purpose: "password_reset", email: "ban@example.com", userID: &b, code: "123123"})
 	e.mustSend(t, app.MailPasswordResetCode, banned) // контрольная: до бана письмо уходит
 	e.exec(t, `UPDATE users SET status = 'banned' WHERE id = $1`, b)
+	// бан по R42 — со строкой login (без неё бан истёк, R12: письмо уходит)
+	e.exec(t, `INSERT INTO user_restrictions (id, user_id, capability, source_id, created_at)
+		VALUES (gen_random_uuid(), $1, 'login', gen_random_uuid(), now())`, b)
 	e.mustSkip(t, app.MailPasswordResetCode, banned)
 
 	m := e.user(t, "move@example.com", "ru")
@@ -786,4 +789,152 @@ func (e *env) footer(t *testing.T, loc string) string {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// captainApp — решённая заявка аккаунта uid в городе посева stavropol: status approved | rejected | pending.
+func (e *env) captainApp(t *testing.T, uid uuid.UUID, status, code string, comment *string) uuid.UUID {
+	t.Helper()
+	id := uuid.Must(uuid.NewV7())
+	e.exec(t, `INSERT INTO captain_applications (id, user_id, city_id, status, reviewed_at, reviewed_by_label,
+			rejection_code, comment, created_at, updated_at)
+		SELECT $1, $2, c.id, $3::application_status, CASE WHEN $3 = 'pending' THEN NULL ELSE $4::timestamptz END,
+			CASE WHEN $3 = 'pending' THEN NULL ELSE 'Модератор' END, NULLIF($5, ''), $6, $4, $4
+		FROM cities c WHERE c.slug = 'stavropol'`, id, uid, status, testNow, code, comment)
+	if status == "approved" {
+		// у одобренной — живой допуск по заявке (письмо «вы капитан» — только при нём, решение пользователя 17.11);
+		// прежний живой допуск игрока в городе снят: один живой допуск на город
+		e.exec(t, `UPDATE role_assignments SET revoked_at = $3 WHERE user_id = $1 AND revoked_at IS NULL
+			AND scope_id = (SELECT city_id FROM captain_applications WHERE id = $2)`, uid, id, testNow)
+		e.exec(t, `INSERT INTO role_assignments (user_id, role, scope_type, scope_id, application_id)
+			SELECT user_id, 'captain', 'city', city_id, id FROM captain_applications WHERE id = $1`, id)
+	}
+	return id
+}
+
+// m3 итогового ревью А (решение пользователя 17.11): допуск по одобренной заявке отозван до сборки письма — письма
+// «вы капитан» нет (ErrSkip); живой допуск — письмо идёт.
+func TestComposeCaptainApprovedPermitRevoked(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	u := e.user(t, "cap-revoked@example.com", "ru")
+	ok := e.captainApp(t, u, "approved", "", nil)
+	e.mustSend(t, app.MailCaptainApplicationApproved, ok)
+	e.exec(t, `UPDATE role_assignments SET revoked_at = $2 WHERE application_id = $1`, ok, testNow)
+	e.mustSkip(t, app.MailCaptainApplicationApproved, ok)
+}
+
+// Письма решения по заявке (спека §8.2; план I-4, Task 4): по captain_applications.id — адрес и язык игрока, ник,
+// город заявки; отказ — причина текстом локали identity.captain_rejection.<код> и комментарий модератора; вид не
+// совпал со статусом заявки, заявки нет, аккаунт анонимизирован — ErrSkip; период удаления — письмо идёт.
+func TestComposeCaptainDecision(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for _, loc := range i18n.Supported {
+		u := e.user(t, "cap-"+loc+"@example.com", loc)
+		ok := e.captainApp(t, u, "approved", "", nil)
+		m := e.mustSend(t, app.MailCaptainApplicationApproved, ok)
+		want := e.text(t, loc, "captain_application_approved", "text", map[string]any{"nickname": "cap-" + loc,
+			"city": "Ставрополь", "has_comment": "no", "comment": ""})
+		if m.To != "cap-"+loc+"@example.com" || !strings.HasPrefix(m.Text, want) || !strings.HasSuffix(m.Text, e.footer(t, loc)+"\n") {
+			t.Fatalf("%s: одобрение: %+v", loc, m)
+		}
+		e.mustSkip(t, app.MailCaptainApplicationRejected, ok)
+
+		// одобрение с комментарием модератора (спека §8.2: «решение и комментарий» у обоих видов; I1 ревью Task 4)
+		okComment := "Знаю по турниру"
+		okc := e.captainApp(t, u, "approved", "", &okComment)
+		m = e.mustSend(t, app.MailCaptainApplicationApproved, okc)
+		want = e.text(t, loc, "captain_application_approved", "text", map[string]any{"nickname": "cap-" + loc,
+			"city": "Ставрополь", "has_comment": "yes", "comment": okComment})
+		if !strings.HasPrefix(m.Text, want) {
+			t.Fatalf("%s: одобрение с комментарием: %q", loc, m.Text)
+		}
+		mustContain(t, "комментарий одобрения", m.Text, okComment)
+
+		comment := "Расскажите подробнее"
+		no := e.captainApp(t, u, "rejected", "other", &comment)
+		m = e.mustSend(t, app.MailCaptainApplicationRejected, no)
+		reason, err := e.cat.Text(loc, "identity.captain_rejection.other", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = e.text(t, loc, "captain_application_rejected", "text", map[string]any{"nickname": "cap-" + loc,
+			"city": "Ставрополь", "reason": reason, "has_comment": "yes", "comment": comment})
+		if !strings.HasPrefix(m.Text, want) {
+			t.Fatalf("%s: отказ other: %q", loc, m.Text)
+		}
+		mustContain(t, "комментарий", m.Text, comment)
+		mustContain(t, "причина", m.Text, reason)
+		e.mustSkip(t, app.MailCaptainApplicationApproved, no)
+
+		plain := e.captainApp(t, u, "rejected", "insufficient_info", nil)
+		m = e.mustSend(t, app.MailCaptainApplicationRejected, plain)
+		reason, _ = e.cat.Text(loc, "identity.captain_rejection.insufficient_info", nil)
+		want = e.text(t, loc, "captain_application_rejected", "text", map[string]any{"nickname": "cap-" + loc,
+			"city": "Ставрополь", "reason": reason, "has_comment": "no", "comment": ""})
+		if !strings.HasPrefix(m.Text, want) {
+			t.Fatalf("%s: отказ без комментария: %q", loc, m.Text)
+		}
+	}
+	u := e.user(t, "cap-pd@example.com", "ru")
+	ok := e.captainApp(t, u, "approved", "", nil)
+	open := e.captainApp(t, u, "pending", "", nil)
+	e.mustSkip(t, app.MailCaptainApplicationApproved, open)
+	e.pendingDeletion(t, u)
+	e.mustSend(t, app.MailCaptainApplicationApproved, ok)
+	e.anonymized(t, u)
+	e.mustSkip(t, app.MailCaptainApplicationApproved, ok)
+	e.mustSkip(t, app.MailCaptainApplicationRejected, uuid.Must(uuid.NewV7()))
+}
+
+// R36: код сброса не уходит аккаунту, заблокированному поверх периода удаления (status_before_deletion = banned и живая
+// строка login); ровно в until бан уже не действует — письмо уходит (один предикат UserBlocked).
+func TestComposePasswordResetCodeBannedPendingDeletion(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	u := e.user(t, "pdban@example.com", "ru")
+	ref := e.code(t, codeRow{purpose: "password_reset", email: "pdban@example.com", userID: &u, code: "246810"})
+	e.pendingDeletion(t, u)
+	e.mustSend(t, app.MailPasswordResetCode, ref) // контрольная: период удаления без бана — письмо уходит
+	until := testNow.Add(10 * time.Minute)
+	e.exec(t, `UPDATE users SET status_before_deletion = 'banned' WHERE id = $1`, u)
+	e.exec(t, `INSERT INTO user_restrictions (id, user_id, capability, until, source_id, created_at)
+		VALUES (gen_random_uuid(), $1, 'login', $2, gen_random_uuid(), $3)`, u, until, testNow)
+	e.mustSkip(t, app.MailPasswordResetCode, ref)
+	e.clock.Advance(until.Sub(testNow)) // ровно в until: код ещё жив (15 мин), бан — уже нет
+	e.mustSend(t, app.MailPasswordResetCode, ref)
+}
+
+// R39: письмо об отзыве заявки сменой города — адрес и язык игрока, ник, названия прежнего (город заявки) и нового
+// (текущий город) городов; заявка не withdrawn, нет заявки, аккаунт анонимизирован — ErrSkip.
+func TestComposeWithdrawnCity(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for _, loc := range i18n.Supported {
+		u := e.user(t, "wc-"+loc+"@example.com", loc)
+		ref := e.captainApp(t, u, "pending", "", nil)
+		e.mustSkip(t, app.MailCaptainApplicationWithdrawnCity, ref)
+		e.exec(t, `UPDATE captain_applications SET status = 'withdrawn', closed_at = $2 WHERE id = $1`, ref, testNow)
+		e.exec(t, `UPDATE users SET city_id = (SELECT id FROM cities WHERE slug = 'mihaylovsk') WHERE id = $1`, u)
+		m := e.mustSend(t, app.MailCaptainApplicationWithdrawnCity, ref)
+		var from, to string
+		if err := e.owner.QueryRow(context.Background(), `SELECT
+			(SELECT city_name FROM geo_read_city_settings s JOIN cities c ON c.id = s.city_id WHERE c.slug = 'stavropol'),
+			(SELECT city_name FROM geo_read_city_settings s JOIN cities c ON c.id = s.city_id WHERE c.slug = 'mihaylovsk')`).
+			Scan(&from, &to); err != nil {
+			t.Fatal(err)
+		}
+		want := e.text(t, loc, "captain_application_withdrawn_city", "text",
+			map[string]any{"nickname": "wc-" + loc, "from_city": from, "to_city": to})
+		if m.To != "wc-"+loc+"@example.com" || m.Subject != e.text(t, loc, "captain_application_withdrawn_city", "subject", nil) ||
+			!strings.HasPrefix(m.Text, want) || !strings.HasSuffix(m.Text, e.footer(t, loc)+"\n") {
+			t.Fatalf("%s: %+v", loc, m)
+		}
+		mustContain(t, "прежний город", m.Text, from)
+		mustContain(t, "новый город", m.Text, to)
+		e.mustSkip(t, app.MailCaptainApplicationApproved, ref)
+		e.anonymized(t, u)
+		e.mustSkip(t, app.MailCaptainApplicationWithdrawnCity, ref)
+	}
+	e.mustSkip(t, app.MailCaptainApplicationWithdrawnCity, uuid.Must(uuid.NewV7()))
 }

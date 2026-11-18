@@ -84,7 +84,27 @@
       "mfa_reset_done": {
         "subject": "Two-factor protection reset",
         "text": "Following a support request, the two-factor protection of your account was reset and all sessions were signed out. Sign in with your password and enable it again.\n\nWhen: {time}\n\nIf you did not contact support, contact it right away."
+      },
+      "captain_application_approved": {
+        "subject": "You are a captain in {city}",
+        "text": "{nickname}, your captain application in {city} has been approved. You can now build a team and create matches.{has_comment, select, yes {\n\nModerator comment: {comment}} other {}}\n\nA probation period applies at first: your match reports start counting towards the city rankings after three played matches."
+      },
+      "captain_application_rejected": {
+        "subject": "Captain application declined",
+        "text": "{nickname}, your captain application in {city} has been declined.\n\nReason: {reason}{has_comment, select, yes {\nModerator comment: {comment}} other {}}\n\nYou can apply again 7 days after the decision."
+      },
+      "captain_application_withdrawn_city": {
+        "subject": "Captain application withdrawn",
+        "text": "{nickname}, you changed your city from {from_city} to {to_city}, so your captain application in {from_city} has been withdrawn.\n\nTo become a captain in your new city, apply again — no waiting needed."
       }
+    },
+    "captain_rejection": {
+      "profile_incomplete": "Profile is incomplete",
+      "insufficient_info": "Not enough information about the team and pitch",
+      "contact_unreachable": "We could not reach you",
+      "suspicious_activity": "Suspected multiple accounts or manipulation",
+      "duplicate_account": "You have another captain account",
+      "other": "Other reason"
     }
   },
   "staff": {
@@ -114,6 +134,15 @@
       "role_change": "Change of duties",
       "other": "Other",
       "operator": "server operator"
-    }
+    },
+    "player_linked": {
+      "subject": "Your staff account is linked to a player account",
+      "body": "Hello, {name}!\n\nThe admin owner {owner} linked your staff account to the player account {nickname}. You can no longer act on that account in the admin panel: applications, protection resets and other decisions about it will be made by another staff member.\n\nIf this is a mistake, contact the admin owner."
+    },
+    "player_unlinked": {
+      "subject": "Player account link removed",
+      "body": "Hello, {name}!\n\nThe admin owner {owner} removed the link between your staff account and the player account {nickname}.\n\nIf this is a mistake, contact the admin owner."
+    },
+    "player_deleted": "(account deleted)"
   }
 }

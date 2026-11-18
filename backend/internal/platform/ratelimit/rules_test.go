@@ -66,6 +66,43 @@ func TestDefaultRulesStaffAuth(t *testing.T) {
 	}
 }
 
+// Фоновые запросы сотрудника (X-WF-Background: 1 у GET — счётчики меню, плитки главной) — свой класс
+// staff_background: не тратят обычный лимит сотрудника. Умолчания admin-api (AdminRules) — общие правила со
+// всплеском default.user 120 (полная загрузка раздела — me, счётчики и 2–5 чтений); public не меняется.
+func TestAdminRules(t *testing.T) {
+	t.Parallel()
+	bg, ok := ratelimit.DefaultRules()[ratelimit.ClassStaffBackground]
+	if !ok {
+		t.Fatalf("нет класса %s", ratelimit.ClassStaffBackground)
+	}
+	wantBG := ratelimit.ClassPolicy{
+		IP:   ratelimit.Policy{Limit: 600, Period: time.Minute, Burst: 120},
+		User: ratelimit.Policy{Limit: 60, Period: time.Minute, Burst: 30},
+	}
+	if bg != wantBG {
+		t.Fatalf("%s = %+v, want %+v", ratelimit.ClassStaffBackground, bg, wantBG)
+	}
+	adm := ratelimit.AdminRules()
+	if err := adm.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := adm[ratelimit.DefaultClass].User, (ratelimit.Policy{Limit: 300, Period: time.Minute, Burst: 120}); got != want {
+		t.Fatalf("admin default.user = %+v, want %+v", got, want)
+	}
+	pub := ratelimit.DefaultRules()
+	if got, want := pub[ratelimit.DefaultClass].User, (ratelimit.Policy{Limit: 300, Period: time.Minute, Burst: 60}); got != want {
+		t.Fatalf("public default.user = %+v, want %+v", got, want)
+	}
+	for class, cp := range pub {
+		if class != ratelimit.DefaultClass && adm[class] != cp {
+			t.Fatalf("admin %s = %+v, общее %+v", class, adm[class], cp)
+		}
+	}
+	if adm[ratelimit.DefaultClass].IP != pub[ratelimit.DefaultClass].IP || adm[ratelimit.DefaultClass].Device != pub[ratelimit.DefaultClass].Device {
+		t.Fatal("admin default: ip и device должны совпадать с общими")
+	}
+}
+
 // Спека identity §6.4: классы входа и аккаунта — auth_send (письма с кодами), auth_refresh (обновление токена:
 // за CGNAT много людей), auth_check (доступность ника), account_secure (чувствительные операции аккаунта); auth
 // не меняется. Правила — раньше классов в контракте: иначе API не стартует (ratelimit.UnknownClasses).

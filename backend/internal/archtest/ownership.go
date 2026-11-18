@@ -116,6 +116,8 @@ var Schema = map[string]Object{
 	"identity_read_linked_accounts": {View, "identity", true},
 	"identity_read_captain_permits": {View, "identity", true},
 	"identity_read_restrictions":    {View, "identity", true},
+	// статистика способов входа для admin-api (0027, R2): агрегаты без user_id
+	"identity_read_auth_method_usage": {View, "identity", true},
 
 	// pitches
 	"pitches":        table("pitches"),

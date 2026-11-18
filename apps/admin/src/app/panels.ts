@@ -44,6 +44,7 @@ const SPEC: Record<PanelKey, Spec> = {
   edit: pattern(COUNTRY),
   start: flag,
   import: pattern(UUID),
+  application: pattern(UUID),
 };
 
 // validateSearch маршрута: годные значения его ключей панелей (в виде для адреса), остальное отбрасывается.

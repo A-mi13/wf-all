@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
@@ -17,9 +19,39 @@ import (
 	"wf/backend/internal/identity"
 	identityadmin "wf/backend/internal/identity/admin"
 	"wf/backend/internal/platform/approvals"
+	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/httpx"
 	"wf/backend/internal/platform/perm"
+	"wf/backend/internal/staff"
 )
+
+// allowCheck — порт условия капитанства, условие выполнено (тесты httpapi не импортируют identity/identitytest —
+// archtest; свой литерал порта, I7б ревью плана I-4).
+type allowCheck string
+
+func (c allowCheck) Name() string { return string(c) }
+
+func (allowCheck) Check(context.Context, pgx.Tx, uuid.UUID, uuid.UUID) (string, bool, error) {
+	return "", true, nil
+}
+
+// staffLinksTx — порт identity.StaffLinks над настоящим staff.LinkedPlayerTx (как адаптер cmd/admin-api).
+type staffLinksTx struct{}
+
+func (staffLinksTx) LinkedUser(ctx context.Context, tx pgx.Tx, staffID uuid.UUID) (uuid.UUID, int64, error) {
+	return staff.LinkedPlayerTx(ctx, tx, staffID)
+}
+
+// identityDeps — зависимости админского хендлера identity в тестах: geo на том же пуле, оба порта условий выполнены,
+// связь сотрудника — настоящая.
+func identityDeps(pool *pgxpool.Pool, clk clock.Clock, rc *river.Client[pgx.Tx]) identityadmin.Deps {
+	checks := make([]identity.CaptainCheck, 0, len(identity.RequiredCaptainChecks))
+	for _, n := range identity.RequiredCaptainChecks {
+		checks = append(checks, allowCheck(n))
+	}
+	return identityadmin.Deps{Pool: pool, Clock: clk, River: rc, Geo: geo.New(pool), CaptainChecks: checks,
+		StaffLinks: staffLinksTx{}, Log: quiet()}
+}
 
 // Сброс 2FA поддержкой через весь конвейер admin-api (спека identity §3.15, §7.1, §7.6; план I-2, Task 17): настоящие
 // staff (сессии, LinkedUserID, хук замка акторов), geo и identity в одном реестре подтверждений — как в сборке
@@ -39,7 +71,7 @@ func newIdentityStaffEnv(t *testing.T) *staffEnv {
 		}
 		gh = geoadmin.New(geo.New(o.DB), geoadmin.Deps{Pool: o.DB, Clock: o.Clock, River: rc})
 		o.Geo = gh
-		ih, err = identityadmin.New(identity.New(o.DB), identityadmin.Deps{Pool: o.DB, Clock: o.Clock, River: rc, Log: quiet()})
+		ih, err = identityadmin.New(identity.New(o.DB), identityDeps(o.DB, o.Clock, rc))
 		if err != nil {
 			t.Fatal(err)
 		}

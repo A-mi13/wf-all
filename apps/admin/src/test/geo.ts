@@ -198,6 +198,8 @@ export function flag(over: Partial<FeatureFlag> = {}): FeatureFlag {
     enabled_city_ids: [],
     version: 1,
     updated_at: '2026-10-20T08:00:00Z',
+    // правило флага без правила (R3 плана I-4): сервер отдаёт rules всегда
+    rules: { global_only: false, requires: null },
     ...over,
   };
 }

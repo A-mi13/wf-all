@@ -3,6 +3,9 @@ package main
 import (
 	"net/http"
 	"testing"
+	"time"
+
+	"wf/backend/internal/platform/ratelimit"
 )
 
 // План B, Task 3 (R2): ключи лимитов admin-api — вход по почте (email:<hmac>), IP класса staff_auth, субъект
@@ -45,5 +48,31 @@ func TestStaffRateLimitsOwnTable(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("остановка: %v", err)
+	}
+}
+
+// Умолчания admin-api — ratelimit.AdminRules (всплеск default.user 120, класс фоновых GET), а не правила public;
+// ADMIN_RATE_LIMITS — поверх них, невалидное — отказ.
+func TestRunUsesAdminRules(t *testing.T) {
+	t.Parallel()
+	rules, err := rateRules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := rules[ratelimit.DefaultClass].User.Burst, ratelimit.AdminRules()[ratelimit.DefaultClass].User.Burst; got != want || got == ratelimit.DefaultRules()[ratelimit.DefaultClass].User.Burst {
+		t.Fatalf("default.user всплеск %d, ждали умолчание admin %d (не public)", got, want)
+	}
+	if _, ok := rules[ratelimit.ClassStaffBackground]; !ok {
+		t.Fatalf("нет класса %s", ratelimit.ClassStaffBackground)
+	}
+	rules, err = rateRules("staff_background.user=10/1m:5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rules[ratelimit.ClassStaffBackground].User; got != (ratelimit.Policy{Limit: 10, Period: time.Minute, Burst: 5}) {
+		t.Fatalf("переопределение фоновых: %+v", got)
+	}
+	if _, err := rateRules("default.user=0/1m"); err == nil {
+		t.Fatal("лимит 0 принят")
 	}
 }

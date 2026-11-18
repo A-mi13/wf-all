@@ -141,6 +141,9 @@ func TestMailWorkerArgs(t *testing.T) {
 		{"admin_disabled: получатель выключен", staff.NewMailArgs(staff.MailAdminDisabled, disabled.Ref, f.offOwner)},
 		{"admin_disabled: получатель не владелец", staff.NewMailArgs(staff.MailAdminDisabled, disabled.Ref, f.admin)},
 		{"блокировка без сессии", staff.NewMailArgs(staff.MailLocked, uuid.New(), f.ownerRU)},
+		// связь «сотрудник → игрок» (план I-4, Task 6): вид известен исполнителю, записи нет — отмена, не повтор
+		{"player_linked: нет записи аудита", staff.NewMailArgs(staff.MailPlayerLinked, uuid.New(), f.ownerRU)},
+		{"player_unlinked: запись другого действия", staff.NewMailArgs(staff.MailPlayerUnlinked, f.bootstrappedAudit, f.ownerRU)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

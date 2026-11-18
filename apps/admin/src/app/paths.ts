@@ -8,6 +8,10 @@ export const paths = {
   staff: '/staff',
   approvals: '/approvals',
   audit: '/audit',
+  // «Капитаны» (I-4): очередь заявок в капитаны; карточка — панель ?application=<id>
+  captains: '/captains',
+  // «Игроки» (I-4, R20): поиск игрока по почте и сброс 2FA; почта и причина — только в памяти экрана, не в адресе
+  players: '/players',
   // «Справочники» (план B): города и страница города, страны, импорт GeoNames, версии, флаги
   cities: '/geo/cities',
   city: '/geo/cities/$cityId',
@@ -24,7 +28,8 @@ export const AUTH_PATHS: readonly string[] = [paths.login, paths.accept, paths.s
 
 // Ключи search открытых панелей (спека UI-фундамента §4.6, план UF2b.8): карточка сотрудника, приглашение,
 // активация города, запись журнала, страна (G9 — ?edit=<код> и ?edit=new, не ?country=: country — фильтр списков, I1),
-// запуск импорта и раскрытый отчёт импорта (G9 — ?start=1, ?import=<id>; задача — ?job= в фильтрах экрана). Ключ
+// запуск импорта и раскрытый отчёт импорта (G9 — ?start=1, ?import=<id>; задача — ?job= в фильтрах экрана), карточка
+// заявки в капитаны (I-4, R21 — ?application=<id>). Ключ
 // панели не совпадает ни с одним ключом фильтра ни на одном пути и ни с одним query-параметром контракта (страж
 // searchKeys.test.ts; ключи фильтров путей — filterKeys.ts): память «Назад» (BackMemory) и ключ позиции таблицы
 // (restore.ts) их вырезают.
@@ -36,6 +41,7 @@ export const PANEL_SEARCH_KEYS = [
   'edit',
   'start',
   'import',
+  'application',
 ] as const;
 export type PanelKey = (typeof PANEL_SEARCH_KEYS)[number];
 

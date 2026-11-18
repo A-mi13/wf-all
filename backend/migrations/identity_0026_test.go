@@ -15,8 +15,8 @@ import (
 // анонимизация затирает дату рождения).
 const identityDeletionVersion = 26
 
-// Ограничения 0026: прежний статус задан ⇔ pending_deletion и только active|suspended; дата рождения обязательна,
-// кроме удалённого.
+// Ограничения 0026: прежний статус задан ⇔ pending_deletion и только active|suspended (с 0027 — и banned); дата
+// рождения обязательна, кроме удалённого.
 func TestIdentityDeletionConstraints(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
@@ -26,8 +26,9 @@ func TestIdentityDeletionConstraints(t *testing.T) {
 	}{
 		{"pending_deletion без прежнего статуса", "users_status_before_deletion",
 			`UPDATE users SET status = 'pending_deletion', deletion_requested_at = now(), purge_at = now() + interval '30 days' WHERE id = $1`},
-		{"прежний статус banned", "users_status_before_deletion",
-			`UPDATE users SET status = 'pending_deletion', status_before_deletion = 'banned', deletion_requested_at = now(),
+		// banned допустим с 0027 (R11) — TestStatusBeforeDeletionAllowsBanned
+		{"прежний статус deleted", "users_status_before_deletion",
+			`UPDATE users SET status = 'pending_deletion', status_before_deletion = 'deleted', deletion_requested_at = now(),
 			 purge_at = now() + interval '30 days' WHERE id = $1`},
 		{"прежний статус у активного", "users_status_before_deletion",
 			`UPDATE users SET status_before_deletion = 'active' WHERE id = $1`},

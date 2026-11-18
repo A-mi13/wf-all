@@ -297,21 +297,6 @@ func (q *Queries) DeletionRevokeCodes(ctx context.Context, arg DeletionRevokeCod
 	return err
 }
 
-const deletionRevokePermits = `-- name: DeletionRevokePermits :exec
-UPDATE role_assignments SET revoked_at = $1, revoke_reason = 'account_deleted'
-WHERE user_id = $2 AND revoked_at IS NULL
-`
-
-type DeletionRevokePermitsParams struct {
-	Now    *time.Time
-	UserID uuid.UUID
-}
-
-func (q *Queries) DeletionRevokePermits(ctx context.Context, arg DeletionRevokePermitsParams) error {
-	_, err := q.db.Exec(ctx, deletionRevokePermits, arg.Now, arg.UserID)
-	return err
-}
-
 const deletionRevokeRestoreTokens = `-- name: DeletionRevokeRestoreTokens :exec
 UPDATE auth_challenges SET consumed_at = $1
 WHERE user_id = $2 AND purpose = 'deletion_restore' AND consumed_at IS NULL
@@ -383,9 +368,10 @@ func (q *Queries) DeletionScrubMfaResets(ctx context.Context, arg DeletionScrubM
 	return err
 }
 
-const deletionWithdrawApplications = `-- name: DeletionWithdrawApplications :exec
+const deletionWithdrawApplications = `-- name: DeletionWithdrawApplications :many
 UPDATE captain_applications SET status = 'withdrawn', closed_at = $1, version = version + 1
 WHERE user_id = $2 AND status = 'pending'
+RETURNING id, city_id, version
 `
 
 type DeletionWithdrawApplicationsParams struct {
@@ -393,8 +379,29 @@ type DeletionWithdrawApplicationsParams struct {
 	UserID uuid.UUID
 }
 
-// открытая заявка в капитаны — withdrawn (допуски не трогаются до анонимизации)
-func (q *Queries) DeletionWithdrawApplications(ctx context.Context, arg DeletionWithdrawApplicationsParams) error {
-	_, err := q.db.Exec(ctx, deletionWithdrawApplications, arg.Now, arg.UserID)
-	return err
+type DeletionWithdrawApplicationsRow struct {
+	ID      uuid.UUID
+	CityID  uuid.UUID
+	Version int64
+}
+
+// открытая заявка в капитаны — withdrawn (допуски не трогаются до анонимизации); событие на каждую (R24)
+func (q *Queries) DeletionWithdrawApplications(ctx context.Context, arg DeletionWithdrawApplicationsParams) ([]DeletionWithdrawApplicationsRow, error) {
+	rows, err := q.db.Query(ctx, deletionWithdrawApplications, arg.Now, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DeletionWithdrawApplicationsRow
+	for rows.Next() {
+		var i DeletionWithdrawApplicationsRow
+		if err := rows.Scan(&i.ID, &i.CityID, &i.Version); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

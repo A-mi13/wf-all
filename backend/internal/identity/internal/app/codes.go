@@ -137,7 +137,9 @@ func (a *App) codeMAC(keyID string, codeID uuid.UUID, code string) ([]byte, erro
 	return a.secrets.MAC(keyID, domain.LabelCode, msg)
 }
 
-// startCode — один живой код на (purpose, email): прежний отзывается; приманка — без секретов. Письмо ставит
+// startCode — один живой код на (purpose, email), у смены почты — на (purpose, user_id, email) (0027, R40: чужой живой
+// код на тот же адрес не гасится, подтверждение выбирает одного уникальностью users.email): прежний отзывается;
+// приманка — без секретов. Письмо ставит
 // вызывающий (вид письма зависит от ветки). Параллельные старты на ту же почту идут по очереди под
 // pg_advisory_xact_lock (purpose, email) до конца tx (m1): отзыв видит закоммиченный код соседа (READ COMMITTED,
 // новый снимок на оператор), вставка не конфликтует. ON CONFLICT DO NOTHING и повтор остаются защитой в глубину.
@@ -172,8 +174,11 @@ func (a *App) startCode(ctx context.Context, tx pgx.Tx, p StartCode) (CodeSent, 
 	if err := q.LockCodeSlot(ctx, identitydb.LockCodeSlotParams{Purpose: string(p.Purpose), Email: p.Email}); err != nil {
 		return CodeSent{}, fmt.Errorf("identity: очередь стартов кода: %w", err)
 	}
+	// смена почты — один живой код на (аккаунт, почта) (R40): отзыв только своего кода; вставка — без цели арбитра,
+	// уникальность держат оба индекса живых кодов
 	for range 2 {
-		if err := q.RevokeLiveCode(ctx, identitydb.RevokeLiveCodeParams{Now: &now, Purpose: p.Purpose, Email: p.Email}); err != nil {
+		if err := q.RevokeLiveCode(ctx, identitydb.RevokeLiveCodeParams{Now: &now, Purpose: p.Purpose, Email: p.Email,
+			UserID: params.UserID}); err != nil {
 			return CodeSent{}, fmt.Errorf("identity: отзыв прежнего кода: %w", err)
 		}
 		n, err := q.InsertCode(ctx, params)

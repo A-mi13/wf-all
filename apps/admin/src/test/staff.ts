@@ -178,10 +178,17 @@ export function approval(over: Partial<Approval> = {}): Approval {
 }
 
 // Сервер «Ролей и доступа»: матрица, список (фильтры q/status/role, курсор по страницам), карточка,
-// города (q — начало названия, ids — подписи), сеансы цели (по умолчанию — нет; свои — server.use в тесте).
-// seen — что спрашивал экран.
+// города (q — начало названия, ids — подписи), сеансы цели (по умолчанию — нет; свои — server.use в тесте),
+// связь с учёткой игрока (I-4: PUT — связь с ником из nicknames, иначе 422 staff.player_not_found; DELETE — 204;
+// linkAnswer — свой ответ PUT, Response — ошибка). seen — что спрашивал экран.
 export function staffServer(
-  opts: { accounts?: StaffAccount[]; pageSize?: number; roles?: StaffRoles } = {},
+  opts: {
+    accounts?: StaffAccount[];
+    pageSize?: number;
+    roles?: StaffRoles;
+    nicknames?: Record<string, string>;
+    linkAnswer?: (userId: string) => Response | null;
+  } = {},
 ) {
   const state = { accounts: opts.accounts ?? [account()] };
   const seen = {
@@ -190,6 +197,17 @@ export function staffServer(
     roles: 0,
     cards: [] as string[],
     sessions: [] as string[],
+    links: [] as { staffId: string; userId: string; key: string | null }[],
+    unlinks: [] as { staffId: string; key: string | null }[],
+  };
+  const setLink = (id: string, link: StaffAccount['player_link']) => {
+    state.accounts = state.accounts.map((a) => {
+      if (a.id !== id) return a;
+      const next: StaffAccount = { ...a, version: a.version + 1 };
+      if (link) next.player_link = link;
+      else delete next.player_link;
+      return next;
+    });
   };
   const size = opts.pageSize ?? 50;
   server.use(
@@ -218,6 +236,33 @@ export function staffServer(
       seen.cards.push(params.staffId);
       const a = state.accounts.find((x) => x.id === params.staffId);
       return a ? response(200).json(a) : response.untyped(problem(404, 'staff.not_found'));
+    }),
+    http.put('/v1/staff/accounts/{staffId}/player-link', async ({ params, request, response }) => {
+      const body = (await request.json()) as { user_id: string };
+      seen.links.push({
+        staffId: params.staffId,
+        userId: body.user_id,
+        key: request.headers.get('Idempotency-Key'),
+      });
+      const own = opts.linkAnswer?.(body.user_id);
+      if (own) return response.untyped(own);
+      if (!state.accounts.some((a) => a.id === params.staffId))
+        return response.untyped(problem(404, 'staff.not_found'));
+      const nickname = opts.nicknames?.[body.user_id];
+      if (!nickname) return response.untyped(problem(422, 'staff.player_not_found'));
+      const link = {
+        user_id: body.user_id,
+        nickname,
+        linked_at: '2026-11-15T10:00:00Z',
+        linked_by_label: 'Ольга В.',
+      };
+      setLink(params.staffId, link);
+      return response(200).json(link);
+    }),
+    http.delete('/v1/staff/accounts/{staffId}/player-link', ({ params, request, response }) => {
+      seen.unlinks.push({ staffId: params.staffId, key: request.headers.get('Idempotency-Key') });
+      setLink(params.staffId, undefined);
+      return response(204).empty();
     }),
     http.get('/v1/staff/accounts/{staffId}/sessions', ({ params, response }) => {
       seen.sessions.push(params.staffId);

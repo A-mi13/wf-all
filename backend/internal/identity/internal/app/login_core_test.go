@@ -23,6 +23,7 @@ import (
 
 	"wf/backend/internal/identity"
 	"wf/backend/internal/identity/internal/domain"
+	"wf/backend/internal/identity/internal/store/identitydb"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/flags"
 	"wf/backend/internal/platform/httpx"
@@ -395,18 +396,38 @@ func TestFinishLoginBranches(t *testing.T) {
 		}
 	})
 
-	t.Run("banned: истёкшее неснятое ограничение — не blocked_until", func(t *testing.T) {
+	// R12 (m1 итогового ревью Г): бан истёк по until, чистка ещё не прошла — не блок (иначе 403 без blocked_until —
+	// «бессрочно»); вход под замком users возвращает active тем же expireBanTx, что чистка и отмена удаления
+	t.Run("banned: истёкший бан до чистки — вход и active", func(t *testing.T) {
 		uid := seedUser(t, e.owner, "banned_expired", "ru")
 		setStatus(t, e, uid, "banned")
 		if _, err := e.owner.Exec(context.Background(), `INSERT INTO user_restrictions (id, user_id, capability, until, source_id, created_at)
-			VALUES (gen_random_uuid(), $1, $2, $3, gen_random_uuid(), $4)`, uid, banCapability, e.clock.Now().Add(-time.Hour),
+			VALUES (gen_random_uuid(), $1, $2, $3, gen_random_uuid(), $4)`, uid, banCapability, e.clock.Now(),
 			e.clock.Now().Add(-48*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
-		_, err := finish(t, e, uid, c, false, false)
-		var pe httpx.ProblemError
-		if !errors.As(err, &pe) || pe.Problem().Code != identity.CodeAccountBlocked || pe.Problem().BlockedUntil != nil {
-			t.Fatalf("истёкшее ограничение: %v", err)
+		var blocked bool
+		if err := e.inTx(t, func(ctx context.Context, tx pgx.Tx) error {
+			u, err := e.a.lockUser(ctx, tx, uid)
+			if err != nil {
+				return err
+			}
+			blocked, err = e.a.blocked(ctx, identitydb.New(tx), u, e.clock.Now())
+			return err
+		}); err != nil || blocked {
+			t.Fatalf("ровно until — ещё заблокирован: %v %v", blocked, err)
+		}
+		out, err := finish(t, e, uid, c, false, false)
+		if err != nil || out.Status != StatusAuthenticated || out.Issued == nil || out.User.Status != "active" {
+			t.Fatalf("истёкший бан: %+v %v", out, err)
+		}
+		if st, _, _, _ := userState(t, e, uid); st != "active" {
+			t.Fatalf("статус %s", st)
+		}
+		if count(t, e.owner, `SELECT count(*) FROM audit_log WHERE action = $1 AND object_id = $2 AND actor_role = 'system'`,
+			ActionBanExpired, uid) != 1 || count(t, e.owner, `SELECT count(*) FROM outbox WHERE event_type = $1
+			AND aggregate_id = $2`, identity.EventRestrictionsChanged, uid) != 1 {
+			t.Fatal("нет аудита ban_expired или события restrictions_changed")
 		}
 	})
 

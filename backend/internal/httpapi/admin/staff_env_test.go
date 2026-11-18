@@ -29,6 +29,7 @@ import (
 
 	geoadmin "wf/backend/internal/geo/admin"
 	"wf/backend/internal/httpapi/admin"
+	"wf/backend/internal/identity"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/auth"
 	"wf/backend/internal/platform/keys"
@@ -112,7 +113,7 @@ func newStaffEnv(t *testing.T, opts ...func(*admin.Options)) *staffEnv {
 	}
 	sh := staffadmin.New(staff.Deps{
 		Pool: pool, Clock: clk, Keys: ring, Hasher: hasher, Limiter: ratelimit.Unlimited, River: rc,
-		Rand: rand.Reader, Origin: testOrigin, Log: quiet(),
+		Rand: rand.Reader, Origin: testOrigin, Log: quiet(), Players: identityPlayers{svc: identity.New(pool)},
 	}, staffadmin.Cookie{Name: admin.CookieName(true), Secure: true})
 	reg := approvals.NewRegistry()
 	svc := approvals.New(pool, clk, reg)

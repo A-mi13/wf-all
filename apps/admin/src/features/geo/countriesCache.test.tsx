@@ -15,6 +15,11 @@ import { geoKeys } from './queries';
 
 afterEach(() => sessionStorage.clear());
 
+// Первый заход в ленивый раздел «Подтверждения» в этом файле: под нагрузкой полного прогона (./task ci 17.11 — 144 файла,
+// jsdom на каждый) кусок с каркасом не успевал за общие 3 с — ожидание и сам тест длиннее, как у FlagsPage.
+const COLD_CHUNK = { timeout: 10_000 };
+const COLD_TEST = 15_000;
+
 const countriesQuery = (app: ReturnType<typeof renderApp>) =>
   app.queryClient.getQueryCache().find({ queryKey: geoKeys.countries('ru'), exact: true });
 
@@ -33,46 +38,54 @@ describe('I-1: кэш стран', () => {
     await waitFor(() => expect(countriesQuery(app)?.state.isInvalidated).toBe(true));
   });
 
-  test('одобрение geo.country_rules с итогом executed — «Справочники» перечитаны', async () => {
-    staffServer();
-    geoServer();
-    const rules = approval({
-      id: '0192f1e2-4c5d-7e6f-a081-0000000000c7',
-      action: 'geo.country_rules',
-      permission: 'geo.countries.rules',
-      payload: {
-        v: 1,
-        code: 'RU',
-        version: 3,
-        patch: { currency: 'KZT' },
-        from: { currency: 'RUB' },
-        to: { currency: 'KZT' },
-      },
-      requested_by: IGOR,
-    });
-    approvalsServer({ incoming: [rules] });
-    const me = {
-      ...meOwner,
-      permissions: { ...meOwner.permissions, 'geo.countries.rules': 'dual' as const },
-    };
-    const app = renderApp('/approvals', { me });
-    const table = await screen.findByRole('table', { name: 'Входящие запросы' });
-    const [row] = within(table).getAllByRole('row').slice(1);
-    app.queryClient.setQueryData(geoKeys.countries('ru'), { items: COUNTRIES });
-    await userEvent.setup().click(within(row!).getByRole('button', { name: 'Подтвердить' }));
-    await screen.findByText('Подтверждено и выполнено.');
-    await waitFor(() => expect(countriesQuery(app)?.state.isInvalidated).toBe(true));
-  });
+  test(
+    'одобрение geo.country_rules с итогом executed — «Справочники» перечитаны',
+    async () => {
+      staffServer();
+      geoServer();
+      const rules = approval({
+        id: '0192f1e2-4c5d-7e6f-a081-0000000000c7',
+        action: 'geo.country_rules',
+        permission: 'geo.countries.rules',
+        payload: {
+          v: 1,
+          code: 'RU',
+          version: 3,
+          patch: { currency: 'KZT' },
+          from: { currency: 'RUB' },
+          to: { currency: 'KZT' },
+        },
+        requested_by: IGOR,
+      });
+      approvalsServer({ incoming: [rules] });
+      const me = {
+        ...meOwner,
+        permissions: { ...meOwner.permissions, 'geo.countries.rules': 'dual' as const },
+      };
+      const app = renderApp('/approvals', { me });
+      const table = await screen.findByRole('table', { name: 'Входящие запросы' }, COLD_CHUNK);
+      const [row] = within(table).getAllByRole('row').slice(1);
+      app.queryClient.setQueryData(geoKeys.countries('ru'), { items: COUNTRIES });
+      await userEvent.setup().click(within(row!).getByRole('button', { name: 'Подтвердить' }));
+      await screen.findByText('Подтверждено и выполнено.');
+      await waitFor(() => expect(countriesQuery(app)?.state.isInvalidated).toBe(true));
+    },
+    COLD_TEST,
+  );
 
-  test('одобрение staff.* — «Справочники» не трогаются', async () => {
-    staffServer();
-    approvalsServer();
-    const app = renderApp('/approvals', { me: meOwner });
-    const table = await screen.findByRole('table', { name: 'Входящие запросы' });
-    const [row] = within(table).getAllByRole('row').slice(1);
-    app.queryClient.setQueryData(geoKeys.countries('ru'), { items: COUNTRIES });
-    await userEvent.setup().click(within(row!).getByRole('button', { name: 'Подтвердить' }));
-    await screen.findByText('Подтверждено и выполнено.');
-    expect(countriesQuery(app)?.state.isInvalidated).toBe(false);
-  });
+  test(
+    'одобрение staff.* — «Справочники» не трогаются',
+    async () => {
+      staffServer();
+      approvalsServer();
+      const app = renderApp('/approvals', { me: meOwner });
+      const table = await screen.findByRole('table', { name: 'Входящие запросы' }, COLD_CHUNK);
+      const [row] = within(table).getAllByRole('row').slice(1);
+      app.queryClient.setQueryData(geoKeys.countries('ru'), { items: COUNTRIES });
+      await userEvent.setup().click(within(row!).getByRole('button', { name: 'Подтвердить' }));
+      await screen.findByText('Подтверждено и выполнено.');
+      expect(countriesQuery(app)?.state.isInvalidated).toBe(false);
+    },
+    COLD_TEST,
+  );
 });

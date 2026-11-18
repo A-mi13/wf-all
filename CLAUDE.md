@@ -24,7 +24,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`,
   `docs/05-ролевая-модель.md` (роли игроков и сотрудников, матрица прав — генерируется `./task gen`)
 - Архитектура бэкенда (модули, владение таблицами, платформа, стражи, порядок): `docs/superpowers/specs/2026-10-01-backend-architecture-design.md`
-- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`, модуль сотрудников — `backend-staff`, аккаунт игрока — `backend-identity`; админка — ядро `admin` и области `admin-ui` (компоненты, тема, витрина, снимки), `admin-e2e`, `admin-geo`, `admin-staff` (сессия, вход, разделы сотрудников))
+- Правила по частям репо — `.claude/rules/` (грузятся при чтении файлов под их `paths`; бэкенд разбит на `backend`, `backend-schema`, `backend-platform`, `backend-http`, модуль сотрудников — `backend-staff`, аккаунт игрока — `backend-identity`; админка — ядро `admin` и области `admin-ui` (компоненты, тема, витрина, снимки), `admin-e2e`, `admin-geo`, `admin-staff` (сессия, вход, разделы сотрудников), `admin-identity` (капитаны, игроки, связь сотрудника, флаги способов входа))
 
 ## Skills и агенты
 Проектных скиллов нет: справочники восстанавливаются из `backend/migrations/README.md` и `design/README.md`.
@@ -69,7 +69,7 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 - Комментарии в коде — по-русски, идентификаторы — по-английски. Переводы строк LF.
 
 ## Проверки
-- Тесты гонять самому после правок: `./task backend:test` (нужен Postgres), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`; живой e2e админки — `./task admin:e2e` (Playwright + admin-api + Mailpit, нужен Postgres; свои порты и база `wf_e2e` — README; проекты по умолчанию `chromium,webkit,prod` — для `prod` скрипт сам собирает админку и проверяет `dist`; без WebKit локально — `WF_E2E_PROJECTS=chromium,prod`).
+- Тесты гонять самому после правок: `./task backend:test` (нужен Postgres; второй командой — тест тестовых портов капитанства с тегом сборки: `go test -tags wf_e2e -run TestCaptainChecksE2EBuild ./cmd/api ./cmd/admin-api`, файлы с тегом проверяет `go vet -tags wf_e2e` в `backend:lint`), `./task web:test`, `./task admin:test`, `./task packages:ci`, `./task design:test`; e2e веба — `./task web:e2e`; живой e2e админки — `./task admin:e2e` (Playwright + admin-api + Mailpit, нужен Postgres; свои порты и база `wf_e2e` — README; проекты по умолчанию `chromium,webkit,prod` — для `prod` скрипт сам собирает админку и проверяет `dist`; без WebKit локально — `WF_E2E_PROJECTS=chromium,prod`).
 - `./task ci` включает lint/typecheck/build — как и они, только по просьбе (глобальный CLAUDE.md). Постоянная просьба
   пользователя (05.10.2026): после финального ревью ветки и волны исправлений, до пуша и PR — полный `./task ci`
   самому; красное — чинить до PR (на PR #11 CI дважды падал на lint, которого не было локально).

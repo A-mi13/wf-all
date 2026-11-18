@@ -7,7 +7,7 @@
 #      прошёл бы проверку портов и пересоздал бы базу и exe под первым; замок держится до конца прогона,
 #      брошенный (процесс с его PID умер) — забирается;
 #   1. порты e2e свободны (свои, чтобы не задеть ./task dev: Vite 5174/5175, admin-api 18181/18182/18183,
-#      Mailpit 18026/11026, фикстура GeoNames 18190);
+#      Mailpit 18026/11026, фикстура GeoNames 18190, публичный api 18184);
 #   2. база wf_e2e на том же кластере пересоздана (DROP … WITH (FORCE)): чистка и истечение подтверждений
 #      идут по реальным часам — общие данные dev не трогаем; каждый прогон — с чистой базы, поэтому повторный прогон
 #      сценария geo (импорт RU, активация места 526815) не встречает «уже импортировано» и «город уже активен»;
@@ -15,13 +15,15 @@
 #   4. admin-api, воркер и HTTPS-фикстура GeoNames (план B, Task 23) собраны в .tools/e2e/: импорт и активация идут
 #      через настоящий воркер (webServer Playwright, база wf_e2e под ролью worker, Mailpit e2e), источник — фикстура
 #      cmd/geofixture на 127.0.0.1:18190 (выдержки testdata, корень TLS — PEM для WORKER_GEONAMES_CA_FILE): внешней сети
-#      прогон не трогает. Порты, адрес и путь PEM — apps/admin/e2e/env.ts;
+#      прогон не трогает. Порты, адрес и путь PEM — apps/admin/e2e/env.ts. Публичный api (план I-4, Task 11) — база
+#      wf_e2e под ролью api, кольцо identity общее с воркером (письма с кодами), свои одноразовые ключи;
+#      admin-api и api — с тегом wf_e2e (тестовые порты условий капитанства);
 #   5. одноразовый ключ сотрудников ADMIN_STAFF_SECRET_KEYS (base64url, только в окружении прогона, не выводится);
 #   6. проект prod (план UI-фундамента UF1b.7) — собранная админка: vite build (без tsc; шаг стенда, не «сборка
 #      по просьбе») и проверка dist (scripts/check-admin-dist.mjs: light-dark( есть, полифила и MSW нет) —
 #      каждый прогон, чтобы прод-проект не проверял сборку старого дерева.
-# Dev-значения ADMIN_* и WORKER_* (корневой Taskfile грузит backend/.env: база dev, настоящий GeoNames) из окружения
-# убираются: admin-api и воркер получают только окружение e2e (apps/admin/e2e/env.ts).
+# Dev-значения ADMIN_*, WORKER_* и API_* (корневой Taskfile грузит backend/.env: база dev, настоящий GeoNames) из
+# окружения убираются: admin-api, воркер и api получают только окружение e2e (apps/admin/e2e/env.ts).
 #
 # Кластер: локально — scripts/pg.sh (127.0.0.1:WF_PG_PORT, суперпользователь postgres без пароля); в CI —
 # сервис postgis/postgis:18-3.6 с ролями и расширениями из deploy/dev/initdb/20_wf.sql
@@ -99,7 +101,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # 1. Порты: занятый — понятная ошибка до сборки (чужие процессы не трогаем)
-ports="18026 11026 18190"
+# публичный api (план I-4, Task 11) — 18184 при любом наборе проектов (его сценарии идут в identityProject)
+ports="18026 11026 18190 18184"
 case ",$PROJECTS," in *,chromium,*) ports="$ports 5174 18181" ;; esac
 case ",$PROJECTS," in *,webkit,*) ports="$ports 5175 18182" ;; esac
 case ",$PROJECTS," in *,prod,*) ports="$ports 18183" ;; esac
@@ -150,8 +153,11 @@ INSERT INTO city_names (city_id, locale, name)
 SELECT c.id, 'ru', c.name FROM cities c WHERE c.slug LIKE 'flagtest-%';
 SQL
 
-# 4. admin-api, воркер и фикстура GeoNames
-(cd backend && go build -o "../.tools/e2e/admin-api$exe" ./cmd/admin-api)
+# 4. admin-api, api, воркер и фикстура GeoNames. admin-api и api — с тегом wf_e2e (план I-4, Task 11; спека identity
+# §10.3, К1): тестовые порты условий капитанства «выполнено» (cmd/{api,admin-api}/captaincy_e2e.go) — только в
+# бинарниках живого e2e; прод-образ собирается без тега (страж TestProdBuildWithoutE2ETag, config)
+(cd backend && go build -tags wf_e2e -o "../.tools/e2e/admin-api$exe" ./cmd/admin-api)
+(cd backend && go build -tags wf_e2e -o "../.tools/e2e/api$exe" ./cmd/api)
 (cd backend && go build -o "../.tools/e2e/worker$exe" ./cmd/worker)
 (cd backend && go build -o "../.tools/e2e/geofixture$exe" ./cmd/geofixture)
 # PEM прошлого прогона не должен сойти за свежий: фикстура пишет новый корень при старте
@@ -159,8 +165,10 @@ rm -f .tools/e2e/geofixture-ca.pem
 
 # 5. Окружение прогона: без dev-настроек админки, с базой и одноразовым ключом e2e
 for k in $(compgen -e); do
-  case "$k" in ADMIN_* | WORKER_* | WF_ADMIN_API_ORIGIN) unset "$k" ;; esac
+  case "$k" in ADMIN_* | WORKER_* | API_* | WF_ADMIN_API_ORIGIN) unset "$k" ;; esac
 done
+# одноразовый ключ прогона: 32 случайных байта в base64url (без «/» — MSYS не перепишет)
+run_key() { node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))'; }
 # Ключ — base64url (ревью 27.10, Minor 1): Git Bash (MSYS), запуская не-MSYS программу (pnpm → node →
 # admin-api), переписывает значение окружения с ведущим «/» в путь Windows («C:/Program Files/Git/…») —
 # base64-ключ начинался с «/» в 1 из 64 прогонов, и admin-api не стартовал. В base64url нет «/» (keys.Decode
@@ -168,13 +176,21 @@ done
 # ни на что не влияет). Адрес базы начинается с postgres:// — MSYS такие не трогает. Страж — e2e/env.ts.
 WF_E2E_STAFF_SECRET_KEYS=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
 export WF_E2E_STAFF_SECRET_KEYS
-# Кольцо identity воркера (план I-2, Task 4) — свой одноразовый ключ, тоже base64url; api в прогоне нет
-WF_E2E_IDENTITY_SECRET_KEYS=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')
+# Кольцо identity (план I-2, Task 4) — одно у воркера и api (план I-4, Task 11): письма с кодами, которые ставит api,
+# собирает воркер; свой одноразовый ключ, тоже base64url
+WF_E2E_IDENTITY_SECRET_KEYS=$(run_key)
 export WF_E2E_IDENTITY_SECRET_KEYS
+# Ключи публичного api (план I-4, Task 11): сид access-токенов (Ed25519 — ровно 32 байта), HMAC задач антибота, HMAC
+# устройств — одноразовые, только api (под именами API_*, apps/admin/e2e/env.ts)
+WF_E2E_JWT_SEEDS=$(run_key)
+WF_E2E_HUMANCHECK_KEYS=$(run_key)
+WF_E2E_DEVICE_KEYS=$(run_key)
+export WF_E2E_JWT_SEEDS WF_E2E_HUMANCHECK_KEYS WF_E2E_DEVICE_KEYS
 export WF_E2E_ADMIN_DATABASE_URL="postgres://admin:admin@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
 export WF_E2E_WORKER_DATABASE_URL="postgres://worker:worker@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
+export WF_E2E_API_DATABASE_URL="postgres://api:api@${PG_HOST}:${PG_PORT}/${DB}?sslmode=disable"
 export WF_E2E_PROJECTS="$PROJECTS"
-export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_WORKER_DATABASE_URL;WF_E2E_IDENTITY_SECRET_KEYS;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
+export MSYS2_ENV_CONV_EXCL="WF_E2E_STAFF_SECRET_KEYS;WF_E2E_ADMIN_DATABASE_URL;WF_E2E_WORKER_DATABASE_URL;WF_E2E_API_DATABASE_URL;WF_E2E_IDENTITY_SECRET_KEYS;WF_E2E_JWT_SEEDS;WF_E2E_HUMANCHECK_KEYS;WF_E2E_DEVICE_KEYS;WF_E2E_PROJECTS${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
 
 # 6. Прод-проект: свежая сборка админки и её проверка (dist — apps/admin/dist, ADMIN_STATIC_DIR пары prod)
 case ",$PROJECTS," in

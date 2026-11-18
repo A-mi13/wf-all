@@ -18,7 +18,8 @@ JOIN staff_roles r ON r.staff_id = a.id
 WHERE a.status = 'active' AND r.role = 'owner' AND a.id <> sqlc.arg(staff_id)::uuid;
 
 -- name: ManageLockAccount :one
--- Цель управления под замком (выключение, сброс, роль, сессии, приглашение).
+-- Цель управления под замком (выключение, сброс, роль, сессии, приглашение). Только после AcquireAccount
+-- (lockAccounts): замок — отдельным оператором, роль — этим, уже со снимком под замком.
 SELECT a.id, a.status::text AS status, a.display_name, a.email::text AS email, a.locked_until, a.version,
        a.locale, r.role::text AS role
 FROM staff_accounts a
@@ -28,7 +29,8 @@ FOR UPDATE OF a;
 
 -- name: ManageShareAccount :one
 -- Автор, инициатор или подтверждающий под разделяемым замком: пока действие идёт, его нельзя
--- выключить, сбросить или сменить ему роль (M-4, m4).
+-- выключить, сбросить или сменить ему роль (M-4, m4). Только после LockAccountForShare (lockAccounts): иначе после
+-- ожидания замка роль — из снимка до смены роли соседом, и понижённый подтверждающий проходил checkActor.
 SELECT a.id, a.status::text AS status, a.display_name, a.email::text AS email, a.locked_until, a.version,
        a.locale, r.role::text AS role
 FROM staff_accounts a

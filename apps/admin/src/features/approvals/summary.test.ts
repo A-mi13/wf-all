@@ -284,3 +284,46 @@ function text(s: ReturnType<typeof summarizePayload>, locale: 'ru' | 'en' = 'ru'
   const { result } = renderHook(() => useCountrySummary(), { wrapper: providers({ me }) });
   return result.current(s);
 }
+
+// Сводка identity.mfa_reset (план I-4, R28): операции «игрок по id» в контракте нет — «Игрок <user_id>», обращение
+// и причина первого сотрудника из payload (backend identity/internal/app/mfa_reset_admin.go, mfaResetPayload).
+// Служебные (v, init_id, init_ver, init_label) не показываются; незнакомые поля и неверный тип — в others.
+describe('identity.mfa_reset', () => {
+  const reset = {
+    v: 1,
+    init_id: '0192f1c4-7a3e-7b21-9c5d-3e8f1a2b4c6d',
+    init_ver: 4,
+    init_label: 'Ольга В.',
+    user_id: '0193a1c1-5d2e-7a10-8b3c-4f5e6a7b8c90',
+    reason: 'Потерял телефон, личность проверена по документам',
+    ticket: 'SUP-4812',
+  };
+
+  test('игрок, обращение, причина', () => {
+    expect(summarizePayload(reset, 'identity.mfa_reset')).toEqual({
+      mfaReset: {
+        userId: reset.user_id,
+        ticket: 'SUP-4812',
+        reason: reset.reason,
+        others: [],
+      },
+    });
+  });
+
+  test('без обращения — строки нет; незнакомые поля и неверный тип — «и ещё N полей»', () => {
+    const noTicket: Record<string, unknown> = { ...reset };
+    delete noTicket.ticket;
+    expect(
+      summarizePayload({ ...noTicket, reason: 7, extra: 'x', zone: 1 }, 'identity.mfa_reset'),
+    ).toEqual({ mfaReset: { userId: reset.user_id, others: ['extra', 'reason', 'zone'] } });
+  });
+
+  test('поля staff.* у сброса 2FA не читаются', () => {
+    const s = summarizePayload(
+      { ...reset, email: 'x@wf.example', role: 'owner' },
+      'identity.mfa_reset',
+    );
+    expect(s).not.toHaveProperty('email');
+    expect(s.mfaReset?.others).toEqual(['email', 'role']);
+  });
+});

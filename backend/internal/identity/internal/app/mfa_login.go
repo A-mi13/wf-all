@@ -69,14 +69,17 @@ func (a *App) CompleteMfa(ctx context.Context, raw string, f SecondFactor, passk
 		if err != nil {
 			return err
 		}
-		switch u.Status {
-		case identitydb.UserStatusBanned:
+		if u.Status == identitydb.UserStatusDeleted {
+			return errMfaExpired
+		}
+		// R36: banned или бан поверх периода удаления — токен гаснет, 410 (account_blocked в контракте нет, R29)
+		if blocked, err := a.blocked(ctx, identitydb.New(tx), u, a.clock.Now()); err != nil {
+			return err
+		} else if blocked {
 			if err := a.consumeChallenge(ctx, tx, ch.ID); err != nil {
 				return fmt.Errorf("identity: погашение mfa_token: %w", err)
 			}
 			return failureToCommit{errMfaExpired}
-		case identitydb.UserStatusDeleted:
-			return errMfaExpired
 		}
 		var data challengeData
 		if err := json.Unmarshal(ch.Data, &data); err != nil {

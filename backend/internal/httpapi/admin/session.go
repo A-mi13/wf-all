@@ -48,6 +48,17 @@ const classStaffAuth = "staff_auth"
 // headerBackground — фоновый запрос (опрос счётчиков): не продлевает бездействие сессии (D10).
 const headerBackground = "X-WF-Background"
 
+// rateClass — класс лимита запроса: фоновый GET (X-WF-Background: 1) операции без своего x-rate-limit — класс
+// ratelimit.ClassStaffBackground, чтобы опрос счётчиков не тратил обычный лимит сотрудника. Решает заголовок, а не
+// операция (одна операция бывает фоновой и нет); мутация с заголовком и операция со своим классом (staff_auth) — как
+// есть: заголовок ставит клиент, и ослаблять им чужой класс нельзя.
+func rateClass(r *http.Request, class string) string {
+	if class == ratelimit.DefaultClass && r.Method == http.MethodGet && r.Header.Get(headerBackground) == "1" {
+		return ratelimit.ClassStaffBackground
+	}
+	return class
+}
+
 // Негативный кэш отказов сессии (R9): срок и предел записей.
 const (
 	negCacheTTL = 5 * time.Second

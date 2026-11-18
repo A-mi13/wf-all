@@ -77,6 +77,19 @@ const (
 // Остановка — дренаж HTTP (ADMIN_SHUTDOWN_TIMEOUT) + config.AdminRiverSoftStop + config.HardStop (queue.Stop) в пределах
 // config.StopBudget (план C, R4; TestAdminShutdownBudget): по умолчанию 10 + 10 + 5 = 25 с из окна Render 30 с.
 
+// rateRules — лимиты admin-api: ADMIN_RATE_LIMITS поверх своих умолчаний ratelimit.AdminRules (всплеск
+// default.user под полную загрузку раздела, класс фоновых GET), проверенные до подключения к базе.
+func rateRules(overrides string) (ratelimit.Rules, error) {
+	rules, err := ratelimit.ParseRules(overrides, ratelimit.AdminRules())
+	if err != nil {
+		return nil, err
+	}
+	if err := rules.Validate(); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
 // run без аргументов — сервер; staff … — команда оператора. Ошибка использования (errUsage) — код выхода 2.
 func run(ctx context.Context, args, environ []string, out, logOut io.Writer) error {
 	// команда разбирается первой: опечатка оператора — usage, а не поднятый сервер и не подключение к базе
@@ -89,11 +102,8 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 		return err
 	}
 	// лимиты и доверие к заголовкам проверяются до подключения к базе
-	rules, err := ratelimit.ParseRules(cfg.RateLimits, ratelimit.DefaultRules())
+	rules, err := rateRules(cfg.RateLimits)
 	if err != nil {
-		return err
-	}
-	if err := rules.Validate(); err != nil {
 		return err
 	}
 	// BFF у админки нет: её фронт ходит в API напрямую
@@ -227,6 +237,8 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 	d := staff.Deps{
 		Pool: pool, Clock: clock.System, Keys: ring, Hasher: hasher, Limiter: ratelimit.NewPG(pool, clock.System, ratelimit.Staff),
 		River: ins, Rand: rand.Reader, Origin: cfg.Origin, Locales: cat, Log: log,
+		// ник и существование учётки игрока для связи «сотрудник → игрок» (R15 плана I-4)
+		Players: players{svc: identity.New(pool)},
 	}
 	h := staffadmin.New(d, staffadmin.Cookie{Name: admin.CookieName(cfg.CookieSecure), Secure: cfg.CookieSecure})
 	reg := approvals.NewRegistry()
@@ -236,8 +248,11 @@ func assemble(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, ring *keys
 	gh := geoadmin.New(geo.New(pool), gd)
 	gh.RegisterApprovals(reg, svc)
 	// identity: письма — mail.SendArgs в очередь mail тем же клиентом вставки (исполняет воркер, R21); кольца identity
-	// у admin-api нет (N3); действие identity.mfa_reset (LockActors) — в том же реестре до Validate
-	ih, err := identityadmin.New(identity.New(pool), identityadmin.Deps{Pool: pool, Clock: d.Clock, River: ins, Log: log})
+	// у admin-api нет (N3); geo — на пуле admin; порты условий капитанства — captainChecks (прод — «недоступно», К1);
+	// связь «сотрудник → игрок» в tx решения — staffLinks (R38); действие identity.mfa_reset (LockActors) — в том же
+	// реестре до Validate
+	ih, err := identityadmin.New(identity.New(pool), identityadmin.Deps{Pool: pool, Clock: d.Clock, River: ins,
+		Geo: geo.New(pool), CaptainChecks: captainChecks(), StaffLinks: staffLinks{}, Log: log})
 	if err != nil {
 		return assembly{}, err
 	}

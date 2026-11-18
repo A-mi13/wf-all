@@ -82,8 +82,28 @@ paths:
   сценария не перетирается. Нечитаемые — код выхода 1; обрыв печатает частичный итог. MAC кодов не пересчитываются;
   MAC устройства (`API_IDENTITY_DEVICE_KEYS`) переписывается текущим ключом лениво — при refresh (`rekeyDevice`) и
   входе (`upsertDevice`). Порядок ротации — `docs/deploy-dev.md`.
-- **Стражи:** `TestNoStubOperations` (`httpapi/public/nostub_test.go`, `pendingOps` по `pending_*_test.go`);
-  `identity_core_test.go` (`TestCoreOpsNotStub` — 32 операции и `pendingOps` 18/9 точными множествами,
-  `TestCoreIDOR`, `TestCoreCacheControl`, `TestCoreAnonymousNoIdempotency`, `TestCoreNoPIIInEvents`);
+- **Капитанство (план I-4, спека §3.12, §7, §10; решения плана R1–R42).** Порты условий — на этапе сборки, не env:
+  прод (`captaincy_prod.go`, `!wf_e2e`) — `UnavailableCheck` по обоим именам, тег `wf_e2e` (`captaincy_e2e.go` в
+  `cmd/api`, `cmd/admin-api`) — тестовые; набор сверяет `ValidateCaptainChecks` при старте; в `backend/Dockerfile` тега
+  нет. Проверка файлов с тегом — `go vet -tags wf_e2e ./cmd/api ./cmd/admin-api` (в `backend:lint`), тесты —
+  `go test -tags wf_e2e -run TestCaptainChecksE2EBuild ./cmd/api ./cmd/admin-api` (в `backend:test`). Условия — одно правило `evaluateCaptaincy` (экран, подача, карточка, одобрение);
+  пустой набор портов — `checks_unavailable`; город — в tx сценария. Одобрение — под ролью `admin` без замка `users`:
+  строка заявки `FOR UPDATE`, затем учётка решающего `FOR SHARE` через порт `StaffLinks` (R38: связь и версия —
+  перечитанные в tx; версия ≠ `auth.Staff.Version` — 403), затем `role_assignments`; тот же порт — у исполнителя
+  `identity.mfa_reset`. Порядок замков (R7): `users` → `sessions` → … → `captain_applications` → `role_assignments` →
+  `mfa_resets` → коды. Свободные поля заявки и комментарий решения — без управляющих и невидимых (`\n`, `\t` — только в
+  `note`); заголовки `X-WF-*` — `admin/headers.go`. Бан и статус: один предикат «заблокирован» `a.blocked` (R36);
+  истечение бана — `expireBanTx` в чистке, входе (`finishLoginAs`) и отмене удаления (R12; истёкший бан — не блок);
+  живая `login` ⇔ `banned` (R42). Вставка кода — `ON CONFLICT DO NOTHING` без цели (предикаты индексов не повторять:
+  `42P10`); письмо «вы капитан» — только при живом допуске по заявке.
+- **`identity/intx`** (спека §10.2): tx — параметром, на соединении транзакции ctx (`sameTx` сверяет `Conn()`:
+  SAVEPOINT вызывающего законен, чужая tx — `ErrTxMismatch`); вызывающий берёт `users` первым; аудит пишет вызывающий
+  (кроме `ChangeCityInTx`); сборка `app.NewTx` — без портов условий.
+- **Стражи:** `TestNoStubOperations` (`httpapi/public/nostub_test.go`, `pendingOps` по `pending_*_test.go`; после
+  I-4 непуст только `pendingI3` — 14 операций I-3; admin — строгий, без списка: план I-4, Task 12, R1);
+  `identity_core_test.go` (`TestCoreOpsNotStub` — 36 операций I-2 и I-4 не 501, `pendingOps` public = `pendingI3`
+  точно, операции identity контракта = I-2 ⊔ I-4 ⊔ I-3; `TestCoreIDOR` — сессия, код почты, сброс 2FA и заявка в
+  капитаны чужого = несуществующее; `TestCoreCacheControl`, `TestCoreAnonymousNoIdempotency`, `TestCoreNoPIIInEvents`);
   `app/lock_order_test.go` (`*VsDeleteNoDeadlock`, `TestConfirmResetDeleteBetweenTx` — барьер `hooks.afterRowFound`,
-  ожидание ≤ 2 с). Реализовал операцию — убери её из `pending_*`.
+  ожидание ≤ 2 с). Реализовал операцию I-3 — убери её из `pending_i3_test.go`; список, `pendingOpsAtFreeze` и
+  `TestPendingOpsExpire` public удаляет последняя задача I-3.

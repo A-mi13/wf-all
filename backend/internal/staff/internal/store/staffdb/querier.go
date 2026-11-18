@@ -14,6 +14,18 @@ type Querier interface {
 	// Принятие приглашения: новый пароль; прежняя блокировка второго фактора снимается — второй фактор
 	// учётки настраивается заново.
 	AcceptInvitePassword(ctx context.Context, arg AcceptInvitePasswordParams) error
+	// Замок учётки FOR UPDATE ОТДЕЛЬНЫМ оператором — первым шагом lockAccount и lockAccounts (цель). Один оператор
+	// «FOR UPDATE OF a + JOIN staff_roles» после ожидания замка (READ COMMITTED) перечитывает только строку учётки, а
+	// роль берёт из снимка до ожидания: роль, сменённую под замком соседа, он бы не увидел (TestStaleRole*). Следующий
+	// оператор (LockAccount, ManageLockAccount) берёт новый снимок уже под замком и не ждёт. Учётки нет — ErrNoRows.
+	AcquireAccount(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	// Приглашения и оператор (спека сотрудников §4.2–4.4, §4.11). Код приглашения — только шифротекст
+	// (keys.Ring, aad = id приглашения). Сценарии с приглашением сначала берут замок учётки
+	// (LockAccount / LockAccountByEmail), затем строку приглашения: учётка сериализует принятие,
+	// recovery-codes/ack, повторные отправки, выпуск нового приглашения и перешифровку.
+	// Замок учётки по почте ОТДЕЛЬНЫМ оператором — первым шагом lockAccountByEmail (причина — у AcquireAccount в
+	// auth.sql: роль соединённой строки после ожидания замка была бы из старого снимка). Нет — ErrNoRows.
+	AcquireAccountByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	// recovery-codes/ack: учётка активна, вход — сейчас.
 	ActivateAccount(ctx context.Context, arg ActivateAccountParams) error
 	AddFactorFailure(ctx context.Context, id uuid.UUID) (int32, error)
@@ -93,6 +105,8 @@ type Querier interface {
 	InsertRoleCities(ctx context.Context, arg InsertRoleCitiesParams) error
 	// Сессии сотрудников (спека сотрудников §4.7). Токен — только SHA-256 (token_hash).
 	InsertSession(ctx context.Context, arg InsertSessionParams) error
+	// Связь сотрудника (после LockAccountForShare); связи нет — ErrNoRows.
+	LinkedPlayerOf(ctx context.Context, staffID uuid.UUID) (uuid.UUID, error)
 	// Кому письмо staff.bootstrapped: активные владельцы.
 	ListActiveOwners(ctx context.Context) ([]uuid.UUID, error)
 	// Перешифровка: приглашения с кодом не на текущем ключе (код есть только у живых).
@@ -112,14 +126,20 @@ type Querier interface {
 	LoadSession(ctx context.Context, tokenHash []byte) (LoadSessionRow, error)
 	// Учётка под замком на время проверки фактора, записи неудачи или изменения своей учётки: роль и
 	// снимок имени — для аудита, хэш пароля — проверка текущего при смене, язык — «было» в аудите,
-	// почта — аккаунт в ссылке otpauth (настройка 2FA).
+	// почта — аккаунт в ссылке otpauth (настройка 2FA). Только после AcquireAccount (lockAccount): сам по себе после
+	// ожидания замка отдал бы роль из старого снимка.
 	LockAccount(ctx context.Context, id uuid.UUID) (LockAccountRow, error)
-	// Приглашения и оператор (спека сотрудников §4.2–4.4, §4.11). Код приглашения — только шифротекст
-	// (keys.Ring, aad = id приглашения). Сценарии с приглашением сначала берут замок учётки
-	// (LockAccount / LockAccountByEmail), затем строку приглашения: учётка сериализует принятие,
-	// recovery-codes/ack, повторные отправки, выпуск нового приглашения и перешифровку.
-	// Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор.
+	// Учётка по нормализованной почте под замком: принятие приглашения, повторная отправка, оператор. Только после
+	// AcquireAccountByEmail (lockAccountByEmail).
 	LockAccountByEmail(ctx context.Context, email string) (LockAccountByEmailRow, error)
+	// Связь «сотрудник → учётка игрока» для чужой транзакции (порт identity.StaffLinks, план I-4 R38): строка учётки
+	// сотрудника FOR SHARE (сериализует с PutPlayerLink/DeletePlayerLink — у них FOR UPDATE той же строки), затем связь из
+	// staff_player_links — ОТДЕЛЬНЫМ оператором. Один оператор «FOR SHARE OF a + LEFT JOIN связи» после ожидания замка
+	// перечитывает (READ COMMITTED) только заблокированную строку учётки, а связь берёт из снимка до ожидания: связь,
+	// заведённая во время решения, не видна (TestStaffLinkedPlayerTxSeesLinkCommittedWhileWaiting). Второй оператор берёт
+	// новый снимок уже под замком.
+	// Учётка сотрудника под FOR SHARE до конца tx вызывающего; сотрудника нет — ErrNoRows.
+	LockAccountForShare(ctx context.Context, staffID uuid.UUID) (uuid.UUID, error)
 	// Код приглашения под замком (перешифровка после замка учётки).
 	LockInviteCode(ctx context.Context, id uuid.UUID) (LockInviteCodeRow, error)
 	// Живое (не погашенное и не принятое-и-закрытое) приглашение учётки под замком; срок проверяет
@@ -132,6 +152,9 @@ type Querier interface {
 	// Живая или погашенная — решает сценарий (заменённая — гонка двух вкладок).
 	LockSession(ctx context.Context, id uuid.UUID) (LockSessionRow, error)
 	LockUnusedRecoveryCodes(ctx context.Context, staffID uuid.UUID) ([]LockUnusedRecoveryCodesRow, error)
+	// Версия учётки (после LockAccountForShare, своим оператором): вызывающий сверяет её с auth.Staff.Version загрузки
+	// сессии — роль, города, выключение и сброс поднимают версию (m1 ревью Task 4 плана I-4).
+	LockedAccountVersion(ctx context.Context, staffID uuid.UUID) (int64, error)
 	// Письмо staff.admin_disabled: кого выключили.
 	ManageAccountMail(ctx context.Context, id uuid.UUID) (ManageAccountMailRow, error)
 	// Инициатор запроса без замка (предварительная проверка инициатора; под замком её повторяет
@@ -159,7 +182,8 @@ type Querier interface {
 	ManageListAccounts(ctx context.Context, arg ManageListAccountsParams) ([]ManageListAccountsRow, error)
 	// Живые приглашения учёток ids: назначение, срок и выпуск (у живого код есть всегда).
 	ManageLiveInvites(ctx context.Context, ids []uuid.UUID) ([]ManageLiveInvitesRow, error)
-	// Цель управления под замком (выключение, сброс, роль, сессии, приглашение).
+	// Цель управления под замком (выключение, сброс, роль, сессии, приглашение). Только после AcquireAccount
+	// (lockAccounts): замок — отдельным оператором, роль — этим, уже со снимком под замком.
 	ManageLockAccount(ctx context.Context, id uuid.UUID) (ManageLockAccountRow, error)
 	// Управление сотрудниками (спека сотрудников §2.6, §4.9, D16, D17): список и карточка, роль и города,
 	// выключение, сброс доступа, страж последнего владельца, исполнители подтверждений staff.*.
@@ -179,11 +203,25 @@ type Querier interface {
 	// Новая роль (granted_by — кто выдал; NULL — оператор).
 	ManageSetRole(ctx context.Context, arg ManageSetRoleParams) error
 	// Автор, инициатор или подтверждающий под разделяемым замком: пока действие идёт, его нельзя
-	// выключить, сбросить или сменить ему роль (M-4, m4).
+	// выключить, сбросить или сменить ему роль (M-4, m4). Только после LockAccountForShare (lockAccounts): иначе после
+	// ожидания замка роль — из снимка до смены роли соседом, и понижённый подтверждающий проходил checkActor.
 	ManageShareAccount(ctx context.Context, id uuid.UUID) (ManageShareAccountRow, error)
 	// Повторная отправка самим (§4.3 п.3): тот же код (строка не перешифровывается — решение
 	// пользователя 14.10.2026), отправка +1, срок не меняется.
 	MarkInviteResent(ctx context.Context, arg MarkInviteResentParams) (int32, error)
+	// связь для карточки: учётка игрока, когда и кем (текущие имя и почта автора; учётки сотрудников не удаляются,
+	// LEFT JOIN — защита в глубину: created_by без внешнего ключа)
+	PlayerLinkCard(ctx context.Context, staffID uuid.UUID) (PlayerLinkCardRow, error)
+	// снять связь; вернуть снятую учётку игрока (нет связи — пусто)
+	PlayerLinkDelete(ctx context.Context, staffID uuid.UUID) ([]uuid.UUID, error)
+	// сотрудник, связанный с учёткой игрока; нет — ни одной строки
+	PlayerLinkHolder(ctx context.Context, userID uuid.UUID) (uuid.UUID, error)
+	// Связь «сотрудник → учётка игрока» (спека identity §7.6; план I-4, Task 6). Учётка сотрудника уже под замком
+	// сценария (lockAccounts: FOR UPDATE) — строка связи этого сотрудника меняется только под ним.
+	// текущая связь сотрудника; нет — ни одной строки
+	PlayerLinkOf(ctx context.Context, staffID uuid.UUID) (PlayerLinkOfRow, error)
+	// вставка или замена связи сотрудника; учётка игрока у другого сотрудника — 23505 staff_player_links_user_id_key
+	PlayerLinkPut(ctx context.Context, arg PlayerLinkPutParams) error
 	RekeyInvite(ctx context.Context, arg RekeyInviteParams) error
 	RekeyMFA(ctx context.Context, arg RekeyMFAParams) error
 	// Гашение живого приглашения учётки перед выпуском нового: код стирается (CHECK

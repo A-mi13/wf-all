@@ -70,6 +70,7 @@ describe('«Справочники»', () => {
   test('группа — после «Безопасности»', () => {
     expect(NAV.map((g) => g.labelKey)).toEqual([
       'nav.groups.overview',
+      'nav.groups.players',
       'nav.groups.security',
       'nav.groups.directories',
     ]);
