@@ -120,15 +120,16 @@ export function enabledProjects(env: NodeJS.ProcessEnv = process.env): ProjectNa
   return names as ProjectName[];
 }
 
-// Окружение процесса без dev-настроек админки, воркера и api: ADMIN_*, WORKER_*, API_* (backend/.env — база dev,
-// настоящий GeoNames, dev-ключи) и адрес прокси Vite.
-const DEV_PREFIXES = ['ADMIN_', 'WORKER_', 'API_'] as const;
+// Окружение процесса без dev-настроек админки, воркера, api и мигратора: ADMIN_*, WORKER_*, API_*, MIGRATOR_*
+// (backend/.env — база dev, настоящий GeoNames, dev-ключи), адрес прокси Vite и любая другая *_DATABASE_URL, кроме
+// строк прогона WF_E2E_* (их затирает RUN_SECRETS): новая роль базы в backend/.env не утечёт в прогон молча.
+const DEV_PREFIXES = ['ADMIN_', 'WORKER_', 'API_', 'MIGRATOR_'] as const;
+const isDevKey = (k: string) =>
+  DEV_PREFIXES.some((p) => k.startsWith(p)) ||
+  k === 'WF_ADMIN_API_ORIGIN' ||
+  (k.endsWith('_DATABASE_URL') && !k.startsWith('WF_E2E_'));
 export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(env).filter(
-      ([k]) => !DEV_PREFIXES.some((p) => k.startsWith(p)) && k !== 'WF_ADMIN_API_ORIGIN',
-    ),
-  );
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !isDevKey(k)));
 }
 
 // Ключ сотрудников и строка подключения прогона (их ставит scripts/e2e-admin.sh) нужны только admin-api —

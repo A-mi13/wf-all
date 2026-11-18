@@ -32,7 +32,8 @@ paths:
   готовность `/readyz`, база `wf_e2e` под ролью `api`, одноразовые `WF_E2E_JWT_SEEDS`/`HUMANCHECK_KEYS`/`DEVICE_KEYS`/
   `API_DATABASE_URL` → `API_*` только у api, кольцо identity — то же `WF_E2E_IDENTITY_SECRET_KEYS`, что у воркера: письма
   с кодами собирает воркер; `API_EMBED_WORKER=false`, документы — `E2E_LEGAL_DOCUMENTS`); dev `API_*` вычищаются, как
-  `ADMIN_*`/`WORKER_*`. Клиент — `e2e/api.ts` (`PublicApi` на `APIRequestContext`: `device` android в теле, Bearer, ключ
+  `ADMIN_*`/`WORKER_*`/`MIGRATOR_*` и любая `*_DATABASE_URL` вне `WF_E2E_*` (`cleanEnv`: `./task ci` грузит
+  `backend/.env` целиком — 17.11 dev-строка мигратора доходила до api; новая роль базы не утечёт молча). Клиент — `e2e/api.ts` (`PublicApi` на `APIRequestContext`: `device` android в теле, Bearer, ключ
   идемпотентности на мутациях с замком, `403 humancheck.required` — решает PoW и повторяет, политику не ослабляет).
 - Лимиты admin-api в прогоне — умолчания (`ADMIN_RATE_LIMITS` пустой у всех пар, страж `env.test.ts`): обход разделов
   `prod.spec` — живой страж `ratelimit.AdminRules` и класса фоновых `staff_background` (`backend-http.md`); расширенный

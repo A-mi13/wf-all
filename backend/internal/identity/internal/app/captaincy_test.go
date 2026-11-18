@@ -284,7 +284,9 @@ func TestSubmitConcurrentSameUser(t *testing.T) {
 // (вызывающий сначала отпускает участников, затем падает: иначе висящая tx держит пул до таймаута пакета).
 func lockWaiters(t *testing.T, owner *pgxpool.Pool, n int) bool {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	// потолок, а не ожидание: в зелёном прогоне выходит сразу; 5 с не хватило под нагрузкой полного ./task ci (18.11 —
+	// пакет 1528 с, TestWithdrawVsApprove: отзыв не успел встать в очередь замка). Без замка тест по-прежнему падает.
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if count(t, owner, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
 			AND wait_event_type = 'Lock'`) >= n {

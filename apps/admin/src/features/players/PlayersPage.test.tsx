@@ -125,6 +125,9 @@ describe('поиск', () => {
     expect(storageDump()).not.toContain('kosta_10');
     await user.click(screen.getByRole('link', { name: 'Журнал действий' }));
     await waitFor(() => expect(app.at()).toBe('/audit'));
+    // экран журнала, а не только адрес: пока ленивый кусок журнала грузится (под нагрузкой ./task ci 17.11), роутер держит
+    // на экране прежнюю страницу «Игроков» — возврат на неё не перемонтирует форму, и тест видел старую почту
+    await screen.findByRole('heading', { level: 1, name: 'Журнал действий' }, { timeout: 10_000 });
     await user.click(screen.getByRole('link', { name: 'Игроки' }));
     expect(await screen.findByLabelText('Почта игрока')).toHaveDisplayValue('');
     expect(screen.getByLabelText('Причина просмотра')).toHaveDisplayValue('');
@@ -134,7 +137,7 @@ describe('поиск', () => {
       .getQueryCache()
       .findAll({ queryKey: ['identity', 'player-lookup'] });
     expect(cached.filter((q) => q.state.data !== undefined)).toEqual([]);
-  });
+  }, 15_000);
 });
 
 describe('сброс 2FA', () => {

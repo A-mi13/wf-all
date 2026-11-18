@@ -277,6 +277,23 @@ describe('окружение e2e', () => {
     ).toEqual({ PATH: '/bin' });
   });
 
+  // ./task ci грузит backend/.env целиком: dev-строка мигратора (и любая будущая *_DATABASE_URL) не должна дойти ни до
+  // одного процесса прогона — ./task ci 17.11 поймал MIGRATOR_DATABASE_URL у api e2e.
+  it('cleanEnv убирает строку мигратора (MIGRATOR_*) и любую чужую *_DATABASE_URL, строки прогона WF_E2E_* оставляет', () => {
+    expect(
+      cleanEnv({
+        MIGRATOR_DATABASE_URL: 'postgres://migrator:migrator@localhost:15432/wf',
+        MIGRATOR_LOG_LEVEL: 'debug',
+        BILLING_DATABASE_URL: 'postgres://billing@localhost:15432/wf',
+        WF_E2E_API_DATABASE_URL: 'postgres://api:api@127.0.0.1:15432/wf_e2e',
+        PATH: '/bin',
+      }),
+    ).toEqual({
+      WF_E2E_API_DATABASE_URL: 'postgres://api:api@127.0.0.1:15432/wf_e2e',
+      PATH: '/bin',
+    });
+  });
+
   const WORKER_DB = 'postgres://worker:worker@127.0.0.1:15432/wf_e2e?sslmode=disable';
 
   it('воркер получает только значения e2e: база прогона, фикстура GeoNames с её корнем, Mailpit e2e; внешней сети нет', () => {
@@ -417,6 +434,10 @@ describe('окружение e2e', () => {
     vi.stubEnv('API_IDENTITY_SECRET_KEYS', 'dev-ring');
     vi.stubEnv('API_EMBED_WORKER', 'true');
     vi.stubEnv('API_BFF_SECRETS', 'dev-bff-secret');
+    vi.stubEnv(
+      'MIGRATOR_DATABASE_URL',
+      'postgres://migrator:migrator@localhost:15432/wf?sslmode=disable',
+    );
     const env = apiEnv();
     expect(PUBLIC_API_URL).toBe(`http://127.0.0.1:${PUBLIC_API.port}`);
     expect(env).toMatchObject({
