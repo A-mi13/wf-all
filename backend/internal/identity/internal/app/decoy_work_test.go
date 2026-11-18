@@ -150,11 +150,11 @@ func TestCodeDecoySameWork(t *testing.T) {
 			}
 		})
 	}
-	same := func(name string, real, decoy []string) {
+	same := func(name string, genuine, decoy []string) {
 		t.Helper()
-		if !slices.Contains(real, "commit") || !slices.Equal(real, decoy) {
+		if !slices.Contains(genuine, "commit") || !slices.Equal(genuine, decoy) {
 			t.Fatalf("%s — настоящий код и приманка работают с базой по-разному:\n код:      %q\n приманка: %q",
-				name, real, decoy)
+				name, genuine, decoy)
 		}
 	}
 
