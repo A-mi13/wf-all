@@ -62,7 +62,8 @@ func problemOf(t *testing.T, err error) httpx.Problem {
 var iphone = mobile("ios", "6F9619FF-8B86-4D01-B42D-00CF4FC964FF")
 
 // §3.2, §9.1: нет почты, нет пароля, неверный пароль, deleted — одна и та же Problem; неудача существующего аккаунта
-// — security_events (login_failed) и аудит anonymous без object_id; у несуществующего — ничего.
+// — security_events (login_failed); аудит anonymous без object_id — у любой неудачи, одна и та же запись (журнал не
+// оракул, а транзакция с коммитом — в обеих ветках: TestLoginFailureSameWork).
 func TestLoginInvalidCredentialsUniform(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -99,7 +100,7 @@ func TestLoginInvalidCredentialsUniform(t *testing.T) {
 		t.Fatalf("deleted в журнале: %d", n)
 	}
 	if n := count(t, e.owner, `SELECT count(*) FROM audit_log WHERE action = $1 AND actor_role = 'anonymous'
-		AND object_id IS NULL AND actor_user_id IS NULL`, ActionLoginFailed); n != 3 {
+		AND object_id IS NULL AND actor_user_id IS NULL`, ActionLoginFailed); n != 5 {
 		t.Fatalf("аудит login_failed: %d", n)
 	}
 	if n := count(t, e.owner, `SELECT count(*) FROM audit_log WHERE action = $1 AND (before::text LIKE '%example%'

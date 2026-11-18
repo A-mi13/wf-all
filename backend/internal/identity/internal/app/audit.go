@@ -67,8 +67,8 @@ func (a *App) auditUser(ctx context.Context, action string, userID uuid.UUID, be
 	return audit.Write(ctx, e)
 }
 
-// auditAnonymous — действие без автора и без object_id (неудачный вход существующего аккаунта: журнал не должен
-// стать оракулом существования); тип объекта — user (платформа требует тип).
+// auditAnonymous — действие без автора и без object_id (неудачный вход на любую почту — одна и та же запись: журнал не
+// должен стать оракулом существования); тип объекта — user (платформа требует тип).
 func (a *App) auditAnonymous(ctx context.Context, action string) error {
 	return audit.Write(ctx, audit.Entry{ActorRole: roleAnonymous, Action: action, ObjectType: objectUser})
 }

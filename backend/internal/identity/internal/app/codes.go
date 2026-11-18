@@ -289,11 +289,10 @@ func (a *App) consumeCode(ctx context.Context, tx pgx.Tx, codeID uuid.UUID) erro
 	return nil
 }
 
-// resendMail — письмо повтора по назначению кода; приманка писем не шлёт (§3.14, R26).
+// resendMail — письмо повтора по назначению кода. У приманки — тот же вид письма настоящего кода: задача ставится так
+// же (§9.1: одна работа с базой, страж TestCodeDecoySameWork), а сборщик письма её отбрасывает — «код другого вида»
+// (identity/mail, code: decoy строки ≠ decoy вида), так что приманка писем по-прежнему не шлёт (§3.14, R26).
 func resendMail(row codeRow) (string, bool) {
-	if row.Decoy {
-		return "", false
-	}
 	switch row.Purpose {
 	case identitydb.AuthCodePurposeSignup:
 		return MailSignupCode, true

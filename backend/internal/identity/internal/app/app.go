@@ -206,7 +206,9 @@ func (a *App) lockUser(ctx context.Context, tx pgx.Tx, userID uuid.UUID) (userRo
 var errRowGone = errors.New("identity: строка исчезла или сменила аккаунт")
 
 // lockByRow — приём R30 «аккаунт по строке» (N1): find ищет строку без замка и отдаёт её user_id (nil — строка
-// без аккаунта: код регистрации, приманка сброса); hooks.afterRowFound(kind); lockUser(user_id), если он есть;
+// без аккаунта: код регистрации, приманка сброса); hooks.afterRowFound(kind); lockUser(user_id), а у строки без аккаунта —
+// тот же запрос замка вхолостую по нулевому id (§9.1: приманка и настоящий код делают одну работу с базой, страж
+// TestCodeDecoySameWork; строки с таким id нет, замка нет);
 // lock берёт ту же строку FOR UPDATE и отдаёт её user_id — другой — errRowGone. Перепроверку состояния строки
 // (погашена, отозвана, истекла) делает lock вызывающего. Ошибку find (pgx.ErrNoRows) вызывающий видит как есть.
 func (a *App) lockByRow(ctx context.Context, tx pgx.Tx, kind string,
@@ -225,6 +227,8 @@ func (a *App) lockByRow(ctx context.Context, tx pgx.Tx, kind string,
 			}
 			return err
 		}
+	} else if _, err := a.lockUser(ctx, tx, uuid.Nil); err != nil && !errors.Is(err, errUserGone) {
+		return err
 	}
 	after, err := lock(ctx, q)
 	if errors.Is(err, pgx.ErrNoRows) {

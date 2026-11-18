@@ -2,7 +2,7 @@
 // Политику проверяют фикстуры (boundaries.test.js), здесь — что её применяют к настоящим пакетам.
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
-import { describe, expect, test } from 'vitest';
+import { beforeAll, describe, expect, test } from 'vitest';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 // cwd = корень репозитория: ESLint берёт корневой eslint.config.mjs, как `pnpm run lint:packages`
@@ -14,6 +14,12 @@ const ruleIds = async (code, file) => {
 };
 
 describe('линт пакетов в репозитории', () => {
+  // Холодный старт ESLint (корневой конфиг, плагины, парсер TypeScript) — ~6 с под нагрузкой полного ./task ci, больше
+  // лимита теста 5 с: первый тест падал по таймауту (18.11, дважды из трёх прогонов). Прогрев — один раз со своим
+  // лимитом, тесты меряют только проверку.
+  beforeAll(async () => {
+    await ruleIds('export {};\n', 'packages/i18n/src/planted.ts');
+  }, 60_000);
   test('пакет с импортом из веба не проходит', async () => {
     const code = "import web from '../../../apps/web/package.json';\nexport default web;\n";
     expect(await ruleIds(code, 'packages/i18n/src/planted.ts')).toContain(

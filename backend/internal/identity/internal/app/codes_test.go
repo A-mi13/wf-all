@@ -320,7 +320,8 @@ func TestStartCodeArbiterIndependentOfIndex(t *testing.T) {
 }
 
 // §3.14: паузы 60/120/300 с, раньше — 429 resend_too_soon с Retry-After до паузы; четвёртая отправка последняя —
-// дальше 410; resend_available_at после последней — expires_at. Приманка — те же паузы и ответы, писем не шлёт.
+// дальше 410; resend_available_at после последней — expires_at. Приманка — те же паузы, ответы и задачи письма, а
+// писем не шлёт: задачу отбрасывает сборщик.
 func TestResendSchedule(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -369,8 +370,10 @@ func TestResendSchedule(t *testing.T) {
 			t.Fatalf("%s: sends не 4", tc.name)
 		}
 	}
-	if n := mailJobs(t, e, MailSignupCode); n != 4 {
-		t.Fatalf("писем кода %d, ждали 4", n)
+	// задачи письма кода: 4 настоящего + 3 повтора приманки — та же работа с базой (§9.1, TestCodeDecoySameWork);
+	// сборщик отбрасывает задачу кода на строке приманки (identity/mail, mustSkip MailSignupCode) — писем нет (R26)
+	if n := mailJobs(t, e, MailSignupCode); n != 7 {
+		t.Fatalf("задач письма кода %d, ждали 7", n)
 	}
 	if n := mailJobs(t, e, MailSignupAccountExists); n != 1 {
 		t.Fatalf("писем «уже есть аккаунт» %d, ждали 1 (R26)", n)
