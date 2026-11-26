@@ -7,6 +7,7 @@ toolchain go1.27.1
 require (
 	github.com/altcha-org/altcha-lib-go v1.0.0
 	github.com/caarlos0/env/v11 v11.4.1
+	github.com/deepteams/webp v1.2.9
 	github.com/getkin/kin-openapi v0.152.0
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -25,9 +26,10 @@ require (
 	github.com/wneessen/go-mail v0.8.1
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.58.0
+	golang.org/x/image v0.48.0
 	golang.org/x/net v0.61.0
-	golang.org/x/sync v0.24.0
-	golang.org/x/text v0.43.0
+	golang.org/x/sync v0.25.0
+	golang.org/x/text v0.44.0
 )
 
 require (
@@ -56,6 +58,6 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20240620070341-3dff1577cd52 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

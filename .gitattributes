@@ -4,3 +4,4 @@
 *.woff2 binary
 *.cmd text eol=crlf
 *.mmdb binary
+*.icc binary

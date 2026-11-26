@@ -37,7 +37,9 @@
 | goose / pgtestdb / kin-openapi | 3.29.0 / 0.1.1 / 0.152.0 | `backend/go.mod` |
 | google/uuid | 1.6.0 | `backend/go.mod` (UUIDv7 — `internal/platform/id`) |
 | golang-jwt/jwt | 5.3.1 | `backend/go.mod` (access-токены, EdDSA — `internal/platform/token`) |
-| golang.org/x/crypto / x/net / x/sync / x/text | 0.58.0 / 0.61.0 / 0.24.0 / 0.43.0 | `backend/go.mod` (argon2id и NFKC пароля — `internal/platform/password`; singleflight — `internal/platform/auth`, `internal/platform/health`; IDNA домена почты (UTS #46) и NFKC кодов — `internal/platform/emailaddr`, `internal/platform/otp`) |
+| golang.org/x/crypto / x/net / x/sync / x/text | 0.58.0 / 0.61.0 / 0.25.0 / 0.44.0 | `backend/go.mod` (argon2id и NFKC пароля — `internal/platform/password`; singleflight — `internal/platform/auth`, `internal/platform/health`; IDNA домена почты (UTS #46) и NFKC кодов — `internal/platform/emailaddr`, `internal/platform/otp`); x/sync и x/text подняты требованием x/image 0.48.0 |
+| golang.org/x/image | 0.48.0 | `backend/go.mod` (декодер WebP и ресайз `draw.CatmullRom` — `internal/media/internal/imaging`) |
+| deepteams/webp (кодировщик WebP, чистый Go; MIT + BSD-3 libwebp) | 1.2.9 | `backend/go.mod` (варианты WebP с альфой и профилем ICC — `internal/media/internal/imaging`; выбор и замеры — спайк media, R6; запасной — `gen2brain/vpx` 0.2.3). Регистрирует свой декодер в `image.RegisterFormat` — в коде декодеры вызываются по типу, не через `image.Decode` |
 | messageformat-go/mf1 | 0.8.6 | `backend/go.mod` (ICU MessageFormat v1 серверных локалей — `internal/platform/i18n`) |
 | go-mail | 0.8.1 | `backend/go.mod` (SMTP — `internal/platform/mail`) |
 | altcha-lib-go | 1.0.0 | `backend/go.mod` (только тесты совместимости ALTCHA — `internal/platform/humancheck`) |
