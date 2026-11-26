@@ -224,12 +224,14 @@ func (q *Queries) ReadObject(ctx context.Context, id uuid.UUID) (MediaReadObject
 
 const setProcessing = `-- name: SetProcessing :one
 UPDATE media_objects
-   SET state = 'processing', process_attempts = process_attempts + 1, version = version + 1
+   SET state = 'processing', process_attempts = process_attempts + CASE WHEN state = 'processing' THEN 1 ELSE 0 END,
+       version = version + 1
  WHERE id = $1 AND state IN ('uploaded', 'processing')
 RETURNING id, purpose, visibility, state, owner_type, owner_id, uploaded_by_user, uploaded_by_staff, declared_type, declared_bytes, width, height, reject_code, process_attempts, version, created_at, uploaded_at, ready_at, ended_at
 `
 
-// захват обработки (§3.3 п. 1): из uploaded и повторно из processing (прошлый исполнитель упал) — попытка + 1
+// захват обработки (§3.3 п. 1): из uploaded — без счёта (обычная ошибка возвращает объект в uploaded и падением не
+// считается); застали processing — прошлый исполнитель упал: попытка + 1
 func (q *Queries) SetProcessing(ctx context.Context, id uuid.UUID) (MediaObject, error) {
 	row := q.db.QueryRow(ctx, setProcessing, id)
 	var i MediaObject

@@ -37,9 +37,11 @@ UPDATE media_objects
 RETURNING *;
 
 -- name: SetProcessing :one
--- захват обработки (§3.3 п. 1): из uploaded и повторно из processing (прошлый исполнитель упал) — попытка + 1
+-- захват обработки (§3.3 п. 1): из uploaded — без счёта (обычная ошибка возвращает объект в uploaded и падением не
+-- считается); застали processing — прошлый исполнитель упал: попытка + 1
 UPDATE media_objects
-   SET state = 'processing', process_attempts = process_attempts + 1, version = version + 1
+   SET state = 'processing', process_attempts = process_attempts + CASE WHEN state = 'processing' THEN 1 ELSE 0 END,
+       version = version + 1
  WHERE id = @id AND state IN ('uploaded', 'processing')
 RETURNING *;
 

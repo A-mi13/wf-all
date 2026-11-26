@@ -132,6 +132,43 @@ func TestDeleteObjectsKeepsLive(t *testing.T) {
 	}
 }
 
+// Публикация (§3.3 п. 7) под ролью worker: InsertVariant проходит с правами worker на media_variants (SELECT, INSERT,
+// DELETE — без UPDATE); строка видна в ListVariants.
+func TestWorkerInsertsVariant(t *testing.T) {
+	t.Parallel()
+	p := dbtest.NewPoolsAs(t, "worker")
+	ctx := context.Background()
+	id := seedObject(t, p.Owner, "processing", uuid.Must(uuid.NewV7()), storeAt)
+	q := mediadb.New(p.As)
+	w, h, n := int32(320), int32(240), int64(100)
+	if err := q.InsertVariant(ctx, mediadb.InsertVariantParams{ObjectID: id, Name: "thumb",
+		BlobKey: id.String() + "/thumb.webp", ContentType: "image/webp", Width: &w, Height: &h, Bytes: &n}); err != nil {
+		t.Fatalf("InsertVariant под worker: %v", err)
+	}
+	vs, err := q.ListVariants(ctx, id)
+	if err != nil || len(vs) != 1 || vs[0].Name != "thumb" {
+		t.Fatalf("ListVariants: %+v, %v", vs, err)
+	}
+}
+
+// Захват обработки (§3.3 п. 1): из uploaded попытка не засчитывается (обычные ошибки возвращают объект в uploaded и
+// падением не считаются), из processing — + 1 (прошлый исполнитель упал); версия растёт оба раза.
+func TestSetProcessingCountsOnlyCrashes(t *testing.T) {
+	t.Parallel()
+	p := dbtest.NewPoolsAs(t, "worker")
+	ctx := context.Background()
+	id := seedObject(t, p.Owner, "uploaded", uuid.Must(uuid.NewV7()), storeAt)
+	q := mediadb.New(p.As)
+	o, err := q.SetProcessing(ctx, id)
+	if err != nil || o.ProcessAttempts != 0 || o.State != "processing" || o.Version != 2 {
+		t.Fatalf("захват из uploaded: attempts %d, state %s, version %d, %v", o.ProcessAttempts, o.State, o.Version, err)
+	}
+	o, err = q.SetProcessing(ctx, id)
+	if err != nil || o.ProcessAttempts != 1 || o.Version != 3 {
+		t.Fatalf("захват из processing: attempts %d, version %d, %v", o.ProcessAttempts, o.Version, err)
+	}
+}
+
 // ReadObject под api: варианты — JSON-массив по имени (пустой — []), без полей загрузившего.
 func TestReadObjectVariants(t *testing.T) {
 	t.Parallel()

@@ -31,7 +31,10 @@ paths:
 - **Запросы.** `version + 1` — на каждую смену состояния (`AttachObject`, `SetState`, `SetProcessing`, `SetReady`);
   событие несёт версию из `RETURNING`. Условие состояния в `WHERE` (`AttachObject` — `pending_upload`, `SetProcessing` —
   `uploaded|processing`, `SetReady` — `processing`) — защита в глубину: не та строка — `pgx.ErrNoRows`. `SetState` условия
-  не имеет — переход проверяет вызывающий под `LockObject`. Замки: в сценариях — `LockObject` (`FOR UPDATE`, ждать);
+  не имеет — переход проверяет вызывающий под `LockObject`. `SetProcessing` считает только падения: из `uploaded` —
+  `process_attempts` без изменений, из `processing` — `+ 1` (`TestSetProcessingCountsOnlyCrashes`). `InsertVariant` —
+  простой `INSERT` (только при `processing → ready` под замком, конфликт недостижим): `ON CONFLICT … DO UPDATE` требует
+  права `UPDATE`, которого у `worker` на `media_variants` нет (`TestWorkerInsertsVariant`). Замки: в сценариях — `LockObject` (`FOR UPDATE`, ждать);
   `SKIP LOCKED` — только чистка (`ExpiredPending`, `EndedBefore`). `PendingLock` — `pg_advisory_xact_lock` по
   загрузившему перед `CountPendingByUser` и вставкой билета. `DeleteObjects` не удаляет `uploaded|processing|ready`.
   Границы чистки строгие (`<`), окно «завершить» — `expires_at + 1 ч`: вызывающий передаёт `before = now − 1 ч`.
