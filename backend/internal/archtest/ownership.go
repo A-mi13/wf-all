@@ -119,6 +119,12 @@ var Schema = map[string]Object{
 	// статистика способов входа для admin-api (0027, R2): агрегаты без user_id
 	"identity_read_auth_method_usage": {View, "identity", true},
 
+	// media (спека media §5): владельцы читают объект только через представление (без «кто загрузил»)
+	"media_objects":      table("media"),
+	"media_uploads":      table("media"),
+	"media_variants":     table("media"),
+	"media_read_objects": {View, "media", true},
+
 	// pitches
 	"pitches":        table("pitches"),
 	"nearby_pitches": {Function, "pitches", true},

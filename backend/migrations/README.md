@@ -43,6 +43,7 @@ PostGIS обязателен двум миграциям: `0005_pitches.sql` (п
 0025_identity.sql        identity целиком (спека identity §5): users и sessions по §5.2–5.3, пароли, коды из письма, токены шагов, устройства, refresh-токены, 2FA, привязки провайдеров, ключи доступа, события безопасности, ограничения, согласия, сбросы 2FA; role_assignments и captain_applications — авторы-сотрудники; staff_player_links (staff); представления identity_read_*; флаги способов входа auth_*
 0026_identity_deletion.sql  удаление аккаунта: users.status_before_deletion (отмена возвращает прежний статус), birth_date NULL только у удалённого; затирание ПД удалённых до 0026
 0027_identity_captaincy.sql  капитанство и админка (план I-4): представление identity_read_auth_method_usage (статистика способов входа без user_id), индексы очереди и истории заявок, banned в status_before_deletion, живой код смены почты по (purpose, user_id, email)
+0028_media.sql           media (спека media §5): media_objects (состояния и поля — CHECK по §4, не больше одного загрузившего), media_uploads (билет, каскад), media_variants, представление media_read_objects без «кто загрузил» и заявленного; права — ветка media в grants.sql
 ```
 
 Правка миграции: пока она не слита в `main` и не накатана на стенд (стенд накатывает `migrate up` из `main`,

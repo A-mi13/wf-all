@@ -308,3 +308,30 @@ sql:
           - db_type: geography
             nullable: true
             go_type: { type: string, pointer: true }
+  # media (план media, Task 5): модели всех трёх таблиц и представления используются запросами (SELECT * / RETURNING *)
+  # — якорь моделей не нужен
+  - engine: postgresql
+    schema: migrations/
+    queries: internal/media/queries/
+    gen:
+      go:
+        package: mediadb
+        out: internal/media/internal/store/mediadb
+        sql_package: pgx/v5
+        emit_interface: false
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: { import: github.com/google/uuid, type: UUID, pointer: true }
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: { type: time.Time, pointer: true }
+          # варианты представления — агрегат jsonb (тип coalesce sqlc не выводит); разбирает сервис media
+          - column: media_read_objects.variants
+            go_type: encoding/json.RawMessage

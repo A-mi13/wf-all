@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -263,6 +264,94 @@ func TestRolePrivileges(t *testing.T) {
 			err := asRole(ctx, t, db, c.role, c.sql)
 			var pg *pgconn.PgError
 			denied := errors.As(err, &pg) && pg.Code == "42501" // insufficient_privilege
+			switch {
+			case c.allowed && err != nil:
+				t.Fatalf("ждали доступ, получили: %v", err)
+			case !c.allowed && !denied:
+				t.Fatalf("ждали отказ в правах (42501), получили: %v", err)
+			}
+		})
+	}
+}
+
+// mediaMatrix — права ролей на объекты media по спеке media §5.3: S — SELECT, I — INSERT, U — UPDATE, D — DELETE,
+// T — TRUNCATE (ни у кого).
+var mediaMatrix = map[string][3]string{ // api, worker, admin
+	"media_objects":      {"SIU", "SUD", "SIU"},
+	"media_uploads":      {"SID", "SD", "SID"},
+	"media_variants":     {"S", "SID", "S"},
+	"media_read_objects": {"S", "S", "S"},
+}
+
+// Страж спеки media §5.3: каждая клетка — ровно по матрице (TRUNCATE — никому), плюс исполнение под ролью: запрещённое
+// — 42501, нужное сценариям (прикрепление, публикация вариантов, чистка, обезличивание) — проходит. Перед Apply всем
+// ролям выдано всё: отказ доказывает, что Apply отзывает.
+func TestMediaGrants(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, "GRANT ALL ON media_objects, media_uploads, media_variants, media_read_objects "+
+		"TO api, admin, worker"); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := grants.Apply(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	privs := map[byte]string{'S': "SELECT", 'I': "INSERT", 'U': "UPDATE", 'D': "DELETE", 'T': "TRUNCATE"}
+	for table, row := range mediaMatrix {
+		for i, role := range [3]string{"api", "worker", "admin"} {
+			for _, p := range []byte("SIUDT") {
+				want := strings.IndexByte(row[i], p) >= 0
+				var got bool
+				if err := db.QueryRowContext(ctx, `SELECT has_table_privilege($1, $2, $3)`, role, "public."+table,
+					privs[p]).Scan(&got); err != nil {
+					t.Fatal(err)
+				}
+				if got != want {
+					t.Errorf("%s %s %s: есть %v, по §5.3 %v", role, privs[p], table, got, want)
+				}
+			}
+		}
+	}
+
+	const object = `INSERT INTO media_objects (id, purpose, visibility, state, uploaded_by_user, declared_type,
+		declared_bytes, created_at) VALUES (gen_random_uuid(), 'e2e_image', 'public', 'pending_upload', gen_random_uuid(),
+		'image/png', 10, now())`
+	const variant = `INSERT INTO media_variants (object_id, name, blob_key, content_type) SELECT id, 'thumb', 'k', 'image/webp'
+		FROM media_objects LIMIT 0`
+	for _, c := range []struct {
+		role, sql string
+		allowed   bool
+	}{
+		{"api", object, true},
+		{"admin", object, true},
+		{"worker", object, false},
+		{"api", "DELETE FROM media_objects WHERE false", false},
+		{"admin", "DELETE FROM media_objects WHERE false", false},
+		{"api", "UPDATE media_objects SET state = 'uploaded', version = version + 1 WHERE false", true},
+		{"api", "DELETE FROM media_uploads WHERE object_id = gen_random_uuid()", true},
+		{"api", variant, false},
+		{"admin", variant, false},
+		{"admin", "DELETE FROM media_variants WHERE false", false},
+		{"api", "DELETE FROM media_variants WHERE false", false},
+		{"worker", variant, true},
+		{"worker", "DELETE FROM media_variants WHERE object_id = gen_random_uuid()", true},
+		{"worker", "DELETE FROM media_objects WHERE id = gen_random_uuid()", true},
+		{"worker", "DELETE FROM media_uploads WHERE expires_at < now()", true},
+		{"worker", "INSERT INTO media_uploads SELECT * FROM media_uploads LIMIT 0", false},
+		{"worker", "UPDATE media_objects SET uploaded_by_user = NULL WHERE uploaded_by_user = gen_random_uuid()", true},
+		{"worker", "UPDATE media_uploads SET expires_at = now() WHERE false", false},
+		{"api", "UPDATE media_uploads SET expires_at = now() WHERE false", false},
+		{"api", "SELECT id, variants FROM media_read_objects", true},
+		{"worker", "TRUNCATE media_objects CASCADE", false},
+		{"api", "TRUNCATE media_uploads", false},
+	} {
+		t.Run(c.role+": "+c.sql, func(t *testing.T) {
+			err := asRole(ctx, t, db, c.role, c.sql)
+			var pg *pgconn.PgError
+			denied := errors.As(err, &pg) && pg.Code == "42501"
 			switch {
 			case c.allowed && err != nil:
 				t.Fatalf("ждали доступ, получили: %v", err)
