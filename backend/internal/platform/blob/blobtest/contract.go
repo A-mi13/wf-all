@@ -64,7 +64,7 @@ func Contract(t *testing.T, b blob.Buckets) {
 
 	t.Run("bad_keys", func(t *testing.T) {
 		bads := []string{
-			"", "/abs", "../escape", "a/../../b", "UPPER", "a b", "a\\b", strings.Repeat("a", 513),
+			"", "/abs", "../escape", "a/../../b", "UPPER", "a b", "a\\b", strings.Repeat("a", 401),
 			"a/./b", "a/", "a.", "a/.tmp-1", "a//b", "a..b", "a/b.", ".hidden", "a/.b", "a/-b", "a-/b",
 			"ключ", "a/" + strings.Repeat("b", 201), "con", "a/nul.webp", "com1/x", "lpt9.tar.gz",
 		}
@@ -85,14 +85,18 @@ func Contract(t *testing.T, b blob.Buckets) {
 	})
 
 	t.Run("max_key", func(t *testing.T) {
-		// ровно 512 символов (сегменты по 100: имя файла длиннее 255 не примет файловая система)
-		long := run + "/" + strings.Repeat(strings.Repeat("a", 100)+"/", 4)
-		long += strings.Repeat("a", 512-len(long))
-		if len(long) != 512 {
+		// ровно 400 символов — принимается и хранилищем (Garage на lmdb), 401 — ErrBadKey до запроса
+		// (сегменты по 100: имя файла длиннее 255 не примет файловая система)
+		long := run + "/" + strings.Repeat(strings.Repeat("a", 100)+"/", 3)
+		long += strings.Repeat("a", 400-len(long))
+		if len(long) != 400 {
 			t.Fatalf("тест: длина ключа %d", len(long))
 		}
 		put(t, b.Pub, long, "x", blob.PutOptions{ContentType: "text/plain"})
 		cleanup(t, b.Pub, long)
+		if err := b.Pub.Put(ctx, long+"a", strings.NewReader("x"), blob.PutOptions{}); !errors.Is(err, blob.ErrBadKey) {
+			t.Fatalf("Put, ключ 401 символ: %v", err)
+		}
 	})
 
 	t.Run("prefix_is_not_a_file", func(t *testing.T) {

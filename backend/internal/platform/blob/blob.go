@@ -91,7 +91,9 @@ var keyRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(/[a-z0-9]([a-z0
 var prefixRe = regexp.MustCompile(`^[a-z0-9._/-]*$`)
 
 const (
-	maxKeyLen = 512
+	// maxKeyLen — с запасом ниже предела Garage на lmdb: ключ записи LMDB ≤ 511 байт вместе с id бакета (32 байта),
+	// длиннее — 503 MDB_BAD_VALSIZE. Ключи media — «<uuid>/<вариант>.webp», ~50 символов.
+	maxKeyLen = 400
 	// maxSegmentLen — запас до предела имени файла (255) под суффикс meta FS.
 	maxSegmentLen = 200
 )
