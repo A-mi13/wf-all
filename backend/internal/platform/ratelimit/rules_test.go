@@ -129,6 +129,29 @@ func TestDefaultRulesIdentityClasses(t *testing.T) {
 	}
 }
 
+// Спека media §3.11, R19: билеты — 30 в час игроку и 60 в час адресу (x-rate-limit операции владельца), 100 в сутки
+// игроку (счёт в NewUpload); объём — 200 МиБ в сутки по заявленным байтам (предел для подсчёта запросом в NewUpload).
+func TestDefaultRulesMediaClasses(t *testing.T) {
+	t.Parallel()
+	want := map[string]ratelimit.ClassPolicy{
+		"media_upload": {
+			IP:   ratelimit.Policy{Limit: 60, Period: time.Hour},
+			User: ratelimit.Policy{Limit: 30, Period: time.Hour},
+		},
+		"media_upload_day": {User: ratelimit.Policy{Limit: 100, Period: 24 * time.Hour}},
+		"media_bytes_day":  {User: ratelimit.Policy{Limit: 200 << 20, Period: 24 * time.Hour}},
+	}
+	r := ratelimit.DefaultRules()
+	for class, w := range want {
+		if got, ok := r[class]; !ok || got != w {
+			t.Errorf("%s = %+v (есть: %v), want %+v", class, got, ok, w)
+		}
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseRules(t *testing.T) {
 	t.Parallel()
 	got, err := ratelimit.ParseRules("auth.ip=10/1m:5, default.device=off, upload.user=30/1h", ratelimit.DefaultRules())

@@ -7,11 +7,19 @@ package media
 import (
 	"context"
 	"image"
+	"io"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 
 	"wf/backend/internal/media/internal/domain"
+	"wf/backend/internal/platform/blob"
+	"wf/backend/internal/platform/clock"
+	"wf/backend/internal/platform/ratelimit"
 )
 
 // Visibility — видимость цели и объекта (media_objects.visibility): публичное отдаётся адресом, закрытое — только
@@ -92,10 +100,12 @@ type Uploader struct {
 	UserID, StaffID uuid.UUID
 }
 
-// Actor — кто снимает объект (TakeDownInTx): сотрудник или игрок-автор и роль для аудита.
+// Actor — кто снимает объект (TakeDownInTx): сотрудник или игрок-автор, роль и снимок имени для аудита
+// (audit.Entry.ActorLabel: у сотрудника обязателен).
 type Actor struct {
 	UserID, StaffID uuid.UUID
 	Role            string
+	Label           string
 }
 
 // Declared — заявленные клиентом тип и размер: только ранний отказ (§1.4, §3.2).
@@ -160,4 +170,39 @@ type checkOff struct{}
 
 func (checkOff) Check(context.Context, image.Image) (Verdict, error) {
 	return Verdict{Allow: true}, nil
+}
+
+// Service — API модуля для владельцев (§2.3, §3.1–§3.5): билеты загрузки, проверка перед «завершить», прямая загрузка
+// во входящее, чтение и адреса. Меняющее объект на стороне владельца — media/intx в его транзакции.
+type Service interface {
+	// Available — false в режиме none (§6.4): владелец генерируемого не рисует и не ставит задач.
+	Available() bool
+	// NewUpload — «начать загрузку» (§3.1 п. 2): ранние проверки заявленного, лимиты игрока (§3.11), объект
+	// pending_upload и билет одной транзакцией, затем подпись. Неизвестная цель или тип владельца — ошибка программиста.
+	NewUpload(ctx context.Context, purpose string, owner OwnerRef, by Uploader, d Declared) (Ticket, error)
+	// ConfirmUpload — до транзакции владельца «завершить» (§3.1 п. 5): объект не pending_upload — nil (повтор);
+	// окно прошло — ErrUploadExpired; файла во входящем нет — ErrUploadIncomplete.
+	ConfirmUpload(ctx context.Context, uploadID uuid.UUID) error
+	// Stage — прямая загрузка (§2.3, §3.6, §3.7): байты во входящее по ключу нового object_id, без записи в базу.
+	Stage(ctx context.Context, purpose string, r io.Reader, d Declared) (Staged, error)
+	// Image — объект для ответа владельца; нет строки — (Image{}, false, nil).
+	Image(ctx context.Context, objectID uuid.UUID) (Image, bool, error)
+	// Images — пачкой для списков владельца; отсутствующих id в карте нет.
+	Images(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]Image, error)
+	// PublicURL — публичный адрес ключа (владельцы адресов не склеивают, §3.4).
+	PublicURL(key string) string
+	// PrivateURL — подписанная ссылка на вариант закрытого ready-объекта на 5 минут (§3.5); иначе ErrObjectUnavailable.
+	PrivateURL(ctx context.Context, objectID uuid.UUID, variant string) (PrivateLink, error)
+}
+
+// Deps — зависимости Service. Blob.Available = false — режим none. River — клиент только для вставки (задачи
+// воркера), Service сам задач не ставит. Limiter — суточный счёт билетов игрока (R19).
+type Deps struct {
+	Pool     *pgxpool.Pool
+	Clock    clock.Clock
+	Registry *Registry
+	Blob     blob.Opened
+	Limiter  ratelimit.Limiter
+	River    *river.Client[pgx.Tx]
+	Log      *slog.Logger
 }

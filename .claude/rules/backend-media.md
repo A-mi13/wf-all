@@ -49,3 +49,36 @@ paths:
   владельцев. Новая константа `Code…` без списка — `TestCodeConstantsListed`.
 - **`intx`** (спека §2.3; Task 6): всё, что меняет объект на стороне владельца, — в транзакции владельца (`tx`
   параметром); пары владельцев — `archtest.IntxPairs` их планами (R11).
+
+## Сервис и intx (Task 6)
+
+- **Раскладка.** `media.Service` (`media.New(Deps)`) реализован в корне на `mediadb` (`service.go`, `upload.go`,
+  `quota.go`, `confirm.go`, `stage.go`, `read.go`): `internal/app` корню недоступен — он работал бы на типах корня
+  (цикл). Транзакционные операции — `media/intx` напрямую на `mediadb`/`domain`/`jobs`. Общие правила показа —
+  `domain/view.go` (`ClientState`: `uploaded` → `processing`; `ShowVariants` — только `ready`; `VariantURL` — у
+  закрытого пусто). Аргументы задач — `media/jobs/args.go` (`ProcessArgs`, `PurgeArgs`, `Bucket{In,Pub,Priv}`,
+  `ProcessInsertOpts` — уникальность по аргументам, `PurgeInsertOpts`).
+- **`NewUpload`:** `none` → `ErrUnavailable`; цель/тип владельца/два загрузивших — ошибка программиста (500); тип —
+  точное совпадение с MIME входов (`AcceptedTypes`), размер 1…`MaxBytes` (422). Игрок: `Limiter.Allow`
+  `SubjectKey("media_upload_day")` (100/сутки, отказ — 429 `ratelimit.exceeded` + Retry-After), затем в **одной** tx:
+  `PendingLock` → `CountPendingByUser(live_after = now)` ≥ 5 → `ErrTooManyPending` → `SumDeclaredBytesByUser(since =
+  now − 24 ч, строго)` + заявка > 200 МиБ → `ErrQuotaExceeded` → `InsertObject` + `InsertUpload` (`POST`, `max_bytes` =
+  заявка, срок now + 15 мин в целых секундах). Вес у `Limiter` нет (`TestLimiterHasNoWeight`) — объём только запросом,
+  под тем же замком (`TestNewUploadQuotaConcurrent`). Сотрудник и система лимитов игрока не считают. Подпись — после
+  коммита; `CompleteBefore = ExpiresAt + CompleteWindow` (1 ч).
+- **`ConfirmUpload`** — до транзакции владельца: билета нет (прикреплён/строки нет) — `nil` без HEAD; `now ≥
+  expires_at + 1 ч` — `ErrUploadExpired`; HEAD `ErrNotFound` — `ErrUploadIncomplete`. **`Stage`** — тип из входов,
+  `LimitReader(MaxBytes+1)`, пусто/больше — `ErrTooLarge`, `Put` во `in` по новому `id.New()`, базы нет.
+- **Чтение:** `Image`/`Images` — `media_read_objects`; `PrivateURL` — только `private` + `ready` + вариант есть, иначе
+  `ErrObjectUnavailable` (у публичного — тоже); `PresignGet(5 мин, "private, no-store")`.
+- **`intx`:** каждый метод сначала `sameTx` (`ErrTxMismatch`), затем `LockObject`. `AttachInTx`: нет строки, цель не
+  допускает тип, загрузивший ≠ `by` — `ErrObjectUnavailable`; не `pending_upload` — повтор к тому же владельцу
+  (кроме `detached`/`taken_down`) отдаёт текущее без задачи; билет на другого владельца — отказ; окно строго до
+  `expires_at + 1 ч` (`ErrUploadExpired`); успех — `AttachObject`, `DeleteUpload`, `media.process`.
+  `CreateDirectInTx` сверяет `Staged` с целью (ошибка программиста). `DetachInTx`: чужой владелец (и `pending_upload`)
+  — 409, конечное/нет строки — `nil`. `TakeDownInTx`: причина — код `a_b(.c)*` ≤ 100; конечное/нет строки — `nil`,
+  `pending_upload` — 409; аудит (`Actor.Label` — снимок имени сотрудника), событие с версией из `RETURNING`.
+  Открепление и снятие ставят `media.purge` на `in` (`<id>`) и, если есть варианты, на бакет видимости (ключи;
+  `PublicURLs` — только у снятия публичного, `intx.Deps.PublicBaseURL`).
+- **Тестовые помощники** — `mediatest`: `E2EPurposes` (`e2e_image`, `e2e_image_private`, владелец `e2e_owner`),
+  `MarkerCheck` (R20), `MemoryBlob(clock)` (Memory + `DevSigner`), `Registry`, `SeedObject` (посев по CHECK 0028).

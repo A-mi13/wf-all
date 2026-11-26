@@ -222,6 +222,42 @@ func (q *Queries) ReadObject(ctx context.Context, id uuid.UUID) (MediaReadObject
 	return i, err
 }
 
+const readObjects = `-- name: ReadObjects :many
+SELECT id, purpose, visibility, state, owner_type, owner_id, reject_code, width, height, variants FROM media_read_objects WHERE id = ANY ($1::uuid[])
+`
+
+// объекты владельца пачкой (списки) — из того же представления
+func (q *Queries) ReadObjects(ctx context.Context, ids []uuid.UUID) ([]MediaReadObject, error) {
+	rows, err := q.db.Query(ctx, readObjects, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MediaReadObject
+	for rows.Next() {
+		var i MediaReadObject
+		if err := rows.Scan(
+			&i.ID,
+			&i.Purpose,
+			&i.Visibility,
+			&i.State,
+			&i.OwnerType,
+			&i.OwnerID,
+			&i.RejectCode,
+			&i.Width,
+			&i.Height,
+			&i.Variants,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setProcessing = `-- name: SetProcessing :one
 UPDATE media_objects
    SET state = 'processing', process_attempts = process_attempts + CASE WHEN state = 'processing' THEN 1 ELSE 0 END,
@@ -352,4 +388,24 @@ func (q *Queries) SetState(ctx context.Context, arg SetStateParams) (MediaObject
 		&i.EndedAt,
 	)
 	return i, err
+}
+
+const sumDeclaredBytesByUser = `-- name: SumDeclaredBytesByUser :one
+SELECT coalesce(sum(declared_bytes), 0)::bigint AS total
+  FROM media_objects
+ WHERE uploaded_by_user = $1::uuid AND created_at > $2
+`
+
+type SumDeclaredBytesByUserParams struct {
+	UploadedByUser uuid.UUID
+	Since          time.Time
+}
+
+// суточный объём игрока (§3.11, R19): заявленные байты объектов, созданных позже since (граница строгая); считается
+// под PendingLock вместе с незавершёнными
+func (q *Queries) SumDeclaredBytesByUser(ctx context.Context, arg SumDeclaredBytesByUserParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumDeclaredBytesByUser, arg.UploadedByUser, arg.Since)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
 }

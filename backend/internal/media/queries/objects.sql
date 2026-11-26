@@ -58,3 +58,14 @@ SELECT * FROM media_read_objects WHERE id = @id;
 
 -- name: ObjectExists :one
 SELECT EXISTS (SELECT 1 FROM media_objects WHERE id = @id);
+
+-- name: ReadObjects :many
+-- объекты владельца пачкой (списки) — из того же представления
+SELECT * FROM media_read_objects WHERE id = ANY (@ids::uuid[]);
+
+-- name: SumDeclaredBytesByUser :one
+-- суточный объём игрока (§3.11, R19): заявленные байты объектов, созданных позже since (граница строгая); считается
+-- под PendingLock вместе с незавершёнными
+SELECT coalesce(sum(declared_bytes), 0)::bigint AS total
+  FROM media_objects
+ WHERE uploaded_by_user = @uploaded_by_user::uuid AND created_at > @since;
