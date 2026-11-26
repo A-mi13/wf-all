@@ -11,8 +11,12 @@ import (
 	"image/png"
 	"slices"
 
+	"github.com/deepteams/webp"
 	xwebp "golang.org/x/image/webp"
 )
+
+// maxSourceSide — предел длинной стороны входа (по заголовку, до декодирования): веса и буфер ресайза растут с ней.
+const maxSourceSide = 65535
 
 // ErrContentRejected — проверка содержимого отвергла картинку; категория — в *ContentRejectedError.
 var ErrContentRejected = errors.New("imaging: content rejected")
@@ -75,6 +79,16 @@ func Process(ctx context.Context, b []byte, lim Limits, variants []Spec,
 	}
 	if int64(in.rawW)*int64(in.rawH) > lim.MaxPixels {
 		return nil, h, fmt.Errorf("%w: %d×%d", ErrTooManyPixels, in.rawW, in.rawH)
+	}
+	// Полоса 1×L проходит предел пикселей, но ресайз тратит память пропорционально длинной стороне.
+	if max(in.rawW, in.rawH) > maxSourceSide {
+		return nil, h, fmt.Errorf("%w: сторона %d > %d", ErrTooManyPixels, max(in.rawW, in.rawH), maxSourceSide)
+	}
+	// Вариант без масштаба больше предела WebP — отказ здесь, а не ошибка кодировщика с повторами задачи.
+	for _, s := range variants {
+		if w, ht := targetSize(in.rawW, in.rawH, s.MaxSide); max(w, ht) > webp.MaxDimension {
+			return nil, h, fmt.Errorf("%w: вариант %q %d×%d больше предела WebP", ErrTooManyPixels, s.Name, w, ht)
+		}
 	}
 	profile, err := outputProfile(in)
 	if err != nil {

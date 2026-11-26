@@ -217,6 +217,47 @@ func TestPixelBomb(t *testing.T) {
 	}
 }
 
+// Полоса 1×L проходит MaxPixels, но ресайз x/image/draw тратит память пропорционально длинной стороне (веса и
+// буфер): длинная сторона ограничена отдельно, по заголовку.
+// serial: TotalAlloc — счётчик процесса, параллельные тесты исказили бы рост.
+func TestStripBomb(t *testing.T) {
+	lim := Limits{MaxPixels: 40_000_000, Inputs: allInputs}
+	in := encPNG(t, image.NewGray(image.Rect(0, 0, 1, 70_000)))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, _, err := Process(context.Background(), in, lim, threeVariants, nil)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrTooManyPixels) {
+		t.Fatalf("ошибка = %v, ждали ErrTooManyPixels", err)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew >= 8<<20 {
+		t.Fatalf("за вызов выделено %d байт (≥ 8 МБ)", grew)
+	}
+	t.Run("ровно 65535 — проходит", func(t *testing.T) {
+		in := encPNG(t, image.NewGray(image.Rect(0, 0, 1, 65_535)))
+		if _, _, err := Process(context.Background(), in, lim, threeVariants, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// Вариант без масштаба со стороной больше предела WebP (16383) — детерминированный отказ до декодирования, а не
+// ошибка кодировщика с повторами задачи.
+func TestVariantSideLimit(t *testing.T) {
+	t.Parallel()
+	in := encPNG(t, gradient(20_000, 2))
+	lim := Limits{MaxPixels: 40_000_000, Inputs: allInputs}
+	_, _, err := Process(context.Background(), in, lim, []Spec{{Name: "raw", MaxSide: 0, Lossy: true, Quality: 80}}, nil)
+	if !errors.Is(err, ErrTooManyPixels) {
+		t.Fatalf("MaxSide 0: ошибка = %v, ждали ErrTooManyPixels", err)
+	}
+	outs, _, err := Process(context.Background(), in, lim, []Spec{{Name: "full", MaxSide: 1920, Lossy: true, Quality: 80}}, nil)
+	if err != nil || outs[0].Width != 1920 {
+		t.Fatalf("MaxSide 1920: %v", err)
+	}
+}
+
 func TestPixelLimitBoundary(t *testing.T) {
 	t.Parallel()
 	in := encPNG(t, gradient(100, 100))
