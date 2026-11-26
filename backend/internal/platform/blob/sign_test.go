@@ -3,6 +3,7 @@ package blob_test
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"maps"
 	"net/url"
@@ -91,7 +92,9 @@ func TestDevSignerUpload(t *testing.T) {
 		{"no_type_field", with("Content-Type", ""), 1000, "image/jpeg", t0, blob.ErrSignature},
 		{"other_key_field", with("key", "other"), 1000, "image/jpeg", t0, blob.ErrSignature},
 		{"no_key_field", with("key", ""), 1000, "image/jpeg", t0, blob.ErrSignature},
-		{"tampered_policy", with("policy", tamper(t, form.Fields["policy"])), 1000, "image/jpeg", t0, blob.ErrSignature},
+		// файл — ровно под подменённую политику: отказ обязан дать подпись, а не сверка размера или срока
+		{"tampered_policy", with("policy", tamper(t, form.Fields["policy"], "bytes", 1001)), 1001, "image/jpeg", t0, blob.ErrSignature},
+		{"extended_exp", with("policy", tamper(t, form.Fields["policy"], "exp", form.ExpiresAt.Add(time.Hour).Unix())), 1000, "image/jpeg", form.ExpiresAt.Add(time.Second), blob.ErrSignature},
 		{"foreign_policy", with("policy", other.Fields["policy"]), 1000, "image/jpeg", t0, blob.ErrSignature},
 		{"no_signature", with("x-wf-signature", ""), 1000, "image/jpeg", t0, blob.ErrSignature},
 		{"bad_hex", with("x-wf-signature", "zz"+form.Fields["x-wf-signature"][2:]), 1000, "image/jpeg", t0, blob.ErrSignature},
@@ -125,18 +128,26 @@ func TestDevSignerUpload(t *testing.T) {
 	}
 }
 
-// tamper — та же политика с другим размером: подпись не сходится.
-func tamper(t *testing.T, policy string) string {
+// tamper — политика с подменённым полем (name = value); подпись остаётся старой.
+func tamper(t *testing.T, policy, name string, value int64) string {
 	t.Helper()
 	raw, err := base64.StdEncoding.DecodeString(policy)
 	if err != nil {
 		t.Fatalf("политика не base64: %v", err)
 	}
-	changed := strings.Replace(string(raw), "1000", "1001", 1)
-	if changed == string(raw) {
-		t.Fatalf("в политике нет размера: %s", raw)
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("политика не JSON: %v", err)
 	}
-	return base64.StdEncoding.EncodeToString([]byte(changed))
+	if _, ok := m[name]; !ok {
+		t.Fatalf("в политике нет поля %q: %s", name, raw)
+	}
+	m[name] = value
+	changed, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(changed)
 }
 
 func TestDevSignerGet(t *testing.T) {
