@@ -260,13 +260,13 @@ func TestSanitizeDropsUnknown(t *testing.T) {
 		`"markers":[{"cm":"start","tm":0,"dr":0,"extra":1}]}`
 	// U+2028 и HTML-символы в строках экранируются: выход безопасно встраивать и в HTML.
 	want := `{"v":"5.7.4","fr":30,"ip":0,"op":60,"w":512,"h":512,"nm":"Мяч ⚽\u2028\u003cb\u003e",` +
-		`"layers":[{"ty":4,"ind":1,"ip":0,"op":60,` +
+		`"layers":[{"ty":4,"ind":1,"ip":0,"op":60,"st":0,` +
 		`"ks":{"o":{"a":0,"k":100},` +
 		`"r":{"a":1,"k":[{"t":0,"s":[0],"i":{"x":[0.833],"y":[0.833]},"o":{"x":[0.167],"y":[0.167]}},{"t":60,"s":[360]}]},` +
 		`"p":{"s":true,"x":{"a":0,"k":0.1000000000000000055511151231257827},"y":{"a":0,"k":1e2}}},` +
 		`"shapes":[{"ty":"gr","it":[{"ty":"el","p":{"a":0,"k":[0,0]},"s":{"a":0,"k":[10,10]}},` +
 		`{"ty":"fl","c":{"a":0,"k":[1,0,0,1]},"o":{"a":0,"k":100},"r":1}]}],` +
-		`"masksProperties":[{"mode":"a","pt":{"a":0,"k":{"c":true,"i":[[0,0]],"o":[[0,0]],"v":[[1,2]]}},"o":{"a":0,"k":100}}]}],` +
+		`"masksProperties":[{"mode":"a","pt":{"a":0,"k":{"c":true,"i":[[0,0]],"o":[[0,0]],"v":[[1,2]]}},"o":{"a":0,"k":100}}],"hasMask":true}],` +
 		`"markers":[{"cm":"start","tm":0,"dr":0}]}`
 	stub := &stubImg{}
 	out, err := Sanitize(context.Background(), []byte(in), DefaultLimits, stub.fn)
@@ -400,6 +400,12 @@ func TestSanitizeAcceptsLACExamples(t *testing.T) {
 			if s, ok := l0["shapes"].([]any); !ok || len(s) == 0 || l0["ks"] == nil {
 				t.Fatalf("слой форм потерял shapes/ks: %v", l0)
 			}
+			for i, l := range layers {
+				// без st lottie-web считает время слоя как NaN и не рисует его
+				if _, ok := l.(map[string]any)["st"].(float64); !ok {
+					t.Fatalf("слой %d без числового st: %v", i, l)
+				}
+			}
 			for _, k := range []string{"meta", "mn", "ddd"} {
 				if bytes.Contains(out, []byte(`"`+k+`":`)) {
 					t.Fatalf("поле %s вне схемы осталось в выходе", k)
@@ -418,14 +424,14 @@ func TestSanitizeAcceptsLACExamples(t *testing.T) {
 func TestSanitizeKeepsAllowed(t *testing.T) {
 	t.Parallel()
 	in := `{"v":"5.7.4","ver":10001,"nm":"all","fr":30,"ip":0,"op":60,"w":100,"h":100,` +
-		`"assets":[{"id":"pc","nm":"pre","layers":[{"nm":"n","hd":false,"ty":3,"ind":1,"parent":2,"ip":0,"op":60,` +
+		`"assets":[{"id":"pc","nm":"pre","layers":[{"nm":"n","hd":false,"ty":3,"ind":1,"parent":2,"ip":0,"op":60,"st":0,` +
 		`"ks":{"a":{"a":0,"k":[0,0]},"p":{"a":1,"k":[{"t":0,"s":[0,0],"i":{"x":0.5,"y":0.5},"o":{"x":0.5,"y":0.5},"ti":[0,0],"to":[1,1],"h":0},{"t":60,"s":[10,10]}]},` +
 		`"r":{"a":0,"k":0},"s":{"a":0,"k":[100,100]},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0}},"ao":0}]}],` +
 		`"markers":[{"cm":"m","tm":0,"dr":10}],"layers":[` +
 		`{"ty":0,"refId":"pc","w":100,"h":100,"sr":1,"st":0,"tm":{"a":0,"k":0},"ip":0,"op":60,"ks":{},"tt":1,"tp":2,` +
-		`"masksProperties":[{"mode":"a","o":{"a":0,"k":100},"pt":{"a":1,"k":[{"t":0,"s":[{"c":true,"i":[[0,0]],"o":[[0,0]],"v":[[0,0]]}]},{"t":60}]}}]},` +
-		`{"ty":1,"sw":10,"sh":10,"sc":"#ff00AA","ip":0,"op":60,"ks":{}},` +
-		`{"ty":4,"ip":0,"op":60,"ks":{},"shapes":[{"ty":"gr","nm":"g","hd":false,"np":3,"it":[` +
+		`"masksProperties":[{"mode":"a","o":{"a":0,"k":100},"pt":{"a":1,"k":[{"t":0,"s":[{"c":true,"i":[[0,0]],"o":[[0,0]],"v":[[0,0]]}]},{"t":60}]}}],"hasMask":true},` +
+		`{"ty":1,"sw":10,"sh":10,"sc":"#ff00AA","ip":0,"op":60,"st":0,"td":1,"ks":{}},` +
+		`{"ty":4,"ip":0,"op":60,"st":0,"ks":{},"shapes":[{"ty":"gr","nm":"g","hd":false,"np":3,"it":[` +
 		`{"ty":"rc","d":1,"p":{"a":0,"k":[0,0]},"s":{"a":0,"k":[10,10]},"r":{"a":0,"k":2}},` +
 		`{"ty":"sr","p":{"a":0,"k":[0,0]},"or":{"a":0,"k":10},"os":{"a":0,"k":0},"r":{"a":0,"k":0},"pt":{"a":0,"k":5},"sy":1,"ir":{"a":0,"k":5},"is":{"a":0,"k":0}},` +
 		`{"ty":"gf","o":{"a":0,"k":100},"r":1,"g":{"p":2,"k":{"a":0,"k":[0,1,0,0,1,0,0,1]}},"s":{"a":0,"k":[0,0]},"e":{"a":0,"k":[10,0]},"t":2,"h":{"a":0,"k":0},"a":{"a":0,"k":0}},` +
@@ -437,13 +443,48 @@ func TestSanitizeKeepsAllowed(t *testing.T) {
 		`{"ty":"el","p":{"a":0,"k":[0,0],"sid":"pos"},"s":{"a":0,"k":[5,5]}},` +
 		`{"ty":"sh","ks":{"a":0,"k":{"c":false,"i":[[0,0],[1,1]],"o":[[0,0],[1,1]],"v":[[0,0],[5,5]]}}},` +
 		`{"ty":"fl","c":{"a":0,"k":[1,1,1]},"r":2}]},` +
-		`{"ty":2,"refId":"pc","ip":0,"op":60,"ks":{"p":{"s":false,"a":0,"k":[0,0]}}}]}`
+		`{"ty":2,"refId":"pc","ip":0,"op":60,"st":-5.5,"ks":{"p":{"s":false,"a":0,"k":[0,0]}}}]}`
 	out, err := Sanitize(context.Background(), []byte(in), DefaultLimits, (&stubImg{}).fn)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if string(out) != in {
 		t.Fatalf("разрешённые поля изменены:\n%s\nожидалось:\n%s", out, in)
+	}
+}
+
+// TestSanitizeLottieWebCompat — поля вне LAC 1.0.1, без которых lottie-web рисует неверно: st у каждого слоя
+// (нет — 0), td переносится, hasMask — по факту масок в выходе, вход не учитывается.
+func TestSanitizeLottieWebCompat(t *testing.T) {
+	t.Parallel()
+	mask := `{"mode":"a","pt":{"a":0,"k":{"c":true,"i":[[0,0]],"o":[[0,0]],"v":[[1,2]]}}}`
+	in := anim("",
+		`{"ty":4,"ip":0,"op":60,"ks":{},"shapes":[]}`,
+		`{"ty":4,"ip":0,"op":60,"st":5,"hasMask":false,"ks":{},"masksProperties":[`+mask+`],"shapes":[]}`,
+		`{"ty":4,"ip":0,"op":60,"st":0,"hasMask":true,"ks":{},"shapes":[]}`,
+		`{"ty":4,"ip":0,"op":60,"st":0,"hasMask":true,"ks":{},"masksProperties":[],"shapes":[]}`,
+		`{"ty":4,"td":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
+		`{"ty":4,"tt":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
+		`{"ty":4,"ip":0,"op":60,"st":"5","ks":{},"shapes":[]}`,
+	)
+	_, err := Sanitize(context.Background(), in, DefaultLimits, (&stubImg{}).fn)
+	if !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("st строкой: err = %v, want ErrCorrupt", err)
+	}
+	in = []byte(strings.Replace(string(in), `,{"ty":4,"ip":0,"op":60,"st":"5","ks":{},"shapes":[]}`, "", 1))
+	out, err := Sanitize(context.Background(), in, DefaultLimits, (&stubImg{}).fn)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	want := `{"v":"5.7.4","fr":30,"ip":0,"op":60,"w":100,"h":100,"layers":[` +
+		`{"ty":4,"ip":0,"op":60,"ks":{},"shapes":[],"st":0},` +
+		`{"ty":4,"ip":0,"op":60,"st":5,"ks":{},"masksProperties":[` + mask + `],"shapes":[],"hasMask":true},` +
+		`{"ty":4,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]},` +
+		`{"ty":4,"ip":0,"op":60,"st":0,"ks":{},"masksProperties":[],"shapes":[]},` +
+		`{"ty":4,"td":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]},` +
+		`{"ty":4,"tt":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}]}`
+	if string(out) != want {
+		t.Fatalf("выход:\n%s\nожидалось:\n%s", out, want)
 	}
 }
 

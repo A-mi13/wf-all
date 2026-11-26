@@ -471,7 +471,18 @@ func (s *sanitizer) layer(v *jvalue, path string) (*jvalue, error) {
 	if err != nil || f < 0 || f > 4 || f != math.Trunc(f) {
 		return nil, unsafeAt(path+".ty", "неизвестный тип слоя")
 	}
-	return s.object(layerFields[int(f)], v, path)
+	out, err := s.object(layerFields[int(f)], v, path)
+	if err != nil {
+		return nil, err
+	}
+	// совместимость с плеерами (allow.go, layerPlayerCompat): st обязателен, hasMask — по выходу, не по входу
+	if _, ok := out.get("st"); !ok {
+		out.add("st", &jvalue{k: jNum, s: "0"})
+	}
+	if m, ok := out.get("masksProperties"); ok && len(m.arr) > 0 {
+		out.add("hasMask", &jvalue{k: jBool, b: true})
+	}
+	return out, nil
 }
 
 var imageMIMEs = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true}

@@ -7,6 +7,7 @@ package lottie
 // 26.11.2026. Отличия от схемы — намеренные, каждое помечено «вне схемы» или «уже схемы»:
 //   - `v` у анимации — вне схемы LAC (версия формата lottie-web, строка); её пишут все экспортёры и примеры LAC,
 //     плееры по ней включают совместимость старых файлов;
+//   - `st`, `td`, `hasMask` у слоёв — вне схемы, нужны плеерам (layerPlayerCompat ниже);
 //   - `slots` анимации — выбрасываются: значение слота в схеме не типизировано (`p: {}`), разрешить его по схеме
 //     нельзя (через слот прошли бы выражения и внешние картинки); `sid` у свойств и ассетов без слотов инертен;
 //   - `unknown-layer` схемы (любой другой `ty` слоя) — отказ `ErrUnsafe`, а не перенос: так режутся аудио (6),
@@ -106,12 +107,21 @@ var imageAssetFields = fields{"id": str, "nm": str, "sid": str, "w": num, "h": n
 
 var markerFields = fields{"cm": str, "tm": num, "dr": num}
 
-// Слои: layers/layer + layers/visual-layer + поля типа.
+// layerPlayerCompat — поля слоя вне схемы: не LAC 1.0.1, нужно lottie-web/Flutter (сверено с исходниками
+// lottie-web: RenderableElement.js checkLayerLimits, SVGRendererBase.js renderFrame, SVGBaseElement.js
+// createContainerElements, DataManager.js completeLayers). Только числа, ни ссылок, ни выражений.
+//   - `st` — время начала слоя: без него время слоя — NaN и слой не рисуется; нет на входе — пишется 0 (sanitize.go);
+//   - `td` — слой — источник track matte (уходит в <defs>); без него мат рисуется видимым, слой под матом пропадает;
+//   - `hasMask` — не из входа: выставляется true, если в выходе непустой masksProperties (sanitize.go); без него
+//     касательные контура маски не переводятся в абсолютные.
+var layerPlayerCompat = fields{"st": num, "td": num}
+
+// Слои: layers/layer + layers/visual-layer + поля совместимости + поля типа.
 var (
-	layerBase = fields{
+	layerBase = merge(fields{
 		"nm": str, "hd": bln, "ty": num, "ind": num, "parent": num, "ip": num, "op": num,
 		"ks": node(nTransform), "ao": bln, "tt": num, "tp": num, "masksProperties": nodes(nMask),
-	}
+	}, layerPlayerCompat)
 	layerFields = map[int]fields{
 		0: merge(layerBase, fields{ // precomposition-layer
 			"refId": str, "w": num, "h": num, "sr": num, "st": num, "tm": node(nPropScalar),
