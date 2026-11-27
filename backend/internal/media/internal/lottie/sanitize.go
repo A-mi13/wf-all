@@ -50,8 +50,8 @@ var (
 )
 
 // Sanitize разбирает in по схеме-разрешению и возвращает компактный JSON. Порядок: размер → разбор с подсчётом
-// глубины → обход по таблице (все отказы) → граф прекомпозиций (checkPrecomps) → перекодирование картинок (дорогое —
-// только для прошедшего проверки).
+// глубины → обход по таблице (все отказы) → граф прекомпозиций (checkPrecomps) и цепочки parent (checkParents) →
+// перекодирование картинок (дорогое — только для прошедшего проверки).
 // Ошибка img возвращается обёрнутой (%w): её код решает вызывающий; отмена ctx — ctx.Err().
 func Sanitize(ctx context.Context, in []byte, lim Limits, img ImageFunc) ([]byte, error) {
 	if len(in) > lim.MaxBytes {
@@ -67,6 +67,9 @@ func Sanitize(ctx context.Context, in []byte, lim Limits, img ImageFunc) ([]byte
 		return nil, err
 	}
 	if err := checkPrecomps(out, lim.MaxExpandedBytes); err != nil {
+		return nil, err
+	}
+	if err := checkParents(out); err != nil {
 		return nil, err
 	}
 	for i, im := range s.images {

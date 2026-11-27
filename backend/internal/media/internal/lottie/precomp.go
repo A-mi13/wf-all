@@ -143,3 +143,68 @@ func layerType(l *jvalue) float64 {
 	}
 	return f
 }
+
+// maxParentDepth — предел звеньев цепочки parent → ind (тот же, что у вложенности прекомпозиций): lottie-web
+// (BaseRenderer.buildElementParenting) идёт по цепочке рекурсией, lottie-android/Flutter (buildParentLayerListIfNeeded)
+// — циклом while; цикл роняет стек или вешает клиента (перепроверка ревью R1).
+const maxParentDepth = maxPrecompDepth
+
+// checkParents — цепочки parent → ind в каждом списке слоёв выхода: корень и все прекомпозиции (Flutter разбирает и
+// неиспользуемые). Отказ ErrUnsafe: повтор ind в списке (плееры выбрали бы разных родителей), parent без слоя с таким
+// ind, цикл или цепочка длиннее maxParentDepth. Числа сравниваются значением, как в JS (1 и 1.0 — один ind).
+func checkParents(out *jvalue) error {
+	if l, ok := out.get("layers"); ok {
+		if err := parentsOf(l, "layers"); err != nil {
+			return err
+		}
+	}
+	if a, ok := out.get("assets"); ok {
+		for i, as := range a.arr {
+			if l, ok := as.get("layers"); ok {
+				if err := parentsOf(l, fmt.Sprintf("assets[%d].layers", i)); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func parentsOf(list *jvalue, path string) error {
+	inds := map[float64]int{} // ind → индекс слоя
+	for i, l := range list.arr {
+		if v, ok := l.get("ind"); ok {
+			f := numValue(v.s)
+			if _, dup := inds[f]; dup {
+				return unsafeAt(fmt.Sprintf("%s[%d].ind", path, i), "повтор ind")
+			}
+			inds[f] = i
+		}
+	}
+	parent := make([]int, len(list.arr)) // индекс родителя; −1 — нет
+	for i, l := range list.arr {
+		parent[i] = -1
+		if v, ok := l.get("parent"); ok {
+			j, ok := inds[numValue(v.s)]
+			if !ok {
+				return unsafeAt(fmt.Sprintf("%s[%d].parent", path, i), "нет слоя с таким ind")
+			}
+			parent[i] = j
+		}
+	}
+	for i := range parent {
+		for n, j := 0, parent[i]; j >= 0; n, j = n+1, parent[j] {
+			if n == maxParentDepth {
+				return unsafeAt(fmt.Sprintf("%s[%d].parent", path, i),
+					fmt.Sprintf("цикл или цепочка parent длиннее %d", maxParentDepth))
+			}
+		}
+	}
+	return nil
+}
+
+// numValue — значение числового литерала выхода (проверен как JSON-число; вне диапазона — ±Inf, как в JS).
+func numValue(lit string) float64 {
+	f, _ := strconv.ParseFloat(lit, 64)
+	return f
+}

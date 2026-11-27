@@ -141,7 +141,9 @@ paths:
   рекурсия не глубже, у готовой — уровень + высота), `ty` 0 или `ty` 2 без `refId`, ссылка `ty` 0 не на прекомпозицию,
   `ty` 2 не на картинку — `ErrUnsafe`; развёрнутые копии слоёв
   прекомпозиций ≤ `Limits.MaxExpandedBytes` (4 МиБ байт выхода, сумма насыщается — `TestExpandedBytesSaturates`), сумма
-  пикселей всех картинок ≤ `MaxTotalImagePixels` (16 Мп). Новый тип узла — перед `nKindEnd` (`TestEveryNodeKindHandled`).
+  пикселей всех картинок ≤ `MaxTotalImagePixels` (16 Мп). Цепочки `parent` → `ind` (`checkParents`, каждый список слоёв —
+  корень и все прекомпозиции): повтор `ind`, `parent` без слоя, цикл или > `maxParentDepth` (= `maxPrecompDepth`, 32)
+  звеньев — `ErrUnsafe`. Новый тип узла — перед `nKindEnd` (`TestEveryNodeKindHandled`).
 - **Стражи** — `media/jobs`: `TestSecondExecutorOnReady`, `TestTakeDownBetweenWriteAndPublish` (снятие из хука `Put`:
   запись под замком строки дала бы взаимную блокировку), `TestCrashCountsAttempts`, `TestStoreErrorsDoNotCountAsCrash`,
   `TestRollbackUsesWithoutCancel`, `TestUniqueWhileRetryable`, `TestProcessWaitsForRowLock`,

@@ -52,6 +52,24 @@ func precompLayer(refID string) string {
 
 // precompChain — depth прекомпозиций c0…c(depth−1), в каждой fan слоёв на следующую (в последней — baseLayer), в корне
 // fan слоёв на c0: документ в килобайты, развёрнутых слоёв — fan^(depth+1).
+// nullLayer — пустой слой ty 3 с ind; parent 0 — без родителя.
+func nullLayer(ind, parent int) string {
+	p := ""
+	if parent != 0 {
+		p = `,"parent":` + strconv.Itoa(parent)
+	}
+	return `{"ty":3,"ind":` + strconv.Itoa(ind) + p + `,"ip":0,"op":60,"ks":{}}`
+}
+
+// parentChain — n слоёв: ind 1…n, у слоя i родитель i−1 (у последнего n−1 звеньев до корня).
+func parentChain(n int) []string {
+	out := make([]string, n)
+	for i := range n {
+		out[i] = nullLayer(i+1, i)
+	}
+	return out
+}
+
 // precompChainAssets — ассеты c0…c(depth−1) цепочкой по одному слою (в последней — baseLayer).
 func precompChainAssets(depth int) []string {
 	list := make([]string, depth)
@@ -259,6 +277,14 @@ func TestSanitizeRejects(t *testing.T) {
 		{"duplicate_id_image_and_precomp", anim(assets(imageAsset("x", dataURL("image/png", png10)), precompAsset("x", baseLayer)), precompLayer("x")), DefaultLimits, ErrUnsafe},
 		// ревью R1, I2: цепочка без цикла и без раздувания — та же глубина рекурсии у клиента; предел вложенности 32
 		{"precomp_depth_33", precompChain(33, 1), DefaultLimits, ErrUnsafe},
+		// перепроверка R1: цепочка parent → ind в одном списке слоёв — lottie-web идёт по ней рекурсией (переполнение
+		// стека), Flutter — циклом while (бесконечный цикл): цикл, родитель без слоя, повтор ind, глубина > 32
+		{"parent_self", anim("", nullLayer(1, 1)), DefaultLimits, ErrUnsafe},
+		{"parent_cycle_two", anim("", nullLayer(1, 2), nullLayer(2, 1)), DefaultLimits, ErrUnsafe},
+		{"parent_missing", anim("", nullLayer(1, 7)), DefaultLimits, ErrUnsafe},
+		{"parent_duplicate_ind", anim("", nullLayer(1, 0), nullLayer(1, 0), nullLayer(2, 1)), DefaultLimits, ErrUnsafe},
+		{"parent_cycle_in_unused_precomp", anim(assets(precompAsset("p", nullLayer(1, 2), nullLayer(2, 1)))), DefaultLimits, ErrUnsafe},
+		{"parent_depth_33", anim("", parentChain(34)...), DefaultLimits, ErrUnsafe},
 		{"precomp_depth_33_via_shared", anim(assets(precompChainAssets(33)...), precompLayer("c1"), precompLayer("c0")), DefaultLimits, ErrUnsafe},
 		{"precomp_blowup", precompChain(10, 10), DefaultLimits, ErrUnsafe},
 		// слой-картинка ty 2: refId — на ассет-картинку с этим id (lottie-web getAssetData), иначе TypeError или
@@ -307,6 +333,8 @@ func TestSanitizeAcceptsAtLimits(t *testing.T) {
 		{"unreferenced_cycle", anim(assets(precompAsset("a", precompLayer("b")), precompAsset("b", precompLayer("a")))), DefaultLimits},
 		{"precomp_reused_chain", precompChain(3, 3), DefaultLimits},
 		{"precomp_depth_32", precompChain(32, 1), DefaultLimits},
+		{"parent_depth_32", anim("", parentChain(33)...), DefaultLimits},
+		{"parent_equal_literals", anim("", nullLayer(1, 0), `{"ty":3,"ind":2,"parent":1.0,"ip":0,"op":60,"ks":{}}`), DefaultLimits},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -500,7 +528,8 @@ func TestSanitizeKeepsAllowed(t *testing.T) {
 	in := `{"v":"5.7.4","ver":10001,"nm":"all","fr":30,"ip":0,"op":60,"w":100,"h":100,` +
 		`"assets":[{"id":"pc","nm":"pre","layers":[{"nm":"n","hd":false,"ty":3,"ind":1,"parent":2,"ip":0,"op":60,"st":0,` +
 		`"ks":{"a":{"a":0,"k":[0,0]},"p":{"a":1,"k":[{"t":0,"s":[0,0],"i":{"x":0.5,"y":0.5},"o":{"x":0.5,"y":0.5},"ti":[0,0],"to":[1,1],"h":0},{"t":60,"s":[10,10]}]},` +
-		`"r":{"a":0,"k":0},"s":{"a":0,"k":[100,100]},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0}},"ao":0}]},` +
+		`"r":{"a":0,"k":0},"s":{"a":0,"k":[100,100]},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0}},"ao":0},` +
+		`{"ty":3,"ind":2,"ip":0,"op":60,"st":0,"ks":{}}]},` +
 		`{"id":"img","nm":"i","w":10,"h":10,"p":"` + dataURL("image/webp", webpVP8L(10, 10)) + `","e":1}],` +
 		`"markers":[{"cm":"m","tm":0,"dr":10}],"layers":[` +
 		`{"ty":0,"refId":"pc","w":100,"h":100,"sr":1,"st":0,"tm":{"a":0,"k":0},"ip":0,"op":60,"ks":{},"tt":1,"tp":2,` +
