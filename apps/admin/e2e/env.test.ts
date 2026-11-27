@@ -395,8 +395,12 @@ describe('окружение e2e', () => {
       new RegExp(`^ports="18026 11026 ${GEOFIXTURE.port} ${PUBLIC_API.port}"$`, 'm'),
     );
     const run = sh.indexOf('pnpm exec playwright test');
-    for (const build of ['./cmd/worker', './cmd/geofixture']) {
-      const at = sh.indexOf(`go build -o "../.tools/e2e/${build.slice(6)}$exe" ${build}`);
+    // воркер — с тегом wf_e2e (тестовые цели media, план media Task 11), фикстура — без
+    for (const [build, tags] of [
+      ['./cmd/worker', '-tags wf_e2e '],
+      ['./cmd/geofixture', ''],
+    ]) {
+      const at = sh.indexOf(`go build ${tags}-o "../.tools/e2e/${build.slice(6)}$exe" ${build}`);
       expect(at, build).toBeGreaterThan(-1);
       expect(run).toBeGreaterThan(at);
     }
