@@ -186,7 +186,9 @@ func TestS3PutBodies(t *testing.T) {
 }
 
 // TestS3PresignGetServes — ссылка, подписанная на PublicEndpoint со временем clk, открывается и отдаёт подписанный
-// Cache-Control; та же ссылка после срока — отказ.
+// Cache-Control; ссылка, срок которой истёк, — отказ. Действующая ссылка — на минуту: подпись усекает время до
+// секунды, и короткий срок под нагрузкой CI истекал бы до запроса (ревью Task 3, m2); истёкшая — подписана минуту
+// назад на 2 с.
 func TestS3PresignGetServes(t *testing.T) {
 	env := blobtest.S3Env(t)
 	w, _ := openAs(t, env, env.Worker, clock.System)
@@ -198,8 +200,8 @@ func TestS3PresignGetServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = w.Priv.Delete(context.Background(), key) })
-	get := func(p blob.Presigner) (int, string) {
-		u, _, err := p.PresignGet(ctx, key, 2*time.Second, "private, max-age=120")
+	get := func(p blob.Presigner, ttl time.Duration) (int, string) {
+		u, _, err := p.PresignGet(ctx, key, ttl, "private, max-age=120")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,11 +216,11 @@ func TestS3PresignGetServes(t *testing.T) {
 		_ = resp.Body.Close()
 		return resp.StatusCode, resp.Header.Get("Cache-Control")
 	}
-	if status, cc := get(p); status != http.StatusOK || cc != "private, max-age=120" {
+	if status, cc := get(p, time.Minute); status != http.StatusOK || cc != "private, max-age=120" {
 		t.Fatalf("подписанный GET: %d %q", status, cc)
 	}
 	// Garage отвечает на истёкшую подпись 400, AWS — 403
-	if status, _ := get(past); status != http.StatusBadRequest && status != http.StatusForbidden {
+	if status, _ := get(past, 2*time.Second); status != http.StatusBadRequest && status != http.StatusForbidden {
 		t.Fatalf("GET после срока: %d", status)
 	}
 }

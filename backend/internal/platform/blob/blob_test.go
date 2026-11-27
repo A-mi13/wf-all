@@ -198,24 +198,59 @@ func TestFSFoundationLeftovers(t *testing.T) {
 		}
 	})
 
-	t.Run("pair", func(t *testing.T) {
+	// Размер в meta = длина данных (ревью Task 2, m4): усечённый, дописанный или испорченный файл объекта не
+	// читается; в List он есть (его найдёт чистка), Delete убирает.
+	t.Run("size_mismatch", func(t *testing.T) {
 		s, _ := newFS(t)
 		put(t, s, "obj", "data", "text/plain")
-		if err := os.Remove(blob.FSMetaPath(s, "obj")); err != nil {
+		path := blob.FSObjectPath(s, "obj")
+		good, err := os.ReadFile(path)
+		if err != nil {
 			t.Fatal(err)
 		}
-		notFound(t, s, "obj")
-		// данные без meta — в List есть (их найдёт чистка), Delete убирает
+		tail := len(good) - len("data")
+		for name, bad := range map[string][]byte{
+			// данные на байт длиннее и короче, хвост meta цел — расходится только размер
+			"longer":  append([]byte("datax"), good[len("data"):]...),
+			"shorter": append([]byte("dat"), good[len("data"):]...),
+			"cut":     good[:len(good)-1],
+			"no_meta": []byte("data"),
+			"empty":   {},
+		} {
+			if err := os.WriteFile(path, bad, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := s.Get(ctx, "obj"); !errors.Is(err, blob.ErrNotFound) {
+				t.Errorf("%s: Get: %v, ждали ErrNotFound", name, err)
+			}
+			if _, err := s.Head(ctx, "obj"); !errors.Is(err, blob.ErrNotFound) {
+				t.Errorf("%s: Head: %v, ждали ErrNotFound", name, err)
+			}
+		}
+		if tail <= 0 {
+			t.Fatalf("у файла объекта нет хвоста meta: %q", good)
+		}
+		var keys []string
+		if err := s.List(ctx, "", func(k string) error { keys = append(keys, k); return nil }); err != nil ||
+			!slices.Equal(keys, []string{"obj"}) {
+			t.Fatalf("List: %q %v", keys, err)
+		}
 		if err := s.Delete(ctx, "obj"); err != nil {
 			t.Fatal(err)
+		}
+		if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("после Delete файл остался: %v", err)
 		}
 	})
 }
 
-// Сбой между частями пары: объект не читается — ни новый, ни смесь старой и новой версии.
-func TestFSPairAtomic(t *testing.T) {
+// Сбой Put до фиксации (ревью Task 2, m1): как у S3 — новый ключ не появляется, прежняя версия читается целиком
+// (данные, тип, Cache-Control), на диске не остаётся временных файлов.
+func TestFSFailedPutKeepsOld(t *testing.T) {
 	ctx := context.Background()
-	s, _ := newFS(t)
+	s, root := newFS(t)
+	put(t, s, "over", "v1v1", "text/plain")
+	before := files(t, root)
 	boom := errors.New("сбой")
 	blob.SetFSFault(s, func() error { return boom })
 
@@ -223,28 +258,117 @@ func TestFSPairAtomic(t *testing.T) {
 		t.Fatalf("Put со сбоем: %v", err)
 	}
 	notFound(t, s, "fresh")
-
-	blob.SetFSFault(s, nil)
-	put(t, s, "over", "v1v1", "text/plain")
-	blob.SetFSFault(s, func() error { return boom })
-	// та же длина: смесь «данные v1 + meta v2» не отличить по размеру
-	err := s.Put(ctx, "over", strings.NewReader("v2v2"), blob.PutOptions{ContentType: "image/png", CacheControl: "no-store"})
-	if !errors.Is(err, boom) {
-		t.Fatalf("Put со сбоем: %v", err)
+	// та же длина и другая: ни смеси версий, ни потери старой
+	for _, v := range []string{"v2v2", "v2-longer"} {
+		err := s.Put(ctx, "over", strings.NewReader(v), blob.PutOptions{ContentType: "image/png", CacheControl: "no-store"})
+		if !errors.Is(err, boom) {
+			t.Fatalf("Put со сбоем: %v", err)
+		}
+		if data, info := read(t, s, "over"); data != "v1v1" || info.ContentType != "text/plain" || info.CacheControl != "" ||
+			info.Size != 4 {
+			t.Fatalf("после сбоя Put(%q): %q %+v, ждали прежнюю версию", v, data, info)
+		}
 	}
-	if rc, info, err := s.Get(ctx, "over"); err == nil {
-		data, _ := io.ReadAll(rc)
-		_ = rc.Close()
-		t.Fatalf("после сбоя читается %q %+v", data, info)
+	if after := files(t, root); !slices.Equal(before, after) {
+		t.Fatalf("после сбоев на диске осталось лишнее:\nбыло  %q\nстало %q", before, after)
 	}
-	notFound(t, s, "over")
 
 	blob.SetFSFault(s, nil)
 	put(t, s, "over", "v3", "image/webp")
-	if data, info := read(t, s, "over"); data != "v3" || info.ContentType != "image/webp" || info.Size != 2 {
+	if data, info := read(t, s, "over"); data != "v3" || info.ContentType != "image/webp" || info.CacheControl != "" ||
+		info.Size != 2 {
 		t.Fatalf("после повтора: %q %+v", data, info)
 	}
 }
+
+// Два Put одного ключа разной длины (ревью Task 2, m3): оба успешны — читается ровно одна из версий целиком, а не
+// «нет объекта» и не смесь. Детерминированно: второй Put целиком проходит, пока первый стоит перед фиксацией.
+func TestFSSameKeyRace(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newFS(t)
+	fired := false
+	blob.SetFSFault(s, func() error {
+		if !fired {
+			fired = true
+			put(t, s, "k", "second-longer", "image/png")
+		}
+		return nil
+	})
+	put(t, s, "k", "first", "text/plain")
+	if !fired {
+		t.Fatal("крючок перед фиксацией не вызван")
+	}
+	if data, info := read(t, s, "k"); data != "first" || info.ContentType != "text/plain" || info.Size != 5 {
+		t.Fatalf("после гонки: %q %+v, ждали версию последней фиксации", data, info)
+	}
+
+	// то же без крючка — общий старт двух горутин
+	for range 20 {
+		s, _ := newFS(t)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		versions := map[string]string{"short": "text/plain", "much-longer-value": "image/png"}
+		for v, ct := range versions {
+			wg.Go(func() {
+				<-start
+				if err := s.Put(ctx, "k", strings.NewReader(v), blob.PutOptions{ContentType: ct}); err != nil {
+					t.Errorf("Put(%q): %v", v, err)
+				}
+			})
+		}
+		close(start)
+		wg.Wait()
+		if data, info := read(t, s, "k"); versions[data] != info.ContentType || info.Size != int64(len(data)) {
+			t.Fatalf("после гонки: %q %+v", data, info)
+		}
+	}
+}
+
+// Пустые каталоги (ревью Task 2, m2): после оборванного Put «a/b» и после удаления всех «x/…» ключ «a» («x»)
+// записывается — пустой каталог не конфликт. Каталог с объектами — по-прежнему ErrConflict (put_over_dir).
+func TestFSEmptyDirsNoConflict(t *testing.T) {
+	ctx := context.Background()
+	s, root := newFS(t)
+	before := files(t, root)
+	broken := io.MultiReader(strings.NewReader("part"), brokenBody{})
+	if err := s.Put(ctx, "a/b/c", broken, blob.PutOptions{}); err == nil {
+		t.Fatal("Put с обрывом тела: ждали ошибку")
+	}
+	notFound(t, s, "a/b/c")
+	if after := files(t, root); !slices.Equal(before, after) {
+		t.Fatalf("оборванный Put оставил каталоги:\nбыло  %q\nстало %q", before, after)
+	}
+	put(t, s, "a", "file", "text/plain")
+	if data, _ := read(t, s, "a"); data != "file" {
+		t.Fatalf("a: %q", data)
+	}
+
+	put(t, s, "x/y/z", "deep", "text/plain")
+	if err := s.Delete(ctx, "x/y/z"); err != nil {
+		t.Fatal(err)
+	}
+	if after := files(t, root); !slices.Contains(after, "obj/a") || slices.Contains(after, "obj/x/") {
+		t.Fatalf("после Delete остались пустые каталоги: %q", after)
+	}
+	put(t, s, "x", "file", "text/plain")
+	if data, _ := read(t, s, "x"); data != "file" {
+		t.Fatalf("x: %q", data)
+	}
+
+	// пустой каталог, оставленный падением процесса (или раскладкой до правки), — не конфликт
+	if err := os.MkdirAll(blob.FSObjectPath(s, "e"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	put(t, s, "e", "file", "text/plain")
+	if data, _ := read(t, s, "e"); data != "file" {
+		t.Fatalf("e: %q", data)
+	}
+}
+
+// brokenBody — обрыв тела загрузки.
+type brokenBody struct{}
+
+func (brokenBody) Read([]byte) (int, error) { return 0, errors.New("обрыв") }
 
 // Windows не переименовывает поверх открытого файла: незакрытый Get не мешает перезаписи и удалению.
 func TestFSOverwriteWhileReading(t *testing.T) {

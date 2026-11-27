@@ -158,6 +158,7 @@ jobs:
         run: |
           set_kv() { sed -i "/^$2=/d" "$1"; printf '%s=%s\n' "$2" "$3" >>"$1"; }
           for s in api admin-api worker migrate storage; do cp "$s.env.example" "$s.env"; done
+          for s in api admin-api worker; do cp "$s.blob.env.example" "$s.blob.env"; done
           cp .env.example .env
           ring=$(openssl rand -base64 32)
           set_kv migrate.env MIGRATOR_DATABASE_URL 'postgres://migrator:migrator@db:5432/wf?sslmode=disable'
@@ -190,7 +191,7 @@ jobs:
           # внешние адреса — домены CI
           set_kv storage.env GARAGE_RPC_SECRET "$(openssl rand -hex 32)"
           set_kv storage.env GARAGE_ADMIN_TOKEN "$(openssl rand -base64 32)"
-          for f in api.env:API admin-api.env:ADMIN worker.env:WORKER; do
+          for f in api.blob.env:API admin-api.blob.env:ADMIN worker.blob.env:WORKER; do
             file=${f%%:*} p=${f#*:}
             set_kv "$file" "${p}_BLOB_S3_PUBLIC_ENDPOINT" https://storage.wf.test
             set_kv "$file" "${p}_MEDIA_PUBLIC_BASE_URL" https://media.wf.test/
@@ -267,8 +268,8 @@ jobs:
             hc() { curl "${c[@]}" -o /dev/null -w '%{http_code}' "$@" || true; }
             hmac() { printf '%s' "$2" | openssl dgst -sha256 -mac HMAC -macopt "$1" -r | cut -d' ' -f1; }
             local ak sk d amz exp cred policy k sig
-            ak=$(sed -n 's/^API_BLOB_S3_ACCESS_KEY=//p' api.env)
-            sk=$(sed -n 's/^API_BLOB_S3_SECRET_KEY=//p' api.env)
+            ak=$(sed -n 's/^API_BLOB_S3_ACCESS_KEY=//p' api.blob.env)
+            sk=$(sed -n 's/^API_BLOB_S3_SECRET_KEY=//p' api.blob.env)
             d=$(date -u +%Y%m%d) amz=$(date -u +%Y%m%dT%H%M%SZ) exp=$(date -u -d '+10 min' +%Y-%m-%dT%H:%M:%SZ)
             cred="$ak/$d/garage/s3/aws4_request"
             policy=$(printf '{"expiration":"%s","conditions":[{"bucket":"wf-in"},{"key":"%s"},{"Content-Type":"text/plain"},%s,{"x-amz-algorithm":"AWS4-HMAC-SHA256"},{"x-amz-credential":"%s"},{"x-amz-date":"%s"}]}' \
@@ -277,19 +278,45 @@ jobs:
             for part in garage s3 aws4_request; do k=$(hmac "hexkey:$k" "$part"); done
             sig=$(hmac "hexkey:$k" "$policy")
             printf '%s' "$payload" >hello.txt
-            h=$(hc --form-string "key=$key" --form-string "policy=$policy" \
+            # браузер шлёт multipart POST формы без предзапроса: CORS нужен на ответе самого POST, а не только на
+            # OPTIONS (ревью Task 12, m2); заголовки и код — одним выводом, код последней строкой
+            h=$(curl "${c[@]}" -D - -o /dev/null -w '%{http_code}' -H 'Origin: https://wf.test' \
+              --form-string "key=$key" --form-string "policy=$policy" \
               --form-string 'x-amz-algorithm=AWS4-HMAC-SHA256' --form-string "x-amz-credential=$cred" \
               --form-string "x-amz-date=$amz" --form-string "x-amz-signature=$sig" \
-              --form-string 'Content-Type=text/plain' -F 'file=@hello.txt;type=text/plain' https://storage.wf.test/wf-in)
-            [[ $h == 2?? ]] || fail "POST загрузки в wf-in через адрес хранилища: $h"
-            # публикация: чтение из wf-in и запись в wf-pub ключом воркера изнутри сети wf (S3-порт наружу закрыт)
+              --form-string 'Content-Type=text/plain' -F 'file=@hello.txt;type=text/plain' https://storage.wf.test/wf-in) ||
+              h=000
+            [[ ${h##*$'\n'} == 2?? ]] || fail "POST загрузки в wf-in через адрес хранилища: ${h##*$'\n'}"
+            grep -qi '^access-control-allow-origin: https://wf.test' <<<"$h" ||
+              fail "POST загрузки в wf-in: нет Access-Control-Allow-Origin на ответе"
+            # публикация: чтение из wf-in и запись в wf-pub ключом воркера изнутри сети wf (S3-порт наружу закрыт);
+            # копия в wf-priv — для подписанного чтения закрытого ниже
             docker compose "${files[@]}" run --rm --no-deps -T --entrypoint sh storage-init -c '
               set -eu
               cfg() { printf "user = \"%s:%s\"\n" "$WORKER_BLOB_S3_ACCESS_KEY" "$WORKER_BLOB_S3_SECRET_KEY"; }
               cfg | curl -fsS -K - --aws-sigv4 aws:amz:garage:s3 -o /tmp/f http://storage:3900/wf-in/ci-check/hello.txt
-              cfg | curl -fsS -K - --aws-sigv4 aws:amz:garage:s3 -X PUT --data-binary @/tmp/f \
-                -H "Content-Type: text/plain" -H "Cache-Control: public, max-age=86400" \
-                http://storage:3900/wf-pub/ci-check/hello.txt' || fail "копия в wf-pub ключом воркера"
+              for b in wf-pub wf-priv; do
+                cfg | curl -fsS -K - --aws-sigv4 aws:amz:garage:s3 -X PUT --data-binary @/tmp/f \
+                  -H "Content-Type: text/plain" -H "Cache-Control: public, max-age=86400" \
+                  "http://storage:3900/$b/ci-check/hello.txt"
+              done' || fail "копия в wf-pub и wf-priv ключом воркера"
+            # закрытое: подписанный GET через адрес хранилища (query-SigV4 ключом api, как blob/s3.PresignGet) — 200 и
+            # тело; подпись включает Host, поэтому подмена Host в Caddy ломает ссылки (ревью финала B, m1); подделанная
+            # подпись — отказ хранилища
+            local q creq sts gsig
+            q="X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=$ak%2F$d%2Fgarage%2Fs3%2Faws4_request&X-Amz-Date=$amz"
+            q+="&X-Amz-Expires=300&X-Amz-SignedHeaders=host"
+            creq=$(printf 'GET\n/wf-priv/%s\n%s\nhost:storage.wf.test\n\nhost\nUNSIGNED-PAYLOAD' "$key" "$q")
+            sts=$(printf 'AWS4-HMAC-SHA256\n%s\n%s/garage/s3/aws4_request\n%s' "$amz" "$d" \
+              "$(printf '%s' "$creq" | openssl dgst -sha256 -r | cut -d' ' -f1)")
+            gsig=$(hmac "hexkey:$k" "$sts")
+            h=$(curl "${c[@]}" -o got.txt -w '%{http_code}' "https://storage.wf.test/wf-priv/$key?$q&X-Amz-Signature=$gsig") ||
+              h=000
+            [ "$h" = 200 ] && [ "$(cat got.txt)" = "$payload" ] ||
+              fail "подписанный GET /wf-priv/$key через адрес хранилища: $h $(head -c 300 got.txt 2>/dev/null)"
+            if [ "${gsig: -1}" = 0 ]; then gsig=${gsig%?}1; else gsig=${gsig%?}0; fi
+            h=$(hc "https://storage.wf.test/wf-priv/$key?$q&X-Amz-Signature=$gsig")
+            [[ $h == 4?? && $h != 404 ]] || fail "GET /wf-priv/$key с подделанной подписью: $h, ждали отказ хранилища"
             # домен медиа: тело, nosniff, Cache-Control и тип из метаданных объекта
             h=$(curl "${c[@]}" -f -D - -o got.txt "https://media.wf.test/$key") || fail "GET /$key через домен медиа"
             [ "$(cat got.txt)" = "$payload" ] || fail "GET /$key через домен медиа: другое тело"

@@ -79,7 +79,7 @@ const devSignKeyMin = 32
 
 // Validate — ключи режима (спека media §6.4, R15, R17); в ошибке — полное имя ключа (prefix + имя), без значений
 // секретов. none — прочие ключи не нужны и не проверяются; fs — корень, адрес api, ключ подписи, не в прод-образе;
-// s3 — все S3_* и адрес публичного медиа (формат адресов проверяет blob/s3 при открытии).
+// s3 — все S3_* и адрес публичного медиа, адреса — http(s)://хост (у адреса медиа можно путь).
 func (b Blob) Validate(prefix, buildKind string) error {
 	backend := prefix + "BLOB_BACKEND"
 	var errs []error
@@ -122,6 +122,19 @@ func (b Blob) Validate(prefix, buildKind string) error {
 		need("BLOB_S3_ACCESS_KEY", b.S3AccessKey)
 		need("BLOB_S3_SECRET_KEY", b.S3SecretKey)
 		need("MEDIA_PUBLIC_BASE_URL", b.MediaPublicBaseURL)
+		// формат адресов — здесь, с именем ключа процесса (у трёх сервисов имена полей одинаковые), а не только в
+		// blob/s3 при открытии
+		for name, v := range map[string]string{"BLOB_S3_ENDPOINT": b.S3Endpoint,
+			"BLOB_S3_PUBLIC_ENDPOINT": b.S3PublicEndpoint} {
+			if v != "" && !rootURL(v) {
+				errs = append(errs, fmt.Errorf("%s%s: нужен адрес http(s)://хост[:порт] без пути, запроса и пользователя",
+					prefix, name))
+			}
+		}
+		if v := b.MediaPublicBaseURL; v != "" && !baseURL(v) {
+			errs = append(errs, fmt.Errorf("%sMEDIA_PUBLIC_BASE_URL: нужен адрес http(s)://хост[:порт]/[путь/] без "+
+				"запроса, фрагмента и пользователя", prefix))
+		}
 	default:
 		return fmt.Errorf("%s = %q: допустимо fs, s3 или none", backend, b.Backend)
 	}
@@ -149,7 +162,19 @@ func withSlash(s string) string {
 
 // rootURL — абсолютный http(s)-адрес без пользователя, пути (кроме «/»), запроса и фрагмента.
 func rootURL(s string) bool {
+	u, ok := baseURLParts(s)
+	return ok && (u.Path == "" || u.Path == "/")
+}
+
+// baseURL — абсолютный http(s)-адрес с любым путём, без пользователя, запроса и фрагмента (к нему дописывается ключ).
+func baseURL(s string) bool {
+	_, ok := baseURLParts(s)
+	return ok
+}
+
+func baseURLParts(s string) (*url.URL, bool) {
 	u, err := url.Parse(s)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil &&
-		(u.Path == "" || u.Path == "/") && u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
+	ok := err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil &&
+		u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && !strings.HasSuffix(s, "#")
+	return u, ok
 }

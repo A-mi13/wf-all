@@ -10,26 +10,34 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
-// FS — файлы в каталоге (dev, e2e). Объект — пара: данные в data/<ключ> и meta в meta/<ключ>@meta.json
-// («@» в ключах не бывает — имя meta не совпадёт с каталогом другого ключа: «x» и «x.json/y» сосуществуют).
-// Читаем объект, только когда записаны обе части и размер в meta равен размеру данных: Put сначала убирает старую
-// meta, затем атомарно (временный файл и переименование) пишет данные и последней — meta; сбой посередине
-// оставляет «нет объекта», а не смесь версий. Префикс существующего ключа («avatars» при «avatars/x/f») —
-// каталог, не файл: Get даёт ErrNotFound, Delete ничего не делает, Put — ErrConflict.
+// FS — файлы в каталоге (dev, e2e). Объект — один файл obj/<ключ>: данные, за ними meta (JSON: тип, Cache-Control,
+// размер данных) и длина meta десятью цифрами. Put пишет всё во временный файл рядом и фиксирует одним
+// переименованием: сбой до него оставляет прежнюю версию целиком (как у S3), параллельные Put одного ключа — версию
+// последнего переименования, не смесь. Размер в meta = длина данных — защита от усечённого или испорченного
+// снаружи файла: такой объект не читается (ErrNotFound). Префикс существующего ключа («avatars» при
+// «avatars/x/f») — каталог, не файл: Get даёт ErrNotFound, Delete ничего не делает, Put — ErrConflict; пустой
+// каталог (оборванный Put «a/b», удалены все «a/…») — не конфликт, Put «a» его убирает.
 // Get читает файл в память и закрывает его: на Windows открытый файл не даёт переименовать поверх него.
 type FS struct {
 	root string
-	// fault — сбой между частями пары (только тесты).
+	// fault — сбой перед фиксацией, после записи временного файла (только тесты).
 	fault func() error
 }
 
-const metaSuffix = "@meta.json"
+// metaLenDigits — длина хвоста файла объекта: длина meta десятичными цифрами с ведущими нулями.
+const metaLenDigits = 10
 
-// fsMeta — содержимое файла meta.
+// errCorrupt — файл объекта не разбирается (усечён, испорчен, не наш формат): для читателя — ErrNotFound.
+var errCorrupt = errors.New("blob: файл объекта испорчен")
+
+// fsMeta — meta объекта в хвосте файла.
 type fsMeta struct {
 	ContentType  string `json:"content_type"`
 	CacheControl string `json:"cache_control,omitempty"`
@@ -37,10 +45,8 @@ type fsMeta struct {
 }
 
 func NewFS(root string) (*FS, error) {
-	for _, d := range []string{"data", "meta"} {
-		if err := os.MkdirAll(filepath.Join(root, d), 0o750); err != nil {
-			return nil, fmt.Errorf("blob: %w", err)
-		}
+	if err := os.MkdirAll(filepath.Join(root, "obj"), 0o750); err != nil {
+		return nil, fmt.Errorf("blob: %w", err)
 	}
 	return &FS{root: root}, nil
 }
@@ -58,12 +64,8 @@ func NewFSBuckets(root string) (Buckets, error) {
 	return Buckets{In: stores[0], Pub: stores[1], Priv: stores[2]}, nil
 }
 
-func (s *FS) dataPath(key string) string {
-	return filepath.Join(s.root, "data", filepath.FromSlash(key))
-}
-
-func (s *FS) metaPath(key string) string {
-	return filepath.Join(s.root, "meta", filepath.FromSlash(key)) + metaSuffix
+func (s *FS) path(key string) string {
+	return filepath.Join(s.root, "obj", filepath.FromSlash(key))
 }
 
 // notExist — пути нет; ENOTDIR — часть пути оказалась файлом (Linux; Windows отвечает «путь не найден»).
@@ -75,47 +77,36 @@ func (s *FS) Put(_ context.Context, key string, r io.Reader, o PutOptions) error
 	if err := ValidKey(key); err != nil {
 		return err
 	}
-	if err := s.checkConflict(key); err != nil {
+	if err := s.checkConflict(key, true); err != nil {
 		return err
 	}
-	// обе части — во временные файлы до любых изменений: ошибка чтения r ничего не трогает
-	dataTmp, size, err := writeTemp(filepath.Dir(s.dataPath(key)), r)
+	// объект целиком — во временный файл до любых изменений: ошибка чтения r ничего не трогает
+	tmp, err := writeTemp(filepath.Dir(s.path(key)), r, o)
 	if err != nil {
-		return s.conflictOr(key, err)
-	}
-	defer func() { _ = os.Remove(dataTmp) }() // после переименования — «нет файла», не ошибка
-	meta, err := json.Marshal(fsMeta{ContentType: o.ContentType, CacheControl: o.CacheControl, Size: size})
-	if err != nil {
-		return fmt.Errorf("blob: %w", err)
-	}
-	metaTmp, _, err := writeTemp(filepath.Dir(s.metaPath(key)), bytes.NewReader(meta))
-	if err != nil {
+		err = s.conflictOr(key, err)
+		s.pruneDirs(key) // каталоги, созданные под оборванную запись
 		return err
 	}
-	defer func() { _ = os.Remove(metaTmp) }()
-	// порядок пары: старая meta прочь → данные → новая meta (точка фиксации)
-	if err := removeFile(s.metaPath(key)); err != nil {
-		return err
-	}
-	if err := os.Rename(dataTmp, s.dataPath(key)); err != nil {
-		return s.conflictOr(key, fmt.Errorf("blob: %w", err))
-	}
+	defer func() { _ = os.Remove(tmp) }() // после переименования — «нет файла», не ошибка
 	if s.fault != nil {
 		if err := s.fault(); err != nil {
 			return err
 		}
 	}
-	if err := os.Rename(metaTmp, s.metaPath(key)); err != nil {
-		return fmt.Errorf("blob: %w", err)
+	// точка фиксации: переименование поверх прежней версии атомарно
+	if err := rename(tmp, s.path(key)); err != nil {
+		return s.conflictOr(key, fmt.Errorf("blob: %w", err))
 	}
 	return nil
 }
 
-// checkConflict — каталог на месте файла или файл на месте каталога-родителя: ErrConflict до записи.
-func (s *FS) checkConflict(key string) error {
+// checkConflict — каталог на месте файла или файл на месте каталога-родителя: ErrConflict до записи. prune — пустой
+// каталог на месте ключа убрать и не считать конфликтом (syscall.Rmdir не удаляет непустой каталог и файл).
+func (s *FS) checkConflict(key string, prune bool) error {
 	segs := strings.Split(key, "/")
 	for i := range segs {
-		st, err := os.Lstat(s.dataPath(strings.Join(segs[:i+1], "/")))
+		p := s.path(strings.Join(segs[:i+1], "/"))
+		st, err := os.Lstat(p)
 		if notExist(err) {
 			return nil
 		}
@@ -123,6 +114,9 @@ func (s *FS) checkConflict(key string) error {
 			return fmt.Errorf("blob: %w", err)
 		}
 		last := i == len(segs)-1
+		if last && st.IsDir() && prune && syscall.Rmdir(p) == nil {
+			return nil
+		}
 		if st.IsDir() == last {
 			return ErrConflict
 		}
@@ -130,80 +124,156 @@ func (s *FS) checkConflict(key string) error {
 	return nil
 }
 
-// conflictOr — сбой записи из-за параллельного Put ключа-префикса (гонка с checkConflict) — ErrConflict.
+// conflictOr — сбой записи из-за параллельного Put ключа-префикса (гонка с checkConflict) — ErrConflict. Каталог
+// здесь не убирается: его мог только что создать параллельный Put ключа под ним.
 func (s *FS) conflictOr(key string, err error) error {
-	if errors.Is(s.checkConflict(key), ErrConflict) {
+	if errors.Is(s.checkConflict(key, false), ErrConflict) {
 		return ErrConflict
 	}
 	return err
 }
 
-func (s *FS) Get(ctx context.Context, key string) (io.ReadCloser, Info, error) {
-	info, err := s.Head(ctx, key)
+func (s *FS) Get(_ context.Context, key string) (io.ReadCloser, Info, error) {
+	if err := ValidKey(key); err != nil {
+		return nil, Info{}, err
+	}
+	p := s.path(key)
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		if notExist(err) {
+			return nil, Info{}, ErrNotFound
+		}
+		if st, serr := os.Lstat(p); serr == nil && !st.Mode().IsRegular() {
+			return nil, Info{}, ErrNotFound
+		}
+		return nil, Info{}, fmt.Errorf("blob: %w", err)
+	}
+	m, err := readMeta(bytes.NewReader(raw), int64(len(raw)))
+	if errors.Is(err, errCorrupt) {
+		return nil, Info{}, ErrNotFound
+	}
 	if err != nil {
 		return nil, Info{}, err
 	}
-	data, err := os.ReadFile(s.dataPath(key))
-	if notExist(err) {
-		return nil, Info{}, ErrNotFound
-	}
-	if err != nil {
-		return nil, Info{}, fmt.Errorf("blob: %w", err)
-	}
-	// между Head и чтением объект могли перезаписать: отдаём только согласованную пару
-	if int64(len(data)) != info.Size {
-		return nil, Info{}, ErrNotFound
-	}
-	return io.NopCloser(bytes.NewReader(data)), info, nil
+	return io.NopCloser(bytes.NewReader(raw[:m.Size])), m.info(), nil
 }
 
 func (s *FS) Head(_ context.Context, key string) (Info, error) {
 	if err := ValidKey(key); err != nil {
 		return Info{}, err
 	}
-	raw, err := os.ReadFile(s.metaPath(key))
+	f, err := os.Open(s.path(key))
 	if notExist(err) {
 		return Info{}, ErrNotFound
 	}
 	if err != nil {
 		return Info{}, fmt.Errorf("blob: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	st, err := f.Stat()
+	if err != nil {
+		return Info{}, fmt.Errorf("blob: %w", err)
+	}
+	if !st.Mode().IsRegular() {
+		return Info{}, ErrNotFound
+	}
+	m, err := readMeta(f, st.Size())
+	if errors.Is(err, errCorrupt) {
+		return Info{}, ErrNotFound
+	}
+	if err != nil {
+		return Info{}, err
+	}
+	return m.info(), nil
+}
+
+func (m fsMeta) info() Info {
+	return Info{Size: m.Size, ContentType: m.ContentType, CacheControl: m.CacheControl}
+}
+
+// readMeta — meta из хвоста файла объекта размера size; хвост не разбирается или размер в meta не равен длине
+// данных — errCorrupt.
+func readMeta(r io.ReaderAt, size int64) (fsMeta, error) {
+	if size < metaLenDigits {
+		return fsMeta{}, errCorrupt
+	}
+	var digits [metaLenDigits]byte
+	if _, err := r.ReadAt(digits[:], size-metaLenDigits); err != nil {
+		return fsMeta{}, fmt.Errorf("blob: %w", err)
+	}
+	n, err := strconv.ParseInt(string(digits[:]), 10, 64)
+	if err != nil || n <= 0 || n > size-metaLenDigits {
+		return fsMeta{}, errCorrupt
+	}
+	raw := make([]byte, n)
+	if _, err := r.ReadAt(raw, size-metaLenDigits-n); err != nil {
+		return fsMeta{}, fmt.Errorf("blob: %w", err)
 	}
 	var m fsMeta
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return Info{}, ErrNotFound
+		return fsMeta{}, errCorrupt
 	}
-	st, err := os.Lstat(s.dataPath(key))
-	if notExist(err) {
-		return Info{}, ErrNotFound
+	if m.Size != size-metaLenDigits-n {
+		return fsMeta{}, errCorrupt
 	}
-	if err != nil {
-		return Info{}, fmt.Errorf("blob: %w", err)
-	}
-	if !st.Mode().IsRegular() || st.Size() != m.Size {
-		return Info{}, ErrNotFound
-	}
-	return Info{Size: m.Size, ContentType: m.ContentType, CacheControl: m.CacheControl}, nil
+	return m, nil
 }
 
-// Delete — сначала meta (объект перестаёт читаться), затем данные.
+// Delete удаляет файл объекта и опустевшие каталоги над ним; каталог-префикс и отсутствующий ключ — не ошибка.
 func (s *FS) Delete(_ context.Context, key string) error {
 	if err := ValidKey(key); err != nil {
 		return err
 	}
-	for _, p := range []string{s.metaPath(key), s.dataPath(key)} {
-		if err := removeFile(p); err != nil {
-			return err
-		}
+	if err := removeFile(s.path(key)); err != nil {
+		return err
 	}
+	s.pruneDirs(key)
 	return nil
 }
 
-// List — ключи файлов данных (и без meta: их находит чистка); временные файлы не ключи.
+// pruneDirs убирает опустевшие каталоги над ключом снизу вверх до корня obj: syscall.Rmdir не трогает ни непустой
+// каталог, ни файл (ключ-префикс «a» при Delete «a/b»), поэтому объекты и временные файлы параллельного Put целы.
+// Параллельный Put ключа под тем же каталогом, успевший создать каталог, но не временный файл, получит ошибку
+// записи — повтор её снимает.
+func (s *FS) pruneDirs(key string) {
+	root := filepath.Join(s.root, "obj")
+	for dir := filepath.Dir(s.path(key)); dir != root && strings.HasPrefix(dir, root); dir = filepath.Dir(dir) {
+		if syscall.Rmdir(dir) != nil {
+			return
+		}
+	}
+}
+
+// renameTries — попытки переименования на Windows (rename).
+const renameTries = 10
+
+// rename — os.Rename. Windows временно отказывает в переименовании поверх файла, который в этот миг открыт (Get,
+// Head, параллельный Put того же ключа), и в каталог, который открыт проверкой конфликта, — повтор с паузой 1, 2, …
+// мс (до ~55 мс); прочие ошибки и прочие ОС — сразу.
+func rename(from, to string) error {
+	var err error
+	for i := range renameTries {
+		if err = os.Rename(from, to); err == nil || !windowsBusy(err) {
+			return err
+		}
+		time.Sleep(time.Duration(i+1) * time.Millisecond)
+	}
+	return err
+}
+
+// windowsBusy — ERROR_ACCESS_DENIED (5) или ERROR_SHARING_VIOLATION (32) на Windows: файл или каталог занят другим
+// дескриптором.
+func windowsBusy(err error) bool {
+	var errno syscall.Errno
+	return runtime.GOOS == "windows" && errors.As(err, &errno) && (errno == 5 || errno == 32)
+}
+
+// List — ключи файлов объектов (и испорченных: их находит чистка); временные файлы не ключи.
 func (s *FS) List(ctx context.Context, prefix string, fn func(key string) error) error {
 	if err := ValidPrefix(prefix); err != nil {
 		return err
 	}
-	data := filepath.Join(s.root, "data")
+	data := filepath.Join(s.root, "obj")
 	start := data
 	if i := strings.LastIndex(prefix, "/"); i >= 0 {
 		start = filepath.Join(data, filepath.FromSlash(prefix[:i]))
@@ -263,22 +333,34 @@ func removeFile(path string) error {
 	return nil
 }
 
-// writeTemp пишет r во временный файл в каталоге dir (та же ФС, что у назначения, — для Rename).
-func writeTemp(dir string, r io.Reader) (string, int64, error) {
+// writeTemp пишет объект (данные из r, meta с их размером, длина meta) во временный файл в каталоге dir (та же ФС,
+// что у назначения, — для Rename).
+func writeTemp(dir string, r io.Reader, o PutOptions) (string, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", 0, fmt.Errorf("blob: %w", err)
+		return "", fmt.Errorf("blob: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		return "", 0, fmt.Errorf("blob: %w", err)
+		return "", fmt.Errorf("blob: %w", err)
 	}
-	n, err := io.Copy(tmp, r)
+	err = func() error {
+		n, err := io.Copy(tmp, r)
+		if err != nil {
+			return err
+		}
+		meta, err := json.Marshal(fsMeta{ContentType: o.ContentType, CacheControl: o.CacheControl, Size: n})
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(tmp, "%s%0*d", meta, metaLenDigits, len(meta))
+		return err
+	}()
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
 		_ = os.Remove(tmp.Name())
-		return "", 0, fmt.Errorf("blob: %w", err)
+		return "", fmt.Errorf("blob: %w", err)
 	}
-	return tmp.Name(), n, nil
+	return tmp.Name(), nil
 }

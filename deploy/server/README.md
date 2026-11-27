@@ -40,6 +40,9 @@
   `storage-init`.
 - `migrate.env`, `api.env`, `admin-api.env`, `worker.env` ← свои `*.env.example`; описание ключей —
   `backend/.env.example`. Рабочие `*.env` под `.gitignore` (`deploy/server/*.env`): в них секреты.
+- `api.blob.env`, `admin-api.blob.env`, `worker.blob.env` ← свои `*.blob.env.example`: ключи хранилища процесса
+  (`*_BLOB_*`, `*_MEDIA_PUBLIC_BASE_URL`). Отдельный файл, потому что его же получает `storage-init` (сторонний образ
+  curl): ему видны только ключи хранилища, а не база, кольца и SMTP процесса.
 - Ключи — `openssl rand -base64 32` (у `ADMIN_STAFF_SECRET_KEYS` — base64url); кольца — через запятую, первый текущий,
   ротация — `.claude/rules/env.md`.
 - **Кольцо identity одно:** `API_IDENTITY_SECRET_KEYS` в `api.env` = `WORKER_IDENTITY_SECRET_KEYS` в `worker.env`
@@ -92,7 +95,18 @@ docker compose up -d
 ```
 
 `migrate` идёт первым; `api`, `admin-api`, `worker` стартуют после его успешного выхода, `caddy` — когда `api` и
-`admin-api` здоровы. Миграция упала — сервисы не обновляются, журнал — `docker compose logs migrate`. Остановка: окно
+`admin-api` здоровы. Миграция упала — сервисы не обновляются, журнал — `docker compose logs migrate`. Так же они
+ждут `storage-init`: **хранилище лежит** (испорчен том, полный диск, admin API не отвечает), а выкатить надо
+исправление не про картинки — в обход зависимостей, если ключи процессов уже заведены в Garage прошлым успешным
+`storage-init`:
+
+```sh
+docker compose up --no-deps migrate                   # без -d: ждёт выхода, код 0 — миграции применены
+docker compose up -d --no-deps api admin-api worker caddy
+```
+
+Картинки до починки хранилища не работают (загрузки и обработка — ошибки с повтором); после починки — обычный
+`docker compose up -d`. Остановка: окно
 `stop_grace_period: 30s` — бюджет процессов 25 с (`config.StopBudget`), задачи в полёте возвращаются в повтор.
 
 Проверка здоровья — `/healthz` (процесс жив, базу не трогает), не `/readyz`: частые пробы не должны будить Neon.
@@ -158,20 +172,23 @@ printf 'GK%s\n' "$(openssl rand -hex 12)"   # *_BLOB_S3_ACCESS_KEY
 openssl rand -hex 32                        # *_BLOB_S3_SECRET_KEY
 ```
 
-`storage-init` импортирует их в Garage (`ImportKey` admin API) — единственный источник ключей остаётся в `*.env`
-процессов. Документация Garage предупреждает не выдумывать идентификаторы ключей: случайные 12 байт после `GK` — тот
+`storage-init` импортирует их в Garage (`ImportKey` admin API) — единственный источник ключей остаётся в
+`<сервис>.blob.env` процессов. Документация Garage предупреждает не выдумывать идентификаторы ключей: случайные 12 байт после `GK` — тот
 же формат, что генерирует сам Garage. Секреты Garage — в `storage.env`: `GARAGE_RPC_SECRET` (`openssl rand -hex 32`),
 `GARAGE_ADMIN_TOKEN` (`openssl rand -base64 32`; токен admin API есть только у `storage` и `storage-init`). Lifecycle
 и CORS `storage-init` ставит через admin API — ключа с правом `owner` нет ни у кого.
 
-**Ротация ключа процесса:** новая пара в его `*.env` → `docker compose up -d` (`storage-init` импортирует новый ключ,
-процесс перезапускается) → старый удалить: `docker compose exec storage /garage key delete --yes <старый GK…>`.
+**Ротация ключа процесса:** новая пара в его `<сервис>.blob.env` → `docker compose up -d` (`storage-init` импортирует
+новый ключ, процесс перезапускается) → **подождать не меньше 15 минут** после перезапуска всех процессов: выданные
+старым ключом билеты загрузки живут 15 минут, подписанные ссылки на закрытое — 5 минут (`uploadTTL`,
+`privateLinkTTL` в `backend/internal/media/service.go`), и после раннего удаления загрузка в полёте получит 403 →
+старый удалить: `docker compose exec storage /garage key delete --yes <старый GK…>`.
 Удалённый идентификатор повторно не импортируется — каждый раз новая пара. Сменить только секрет при прежнем
 `*_ACCESS_KEY` нельзя: `storage-init` откажет «уже есть с другим секретом».
 
 ### Первый старт
 
-1. `storage.env` и ключи в `api.env`, `admin-api.env`, `worker.env` (выше); адреса там же:
+1. `storage.env` и ключи в `api.blob.env`, `admin-api.blob.env`, `worker.blob.env` (выше); адреса там же:
    `*_BLOB_S3_PUBLIC_ENDPOINT=https://<WF_STORAGE_DOMAIN>`, `*_MEDIA_PUBLIC_BASE_URL=https://<WF_MEDIA_DOMAIN>/`;
    внутренний `*_BLOB_S3_ENDPOINT=http://storage:3900` — из шаблона.
 2. В `.env`: `WF_MEDIA_DOMAIN`, `WF_STORAGE_DOMAIN`, `WF_WEB_ORIGIN` (origin веба без «/» в конце — CORS загрузки).
@@ -182,6 +199,13 @@ openssl rand -hex 32                        # *_BLOB_S3_SECRET_KEY
 
 `storage-init` идёт при каждом `up` и безопасен повторно: недостающее создаёт, права приводит к таблице выше
 (лишние снимает). Ёмкость узла в слое — условная (на одном узле не ограничивает), задаётся только при первом старте.
+
+**Воркер не должен стоять дольше суток.** Жизненный цикл `wf-in` (1 сутки) удаляет входящие файлы, а обрабатывает их
+только воркер: всё, что загрузили за время простоя дольше суток, после его подъёма уйдёт в `rejected
+(processing_failed)` (задача не находит файл, повторы, затем отказ) — игрок увидит «не принято» и загрузит заново.
+Поэтому тревога на остановленный `worker` — та же, что на диск. Простой затягивается — временно поднять срок
+(`"Days":1` в правиле `wf-in-1d`, `storage/init.sh`) и применить `docker compose run --rm storage-init`; после
+подъёма воркера и разбора очереди вернуть 1 и повторить (каждый `up` ставит срок из `init.sh`).
 
 ### Домены
 
@@ -210,7 +234,10 @@ openssl rand -hex 32                        # *_BLOB_S3_SECRET_KEY
 
 Реплик нет — копия тома единственная страховка. Копии хранилища и базы согласуются по времени (m10): **сначала база,
 потом хранилище**. Хранилище новее базы — лишние файлы без строк (их уберёт сверка); хранилище старее базы — строки
-`ready` без файлов (битые картинки), этого избегаем. Cron хоста, например раз в сутки, из `deploy/server`:
+`ready` без файлов (битые картинки), этого избегаем. Порядок не закрывает удаления **между** копией базы и снимком
+хранилища (снятие или удаление аккаунта в эти минуты): после восстановления их строки `ready` останутся без файлов.
+Их покажет сверка `worker media reconcile` (раздел «Восстановление», шаг 5) как «строка без файла» — сама она их не
+правит, разбирает оператор. Cron хоста, например раз в сутки, из `deploy/server`:
 
 ```sh
 # 1. база: Neon — запомнить время T (точка восстановления по времени); база на сервере — pg_dump (раздел «База»)
@@ -251,7 +278,7 @@ Docker Desktop; проект — только свой `-p wf-srv`, команд
 1. Рабочие `*.env` и `.env` из шаблонов со значениями CI — как шаг «env из шаблонов» job `server` в
    `.github/workflows/image.yml` (строки к `db` под ролями из `deploy/dev/initdb/20_wf.sql`, одно кольцо identity у api
    и worker, SMTP `127.0.0.1:1` с TLS `none`, `WF_IMAGE=wf-backend`, домены `api.wf.test`, `admin.wf.test`,
-   `media.wf.test`, `storage.wf.test`, одноразовые ключи хранилища и `storage.env`); в `.env` — свободные порты
+   `media.wf.test`, `storage.wf.test`, одноразовые ключи хранилища в `*.blob.env` и `storage.env`); в `.env` — свободные порты
    `WF_HTTP_PORT`, `WF_HTTPS_PORT` (80/443 хоста могут быть заняты).
 2. Флаг: `docker compose -p wf-srv --env-file .env.example -f compose.yaml config --format json` →
    `services.api.environment.API_EMBED_WORKER` строго `"false"` (то же с `-f compose.yaml -f compose.ci.yaml`).
@@ -264,9 +291,11 @@ Docker Desktop; проект — только свой `-p wf-srv`, команд
 5. Фон: `docker compose -p wf-srv logs worker` содержит `воркер запущен`; периодика —
    `docker compose -p wf-srv exec -T db psql -U postgres -d wf -tAc "SELECT count(*) FROM river_job WHERE kind =
    'ratelimit.cleanup' AND state = 'completed'"` ≥ 1 (до 120 с).
-6. Хранилище — тело функции `storage_check` job `server` (порт `WF_HTTPS_PORT` в `--resolve` и адресах): подписанный
-   `POST` в `wf-in` через `storage.wf.test`, копия в `wf-pub` ключом воркера, `GET` через `media.wf.test` с `nosniff`
-   и `Cache-Control`, запреты (405/404) обоих доменов, предзапрос CORS, повторный `storage-init`. В Git Bash —
+6. Хранилище — тело функции `storage_check` job `server` (порт `WF_HTTPS_PORT` в `--resolve`, адресах и в `host:`
+   подписи GET): подписанный `POST` в `wf-in` через `storage.wf.test` с CORS на ответе, копии в `wf-pub` и `wf-priv`
+   ключом воркера, `GET` через `media.wf.test` с `nosniff` и `Cache-Control`, подписанный `GET` закрытого через
+   `storage.wf.test` (и отказ с подделанной подписью), запреты (405/404) обоих доменов, предзапрос CORS, повторный
+   `storage-init`. В Git Bash —
    `-o NUL` вместо `-o /dev/null` (curl Windows при `MSYS_NO_PATHCONV=1` не открывает `/dev/null`).
 7. `docker compose -p wf-srv -f compose.yaml -f compose.ci.yaml down -v` — только свой проект; удалить рабочие
    `*.env`, `.env`, `root.crt`, `hello.txt`, `got.txt`.

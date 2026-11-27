@@ -1,7 +1,7 @@
 package blob
 
-// SetFSFault — сбой между записью частей пары (TestFSPairAtomic).
+// SetFSFault — сбой перед фиксацией Put, после записи временного файла (TestFSFailedPutKeepsOld, TestFSSameKeyRace).
 func SetFSFault(s *FS, fn func() error) { s.fault = fn }
 
-// FSMetaPath — путь файла meta ключа.
-func FSMetaPath(s *FS, key string) string { return s.metaPath(key) }
+// FSObjectPath — путь файла объекта ключа.
+func FSObjectPath(s *FS, key string) string { return s.path(key) }

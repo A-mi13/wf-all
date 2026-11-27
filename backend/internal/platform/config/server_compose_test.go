@@ -26,15 +26,38 @@ type composeService struct {
 	} `yaml:"depends_on"`
 	StopGracePeriod string   `yaml:"stop_grace_period"`
 	Volumes         []string `yaml:"volumes"`
+	EnvFile         envFiles `yaml:"env_file"`
+	Ports           []any    `yaml:"ports"`
 	Healthcheck     *struct {
 		Test []string `yaml:"test"`
 	} `yaml:"healthcheck"`
 }
 
+// envFiles — env_file сервиса: строка или список строк.
+type envFiles []string
+
+func (e *envFiles) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		*e = envFiles{n.Value}
+		return nil
+	}
+	var l []string
+	if err := n.Decode(&l); err != nil {
+		return err
+	}
+	*e = l
+	return nil
+}
+
 // composeServices — сервисы deploy/server/compose.yaml (якоря и «<<» раскрывает yaml).
 func composeServices(t *testing.T) map[string]composeService {
+	return composeFileServices(t, "deploy/server/compose.yaml")
+}
+
+// composeFileServices — сервисы файла compose name.
+func composeFileServices(t *testing.T, name string) map[string]composeService {
 	t.Helper()
-	raw, err := fs.ReadFile(repoFS, "deploy/server/compose.yaml")
+	raw, err := fs.ReadFile(repoFS, name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +65,7 @@ func composeServices(t *testing.T) map[string]composeService {
 		Services map[string]composeService `yaml:"services"`
 	}
 	if err := yaml.Unmarshal(raw, &c); err != nil {
-		t.Fatalf("compose.yaml: %v", err)
+		t.Fatalf("%s: %v", name, err)
 	}
 	return c.Services
 }
@@ -255,10 +278,14 @@ func TestTemplateSecretProblem(t *testing.T) {
 // обязательный ключ (required/notEmpty) процесса есть в шаблоне, иначе сервис на сервере не стартует.
 func TestServerEnvExamplesKnownKeys(t *testing.T) {
 	for file, keys := range map[string]map[string]env.FieldParams{
-		"api.env.example":       envKeys(t, "API_", &config.API{}, &config.Blob{}),
-		"admin-api.env.example": envKeys(t, "ADMIN_", &config.Admin{}, &config.Blob{}),
-		"worker.env.example":    workerKeys(t),
+		"api.env.example":       envKeys(t, "API_", &config.API{}),
+		"admin-api.env.example": envKeys(t, "ADMIN_", &config.Admin{}),
+		"worker.env.example":    envKeys(t, "WORKER_", &config.Worker{}, &config.Mail{}, &config.WorkerIdentity{}),
 		"migrate.env.example":   envKeys(t, "MIGRATOR_", &config.Migrator{}),
+		// ключи хранилища процесса — отдельным файлом: его же получает storage-init (ревью Task 12, m1)
+		"api.blob.env.example":       envKeys(t, "API_", &config.Blob{}),
+		"admin-api.blob.env.example": envKeys(t, "ADMIN_", &config.Blob{}),
+		"worker.blob.env.example":    envKeys(t, "WORKER_", &config.Blob{}),
 		// не процесс бэкенда: секреты Garage для storage и storage-init (compose.yaml), оба обязательны
 		"storage.env.example": {"GARAGE_RPC_SECRET": {Required: true}, "GARAGE_ADMIN_TOKEN": {Required: true}},
 	} {
@@ -285,10 +312,10 @@ func TestServerEnvExamplesKnownKeys(t *testing.T) {
 }
 
 // Спека media §6.4, §6.5: свой сервер — хранилище S3 у всех трёх процессов (fs запрещён в прод-образе, none — только
-// стенд); шаблоны с плейсхолдерами проходят ту же проверку, что процесс на старте в прод-образе.
+// стенд); шаблоны ключей хранилища с плейсхолдерами проходят config.LoadBlob в прод-образе (набор ключей и формат адресов).
 func TestServerEnvExamplesBlobS3(t *testing.T) {
-	for file, prefix := range map[string]string{"api.env.example": "API_", "admin-api.env.example": "ADMIN_",
-		"worker.env.example": "WORKER_"} {
+	for file, prefix := range map[string]string{"api.blob.env.example": "API_", "admin-api.blob.env.example": "ADMIN_",
+		"worker.blob.env.example": "WORKER_"} {
 		vals := envFile(t, "deploy/server/"+file)
 		if vals[prefix+"BLOB_BACKEND"] != "s3" {
 			t.Errorf("%s: %sBLOB_BACKEND = %q, ждали s3", file, prefix, vals[prefix+"BLOB_BACKEND"])
@@ -349,10 +376,10 @@ func garagePort(t *testing.T, section, key string) string {
 	return addr[i+1:]
 }
 
-// storageBuckets — имена бакетов (api.env.example; у admin-api и worker те же — TestServerComposeStorageInit).
+// storageBuckets — имена бакетов (api.blob.env.example; у admin-api и worker те же — TestServerComposeStorageInit).
 func storageBuckets(t *testing.T) (in, pub, priv string) {
 	t.Helper()
-	v := envFile(t, "deploy/server/api.env.example")
+	v := envFile(t, "deploy/server/api.blob.env.example")
 	return v["API_BLOB_S3_BUCKET_IN"], v["API_BLOB_S3_BUCKET_PUB"], v["API_BLOB_S3_BUCKET_PRIV"]
 }
 
@@ -397,24 +424,53 @@ func TestServerComposeStorageInit(t *testing.T) {
 	}
 	// точный тег: ни latest, ни плавающей линии вроде 8 или 8.23
 	for name, img := range map[string]string{"storage": storage.Image, "storage-init": initSvc.Image} {
-		_, tag, ok := strings.Cut(img, ":")
+		ref, _, _ := strings.Cut(img, "@")
+		_, tag, ok := strings.Cut(ref, ":")
 		if !ok || strings.Count(strings.TrimPrefix(tag, "v"), ".") != 2 {
 			t.Errorf("%s: образ %q — нужен точный тег MAJOR.MINOR.PATCH", name, img)
 		}
 	}
+	// сторонний образ init видит секреты хранилища — закреплён по digest, подмена тега не пройдёт (ревью Task 12, m1)
+	if _, digest, ok := strings.Cut(initSvc.Image, "@sha256:"); !ok || len(digest) != 64 ||
+		strings.Trim(digest, "0123456789abcdef") != "" {
+		t.Errorf("storage-init: образ %q — нужен digest @sha256:<64 hex>", initSvc.Image)
+	}
+	// Спека §6.5: листинг и admin API хранилища наружу не открыты — у storage и storage-init нет опубликованных портов
+	// (снаружи — только Caddy; ревью Task 12, m3)
+	for name, s := range map[string]composeService{"storage": storage, "storage-init": initSvc} {
+		if len(s.Ports) != 0 {
+			t.Errorf("%s: опубликованы порты %v — наружу хранилище открывает только Caddy", name, s.Ports)
+		}
+	}
+	// init получает только ключи хранилища: секреты Garage и <сервис>.blob.env, а не env процессов целиком (базы,
+	// кольца, SMTP; ревью Task 12, m1)
+	if got, want := slices.Sorted(slices.Values(initSvc.EnvFile)),
+		[]string{"admin-api.blob.env", "api.blob.env", "storage.env", "worker.blob.env"}; !slices.Equal(got, want) {
+		t.Errorf("storage-init: env_file %q, ждали %q", got, want)
+	}
+	embedded := composeFileServices(t, "deploy/server/compose.ci-embed.yaml")["api"]
 	s3 := "http://storage:" + garagePort(t, "s3_api", "api_bind_addr")
 	in, pub, priv := storageBuckets(t)
 	for svc, prefix := range map[string]string{"api": "API_", "admin-api": "ADMIN_", "worker": "WORKER_"} {
 		if cond := c.Services[svc].DependsOn["storage-init"].Condition; cond != "service_completed_successfully" {
 			t.Errorf("%s: depends_on.storage-init.condition = %q, ждали service_completed_successfully", svc, cond)
 		}
-		v := envFile(t, "deploy/server/"+svc+".env.example")
+		// процесс читает свои ключи хранилища из того же файла, что init (один источник ключей)
+		if got, want := c.Services[svc].EnvFile, []string{svc + ".env", svc + ".blob.env"}; !slices.Equal(got, want) {
+			t.Errorf("%s: env_file %q, ждали %q", svc, got, want)
+		}
+		// встроенный воркер (compose.ci-embed.yaml) — те же файлы api и worker
+		if svc != "admin-api" && !slices.Contains(embedded.EnvFile, svc+".blob.env") {
+			t.Errorf("compose.ci-embed.yaml: у api нет %s.blob.env в env_file %q", svc, embedded.EnvFile)
+		}
+		file := svc + ".blob.env.example"
+		v := envFile(t, "deploy/server/"+file)
 		if got := v[prefix+"BLOB_S3_ENDPOINT"]; got != s3 {
-			t.Errorf("%s.env.example: %sBLOB_S3_ENDPOINT = %q, ждали внутренний адрес %q", svc, prefix, got, s3)
+			t.Errorf("%s: %sBLOB_S3_ENDPOINT = %q, ждали внутренний адрес %q", file, prefix, got, s3)
 		}
 		for k, want := range map[string]string{"IN": in, "PUB": pub, "PRIV": priv} {
 			if got := v[prefix+"BLOB_S3_BUCKET_"+k]; got != want || want == "" {
-				t.Errorf("%s.env.example: %sBLOB_S3_BUCKET_%s = %q, ждали %q (бакеты одни на все процессы)", svc,
+				t.Errorf("%s: %sBLOB_S3_BUCKET_%s = %q, ждали %q (бакеты одни на все процессы)", file,
 					prefix, k, got, want)
 			}
 		}

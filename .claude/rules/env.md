@@ -31,11 +31,14 @@ paths:
   api). Api сверяет кольцо на старте: `WORKER_IDENTITY_SECRET_KEYS` ≠ `API_IDENTITY_SECRET_KEYS` по ключам и порядку —
   отказ старта, ротация — обе переменные вместе. На своём сервере — `false` (`deploy/server/compose.yaml`), `WORKER_*` —
   сервису `worker`. `ADMIN_WAKE_API_URL` — тоже только стенд.
-- Шаблоны своего сервера — `deploy/server/{api,admin-api,worker,migrate}.env.example`, `storage.env.example` (секреты
-  Garage для `storage` и `storage-init`) и `.env.example` (переменные compose); рабочие `deploy/server/*.env` — под
-  `.gitignore`. Ключи хранилища процессов на сервере генерирует оператор (`GK` + 24 hex, секрет 64 hex), `storage-init`
-  импортирует их из `*.env` процессов (`deploy/server/README.md`, «Хранилище файлов»). Новый обязательный ключ бинарника — и в шаблон сервиса
-  (страж `TestServerEnvExamplesKnownKeys`: ключи известны config, обязательные есть, секреты — `<…>`).
+- Шаблоны своего сервера — `deploy/server/{api,admin-api,worker,migrate}.env.example`, ключи хранилища процессов
+  отдельно — `{api,admin-api,worker}.blob.env.example` (`*_BLOB_*`, `*_MEDIA_PUBLIC_BASE_URL`: их же получает
+  `storage-init`, без прочих секретов процесса), `storage.env.example` (секреты Garage для `storage` и `storage-init`) и
+  `.env.example` (переменные compose); рабочие `deploy/server/*.env` — под `.gitignore`. Ключи хранилища процессов на
+  сервере генерирует оператор (`GK` + 24 hex, секрет 64 hex), `storage-init` импортирует их из `<сервис>.blob.env`
+  (`deploy/server/README.md`, «Хранилище файлов»). Новый обязательный ключ бинарника — и в шаблон сервиса (страж
+  `TestServerEnvExamplesKnownKeys`: ключи известны config и лежат в своём файле — `Blob` только в `*.blob.env.example`,
+  обязательные есть, секреты — `<…>`).
 - Хранилище файлов — `*_BLOB_*` и `*_MEDIA_PUBLIC_BASE_URL` у `API_`, `ADMIN_`, `WORKER_` читает отдельный
   `config.LoadBlob(prefix, environ)` (как `Mail` у воркера); `*_BLOB_BACKEND` обязателен: `fs` (dev, e2e: один
   `FS_ROOT` и один `*_BLOB_DEV_SIGN_KEY` у трёх процессов — `scripts/env-keys.sh` выдаёт им общий ключ), `s3` (свой
