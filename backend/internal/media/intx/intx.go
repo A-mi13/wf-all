@@ -316,21 +316,28 @@ func (t *Tx) end(ctx context.Context, tx pgx.Tx, q *mediadb.Queries, o mediadb.M
 	if err != nil {
 		return mediadb.MediaObject{}, fmt.Errorf("media/intx: %s: %w", to, err)
 	}
-	vs, err := q.ListVariants(ctx, o.ID)
-	if err != nil {
-		return mediadb.MediaObject{}, fmt.Errorf("media/intx: варианты: %w", err)
+	// ключи вариантов: у ready — строки media_variants; у uploaded|processing строк нет, но неудачная или упавшая
+	// попытка обработки могла записать файлы (ревью Task 9, I-1) — все ключи цели (нет файла — не ошибка)
+	var keys []string
+	if media.State(o.State) == media.StateReady {
+		vs, err := q.ListVariants(ctx, o.ID)
+		if err != nil {
+			return mediadb.MediaObject{}, fmt.Errorf("media/intx: варианты: %w", err)
+		}
+		for _, x := range vs {
+			keys = append(keys, x.BlobKey)
+		}
+	} else if p, ok := t.d.Registry.Get(o.Purpose); ok {
+		keys = jobs.VariantKeys(o.ID, p)
 	}
 	purges := []jobs.PurgeArgs{{V: 1, Bucket: jobs.BucketIn, Keys: []string{o.ID.String()}}}
-	if len(vs) > 0 {
-		v := jobs.PurgeArgs{V: 1, Bucket: jobs.BucketPub}
+	if len(keys) > 0 {
+		v := jobs.PurgeArgs{V: 1, Bucket: jobs.BucketPub, Keys: keys}
 		if media.Visibility(o.Visibility) == media.VisibilityPrivate {
 			v.Bucket = jobs.BucketPriv
 		}
-		for _, x := range vs {
-			v.Keys = append(v.Keys, x.BlobKey)
-			if withURLs && v.Bucket == jobs.BucketPub {
-				v.PublicURLs = append(v.PublicURLs, t.d.PublicBaseURL+x.BlobKey)
-			}
+		if withURLs && v.Bucket == jobs.BucketPub {
+			v.PublicURLs = jobs.PublicURLs(t.d.PublicBaseURL, keys)
 		}
 		purges = append(purges, v)
 	}

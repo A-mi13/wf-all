@@ -78,8 +78,10 @@ paths:
   `CreateDirectInTx` сверяет `Staged` с целью (ошибка программиста). `DetachInTx`: чужой владелец (и `pending_upload`)
   — 409, конечное/нет строки — `nil`. `TakeDownInTx`: причина — код `a_b(.c)*` ≤ 100; конечное/нет строки — `nil`,
   `pending_upload` — 409; аудит (`Actor.Label` — снимок имени сотрудника), событие с версией из `RETURNING`.
-  Открепление и снятие ставят `media.purge` на `in` (`<id>`) и, если есть варианты, на бакет видимости (ключи;
-  `PublicURLs` — только у снятия публичного, `intx.Deps.PublicBaseURL`).
+  Открепление и снятие ставят `media.purge` на `in` (`<id>`) и на бакет видимости: у `ready` — ключи строк
+  `media_variants`, у `uploaded|processing` — все ключи цели `jobs.VariantKeys` (строк ещё нет, а неудачная или упавшая
+  попытка могла записать файлы — ревью Task 9, I-1; страж `TestEndAfterFailedAttempt`); `PublicURLs` — только у
+  снятия публичного (`jobs.PublicURLs`, `intx.Deps.PublicBaseURL`).
 - **Тестовые помощники** — `mediatest`: `E2EPurposes` (`e2e_image`, `e2e_image_private`, владелец `e2e_owner`),
   `MarkerCheck` (R20), `MemoryBlob(clock)` (Memory + `DevSigner`), `Registry`, `SeedObject` (посев по CHECK 0028).
 
@@ -103,7 +105,8 @@ paths:
   у Lottie — `w`/`h` анимации), `media.object_ready`; `ready` — ничего; `detached|taken_down|rejected` или строки нет —
   `media.purge` записанных ключей (+ `PublicURLs` у `pub`); `uploaded` — обычная ошибка. После коммита — `Delete(in)`
   (сбой — WARN, не повтор). **Отклонение** — tx: только из `uploaded|processing` — `rejected`, `ended_at`,
-  `media.object_rejected`, `media.purge` входящего и ключей (после падения/последней попытки — все ключи цели).
+  `media.object_rejected`, `media.purge` входящего и всех ключей цели `VariantKeys` (с `PublicURLs` у `pub`) — прошлая
+  неудачная попытка могла записать варианты.
 - **Ошибки.** Обычная ошибка шагов 2–7 — `context.WithoutCancel` + 5 с: `processing → uploaded` (только из
   `processing`) и ошибка River (падением не считается); `job.Attempt ≥ MaxAttempts` — `rejected(processing_failed)`.
   Входящего нет (`ErrNotFound`) — перечитать строку: не `uploaded|processing` — успех без изменений (сняли, открепили,

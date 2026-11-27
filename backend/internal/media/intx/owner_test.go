@@ -213,8 +213,13 @@ func TestDetachPurges(t *testing.T) {
 	if len(p) != 2 || !slices.Equal(p[jobs.BucketPriv].Keys, []string{mediatest.VariantKey(priv, "full")}) {
 		t.Fatalf("purge закрытого: %+v", p)
 	}
-	if p = purges(t, e.pools.Owner, proc); len(p) != 1 || !slices.Equal(p[jobs.BucketIn].Keys, []string{proc.String()}) {
-		t.Fatalf("purge без вариантов: %+v", p)
+	// строк вариантов нет, но неудачная попытка обработки могла записать файлы (ревью Task 9, I-1): все ключи цели,
+	// без адресов (открепление)
+	p = purges(t, e.pools.Owner, proc)
+	if len(p) != 2 || !slices.Equal(p[jobs.BucketIn].Keys, []string{proc.String()}) ||
+		!slices.Equal(p[jobs.BucketPub].Keys, []string{mediatest.VariantKey(proc, "thumb"), mediatest.VariantKey(proc, "full")}) ||
+		len(p[jobs.BucketPub].PublicURLs) != 0 {
+		t.Fatalf("purge без строк вариантов: %+v", p)
 	}
 }
 

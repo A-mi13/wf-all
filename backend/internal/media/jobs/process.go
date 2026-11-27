@@ -33,8 +33,6 @@ const (
 	cacheControlPublic  = "public, max-age=86400"
 	cacheControlPrivate = "private, no-store"
 	contentTypeLottie   = "application/json"
-	// lottieFile — файл анимации в ключе <object_id>/anim.json.
-	lottieFile = "anim.json"
 	// embeddedQuality — WebP вшитой в Lottie картинки (без масштаба, прозрачность сохраняется).
 	embeddedQuality = 85
 )
@@ -90,7 +88,7 @@ func (w *ProcessWorker) Work(ctx context.Context, job *river.Job[ProcessArgs]) e
 	if err == nil {
 		return nil
 	}
-	return w.fail(ctx, job, o, p, err)
+	return w.fail(ctx, job, o, err)
 }
 
 // claim — шаг 1: короткая транзакция под замком строки (ждать). Не uploaded/processing (и нет строки) — ok=false без
@@ -116,8 +114,7 @@ func (w *ProcessWorker) claim(ctx context.Context, objectID uuid.UUID) (mediadb.
 			return fmt.Errorf("media/jobs: захват: %w", err)
 		}
 		if row.ProcessAttempts >= maxCrashes {
-			p, _ := w.d.Registry.Get(row.Purpose)
-			return w.rejectTx(ctx, tx, q, row, media.RejectProcessingFailed, purposeKeys(row, p))
+			return w.rejectTx(ctx, tx, q, row, media.RejectProcessingFailed)
 		}
 		out, claimed = row, true
 		return nil
@@ -145,7 +142,7 @@ func (w *ProcessWorker) process(ctx context.Context, o mediadb.MediaObject, p me
 	data, err := w.read(ctx, o.ID, p.MaxBytes)
 	switch {
 	case errors.Is(err, errTooLarge):
-		return w.reject(ctx, o.ID, media.RejectTooLarge, nil)
+		return w.reject(ctx, o.ID, media.RejectTooLarge)
 	case errors.Is(err, blob.ErrNotFound):
 		return w.inputGone(ctx, o.ID)
 	case err != nil:
@@ -154,7 +151,7 @@ func (w *ProcessWorker) process(ctx context.Context, o mediadb.MediaObject, p me
 	outs, width, height, err := w.render(ctx, o, p, data)
 	if err != nil {
 		if code, ok := rejectCode(err); ok {
-			return w.reject(ctx, o.ID, code, nil)
+			return w.reject(ctx, o.ID, code)
 		}
 		return err
 	}
@@ -236,10 +233,6 @@ func (w *ProcessWorker) render(ctx context.Context, o mediadb.MediaObject, p med
 			width: x.Width, height: x.Height, data: x.Data}
 	}
 	return res, h.Width, h.Height, nil
-}
-
-func isLottie(p media.Purpose) bool {
-	return len(p.Inputs) == 1 && p.Inputs[0] == media.InputLottie
 }
 
 // embedded — перекодирование вшитой в Lottie картинки: тот же конвейер, один вариант full без масштаба, не больше
@@ -385,20 +378,20 @@ func dim(v int) *int32 {
 }
 
 // reject — шаг 8 своей транзакцией.
-func (w *ProcessWorker) reject(ctx context.Context, objectID uuid.UUID, code media.RejectCode, keys []string) error {
+func (w *ProcessWorker) reject(ctx context.Context, objectID uuid.UUID, code media.RejectCode) error {
 	return db.InTx(ctx, w.d.Pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := mediadb.New(tx)
 		o, ok, err := lock(ctx, q, objectID)
 		if err != nil || !ok {
 			return err
 		}
-		return w.rejectTx(ctx, tx, q, o, code, keys)
+		return w.rejectTx(ctx, tx, q, o, code)
 	})
 }
 
 // rejectTx — отклонение под замком строки o: только из uploaded/processing (иначе ничего) — rejected с кодом и
-// ended_at, событие media.object_rejected, media.purge входящего и ключей вариантов keys.
-func (w *ProcessWorker) rejectTx(ctx context.Context, tx pgx.Tx, q *mediadb.Queries, o mediadb.MediaObject, code media.RejectCode, keys []string) error {
+// ended_at, событие media.object_rejected, media.purge входящего и всех ключей вариантов цели (с публичными адресами).
+func (w *ProcessWorker) rejectTx(ctx context.Context, tx pgx.Tx, q *mediadb.Queries, o mediadb.MediaObject, code media.RejectCode) error {
 	from := media.State(o.State)
 	if from != media.StateUploaded && from != media.StateProcessing {
 		return nil
@@ -416,9 +409,14 @@ func (w *ProcessWorker) rejectTx(ctx context.Context, tx pgx.Tx, q *mediadb.Quer
 		ownerOf(row), code)); err != nil {
 		return fmt.Errorf("media/jobs: событие отклонения: %w", err)
 	}
+	// все ключи цели, а не только записанные этой попыткой: прошлая неудачная (или упавшая) могла оставить варианты
+	p, _ := w.d.Registry.Get(o.Purpose)
 	_, bucket := w.bucketOf(o)
-	return w.insertPurges(ctx, tx, PurgeArgs{V: 1, Bucket: BucketIn, Keys: []string{o.ID.String()}},
-		PurgeArgs{V: 1, Bucket: bucket, Keys: keys})
+	vs := PurgeArgs{V: 1, Bucket: bucket, Keys: VariantKeys(o.ID, p)}
+	if bucket == BucketPub {
+		vs.PublicURLs = PublicURLs(w.d.Blob.PublicBaseURL, vs.Keys)
+	}
+	return w.insertPurges(ctx, tx, PurgeArgs{V: 1, Bucket: BucketIn, Keys: []string{o.ID.String()}}, vs)
 }
 
 // insertPurges — задачи media.purge в транзакции tx; без ключей — не ставятся.
@@ -435,25 +433,13 @@ func (w *ProcessWorker) insertPurges(ctx context.Context, tx pgx.Tx, as ...Purge
 	return nil
 }
 
-// purposeKeys — все ключи вариантов, которые мог записать исполнитель цели (упавший — неизвестно какие).
-func purposeKeys(o mediadb.MediaObject, p media.Purpose) []string {
-	if isLottie(p) {
-		return []string{o.ID.String() + "/" + lottieFile}
-	}
-	keys := make([]string, 0, len(p.Variants))
-	for _, v := range p.Variants {
-		keys = append(keys, o.ID.String()+"/"+v.Name+".webp")
-	}
-	return keys
-}
-
 // fail — обычная ошибка шагов 2–7 (m3-2): на неотменяемом ctx со своим сроком — последняя попытка River —
 // rejected(processing_failed) с удалением всех ключей цели, иначе processing → uploaded. Ошибка возвращается River.
-func (w *ProcessWorker) fail(ctx context.Context, job *river.Job[ProcessArgs], o mediadb.MediaObject, p media.Purpose, cause error) error {
+func (w *ProcessWorker) fail(ctx context.Context, job *river.Job[ProcessArgs], o mediadb.MediaObject, cause error) error {
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
 	defer cancel()
 	if job.Attempt >= job.MaxAttempts {
-		if err := w.reject(bg, o.ID, media.RejectProcessingFailed, purposeKeys(o, p)); err != nil {
+		if err := w.reject(bg, o.ID, media.RejectProcessingFailed); err != nil {
 			return errors.Join(cause, fmt.Errorf("media/jobs: отклонение после последней попытки: %w", err))
 		}
 		w.d.Log.WarnContext(ctx, "media: обработка не удалась, объект отклонён", "object_id", o.ID, "err", cause)

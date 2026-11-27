@@ -285,9 +285,107 @@ func TestProcessWaitsForRowLock(t *testing.T) {
 	}
 }
 
-// I-4: снятие между записью вариантов и публикацией — публикация ставит media.purge по записанным ключам с публичными
-// адресами; после него ни в pub, ни в priv нет <id>/, Purger получил адреса. Хук снимает объект изнутри Put: запись
-// под замком строки дала бы взаимную блокировку.
+// newIntx — операции владельца (снятие, открепление) на пуле владельца базы.
+func newIntx(t *testing.T, e *env) *intx.Tx {
+	t.Helper()
+	ins, err := river.NewClient(riverpgxv5.New(e.pools.Owner), queue.InsertConfig(mediatest.Discard()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, err := intx.New(intx.Deps{Clock: e.clk, Registry: e.reg, River: ins, PublicBaseURL: mediatest.PublicBaseURL,
+		Log: mediatest.Discard()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return x
+}
+
+// Ревью Task 9, I-1: попытка 1 записала варианты, публикация не прошла (отмена ctx), объект откатился в uploaded; пока
+// задача ждёт повтора, объект сняли, открепили или следующая попытка его отклонила. Строк вариантов нет — media.purge
+// обязан идти по всем ключам цели: после него ни одного <id>/ ни в pub, ни в priv.
+func TestEndAfterFailedAttempt(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		purpose string
+		end     string
+	}{
+		{"снятие_публичного", mediatest.PurposeImage, "take_down"},
+		{"открепление_закрытого", mediatest.PurposeImagePrivate, "detach"},
+		{"отклонение_повтором", mediatest.PurposeImage, "reject"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			e := newEnv(t, envOpt{})
+			x := newIntx(t, e)
+			oid := e.seed(t, c.purpose, media.StateUploaded, encPNG(t, 640, 480))
+			bucket := e.mem.Pub
+			if c.purpose == mediatest.PurposeImagePrivate {
+				bucket = e.mem.Priv
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			hook := func(_ context.Context, _ string, n int) {
+				if n == 2 {
+					cancel() // остановка воркера после записи вариантов, до публикации
+				}
+			}
+			e.pub.put, e.priv.put = hook, hook
+			if err := e.pw.Work(ctx, job(oid, 1)); err == nil {
+				t.Fatal("попытка с отменой — успех")
+			}
+			if o := e.object(t, oid); o.State != "uploaded" {
+				t.Fatalf("после неудачной попытки: %+v", o)
+			}
+			if got := keys(t, bucket, oid); len(got) != 2 {
+				t.Fatalf("варианты неудачной попытки: %v", got)
+			}
+			e.pub.put, e.priv.put = nil, nil
+			bg := context.Background()
+			switch c.end {
+			case "take_down":
+				if err := db.InTx(bg, e.pools.Owner, func(ctx context.Context, tx pgx.Tx) error {
+					return x.TakeDownInTx(ctx, tx, oid, media.Actor{StaffID: uuid.Must(uuid.NewV7()), Role: "moderator",
+						Label: "Модератор"}, "test.takedown")
+				}); err != nil {
+					t.Fatal(err)
+				}
+			case "detach":
+				var owner media.OwnerRef
+				if err := e.pools.Owner.QueryRow(bg, `SELECT owner_type, owner_id FROM media_objects WHERE id = $1`, oid).
+					Scan(&owner.Type, &owner.ID); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.InTx(bg, e.pools.Owner, func(ctx context.Context, tx pgx.Tx) error {
+					return x.DetachInTx(ctx, tx, oid, owner)
+				}); err != nil {
+					t.Fatal(err)
+				}
+			case "reject":
+				// перезаливка по живому билету: вторая попытка отклоняет too_large
+				big := bytes.Repeat([]byte{1}, mediatest.MaxBytes+1)
+				if err := e.mem.In.Put(bg, oid.String(), bytes.NewReader(big), blob.PutOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := e.pw.Work(bg, job(oid, 2)); err != nil {
+				t.Fatal(err)
+			}
+			e.runPurges(t, oid)
+			if got := append(keys(t, e.mem.Pub, oid), keys(t, e.mem.Priv, oid)...); len(got) != 0 {
+				t.Fatalf("после media.purge остались: %v", got)
+			}
+			if inExists(t, e.mem.In, oid) {
+				t.Fatal("входящее осталось")
+			}
+		})
+	}
+}
+
+// I-4: снятие посреди записи вариантов, и его media.purge (по всем ключам цели) успел исполниться до записи
+// следующего варианта — публикация ставит media.purge по записанным ключам с публичными адресами; после него ни в pub,
+// ни в priv нет <id>/, Purger получил адреса. Хук снимает объект изнутри Put: запись под замком строки дала бы
+// взаимную блокировку.
 func TestTakeDownBetweenWriteAndPublish(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOpt{})
@@ -304,7 +402,7 @@ func TestTakeDownBetweenWriteAndPublish(t *testing.T) {
 	oid := e.seed(t, mediatest.PurposeImage, media.StateUploaded, encPNG(t, 640, 480))
 	var took atomic.Bool
 	e.pub.put = func(ctx context.Context, _ string, n int) {
-		if n != 2 || took.Swap(true) {
+		if n != 1 || took.Swap(true) {
 			return
 		}
 		tctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -314,6 +412,11 @@ func TestTakeDownBetweenWriteAndPublish(t *testing.T) {
 				"test.takedown")
 		}); err != nil {
 			t.Errorf("снятие: %v", err)
+		}
+		// media.purge снятия исполнился (и завершился) раньше, чем записан следующий вариант
+		e.runPurges(t, oid)
+		if _, err := e.pools.Owner.Exec(ctx, `DELETE FROM river_job WHERE kind = 'media.purge'`); err != nil {
+			t.Error(err)
 		}
 	}
 	if err := e.pw.Work(ctx, job(oid, 1)); err != nil {
@@ -328,8 +431,8 @@ func TestTakeDownBetweenWriteAndPublish(t *testing.T) {
 	if n := count(t, e.pools.Owner, `SELECT count(*) FROM media_variants WHERE object_id = $1`, oid); n != 0 {
 		t.Fatalf("строк вариантов: %d", n)
 	}
-	if got := keys(t, e.mem.Pub, oid); len(got) != 2 {
-		t.Fatalf("до media.purge варианты записаны: %v", got)
+	if got := keys(t, e.mem.Pub, oid); len(got) != 1 {
+		t.Fatalf("после снятия записан ещё вариант: %v", got)
 	}
 	e.runPurges(t, oid)
 	if got := append(keys(t, e.mem.Pub, oid), keys(t, e.mem.Priv, oid)...); len(got) != 0 {
@@ -338,8 +441,10 @@ func TestTakeDownBetweenWriteAndPublish(t *testing.T) {
 	if inExists(t, e.mem.In, oid) {
 		t.Fatal("входящее осталось")
 	}
+	// адреса приходят и от снятия, и от публикации (повтор сброса безвреден) — сравнивается множество
 	urls := e.purger.got()
 	slices.Sort(urls)
+	urls = slices.Compact(urls)
 	want := []string{mediatest.PublicBaseURL + mediatest.VariantKey(oid, "full"), mediatest.PublicBaseURL + mediatest.VariantKey(oid, "thumb")}
 	if !slices.Equal(urls, want) {
 		t.Fatalf("Purger: %v, ждали %v", urls, want)
@@ -457,9 +562,11 @@ func TestCrashCountsAttempts(t *testing.T) {
 	ps := e.purgeJobs(t, oid)
 	var all []string
 	for _, a := range ps {
-		all = append(all, a.Bucket+":"+fmt.Sprint(a.Keys))
+		all = append(all, a.Bucket+":"+fmt.Sprint(a.Keys)+fmt.Sprint(a.PublicURLs))
 	}
-	want := []string{"in:[" + oid.String() + "]", "pub:[" + mediatest.VariantKey(oid, "thumb") + " " + mediatest.VariantKey(oid, "full") + "]"}
+	thumb, full := mediatest.VariantKey(oid, "thumb"), mediatest.VariantKey(oid, "full")
+	want := []string{"in:[" + oid.String() + "][]", "pub:[" + thumb + " " + full + "]" +
+		"[" + mediatest.PublicBaseURL + thumb + " " + mediatest.PublicBaseURL + full + "]"}
 	slices.Sort(all)
 	slices.Sort(want)
 	if !slices.Equal(all, want) {

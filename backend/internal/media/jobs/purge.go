@@ -47,6 +47,9 @@ func (w *PurgeWorker) Work(ctx context.Context, job *river.Job[PurgeArgs]) error
 	}
 	for _, k := range a.Keys {
 		if err := s.Delete(ctx, k); err != nil {
+			// негодный ключ отменяет всю задачу, и следующие ключи списка не удаляются: ключи формирует только наш код
+			// (<id> и <id>/<вариант>), так что сейчас это недостижимо; появится внешний источник ключей — удалять
+			// остальные и отменять в конце (ревью Task 9, m-2)
 			if errors.Is(err, blob.ErrBadKey) {
 				return river.JobCancel(fmt.Errorf("media/jobs: удаление из %s: %w", a.Bucket, err))
 			}
