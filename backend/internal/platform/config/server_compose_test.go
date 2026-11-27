@@ -3,6 +3,7 @@ package config_test
 import (
 	"io/fs"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +18,17 @@ import (
 // без Docker; подъём compose проверяет job server в .github/workflows/image.yml.
 
 type composeService struct {
+	Image       string            `yaml:"image"`
 	Command     []string          `yaml:"command"`
 	Environment map[string]string `yaml:"environment"`
 	DependsOn   map[string]struct {
 		Condition string `yaml:"condition"`
 	} `yaml:"depends_on"`
-	StopGracePeriod string `yaml:"stop_grace_period"`
+	StopGracePeriod string   `yaml:"stop_grace_period"`
+	Volumes         []string `yaml:"volumes"`
+	Healthcheck     *struct {
+		Test []string `yaml:"test"`
+	} `yaml:"healthcheck"`
 }
 
 // composeServices — сервисы deploy/server/compose.yaml (якоря и «<<» раскрывает yaml).
@@ -150,11 +156,11 @@ func envFile(t *testing.T, name string) map[string]string {
 // secretWords — слова ключей секретов и адресов (как в TestRenderYAMLSecretsNotInFile) плюс кольца ключей и ключи
 // хранилища (*_BLOB_S3_ACCESS_KEY, *_BLOB_DEV_SIGN_KEY: «_KEYS» их не ловит).
 var secretWords = []string{"DATABASE_URL", "SECRET", "PASSWORD", "USERNAME", "SMTP_ADDR", "MAIL_FROM", "ORIGIN",
-	"DEVICE_KEYS", "_SEEDS", "_KEYS", "ACCESS_KEY", "SIGN_KEY"}
+	"DEVICE_KEYS", "_SEEDS", "_KEYS", "ACCESS_KEY", "SIGN_KEY", "TOKEN"}
 
 // wholeSecretWords — ключи, у которых всё значение — секрет: в шаблоне только один плейсхолдер целиком.
 var wholeSecretWords = []string{"SECRET", "PASSWORD", "USERNAME", "DEVICE_KEYS", "_SEEDS", "_KEYS", "ACCESS_KEY",
-	"SIGN_KEY"}
+	"SIGN_KEY", "TOKEN"}
 
 // isPlaceholder — значение целиком один плейсхолдер <…>.
 func isPlaceholder(v string) bool {
@@ -235,6 +241,8 @@ func TestTemplateSecretProblem(t *testing.T) {
 		{"API_BLOB_DEV_SIGN_KEY", "<base64-32-байта>", false},
 		{"API_BLOB_DEV_SIGN_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", true},
 		{"API_BLOB_S3_BUCKET_IN", "wf-in", false},
+		{"GARAGE_ADMIN_TOKEN", "<base64-32-байта>", false},
+		{"GARAGE_ADMIN_TOKEN", "c2VjcmV0LXRva2Vu", true},
 	} {
 		if got := templateSecretProblem(c.k, c.v) != ""; got != c.bad {
 			t.Errorf("%s=%s: отказ %v, ждали %v", c.k, c.v, got, c.bad)
@@ -251,6 +259,8 @@ func TestServerEnvExamplesKnownKeys(t *testing.T) {
 		"admin-api.env.example": envKeys(t, "ADMIN_", &config.Admin{}, &config.Blob{}),
 		"worker.env.example":    workerKeys(t),
 		"migrate.env.example":   envKeys(t, "MIGRATOR_", &config.Migrator{}),
+		// не процесс бэкенда: секреты Garage для storage и storage-init (compose.yaml), оба обязательны
+		"storage.env.example": {"GARAGE_RPC_SECRET": {Required: true}, "GARAGE_ADMIN_TOKEN": {Required: true}},
 	} {
 		vals := envFile(t, "deploy/server/"+file)
 		for k, v := range vals {
@@ -290,5 +300,350 @@ func TestServerEnvExamplesBlobS3(t *testing.T) {
 		if _, err := config.LoadBlob(prefix, environ); err != nil {
 			t.Errorf("%s: ключи хранилища не пройдут проверку старта: %v", file, err)
 		}
+	}
+}
+
+// Хранилище своего сервера (план media, Task 12; спека §6.5, R1, R2, R5): сервис storage (Garage) и разовый
+// storage-init до процессов; Caddy — домен медиа (только чтение публичного бакета) и адрес хранилища (подписанные
+// загрузка и чтение закрытого). Поведение проверяет job server в .github/workflows/image.yml, здесь — файлы.
+
+// garageImage — образ Garage dev-хранилища (scripts/s3.sh, строка IMAGE=): сервер и тесты S3 — одна версия.
+func garageImage(t *testing.T) string {
+	t.Helper()
+	for l := range strings.Lines(readRepo(t, "scripts/s3.sh")) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(l), "IMAGE="); ok {
+			return v
+		}
+	}
+	t.Fatal("scripts/s3.sh: нет строки IMAGE=")
+	return ""
+}
+
+// garageSetting — значение ключа секции [section] deploy/server/storage/garage.toml (строка в кавычках).
+func garageSetting(t *testing.T, section, key string) string {
+	t.Helper()
+	cur := ""
+	for l := range strings.Lines(readRepo(t, "deploy/server/storage/garage.toml")) {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "[") {
+			cur = strings.Trim(l, "[]")
+			continue
+		}
+		k, v, ok := strings.Cut(l, "=")
+		if ok && cur == section && strings.TrimSpace(k) == key {
+			return strings.Trim(strings.TrimSpace(v), `"`)
+		}
+	}
+	t.Fatalf("storage/garage.toml: нет %s в [%s]", key, section)
+	return ""
+}
+
+// garagePort — порт из адреса привязки Garage ("[::]:3900" → "3900").
+func garagePort(t *testing.T, section, key string) string {
+	t.Helper()
+	addr := garageSetting(t, section, key)
+	i := strings.LastIndex(addr, ":")
+	if i < 0 {
+		t.Fatalf("storage/garage.toml: [%s] %s = %q без порта", section, key, addr)
+	}
+	return addr[i+1:]
+}
+
+// storageBuckets — имена бакетов (api.env.example; у admin-api и worker те же — TestServerComposeStorageInit).
+func storageBuckets(t *testing.T) (in, pub, priv string) {
+	t.Helper()
+	v := envFile(t, "deploy/server/api.env.example")
+	return v["API_BLOB_S3_BUCKET_IN"], v["API_BLOB_S3_BUCKET_PUB"], v["API_BLOB_S3_BUCKET_PRIV"]
+}
+
+func TestServerComposeStorageInit(t *testing.T) {
+	raw, err := fs.ReadFile(repoFS, "deploy/server/compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		Services map[string]composeService `yaml:"services"`
+		Volumes  map[string]any            `yaml:"volumes"`
+	}
+	if err := yaml.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("compose.yaml: %v", err)
+	}
+	storage, ok := c.Services["storage"]
+	if !ok {
+		t.Fatal("compose.yaml: нет сервиса storage")
+	}
+	if want := garageImage(t); storage.Image != want {
+		t.Errorf("storage: образ %q, ждали %q (как scripts/s3.sh)", storage.Image, want)
+	}
+	if storage.Healthcheck == nil || len(storage.Healthcheck.Test) == 0 {
+		t.Error("storage: нет healthcheck — storage-init не дождётся узла")
+	}
+	data := false
+	for _, v := range storage.Volumes {
+		data = data || strings.HasPrefix(v, "storage_data:")
+	}
+	if !data {
+		t.Errorf("storage: том storage_data не подключён (%q)", storage.Volumes)
+	}
+	if _, ok := c.Volumes["storage_data"]; !ok {
+		t.Error("compose.yaml: том storage_data не объявлен в volumes")
+	}
+	initSvc, ok := c.Services["storage-init"]
+	if !ok {
+		t.Fatal("compose.yaml: нет сервиса storage-init")
+	}
+	if cond := initSvc.DependsOn["storage"].Condition; cond != "service_healthy" {
+		t.Errorf("storage-init: depends_on.storage.condition = %q, ждали service_healthy", cond)
+	}
+	// точный тег: ни latest, ни плавающей линии вроде 8 или 8.23
+	for name, img := range map[string]string{"storage": storage.Image, "storage-init": initSvc.Image} {
+		_, tag, ok := strings.Cut(img, ":")
+		if !ok || strings.Count(strings.TrimPrefix(tag, "v"), ".") != 2 {
+			t.Errorf("%s: образ %q — нужен точный тег MAJOR.MINOR.PATCH", name, img)
+		}
+	}
+	s3 := "http://storage:" + garagePort(t, "s3_api", "api_bind_addr")
+	in, pub, priv := storageBuckets(t)
+	for svc, prefix := range map[string]string{"api": "API_", "admin-api": "ADMIN_", "worker": "WORKER_"} {
+		if cond := c.Services[svc].DependsOn["storage-init"].Condition; cond != "service_completed_successfully" {
+			t.Errorf("%s: depends_on.storage-init.condition = %q, ждали service_completed_successfully", svc, cond)
+		}
+		v := envFile(t, "deploy/server/"+svc+".env.example")
+		if got := v[prefix+"BLOB_S3_ENDPOINT"]; got != s3 {
+			t.Errorf("%s.env.example: %sBLOB_S3_ENDPOINT = %q, ждали внутренний адрес %q", svc, prefix, got, s3)
+		}
+		for k, want := range map[string]string{"IN": in, "PUB": pub, "PRIV": priv} {
+			if got := v[prefix+"BLOB_S3_BUCKET_"+k]; got != want || want == "" {
+				t.Errorf("%s.env.example: %sBLOB_S3_BUCKET_%s = %q, ждали %q (бакеты одни на все процессы)", svc,
+					prefix, k, got, want)
+			}
+		}
+	}
+}
+
+// caddyNode — строка Caddyfile (токены через пробел) и вложенный блок, если строка открывает «{».
+type caddyNode struct {
+	tokens   []string
+	children []*caddyNode
+}
+
+// caddySite — блок сайта deploy/server/Caddyfile с адресом addr (разбор строк: «{» в конце открывает блок, «}» —
+// закрывает; комментарии — с «#»).
+func caddySite(t *testing.T, addr string) *caddyNode {
+	t.Helper()
+	root := &caddyNode{}
+	stack := []*caddyNode{root}
+	for l := range strings.Lines(readRepo(t, "deploy/server/Caddyfile")) {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		if l == "}" {
+			if len(stack) == 1 {
+				t.Fatal("Caddyfile: лишняя «}»")
+			}
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		f := strings.Fields(l)
+		n := &caddyNode{tokens: f}
+		parent := stack[len(stack)-1]
+		parent.children = append(parent.children, n)
+		if f[len(f)-1] == "{" {
+			n.tokens = f[:len(f)-1]
+			stack = append(stack, n)
+		}
+	}
+	if len(stack) != 1 {
+		t.Fatal("Caddyfile: незакрытый блок")
+	}
+	for _, n := range root.children {
+		if len(n.tokens) == 1 && n.tokens[0] == addr {
+			return n
+		}
+	}
+	t.Fatalf("Caddyfile: нет сайта %s", addr)
+	return nil
+}
+
+// caddyMatchers — именованные матчеры сайта: имя → строки условий (однострочный «@m path …» или блок «@m { … }»).
+func caddyMatchers(site *caddyNode) map[string][][]string {
+	out := map[string][][]string{}
+	for _, n := range site.children {
+		if len(n.tokens) == 0 || !strings.HasPrefix(n.tokens[0], "@") {
+			continue
+		}
+		if len(n.tokens) > 1 {
+			out[n.tokens[0]] = append(out[n.tokens[0]], n.tokens[1:])
+		}
+		for _, c := range n.children {
+			out[n.tokens[0]] = append(out[n.tokens[0]], c.tokens)
+		}
+	}
+	return out
+}
+
+// caddyProxy — reverse_proxy сайта: матчер (свой или ближайшего handle/route; пусто — без матчера), апстримы, блок.
+type caddyProxy struct {
+	matcher   string
+	upstreams []string
+	node      *caddyNode
+}
+
+func caddyProxies(site *caddyNode) []caddyProxy {
+	var out []caddyProxy
+	var walk func(n *caddyNode, matcher string)
+	walk = func(n *caddyNode, matcher string) {
+		for _, c := range n.children {
+			if len(c.tokens) == 0 {
+				continue
+			}
+			m := matcher
+			args := c.tokens[1:]
+			if len(args) > 0 && strings.HasPrefix(args[0], "@") {
+				m = args[0]
+				args = args[1:]
+			}
+			switch c.tokens[0] {
+			case "reverse_proxy":
+				p := caddyProxy{matcher: m, upstreams: args, node: c}
+				for _, s := range c.children {
+					if len(s.tokens) > 1 && s.tokens[0] == "to" {
+						p.upstreams = append(p.upstreams, s.tokens[1:]...)
+					}
+				}
+				out = append(out, p)
+			case "handle", "route":
+				walk(c, m)
+			}
+		}
+	}
+	walk(site, "")
+	return out
+}
+
+// caddyFallback — ответ блока handle без матчера (без него необработанный запрос получил бы пустой 200).
+func caddyFallback(site *caddyNode) string {
+	for _, n := range site.children {
+		if len(n.tokens) == 1 && n.tokens[0] == "handle" {
+			for _, c := range n.children {
+				if len(c.tokens) > 0 && c.tokens[0] == "respond" {
+					return strings.Join(c.tokens[1:], " ")
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// matcherLine — аргументы условия матчера с началом kind (например, method) или nil.
+func matcherLine(lines [][]string, kind ...string) []string {
+	for _, l := range lines {
+		if len(l) >= len(kind) && slices.Equal(l[:len(kind)], kind) {
+			return l[len(kind):]
+		}
+	}
+	return nil
+}
+
+// Спека §6.5 (I-7), R5: домен медиа (может стоять за CDN) — только GET/HEAD к публичному бакету через сайт Garage;
+// корень и пути входящего и закрытого бакетов не проксируются ни одним методом; прочее — 405; nosniff.
+func TestServerCaddyMediaDomainReadOnly(t *testing.T) {
+	site := caddySite(t, "{$WF_MEDIA_DOMAIN}")
+	in, pub, priv := storageBuckets(t)
+	nosniff := false
+	for _, n := range site.children {
+		nosniff = nosniff || slices.Equal(n.tokens, []string{"header", "X-Content-Type-Options", "nosniff"})
+	}
+	if !nosniff {
+		t.Error("домен медиа: нет «header X-Content-Type-Options nosniff» на уровне сайта")
+	}
+	ms := caddyMatchers(site)
+	proxies := caddyProxies(site)
+	if len(proxies) == 0 {
+		t.Fatal("домен медиа: нет reverse_proxy")
+	}
+	web := "http://storage:" + garagePort(t, "s3_web", "bind_addr")
+	host := pub + garageSetting(t, "s3_web", "root_domain")
+	for _, p := range proxies {
+		if p.matcher == "" {
+			t.Error("домен медиа: reverse_proxy без матчера — проксировался бы любой метод и путь")
+			continue
+		}
+		if m := matcherLine(ms[p.matcher], "method"); !slices.Equal(m, []string{"GET", "HEAD"}) {
+			t.Errorf("домен медиа: матчер %s — method %q, ждали ровно GET HEAD", p.matcher, m)
+		}
+		hidden := matcherLine(ms[p.matcher], "not", "path")
+		for _, want := range []string{"/", "/" + in, "/" + in + "/*", "/" + priv, "/" + priv + "/*"} {
+			if !slices.Contains(hidden, want) {
+				t.Errorf("домен медиа: матчер %s не исключает путь %s — он ушёл бы в сайт бакета", p.matcher, want)
+			}
+		}
+		if !slices.Equal(p.upstreams, []string{web}) {
+			t.Errorf("домен медиа: апстрим %q, ждали web-порт Garage %s", p.upstreams, web)
+		}
+		var hostUp []string
+		for _, c := range p.node.children {
+			if len(c.tokens) > 1 && c.tokens[0] == "header_up" && strings.EqualFold(c.tokens[1], "Host") {
+				hostUp = c.tokens[2:]
+			}
+		}
+		if !slices.Equal(hostUp, []string{host}) {
+			t.Errorf("домен медиа: header_up Host %q, ждали сайт бакета %s", hostUp, host)
+		}
+	}
+	if fb := caddyFallback(site); fb != "405" {
+		t.Errorf("домен медиа: handle без матчера отвечает %q, ждали 405", fb)
+	}
+}
+
+// R5, R9: адрес хранилища (без CDN) — подпись SigV4 включает Host, поэтому Caddy его не подменяет (Caddy ≥ 2.11
+// подменяет Host только у HTTPS-апстрима — апстрим внутри сети по http://); наружу — только подписанная загрузка POST
+// в бакет входящих (и OPTIONS CORS) и подписанное чтение GET/HEAD закрытого; листинг и прочее — 404.
+func TestServerCaddyStoragePreservesHost(t *testing.T) {
+	site := caddySite(t, "{$WF_STORAGE_DOMAIN}")
+	in, _, priv := storageBuckets(t)
+	var walk func(n *caddyNode)
+	walk = func(n *caddyNode) {
+		for _, c := range n.children {
+			if len(c.tokens) > 1 && c.tokens[0] == "header_up" &&
+				strings.EqualFold(strings.TrimLeft(c.tokens[1], "+-"), "Host") {
+				t.Errorf("адрес хранилища: %q — подмена Host ломает подпись SigV4", strings.Join(c.tokens, " "))
+			}
+			walk(c)
+		}
+	}
+	walk(site)
+	ms := caddyMatchers(site)
+	proxies := caddyProxies(site)
+	if len(proxies) == 0 {
+		t.Fatal("адрес хранилища: нет reverse_proxy")
+	}
+	s3 := "http://storage:" + garagePort(t, "s3_api", "api_bind_addr")
+	seen := map[string]bool{}
+	for _, p := range proxies {
+		if !slices.Equal(p.upstreams, []string{s3}) {
+			t.Errorf("адрес хранилища: апстрим %q, ждали S3-порт Garage по http:// %s", p.upstreams, s3)
+		}
+		lines := ms[p.matcher]
+		path, method := matcherLine(lines, "path"), matcherLine(lines, "method")
+		switch {
+		case p.matcher == "":
+			t.Error("адрес хранилища: reverse_proxy без матчера — наружу ушли бы листинг и любые методы")
+		case slices.Equal(path, []string{"/" + in}) && slices.Equal(method, []string{"POST", "OPTIONS"}):
+			seen["upload"] = true
+		case slices.Equal(path, []string{"/" + priv + "/*"}) && slices.Equal(method, []string{"GET", "HEAD"}) &&
+			slices.Equal(matcherLine(lines, "query"), []string{"X-Amz-Signature=*"}):
+			seen["read"] = true
+		default:
+			t.Errorf("адрес хранилища: reverse_proxy под матчером %s (%q) — разрешены только POST/OPTIONS /%s и "+
+				"подписанные GET/HEAD /%s/*", p.matcher, lines, in, priv)
+		}
+	}
+	if !seen["upload"] || !seen["read"] {
+		t.Errorf("адрес хранилища: нет маршрута загрузки (%v) или чтения закрытого (%v)", seen["upload"], seen["read"])
+	}
+	if fb := caddyFallback(site); fb != "404" {
+		t.Errorf("адрес хранилища: handle без матчера отвечает %q, ждали 404", fb)
 	}
 }

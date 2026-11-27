@@ -69,6 +69,7 @@ jobs:
             -e API_LEGAL_DOCUMENTS='terms=0.1.0|https://example.com/legal/terms,privacy=0.1.0|https://example.com/legal/privacy' \
             -e API_DATABASE_URL='postgres://api:api@127.0.0.1:15432/wf?sslmode=disable' \
             -e MIGRATOR_DATABASE_URL='postgres://migrator:migrator@127.0.0.1:15432/wf?sslmode=disable' \
+            -e API_BLOB_BACKEND=none \
             wf-backend migrate-then-api
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:18080/healthz; then
@@ -104,6 +105,7 @@ jobs:
             -e ADMIN_MAIL_SMTP_TLS=none \
             -e 'ADMIN_MAIL_FROM=WF <noreply@wf.local>' \
             -e ADMIN_STATIC_DIR=/app/admin \
+            -e ADMIN_BLOB_BACKEND=none \
             wf-backend admin-api
           up=
           for _ in $(seq 1 30); do
@@ -155,7 +157,7 @@ jobs:
       - name: env из шаблонов
         run: |
           set_kv() { sed -i "/^$2=/d" "$1"; printf '%s=%s\n' "$2" "$3" >>"$1"; }
-          for s in api admin-api worker migrate; do cp "$s.env.example" "$s.env"; done
+          for s in api admin-api worker migrate storage; do cp "$s.env.example" "$s.env"; done
           cp .env.example .env
           ring=$(openssl rand -base64 32)
           set_kv migrate.env MIGRATOR_DATABASE_URL 'postgres://migrator:migrator@db:5432/wf?sslmode=disable'
@@ -184,6 +186,20 @@ jobs:
           set_kv .env WF_API_DOMAIN api.wf.test
           set_kv .env WF_ADMIN_DOMAIN admin.wf.test
           set_kv .env WF_ACME_EMAIL ci@wf.test
+          # хранилище: секреты Garage и ключи процессов — одноразовые в формате Garage (README, «Хранилище файлов»),
+          # внешние адреса — домены CI
+          set_kv storage.env GARAGE_RPC_SECRET "$(openssl rand -hex 32)"
+          set_kv storage.env GARAGE_ADMIN_TOKEN "$(openssl rand -base64 32)"
+          for f in api.env:API admin-api.env:ADMIN worker.env:WORKER; do
+            file=${f%%:*} p=${f#*:}
+            set_kv "$file" "${p}_BLOB_S3_PUBLIC_ENDPOINT" https://storage.wf.test
+            set_kv "$file" "${p}_MEDIA_PUBLIC_BASE_URL" https://media.wf.test/
+            set_kv "$file" "${p}_BLOB_S3_ACCESS_KEY" "GK$(openssl rand -hex 12)"
+            set_kv "$file" "${p}_BLOB_S3_SECRET_KEY" "$(openssl rand -hex 32)"
+          done
+          set_kv .env WF_MEDIA_DOMAIN media.wf.test
+          set_kv .env WF_STORAGE_DOMAIN storage.wf.test
+          set_kv .env WF_WEB_ORIGIN https://wf.test
       # прод-файл держит встроенный режим выключенным: config на шаблоне .env.example, с оверлеем CI — тоже
       - name: compose config — API_EMBED_WORKER у api = "false"
         run: |
@@ -241,8 +257,72 @@ jobs:
             done
             [ -n "$ok" ] || fail "ratelimit.cleanup не дошла до completed за 120 с"
           }
+          # Хранилище (спека media §6.5, R3, R5): загрузка подписанным POST (ключ api) через адрес хранилища, копия в
+          # wf-pub ключом воркера — как публикует вариант воркер, чтение через домен медиа; запреты обоих сайтов;
+          # повторный storage-init — без ошибок. Подпись POST — SigV4 политики (как blob/s3.PresignUpload).
+          storage_check() {
+            local c=(-sS --cacert root.crt --resolve media.wf.test:443:127.0.0.1 --resolve storage.wf.test:443:127.0.0.1)
+            local key=ci-check/hello.txt payload='wf storage ci' h
+            # hc <curl-аргументы> — HTTP-код ответа; обрыв соединения — 000, а не выход bash -e мимо fail
+            hc() { curl "${c[@]}" -o /dev/null -w '%{http_code}' "$@" || true; }
+            hmac() { printf '%s' "$2" | openssl dgst -sha256 -mac HMAC -macopt "$1" -r | cut -d' ' -f1; }
+            local ak sk d amz exp cred policy k sig
+            ak=$(sed -n 's/^API_BLOB_S3_ACCESS_KEY=//p' api.env)
+            sk=$(sed -n 's/^API_BLOB_S3_SECRET_KEY=//p' api.env)
+            d=$(date -u +%Y%m%d) amz=$(date -u +%Y%m%dT%H%M%SZ) exp=$(date -u -d '+10 min' +%Y-%m-%dT%H:%M:%SZ)
+            cred="$ak/$d/garage/s3/aws4_request"
+            policy=$(printf '{"expiration":"%s","conditions":[{"bucket":"wf-in"},{"key":"%s"},{"Content-Type":"text/plain"},%s,{"x-amz-algorithm":"AWS4-HMAC-SHA256"},{"x-amz-credential":"%s"},{"x-amz-date":"%s"}]}' \
+              "$exp" "$key" "[\"content-length-range\",${#payload},${#payload}]" "$cred" "$amz" | base64 -w0)
+            k=$(hmac "key:AWS4$sk" "$d")
+            for part in garage s3 aws4_request; do k=$(hmac "hexkey:$k" "$part"); done
+            sig=$(hmac "hexkey:$k" "$policy")
+            printf '%s' "$payload" >hello.txt
+            h=$(hc --form-string "key=$key" --form-string "policy=$policy" \
+              --form-string 'x-amz-algorithm=AWS4-HMAC-SHA256' --form-string "x-amz-credential=$cred" \
+              --form-string "x-amz-date=$amz" --form-string "x-amz-signature=$sig" \
+              --form-string 'Content-Type=text/plain' -F 'file=@hello.txt;type=text/plain' https://storage.wf.test/wf-in)
+            [[ $h == 2?? ]] || fail "POST загрузки в wf-in через адрес хранилища: $h"
+            # публикация: чтение из wf-in и запись в wf-pub ключом воркера изнутри сети wf (S3-порт наружу закрыт)
+            docker compose "${files[@]}" run --rm --no-deps -T --entrypoint sh storage-init -c '
+              set -eu
+              cfg() { printf "user = \"%s:%s\"\n" "$WORKER_BLOB_S3_ACCESS_KEY" "$WORKER_BLOB_S3_SECRET_KEY"; }
+              cfg | curl -fsS -K - --aws-sigv4 aws:amz:garage:s3 -o /tmp/f http://storage:3900/wf-in/ci-check/hello.txt
+              cfg | curl -fsS -K - --aws-sigv4 aws:amz:garage:s3 -X PUT --data-binary @/tmp/f \
+                -H "Content-Type: text/plain" -H "Cache-Control: public, max-age=86400" \
+                http://storage:3900/wf-pub/ci-check/hello.txt' || fail "копия в wf-pub ключом воркера"
+            # домен медиа: тело, nosniff, Cache-Control и тип из метаданных объекта
+            h=$(curl "${c[@]}" -f -D - -o got.txt "https://media.wf.test/$key") || fail "GET /$key через домен медиа"
+            [ "$(cat got.txt)" = "$payload" ] || fail "GET /$key через домен медиа: другое тело"
+            for want in '^x-content-type-options: nosniff' '^cache-control: public, max-age=86400' \
+              '^content-type: text/plain'; do
+              grep -qi "$want" <<<"$h" || fail "GET /$key через домен медиа: нет заголовка $want"
+            done
+            [ "$(hc -I "https://media.wf.test/$key")" = 200 ] || fail "HEAD /$key через домен медиа"
+            for m in DELETE PUT POST; do
+              h=$(hc -X "$m" "https://media.wf.test/$key")
+              [ "$h" = 405 ] || fail "$m /$key через домен медиа: $h, ждали 405"
+            done
+            # входящие и закрытые через домен медиа не видны, даже существующий файл wf-in
+            for p in / "/wf-in/$key" "/wf-priv/$key"; do
+              h=$(hc "https://media.wf.test$p")
+              [ "$h" = 404 ] || fail "GET $p через домен медиа: $h, ждали 404"
+            done
+            # адрес хранилища: ни листинга, ни чтения без подписи, ни чужих методов
+            for p in / /wf-in "/wf-in/$key" "/wf-priv/$key" "/wf-pub/$key"; do
+              h=$(hc "https://storage.wf.test$p")
+              [ "$h" = 404 ] || fail "GET $p через адрес хранилища: $h, ждали 404"
+            done
+            h=$(hc -X DELETE "https://storage.wf.test/wf-in")
+            [ "$h" = 404 ] || fail "DELETE /wf-in через адрес хранилища: $h, ждали 404"
+            # CORS загрузки с веба: предзапрос проходит до Garage и получает origin из WF_WEB_ORIGIN
+            h=$(curl "${c[@]}" -D - -o /dev/null -X OPTIONS -H 'Origin: https://wf.test' \
+              -H 'Access-Control-Request-Method: POST' https://storage.wf.test/wf-in) || h=
+            grep -qi '^access-control-allow-origin: https://wf.test' <<<"$h" || fail "CORS предзапрос POST /wf-in"
+            docker compose "${files[@]}" run --rm --no-deps -T storage-init || fail "повторный storage-init"
+          }
           run=worker files=(-f compose.yaml -f compose.ci.yaml)
           check worker
+          storage_check
           docker compose "${files[@]}" down -v
           run=embed files=(-f compose.yaml -f compose.ci.yaml -f compose.ci-embed.yaml)
           if docker compose "${files[@]}" config --services | grep -qx worker; then fail "сервис worker не выключен"; fi

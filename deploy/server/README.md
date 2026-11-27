@@ -9,10 +9,13 @@
 | `api` | публичный API, `:8080` внутри сети; `API_EMBED_WORKER=false` задан в `compose.yaml` явно |
 | `admin-api` | API сотрудников и собранная админка (`ADMIN_STATIC_DIR=/app/admin`), `:8081` внутри сети |
 | `worker` | River, relay outbox, периодика; журнал старта — `воркер запущен` |
-| `caddy` | TLS (ACME) и маршрут: `WF_API_DOMAIN` → `api`, `WF_ADMIN_DOMAIN` → `admin-api`; наружу — только 80/443 |
+| `storage` | хранилище файлов Garage (S3), том `storage_data`; порты только внутри сети `wf` (раздел «Хранилище файлов») |
+| `storage-init` | разовая настройка хранилища (`storage/init.sh`): бакеты, ключи процессов, права; процессы стартуют после его успешного выхода |
+| `caddy` | TLS (ACME) и маршрут: `WF_API_DOMAIN` → `api`, `WF_ADMIN_DOMAIN` → `admin-api`, `WF_MEDIA_DOMAIN` и `WF_STORAGE_DOMAIN` → `storage`; наружу — только 80/443 |
 
 Файлы: `compose.yaml` (прод), `Caddyfile`, `.env.example` (переменные compose), `<сервис>.env.example` (переменные
-бинарников), `compose.ci.yaml` и `compose.ci-embed.yaml` — только проверка (CI и локально).
+бинарников), `storage.env.example` (секреты Garage), `storage/garage.toml` и `storage/init.sh` (хранилище),
+`compose.ci.yaml` и `compose.ci-embed.yaml` — только проверка (CI и локально).
 
 ## Встроенный режим — только стенд
 
@@ -23,14 +26,18 @@
 ## Подготовка сервера
 
 1. Docker Engine с плагином Compose v2.
-2. DNS: записи A доменов API и админки — на адрес сервера. AAAA — только с IPv6 в сети `wf` (раздел «Клиентский IP»).
+2. DNS: записи A доменов API, админки, медиа и хранилища — на адрес сервера (домен медиа может смотреть на CDN —
+   раздел «Хранилище файлов»). AAAA — только с IPv6 в сети `wf` (раздел «Клиентский IP»).
 3. Открыты входящие 80/tcp (ACME HTTP-01 и редирект на HTTPS), 443/tcp и 443/udp (HTTP/3). Остальные порты наружу не
    нужны: `api`, `admin-api`, `worker` и база (если на сервере) не публикуются.
 4. Каталог `deploy/server` из того же коммита, что образ.
 
 ## Переменные
 
-- `.env` ← `.env.example`: `WF_IMAGE` (образ с тегом релиза), `WF_API_DOMAIN`, `WF_ADMIN_DOMAIN`, `WF_ACME_EMAIL`.
+- `.env` ← `.env.example`: `WF_IMAGE` (образ с тегом релиза), `WF_API_DOMAIN`, `WF_ADMIN_DOMAIN`, `WF_ACME_EMAIL`,
+  `WF_MEDIA_DOMAIN`, `WF_STORAGE_DOMAIN`, `WF_WEB_ORIGIN` (раздел «Хранилище файлов»).
+- `storage.env` ← `storage.env.example`: `GARAGE_RPC_SECRET`, `GARAGE_ADMIN_TOKEN` — только сервисам `storage` и
+  `storage-init`.
 - `migrate.env`, `api.env`, `admin-api.env`, `worker.env` ← свои `*.env.example`; описание ключей —
   `backend/.env.example`. Рабочие `*.env` под `.gitignore` (`deploy/server/*.env`): в них секреты.
 - Ключи — `openssl rand -base64 32` (у `ADMIN_STAFF_SECRET_KEYS` — base64url); кольца — через запятую, первый текущий,
@@ -124,6 +131,115 @@ docker compose up -d
 `pg_dump` по расписанию (cron хоста) с выносом копии с сервера, например:
 `docker compose exec -T db pg_dump -U postgres -Fc wf > wf-$(date +%F).dump`; восстановление проверять.
 
+## Хранилище файлов
+
+Картинки и файлы (спека `docs/superpowers/specs/2026-11-18-media-design.md` §6) — S3-совместимое хранилище **Garage**
+(`dxflrs/garage:v2.6.0`, один узел, том `storage_data`). Лицензия Garage — **AGPLv3**: он работает отдельным сервисом
+из официального образа без изменений, наш код с ним не линкуется (план media R1); вопрос лицензии — к юристу до
+запуска в прод. Порты Garage наружу не публикуются: S3 (`3900`), сайт публичного бакета (`3902`) и admin API (`3903`)
+— только в сети `wf`.
+
+### Ключи и права
+
+Бакеты: `wf-in` (входящие загрузки), `wf-pub` (публичные варианты), `wf-priv` (закрытые). Имена зашиты в `Caddyfile`,
+`storage/init.sh` и шаблонах `*.env.example` — в `*.env` их не менять (`storage-init` откажет). Права (R2; `write`
+включает удаление, `read` — листинг; `owner` — ни у кого):
+
+| Ключ процесса | `wf-in` | `wf-pub` | `wf-priv` |
+| --- | --- | --- | --- |
+| api (`API_BLOB_S3_*`) | read, write | — | read |
+| admin-api (`ADMIN_BLOB_S3_*`) | read, write | — | read |
+| worker (`WORKER_BLOB_S3_*`) | read, write | read, write | read, write |
+
+Ключи процессов генерирует оператор — у каждого процесса своя пара, в формате ключей Garage:
+
+```sh
+printf 'GK%s\n' "$(openssl rand -hex 12)"   # *_BLOB_S3_ACCESS_KEY
+openssl rand -hex 32                        # *_BLOB_S3_SECRET_KEY
+```
+
+`storage-init` импортирует их в Garage (`ImportKey` admin API) — единственный источник ключей остаётся в `*.env`
+процессов. Документация Garage предупреждает не выдумывать идентификаторы ключей: случайные 12 байт после `GK` — тот
+же формат, что генерирует сам Garage. Секреты Garage — в `storage.env`: `GARAGE_RPC_SECRET` (`openssl rand -hex 32`),
+`GARAGE_ADMIN_TOKEN` (`openssl rand -base64 32`; токен admin API есть только у `storage` и `storage-init`). Lifecycle
+и CORS `storage-init` ставит через admin API — ключа с правом `owner` нет ни у кого.
+
+**Ротация ключа процесса:** новая пара в его `*.env` → `docker compose up -d` (`storage-init` импортирует новый ключ,
+процесс перезапускается) → старый удалить: `docker compose exec storage /garage key delete --yes <старый GK…>`.
+Удалённый идентификатор повторно не импортируется — каждый раз новая пара. Сменить только секрет при прежнем
+`*_ACCESS_KEY` нельзя: `storage-init` откажет «уже есть с другим секретом».
+
+### Первый старт
+
+1. `storage.env` и ключи в `api.env`, `admin-api.env`, `worker.env` (выше); адреса там же:
+   `*_BLOB_S3_PUBLIC_ENDPOINT=https://<WF_STORAGE_DOMAIN>`, `*_MEDIA_PUBLIC_BASE_URL=https://<WF_MEDIA_DOMAIN>/`;
+   внутренний `*_BLOB_S3_ENDPOINT=http://storage:3900` — из шаблона.
+2. В `.env`: `WF_MEDIA_DOMAIN`, `WF_STORAGE_DOMAIN`, `WF_WEB_ORIGIN` (origin веба без «/» в конце — CORS загрузки).
+3. `docker compose up -d`: `storage` → `storage-init` (слой узла, бакеты, ключи, права, сайт `wf-pub`, lifecycle `wf-in`
+   1 сутки, CORS `wf-in`) → `api`, `admin-api`, `worker`. Журнал — `docker compose logs storage-init`, последняя строка
+   `готово`. Упал (плейсхолдер вместо ключа, чужой секрет, имя бакета, origin) — процессы не стартуют, причина — в
+   журнале; исправить `*.env` и повторить `up -d`.
+
+`storage-init` идёт при каждом `up` и безопасен повторно: недостающее создаёт, права приводит к таблице выше
+(лишние снимает). Ёмкость узла в слое — условная (на одном узле не ограничивает), задаётся только при первом старте.
+
+### Домены
+
+| Домен | Что пропускает Caddy | CDN |
+| --- | --- | --- |
+| `WF_MEDIA_DOMAIN` (`*_MEDIA_PUBLIC_BASE_URL`) | только `GET`/`HEAD` → сайт бакета `wf-pub`; корень, `/wf-in…`, `/wf-priv…` — 404; прочие методы — 405; `X-Content-Type-Options: nosniff` | можно (держит копии публичного) |
+| `WF_STORAGE_DOMAIN` (`*_BLOB_S3_PUBLIC_ENDPOINT`) | `POST`/`OPTIONS /wf-in` (подписанная загрузка и предзапрос CORS), `GET`/`HEAD /wf-priv/*` с подписью в query; прочее — 404 | **нельзя**: подпись SigV4 включает Host и путь, через CDN пошло бы закрытое |
+
+`Cache-Control` и `Content-Type` публичных вариантов — метаданные объекта (пишет воркер), Garage отдаёт их сам.
+Проверка обоих доменов — job `server` в `.github/workflows/image.yml` (функция `storage_check`).
+
+### Диск и память
+
+- **Диск.** Garage на одном узле без реплик: заполненный том — отказ загрузок и публикации. Тревога при заполнении
+  > 80 % (спека §3.11) — cron хоста, например раз в 10 минут:
+  `df --output=pcent "$(docker volume inspect -f '{{.Mountpoint}}' wf_storage_data)" | tail -n 1` → число > 80 —
+  уведомление оператору (расширить диск, проверить чистку `media`). В наблюдаемость — когда она появится.
+- **Память воркера.** Обработка картинки 40 Мп берёт до ≈ 0,8 ГиБ на исполнителя (спайк плана media: формула спеки §3.3
+  занижает пик в 1,4–2,4 раза). При `WORKER_QUEUE_MEDIA=2` (по умолчанию) воркеру нужно **≥ 2 ГиБ**; меньше —
+  `WORKER_QUEUE_MEDIA=1`.
+
+### Бэкап тома
+
+Реплик нет — копия тома единственная страховка. Копии хранилища и базы согласуются по времени (m10): **сначала база,
+потом хранилище**. Хранилище новее базы — лишние файлы без строк (их уберёт сверка); хранилище старее базы — строки
+`ready` без файлов (битые картинки), этого избегаем. Cron хоста, например раз в сутки, из `deploy/server`:
+
+```sh
+# 1. база: Neon — запомнить время T (точка восстановления по времени); база на сервере — pg_dump (раздел «База»)
+# 2. согласованный снимок метаданных Garage (LMDB): meta/snapshots/<время UTC>, хранятся два последних
+docker compose exec -T storage /garage meta snapshot
+# 3. архив тома без живого файла метаданных — и вынести копию с сервера
+tar -C "$(docker volume inspect -f '{{.Mountpoint}}' wf_storage_data)" --exclude=./meta/db.lmdb \
+  -czf /srv/backup/storage-$(date -u +%Y-%m-%dT%H%MZ).tgz .
+```
+
+Снимок метаданных Garage делает и сам каждые 6 часов (`metadata_auto_snapshot_interval` в `storage/garage.toml`);
+`metadata_fsync` и `data_fsync` включены — без них LMDB на одном узле портится при нечистом выключении.
+
+### Восстановление
+
+1. `docker compose stop` (тома не трогать). Новый сервер — `docker compose create storage` (создаст том).
+2. Распаковать архив в том и поставить снимок метаданных на место базы Garage:
+
+```sh
+v=$(docker volume inspect -f '{{.Mountpoint}}' wf_storage_data)
+tar -C "$v" -xzf storage-<время>.tgz
+mv "$v/meta/db.lmdb" "$v/meta/db.lmdb.bak" 2>/dev/null || true
+cp -r "$v/meta/snapshots/<последний>" "$v/meta/db.lmdb"
+```
+
+3. `docker compose up -d storage`, затем `docker compose exec storage /garage repair -a --yes tables` (доки Garage,
+   «Recovering from failures»).
+4. База — на момент **не позже** копии хранилища (Neon — восстановление ветки на время T шага 1 бэкапа).
+5. `docker compose up -d`, затем сверка: `docker compose run --rm --no-deps worker worker media reconcile` — отчёт
+   «строка без файла / файл без строки» (только id и ключи); с `--fix` удаляются файлы без строк. Строки `ready` без
+   файлов команда не правит — разбирает оператор.
+
 ## Проверка локально
 
 Docker Desktop; проект — только свой `-p wf-srv`, команды — из `deploy/server`. Образ:
@@ -131,8 +247,9 @@ Docker Desktop; проект — только свой `-p wf-srv`, команд
 
 1. Рабочие `*.env` и `.env` из шаблонов со значениями CI — как шаг «env из шаблонов» job `server` в
    `.github/workflows/image.yml` (строки к `db` под ролями из `deploy/dev/initdb/20_wf.sql`, одно кольцо identity у api
-   и worker, SMTP `127.0.0.1:1` с TLS `none`, `WF_IMAGE=wf-backend`, домены `api.wf.test`, `admin.wf.test`); в `.env`
-   — свободные порты `WF_HTTP_PORT`, `WF_HTTPS_PORT` (80/443 хоста могут быть заняты).
+   и worker, SMTP `127.0.0.1:1` с TLS `none`, `WF_IMAGE=wf-backend`, домены `api.wf.test`, `admin.wf.test`,
+   `media.wf.test`, `storage.wf.test`, одноразовые ключи хранилища и `storage.env`); в `.env` — свободные порты
+   `WF_HTTP_PORT`, `WF_HTTPS_PORT` (80/443 хоста могут быть заняты).
 2. Флаг: `docker compose -p wf-srv --env-file .env.example -f compose.yaml config --format json` →
    `services.api.environment.API_EMBED_WORKER` строго `"false"` (то же с `-f compose.yaml -f compose.ci.yaml`).
 3. Подъём: `docker compose -p wf-srv -f compose.yaml -f compose.ci.yaml up -d --wait`.
@@ -144,7 +261,12 @@ Docker Desktop; проект — только свой `-p wf-srv`, команд
 5. Фон: `docker compose -p wf-srv logs worker` содержит `воркер запущен`; периодика —
    `docker compose -p wf-srv exec -T db psql -U postgres -d wf -tAc "SELECT count(*) FROM river_job WHERE kind =
    'ratelimit.cleanup' AND state = 'completed'"` ≥ 1 (до 120 с).
-6. `docker compose -p wf-srv -f compose.yaml -f compose.ci.yaml down -v` — только свой проект.
+6. Хранилище — тело функции `storage_check` job `server` (порт `WF_HTTPS_PORT` в `--resolve` и адресах): подписанный
+   `POST` в `wf-in` через `storage.wf.test`, копия в `wf-pub` ключом воркера, `GET` через `media.wf.test` с `nosniff`
+   и `Cache-Control`, запреты (405/404) обоих доменов, предзапрос CORS, повторный `storage-init`. В Git Bash —
+   `-o NUL` вместо `-o /dev/null` (curl Windows при `MSYS_NO_PATHCONV=1` не открывает `/dev/null`).
+7. `docker compose -p wf-srv -f compose.yaml -f compose.ci.yaml down -v` — только свой проект; удалить рабочие
+   `*.env`, `.env`, `root.crt`, `hello.txt`, `got.txt`.
 
 Встроенный режим (как на стенде) — те же шаги с `-f compose.yaml -f compose.ci.yaml -f compose.ci-embed.yaml`:
 сервиса `worker` нет, `воркер запущен` (с `"component":"worker"`) — в журнале `api`.
