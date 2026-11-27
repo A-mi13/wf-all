@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"wf/backend/internal/platform/blob"
 	"wf/backend/internal/platform/blob/blobtest"
@@ -373,7 +374,13 @@ func TestFSEmptyDirsNoConflict(t *testing.T) {
 func TestFSPruneRaceConflict(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newFS(t)
+	// stall — свой срок ожидания: поломка, при которой Put «a» не доходит до фиксации или не возвращается, роняет
+	// тест сразу, а не висит до -timeout пакета
+	const stall = 10 * time.Second
 	reached, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock) // после t.Fatal Put «a» не остаётся висеть на release
 	var faults atomic.Int32
 	blob.SetFSFault(s, func() error {
 		if faults.Add(1) == 1 { // первый до фиксации — Put «a»: ждёт, пока «a/x» закончит
@@ -391,11 +398,24 @@ func TestFSPruneRaceConflict(t *testing.T) {
 		go func() {
 			errA <- s.Put(ctx, "a", strings.NewReader("file"), blob.PutOptions{ContentType: "text/plain"})
 		}()
-		<-reached // Put «a» убрал пустой «a» и стоит перед фиксацией
+		// Put «a» убрал пустой «a» и стоит перед фиксацией
+		select {
+		case <-reached:
+		case err := <-errA:
+			t.Fatalf("Put «a» вернулся (%v), не дойдя до точки фиксации — гонку не воспроизвести", err)
+		case <-time.After(stall):
+			t.Fatalf("Put «a» за %s не дошёл до точки фиксации", stall)
+		}
 	})
 	errAX := s.Put(ctx, "a/x", strings.NewReader("under"), blob.PutOptions{ContentType: "text/plain"})
-	close(release)
-	errs := map[string]error{"a": <-errA, "a/x": errAX}
+	unblock()
+	var gotA error
+	select {
+	case gotA = <-errA:
+	case <-time.After(stall):
+		t.Fatalf("Put «a» не вернулся за %s после фиксации «a/x»", stall)
+	}
+	errs := map[string]error{"a": gotA, "a/x": errAX}
 	if (errs["a"] == nil) == (errs["a/x"] == nil) {
 		t.Fatalf("ждали ровно один успех: %v", errs)
 	}
