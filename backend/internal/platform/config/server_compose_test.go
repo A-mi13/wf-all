@@ -147,12 +147,14 @@ func envFile(t *testing.T, name string) map[string]string {
 	return out
 }
 
-// secretWords — слова ключей секретов и адресов (как в TestRenderYAMLSecretsNotInFile) плюс кольца ключей.
+// secretWords — слова ключей секретов и адресов (как в TestRenderYAMLSecretsNotInFile) плюс кольца ключей и ключи
+// хранилища (*_BLOB_S3_ACCESS_KEY, *_BLOB_DEV_SIGN_KEY: «_KEYS» их не ловит).
 var secretWords = []string{"DATABASE_URL", "SECRET", "PASSWORD", "USERNAME", "SMTP_ADDR", "MAIL_FROM", "ORIGIN",
-	"DEVICE_KEYS", "_SEEDS", "_KEYS"}
+	"DEVICE_KEYS", "_SEEDS", "_KEYS", "ACCESS_KEY", "SIGN_KEY"}
 
 // wholeSecretWords — ключи, у которых всё значение — секрет: в шаблоне только один плейсхолдер целиком.
-var wholeSecretWords = []string{"SECRET", "PASSWORD", "USERNAME", "DEVICE_KEYS", "_SEEDS", "_KEYS"}
+var wholeSecretWords = []string{"SECRET", "PASSWORD", "USERNAME", "DEVICE_KEYS", "_SEEDS", "_KEYS", "ACCESS_KEY",
+	"SIGN_KEY"}
 
 // isPlaceholder — значение целиком один плейсхолдер <…>.
 func isPlaceholder(v string) bool {
@@ -227,6 +229,12 @@ func TestTemplateSecretProblem(t *testing.T) {
 		{"ADMIN_ORIGIN", "https://<admin-домен>", false},
 		{"ADMIN_ORIGIN", "https://admin.example", true},
 		{"API_IDENTITY_TOTP_ISSUER", "WF", false},
+		{"API_BLOB_S3_ACCESS_KEY", "<ключ-доступа-api>", false},
+		{"API_BLOB_S3_ACCESS_KEY", "GK31c2f218a2e44f485b94239e", true}, // gitleaks:allow — нарочно похоже на ключ: страж должен его поймать
+		{"WORKER_BLOB_S3_ACCESS_KEY", "GK<id>", true},
+		{"API_BLOB_DEV_SIGN_KEY", "<base64-32-байта>", false},
+		{"API_BLOB_DEV_SIGN_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", true},
+		{"API_BLOB_S3_BUCKET_IN", "wf-in", false},
 	} {
 		if got := templateSecretProblem(c.k, c.v) != ""; got != c.bad {
 			t.Errorf("%s=%s: отказ %v, ждали %v", c.k, c.v, got, c.bad)
@@ -239,8 +247,8 @@ func TestTemplateSecretProblem(t *testing.T) {
 // обязательный ключ (required/notEmpty) процесса есть в шаблоне, иначе сервис на сервере не стартует.
 func TestServerEnvExamplesKnownKeys(t *testing.T) {
 	for file, keys := range map[string]map[string]env.FieldParams{
-		"api.env.example":       envKeys(t, "API_", &config.API{}),
-		"admin-api.env.example": envKeys(t, "ADMIN_", &config.Admin{}),
+		"api.env.example":       envKeys(t, "API_", &config.API{}, &config.Blob{}),
+		"admin-api.env.example": envKeys(t, "ADMIN_", &config.Admin{}, &config.Blob{}),
 		"worker.env.example":    workerKeys(t),
 		"migrate.env.example":   envKeys(t, "MIGRATOR_", &config.Migrator{}),
 	} {
@@ -263,5 +271,24 @@ func TestServerEnvExamplesKnownKeys(t *testing.T) {
 	}
 	if v, ok := envFile(t, "deploy/server/api.env.example")["API_EMBED_WORKER"]; ok && v != "false" {
 		t.Errorf("api.env.example: API_EMBED_WORKER=%s — встроенный воркер в проде запрещён", v)
+	}
+}
+
+// Спека media §6.4, §6.5: свой сервер — хранилище S3 у всех трёх процессов (fs запрещён в прод-образе, none — только
+// стенд); шаблоны с плейсхолдерами проходят ту же проверку, что процесс на старте в прод-образе.
+func TestServerEnvExamplesBlobS3(t *testing.T) {
+	for file, prefix := range map[string]string{"api.env.example": "API_", "admin-api.env.example": "ADMIN_",
+		"worker.env.example": "WORKER_"} {
+		vals := envFile(t, "deploy/server/"+file)
+		if vals[prefix+"BLOB_BACKEND"] != "s3" {
+			t.Errorf("%s: %sBLOB_BACKEND = %q, ждали s3", file, prefix, vals[prefix+"BLOB_BACKEND"])
+		}
+		environ := []string{config.BuildKindVar + "=" + config.BuildKindProd}
+		for k, v := range vals {
+			environ = append(environ, k+"="+v)
+		}
+		if _, err := config.LoadBlob(prefix, environ); err != nil {
+			t.Errorf("%s: ключи хранилища не пройдут проверку старта: %v", file, err)
+		}
 	}
 }

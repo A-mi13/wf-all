@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"go.yaml.in/yaml/v3"
+
+	"wf/backend/internal/platform/config"
 )
 
 // e2eTag — тег сборки тестовых портов условий капитанства (cmd/{api,admin-api}/captaincy_e2e.go, спека identity §10.3,
@@ -126,4 +128,27 @@ func sprintAll(cmds []any) string {
 		}
 	}
 	return b.String()
+}
+
+// R15, спека media §6.3: финальная стадия прод-образа задаёт признак, по которому config отвергает
+// *_BLOB_BACKEND=fs. Строка — после последнего FROM (в стадиях сборки она бы до образа не дошла); имя и значение — те
+// же, что читает config.LoadBlob.
+func TestDockerfileSetsBuildKind(t *testing.T) {
+	want := "ENV " + config.BuildKindVar + "=" + config.BuildKindProd
+	lines := strings.Split(readRepo(t, "backend/Dockerfile"), "\n")
+	last := -1
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "FROM ") {
+			last = i
+		}
+	}
+	if last < 0 {
+		t.Fatal("backend/Dockerfile: нет FROM — страж проверяет не тот файл")
+	}
+	for _, l := range lines[last+1:] {
+		if strings.TrimSpace(l) == want {
+			return
+		}
+	}
+	t.Errorf("backend/Dockerfile: после последнего FROM нет строки %q — прод-образ примет *_BLOB_BACKEND=fs", want)
 }

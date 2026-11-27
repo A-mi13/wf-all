@@ -88,6 +88,10 @@ services:
       # сервис worker (deploy/server). WORKER_* ниже читает только встроенный воркер (страж TestRenderYAMLEmbeddedWorker).
       - key: API_EMBED_WORKER
         value: 'true'
+      # хранилища файлов на стенде нет (спека media §6.4, R14): media отвечает 503 media.unavailable, прочее живо;
+      # прочие *_BLOB_* и *_MEDIA_PUBLIC_BASE_URL при none не нужны (страж TestRenderYAMLBlobNone)
+      - key: API_BLOB_BACKEND
+        value: none
       # остановка: дренаж 8 с + relay 2 + River мягко 8 + жёстко 5 = 23 с из бюджета 25 с (config.APIEmbeddedStopTime)
       - key: API_SHUTDOWN_TIMEOUT
         value: 8s
@@ -113,6 +117,9 @@ services:
       # импорт командой оператора (docs/deploy-dev.md); WORKER_QUEUE_IMPORT поэтому не задаётся
       - key: WORKER_GEO_IMPORT_ENABLED
         value: 'false'
+      # встроенный воркер — тоже без хранилища (R14)
+      - key: WORKER_BLOB_BACKEND
+        value: none
       # письма игрокам — только по TLS; Resend на Render free — STARTTLS-порт 2587
       - key: WORKER_MAIL_SMTP_TLS
         value: mandatory
@@ -192,6 +199,9 @@ services:
       # 5 писем staff + тикер + HTTP (+1 LISTEN River вне пула); сумма пулов стенда — против max_connections Neon (TestRenderYAMLPools)
       - key: ADMIN_DB_MAX_CONNS
         value: '10'
+      # хранилища файлов на стенде нет (спека media §6.4, R14)
+      - key: ADMIN_BLOB_BACKEND
+        value: none
       # письма — только по TLS (R8); Resend на Render free — только STARTTLS-порт 2587 (25/465/587 закрыты)
       - key: ADMIN_MAIL_SMTP_TLS
         value: mandatory

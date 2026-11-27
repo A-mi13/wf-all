@@ -34,5 +34,9 @@ paths:
 - Шаблоны своего сервера — `deploy/server/{api,admin-api,worker,migrate}.env.example` и `.env.example` (переменные
   compose); рабочие `deploy/server/*.env` — под `.gitignore`. Новый обязательный ключ бинарника — и в шаблон сервиса
   (страж `TestServerEnvExamplesKnownKeys`: ключи известны config, обязательные есть, секреты — `<…>`).
+- Хранилище файлов — `*_BLOB_*` и `*_MEDIA_PUBLIC_BASE_URL` у `API_`, `ADMIN_`, `WORKER_` читает отдельный
+  `config.LoadBlob(prefix, environ)` (как `Mail` у воркера); `*_BLOB_BACKEND` обязателен: `fs` (dev, e2e: один
+  `FS_ROOT` и один `*_BLOB_DEV_SIGN_KEY` у трёх процессов — `scripts/env-keys.sh` выдаёт им общий ключ), `s3` (свой
+  сервер), `none` (стенд). `fs` при `WF_BUILD_KIND=prod` (финальная стадия `backend/Dockerfile`) — отказ старта.
 - Ключи сотрудников есть только у admin-api (`ADMIN_STAFF_SECRET_KEYS`); воркеру их не заводить (решение D3).
 - Во фронт-сборку попадают только публичные значения (`VITE_*`, `NEXT_PUBLIC_*`).

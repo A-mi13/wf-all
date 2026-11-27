@@ -91,3 +91,27 @@ test('кольцо identity у обоих одинаковое — без пре
   const { stderr } = run(`API_IDENTITY_SECRET_KEYS=${ring}\nWORKER_IDENTITY_SECRET_KEYS=${ring}\n`);
   assert.equal(stderr, '');
 });
+
+// Ключ подписи путей fs (спека media §6.4, R4): admin-api подписывает ссылки на закрытое, api их проверяет — у трёх
+// процессов одно значение, своё, не равное кольцу identity.
+test('ключ подписи fs: api, admin-api и воркер получают одно значение, отдельное от кольца identity', () => {
+  const { env, stdout } = run(
+    `API_IDENTITY_SECRET_KEYS=${PH}\nAPI_BLOB_DEV_SIGN_KEY=${PH}\nADMIN_BLOB_DEV_SIGN_KEY=${PH}\n` +
+      `WORKER_IDENTITY_SECRET_KEYS=${PH}\nWORKER_BLOB_DEV_SIGN_KEY=${PH}\n`,
+  );
+  assert.equal(Buffer.from(env.API_BLOB_DEV_SIGN_KEY, 'base64').length, 32);
+  assert.equal(env.ADMIN_BLOB_DEV_SIGN_KEY, env.API_BLOB_DEV_SIGN_KEY);
+  assert.equal(env.WORKER_BLOB_DEV_SIGN_KEY, env.API_BLOB_DEV_SIGN_KEY);
+  assert.equal(env.WORKER_IDENTITY_SECRET_KEYS, env.API_IDENTITY_SECRET_KEYS);
+  assert.notEqual(env.API_BLOB_DEV_SIGN_KEY, env.API_IDENTITY_SECRET_KEYS);
+  assert.ok(!stdout.includes(env.API_BLOB_DEV_SIGN_KEY));
+});
+
+test('ключ подписи fs уже заполнен у одного — остальные получают то же значение', () => {
+  const key = 'Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmE='; // gitleaks:allow — фиктивный ключ (base64 «foobarbazqux…»)
+  const { env } = run(
+    `API_BLOB_DEV_SIGN_KEY=${PH}\nADMIN_BLOB_DEV_SIGN_KEY=${key}\nWORKER_BLOB_DEV_SIGN_KEY=${PH}\n`,
+  );
+  assert.equal(env.API_BLOB_DEV_SIGN_KEY, key);
+  assert.equal(env.WORKER_BLOB_DEV_SIGN_KEY, key);
+});

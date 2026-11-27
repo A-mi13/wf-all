@@ -533,6 +533,39 @@ describe('окружение e2e', () => {
     expect(sh).toMatch(/MSYS2_ENV_CONV_EXCL="[^"]*WF_E2E_API_DATABASE_URL/);
   });
 
+  // Хранилище прогона (спека media §6.3, §6.4): fs у api, воркера и каждого admin-api — один каталог .tools/e2e/blob,
+  // адрес публичного api (там /_blob и /_media), один ключ подписи (admin-api подписывает ссылки, api проверяет);
+  // dev-значения *_BLOB_* из backend/.env не доходят.
+  it('хранилище e2e: fs с общим каталогом, адресом публичного api и одним ключом подписи у трёх процессов', () => {
+    stubApi();
+    vi.stubEnv('WF_E2E_WORKER_DATABASE_URL', WORKER_DB);
+    vi.stubEnv('WF_E2E_ADMIN_DATABASE_URL', DB_URL);
+    vi.stubEnv('WF_E2E_STAFF_SECRET_KEYS', KEY);
+    vi.stubEnv('API_BLOB_FS_ROOT', '../.tools/blob');
+    vi.stubEnv('WORKER_BLOB_DEV_SIGN_KEY', 'dev-key');
+    const envs = {
+      API_: apiEnv(),
+      WORKER_: workerEnv(),
+      ...Object.fromEntries(
+        Object.values(PAIRS).map((p) => [`ADMIN_${p.api}`, adminApiEnv(p)] as const),
+      ),
+    };
+    const keys = new Set<string>();
+    for (const [name, env] of Object.entries(envs)) {
+      const prefix = name.startsWith('ADMIN_') ? 'ADMIN_' : name;
+      expect(env, name).toMatchObject({
+        [`${prefix}BLOB_BACKEND`]: 'fs',
+        [`${prefix}BLOB_FS_ROOT`]: path.join(ROOT, '.tools', 'e2e', 'blob'),
+        [`${prefix}BLOB_FS_BASE_URL`]: PUBLIC_API_URL,
+      });
+      const key = env[`${prefix}BLOB_DEV_SIGN_KEY`] ?? '';
+      // как blob.MinDevSignKeyLen: base64url не короче 32 байт
+      expect(Buffer.from(key, 'base64url').length, name).toBeGreaterThanOrEqual(32);
+      keys.add(key);
+    }
+    expect(keys.size).toBe(1);
+  });
+
   it('имя cookie — как httpapi/admin.CookieName: __Host- только с Secure', () => {
     expect(cookieName(PAIRS.chromium)).toBe('__Host-wf_admin_session');
     expect(cookieName(PAIRS.webkit)).toBe('wf_admin_session');
