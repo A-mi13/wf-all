@@ -161,7 +161,10 @@ func TestMediaE2EAdmin(t *testing.T) {
 			t.Errorf("%s: %d %s", name, code, b)
 		}
 	}
-	// ровно 1 КиБ — можно (граница)
+	if n := e.count(`SELECT count(*) FROM media_objects`); n != 0 {
+		t.Fatalf("отказы создали объектов: %d", n)
+	}
+	// ровно 1 КиБ — можно (граница); объект границы убирается — дальше счёт идёт по id
 	body, ct = fieldsForm(t, [][2]string{{"purpose", mediatest.PurposeImage}, {"owner_id", owner.String()},
 		{"content_type", "image/png" + strings.Repeat(" ", 1<<10-len("image/png"))}}, data)
 	if code, _, b := e.send(http.MethodPost, "/_e2e/media/direct", tok, body, ct, "", true); code != http.StatusCreated {
@@ -169,9 +172,6 @@ func TestMediaE2EAdmin(t *testing.T) {
 	}
 	e.exec(`DELETE FROM river_job WHERE kind = 'media.process'`)
 	e.exec(`DELETE FROM media_objects`)
-	if n := e.count(`SELECT count(*) FROM media_objects`); n != 0 {
-		t.Fatalf("отказы создали объектов: %d", n)
-	}
 
 	key := uuid.NewString()
 	var ids []uuid.UUID
