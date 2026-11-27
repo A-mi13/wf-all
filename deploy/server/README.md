@@ -101,9 +101,12 @@ docker compose up -d
 `storage-init`:
 
 ```sh
-docker compose up --no-deps migrate                   # без -d: ждёт выхода, код 0 — миграции применены
-docker compose up -d --no-deps api admin-api worker caddy
+docker compose run --rm --no-deps migrate &&         # код выхода — код миграции; не 0 — дальше не идём
+  docker compose up -d --no-deps api admin-api worker caddy
 ```
+
+Именно `run`, а не `up --no-deps migrate`: `up` без `--exit-code-from` возвращает 0 и при упавшей миграции (код
+контейнера он не передаёт), и сервисы поднялись бы поверх неё.
 
 Картинки до починки хранилища не работают (загрузки и обработка — ошибки с повтором); после починки — обычный
 `docker compose up -d`. Остановка: окно

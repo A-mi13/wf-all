@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"wf/backend/internal/platform/blob"
@@ -362,6 +363,53 @@ func TestFSEmptyDirsNoConflict(t *testing.T) {
 	put(t, s, "e", "file", "text/plain")
 	if data, _ := read(t, s, "e"); data != "file" {
 		t.Fatalf("e: %q", data)
+	}
+}
+
+// Гонка с уборкой пустого каталога (ревью R2, m3): Put «a/x» создал каталог «a», и до его временного файла Put «a»
+// убрал этот каталог как пустой. Ровно один успех, проигравший — ErrConflict, а не «нет такого файла».
+// Детерминированно: Put «a» запускается из крючка Put «a/x» между каталогом и временным файлом и стоит перед своей
+// фиксацией, пока «a/x» не закончит.
+func TestFSPruneRaceConflict(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newFS(t)
+	reached, release := make(chan struct{}), make(chan struct{})
+	var faults atomic.Int32
+	blob.SetFSFault(s, func() error {
+		if faults.Add(1) == 1 { // первый до фиксации — Put «a»: ждёт, пока «a/x» закончит
+			close(reached)
+			<-release
+		}
+		return nil
+	})
+	var first atomic.Bool // не sync.Once: Put «a» зовёт крючок, пока первый вызов ещё ждёт
+	errA := make(chan error, 1)
+	blob.SetFSBeforeCreate(s, func() {
+		if first.Swap(true) {
+			return
+		}
+		go func() {
+			errA <- s.Put(ctx, "a", strings.NewReader("file"), blob.PutOptions{ContentType: "text/plain"})
+		}()
+		<-reached // Put «a» убрал пустой «a» и стоит перед фиксацией
+	})
+	errAX := s.Put(ctx, "a/x", strings.NewReader("under"), blob.PutOptions{ContentType: "text/plain"})
+	close(release)
+	errs := map[string]error{"a": <-errA, "a/x": errAX}
+	if (errs["a"] == nil) == (errs["a/x"] == nil) {
+		t.Fatalf("ждали ровно один успех: %v", errs)
+	}
+	for key, err := range errs {
+		if err == nil {
+			if data, _ := read(t, s, key); data != map[string]string{"a": "file", "a/x": "under"}[key] {
+				t.Fatalf("%q: %q", key, data)
+			}
+			continue
+		}
+		if !errors.Is(err, blob.ErrConflict) {
+			t.Errorf("проигравший %q: %v, ждали ErrConflict", key, err)
+		}
+		notFound(t, s, key)
 	}
 }
 

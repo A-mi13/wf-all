@@ -29,6 +29,8 @@ type FS struct {
 	root string
 	// fault — сбой перед фиксацией, после записи временного файла (только тесты).
 	fault func() error
+	// beforeCreate — между созданием каталога и временного файла (только тесты: гонка с pruning).
+	beforeCreate func()
 }
 
 // metaLenDigits — длина хвоста файла объекта: длина meta десятичными цифрами с ведущими нулями.
@@ -81,7 +83,7 @@ func (s *FS) Put(_ context.Context, key string, r io.Reader, o PutOptions) error
 		return err
 	}
 	// объект целиком — во временный файл до любых изменений: ошибка чтения r ничего не трогает
-	tmp, err := writeTemp(filepath.Dir(s.path(key)), r, o)
+	tmp, err := s.writeTemp(filepath.Dir(s.path(key)), r, o)
 	if err != nil {
 		err = s.conflictOr(key, err)
 		s.pruneDirs(key) // каталоги, созданные под оборванную запись
@@ -233,8 +235,8 @@ func (s *FS) Delete(_ context.Context, key string) error {
 
 // pruneDirs убирает опустевшие каталоги над ключом снизу вверх до корня obj: syscall.Rmdir не трогает ни непустой
 // каталог, ни файл (ключ-префикс «a» при Delete «a/b»), поэтому объекты и временные файлы параллельного Put целы.
-// Параллельный Put ключа под тем же каталогом, успевший создать каталог, но не временный файл, получит ошибку
-// записи — повтор её снимает.
+// Параллельный Put ключа под тем же каталогом, успевший создать каталог, но не временный файл, создаёт его заново
+// (createTemp).
 func (s *FS) pruneDirs(key string) {
 	root := filepath.Join(s.root, "obj")
 	for dir := filepath.Dir(s.path(key)); dir != root && strings.HasPrefix(dir, root); dir = filepath.Dir(dir) {
@@ -335,13 +337,37 @@ func removeFile(path string) error {
 
 // writeTemp пишет объект (данные из r, meta с их размером, длина meta) во временный файл в каталоге dir (та же ФС,
 // что у назначения, — для Rename).
-func writeTemp(dir string, r io.Reader, o PutOptions) (string, error) {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("blob: %w", err)
+// createTries — попытки создать каталог и временный файл (createTemp).
+const createTries = 3
+
+// createTemp создаёт каталог dir и в нём временный файл. Каталог между MkdirAll и CreateTemp может исчезнуть: его как
+// пустой убрал параллельный Put ключа-префикса (checkConflict) или Delete соседа (pruneDirs). Тогда — повтор: каталог
+// создаётся заново, и спор решает фиксация (rename поверх каталога или каталог на месте файла → ErrConflict у
+// проигравшего), а не случайная ошибка «нет пути». Тело r здесь ещё не прочитано — повтор безопасен.
+func (s *FS) createTemp(dir string) (*os.File, error) {
+	var err error
+	for range createTries {
+		if err = os.MkdirAll(dir, 0o750); err != nil {
+			break // файл на месте каталога и прочее — не гонка с уборкой
+		}
+		if s.beforeCreate != nil {
+			s.beforeCreate()
+		}
+		var f *os.File
+		if f, err = os.CreateTemp(dir, ".tmp-*"); err == nil {
+			return f, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
 	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	return nil, fmt.Errorf("blob: %w", err)
+}
+
+func (s *FS) writeTemp(dir string, r io.Reader, o PutOptions) (string, error) {
+	tmp, err := s.createTemp(dir)
 	if err != nil {
-		return "", fmt.Errorf("blob: %w", err)
+		return "", err
 	}
 	err = func() error {
 		n, err := io.Copy(tmp, r)
