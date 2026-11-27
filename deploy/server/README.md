@@ -15,7 +15,8 @@
 
 Файлы: `compose.yaml` (прод), `Caddyfile`, `.env.example` (переменные compose), `<сервис>.env.example` (переменные
 бинарников), `storage.env.example` (секреты Garage), `storage/garage.toml` и `storage/init.sh` (хранилище),
-`compose.ci.yaml` и `compose.ci-embed.yaml` — только проверка (CI и локально).
+`compose.ci.yaml` и `compose.ci-embed.yaml` — только проверка (CI и локально), `ci-check.sh` — скрипт шага подъёма
+и исполнения фона job `server` (`.github/workflows/image.yml`).
 
 ## Встроенный режим — только стенд
 
@@ -218,7 +219,7 @@ openssl rand -hex 32                        # *_BLOB_S3_SECRET_KEY
 | `WF_STORAGE_DOMAIN` (`*_BLOB_S3_PUBLIC_ENDPOINT`) | `POST`/`OPTIONS /wf-in` (подписанная загрузка и предзапрос CORS), `GET`/`HEAD /wf-priv/*` с подписью в query; прочее — 404 | **нельзя**: подпись SigV4 включает Host и путь, через CDN пошло бы закрытое |
 
 `Cache-Control` и `Content-Type` публичных вариантов — метаданные объекта (пишет воркер), Garage отдаёт их сам.
-Проверка обоих доменов — job `server` в `.github/workflows/image.yml` (функция `storage_check`).
+Проверка обоих доменов — job `server` в `.github/workflows/image.yml` (функция `storage_check` в `ci-check.sh`).
 
 ### Диск и память
 
@@ -294,7 +295,7 @@ Docker Desktop; проект — только свой `-p wf-srv`, команд
 5. Фон: `docker compose -p wf-srv logs worker` содержит `воркер запущен`; периодика —
    `docker compose -p wf-srv exec -T db psql -U postgres -d wf -tAc "SELECT count(*) FROM river_job WHERE kind =
    'ratelimit.cleanup' AND state = 'completed'"` ≥ 1 (до 120 с).
-6. Хранилище — тело функции `storage_check` job `server` (порт `WF_HTTPS_PORT` в `--resolve`, адресах и в `host:`
+6. Хранилище — тело функции `storage_check` в `ci-check.sh` (порт `WF_HTTPS_PORT` в `--resolve`, адресах и в `host:`
    подписи GET): подписанный `POST` в `wf-in` через `storage.wf.test` с CORS на ответе, копии в `wf-pub` и `wf-priv`
    ключом воркера, `GET` через `media.wf.test` с `nosniff` и `Cache-Control`, подписанный `GET` закрытого через
    `storage.wf.test` (и отказ с подделанной подписью), запреты (405/404) обоих доменов, предзапрос CORS, повторный
