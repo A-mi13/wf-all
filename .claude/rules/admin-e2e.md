@@ -17,6 +17,9 @@ paths:
   одноразовый ключ — base64url (Git Bash переписывает значение с ведущим «/» в путь Windows; `WF_E2E_*` — и в
   `MSYS2_ENV_CONV_EXCL`); страж `e2e/env.ts`: негодный ключ или адрес базы — ошибка до старта без значения. С проектом
   `prod` — сборка админки (`vite build` без tsc, шаг стенда) и `check-admin-dist.mjs` → Playwright.
+- Нагрузка (пользователь, 27.11.2026): скрипт ставит `GOMAXPROCS=4`, если он не задан, — `go build` шага 4 и
+  admin-api, api, воркер прогона не занимают все ядра; Playwright — `workers: 1`. dev-Garage (`scripts/s3.sh`) —
+  `--cpus 1 --memory 512m`.
 - Серверы и порты — `e2e/env.ts`: Mailpit → admin-api → Vite; пара Chromium 5174/18181 с `__Host-` cookie, пара WebKit
   5175/18182 с `ADMIN_COOKIE_SECURE=false`, `prod` — admin-api 18183 без Vite (отдаёт `apps/admin/dist`,
   `ADMIN_STATIC_DIR` только у него, с настоящим `staticCSP`, Chromium, `__Host-` cookie); Mailpit 18026/11026. Ключ и

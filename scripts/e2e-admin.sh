@@ -38,6 +38,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Нагрузка на машину разработчика (пользователь, 27.11.2026): Go-сборки шага 4 (`go build -p` по умолчанию = GOMAXPROCS)
+# и потоки admin-api, api и воркера прогона — не больше 4 ядер; больше — явным GOMAXPROCS=N в окружении.
+export GOMAXPROCS="${GOMAXPROCS:-4}"
+
 die() { echo "e2e-admin: $*" >&2; exit 1; }
 
 LOCAL_PORT="${WF_PG_PORT:-15432}"

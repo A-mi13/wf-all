@@ -44,7 +44,10 @@ up() {
   need_docker
   if ! exists; then
     docker volume create "$NAME" >/dev/null
+    # Лимиты dev-Garage (пользователь, 27.11.2026): ему хватает доли ядра и сотни МБ; уже созданный контейнер —
+    # docker update --cpus 1 --memory 512m --memory-swap 512m wf-s3-dev
     docker create --name "$NAME" -e "GARAGE_RPC_SECRET=$(openssl rand -hex 32)" \
+      --cpus 1 --memory 512m --memory-swap 512m \
       -p "127.0.0.1:$PORT:3900" -p "127.0.0.1:$WEB_PORT:3902" \
       --mount "type=volume,src=$NAME,dst=/var/lib/garage" "$IMAGE" >/dev/null
     docker cp scripts/s3/garage.toml "$NAME:/etc/garage.toml"
