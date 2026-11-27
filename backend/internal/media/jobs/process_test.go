@@ -527,6 +527,34 @@ func endedDuringWrite(t *testing.T, attempt int) {
 	}
 }
 
+// Ревью R1, m1: последняя попытка упала на записи, а другой исполнитель уже опубликовал объект (ready) — отклонения
+// нет, и журнал не пишет «объект отклонён».
+func TestLastAttemptOnReadyNotRejected(t *testing.T) {
+	t.Parallel()
+	rl := &recLog{}
+	e := newEnv(t, envOpt{log: rl})
+	ctx := context.Background()
+	oid := e.seed(t, mediatest.PurposeImage, media.StateUploaded, encPNG(t, 640, 480))
+	errPut := errors.New("сбой хранилища")
+	e.pub.before = func(ctx context.Context, _ string, _ int) error {
+		// «другой исполнитель опубликовал» — строка ready, пока этот пишет варианты
+		if _, err := e.pools.Owner.Exec(ctx, `UPDATE media_objects SET state = 'ready', ready_at = $2, version = version + 1
+			WHERE id = $1`, oid, at); err != nil {
+			t.Error(err)
+		}
+		return errPut
+	}
+	if err := e.pw.Work(ctx, job(oid, 10)); !errors.Is(err, errPut) {
+		t.Fatalf("Work: %v, ждали сбой записи", err)
+	}
+	if o := e.object(t, oid); o.State != "ready" {
+		t.Fatalf("объект: %+v", o)
+	}
+	if got := rl.got(); slices.Contains(got, "WARN "+lastAttemptRejected) || !slices.Contains(got, "WARN "+lastAttemptEnded) {
+		t.Fatalf("журнал: %q", got)
+	}
+}
+
 // Сообщения журнала последней попытки (process.go fail).
 const (
 	lastAttemptRejected = "media: обработка не удалась, объект отклонён"

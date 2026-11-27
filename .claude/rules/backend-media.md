@@ -71,8 +71,9 @@ paths:
   `SumDeclaredBytesByUser(since = now − 24 ч, строго)` + заявка > 200 МиБ → `ErrQuotaExceeded` → `InsertObject` +
   `InsertUpload` (`POST`, `max_bytes` = заявка, срок now + 15 мин в целых секундах); после коммита — `Limiter.Add`
   (`WithoutCancel`; сбой — ERROR, билет выдан): отказы счёт не тратят (`TestNewUploadRefusalKeepsDayCount`). Лимитер —
-  не под замком (второе соединение в tx грозит исчерпанием пула), поэтому параллельные «начать» у границы превышают
-  суточный счёт не больше чем на 4 (незавершённых ≤ 5) — принято. Пределы — из `Deps.Rules` (cmd/api передаёт
+  не под замком (второе соединение в tx грозит исчерпанием пула): `Over` — до транзакции, `Add` — после коммита, замок
+  пускает ≤ 5 незавершённых, поэтому параллельные «начать» у границы превышают суточный счёт на практике ≤ 4; строгой
+  границы нет — это число параллельных «начать», если игрок одновременно «завершает» прежние билеты — принято. Пределы — из `Deps.Rules` (cmd/api передаёт
   `API_RATE_LIMITS` поверх `DefaultRules`, nil — умолчания; класса нет — отказ `New`; `media_bytes_day.user=off` — объём
   не считается; `TestNewUploadRulesOverride`, `TestNewMediaRateRules`); admin-api — умолчания (сотрудник их не
   считает). Вес у `Limiter` нет (`TestLimiterHasNoWeight`) — объём только запросом, под тем же замком
@@ -126,16 +127,19 @@ paths:
   Входящего нет (`ErrNotFound`) — перечитать строку: не `uploaded|processing` — успех без изменений (сняли, открепили,
   опубликовал другой), иначе обычная ошибка. Паника исполнителя оставляет `processing` — засчитывается как падение.
   Последняя попытка: WARN «объект отклонён» — только если отклонил этот вызов (`rejectFailed` → `rejected`); застал
-  конечное или строки нет — «уже не в обработке — не отклонялся».
+  конечное, `ready` (опубликовал другой) или строки нет — «уже не в обработке — не отклонялся»
+  (`TestLastAttemptOnReadyNotRejected`).
 - **`media.purge` (§3.8):** `Delete` каждого ключа (идемпотентно), затем `Purger.Purge(PublicURLs)`; сбой — повтор
   (25 попыток); неизвестный бакет и `blob.ErrBadKey` — `JobCancel`.
 - **Lottie** (`internal/lottie`, Task 8): схема-разрешение LAC 1.0.1 в `allow.go` (дата сверки в комментарии; новые
   поля — только со сверкой со схемой), текстовые слои отклоняются целиком, слоты не допускаются, вшитые картинки —
   через `ImageFunc` после обхода; отказы — `ErrUnsafe`/`ErrCorrupt`; выход совместим с lottie-web (`st`, `td`, `hasMask`).
   Доработка до мержа (27.11): `w`/`h` — число в диапазоне float64, у слоя обязательны `ip`/`op`/`ks`, ассет с
-  `"layers": null` — `ErrCorrupt`; `td` — bool или число. Граф ссылок (`precomp.go`, `checkPrecomps`, после обхода и до
-  перекодирования картинок; только достижимое от корня, как разворачивает lottie-web; первый ассет с id): цикл, `ty` 0 или
-  `ty` 2 без `refId`, ссылка `ty` 0 не на прекомпозицию, `ty` 2 не на картинку — `ErrUnsafe`; развёрнутые копии слоёв
+  `"layers": null` — `ErrCorrupt`; `td` — bool или число, boolean на выходе — `1`/`0` (Flutter читает число). Граф ссылок
+  (`precomp.go`, `checkPrecomps`, после обхода и до перекодирования картинок): повтор `id` среди всех ассетов (lottie-web
+  берёт первый, Flutter — последний); по достижимому от корня — цикл, вложенность прекомпозиций > `maxPrecompDepth` (32;
+  рекурсия не глубже, у готовой — уровень + высота), `ty` 0 или `ty` 2 без `refId`, ссылка `ty` 0 не на прекомпозицию,
+  `ty` 2 не на картинку — `ErrUnsafe`; развёрнутые копии слоёв
   прекомпозиций ≤ `Limits.MaxExpandedBytes` (4 МиБ байт выхода, сумма насыщается — `TestExpandedBytesSaturates`), сумма
   пикселей всех картинок ≤ `MaxTotalImagePixels` (16 Мп). Новый тип узла — перед `nKindEnd` (`TestEveryNodeKindHandled`).
 - **Стражи** — `media/jobs`: `TestSecondExecutorOnReady`, `TestTakeDownBetweenWriteAndPublish` (снятие из хука `Put`:
@@ -245,13 +249,15 @@ paths:
   COM/APPn сканом не считается) и, у JPEG и PNG, байты декодера `decodeBytes` ≤ `MaxPixels × decodeBytesPerPixel` (8;
   больше — `ErrTooManyPixels`, `too_many_pixels`). `jpegBytes` повторяет выделения `image/jpeg` Go 1.27 (плоскости на
   сетке MCU, чёрный канал, RGBA/CMYK на выходе — APP0/APP14 по всему файлу, коэффициенты прогрессивного 256 Б на блок),
-  `pngBytes` — `image/png` (тип картинки по IHDR и tRNS до IDAT: 1/2/4/8 Б/пикс., у Adam7 + наибольший проход; доработка
+  `pngBytes` — `image/png` (тип картинки по IHDR и законному tRNS до IDAT — серый 2 байта, RGB 6, иначе файл битый и оценку не раздувает,
+  `TestPNGTRNSOnlyWhereLegal`: 1/2/4/8 Б/пикс., у Adam7 + наибольший проход; доработка
   до мержа, 27.11); обновили Go или формулу — `TestDecodeBytesMatchesDecoder`, `TestPNGDecodeBytesMatchesDecoder`
   (сверка с `TotalAlloc` декодера). Стражи — `TestProgressiveCoeffBomb`, `TestDecodeBudgetBoundary`, `TestScanLimit`,
   `TestPNGAdam7Bomb`, `TestPNGDecodeBudgetBoundary`, полоса — `TestStripBomb` (порог памяти решающий), граница WebP
   16383/16384 — `TestVariantSideLimit`.
 - **Декодеры — только явно по типу** (`decode`, `inspect`); `image.Decode`/`DecodeConfig` в модуле `backend` запрещены
-  (зарегистрированные чужие декодеры прошли бы мимо типа и бюджета) — `TestNoGenericImageDecode` (AST всех `.go`).
+  (зарегистрированные чужие декодеры прошли бы мимо типа и бюджета) — `TestNoGenericImageDecode` (AST всех `.go`; алиас импорта учитывается, точечный импорт `image` запрещён целиком —
+  `TestGenericDecodesCatches`).
 - **Битый профиль — как отсутствующий** (доработка до мержа, 27.11): битый ICC JPEG/WebP, битое `desc` и битый `iCCP`
   PNG (заголовок, метод, zlib) — картинка принимается без профиля (`TestBrokenICCPIgnored`); `corrupt` — только `iCCP`
   больше 1 МиБ после распаковки (`TestCorrupt`).

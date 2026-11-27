@@ -444,7 +444,7 @@ func (w *ProcessWorker) fail(ctx context.Context, job *river.Job[ProcessArgs], o
 			return errors.Join(cause, fmt.Errorf("media/jobs: отклонение после последней попытки: %w", err))
 		}
 		msg := "media: обработка не удалась, объект отклонён"
-		if !rejected { // уже конечный (удаление вариантов поставлено) или строки нет — ревью Task 10, m3
+		if !rejected { // конечный (удаление вариантов поставлено), ready или строки нет — ревью Task 10 m3, R1 m1
 			msg = "media: обработка не удалась на последней попытке, объект уже не в обработке — не отклонялся"
 		}
 		w.d.Log.WarnContext(ctx, msg, "object_id", o.ID, "err", cause)
@@ -457,8 +457,8 @@ func (w *ProcessWorker) fail(ctx context.Context, job *river.Job[ProcessArgs], o
 }
 
 // rejectFailed — последняя попытка River: rejected(processing_failed) под замком строки (rejected = true после
-// коммита); конечное состояние — media.purge всех ключей цели, как у release (m-r1-1 на последней попытке); строки
-// нет — ничего.
+// коммита, только из uploaded/processing); конечное состояние — media.purge всех ключей цели, как у release (m-r1-1
+// на последней попытке); ready (опубликовал другой) и нет строки — ничего.
 func (w *ProcessWorker) rejectFailed(ctx context.Context, objectID uuid.UUID) (rejected bool, err error) {
 	err = db.InTx(ctx, w.d.Pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := mediadb.New(tx)
@@ -469,7 +469,9 @@ func (w *ProcessWorker) rejectFailed(ctx context.Context, objectID uuid.UUID) (r
 		if domain.IsFinal(media.State(o.State)) {
 			return w.purgeEnded(ctx, tx, o)
 		}
-		rejected = true
+		// rejectTx отклоняет только из uploaded/processing; ready (опубликовал другой исполнитель) — без изменений
+		st := media.State(o.State)
+		rejected = st == media.StateUploaded || st == media.StateProcessing
 		return w.rejectTx(ctx, tx, q, o, media.RejectProcessingFailed)
 	})
 	return rejected && err == nil, err

@@ -58,18 +58,21 @@ func genericDecodes(t *testing.T, path string) []string {
 		t.Fatalf("%s: %v", path, err)
 	}
 	name := ""
+	var out []string
 	for _, im := range f.Imports {
 		if p, _ := strconv.Unquote(im.Path.Value); p == "image" {
 			name = "image"
 			if im.Name != nil {
 				name = im.Name.Name
 			}
+			if name == "." { // Decode без селектора не отличить от своей функции — точечный импорт image запрещён целиком
+				out = append(out, fset.Position(im.Pos()).String()+" (точечный импорт image)")
+			}
 		}
 	}
-	if name == "" || name == "_" {
-		return nil
+	if name == "" || name == "_" || name == "." {
+		return out
 	}
-	var out []string
 	ast.Inspect(f, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok {
@@ -81,4 +84,31 @@ func genericDecodes(t *testing.T, path string) []string {
 		return true
 	})
 	return out
+}
+
+// Страж сам ловит обходы (ревью R1, m2): алиас импорта и точечный импорт image; упоминание в строке и комментарии —
+// не вызов.
+func TestGenericDecodesCatches(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		src   string
+		found bool
+	}{
+		"алиас":                {"package p\nimport img \"image\"\nvar _, _, _ = img.Decode(nil)\n", true},
+		"точечный":             {"package p\nimport . \"image\"\nvar _, _, _ = Decode(nil)\n", true},
+		"DecodeConfig":         {"package p\nimport \"image\"\nvar _, _, _ = image.DecodeConfig(nil)\n", true},
+		"строка и комментарий": {"package p\nimport \"image\"\n// image.Decode\nvar _ = \"image.Decode\"\nvar _ image.Point\n", false},
+		"пустой импорт":        {"package p\nimport _ \"image\"\n", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "p.go")
+			if err := os.WriteFile(path, []byte(tc.src), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := genericDecodes(t, path); (len(got) > 0) != tc.found {
+				t.Fatalf("найдено %v, ждали %v", got, tc.found)
+			}
+		})
+	}
 }

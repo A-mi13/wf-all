@@ -273,7 +273,8 @@ func joinICC(parts [][]byte) []byte {
 }
 
 // walkPNG — чанки до IDAT: acTL до IDAT — APNG (после IDAT браузеры его не видят), первый iCCP, первый IHDR (второй
-// декодер отвергает) и tRNS (декодер принимает его только до IDAT; битый отвергает).
+// декодер отвергает) и законный tRNS (декодер принимает его только до IDAT, у серого и RGB — нужной длины; битый —
+// отвергает, и оценка его не раздувает: ревью R1, m3).
 func walkPNG(b []byte) (animated bool, iccp []byte, hdr pngIHDR) {
 	seenIHDR := false
 	for i := len(sigPNG); i+8 <= len(b); {
@@ -290,8 +291,8 @@ func walkPNG(b []byte) (animated bool, iccp []byte, hdr pngIHDR) {
 				seenIHDR = true
 				hdr.depth, hdr.colorType, hdr.adam7 = data[8], data[9], data[12] == 1
 			}
-		case "tRNS":
-			hdr.trns = true
+		case "tRNS": // тип картинки меняет только законный: серый — 2 байта, RGB — 6 (иначе декодер отвергает файл)
+			hdr.trns = hdr.trns || seenIHDR && (hdr.colorType == 0 && n == 2 || hdr.colorType == 2 && n == 6)
 		case "acTL":
 			animated = true
 		case "iCCP":

@@ -503,6 +503,14 @@ func (s *sanitizer) layer(v *jvalue, path string) (*jvalue, error) {
 	if _, ok := out.get("st"); !ok {
 		out.add("st", &jvalue{k: jNum, s: "0"})
 	}
+	// td boolean — 1/0: lottie-web проверяет истинность, а Flutter читает td числом (ревью R1)
+	if i := indexOf(out.keys, "td"); i >= 0 && out.vals[i].k == jBool {
+		lit := "0"
+		if out.vals[i].b {
+			lit = "1"
+		}
+		out.vals[i] = &jvalue{k: jNum, s: lit}
+	}
 	if m, ok := out.get("masksProperties"); ok && len(m.arr) > 0 {
 		out.add("hasMask", &jvalue{k: jBool, b: true})
 	}

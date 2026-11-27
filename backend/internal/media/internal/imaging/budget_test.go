@@ -264,3 +264,27 @@ func TestScanLimit(t *testing.T) {
 		}
 	})
 }
+
+// Ревью R1, m3: tRNS меняет тип картинки только там, где декодер его принимает (серый — 2 байта, RGB — 6; у палитры
+// тип не меняется). Недопустимый tRNS не раздувает оценку: битый файл — corrupt от декодера, а не too_many_pixels.
+// Серый 16 бит Adam7 64×64: без tRNS 3 Б/пикс. (в бюджете 8), с законным tRNS — 12 (отказ).
+func TestPNGTRNSOnlyWhereLegal(t *testing.T) {
+	t.Parallel()
+	lim := Limits{MaxPixels: 64 * 64, Inputs: allInputs}
+	for _, tc := range []struct {
+		name string
+		in   []byte
+		want error
+	}{
+		{"серый 16 бит Adam7, tRNS 6 байт — битый", zeroPNG(t, 64, 64, 16, 0, true, pngChunk("tRNS", make([]byte, 6))), ErrCorrupt},
+		{"серый 16 бит Adam7, tRNS 2 байта — NRGBA64", zeroPNG(t, 64, 64, 16, 0, true, pngChunk("tRNS", make([]byte, 2))), ErrTooManyPixels},
+		{"RGBA 8 бит с tRNS — битый", zeroPNG(t, 64, 64, 8, 6, false, pngChunk("tRNS", make([]byte, 6))), ErrCorrupt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, _, err := Process(context.Background(), tc.in, lim, oneFull, nil); !errors.Is(err, tc.want) {
+				t.Fatalf("ошибка = %v, ждали %v", err, tc.want)
+			}
+		})
+	}
+}

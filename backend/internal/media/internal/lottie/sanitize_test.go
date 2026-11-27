@@ -52,6 +52,19 @@ func precompLayer(refID string) string {
 
 // precompChain — depth прекомпозиций c0…c(depth−1), в каждой fan слоёв на следующую (в последней — baseLayer), в корне
 // fan слоёв на c0: документ в килобайты, развёрнутых слоёв — fan^(depth+1).
+// precompChainAssets — ассеты c0…c(depth−1) цепочкой по одному слою (в последней — baseLayer).
+func precompChainAssets(depth int) []string {
+	list := make([]string, depth)
+	for i := range depth {
+		inner := baseLayer
+		if i < depth-1 {
+			inner = precompLayer("c" + strconv.Itoa(i+1))
+		}
+		list[i] = precompAsset("c"+strconv.Itoa(i), inner)
+	}
+	return list
+}
+
 func precompChain(depth, fan int) []byte {
 	list := make([]string, depth)
 	for i := range depth {
@@ -240,13 +253,18 @@ func TestSanitizeRejects(t *testing.T) {
 		{"precomp_ref_missing", anim("", precompLayer("nope")), DefaultLimits, ErrUnsafe},
 		{"precomp_without_refId", anim("", `{"ty":0,"w":100,"h":100,"ip":0,"op":60,"ks":{}}`), DefaultLimits, ErrUnsafe},
 		{"precomp_ref_image", anim(assets(imageAsset("img", dataURL("image/png", png10))), precompLayer("img")), DefaultLimits, ErrUnsafe},
-		{"precomp_ref_first_id_is_image", anim(assets(imageAsset("x", dataURL("image/png", png10)), precompAsset("x", baseLayer)), precompLayer("x")), DefaultLimits, ErrUnsafe},
+		// ревью R1, I1: повтор id ассета — lottie-web берёт первый, Flutter (словарь по id) — последний; проверялся бы не тот
+		{"precomp_duplicate_id", anim(assets(precompAsset("x", baseLayer), precompAsset("x", precompLayer("x"))), precompLayer("x")), DefaultLimits, ErrUnsafe},
+		{"image_duplicate_id_unused", anim(assets(imageAsset("x", dataURL("image/png", png10)), imageAsset("x", dataURL("image/png", png10)))), DefaultLimits, ErrUnsafe},
+		{"duplicate_id_image_and_precomp", anim(assets(imageAsset("x", dataURL("image/png", png10)), precompAsset("x", baseLayer)), precompLayer("x")), DefaultLimits, ErrUnsafe},
+		// ревью R1, I2: цепочка без цикла и без раздувания — та же глубина рекурсии у клиента; предел вложенности 32
+		{"precomp_depth_33", precompChain(33, 1), DefaultLimits, ErrUnsafe},
+		{"precomp_depth_33_via_shared", anim(assets(precompChainAssets(33)...), precompLayer("c1"), precompLayer("c0")), DefaultLimits, ErrUnsafe},
 		{"precomp_blowup", precompChain(10, 10), DefaultLimits, ErrUnsafe},
-		// слой-картинка ty 2: refId — на первый ассет-картинку с этим id (lottie-web getAssetData), иначе TypeError или
+		// слой-картинка ty 2: refId — на ассет-картинку с этим id (lottie-web getAssetData), иначе TypeError или
 		// запрос images/undefined у клиента
 		{"image_layer_ref_missing", anim("", imageLayer("nope")), DefaultLimits, ErrUnsafe},
 		{"image_layer_ref_precomp", anim(assets(precompAsset("p", baseLayer)), imageLayer("p")), DefaultLimits, ErrUnsafe},
-		{"image_layer_ref_first_id_is_precomp", anim(assets(precompAsset("x", baseLayer), imageAsset("x", dataURL("image/png", png10))), imageLayer("x")), DefaultLimits, ErrUnsafe},
 		{"image_layer_without_refId", anim("", `{"ty":2,"ip":0,"op":60,"ks":{}}`), DefaultLimits, ErrUnsafe},
 		{"image_layer_in_precomp_ref_missing", anim(assets(precompAsset("p", imageLayer("nope"))), precompLayer("p")), DefaultLimits, ErrUnsafe},
 		{"images_total_pixels", anim(assets(imageAsset("a", dataURL("image/png", png10)), imageAsset("b", dataURL("image/png", png10)))), lim(func(l *Limits) { l.MaxTotalImagePixels = 199 }), ErrUnsafe},
@@ -288,6 +306,7 @@ func TestSanitizeAcceptsAtLimits(t *testing.T) {
 		// плееру не вредят
 		{"unreferenced_cycle", anim(assets(precompAsset("a", precompLayer("b")), precompAsset("b", precompLayer("a")))), DefaultLimits},
 		{"precomp_reused_chain", precompChain(3, 3), DefaultLimits},
+		{"precomp_depth_32", precompChain(32, 1), DefaultLimits},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -512,7 +531,7 @@ func TestSanitizeKeepsAllowed(t *testing.T) {
 }
 
 // TestSanitizeLottieWebCompat — поля вне LAC 1.0.1, без которых lottie-web рисует неверно: st у каждого слоя
-// (нет — 0), td переносится (число или boolean — ревью Task 8, m3: lottie-web проверяет истинность), hasMask — по факту масок в выходе, вход не учитывается.
+// (нет — 0), td переносится (число или boolean — ревью Task 8, m3; boolean на выходе — 1/0: Flutter читает td числом, ревью R1), hasMask — по факту масок в выходе, вход не учитывается.
 func TestSanitizeLottieWebCompat(t *testing.T) {
 	t.Parallel()
 	mask := `{"mode":"a","pt":{"a":0,"k":{"c":true,"i":[[0,0]],"o":[[0,0]],"v":[[1,2]]}}}`
@@ -524,6 +543,7 @@ func TestSanitizeLottieWebCompat(t *testing.T) {
 		`{"ty":4,"td":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
 		`{"ty":4,"tt":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
 		`{"ty":4,"td":true,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
+		`{"ty":4,"td":false,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
 		`{"ty":4,"ip":0,"op":60,"st":"5","ks":{},"shapes":[]}`,
 	)
 	_, err := Sanitize(context.Background(), in, DefaultLimits, (&stubImg{}).fn)
@@ -542,7 +562,8 @@ func TestSanitizeLottieWebCompat(t *testing.T) {
 		`{"ty":4,"ip":0,"op":60,"st":0,"ks":{},"masksProperties":[],"shapes":[]},` +
 		`{"ty":4,"td":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]},` +
 		`{"ty":4,"tt":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]},` +
-		`{"ty":4,"td":true,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}]}`
+		`{"ty":4,"td":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]},` +
+		`{"ty":4,"td":0,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}]}`
 	if string(out) != want {
 		t.Fatalf("выход:\n%s\nожидалось:\n%s", out, want)
 	}
