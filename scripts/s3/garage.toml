@@ -1,0 +1,23 @@
+# Конфигурация dev-Garage (scripts/s3.sh): один узел, данные — в томе wf-s3-dev. Секрета здесь нет:
+# rpc_secret приходит переменной GARAGE_RPC_SECRET, её генерирует `s3.sh up`. Админ-API не включён —
+# бакеты, ключи и права настраивает CLI внутри контейнера (scripts/s3/init.sh).
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+# lmdb — как на своём сервере: ключ записи LMDB ≤ 511 байт (id бакета + ключ объекта), поэтому blob.ValidKey
+# ограничивает ключ 400 символами (контракт blobtest, max_key)
+db_engine = "lmdb"
+replication_factor = 1
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.localhost"
+
+# Публичное чтение бакета wf-pub без подписи (R5): Host wf-pub.web.localhost (*.localhost браузеры
+# разрешают в 127.0.0.1), порт — WF_S3_WEB_PORT.
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.localhost"
+index = "index.html"

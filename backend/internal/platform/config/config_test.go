@@ -435,3 +435,179 @@ func TestLoadAdminWakeAPIURL(t *testing.T) {
 		t.Fatalf("WakeAPIURL = %q", c.WakeAPIURL)
 	}
 }
+
+// blobDevKey — годный ключ подписи FS (32 байта в base64) для тестов.
+var blobDevKey = strings.Repeat("B", 43) + "="
+
+// blobEnv — полный набор ключей режима mode с префиксом prefix и правками: "KEY=value" (без префикса) заменяет или
+// добавляет, "KEY" без «=» убирает.
+func blobEnv(prefix, mode string, edits ...string) []string {
+	env := map[string]string{"BLOB_BACKEND": mode}
+	switch mode {
+	case "fs":
+		env["BLOB_FS_ROOT"] = "../.tools/blob"
+		env["BLOB_FS_BASE_URL"] = "http://127.0.0.1:8080"
+		env["BLOB_DEV_SIGN_KEY"] = blobDevKey
+	case "s3":
+		env["BLOB_S3_ENDPOINT"] = "http://garage:3900"
+		env["BLOB_S3_PUBLIC_ENDPOINT"] = "https://s3.example"
+		env["BLOB_S3_REGION"] = "garage"
+		env["BLOB_S3_BUCKET_IN"] = "wf-in"
+		env["BLOB_S3_BUCKET_PUB"] = "wf-pub"
+		env["BLOB_S3_BUCKET_PRIV"] = "wf-priv"
+		env["BLOB_S3_ACCESS_KEY"] = "GKtest"
+		env["BLOB_S3_SECRET_KEY"] = "s3-secret-value"
+		env["MEDIA_PUBLIC_BASE_URL"] = "https://media.example/"
+	}
+	for _, e := range edits {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			env[k] = v
+		} else {
+			delete(env, k)
+		}
+	}
+	out := make([]string, 0, len(env))
+	for k, v := range env {
+		out = append(out, prefix+k+"="+v)
+	}
+	return out
+}
+
+// Спека media §6.4, R17: режимы хранилища у трёх процессов. none — прочие ключи не нужны и не читаются; fs — корень,
+// внешний адрес api и ключ подписи; s3 — все S3_* и адрес публичного медиа; иное или пустое значение — отказ. В
+// ошибке — полное имя ключа с префиксом процесса, без значений секретов.
+func TestBlobConfigModes(t *testing.T) {
+	s3Keys := []string{"BLOB_S3_ENDPOINT", "BLOB_S3_PUBLIC_ENDPOINT", "BLOB_S3_REGION", "BLOB_S3_BUCKET_IN",
+		"BLOB_S3_BUCKET_PUB", "BLOB_S3_BUCKET_PRIV", "BLOB_S3_ACCESS_KEY", "BLOB_S3_SECRET_KEY", "MEDIA_PUBLIC_BASE_URL"}
+	type tc struct {
+		name    string
+		prefix  string
+		env     []string
+		wantErr string // "" — без ошибки
+	}
+	cases := []tc{
+		{"none один", "API_", blobEnv("API_", "none"), ""},
+		{"none с мусором прочих ключей", "WORKER_", blobEnv("WORKER_", "none", "BLOB_FS_ROOT=x",
+			"BLOB_DEV_SIGN_KEY=короткий", "BLOB_S3_ENDPOINT=не-адрес", "MEDIA_PUBLIC_BASE_URL=x"), ""},
+		{"fs полный", "API_", blobEnv("API_", "fs"), ""},
+		{"fs и совпадающий адрес медиа", "API_", blobEnv("API_", "fs",
+			"MEDIA_PUBLIC_BASE_URL=http://127.0.0.1:8080/_media/pub/"), ""},
+		{"fs без ключа подписи", "API_", blobEnv("API_", "fs", "BLOB_DEV_SIGN_KEY"), "API_BLOB_DEV_SIGN_KEY"},
+		{"fs с пустым ключом подписи", "ADMIN_", blobEnv("ADMIN_", "fs", "BLOB_DEV_SIGN_KEY="), "ADMIN_BLOB_DEV_SIGN_KEY"},
+		{"fs с ключом короче 32 байт", "API_", blobEnv("API_", "fs", "BLOB_DEV_SIGN_KEY=c2hvcnQ="), "API_BLOB_DEV_SIGN_KEY"},
+		{"fs с ключом не в base64", "API_", blobEnv("API_", "fs", "BLOB_DEV_SIGN_KEY="+strings.Repeat("!", 44)),
+			"API_BLOB_DEV_SIGN_KEY"},
+		{"fs без корня", "WORKER_", blobEnv("WORKER_", "fs", "BLOB_FS_ROOT"), "WORKER_BLOB_FS_ROOT"},
+		{"fs без адреса api", "API_", blobEnv("API_", "fs", "BLOB_FS_BASE_URL"), "API_BLOB_FS_BASE_URL"},
+		{"fs с адресом без схемы", "API_", blobEnv("API_", "fs", "BLOB_FS_BASE_URL=127.0.0.1:8080"), "API_BLOB_FS_BASE_URL"},
+		{"fs с адресом с запросом", "API_", blobEnv("API_", "fs", "BLOB_FS_BASE_URL=http://127.0.0.1:8080/?a=1"),
+			"API_BLOB_FS_BASE_URL"},
+		{"fs и другой адрес медиа", "API_", blobEnv("API_", "fs", "MEDIA_PUBLIC_BASE_URL=https://cdn.example/"),
+			"API_MEDIA_PUBLIC_BASE_URL"},
+		{"s3 полный", "ADMIN_", blobEnv("ADMIN_", "s3"), ""},
+		{"s3 с адресом медиа с путём", "API_", blobEnv("API_", "s3", "MEDIA_PUBLIC_BASE_URL=https://cdn.example/media/"), ""},
+		{"s3 с плейсхолдерами шаблона", "API_", blobEnv("API_", "s3", "BLOB_S3_PUBLIC_ENDPOINT=https://<домен-хранилища>",
+			"MEDIA_PUBLIC_BASE_URL=https://<домен-медиа>/"), ""},
+		// формат адресов (ревью Task 4, m2): ошибка — с полным именем ключа процесса, без значения
+		{"s3 с адресом без схемы", "WORKER_", blobEnv("WORKER_", "s3", "BLOB_S3_ENDPOINT=garage:3900"),
+			"WORKER_BLOB_S3_ENDPOINT"},
+		{"s3 с адресом не http", "API_", blobEnv("API_", "s3", "BLOB_S3_ENDPOINT=ftp://garage:3900"), "API_BLOB_S3_ENDPOINT"},
+		{"s3 с адресом с путём", "API_", blobEnv("API_", "s3", "BLOB_S3_ENDPOINT=http://garage:3900/wf-in"),
+			"API_BLOB_S3_ENDPOINT"},
+		{"s3 с внешним адресом без хоста", "ADMIN_", blobEnv("ADMIN_", "s3", "BLOB_S3_PUBLIC_ENDPOINT=https://"),
+			"ADMIN_BLOB_S3_PUBLIC_ENDPOINT"},
+		{"s3 с внешним адресом с запросом", "API_", blobEnv("API_", "s3", "BLOB_S3_PUBLIC_ENDPOINT=https://s3.example/?x=1"),
+			"API_BLOB_S3_PUBLIC_ENDPOINT"},
+		{"s3 с паролем в адресе", "WORKER_", blobEnv("WORKER_", "s3", "BLOB_S3_PUBLIC_ENDPOINT=https://u:s3-secret-value@s3.example"),
+			"WORKER_BLOB_S3_PUBLIC_ENDPOINT"},
+		{"s3 с адресом медиа без схемы", "ADMIN_", blobEnv("ADMIN_", "s3", "MEDIA_PUBLIC_BASE_URL=media.example/"),
+			"ADMIN_MEDIA_PUBLIC_BASE_URL"},
+		{"s3 с адресом медиа с фрагментом", "API_", blobEnv("API_", "s3", "MEDIA_PUBLIC_BASE_URL=https://media.example/#x"),
+			"API_MEDIA_PUBLIC_BASE_URL"},
+		{"s3 с адресом медиа с пустым фрагментом", "API_", blobEnv("API_", "s3", "MEDIA_PUBLIC_BASE_URL=https://media.example/#"),
+			"API_MEDIA_PUBLIC_BASE_URL"},
+		{"s3 с адресом медиа с запросом", "API_", blobEnv("API_", "s3", "MEDIA_PUBLIC_BASE_URL=https://media.example/?v=1"),
+			"API_MEDIA_PUBLIC_BASE_URL"},
+		{"BACKEND нет", "API_", blobEnv("API_", "none", "BLOB_BACKEND"), "API_BLOB_BACKEND"},
+		{"BACKEND пусто", "API_", blobEnv("API_", "none", "BLOB_BACKEND="), "API_BLOB_BACKEND"},
+		{"BACKEND minio", "API_", blobEnv("API_", "minio"), "API_BLOB_BACKEND"},
+		{"BACKEND в верхнем регистре", "API_", blobEnv("API_", "FS"), "API_BLOB_BACKEND"},
+	}
+	for _, k := range s3Keys {
+		cases = append(cases, tc{"s3 без " + k, "API_", blobEnv("API_", "s3", k), "API_" + k},
+			tc{"s3 с пустым " + k, "WORKER_", blobEnv("WORKER_", "s3", k+"="), "WORKER_" + k})
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := config.LoadBlob(c.prefix, c.env)
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ждали без ошибки: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("err = %v, ждали упоминание %s", err, c.wantErr)
+			}
+			for _, secret := range []string{blobDevKey, "s3-secret-value", "c2hvcnQ="} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatalf("в ошибке значение секрета: %v", err)
+				}
+			}
+		})
+	}
+	// поля и адрес публичного медиа: у fs — выводится из адреса api (R17), у s3 — из ключа, у none — пусто
+	fs, err := config.LoadBlob("API_", blobEnv("API_", "fs", "BLOB_FS_BASE_URL=http://127.0.0.1:8080/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fs.Backend != "fs" || fs.FSRoot != "../.tools/blob" || fs.DevSignKey != blobDevKey {
+		t.Fatalf("fs: %+v", fs)
+	}
+	if got := fs.PublicBaseURL(); got != "http://127.0.0.1:8080/_media/pub/" {
+		t.Fatalf("fs: PublicBaseURL = %q", got)
+	}
+	s3, err := config.LoadBlob("ADMIN_", blobEnv("ADMIN_", "s3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s3.S3Endpoint != "http://garage:3900" || s3.S3PublicEndpoint != "https://s3.example" || s3.S3Region != "garage" ||
+		s3.S3BucketIn != "wf-in" || s3.S3BucketPub != "wf-pub" || s3.S3BucketPriv != "wf-priv" ||
+		s3.S3AccessKey != "GKtest" || s3.S3SecretKey != "s3-secret-value" || s3.PublicBaseURL() != "https://media.example/" {
+		t.Fatalf("s3: %+v", s3)
+	}
+	none, err := config.LoadBlob("API_", blobEnv("API_", "none", "MEDIA_PUBLIC_BASE_URL=https://media.example/"))
+	if err != nil || none.PublicBaseURL() != "" {
+		t.Fatalf("none: %v %q", err, none.PublicBaseURL())
+	}
+}
+
+// R15: в прод-образе (WF_BUILD_KIND=prod из backend/Dockerfile) fs не принимается — ошибка старта с именем ключа;
+// none и s3 — в порядке. Признак читается из окружения процесса (LoadBlob) и передаётся в Validate.
+func TestBlobFSRejectedInProdBuild(t *testing.T) {
+	for _, prefix := range []string{"API_", "ADMIN_", "WORKER_"} {
+		_, err := config.LoadBlob(prefix, append(blobEnv(prefix, "fs"), "WF_BUILD_KIND=prod"))
+		if err == nil || !strings.Contains(err.Error(), prefix+"BLOB_BACKEND") || !strings.Contains(err.Error(), "WF_BUILD_KIND") {
+			t.Errorf("%s: prod + fs: err = %v, ждали отказ с %sBLOB_BACKEND и WF_BUILD_KIND", prefix, err, prefix)
+		}
+		for _, mode := range []string{"none", "s3"} {
+			if _, err := config.LoadBlob(prefix, append(blobEnv(prefix, mode), "WF_BUILD_KIND=prod")); err != nil {
+				t.Errorf("%s: prod + %s: %v", prefix, mode, err)
+			}
+		}
+		// без признака (dev, e2e) fs принимается
+		if _, err := config.LoadBlob(prefix, blobEnv(prefix, "fs")); err != nil {
+			t.Errorf("%s: fs без WF_BUILD_KIND: %v", prefix, err)
+		}
+	}
+	c, err := config.Load[config.Blob]("API_", blobEnv("API_", "fs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Validate("API_", "prod"); err == nil || !strings.Contains(err.Error(), "API_BLOB_BACKEND") {
+		t.Fatalf("Validate(prod) fs: %v", err)
+	}
+	if err := c.Validate("API_", ""); err != nil {
+		t.Fatalf("Validate(\"\") fs: %v", err)
+	}
+}

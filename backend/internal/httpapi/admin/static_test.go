@@ -175,3 +175,30 @@ func TestStaticOffAndBadDir(t *testing.T) {
 		}
 	}
 }
+
+// Спека media §3.6: ассеты в админке показываются с домена медиа — его origin в img-src CSP статики (s3 —
+// MEDIA_PUBLIC_BASE_URL, fs — адрес api с /_media/pub/); при none домена нет. Прочие директивы не меняются; негодный
+// адрес — отказ старта.
+func TestAdminCSPMediaDomain(t *testing.T) {
+	t.Parallel()
+	o := testOptions(t)
+	o.StaticDir = staticDir(t)
+	for base, img := range map[string]string{
+		"https://media.wf.test/":            "img-src 'self' data: https://media.wf.test;",
+		"http://127.0.0.1:8080/_media/pub/": "img-src 'self' data: http://127.0.0.1:8080;",
+		"":                                  "img-src 'self' data:;",
+	} {
+		o.MediaBaseURL = base
+		csp := get(newHandler(t, o), "/").Header().Get("Content-Security-Policy")
+		if !strings.Contains(csp, img) || !strings.Contains(csp, "connect-src 'self';") ||
+			!strings.Contains(csp, "default-src 'self';") {
+			t.Errorf("%q: CSP %q, ждали %q", base, csp, img)
+		}
+	}
+	for _, bad := range []string{"media.wf.test", "ftp://media.wf.test/", "https://media.wf.test/;script-src *", "https:///x"} {
+		o.MediaBaseURL = bad
+		if _, err := admin.NewHandler(quiet(), o); err == nil {
+			t.Errorf("%q: адрес медиа принят", bad)
+		}
+	}
+}

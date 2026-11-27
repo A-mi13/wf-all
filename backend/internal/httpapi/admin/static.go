@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,10 +16,11 @@ import (
 )
 
 // Заголовки безопасности сборки админки (спека сотрудников §5.2). Сборка Vite — только свои
-// скрипты и стили (style={…} React пишет через CSSOM — CSP его не режет); data: — картинки вроде QR.
+// скрипты и стили (style={…} React пишет через CSSOM — CSP его не режет); data: — картинки вроде QR;
+// домен медиа — ассеты (спека media §3.6), подставляется staticCSP.
 const (
-	staticCSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-		"font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; " +
+	cspBefore = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:"
+	cspAfter  = "; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; " +
 		"frame-ancestors 'none'"
 	cacheIndex  = "no-store"                            // новая сборка видна сразу
 	cacheAssets = "public, max-age=31536000, immutable" // имена assets/ с хэшем содержимого
@@ -36,15 +38,36 @@ var errNoIndex = errors.New("admin: статика: index.html пропал из
 // каталог не держится открытым — сборку можно заменить на месте.
 type static struct {
 	dir string // абсолютный
+	csp string
 	log *slog.Logger
 }
 
-func newStatic(dir string, log *slog.Logger) (*static, error) {
+// staticCSP — CSP статики: img-src с origin домена медиа (mediaBase — *_MEDIA_PUBLIC_BASE_URL или адрес fs; пусто —
+// режим none, без домена). Адрес — только http(s)://хост[:порт] с необязательным путём: иное — отказ старта (в CSP не
+// попадают «;» и пробелы, которыми можно дописать директиву).
+func staticCSP(mediaBase string) (string, error) {
+	const cspUnsafe = "; \t\r\n,'"
+	if mediaBase == "" {
+		return cspBefore + cspAfter, nil
+	}
+	u, err := url.Parse(mediaBase)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
+		u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(mediaBase, cspUnsafe) {
+		return "", fmt.Errorf("admin: адрес медиа %q — нужен http(s)://хост[:порт]/…", mediaBase)
+	}
+	return cspBefore + " " + u.Scheme + "://" + u.Host + cspAfter, nil
+}
+
+func newStatic(dir, mediaBase string, log *slog.Logger) (*static, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("admin: ADMIN_STATIC_DIR: %w", err)
 	}
-	s := &static{dir: abs, log: log}
+	csp, err := staticCSP(mediaBase)
+	if err != nil {
+		return nil, err
+	}
+	s := &static{dir: abs, csp: csp, log: log}
 	f, _, ok := s.open(indexFile)
 	if !ok {
 		return nil, fmt.Errorf("admin: ADMIN_STATIC_DIR %q: нет %s — каталог не сборка apps/admin", dir, indexFile)
@@ -81,7 +104,7 @@ func (s *static) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	h := w.Header()
-	h.Set("Content-Security-Policy", staticCSP)
+	h.Set("Content-Security-Policy", s.csp)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	switch {

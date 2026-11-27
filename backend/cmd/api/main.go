@@ -101,6 +101,11 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 	// закрывается после возврата RunHTTP/RunService — HTTP уже дренирован, фон остановлен: запрос в полёте не читает
 	// закрытый mmap (иначе SIGSEGV maxminddb)
 	defer func() { _ = closeGeo.Close() }()
+	// хранилище и цели media — до базы: fs в прод-образе, негодные ключи или цель — отказ старта
+	blobs, purposes, err := openBlob(ctx, environ, clock.System)
+	if err != nil {
+		return err
+	}
 	hc := server.HTTPConfig{Log: cfg.Log, HTTP: cfg.HTTP, DB: cfg.DB}
 	build := func(log *slog.Logger, pool *pgxpool.Pool) (http.Handler, error) {
 		// PoW — проверка решения по риску в сценариях identity (humancheck.Require)
@@ -119,6 +124,10 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 		if err != nil {
 			return nil, err
 		}
+		mk, err := newMedia(log, pool, blobs, purposes, clock.System, limiter, rules)
+		if err != nil {
+			return nil, err
+		}
 		return public.NewHandler(log, public.Options{
 			Docs:           cfg.HTTP.DocsEnabled,
 			RequestTimeout: cfg.HTTP.RequestTimeout,
@@ -133,6 +142,8 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 			RateRules:   rules,
 			Geo:         geo.New(pool),
 			AppVersions: appversion.NewReader(pool),
+			Media:       mk.devMedia(log),
+			E2E:         mediaE2E(mk, pool, log),
 		})
 	}
 	if !cfg.EmbedWorker {

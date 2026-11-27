@@ -72,6 +72,21 @@ func DefaultRules() Rules {
 			IP:   Policy{Limit: 30, Period: time.Minute, Burst: 15},
 			User: Policy{Limit: 20, Period: time.Minute, Burst: 10},
 		},
+		// билеты загрузки (спека media §3.11): x-rate-limit операции владельца «начать загрузку» — час игрока и адреса
+		"media_upload": {
+			IP:   Policy{Limit: 60, Period: time.Hour},
+			User: Policy{Limit: 30, Period: time.Hour},
+		},
+		// билеты за сутки игрока (R19): счёт ведёт media.Service.NewUpload через Limiter (SubjectKey), не конвейер
+		"media_upload_day": {
+			User: Policy{Limit: 100, Period: 24 * time.Hour},
+		},
+		// объём за сутки игрока по заявленным байтам (R19): Limit — байты за Period. Вес у Limiter нет (Allow/Add — один
+		// интервал), поэтому NewUpload считает сумму запросом к media_objects под замком незавершённых, а политика —
+		// только предел и окно
+		"media_bytes_day": {
+			User: Policy{Limit: 200 << 20, Period: 24 * time.Hour},
+		},
 		// фоновые GET сотрудника (X-WF-Background: 1 — счётчики меню, плитки главной): класс выбирает конвейер
 		// admin-api по заголовку, а не x-rate-limit операции (одна операция бывает фоновой и нет), — опрос не
 		// тратит обычный лимит сотрудника и ограничен своим

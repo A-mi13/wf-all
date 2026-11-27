@@ -19,3 +19,58 @@
 {$WF_ADMIN_DOMAIN} {
 	reverse_proxy admin-api:8081
 }
+
+# Хранилище файлов (спека media §6.5, план R5). Имена бакетов wf-in, wf-pub, wf-priv зашиты здесь, в storage/init.sh и
+# шаблонах *.env.example; порты и root_domain сайта — storage/garage.toml (стражи server_compose_test.go сверяют).
+#
+# Домен медиа (*_MEDIA_PUBLIC_BASE_URL; может стоять за CDN): только чтение публичного бакета wf-pub через сайт
+# Garage — GET/HEAD, Host сайта бакета. Корень и пути входящих и закрытых — 404 любым методом, прочие методы — 405.
+# Cache-Control и Content-Type — метаданные объекта (их пишет воркер), Garage отдаёт их сам; nosniff он не ставит.
+{$WF_MEDIA_DOMAIN} {
+	header X-Content-Type-Options nosniff
+
+	@hidden path / /wf-in /wf-in/* /wf-priv /wf-priv/*
+	handle @hidden {
+		respond 404
+	}
+
+	@read {
+		method GET HEAD
+		not path / /wf-in /wf-in/* /wf-priv /wf-priv/*
+	}
+	handle @read {
+		reverse_proxy http://storage:3902 {
+			header_up Host wf-pub.web.storage
+		}
+	}
+
+	handle {
+		respond 405
+	}
+}
+
+# Адрес хранилища (*_BLOB_S3_PUBLIC_ENDPOINT; без CDN): подписанная загрузка POST в wf-in (и предзапрос CORS) и
+# подписанное чтение GET/HEAD из wf-priv. Подпись SigV4 включает Host и путь — Caddy их не меняет (апстрим по
+# http://: Caddy 2.11 подменяет Host только у HTTPS-апстрима). Листинг, прочие пути и методы — 404.
+{$WF_STORAGE_DOMAIN} {
+	@upload {
+		path /wf-in
+		method POST OPTIONS
+	}
+	handle @upload {
+		reverse_proxy http://storage:3900
+	}
+
+	@private {
+		path /wf-priv/*
+		method GET HEAD
+		query X-Amz-Signature=*
+	}
+	handle @private {
+		reverse_proxy http://storage:3900
+	}
+
+	handle {
+		respond 404
+	}
+}

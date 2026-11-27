@@ -61,5 +61,9 @@ migrate up
 exec api
 EOF
 ENV PATH=/app:$PATH
+# Признак прод-образа (спека media §6.3, R15): config.LoadBlob при нём отвергает *_BLOB_BACKEND=fs — файловое хранилище
+# только для dev и e2e (страж TestDockerfileSetsBuildKind: строка после последнего FROM). Стенд Render и свой сервер —
+# этот же образ: none и s3.
+ENV WF_BUILD_KIND=prod
 USER wf
 CMD ["api"]

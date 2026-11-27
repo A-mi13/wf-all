@@ -22,3 +22,21 @@ for (const name of ['public', 'admin']) {
     assert.ok(out.includes(`"${samplePath[name]}"`), `нет пути ${samplePath[name]}`);
   });
 }
+
+// Спека media §7.1: общие схемы файлов одинаковы в public и admin (операции владельцев в обоих контрактах); у admin —
+// ещё multipart прямой загрузки. UploadTicket.method и MediaImage.state — открытые enum контракта.
+test('схемы media одинаковы в public и admin', async () => {
+  const [pub, adm] = await Promise.all([load('public'), load('admin')]);
+  for (const name of ['UploadRequest', 'UploadTicket', 'MediaImage', 'PrivateMediaLink']) {
+    assert.ok(pub.components.schemas[name], `public: нет ${name}`);
+    assert.deepEqual(adm.components.schemas[name], pub.components.schemas[name], name);
+  }
+  const s = pub.components.schemas;
+  assert.deepEqual(s.UploadTicket.properties.method.enum, ['PUT', 'POST']);
+  assert.equal(s.UploadTicket.properties.method['x-extensible-enum'], true);
+  assert.deepEqual(s.MediaImage.properties.state.enum, ['processing', 'ready', 'rejected']);
+  assert.equal(s.MediaImage.properties.state['x-extensible-enum'], true);
+  const direct = adm.components.schemas.MediaDirectUpload;
+  assert.equal(direct.properties.file.format, 'binary');
+  assert.equal(pub.components.schemas.MediaDirectUpload, undefined);
+});

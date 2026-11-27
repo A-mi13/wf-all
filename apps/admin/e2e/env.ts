@@ -110,6 +110,20 @@ export const PUBLIC_API_URL = `http://127.0.0.1:${PUBLIC_API.port}`;
 export const E2E_LEGAL_DOCUMENTS =
   'terms=1.0.0|https://wf-e2e.test/legal/terms,privacy=1.0.0|https://wf-e2e.test/legal/privacy';
 
+// Хранилище прогона (спека media §6.3, §6.4): fs — один каталог у api, воркера и admin-api, пути /_blob и /_media
+// отдаёт публичный api прогона. Ключ подписи — один у трёх процессов (admin-api подписывает ссылки на закрытое, api их
+// проверяет); не секрет: fs живёт только в dev и e2e, прод-образ его отвергает (WF_BUILD_KIND=prod).
+const E2E_BLOB_ROOT = path.join(ROOT, '.tools', 'e2e', 'blob');
+const E2E_BLOB_SIGN_KEY = Buffer.alloc(32, 'wf-e2e-blob-sign').toString('base64url');
+function blobEnv(prefix: 'API_' | 'ADMIN_' | 'WORKER_'): NodeJS.ProcessEnv {
+  return {
+    [`${prefix}BLOB_BACKEND`]: 'fs',
+    [`${prefix}BLOB_FS_ROOT`]: E2E_BLOB_ROOT,
+    [`${prefix}BLOB_FS_BASE_URL`]: PUBLIC_API_URL,
+    [`${prefix}BLOB_DEV_SIGN_KEY`]: E2E_BLOB_SIGN_KEY,
+  };
+}
+
 // Проекты прогона: WF_E2E_PROJECTS (через запятую), по умолчанию DEFAULT_PROJECTS. CI — chromium,prod
 // (браузер WebKit на раннере требует системных библиотек через apt).
 export function enabledProjects(env: NodeJS.ProcessEnv = process.env): ProjectName[] {
@@ -214,6 +228,7 @@ export function adminApiEnv(p: Pair): NodeJS.ProcessEnv {
     ADMIN_MAIL_SMTP_ADDR: `127.0.0.1:${MAILPIT.smtp}`,
     ADMIN_MAIL_FROM: 'WhereFootball e2e <noreply@wf-e2e.test>',
     ADMIN_MAIL_SMTP_TLS: 'none',
+    ...blobEnv('ADMIN_'),
   };
 }
 
@@ -242,6 +257,7 @@ export function workerEnv(): NodeJS.ProcessEnv {
     WORKER_MAIL_SMTP_ADDR: `127.0.0.1:${MAILPIT.smtp}`,
     WORKER_MAIL_FROM: 'WhereFootball e2e <noreply@wf-e2e.test>',
     WORKER_MAIL_SMTP_TLS: 'none',
+    ...blobEnv('WORKER_'),
   };
 }
 
@@ -272,6 +288,7 @@ export function apiEnv(): NodeJS.ProcessEnv {
     API_WELLKNOWN_APPLE_APP_IDS: '',
     API_WELLKNOWN_ANDROID: '',
     API_RATE_LIMITS: '',
+    ...blobEnv('API_'),
   };
 }
 

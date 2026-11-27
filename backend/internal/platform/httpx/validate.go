@@ -27,15 +27,39 @@ func init() {
 // MaxBodyBytes — лимит тела запроса по умолчанию: JSON API больших тел не ждёт (спека §6.1).
 const MaxBodyBytes = 1 << 20
 
-// LimitBody ограничивает тело запроса n байтами. Чтение сверх лимита — *http.MaxBytesError;
-// ValidateRequests отвечает на неё 413 request.too_large.
-func LimitBody(n int64) func(http.Handler) http.Handler {
+// BodyLimit — исключение из общего лимита тела (R16 плана media): запрос с методом Method и путём Prefix (ровно он или
+// Prefix/… — граница сегмента: «/_blob/in» не ловит «/_blob/inx») получает предел Max вместо общего. chi запрещает Use
+// после маршрутов, поэтому исключение — параметр LimitBody, а не своё звено у маршрута.
+type BodyLimit struct {
+	Method, Prefix string
+	Max            int64
+}
+
+func (b BodyLimit) matches(r *http.Request) bool {
+	if r.Method != b.Method {
+		return false
+	}
+	p := r.URL.Path
+	return p == b.Prefix || strings.HasPrefix(p, strings.TrimSuffix(b.Prefix, "/")+"/")
+}
+
+// LimitBody ограничивает тело запроса n байтами; запрос из except — пределом исключения (первое совпавшее). Чтение
+// сверх лимита — *http.MaxBytesError; ValidateRequests отвечает на неё 413 request.too_large.
+func LimitBody(n int64, except ...BodyLimit) func(http.Handler) http.Handler {
+	except = slices.Clone(except)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// nil — запрос собран руками (сервер всегда даёт хотя бы http.NoBody):
 			// MaxBytesReader поверх nil паникует при чтении
 			if r.Body != nil {
-				r.Body = http.MaxBytesReader(w, r.Body, n)
+				limit := n
+				for _, e := range except {
+					if e.matches(r) {
+						limit = e.Max
+						break
+					}
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
 			}
 			next.ServeHTTP(w, r)
 		})

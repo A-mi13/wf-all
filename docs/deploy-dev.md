@@ -54,6 +54,7 @@ River держит её бодрой (опросы и `LISTEN`) — вычисл
 | `WORKER_MAIL_SMTP_TLS` | `mandatory` (в `render.yaml`) |
 | `WORKER_DB_MAX_CONNS`, `WORKER_QUEUE_*` | `10` и по `1` на очередь (в `render.yaml`): 7 слотов ≤ 10 − 3; сумма пулов стенда — страж `TestRenderYAMLPools`: `LISTEN` relay и River держат соединения вне пула (River уводит своё из пула — `Hijack`), поэтому у `wf-api` +2 сверх двух пулов, у `wf-admin-api` +1 |
 | `WORKER_GEO_IMPORT_ENABLED` | `false` (в `render.yaml`) — очереди `import` нет, импорт из админки не исполнится (раздел «Импорт городов GeoNames»); `WORKER_QUEUE_IMPORT` не задаётся |
+| `API_BLOB_BACKEND`, `WORKER_BLOB_BACKEND` | `none` (в `render.yaml`) — хранилища файлов на стенде нет (раздел «Файлы на стенде»); прочие `*_BLOB_*` и `*_MEDIA_PUBLIC_BASE_URL` не задаются (страж `TestRenderYAMLBlobNone`) |
 | `WORKER_LOG_LEVEL`, `WORKER_LOG_FORMAT` | не задаются: во встроенном режиме **не действуют** (читаются и проверяются, но журнал — общий с api: `API_LOG_*`, строки фона — с `component=worker`) |
 
 **До выкатки identity (план I-2) — в панели `wf-api`:** `API_IDENTITY_SECRET_KEYS` и `API_IDENTITY_DEVICE_KEYS` —
@@ -502,6 +503,7 @@ SELECT has_table_privilege('admin', 'staff_accounts', 'INSERT') AS admin_staff,
 | `ADMIN_COOKIE_SECURE` | `true` (по умолчанию); `false` — только локально по http |
 | `ADMIN_STATIC_DIR` | каталог собранной `apps/admin`, если admin-api отдаёт её сам |
 | `ADMIN_RATE_LIMITS` | как `API_RATE_LIMITS` |
+| `ADMIN_BLOB_BACKEND` | обязателен: `fs` (dev), `s3` (свой сервер), `none` (стенд, в `render.yaml`) — раздел «Файлы на стенде»; ключи `s3` — `deploy/server/README.md`, «Хранилище файлов» |
 | `ADMIN_WAKE_API_URL` | только стенд: адрес `wf-api` (`https://<имя>.onrender.com`, без пути) для побудки; `sync: false` — в панели; пусто — выключено; путь, запрос или не `https` — отказ старта до базы |
 
 Остановка (SIGTERM): сначала дренаж HTTP (`ADMIN_SHUTDOWN_TIMEOUT`, 10 с; на стенде 8 с), затем чистка и River — мягко до 10 с
@@ -593,10 +595,26 @@ stderr. Потерян единственный ключ, на котором л
 identity, Q3 и §10.3; страж `TestProdBuildWithoutE2ETag`). Проверить капитанство целиком на стенде можно будет
 с модулями `players`/`teams`.
 
+## Файлы на стенде
+
+Хранилища файлов на стенде нет (спека media §6.4, Ц9; план media R14): у всех трёх процессов `*_BLOB_BACKEND=none` —
+`API_BLOB_BACKEND` и `WORKER_BLOB_BACKEND` у `wf-api` (встроенный воркер), `ADMIN_BLOB_BACKEND` у `wf-admin-api`.
+Ключи хранилища и адрес домена медиа не задаются. Что видно:
+
+- загрузки (операции владельцев, когда появятся) отвечают `503 media.unavailable`, остальное приложение живо;
+- задачи `media.process` и `media.purge` отменяются без повтора, очередь `media` пуста; чистка `media.cleanup` идёт по
+  строкам (объектов нет); CSP админки — без домена медиа;
+- старт — без ключей хранилища: в строке журнала «воркер запущен» (`component=worker`) — `media_storage=false`;
+  `/readyz` от хранилища не зависит.
+
+Проверка после выкатки (контроллер, с разрешения пользователя на деплой): `/readyz` `wf-api` и `wf-admin-api` — 200,
+в журнале `wf-api` — «воркер запущен» с `media_storage=false`. `fs` в образ не попадает: прод-образ
+(`WF_BUILD_KIND=prod`) отвергает его при старте с именем ключа.
+
 ## Потом — свой сервер
 
 Тот же образ, `docker compose` — `deploy/server/README.md` (подготовка, переменные, выкатка, переход со стенда,
-базы, проверка локально). Коротко:
+базы, хранилище файлов, проверка локально). Коротко:
 
 - перед обновлением — разовый `migrate up` (отдельный контейнер), а не в старте API;
 - `api`, `admin-api`, `worker` — отдельные сервисы из одного образа (`CMD` переопределяется:
@@ -604,3 +622,6 @@ identity, Q3 и §10.3; страж `TestProdBuildWithoutE2ETag`). Провери
   (`API_`, `ADMIN_`, `WORKER_`, `MIGRATOR_` — `internal/platform/config`);
 - фон — отдельный сервис `worker`, `API_EMBED_WORKER=false` (встроенный режим — только стенд);
 - база — Neon или свой Postgres 18 + PostGIS; переезд — смена строк подключения.
+- файлы — сервисы `storage` (Garage) и `storage-init` в compose, `*_BLOB_BACKEND=s3` у `api`, `admin-api`, `worker`
+  со своими ключами хранилища (права R2 плана media), домен медиа и адрес хранилища — за Caddy
+  (`deploy/server/README.md`, «Хранилище файлов»).

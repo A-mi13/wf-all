@@ -477,7 +477,8 @@ func TestRenderYAMLAdminCookie(t *testing.T) {
 // generateValue: ключи сотрудников нужны и командам оператора (R2), сгенерированный Render ключ пришлось бы копировать
 // из панели, а перегенерация обнулила бы все секреты TOTP. У каждой переменной — ровно один источник.
 func TestRenderYAMLSecretsNotInFile(t *testing.T) {
-	secret := []string{"DATABASE_URL", "SECRET", "PASSWORD", "USERNAME", "SMTP_ADDR", "MAIL_FROM", "ORIGIN", "DEVICE_KEYS"}
+	secret := []string{"DATABASE_URL", "SECRET", "PASSWORD", "USERNAME", "SMTP_ADDR", "MAIL_FROM", "ORIGIN", "DEVICE_KEYS",
+		"ACCESS_KEY", "SIGN_KEY"}
 	for _, s := range blueprint(t) {
 		for _, e := range s.EnvVars {
 			n := 0
@@ -807,10 +808,11 @@ func envKeys(t *testing.T, prefix string, vs ...any) map[string]env.FieldParams 
 	return out
 }
 
-// workerKeys — ключи процесса воркера (отдельного или встроенного): Worker, Mail и WorkerIdentity с префиксом WORKER_.
+// workerKeys — ключи процесса воркера (отдельного или встроенного): Worker, Mail, WorkerIdentity и Blob с префиксом
+// WORKER_.
 func workerKeys(t *testing.T) map[string]env.FieldParams {
 	t.Helper()
-	return envKeys(t, "WORKER_", &config.Worker{}, &config.Mail{}, &config.WorkerIdentity{})
+	return envKeys(t, "WORKER_", &config.Worker{}, &config.Mail{}, &config.WorkerIdentity{}, &config.Blob{})
 }
 
 // Каждая переменная Blueprint читается своим процессом: опечатка в ключе (ADMIN_SHUTDOWN_TIMOUT) молча оставила бы
@@ -827,9 +829,9 @@ func TestRenderYAMLKnownKeys(t *testing.T) {
 		return out
 	}
 	known := map[string]map[string]bool{
-		"wf-api": merge(envKeys(t, "API_", &config.API{}), envKeys(t, "MIGRATOR_", &config.Migrator{}),
+		"wf-api": merge(envKeys(t, "API_", &config.API{}, &config.Blob{}), envKeys(t, "MIGRATOR_", &config.Migrator{}),
 			workerKeys(t)),
-		"wf-admin-api": merge(envKeys(t, "ADMIN_", &config.Admin{})),
+		"wf-admin-api": merge(envKeys(t, "ADMIN_", &config.Admin{}, &config.Blob{})),
 	}
 	if !known["wf-admin-api"]["ADMIN_MAIL_SMTP_TLS"] || !known["wf-api"]["API_TRUSTED_PROXIES"] ||
 		!known["wf-api"]["WORKER_MAIL_SMTP_TLS"] || !known["wf-api"]["WORKER_IDENTITY_SECRET_KEYS"] {
@@ -846,6 +848,26 @@ func TestRenderYAMLKnownKeys(t *testing.T) {
 				t.Errorf("%s: %s — такого ключа нет в config процессов сервиса (опечатка или чужой префикс?)",
 					s.Name, e.Key)
 			}
+		}
+	}
+}
+
+// R14, спека media §6.4: стенд без хранилища — режим none у api, встроенного воркера и admin-api значением в файле
+// (не секрет); с признаком прод-образа (стенд — тот же образ) ключи проходят проверку старта.
+func TestRenderYAMLBlobNone(t *testing.T) {
+	for _, c := range []struct {
+		service, prefix string
+		fill            map[string]string
+	}{
+		{"wf-api", "API_", apiFill}, {"wf-api", "WORKER_", apiFill}, {"wf-admin-api", "ADMIN_", adminFill},
+	} {
+		s := service(t, c.service)
+		if v := s.fileEnv()[c.prefix+"BLOB_BACKEND"]; v != "none" {
+			t.Errorf("%s: %sBLOB_BACKEND = %q в файле, ждали none", c.service, c.prefix, v)
+		}
+		environ := append(s.environ(t, c.fill), config.BuildKindVar+"="+config.BuildKindProd)
+		if _, err := config.LoadBlob(c.prefix, environ); err != nil {
+			t.Errorf("%s: ключи хранилища %s не пройдут проверку старта: %v", c.service, c.prefix, err)
 		}
 	}
 }

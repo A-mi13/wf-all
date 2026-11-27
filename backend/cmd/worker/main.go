@@ -1,4 +1,4 @@
-// Command worker — фоновые задачи: пуши, пересчёты, outbox, импорт GeoNames.
+// Command worker — фоновые задачи: пуши, пересчёты, outbox, импорт GeoNames, файлы media.
 package main
 
 import (
@@ -22,7 +22,10 @@ import (
 
 	"wf/backend/cmd/internal/workerhost"
 	geojobs "wf/backend/internal/geo/jobs"
+	"wf/backend/internal/media/reconcile"
+	"wf/backend/internal/platform/blob/blobopen"
 	"wf/backend/internal/platform/clock"
+	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/db"
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/logx"
@@ -68,11 +71,11 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 			return err
 		}
 		defer pool.Close()
-		reg, err := workerhost.Subscriptions()
+		reg, err := workerhost.Subscriptions(log)
 		if err != nil {
 			return err
 		}
-		return command(ctx, args, pool, reg, b.Geo, h.clock, out, log)
+		return command(ctx, args, environ, pool, reg, b.Geo, h.clock, out, log)
 	}
 	// почта, кольцо identity и очереди — до подключения к базе; предупреждения SMTP — в журнал воркера
 	p, err := workerhost.Prepare(b, environ, log)
@@ -94,7 +97,7 @@ func runOn(ctx context.Context, h host, args, environ []string, out, logOut io.W
 }
 
 const usage = "без аргументов — воркер; events replay --type <модуль>.<факт> --subscriber <модуль>.<имя> --since <RFC 3339>; " +
-	"geo import --country <ISO 3166-1 alpha-2>"
+	"geo import --country <ISO 3166-1 alpha-2>; media reconcile [--fix]"
 
 // errUsage — неверная разовая команда (неизвестная, лишние аргументы, неизвестный или недостающий флаг): код
 // выхода 2 и usage в тексте ошибки, как у admin-api (geo 1 Task 11 M4).
@@ -111,8 +114,8 @@ func exitCode(err error) int {
 }
 
 // command — разовые команды воркера: реестр подписчиков знает только воркер, импорт GeoNames
-// оператор запускает со своей машины под ролью worker.
-func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config,
+// оператор запускает со своей машины под ролью worker. Ключи хранилища (WORKER_BLOB_*) читает только media reconcile.
+func command(ctx context.Context, args, environ []string, pool *pgxpool.Pool, reg *events.Registry, geo geojobs.Config,
 	clk clock.Clock, out io.Writer, log *slog.Logger) error {
 	var do func() error
 	switch {
@@ -120,6 +123,8 @@ func command(ctx context.Context, args []string, pool *pgxpool.Pool, reg *events
 		do = func() error { return replay(ctx, args[2:], pool, reg, out, log) }
 	case len(args) >= 2 && args[0] == "geo" && args[1] == "import":
 		do = func() error { return geoImport(ctx, args[2:], pool, geo, clk, out, log) }
+	case len(args) >= 2 && args[0] == "media" && args[1] == "reconcile":
+		do = func() error { return mediaReconcile(ctx, args[2:], environ, pool, clk, out) }
 	default:
 		return usageError(fmt.Sprintf("неизвестная команда %q", strings.Join(args, " ")))
 	}
@@ -193,6 +198,35 @@ func geoImport(ctx context.Context, args []string, pool *pgxpool.Pool, geo geojo
 	}
 	printGeoSummary(out, cc, s)
 	return nil
+}
+
+// mediaReconcile — сверка хранилища с базой после восстановления (спека media §6.5, deploy/server/README.md): отчёт
+// «строка без файла / файл без строки» (только id и ключи); --fix удаляет файлы без строк. Хранилище — WORKER_BLOB_*
+// через config.LoadBlob (fs в прод-образе — отказ); none — «хранилище выключено», код 0.
+func mediaReconcile(ctx context.Context, args, environ []string, pool *pgxpool.Pool, clk clock.Clock, out io.Writer) error {
+	fs := flag.NewFlagSet("media reconcile", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fix := fs.Bool("fix", false, "удалить файлы без строк")
+	if err := fs.Parse(args); err != nil {
+		return usageError(fmt.Sprintf("media reconcile: %v", err))
+	}
+	if fs.NArg() > 0 {
+		return usageError(fmt.Sprintf("media reconcile: лишние аргументы %q", strings.Join(fs.Args(), " ")))
+	}
+	bc, err := config.LoadBlob("WORKER_", environ)
+	if err != nil {
+		return err
+	}
+	opened, err := blobopen.Open(ctx, bc, clk)
+	if err != nil {
+		return err
+	}
+	if !opened.Available {
+		fmt.Fprintln(out, "хранилище выключено (WORKER_BLOB_BACKEND=none): сверять нечего")
+		return nil
+	}
+	_, err = reconcile.Run(ctx, pool, opened.Buckets, clk, *fix, out)
+	return err
 }
 
 // printGeoSummary — итог импорта в вывод команды: счётчики и перечень slug по категориям сверки.

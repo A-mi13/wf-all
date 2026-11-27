@@ -1,0 +1,216 @@
+# Общие схемы файлов (спека media §7.1) — копия public/media/schemas.yaml (равенство — тест contracts.test.mjs) и
+# multipart прямой загрузки сотрудником (§3.6). Своих операций у media нет: операции владельцев (ассеты каталога,
+# фото поля) ссылаются на эти схемы.
+UploadRequest:
+  type: object
+  description: >-
+    Заявка «начать загрузку» (спека media §3.1): тип и точный размер файла. Это только ранний отказ — итог решает
+    сервер по байтам файла: заявленный тип не из accepted_types цели — 422 media.unsupported_type, размер больше
+    предела цели — 422 media.too_large. Размер подписывается в билете точно: файл другого размера хранилище отвергнет
+  required: [content_type, bytes]
+  properties:
+    content_type:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: MIME-тип файла (image/jpeg, image/png, image/webp; у анимаций — application/json)
+      example: image/jpeg
+    bytes:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Точный размер файла в байтах — ровно столько хранилище примет по билету
+      example: 2457600
+UploadTicket:
+  type: object
+  description: >-
+    Билет загрузки (спека media §3.1, §3.2): клиент отправляет файл прямо в хранилище по url, затем вызывает
+    «завершить» владельца с upload_id. Ссылка и поля — секрет на срок билета (15 минут): не логировать и не
+    сохранять. Сейчас метод всегда POST — форма multipart/form-data: сначала все поля fields как есть, файл —
+    последним полем с именем file, Content-Type формы ставит клиент; ответ хранилища 2xx (204) — файл принят;
+    любой ответ 4xx — файл не принят (подпись, тип, размер или срок не совпали; код зависит от хранилища — 403 или
+    400): начать загрузку заново, получив новый билет
+  required:
+    [
+      upload_id,
+      method,
+      url,
+      headers,
+      fields,
+      expires_at,
+      complete_before,
+      max_bytes,
+      accepted_types,
+    ]
+  properties:
+    upload_id:
+      type: string
+      format: uuid
+      description: Id загрузки — его передают в «завершить» владельца; он же — id будущего изображения
+      example: 019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42
+    method:
+      type: string
+      enum: [PUT, POST]
+      x-extensible-enum: true
+      description: >-
+        HTTP-метод отправки файла в хранилище. Сервер выдаёт POST (форма с полями fields и файлом последним); PUT
+        оставлен на будущее — тогда файл уходит телом запроса с заголовками headers
+    url:
+      type: string
+      format: uri
+      description: Адрес хранилища для отправки файла (не адрес API; в dev — /_blob/in на api)
+      example: https://storage.wherefootball.example/wf-in
+    headers:
+      type: object
+      additionalProperties:
+        type: string
+      description: Обязательные заголовки запроса к хранилищу (у POST — пусто, Content-Type формы ставит клиент)
+      example: {}
+    fields:
+      type: object
+      additionalProperties:
+        type: string
+      description: >-
+        Поля формы POST — отправить все как есть, в любом порядке, но до поля file; у PUT — пусто
+      example:
+        key: 019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42
+        Content-Type: image/jpeg
+        policy: eyJleHBpcmF0aW9uIjoiMjAyNi0xMS0yN1QxMjoxNTowMFoifQ==
+        x-amz-signature: 4f1c2a9b7e
+    expires_at:
+      type: string
+      format: date-time
+      description: До этого момента (UTC) хранилище принимает файл по билету
+      example: '2026-11-27T12:15:00Z'
+    complete_before:
+      type: string
+      format: date-time
+      description: >-
+        До этого момента (UTC, expires_at + 1 ч) владелец принимает «завершить» — окно медленной загрузки, начатой до
+        expires_at; позже — 410 media.upload_expired
+      example: '2026-11-27T13:15:00Z'
+    max_bytes:
+      type: integer
+      format: int64
+      description: Размер файла, который примет хранилище, — ровно заявленный bytes
+      example: 2457600
+    accepted_types:
+      type: array
+      items:
+        type: string
+      description: MIME-типы, которые принимает цель загрузки
+      example: [image/jpeg, image/png, image/webp]
+MediaImage:
+  type: object
+  description: >-
+    Изображение в ответе владельца (спека media §3.4, §7.1). Варианты есть только у ready; у processing и rejected —
+    пустой объект. Готовность клиент видит при следующем чтении ресурса владельца. У закрытого изображения адресов в
+    вариантах нет — ссылку на 5 минут выдаёт ручка показа владельца (PrivateMediaLink)
+  required: [id, state, reject_code, variants]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Id изображения (= upload_id билета)
+      example: 019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42
+    state:
+      type: string
+      enum: [processing, ready, rejected]
+      x-extensible-enum: true
+      description: >-
+        processing — файл принят и обрабатывается; ready — варианты готовы; rejected — файл отклонён, причина —
+        reject_code
+    reject_code:
+      type: string
+      nullable: true
+      enum:
+        [
+          too_large,
+          unsupported_type,
+          too_many_pixels,
+          corrupt,
+          content_rejected,
+          unsafe_animation,
+          processing_failed,
+        ]
+      x-extensible-enum: true
+      description: >-
+        Причина отклонения — только у rejected (иначе null): too_large — больше предела, unsupported_type — формат не
+        из входов цели, too_many_pixels — слишком большое разрешение, corrupt — файл не читается, content_rejected —
+        не прошёл проверку содержимого, unsafe_animation — анимация с запрещёнными элементами, processing_failed —
+        обработка не удалась
+    variants:
+      type: object
+      description: >-
+        Варианты по имени (thumb, full, …): url — адрес варианта (только у публичного изображения; у закрытого поля
+        нет), width и height — размеры в пикселях, content_type — тип файла варианта (image/webp, у анимации —
+        application/json)
+      additionalProperties:
+        type: object
+        required: [width, height, content_type]
+        properties:
+          url:
+            type: string
+            format: uri
+            description: Публичный адрес варианта; у закрытого изображения поля нет
+            example: https://media.wherefootball.example/019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42/thumb.webp
+          width:
+            type: integer
+            description: Ширина варианта в пикселях
+            example: 256
+          height:
+            type: integer
+            description: Высота варианта в пикселях
+            example: 192
+          content_type:
+            type: string
+            description: MIME-тип файла варианта
+            example: image/webp
+      example:
+        thumb:
+          url: https://media.wherefootball.example/019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42/thumb.webp
+          width: 256
+          height: 192
+          content_type: image/webp
+        full:
+          url: https://media.wherefootball.example/019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42/full.webp
+          width: 2048
+          height: 1536
+          content_type: image/webp
+PrivateMediaLink:
+  type: object
+  description: >-
+    Подписанная ссылка на вариант закрытого изображения (спека media §3.5): действует 5 минут, ведёт на адрес
+    хранилища; ответ по ней не кэшируется. Ответ ручки показа — Cache-Control no-store
+  required: [url, expires_at]
+  properties:
+    url:
+      type: string
+      format: uri
+      description: Подписанная ссылка на файл варианта — секрет на срок ссылки, не сохранять
+      example: https://storage.wherefootball.example/wf-priv/019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42/full.webp?X-Amz-Expires=300
+    expires_at:
+      type: string
+      format: date-time
+      description: Момент (UTC), после которого ссылка не действует — запросить новую
+      example: '2026-11-27T12:05:00Z'
+MediaDirectUpload:
+  type: object
+  description: >-
+    Тело прямой загрузки сотрудником (спека media §3.6): multipart/form-data, файл — последним полем file (поля после
+    файла — 400), предел всего тела — 5 МиБ (больше — 413 request.too_large). Цель и владельца задаёт операция
+    владельца (путь), тип — поле content_type, не заголовок части. Заявленный тип не из входов цели — 422
+    media.unsupported_type, пустой файл или больше предела цели — 422 media.too_large; итог решает сервер по байтам
+  required: [content_type, file]
+  properties:
+    content_type:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: MIME-тип файла (image/jpeg, image/png, image/webp; у анимации — application/json)
+      example: image/png
+    file:
+      type: string
+      format: binary
+      description: Байты файла — последним полем формы; имя файла клиента не принимается и не хранится
+      example: (байты PNG)

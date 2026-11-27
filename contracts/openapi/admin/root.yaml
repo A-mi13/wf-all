@@ -865,3 +865,13 @@ components:
       $ref: './identity/schemas.yaml#/IdentityMfaResetRequest'
     IdentityMfaResetCancelled:
       $ref: './identity/schemas.yaml#/IdentityMfaResetCancelled'
+    UploadRequest:
+      $ref: './media/schemas.yaml#/UploadRequest'
+    UploadTicket:
+      $ref: './media/schemas.yaml#/UploadTicket'
+    MediaImage:
+      $ref: './media/schemas.yaml#/MediaImage'
+    PrivateMediaLink:
+      $ref: './media/schemas.yaml#/PrivateMediaLink'
+    MediaDirectUpload:
+      $ref: './media/schemas.yaml#/MediaDirectUpload'

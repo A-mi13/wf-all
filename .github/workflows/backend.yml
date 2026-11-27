@@ -68,6 +68,17 @@ jobs:
       - run: bash scripts/bootstrap.sh
       # сервис postgis/postgis не видит deploy/dev/initdb — накатываем роли и расширения вручную
       - run: psql "postgresql://postgres:postgres@localhost:15432/postgres" -v ON_ERROR_STOP=1 -f deploy/dev/initdb/20_wf.sql
+      # интеграция blob/s3 (план media R13): dev-Garage в Docker (образ и права ключей — scripts/s3.sh, scripts/s3/);
+      # без WF_TEST_S3_* тесты S3 при CI=true падают, а не пропускаются. Секреты — только в маске и GITHUB_ENV.
+      # shell: bash — это -eo pipefail: сбой `s3.sh env` в конвейере красит шаг здесь, а не тесты через 10 минут
+      - name: Garage для тестов
+        shell: bash
+        run: |
+          bash scripts/s3.sh up
+          bash scripts/s3.sh env | sed 's/^export //' > "$RUNNER_TEMP/s3.env"
+          grep '_SECRET_KEY=' "$RUNNER_TEMP/s3.env" | cut -d= -f2- | sed 's/^/::add-mask::/'
+          cat "$RUNNER_TEMP/s3.env" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/s3.env"
       - run: ./task backend:ci
       # ломающее изменение контракта валит PR; ломать — только в /v2 (до тега contracts-v1.0.0 — исключения в contracts/oasdiff-err-ignore-*.txt) (спека §8.3)
       - run: ./task contracts:breaking

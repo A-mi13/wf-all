@@ -28,10 +28,13 @@ import (
 	"wf/backend/internal/platform/testkit/dbtest"
 )
 
-// mailEnv — почта и кольцо identity обязательны режиму воркера (разовым командам — нет); в тестах — адрес, на котором
-// никто не слушает: письма не отправляются, пока модули не поставят задачу.
+// mailEnv — почта, кольцо identity и хранилище обязательны режиму воркера (разовым командам — нет); в тестах — адрес,
+// на котором никто не слушает: письма не отправляются, пока модули не поставят задачу; хранилище — none.
 var mailEnv = []string{"WORKER_MAIL_SMTP_ADDR=127.0.0.1:1", "WORKER_MAIL_FROM=WF <noreply@wf.local>", "WORKER_MAIL_SMTP_TLS=none",
-	identityEnv}
+	identityEnv, blobNone}
+
+// blobNone — хранилище выключено (режим стенда).
+const blobNone = "WORKER_BLOB_BACKEND=none"
 
 // identityEnv — кольцо identity воркера (план I-2, Task 4): 32 нулевых байта в base64, только для тестов.
 const identityEnv = "WORKER_IDENTITY_SECRET_KEYS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -411,7 +414,7 @@ func TestRunWarnsOpportunisticSMTPInServiceLog(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	env := []string{"WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1", "WORKER_LOG_FORMAT=json", identityEnv,
-		"WORKER_MAIL_SMTP_ADDR=smtp.example.com:587", "WORKER_MAIL_FROM=WF <noreply@wf.local>", "WORKER_MAIL_SMTP_TLS=opportunistic"}
+		"WORKER_MAIL_SMTP_ADDR=smtp.example.com:587", "WORKER_MAIL_FROM=WF <noreply@wf.local>", "WORKER_MAIL_SMTP_TLS=opportunistic", blobNone}
 	if err := run(ctx, nil, env, io.Discard, &logBuf); err == nil {
 		t.Fatal("база недостижима, а run вернул nil")
 	}

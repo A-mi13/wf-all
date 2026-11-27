@@ -1,9 +1,10 @@
 # Свой сервер (спека 2026-11-16-embedded-worker §5): тот же образ, что на dev-стенде Render, — migrate, api, admin-api,
-# worker и Caddy (TLS и маршрутизация по доменам). Переход со стенда — правкой конфигурации, без правок кода:
+# worker, хранилище файлов storage (Garage) с разовой настройкой storage-init и Caddy (TLS и маршрутизация по доменам,
+# включая домен медиа и адрес хранилища). Переход со стенда — правкой конфигурации, без правок кода:
 # подготовка, выкатка и порядок перехода — README.md рядом.
 #
 # Запуск из этого каталога: docker compose up -d (переменные уровня compose — .env, шаблон .env.example;
-# переменные бинарников — <сервис>.env, шаблоны <сервис>.env.example). База по умолчанию — Neon (строки в *.env);
+# переменные бинарников — <сервис>.env и ключи хранилища <сервис>.blob.env, шаблоны — те же имена с .example). База по умолчанию — Neon (строки в *.env);
 # вариант «база на сервере» — закомментированный сервис db ниже и раздел README.
 # Проверка в CI и локально — поверх этого файла compose.ci.yaml (база в compose, local_certs) и compose.ci-embed.yaml
 # (второй прогон: api со встроенным воркером); страж файлов — server_compose_test.go (config).
@@ -38,7 +39,8 @@ services:
   api:
     <<: *backend
     command: ['api']
-    env_file: api.env
+    # ключи хранилища — отдельным файлом (его же читает storage-init)
+    env_file: [api.env, api.blob.env]
     environment:
       # Встроенный воркер в проде запрещён (README, «Встроенный режим — только стенд»): фон исполняет отдельный
       # сервис worker. Значение здесь перекрывает api.env; страж — TestServerComposeNoEmbeddedWorker и job server
@@ -46,6 +48,9 @@ services:
       API_EMBED_WORKER: 'false'
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      # бакеты, ключи и права хранилища готовы (storage/init.sh); init упал — процессы не стартуют
+      storage-init:
         condition: service_completed_successfully
     healthcheck:
       <<: *health
@@ -55,9 +60,13 @@ services:
   admin-api:
     <<: *backend
     command: ['admin-api']
-    env_file: admin-api.env
+    # ключи хранилища — отдельным файлом (его же читает storage-init)
+    env_file: [admin-api.env, admin-api.blob.env]
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      # бакеты, ключи и права хранилища готовы (storage/init.sh); init упал — процессы не стартуют
+      storage-init:
         condition: service_completed_successfully
     healthcheck:
       <<: *health
@@ -67,10 +76,63 @@ services:
   worker:
     <<: *backend
     command: ['worker']
-    env_file: worker.env
+    # ключи хранилища — отдельным файлом (его же читает storage-init)
+    env_file: [worker.env, worker.blob.env]
     depends_on:
       migrate:
         condition: service_completed_successfully
+      # бакеты, ключи и права хранилища готовы (storage/init.sh); init упал — процессы не стартуют
+      storage-init:
+        condition: service_completed_successfully
+
+  # Хранилище файлов (спека media §6.5, план R1): Garage, один узел, данные и метаданные — том storage_data.
+  # AGPLv3, отдельный сервис без изменений (README, «Хранилище файлов»). Порты не публикуются: S3 (3900), сайт
+  # публичного бакета (3902) и admin API (3903) — только в сети wf; снаружи — Caddy (Caddyfile).
+  storage:
+    # тег — docs/versions.md, тот же, что у dev-хранилища scripts/s3.sh (страж TestServerComposeStorageInit)
+    image: dxflrs/garage:v2.6.0
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # GARAGE_RPC_SECRET и GARAGE_ADMIN_TOKEN (шаблон storage.env.example)
+    env_file: storage.env
+    volumes:
+      - ./storage/garage.toml:/etc/garage.toml:ro
+      - storage_data:/var/lib/garage
+    # образ без оболочки и wget — CLI самого Garage: узел отвечает по RPC
+    healthcheck:
+      test: ['CMD', '/garage', 'status']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [wf]
+
+  # Разовая настройка хранилища перед процессами (storage/init.sh; повторный запуск безопасен): слой узла, бакеты
+  # wf-in, wf-pub, wf-priv, импорт ключей процессов из их env с правами R2, сайт wf-pub, lifecycle и CORS wf-in.
+  # Через admin API Garage — ключа с правом owner нет ни у кого.
+  storage-init:
+    # тег — docs/versions.md; busybox sh + curl. Сторонний образ видит секреты хранилища — закреплён по digest (индекс
+    # мультиплатформенного образа): подмена тега в реестре не пройдёт. Обновление — тег и digest вместе
+    # (docker buildx imagetools inspect curlimages/curl:<тег>, строка Digest)
+    image: curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
+    restart: 'no'
+    entrypoint: ['sh', '/init.sh']
+    # токен admin API и ключи процессов (*_BLOB_S3_ACCESS_KEY, *_SECRET_KEY, *_BUCKET_*) — из тех же файлов, что у
+    # процессов (<сервис>.blob.env): один источник ключей. env процессов целиком (база, кольца, SMTP) init не получает.
+    env_file:
+      - storage.env
+      - api.blob.env
+      - admin-api.blob.env
+      - worker.blob.env
+    environment:
+      # CORS загрузки в wf-in (подписанный POST из браузера)
+      WF_WEB_ORIGIN: ${WF_WEB_ORIGIN:?WF_WEB_ORIGIN — origin веба для CORS загрузки, см. .env.example}
+    volumes:
+      - ./storage/init.sh:/init.sh:ro
+    depends_on:
+      storage:
+        condition: service_healthy
+    networks: [wf]
 
   caddy:
     # тег — docs/versions.md
@@ -86,6 +148,8 @@ services:
       WF_API_DOMAIN: ${WF_API_DOMAIN:?WF_API_DOMAIN — домен API, см. .env.example}
       WF_ADMIN_DOMAIN: ${WF_ADMIN_DOMAIN:?WF_ADMIN_DOMAIN — домен админки, см. .env.example}
       WF_ACME_EMAIL: ${WF_ACME_EMAIL:?WF_ACME_EMAIL — почта для ACME, см. .env.example}
+      WF_MEDIA_DOMAIN: ${WF_MEDIA_DOMAIN:?WF_MEDIA_DOMAIN — домен медиа, см. .env.example}
+      WF_STORAGE_DOMAIN: ${WF_STORAGE_DOMAIN:?WF_STORAGE_DOMAIN — адрес хранилища, см. .env.example}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # сертификаты и ключ ACME-учётки: том не удалять (лимиты выдачи Let's Encrypt)
@@ -128,4 +192,6 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  # файлы и метаданные хранилища: бэкап по расписанию, том не удалять (README, «Хранилище файлов»)
+  storage_data:
   # db_data:

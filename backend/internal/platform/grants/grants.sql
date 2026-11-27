@@ -126,6 +126,15 @@ BEGIN
         -- минимальная версия приложения: API читает, админка задаёт; воркеру не нужна
         WHEN r.name = 'app_versions' THEN CASE who WHEN 'api' THEN 'SELECT'
                                                    WHEN 'admin' THEN 'SELECT, INSERT, UPDATE' END
+        -- media (спека media §5.3): api и admin создают объекты, прикрепляют, открепляют и снимают (без DELETE строк),
+        -- ведут билеты (прикрепление удаляет билет), варианты только читают; воркер меняет состояние, размеры,
+        -- попытки и обезличивает загрузившего, пишет варианты, чистит объекты и билеты, объектов не создаёт.
+        -- Представление media_read_objects — ветка представлений ниже. TRUNCATE — никому
+        WHEN r.name = 'media_objects' THEN CASE who WHEN 'worker' THEN 'SELECT, UPDATE, DELETE'
+                                                    ELSE 'SELECT, INSERT, UPDATE' END
+        WHEN r.name = 'media_uploads' THEN CASE who WHEN 'worker' THEN 'SELECT, DELETE'
+                                                    ELSE 'SELECT, INSERT, DELETE' END
+        WHEN r.name = 'media_variants' THEN CASE who WHEN 'worker' THEN 'SELECT, INSERT, DELETE' ELSE 'SELECT' END
         WHEN r.kind IN ('v', 'm') THEN 'SELECT'
         ELSE 'SELECT, INSERT, UPDATE, DELETE'
       END;

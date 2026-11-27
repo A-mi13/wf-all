@@ -69,6 +69,7 @@ jobs:
             -e API_LEGAL_DOCUMENTS='terms=0.1.0|https://example.com/legal/terms,privacy=0.1.0|https://example.com/legal/privacy' \
             -e API_DATABASE_URL='postgres://api:api@127.0.0.1:15432/wf?sslmode=disable' \
             -e MIGRATOR_DATABASE_URL='postgres://migrator:migrator@127.0.0.1:15432/wf?sslmode=disable' \
+            -e API_BLOB_BACKEND=none \
             wf-backend migrate-then-api
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:18080/healthz; then
@@ -104,6 +105,7 @@ jobs:
             -e ADMIN_MAIL_SMTP_TLS=none \
             -e 'ADMIN_MAIL_FROM=WF <noreply@wf.local>' \
             -e ADMIN_STATIC_DIR=/app/admin \
+            -e ADMIN_BLOB_BACKEND=none \
             wf-backend admin-api
           up=
           for _ in $(seq 1 30); do
@@ -155,7 +157,8 @@ jobs:
       - name: env из шаблонов
         run: |
           set_kv() { sed -i "/^$2=/d" "$1"; printf '%s=%s\n' "$2" "$3" >>"$1"; }
-          for s in api admin-api worker migrate; do cp "$s.env.example" "$s.env"; done
+          for s in api admin-api worker migrate storage; do cp "$s.env.example" "$s.env"; done
+          for s in api admin-api worker; do cp "$s.blob.env.example" "$s.blob.env"; done
           cp .env.example .env
           ring=$(openssl rand -base64 32)
           set_kv migrate.env MIGRATOR_DATABASE_URL 'postgres://migrator:migrator@db:5432/wf?sslmode=disable'
@@ -184,6 +187,20 @@ jobs:
           set_kv .env WF_API_DOMAIN api.wf.test
           set_kv .env WF_ADMIN_DOMAIN admin.wf.test
           set_kv .env WF_ACME_EMAIL ci@wf.test
+          # хранилище: секреты Garage и ключи процессов — одноразовые в формате Garage (README, «Хранилище файлов»),
+          # внешние адреса — домены CI
+          set_kv storage.env GARAGE_RPC_SECRET "$(openssl rand -hex 32)"
+          set_kv storage.env GARAGE_ADMIN_TOKEN "$(openssl rand -base64 32)"
+          for f in api.blob.env:API admin-api.blob.env:ADMIN worker.blob.env:WORKER; do
+            file=${f%%:*} p=${f#*:}
+            set_kv "$file" "${p}_BLOB_S3_PUBLIC_ENDPOINT" https://storage.wf.test
+            set_kv "$file" "${p}_MEDIA_PUBLIC_BASE_URL" https://media.wf.test/
+            set_kv "$file" "${p}_BLOB_S3_ACCESS_KEY" "GK$(openssl rand -hex 12)"
+            set_kv "$file" "${p}_BLOB_S3_SECRET_KEY" "$(openssl rand -hex 32)"
+          done
+          set_kv .env WF_MEDIA_DOMAIN media.wf.test
+          set_kv .env WF_STORAGE_DOMAIN storage.wf.test
+          set_kv .env WF_WEB_ORIGIN https://wf.test
       # прод-файл держит встроенный режим выключенным: config на шаблоне .env.example, с оверлеем CI — тоже
       - name: compose config — API_EMBED_WORKER у api = "false"
         run: |
@@ -193,58 +210,6 @@ jobs:
               jq -e '.services.api.environment.API_EMBED_WORKER == "false"' >/dev/null ||
               { echo "::error::$files: у api API_EMBED_WORKER не \"false\""; exit 1; }
           done
+      # скрипт — в файле: actionlint 1.7.12 на Windows виснет на run: длиннее ~4 КиБ (шапка ci-check.sh)
       - name: подъём и исполнение фона — отдельный worker, затем встроенный в api
-        run: |
-          fail() { echo "::error::server ($run): $1"; exit 1; }
-          # журналы стека — при любом ненулевом выходе
-          trap 'rc=$?; [ "$rc" -eq 0 ] || docker compose "${files[@]}" logs --no-color || true; exit "$rc"' EXIT
-          # check <сервис с фоном>: /readyz через Caddy, журнал «воркер запущен», исполнилась периодика
-          check() {
-            local bg=$1 ok=
-            # migrate — первым и успешно (up --wait ждёт здоровья, migrate — выхода)
-            docker compose "${files[@]}" up -d --wait --wait-timeout 180 || fail "up --wait"
-            [ "$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose "${files[@]}" ps -aq migrate)")" = 0 ] ||
-              fail "migrate не 0"
-            docker compose "${files[@]}" exec -T caddy cat /data/caddy/pki/authorities/local/root.crt >root.crt
-            for host in api.wf.test admin.wf.test; do
-              ok=
-              for _ in $(seq 1 30); do
-                if curl -fsS --cacert root.crt --resolve "$host:443:127.0.0.1" "https://$host/readyz"; then
-                  ok=1
-                  break
-                fi
-                sleep 2
-              done
-              [ -n "$ok" ] || fail "https://$host/readyz за 60 с"
-            done
-            ok=
-            for _ in $(seq 1 30); do
-              if docker compose "${files[@]}" logs --no-color "$bg" | grep -q 'воркер запущен'; then
-                ok=1
-                break
-              fi
-              sleep 2
-            done
-            [ -n "$ok" ] || fail "в журнале $bg нет «воркер запущен» за 60 с"
-            if [ "$bg" = api ]; then
-              docker compose "${files[@]}" logs --no-color api | grep 'воркер запущен' | grep -q '"component":"worker"' ||
-                fail "«воркер запущен» у api без component=worker"
-            fi
-            # выборы лидера и RunOnStart периодики — до 120 с
-            ok=
-            for _ in $(seq 1 60); do
-              # || true: под bash -e сбой exec (db ещё не принимает) оборвал бы цикл — это повтор, не отказ
-              n=$(docker compose "${files[@]}" exec -T db psql -U postgres -d wf -tAc \
-                "SELECT count(*) FROM river_job WHERE kind = 'ratelimit.cleanup' AND state = 'completed'") || true
-              if [ "${n:-0}" -ge 1 ]; then ok=1; break; fi
-              sleep 2
-            done
-            [ -n "$ok" ] || fail "ratelimit.cleanup не дошла до completed за 120 с"
-          }
-          run=worker files=(-f compose.yaml -f compose.ci.yaml)
-          check worker
-          docker compose "${files[@]}" down -v
-          run=embed files=(-f compose.yaml -f compose.ci.yaml -f compose.ci-embed.yaml)
-          if docker compose "${files[@]}" config --services | grep -qx worker; then fail "сервис worker не выключен"; fi
-          check api
-          docker compose "${files[@]}" down -v
+        run: bash ci-check.sh

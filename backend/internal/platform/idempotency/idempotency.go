@@ -90,6 +90,12 @@ func Middleware(dbtx idempotencydb.DBTX, cfg Config, log *slog.Logger) func(http
 				return
 			}
 			body, err := io.ReadAll(r.Body)
+			if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
+				// тело сверх предела звена лимита — 413, как без ключа: ручки вне контракта (валидатор не читал тело
+				// раньше) иначе получали бы 400 (ревью финала C m2)
+				httpx.WriteProblem(w, r, http.StatusRequestEntityTooLarge, httpx.CodeRequestTooLarge, "")
+				return
+			}
 			if err != nil {
 				httpx.WriteProblem(w, r, http.StatusBadRequest, httpx.CodeRequestInvalid, "")
 				return

@@ -1,13 +1,15 @@
 # Второй прогон проверки (job server, решение плана R9): api со встроенным воркером, как на стенде Render, — фон
-# исполняется внутри api на переменных WORKER_* из worker.env, отдельного сервиса worker нет. Только проверка:
-# compose.yaml держит "false" литералом, встроенный режим в проде запрещён (README).
+# исполняется внутри api на переменных WORKER_* из worker.env и worker.blob.env, отдельного сервиса worker нет.
+# Только проверка: compose.yaml держит "false" литералом, встроенный режим в проде запрещён (README).
 # docker compose -f compose.yaml -f compose.ci.yaml -f compose.ci-embed.yaml …
 
 services:
   api:
     env_file:
       - api.env
+      - api.blob.env
       - worker.env
+      - worker.blob.env
     environment:
       API_EMBED_WORKER: 'true'
 

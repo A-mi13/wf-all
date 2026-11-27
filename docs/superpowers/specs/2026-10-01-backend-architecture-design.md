@@ -88,7 +88,7 @@ backend/internal/<модуль>/
 | `geo` | countries, regions, cities, districts, country_names, region_names, city_names, city_slug_history; источник GeoNames: geonames_places, geonames_place_names, geonames_admin1, geonames_admin1_names, geonames_imports; экспортированное представление geo_read_city_settings | справочник, статусы городов, названия по локалям, валюта и возрастные пороги страны, импорт GeoNames и активация городов (спека `geo`) |
 | `staff` | staff_accounts, staff_roles, staff_role_cities, staff_mfa, staff_recovery_codes, staff_invites, staff_sessions; функция-триггер staff_role_cities_check | учётки сотрудников админки, роли и города модератора, приглашения, вход с TOTP, сессии admin-api, управление сотрудниками, исполнители подтверждений `staff.*`, письма и чистка сотрудников (спека сотрудников `docs/superpowers/specs/2026-10-06-staff-admin-geo2-design.md`) |
 | `identity` | users (ядро аккаунта), credentials, auth_codes, auth_challenges, sessions, refresh_tokens, security_events, devices, device_accounts, user_identities, passkeys, user_mfa, user_recovery_codes, mfa_resets, consents, role_assignments, user_restrictions, captain_applications, nickname_reservations, nickname_changes, reserved_nicknames; экспортированные представления identity_read_users, identity_read_linked_accounts, identity_read_captain_permits, identity_read_restrictions, identity_read_auth_method_usage (миграции `0024`–`0027`, спека identity §5) | регистрация, вход, 2FA и её сброс поддержкой, сессии, устройства и связанные аккаунты, согласие с документами, заявка и допуск к капитанству в городе, ограничения доступа, ники, удаление аккаунта (спека `docs/superpowers/specs/2026-11-13-identity-design.md`) |
-| `media` | media_objects | загрузка, проверка типа по содержимому, перекодирование, отдача с отдельного домена |
+| `media` | media_objects, media_uploads, media_variants; экспортированное представление media_read_objects (миграция `0028`, спека media §5) | билеты загрузки, проверка типа по содержимому, перекодирование в WebP, отдача публичного с домена медиа и закрытого подписанной ссылкой, удаление и чистка файлов, S3-реализация `platform/blob` (спека `docs/superpowers/specs/2026-11-18-media-design.md`) |
 | `economy` | wallets, ledger_entries, subscriptions, catalog_items, user_inventory, team_inventory, achievements, user_achievements, lootbox_*, quests, user_quests, referrals | очки и кредиты (двойная запись), каталог (аватары-архетипы, гербы, рамки), инвентарь, права на платные опции, подписки через IAP, достижения, задания, рефералы |
 | `players` | player_profiles | карточка игрока: позиции, заявленный и подтверждённый уровень, нога, рост, номер, клуб, девиз, выбранный аватар, предпочитаемое время |
 | `pitches` | pitches | поля, покрытия, обувь, дубли в радиусе 150 м, слияние, модерация |
@@ -184,6 +184,7 @@ geo ← identity ← media ← economy ← players ← pitches ← teams ← mat
 | Ставка прогноза | `predictions` → `economy/intx.DebitInTx` |
 | Протокол: явка и самоподтверждение участников | `results` → `matches/intx.SetAttendanceInTx` |
 | Протокол принят или истёк: статус матча | `results` → `matches/intx.SetOutcomeInTx` |
+| Файлы владельца: прикрепление загрузки, прямая загрузка, открепление, снятие | `economy`, `pitches`, `moderation`, `results`, поддержка, `chat`, `players` → `media/intx.{AttachInTx,CreateDirectInTx,DetachInTx,TakeDownInTx}` (спека media §2.3); пары в `archtest.IntxPairs` добавляют **планы владельцев** вместе со своим кодом (план media R11, 26.11): после плана `media` пар нет, место «поддержки» в `archtest.Layers` решает её спека |
 
 - Список расширяется только правкой этой спеки (или спеки модуля со ссылкой сюда) —
   страж §12.3.
@@ -481,7 +482,7 @@ strict-хендлер. Ошибки механизмов — `httpx.ProblemError
 | Время | `platform/clock` (подменяется в тестах); хранение в UTC; местное время — по таймзоне поля, затем города; `users.timezone` пуст → таймзона города; база таймзон вшита (`time/tzdata`) |
 | Серверные тексты | `backend/locales/{ru,en}.json`, ICU-сообщения для писем и пушей; язык — `users.locale`; тест сверки ключей |
 | Почта | `platform/mail.Sender`: одна реализация SMTP — в dev Mailpit (`./task mail`), в проде — провайдер (выбирается отдельно); отправка только задачей River (`mail.send`, очередь `mail`); в аргументах — вид письма и id получателя или кода, не адрес; письмо собирает `mail.Composer` модуля. Письма сотрудников — задача `staff.mail` очереди `staff`, её исполняет admin-api (SMTP `ADMIN_MAIL_*`, §10): у воркера нет ключей и прав на `staff_*` |
-| Файлы | `platform/blob`: dev — файловая система, прод — S3-совместимое хранилище; S3-совместимая реализация — в спеке `media` |
+| Файлы | `platform/blob` (спека media §6, план media 26.11): три бакета (`Buckets{In, Pub, Priv}`), `Store` (`Put`/`Get`/`Head`/`Delete`/`List`), подпись `Presigner` (загрузка — только подписанный `POST` с политикой точного размера, чтение закрытого — подписанный `GET`), сброс CDN `Purger` (пока `NoopPurger`). Реализации: `fs` (dev, e2e: каталоги бакетов и эмуляция подписи путями `/_blob/in`, `/_media/*` у api), Memory (тесты), `blob/s3` (свой сервер: Garage, `aws-sdk-go-v2`), режим `none` (стенд Render: модуль отвечает `503 media.unavailable`). Выбор — `*_BLOB_BACKEND` у api, admin-api и воркера (`config.LoadBlob`, фабрика `blobopen.Open`); `fs` в прод-образе (`WF_BUILD_KIND=prod`) — отказ старта |
 | Наблюдаемость | JSON-логи `slog` без персональных данных, сквозной `request_id`; цель — OTel-трейсы и метрики по OTLP (в dev выключены), пока не подключены (§6.1); `/healthz` (процесс жив, без зависимостей) и `/readyz` (база отвечает) — вне контракта, у `api` и `admin-api`, метрики очередей; алерты на лаг outbox (возраст самой старой неопубликованной строки), рост «мёртвых» задач; маскирование ПД — в обработчике `slog` (`logx.Mask`: почта, телефоны) для сообщений, атрибутов и ошибок (строки и ошибки; структуры, `Stringer` и срезы не маскируются — их в лог не класть); `/readyz` кэширует результат на 1 с со схлопыванием проб |
 | Конфиг и секреты | только окружение, валидация на старте, ошибка — процесс не стартует; ключи JWT, PoW, cookie веба, секретов сотрудников (`ADMIN_STAFF_SECRET_KEYS`, `platform/keys.Ring`: шифрование секрета TOTP и кода приглашения, HMAC резервных кодов) и HMAC устройств — списком для ротации |
 | Фича-флаги | существующий `platform/flags`, проверка в `app/`; выключено → `403 feature.disabled` |
@@ -730,8 +731,8 @@ TS-типы для веба и админки — из бандлов. Dart — 
 | `notify` | пуши и письма-уведомления, с ограничением скорости |
 | `mail` | транзакционные письма (коды, сброс пароля) — отдельно от рассылок |
 | `stats` | ночные пересчёты |
-| `media` | обработка загрузок |
-| `maintenance` | чистка, сроки, сверочные задачи, отложенные действия админки |
+| `media` | обработка загрузок (`media.process`: проверка по байтам, варианты WebP, публикация) и удаление файлов (`media.purge`: ключи и сброс CDN) — спека media §3.3, §3.8; при `none` задачи отменяются |
+| `maintenance` | чистка, сроки, сверочные задачи, отложенные действия админки; чистка файлов `media.cleanup` (спека media §3.9) |
 | `import` | импорт GeoNames (`geo.import`, до 30 мин) — не держит слоты `maintenance`; `WORKER_GEO_IMPORT_ENABLED=false` (стенд) — очередь не обслуживается, задача ждёт |
 | `staff` | письма сотрудникам (`staff.mail`) — исполняет admin-api, не воркер (§10) |
 
@@ -776,6 +777,10 @@ River-клиент admin-api под ролью `admin` (5 исполнителе
   карточка показывает истёкшее приглашение) и подтверждения
   (просроченные → `expired`, решённые старше 180 суток — удаление) чистит тикер admin-api раз в час
   (`staff/jobs.Cleaner`, §10) — не периодическая задача River.
+- **Чистка файлов** `media.cleanup` (очередь `maintenance`) раз в 10 минут: брошенные билеты, зависшая обработка,
+  откреплённые, снятые и отклонённые объекты, входящее без строки (спека media §3.9). Периодика модуля —
+  `media/jobs.Periodic()` у обоих бинарников, которые могут стать лидером River (воркер и admin-api), как и
+  `identity/jobs.Periodic()`.
 
 ### 9.4. Уведомления
 
@@ -890,7 +895,7 @@ River-клиент admin-api под ролью `admin` (5 исполнителе
 | identity | `role_assignments`: `role_name` — только `captain`, `role_scope` — только `city` (миграция `0020`). План I-2: `0024_identity_status` — значение `pending_deletion` в `user_status` (отдельной миграцией без транзакции); `0025_identity` — `users.email NOT NULL`, − CHECK `users_contact_present`, + `version`, CHECK `users_email_format`, поля удаления; новые `credentials`, `auth_codes`, `auth_challenges`, `refresh_tokens`, `security_events`, `user_identities`, `passkeys`, `user_mfa`, `user_recovery_codes`, `mfa_resets`, `consents`, `devices`, `device_accounts`, `user_restrictions`, `staff_player_links` (владелец — `staff`); `sessions` перестроена (строка = вход; сессии сотрудников — свои, `staff_sessions`); `captain_applications` переходит к `identity`; `0026_identity_deletion` — `users.status_before_deletion`, `birth_date` NULL только у `deleted`, затирание ПД удалённых до неё (спека identity §5.1–§5.3). План I-4: `0027_identity_captaincy` — представление `identity_read_auth_method_usage`, индексы очереди и истории заявок, `banned` в `status_before_deletion`, живой код смены почты по `(purpose, user_id, email)` (спека identity §0.2) |
 | staff | миграция `0020_staff.sql`: `staff_accounts`, `staff_roles`, `staff_role_cities`, `staff_mfa`, `staff_recovery_codes`, `staff_invites`, `staff_sessions` (спека сотрудников §3.1) |
 | players | `player_profiles`; игровые поля переносятся из `users` одной миграцией «создать → скопировать → удалить» |
-| media | `media_objects`; `pitches.photo_urls`, `catalog_items.asset_url`, `ad_placements.image_url` → ссылки на `media_objects` (в спеках владельцев) |
+| media | миграция `0028_media.sql` (план media): `media_objects`, `media_uploads`, `media_variants`, представление `media_read_objects`, CHECK пар «состояние — поля», права ролей (спека media §5); `pitches.photo_urls`, `catalog_items.asset_url`, `ad_placements.image_url` → ссылки на `media_objects` без FK — в спеках и планах владельцев |
 | pitches | новые значения `pitch_surface` (отдельная миграция) |
 | teams | один источник испытательного срока: `captain_applications.is_probationary` vs `teams.is_probationary` — решение в спеке `teams` |
 | matches, results | колонка `version` у `matches` и `match_reports`; реестр «отдал / не отдал» — один источник: `payment_notes` (`reputation`) vs `match_participants.paid` — решение в спеке `reputation` |

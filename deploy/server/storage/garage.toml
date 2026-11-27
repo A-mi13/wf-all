@@ -1,0 +1,36 @@
+# Хранилище файлов своего сервера (спека media §6.5, план R1): Garage, один узел, данные и метаданные — том
+# storage_data. Секретов здесь нет: rpc_secret и admin_token приходят переменными GARAGE_RPC_SECRET и
+# GARAGE_ADMIN_TOKEN из storage.env. Бакеты, ключи, права, сайт, lifecycle и CORS настраивает storage-init
+# (storage/init.sh) через admin API. Наружу порты не публикуются: снаружи — только Caddy (Caddyfile).
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+# lmdb — как dev-хранилище (scripts/s3/garage.toml): ключ записи ≤ 511 байт, поэтому blob.ValidKey — до 400 символов.
+# Один узел без реплик: LMDB без синхронной записи портится при нечистом выключении (доки Garage 2.6, db_engine),
+# восстановить его не с чего. metadata_fsync = true — MDB_NOMETASYNC без MDB_NOSYNC: сбой питания теряет максимум
+# последнюю транзакцию, а не базу; data_fsync — то же для блоков данных. Цена — медленнее запись, для нашего объёма
+# несущественно.
+db_engine = "lmdb"
+metadata_fsync = true
+data_fsync = true
+# Снимки метаданных (<metadata_dir>/snapshots/<время UTC>, Garage держит два последних): восстановление после порчи
+# LMDB и согласованная копия для бэкапа тома (README, «Хранилище файлов»).
+metadata_auto_snapshot_interval = "6h"
+replication_factor = 1
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+# адрес хранилища — path-style (Host из запроса не совпадает с root_domain); Caddy Host не подменяет
+root_domain = ".s3.storage"
+
+# Публичное чтение бакета wf-pub без подписи (R5): Caddy домена медиа шлёт сюда только GET/HEAD с
+# Host wf-pub.web.storage (header_up Host в Caddyfile = бакет + root_domain).
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.storage"
+
+# admin API (бакеты, ключи, права — storage-init): только внутри сети wf, токен — GARAGE_ADMIN_TOKEN
+[admin]
+api_bind_addr = "[::]:3903"

@@ -119,6 +119,9 @@ tasks:
           exit 1
         }
       - "'{{.TOOLS}}/actionlint' -shellcheck='{{.TOOLS}}/shellcheck'"
+      # ловушка: actionlint 1.7.12 на Windows виснет на run: длиннее ~4 КиБ (весь скрипт пишется в stdin shellcheck до
+      # его запуска) — большие скрипты шагов выносить в файлы и проверять здесь
+      - "'{{.TOOLS}}/shellcheck' deploy/server/ci-check.sh"
 
   ci:
     desc: Всё, что проверяет CI, — локально

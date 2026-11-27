@@ -144,6 +144,31 @@ type Mail struct {
 	TLS      string `env:"MAIL_SMTP_TLS" envDefault:"mandatory"` // mandatory | opportunistic | none
 }
 
+// Blob — хранилище файлов процесса (спека media §6.4; префиксы API_, WORKER_, ADMIN_). Читается отдельно, как Mail у
+// воркера: config.LoadBlob(prefix, environ) — разбор и Validate с признаком прод-образа из того же окружения; разовым
+// командам (events replay, geo import) ключи хранилища не нужны. Режимы: fs — dev и e2e (каталог, подпись HMAC,
+// пути /_blob и /_media на api), s3 — свой сервер (Garage), none — стенд без хранилища (модуль media отвечает 503).
+type Blob struct {
+	Backend string `env:"BLOB_BACKEND,required,notEmpty"` // fs | s3 | none
+	// FSRoot — общий каталог трёх процессов (dev — ../.tools/blob от backend/), внутри — in, pub, priv.
+	FSRoot string `env:"BLOB_FS_ROOT"`
+	// FSBaseURL — внешний адрес api, на котором живут /_blob и /_media (R17); у admin-api и воркера — тот же адрес.
+	FSBaseURL string `env:"BLOB_FS_BASE_URL"`
+	// DevSignKey — ключ подписи путей fs (base64, ≥ 32 байт), одно значение у трёх процессов.
+	DevSignKey string `env:"BLOB_DEV_SIGN_KEY"`
+	// S3Endpoint — внутренний адрес хранилища; S3PublicEndpoint — внешний, для подписанных ссылок (SigV4 включает хост).
+	S3Endpoint       string `env:"BLOB_S3_ENDPOINT"`
+	S3PublicEndpoint string `env:"BLOB_S3_PUBLIC_ENDPOINT"`
+	S3Region         string `env:"BLOB_S3_REGION"`
+	S3BucketIn       string `env:"BLOB_S3_BUCKET_IN"`
+	S3BucketPub      string `env:"BLOB_S3_BUCKET_PUB"`
+	S3BucketPriv     string `env:"BLOB_S3_BUCKET_PRIV"`
+	S3AccessKey      string `env:"BLOB_S3_ACCESS_KEY"`
+	S3SecretKey      string `env:"BLOB_S3_SECRET_KEY"`
+	// MediaPublicBaseURL — адрес публичных вариантов (домен медиа); у fs выводится из FSBaseURL (PublicBaseURL).
+	MediaPublicBaseURL string `env:"MEDIA_PUBLIC_BASE_URL"`
+}
+
 // Queues — конкурентность очередей воркера (спека §9.1).
 type Queues struct {
 	Events      int `env:"QUEUE_EVENTS" envDefault:"10"`

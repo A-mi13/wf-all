@@ -16,8 +16,13 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"wf/backend/cmd/internal/mediapurposes"
 	geojobs "wf/backend/internal/geo/jobs"
 	"wf/backend/internal/identity"
+	"wf/backend/internal/media"
+	mediajobs "wf/backend/internal/media/jobs"
+	"wf/backend/internal/platform/blob"
+	"wf/backend/internal/platform/blob/blobopen"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/events"
@@ -54,16 +59,27 @@ func Load(environ []string, geoHTTP *http.Client) (Base, error) {
 		MaxUncompressed: cfg.GeoNames.MaxUncompressed, HTTPClient: geoClient}}, nil
 }
 
-// Prepared — всё, что сервису воркера нужно до подключения к базе: Base, SMTP, кольцо identity, серверные локали.
+// Prepared — всё, что сервису воркера нужно до подключения к базе: Base, SMTP, кольцо identity, серверные локали,
+// хранилище и цели media.
 type Prepared struct {
 	base   Base
 	sender *mail.SMTP
 	ring   *keys.Ring
 	cat    *i18n.Catalog
+	media  mediaDeps
+}
+
+// mediaDeps — зависимости исполнителей media, известные до базы: открытое хранилище (none — Available = false),
+// реестр целей и проверка содержимого бинарника (mediapurposes, R12).
+type mediaDeps struct {
+	Blob     blob.Opened
+	Registry *media.Registry
+	Check    media.ContentCheck
 }
 
 // Prepare — проверки режима сервиса до базы (разовым командам не нужны): очереди ≥ 1 (R4), почта WORKER_MAIL_*
-// (предупреждения SMTP — в log), кольцо WORKER_IDENTITY_SECRET_KEYS, тексты писем.
+// (предупреждения SMTP — в log), кольцо WORKER_IDENTITY_SECRET_KEYS, тексты писем, хранилище WORKER_BLOB_* и цели
+// media.
 func Prepare(b Base, environ []string, log *slog.Logger) (Prepared, error) {
 	if err := b.Config.ValidateQueues(); err != nil {
 		return Prepared{}, err
@@ -91,7 +107,30 @@ func Prepare(b Base, environ []string, log *slog.Logger) (Prepared, error) {
 	if err != nil {
 		return Prepared{}, err
 	}
-	return Prepared{base: b, sender: sender, ring: ring, cat: cat}, nil
+	md, err := prepareMedia(environ)
+	if err != nil {
+		return Prepared{}, err
+	}
+	return Prepared{base: b, sender: sender, ring: ring, cat: cat, media: md}, nil
+}
+
+// prepareMedia — хранилище воркера: config.LoadBlob (fs в прод-образе — отказ старта, R15: blobopen.Open признак
+// образа не проверяет), открытие без сети; цели и проверка — mediapurposes.
+func prepareMedia(environ []string) (mediaDeps, error) {
+	bc, err := config.LoadBlob("WORKER_", environ)
+	if err != nil {
+		return mediaDeps{}, err
+	}
+	// blobopen.Open в сеть не ходит: ctx старта не нужен
+	opened, err := blobopen.Open(context.Background(), bc, clock.System)
+	if err != nil {
+		return mediaDeps{}, err
+	}
+	reg, err := mediapurposes.Registry()
+	if err != nil {
+		return mediaDeps{}, err
+	}
+	return mediaDeps{Blob: opened, Registry: reg, Check: mediapurposes.Check()}, nil
 }
 
 // DB — настройки пула воркера (WORKER_DATABASE_URL и др.).
@@ -122,7 +161,7 @@ func Run(ctx context.Context, p Prepared, pool *pgxpool.Pool, log *slog.Logger, 
 		}
 		return err
 	}
-	reg, err := Subscriptions()
+	reg, err := Subscriptions(log)
 	if err != nil {
 		return err
 	}
@@ -133,7 +172,9 @@ func Run(ctx context.Context, p Prepared, pool *pgxpool.Pool, log *slog.Logger, 
 		return err
 	}
 	idd := identity.WorkerDeps{Pool: pool, Clock: clock.System, Secrets: p.ring, River: ins, Catalog: p.cat, Log: log}
-	workers, err := allWorkers(pool, reg, p.base.Geo, log, p.sender, idd)
+	md := mediajobs.WorkerDeps{Pool: pool, Clock: clock.System, Registry: p.media.Registry, Blob: p.media.Blob,
+		Check: p.media.Check, Log: log}
+	workers, err := allWorkers(pool, reg, p.base.Geo, log, p.sender, idd, md)
 	if err != nil {
 		return err
 	}
@@ -161,7 +202,7 @@ func Run(ctx context.Context, p Prepared, pool *pgxpool.Pool, log *slog.Logger, 
 		}
 	})
 	// сроки остановки — в строке старта: по журналу видно, какой бюджет у процесса (отдельный или встроенный режим)
-	log.Info("воркер запущен", "queues", cfg.Queues, "geo_import", cfg.GeoImportEnabled,
+	log.Info("воркер запущен", "queues", cfg.Queues, "geo_import", cfg.GeoImportEnabled, "media_storage", p.media.Blob.Available,
 		"stop_relay", stop.Relay.String(), "stop_soft", stop.Soft.String())
 	<-ctx.Done()
 	wg.Wait() // relay больше не ставит задачи (или не уложился в stop.Relay)

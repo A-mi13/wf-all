@@ -683,3 +683,11 @@ components:
       $ref: './identity/schemas.yaml#/CaptainApplicationPage'
     CaptainApplicationSubmitRequest:
       $ref: './identity/schemas.yaml#/CaptainApplicationSubmitRequest'
+    UploadRequest:
+      $ref: './media/schemas.yaml#/UploadRequest'
+    UploadTicket:
+      $ref: './media/schemas.yaml#/UploadTicket'
+    MediaImage:
+      $ref: './media/schemas.yaml#/MediaImage'
+    PrivateMediaLink:
+      $ref: './media/schemas.yaml#/PrivateMediaLink'

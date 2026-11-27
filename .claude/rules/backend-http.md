@@ -34,6 +34,16 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
   конфиг файла — 404 (страж `TestWellKnownMounted`); битый `API_WELLKNOWN_ANDROID` (нет пакета; отпечаток не 32 байта
   hex через «:») — ошибка `WellKnown(…) (http.Handler, error)`, `cmd/api` отказывает в старте до базы (стражи
   `TestWellKnownRejectsBadAndroid`, `TestRunRejectsBadWellKnownAndroid`).
+- Вне контракта на роутере public (как `/.well-known`): `Options.Media` (`public.DevMedia` = `*httpdev.Handler`, только
+  при `*_BLOB_BACKEND=fs`) — `/_blob/in` со своим пределом тела (`httpx.LimitBody(n, BodyLimit{Method, Prefix, Max})`:
+  метод и путь до «/» или конца, R16 плана media) и `/_media/*`; `Options.E2E` — тестовые ручки сборки `wf_e2e` под
+  `/_e2e/*` (nil в прод-сборке). `/_e2e/*` — за общим конвейером: `auth.Middleware` и `idempotency.Middleware` работают
+  и без маршрута контракта. Dev-пути — вне него, как S3: верхний `chi`-роутер отдаёт `/_blob/in` и `/_media/*` своему
+  `httpx.NewRouter` (peer, лимит тела, таймаут), остальное — `Mount("/")` конвейера; `Authorization` и `Idempotency-Key`
+  там не читаются (стражи `TestDevMediaMounted`, `TestDevMediaOutsidePipeline`, `TestProdBuildHasNoE2ERoutes`;
+  `backend-media.md`, Task 11).
+- `idempotency.Middleware` читает тело до ручки: `http.MaxBytesError` — `413 request.too_large` (как без ключа), прочая
+  ошибка чтения — `400 request.invalid` (`TestBodyTooLargeIs413`).
 - Сессии игроков — `identity.NewSessionLoader(pool, clock)` под `auth.NewCachedLoader` (5 с) в `cmd/api`: отзыв,
   бан и истечение доходят до запросов не позже чем через 5 с (`TestAccessAfterLogout`).
 - Нестроковый или пустой `x-rate-limit` — ошибка старта (`ratelimit.UnknownClasses`), а не тихий `default`.
@@ -95,7 +105,12 @@ peer → IP-аллоулист (`ADMIN_IP_ALLOWLIST`; пусто — выклю�
 - **Статика** (`ADMIN_STATIC_DIR`; пусто — не отдаётся): `NotFound` роутера — вне `/v1/*` файл каталога или
   `index.html` (SPA), нет файла в `assets/` — 404; `/v1/*` — 404 Problem; только GET/HEAD. Файл — через
   `os.OpenInRoot` (выход за каталог невозможен). Заголовки: CSP, `X-Content-Type-Options: nosniff`,
-  `Referrer-Policy: no-referrer`; `index.html` — `no-store`, `assets/` — `immutable`, прочее — `no-cache`.
+  `Referrer-Policy: no-referrer`; `index.html` — `no-store`, `assets/` — `immutable`, прочее — `no-cache`. `img-src` CSP —
+  `'self' data:` и origin `Options.MediaBaseURL` (домен медиа из `blob.Opened.PublicBaseURL`; `none` — без него; негодный
+  адрес или «;», пробел, запятая, кавычка — отказ старта; страж `TestAdminCSPMediaDomain`).
+- **Тестовые ручки** `Options.E2E` (сборка `wf_e2e`) — под `/_e2e/*` за конвейером (аллоулист, CSRF, лимит тела с
+  `Options.E2EBodyLimits`); звено сессии их не видит (только маршруты контракта) — сессию и идемпотентность ставят сами
+  ручки (`cmd/internal/mediae2e`; страж конвейера — `TestE2ERoutesMounted`).
 - **Защита в глубину**: chi сопоставляет `{param}` с пустым сегментом (`PUT /v1/staff/accounts//role`), маршрутизатор
   контракта — нет, и `httpx.Route` не ставится. В `ChiServerOptions` обоих API стоят `httpx.RequireRoute` (на хендлере) и
   `httpx.NotFoundWithoutRoute` (на ошибке биндинга): запрос без `Route` — `404 http.not_found`, хендлер не вызывается.

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -31,6 +32,7 @@ import (
 	"wf/backend/internal/identity"
 	identityadmin "wf/backend/internal/identity/admin"
 	identityjobs "wf/backend/internal/identity/jobs"
+	mediajobs "wf/backend/internal/media/jobs"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
@@ -135,6 +137,11 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	if cmd != nil {
 		return runCommand(ctx, *cmd, cfg, ring, cat, out, logOut)
 	}
+	// хранилище и цели media — только серверу и до базы: fs в прод-образе, негодные ключи или цель — отказ старта
+	blobs, purposes, err := openBlob(ctx, environ, clock.System)
+	if err != nil {
+		return err
+	}
 	// журнал предупреждений старта — тот же формат и вывод, что у сервиса (RunService создаёт свой позже)
 	startLog := logx.New(logOut, cfg.Log).With("service", "admin-api")
 	// SMTP — только серверу (письма шлёт фон): битый адрес — отказ старта до базы
@@ -158,29 +165,11 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 			if err != nil {
 				return server.Service{}, err
 			}
-			h, err := admin.NewHandler(log, admin.Options{
-				Docs:           cfg.HTTP.DocsEnabled,
-				RequestTimeout: cfg.HTTP.RequestTimeout,
-				Peer:           pc,
-				DB:             pool,
-				Limiter:        a.deps.Limiter,
-				RateRules:      rules,
-				Origin:         cfg.Origin,
-				IPAllowlist:    cfg.IPAllowlist,
-				CookieSecure:   cfg.CookieSecure,
-				StaticDir:      cfg.StaticDir,
-				Sessions:       a.staff.Sessions(),
-				Staff:          a.staff,
-				// тот же сервис, в котором staff зарегистрировал действия (ревью 10b: два сервиса — approve 500)
-				Approvals: a.approvals,
-				// geo собран в assemble: его действия подтверждения — в том же реестре и сервисе (Task 16)
-				Geo: a.geo,
-				// identity (сброс 2FA поддержкой, план I-2 Task 17): действие identity.mfa_reset — в том же реестре
-				Identity: a.identity,
-				Clock:    a.deps.Clock,
-				// побудка wf-api (dev-стенд): команды оператора её не получают
-				Wake: admin.NewWaker(cfg.WakeAPIURL, nil, log),
-			})
+			mk, err := newMedia(log, pool, blobs, purposes, a.deps.Clock, a.deps.Limiter, a.deps.River)
+			if err != nil {
+				return server.Service{}, err
+			}
+			h, err := newAdminHandler(log, pool, cfg, pc, rules, a, mk)
 			if err != nil {
 				return server.Service{}, err
 			}
@@ -561,14 +550,49 @@ func checkKeys(ctx context.Context, h *staffadmin.Handler, keysLost bool, errOut
 }
 
 // riverConfig — исполняющий клиент admin-api: обслуживание — общее с воркером (queue.ClientConfig от
-// queue.MaintenanceConfig, страж TestAdminRiverMaintenance), очередь — только staff, периодика — платформа и identity,
-// как у воркера (R7 плана I-2: став лидером, admin-api ставит и чистку, анонимизацию, сбросы 2FA identity — исполняет
+// queue.MaintenanceConfig, страж TestAdminRiverMaintenance), очередь — только staff, периодика — платформа, identity
+// и media, как у воркера (R7 плана I-2: став лидером, admin-api ставит и чистку, анонимизацию, сбросы 2FA identity — исполняет
 // воркер; страж TestPeriodicSameInBothBinaries).
 func riverConfig(workers *river.Workers, log *slog.Logger) *river.Config {
-	return queue.ClientConfig(staffQueues(), workers, append(periodic.Jobs(), identityjobs.Periodic()...), log)
+	return queue.ClientConfig(staffQueues(), workers, append(append(periodic.Jobs(), identityjobs.Periodic()...),
+		mediajobs.Periodic()...), log)
 }
 
 // staffQueues — очереди исполняющего клиента admin-api: только staff (у воркера её нет — TestAdminKindsQueues).
 func staffQueues() map[string]river.QueueConfig {
 	return map[string]river.QueueConfig{queue.Staff: {MaxWorkers: staffMailWorkers}}
+}
+
+// newAdminHandler — HTTP-хендлер admin-api на собранных сценариях и media (как в run; страж прод-сборки
+// TestAdminProdBuildHasNoE2ERoutes обходит его маршруты).
+func newAdminHandler(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, pc peer.Config, rules ratelimit.Rules,
+	a assembly, mk mediaKit) (http.Handler, error) {
+	e2e, e2eLimits := mediaE2E(mk, a, admin.CookieName(cfg.CookieSecure), pool, log)
+	return admin.NewHandler(log, admin.Options{
+		Docs:           cfg.HTTP.DocsEnabled,
+		RequestTimeout: cfg.HTTP.RequestTimeout,
+		Peer:           pc,
+		DB:             pool,
+		Limiter:        a.deps.Limiter,
+		RateRules:      rules,
+		Origin:         cfg.Origin,
+		IPAllowlist:    cfg.IPAllowlist,
+		CookieSecure:   cfg.CookieSecure,
+		StaticDir:      cfg.StaticDir,
+		Sessions:       a.staff.Sessions(),
+		Staff:          a.staff,
+		// тот же сервис, в котором staff зарегистрировал действия (ревью 10b: два сервиса — approve 500)
+		Approvals: a.approvals,
+		// geo собран в assemble: его действия подтверждения — в том же реестре и сервисе (Task 16)
+		Geo: a.geo,
+		// identity (сброс 2FA поддержкой, план I-2 Task 17): действие identity.mfa_reset — в том же реестре
+		Identity: a.identity,
+		Clock:    a.deps.Clock,
+		// побудка wf-api (dev-стенд): команды оператора её не получают
+		Wake: admin.NewWaker(cfg.WakeAPIURL, nil, log),
+		// домен медиа — в img-src CSP статики (none — без него); тестовые ручки — только сборка wf_e2e
+		MediaBaseURL:  mk.blob.PublicBaseURL,
+		E2E:           e2e,
+		E2EBodyLimits: e2eLimits,
+	})
 }
