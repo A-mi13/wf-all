@@ -256,6 +256,15 @@ func TestVariantSideLimit(t *testing.T) {
 	if err != nil || outs[0].Width != 1920 {
 		t.Fatalf("MaxSide 1920: %v", err)
 	}
+	// граница предела WebP (Task 7 r1-m2): 16383 кодируется, 16384 — отказ до декодирования
+	raw := []Spec{{Name: "raw", MaxSide: 0, Lossy: true, Quality: 80}}
+	outs, _, err = Process(context.Background(), encPNG(t, gradient(webp.MaxDimension, 2)), lim, raw, nil)
+	if err != nil || outs[0].Width != webp.MaxDimension {
+		t.Fatalf("сторона 16383: %v", err)
+	}
+	if _, _, err = Process(context.Background(), encPNG(t, gradient(webp.MaxDimension+1, 2)), lim, raw, nil); !errors.Is(err, ErrTooManyPixels) {
+		t.Fatalf("сторона 16384: ошибка = %v, ждали ErrTooManyPixels", err)
+	}
 }
 
 func TestPixelLimitBoundary(t *testing.T) {

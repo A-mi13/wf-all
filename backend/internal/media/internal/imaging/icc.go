@@ -27,6 +27,14 @@ const (
 	maxICC       = 1 << 20 // предел распаковки iCCP: больше — zip-бомба, ErrCorrupt
 	p3Tolerance  = 0.002   // допуск первичных к эталону (R8; профиль Apple отличается на 0.00002)
 	headerLength = 128
+
+	// Пределы разбора desc (mluc), ревью D-C1: каждая запись может указывать на весь тег, без пределов разбор
+	// квадратичен (PNG в 421 байт — 7 ГиБ выделений). У профиля Apple «Display P3» и эталона — одна запись в десятки
+	// байт; многоязычные профили — десятки локалей по десятку символов. Нарушение — описания нет, профиль не P3 (как
+	// любой битый профиль: картинка не отклоняется, варианты без профиля).
+	maxDescRecords     = 64   // записей
+	maxDescRecordBytes = 512  // UTF-16 одной записи (256 символов)
+	maxDescBytes       = 4096 // UTF-16 всех записей
 )
 
 // isDisplayP3 — R8 с поправкой спайка: профиль байт в байт равен эталону, или desc содержит «display p3» (без
@@ -102,14 +110,16 @@ func iccDesc(p []byte) string {
 		return string(bytes.TrimRight(t[12:12+n], "\x00"))
 	case len(t) >= 16 && string(t[:4]) == "mluc":
 		recs, size := int(binary.BigEndian.Uint32(t[8:])), int(binary.BigEndian.Uint32(t[12:]))
-		if size < 12 || recs > (len(t)-16)/size {
+		if size < 12 || recs > (len(t)-16)/size || recs > maxDescRecords {
 			return ""
 		}
 		var sb strings.Builder
+		total := 0
 		for k := range recs {
 			r := t[16+k*size:]
 			l, off := int(binary.BigEndian.Uint32(r[4:])), int(binary.BigEndian.Uint32(r[8:]))
-			if off+l > len(t) {
+			total += l
+			if l > maxDescRecordBytes || total > maxDescBytes || off+l > len(t) {
 				return ""
 			}
 			s := t[off : off+l]

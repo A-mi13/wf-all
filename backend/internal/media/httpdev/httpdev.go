@@ -106,7 +106,8 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	key, err := h.dev.VerifyUpload(fields, int64(len(data)), fields[blob.FieldContentType])
 	if err != nil {
-		// подпись, ключ, тип, размер, срок — как AccessDenied у S3; причина клиенту не раскрывается
+		// подпись, ключ, тип, размер, срок — 403 (S3 отвечает 403, Garage — на часть случаев 400; клиент по контракту
+		// UploadTicket любой 4xx понимает как «не принято, начать заново»); причина клиенту не раскрывается
 		httpx.WriteProblem(w, r, http.StatusForbidden, httpx.CodeForbidden, "")
 		return
 	}
@@ -140,7 +141,7 @@ func (h *Handler) readForm(r *http.Request) (map[string]string, []byte, error) {
 		case gotFile, name == "":
 			return nil, nil, errBadForm
 		case name == fileField:
-			// предел + 1: больший файл дойдёт до проверки размера и получит 403, как у S3 content-length-range
+			// предел + 1: больший файл дойдёт до проверки размера и получит 4xx (403), как у S3 content-length-range
 			if data, err = io.ReadAll(io.LimitReader(part, h.maxFile+1)); err != nil {
 				return nil, nil, err
 			}

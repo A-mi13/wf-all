@@ -228,6 +228,20 @@ func TestAttachRights(t *testing.T) {
 	if _, err := attach(pending, a, player()); !errors.Is(err, media.ErrObjectUnavailable) {
 		t.Fatalf("повтор чужим загрузившим: %v", err)
 	}
+	// Повтор «завершить» (офлайн-очередь клиента) после открепления или снятия: объект уже не его — отказ, строка и
+	// задачи не меняются (финальное ревью media, A / Task 6 m2).
+	for _, st := range []media.State{media.StateDetached, media.StateTakenDown} {
+		ended := e.seed(t, mediatest.Seed{State: st, Owner: a, By: by, At: at})
+		if _, err := attach(ended, a, by); !errors.Is(err, media.ErrObjectUnavailable) {
+			t.Errorf("повтор к %s: %v, ждали ErrObjectUnavailable", st, err)
+		}
+		if r, _ := object(t, e.pools.Owner, ended); r.State != string(st) || r.Version != 1 {
+			t.Errorf("%s после повтора: %+v", st, r)
+		}
+		if n := processJobs(t, e.pools.Owner, ended); n != 0 {
+			t.Errorf("%s: задач media.process %d", st, n)
+		}
+	}
 }
 
 func equalImage(a, b media.Image) bool {

@@ -209,3 +209,18 @@ paths:
   воркера, смещённых вперёд (у api окно ещё живо, у чистки прошло): строка моложе суток остаётся, прикрепление
   проходит всегда; порядок «чистка, затем прикрепление» — объект без входящего, последняя попытка `media.process` —
   `rejected(processing_failed)` (спека §12 «Гонки»). На одних часах недостижимо.
+
+## Пределы imaging (финальное ревью, волна исправлений)
+
+- **До декодирования**, кроме пикселей и стороны: у JPEG — сканов ≤ `maxScans` (100; больше — `ErrUnsupported`,
+  `unsupported_type`; `walkJPEG` проходит весь файл как `image/jpeg` — энтропийные данные до маркера, FF DA внутри
+  COM/APPn сканом не считается) и байты декодера `decodeBytes` ≤ `MaxPixels × decodeBytesPerPixel` (8; больше —
+  `ErrTooManyPixels`, `too_many_pixels`). `decodeBytes` повторяет выделения `image/jpeg` Go 1.27 (плоскости на сетке MCU,
+  чёрный канал, RGBA/CMYK на выходе — APP0/APP14 по всему файлу, коэффициенты прогрессивного 256 Б на блок); обновили Go
+  или формулу — `TestDecodeBytesMatchesDecoder` (сверка с `TotalAlloc` декодера). Стражи — `TestProgressiveCoeffBomb`,
+  `TestDecodeBudgetBoundary`, `TestScanLimit`, граница WebP 16383/16384 — `TestVariantSideLimit`.
+- **ICC `desc` (mluc)** — записей ≤ 64, запись ≤ 512 Б, всего ≤ 4 КиБ; нарушение — профиль не P3 (как битый: картинка
+  не отклоняется, варианты без профиля). Стражи — `TestICCDescLimits`, `TestICCDescBomb`.
+- Генераторы злых входов (`zeroJPEG`, `progScans`, `eobRuns`, `mlucBomb`, `p3WithDesc`) — `helpers_test.go`; тесты на
+  `TotalAlloc` — `// serial`. Пик кучи на 40 Мп — комментарий `Process` и `deploy/server/README.md` («Память воркера»).
+- **Intx:** повтор «завершить» к `detached`/`taken_down` — `ErrObjectUnavailable` (`TestAttachRights`).

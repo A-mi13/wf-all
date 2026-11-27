@@ -1,7 +1,9 @@
 // Package media — загрузка, обработка и отдача файлов (спека docs/superpowers/specs/2026-11-18-media-design.md).
 // Корневой пакет — API модуля для владельцев (pitches, economy, results, moderation, players и др.): типы, реестр
-// целей, коды ошибок, события. Сценарии — internal/app, правила без базы — internal/domain, SQL — queries/ →
-// internal/store/mediadb; транзакции владельца — media/intx (спека §2.3).
+// целей, коды ошибок, события и сервис media.New (service.go, upload.go, quota.go, confirm.go, stage.go, read.go —
+// прямо на internal/store/mediadb: internal/app работал бы на типах корня — цикл). Правила без базы —
+// internal/domain, SQL — queries/ → internal/store/mediadb, картинки — internal/imaging, Lottie — internal/lottie,
+// задачи — media/jobs; транзакции владельца — media/intx (спека §2.3).
 package media
 
 import (

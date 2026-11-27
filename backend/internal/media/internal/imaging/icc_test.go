@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/deepteams/webp"
@@ -119,6 +121,80 @@ func TestICCNotCopied(t *testing.T) {
 					t.Fatalf("%s: флаг ICC в VP8X без профиля", o.Name)
 				}
 				noSubstring(t, o.Data, tc.profile)
+			}
+		})
+	}
+}
+
+// Финальное ревью media, D-C1: разбор desc (mluc) ограничен — записей ≤ 64, запись ≤ 512 Б, всего ≤ 4 КиБ; больше —
+// описание не читается и профиль не P3 (как любой битый профиль: варианты без профиля, картинка не отклоняется).
+func TestICCDescLimits(t *testing.T) {
+	t.Parallel()
+	fill := func(n int, last string) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = "x"
+		}
+		out[n-1] = last
+		return out
+	}
+	pad := func(s string, chars int) string { return s + strings.Repeat(" ", chars-len(s)) }
+	big := pad("Display P3", 256) // 512 Б в UTF-16
+	tests := []struct {
+		name  string
+		texts []string
+		want  bool
+	}{
+		{"64 записи, P3 в последней", fill(64, "Display P3"), true},
+		{"65 записей", fill(65, "Display P3"), false},
+		{"запись 512 Б", []string{big}, true},
+		{"запись 514 Б", []string{pad("Display P3", 257)}, false},
+		{"8 записей по 512 Б — ровно 4 КиБ", slices.Repeat([]string{big}, 8), true},
+		{"9 записей по 512 Б", slices.Repeat([]string{big}, 9), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isDisplayP3(p3WithDesc(tc.texts...)); got != tc.want {
+				t.Fatalf("isDisplayP3 = %v, ждали %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// PNG 8×8 с iCCP в сотни байт (профиль 72 КБ: 6000 записей mluc «весь тег») и JPEG с тем же профилем в APP2 — до
+// правки 7 ГиБ выделений и секунды CPU. Теперь профиль просто не P3: варианты без профиля, выделения — мелочь.
+// serial: TotalAlloc — счётчик процесса, параллельные тесты исказили бы рост.
+func TestICCDescBomb(t *testing.T) {
+	prof := mlucBomb(6000)
+	src := gradient(8, 8)
+	for _, tc := range []struct {
+		name string
+		in   []byte
+		max  int
+	}{
+		{"PNG iCCP", withPNGChunks(encPNG(t, src), iccpChunk(t, prof)), 1024},
+		{"JPEG APP2", withJPEGSegs(encJPEG(t, src, 90), jpegICC(prof, 2, false)...), 80 << 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.in) > tc.max {
+				t.Fatalf("вход %d байт, ждали ≤ %d", len(tc.in), tc.max)
+			}
+			var (
+				outs []Output
+				err  error
+			)
+			grew := allocDuring(func() {
+				outs, _, err = Process(context.Background(), tc.in, Limits{MaxPixels: 1 << 20, Inputs: allInputs}, oneFull, nil)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if icc := chunkData(riffChunks(t, outs[0].Data), "ICCP"); icc != nil {
+				t.Fatalf("в варианте профиль %d байт, ждали без профиля", len(icc))
+			}
+			if grew >= 16<<20 {
+				t.Fatalf("за вызов выделено %d байт (≥ 16 МБ): разбор desc не ограничен", grew)
 			}
 		})
 	}

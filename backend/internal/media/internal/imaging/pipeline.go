@@ -18,6 +18,19 @@ import (
 // maxSourceSide — предел длинной стороны входа (по заголовку, до декодирования): веса и буфер ресайза растут с ней.
 const maxSourceSide = 65535
 
+// decodeBytesPerPixel — бюджет декодера JPEG в байтах на пиксель предела цели (decodeBytes ≤ MaxPixels × 8): столько
+// же, сколько у PNG 16 бит RGBA, худшего из уже принятых входов. Проходят на пределе пикселей базовые JPEG любой
+// выборки (CMYK 4:4:4 — 8 Б/пикс. плюс выравнивание до блока 8×8: кадр в последних ~0,1 % предела не проходит) и
+// прогрессивный 4:2:0 (7,5); прогрессивные 4:2:2 (10), 4:4:4 (15) и CMYK (24) — только меньше предела (≈ 32, 21 и
+// 13 Мп из 40).
+const decodeBytesPerPixel = 8
+
+// maxScans — предел числа сканов JPEG: декодер обходит все блоки компоненты на каждом скане (≈ 14 мс на 40 Мп), а
+// скан из нулевых коэффициентов стоит десятки байт, срок задачи синхронный декодер не прерывает. Обычные кодировщики
+// пишут единицы–десятки сканов (libjpeg jpeg_simple_progression: серый — 6, YCbCr — 10, CMYK — 18; базовый — 1–4);
+// 100 — запас ×5 к худшему из них, сто пустых сканов на 40 Мп — ≈ 1,5 с.
+const maxScans = 100
+
 // ErrContentRejected — проверка содержимого отвергла картинку; категория — в *ContentRejectedError.
 var ErrContentRejected = errors.New("imaging: content rejected")
 
@@ -56,10 +69,14 @@ type Output struct {
 // ErrTooManyPixels, ErrCorrupt, ErrContentRejected (*ContentRejectedError с категорией). Прочие ошибки — отмена ctx,
 // сбой check, сбой кодировщика — не отказ: задача повторяется. Header — размеры после EXIF-ориентации.
 //
-// Память: пиксели проверяются по заголовку до декодирования — декодер выделяет память по тем же размерам
-// (DecodeConfig того же пакета), так что пик ограничен MaxPixels × байт на пиксель (до 8 у PNG 16 бит) плюс
-// буфер уменьшения; варианты уменьшаются каскадом (каждый — из наименьшего готового не меньше себя), ориентация
-// применяется к уменьшенным.
+// Память: до декодирования проверяются пиксели и длинная сторона по заголовку (DecodeConfig того же декодера), а у
+// JPEG ещё байты декодера по маркерам (decodeBytes ≤ MaxPixels × decodeBytesPerPixel: выборка, число компонент,
+// коэффициенты прогрессивного) и число сканов; картинка в памяти — не больше 8 Б/пикс. (PNG 16 бит RGBA, предел
+// JPEG). Сверху — буфер уменьшения x/image/draw (ширина варианта × высота входа × 32 Б: ≈ 0,3–0,4 ГиБ у варианта
+// 1920 на 40 Мп); варианты уменьшаются каскадом (каждый — из наименьшего готового не меньше себя), ориентация
+// применяется к уменьшенным. Пик кучи одного вызова на 40 Мп с тремя вариантами (замер финальной волны media, с
+// мусором до сборки): JPEG ≤ ≈ 0,6 ГиБ (базовый 4:2:0 ≈ 0,45, прогрессивный 4:2:0 и CMYK ≈ 0,6), PNG 16 бит ≈ 0,75,
+// PNG 16 бит Adam7 ≈ 0,9 ГиБ.
 func Process(ctx context.Context, b []byte, lim Limits, variants []Spec,
 	check func(image.Image) (bool, string, error),
 ) ([]Output, Header, error) {
@@ -77,8 +94,15 @@ func Process(ctx context.Context, b []byte, lim Limits, variants []Spec,
 	if h.Animated {
 		return nil, h, fmt.Errorf("%w: анимация", ErrUnsupported)
 	}
+	if in.jpeg.scans > maxScans {
+		return nil, h, fmt.Errorf("%w: сканов JPEG %d > %d", ErrUnsupported, in.jpeg.scans, maxScans)
+	}
 	if int64(in.rawW)*int64(in.rawH) > lim.MaxPixels {
 		return nil, h, fmt.Errorf("%w: %d×%d", ErrTooManyPixels, in.rawW, in.rawH)
+	}
+	// Память декодера JPEG зависит ещё от выборки, числа компонент и прогрессивности (ревью D-C2).
+	if n := decodeBytes(in); n > lim.MaxPixels*decodeBytesPerPixel {
+		return nil, h, fmt.Errorf("%w: декодеру нужно %d байт > %d × %d", ErrTooManyPixels, n, lim.MaxPixels, decodeBytesPerPixel)
 	}
 	// Полоса 1×L проходит предел пикселей, но ресайз тратит память пропорционально длинной стороне.
 	if max(in.rawW, in.rawH) > maxSourceSide {

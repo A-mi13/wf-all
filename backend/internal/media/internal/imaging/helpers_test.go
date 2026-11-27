@@ -221,6 +221,182 @@ func jpegICC(profile []byte, parts int, reverse bool) [][]byte {
 	return segs
 }
 
+// Генераторы «злых» JPEG (финальное ревью media, D-C2 и D-I1): все коэффициенты нулевые, поэтому файл крошечный,
+// а память и время декодера — как у настоящего снимка тех же размеров и выборки.
+
+// zeroJPEGHead — SOI, DQT (все единицы), APP14 Adobe у 4 компонент (без него Go не декодирует CMYK), SOF0/SOF2 w×h с
+// факторами выборки hv (0x11, 0x22, …; идентификаторы компонент 1…n), DHT: DC '0' → 0x00, '1' → 0x01; AC '0' →
+// 0xE0 (EOBRUN, 14 бит), '1' → 0x00 (EOB).
+func zeroJPEGHead(w, h int, hv []byte, progressive bool) []byte {
+	b := []byte{0xFF, 0xD8}
+	q := make([]byte, 65)
+	for i := 1; i < 65; i++ {
+		q[i] = 1
+	}
+	b = append(b, jpegSeg(0xDB, q)...)
+	if len(hv) == 4 {
+		b = append(b, jpegSeg(0xEE, []byte("Adobe\x00\x64\x00\x00\x00\x00\x00"))...)
+	}
+	sof := []byte{8, u8(h >> 8), u8(h), u8(w >> 8), u8(w), u8(len(hv))}
+	for c, f := range hv {
+		sof = append(sof, u8(c+1), f, 0)
+	}
+	marker := byte(0xC0)
+	if progressive {
+		marker = 0xC2
+	}
+	b = append(b, jpegSeg(marker, sof)...)
+	return append(b, jpegSeg(0xC4, []byte{
+		0x00, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x01,
+		0x10, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xE0, 0x00,
+	})...)
+}
+
+// mcuGrid — число MCU по осям и блоков в MCU (как считает image/jpeg: у одной компоненты MCU — один блок).
+func mcuGrid(w, h int, hv []byte) (mxx, myy, perMCU int) {
+	maxH, maxV := 1, 1
+	if len(hv) > 1 {
+		for _, f := range hv {
+			maxH, maxV = max(maxH, int(f>>4)), max(maxV, int(f&0x0F))
+			perMCU += int(f>>4) * int(f&0x0F)
+		}
+	} else {
+		perMCU = 1
+	}
+	return (w + 8*maxH - 1) / (8 * maxH), (h + 8*maxV - 1) / (8 * maxV), perMCU
+}
+
+// zeroJPEG — базовый (один скан всех компонент: блок — «DC 0, EOB», 2 бита) или прогрессивный (по одному AC-скану на
+// компоненту, нулевые коэффициенты — символами EOBRUN по 32767 блоков) JPEG w×h.
+func zeroJPEG(w, h int, hv []byte, progressive bool) []byte {
+	b := zeroJPEGHead(w, h, hv, progressive)
+	mxx, myy, perMCU := mcuGrid(w, h, hv)
+	if !progressive {
+		sos := []byte{u8(len(hv))}
+		for c := range hv {
+			sos = append(sos, u8(c+1), 0x00)
+		}
+		b = append(b, jpegSeg(0xDA, append(sos, 0, 63, 0))...)
+		bits := 2 * mxx * myy * perMCU
+		data := bytes.Repeat([]byte{0x55}, bits/8) // «01» на блок
+		if bits%8 != 0 {
+			data = append(data, 0x5F) // остаток «01» и единицы до байта
+		}
+		return append(append(b, data...), 0xFF, 0xD9)
+	}
+	for c := range hv {
+		b = append(b, jpegSeg(0xDA, []byte{1, u8(c + 1), 0x00, 1, 63, 0x00})...)
+		b = append(b, eobRuns((mxx*myy*perMCU+32766)/32767)...)
+	}
+	return append(b, 0xFF, 0xD9)
+}
+
+// progScans — прогрессивный серый JPEG w×h с n AC-сканами, каждый — символы EOBRUN на все блоки (скан в десятки
+// байт, а декодер обходит все блоки на каждом скане).
+func progScans(w, h, n int) []byte {
+	b := zeroJPEGHead(w, h, []byte{0x11}, true)
+	runs := eobRuns((((w+7)/8)*((h+7)/8) + 32766) / 32767)
+	for range n {
+		b = append(b, jpegSeg(0xDA, []byte{1, 1, 0x00, 1, 63, 0x00})...)
+		b = append(b, runs...)
+	}
+	return append(b, 0xFF, 0xD9)
+}
+
+// eobRuns — n символов EOBRUN 32767 (код '0' + 14 единиц) подряд, хвост байта — единицами, 0xFF — с 0x00.
+func eobRuns(n int) []byte {
+	var (
+		out []byte
+		acc byte
+		nb  int
+	)
+	put := func(bit byte) {
+		acc = acc<<1 | bit
+		if nb++; nb == 8 {
+			out = append(out, acc)
+			if acc == 0xFF {
+				out = append(out, 0x00)
+			}
+			acc, nb = 0, 0
+		}
+	}
+	for range n {
+		put(0)
+		for range 14 {
+			put(1)
+		}
+	}
+	for nb != 0 {
+		put(1)
+	}
+	return out
+}
+
+// mlucBomb — профиль с первичными sRGB и тегом desc (mluc): recs записей, каждая указывает на весь тег (до правки
+// D-C1 разбор выделял recs × длина тега байт).
+func mlucBomb(recs int) []byte {
+	tagLen := 16 + recs*12
+	desc := []byte("mluc\x00\x00\x00\x00")
+	desc = binary.BigEndian.AppendUint32(desc, u32(recs))
+	desc = binary.BigEndian.AppendUint32(desc, 12)
+	for range recs {
+		desc = append(desc, "enUS"...)
+		desc = binary.BigEndian.AppendUint32(desc, u32(tagLen&^1))
+		desc = binary.BigEndian.AppendUint32(desc, 0)
+	}
+	return iccWithTags(iccTag{"rXYZ", xyzTag(srgb[0])}, iccTag{"gXYZ", xyzTag(srgb[1])}, iccTag{"bXYZ", xyzTag(srgb[2])},
+		iccTag{"desc", desc})
+}
+
+type iccTag struct {
+	sig  string
+	data []byte
+}
+
+// iccWithTags — минимальный профиль: заголовок 128 байт («acsp»), таблица тегов, данные подряд.
+func iccWithTags(tags ...iccTag) []byte {
+	head := make([]byte, 128)
+	copy(head[36:], "acsp")
+	table := binary.BigEndian.AppendUint32(nil, u32(len(tags)))
+	off := 128 + 4 + 12*len(tags)
+	var data []byte
+	for _, tg := range tags {
+		table = append(table, tg.sig...)
+		table = binary.BigEndian.AppendUint32(table, u32(off+len(data)))
+		table = binary.BigEndian.AppendUint32(table, u32(len(tg.data)))
+		data = append(data, tg.data...)
+	}
+	p := append(append(head, table...), data...)
+	binary.BigEndian.PutUint32(p, u32(len(p)))
+	return p
+}
+
+// mlucDesc — тег desc (mluc) из записей: каждая — UTF-16BE своей строки, данные после таблицы записей.
+func mlucDesc(texts ...string) []byte {
+	desc := []byte("mluc\x00\x00\x00\x00")
+	desc = binary.BigEndian.AppendUint32(desc, u32(len(texts)))
+	desc = binary.BigEndian.AppendUint32(desc, 12)
+	var data []byte
+	off := 16 + 12*len(texts)
+	for _, s := range texts {
+		var u []byte
+		for _, r := range utf16.Encode([]rune(s)) {
+			u = binary.BigEndian.AppendUint16(u, r)
+		}
+		desc = append(desc, "enUS"...)
+		desc = binary.BigEndian.AppendUint32(desc, u32(len(u)))
+		desc = binary.BigEndian.AppendUint32(desc, u32(off+len(data)))
+		data = append(data, u...)
+	}
+	return append(desc, data...)
+}
+
+// p3WithDesc — профиль с первичными Apple P3 и desc из записей mluc.
+func p3WithDesc(texts ...string) []byte {
+	return iccWithTags(iccTag{"rXYZ", xyzTag(appleP3[0])}, iccTag{"gXYZ", xyzTag(appleP3[1])},
+		iccTag{"bXYZ", xyzTag(appleP3[2])}, iccTag{"desc", mlucDesc(texts...)})
+}
+
 // Первичные из отчёта спайка (spike.md §3), D50: эталон Compact ICC, профиль Apple «Display P3», sRGB.
 var (
 	refP3   = [3][3]float64{{0.51512, 0.24120, -0.00105}, {0.29198, 0.69225, 0.04189}, {0.15710, 0.06656, 0.78407}}
