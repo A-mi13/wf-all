@@ -52,12 +52,26 @@ func New(d Deps) (Service, error) {
 	case d.Blob.Available && (d.Blob.Buckets.In == nil || d.Blob.Presigner == nil):
 		return nil, errors.New("media: хранилище без бакета входящего или подписи")
 	}
-	rules := ratelimit.DefaultRules()
-	s := &service{d: d, q: mediadb.New(d.Pool), uploadDay: rules[classUploadDay].User, bytesDay: rules[classBytesDay].User}
-	if s.uploadDay.Validate() != nil || s.bytesDay.Limit <= 0 || s.bytesDay.Period <= 0 {
-		return nil, errors.New("media: нет правил media_upload_day / media_bytes_day")
+	rules := d.Rules
+	if rules == nil {
+		rules = ratelimit.DefaultRules()
 	}
-	return s, nil
+	day, ok1 := rules[classUploadDay]
+	bytes, ok2 := rules[classBytesDay]
+	// класса нет — отказ сборки: нулевая политика молча выключила бы предел (off задаётся явно — ParseRules)
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("media: нет правил %s / %s", classUploadDay, classBytesDay)
+	}
+	if err := errors.Join(day.User.Validate(), bytes.User.Validate()); err != nil {
+		return nil, fmt.Errorf("media: правила %s / %s: %w", classUploadDay, classBytesDay, err)
+	}
+	return &service{d: d, q: mediadb.New(d.Pool), uploadDay: day.User, bytesDay: bytes.User}, nil
+}
+
+// dayRetryAfter — Retry-After исчерпанного суточного счёта: интервал политики (следующий билет — не позже; у Over нет
+// точного срока, как у отказов сессии admin-api).
+func (s *service) dayRetryAfter() time.Duration {
+	return s.uploadDay.Period / time.Duration(s.uploadDay.Limit)
 }
 
 func (s *service) Available() bool { return s.d.Blob.Available }

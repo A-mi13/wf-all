@@ -60,6 +60,36 @@ func (q *Queries) GetUpload(ctx context.Context, objectID uuid.UUID) (MediaUploa
 	return i, err
 }
 
+const getUploadWithUploader = `-- name: GetUploadWithUploader :one
+SELECT u.intended_owner_type, u.intended_owner_id, u.expires_at, o.uploaded_by_user, o.uploaded_by_staff
+  FROM media_uploads u
+  JOIN media_objects o ON o.id = u.object_id
+ WHERE u.object_id = $1
+`
+
+type GetUploadWithUploaderRow struct {
+	IntendedOwnerType string
+	IntendedOwnerID   uuid.UUID
+	ExpiresAt         time.Time
+	UploadedByUser    *uuid.UUID
+	UploadedByStaff   *uuid.UUID
+}
+
+// ConfirmUpload: билет и загрузивший — чужой билет (другой намеченный владелец или загрузивший) неотличим от
+// несуществующего (ревью Task 6 m5)
+func (q *Queries) GetUploadWithUploader(ctx context.Context, objectID uuid.UUID) (GetUploadWithUploaderRow, error) {
+	row := q.db.QueryRow(ctx, getUploadWithUploader, objectID)
+	var i GetUploadWithUploaderRow
+	err := row.Scan(
+		&i.IntendedOwnerType,
+		&i.IntendedOwnerID,
+		&i.ExpiresAt,
+		&i.UploadedByUser,
+		&i.UploadedByStaff,
+	)
+	return i, err
+}
+
 const insertUpload = `-- name: InsertUpload :exec
 
 INSERT INTO media_uploads (object_id, intended_owner_type, intended_owner_id, method, max_bytes, expires_at)

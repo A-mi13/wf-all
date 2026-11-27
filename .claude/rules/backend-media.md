@@ -16,8 +16,12 @@ paths:
   `json.RawMessage`).
 - **Цели.** `NewRegistry` проверяет цель при сборке бинарника (отказ старта, не 500): слаг имени и имени варианта
   (вариант входит в ключ `<object_id>/<вариант>.webp`), видимость, входы (Lottie — только один), `MaxBytes > 0`,
-  у растра `MaxPixels > 0` (защита от «бомбы»), варианты, типы владельца. Реестр неизменяем: `Get`/`Names` — копии,
-  `Names` по алфавиту. Набор целей — только `cmd/internal/mediapurposes` (R12).
+  у растра `MaxPixels > 0` (защита от «бомбы»), варианты (`Quality` 0–100, у `Lossy` — 1–100), типы владельца. Реестр
+  неизменяем: `Get`/`Names` — копии, `Names` по алфавиту. Набор целей — только `cmd/internal/mediapurposes` (R12).
+- **Владельцам (планы `economy` и др.).** Тип владельца, у которого есть билеты (`NewUpload`), входит в `OwnerTypes`
+  ровно одной цели: `AttachInTx` цель не принимает и сверяет только тип владельца с целью строки. Конечные состояния
+  показывает ручка владельца: `Service.Image` отдаёт `ClientState` и для `detached`/`taken_down`, а в `MediaImage` их
+  нет — ручка отвечает «изображения нет» (как `shown` тестовых ручек `mediae2e`), `pending_upload` — так же.
 - **Состояния (§4, §3.3).** Переходы — только `domain.Transition(from, to)`: `pending_upload → uploaded`;
   `uploaded → processing | rejected | detached | taken_down`; `processing → processing` (захват после падения
   исполнителя, `process_attempts + 1`) `| uploaded` (обычная ошибка) `| ready | rejected | detached | taken_down`;
@@ -26,7 +30,8 @@ paths:
   сразу `uploaded`.
 - **CHECK базы (`0028`)** повторяют пары «состояние — поля»: владелец у всех, кроме `pending_upload`; `ended_at` ⇔
   конечное; `reject_code` (непустой) ⇔ `rejected`; `ready_at` у `ready`, может остаться у `detached`/`taken_down`;
-  не больше одного загрузившего (I-6: обнуление `uploaded_by_user` проходит). Время колонок — из `clock.Clock`
+  не больше одного загрузившего (I-6: обнуление `uploaded_by_user` проходит); `uploaded_at` ⇔ не `pending_upload`
+  (`media_objects_uploaded_at`: на нём держится `StaleProcessing`). Время колонок — из `clock.Clock`
   параметром запроса, умолчаний `now()` нет.
 - **Запросы.** `version + 1` — на каждую смену состояния (`AttachObject`, `SetState`, `SetProcessing`, `SetReady`);
   событие несёт версию из `RETURNING`. Условие состояния в `WHERE` (`AttachObject` — `pending_upload`, `SetProcessing` —
@@ -59,15 +64,23 @@ paths:
   закрытого пусто). Аргументы задач — `media/jobs/args.go` (`ProcessArgs`, `PurgeArgs`, `Bucket{In,Pub,Priv}`,
   `ProcessInsertOpts` — уникальность по аргументам, `PurgeInsertOpts`).
 - **`NewUpload`:** `none` → `ErrUnavailable`; цель/тип владельца/два загрузивших — ошибка программиста (500); тип —
-  точное совпадение с MIME входов (`AcceptedTypes`), размер 1…`MaxBytes` (422). Игрок: `Limiter.Allow`
-  `SubjectKey("media_upload_day")` (100/сутки, отказ — 429 `ratelimit.exceeded` + Retry-After), затем в **одной** tx:
-  `PendingLock` → `CountPendingByUser(live_after = now)` ≥ 5 → `ErrTooManyPending` → `SumDeclaredBytesByUser(since =
-  now − 24 ч, строго)` + заявка > 200 МиБ → `ErrQuotaExceeded` → `InsertObject` + `InsertUpload` (`POST`, `max_bytes` =
-  заявка, срок now + 15 мин в целых секундах). Вес у `Limiter` нет (`TestLimiterHasNoWeight`) — объём только запросом,
-  под тем же замком (`TestNewUploadQuotaConcurrent`). Сотрудник и система лимитов игрока не считают. Подпись — после
-  коммита; `CompleteBefore = ExpiresAt + CompleteWindow` (1 ч).
-- **`ConfirmUpload`** — до транзакции владельца: билета нет (прикреплён/строки нет) — `nil` без HEAD; `now ≥
-  expires_at + 1 ч` — `ErrUploadExpired`; HEAD `ErrNotFound` — `ErrUploadIncomplete`. **`Stage`** — тип из входов,
+  точное совпадение с MIME входов (`AcceptedTypes`), размер 1…`MaxBytes` (422). Игрок: `Limiter.Over`
+  `SubjectKey("media_upload_day")` без расхода (100/сутки; исчерпан — 429 `ratelimit.exceeded` + Retry-After = интервал
+  политики), затем в **одной** tx: `PendingLock` → `CountPendingByUser(live_after = now)` ≥ 5 → `ErrTooManyPending` →
+  `SumDeclaredBytesByUser(since = now − 24 ч, строго)` + заявка > 200 МиБ → `ErrQuotaExceeded` → `InsertObject` +
+  `InsertUpload` (`POST`, `max_bytes` = заявка, срок now + 15 мин в целых секундах); после коммита — `Limiter.Add`
+  (`WithoutCancel`; сбой — ERROR, билет выдан): отказы счёт не тратят (`TestNewUploadRefusalKeepsDayCount`). Лимитер —
+  не под замком (второе соединение в tx грозит исчерпанием пула), поэтому параллельные «начать» у границы превышают
+  суточный счёт не больше чем на 4 (незавершённых ≤ 5) — принято. Пределы — из `Deps.Rules` (cmd/api передаёт
+  `API_RATE_LIMITS` поверх `DefaultRules`, nil — умолчания; класса нет — отказ `New`; `media_bytes_day.user=off` — объём
+  не считается; `TestNewUploadRulesOverride`, `TestNewMediaRateRules`); admin-api — умолчания (сотрудник их не
+  считает). Вес у `Limiter` нет (`TestLimiterHasNoWeight`) — объём только запросом, под тем же замком
+  (`TestNewUploadQuotaConcurrent`). Сотрудник и система лимитов игрока не считают. Подпись — после коммита;
+  `CompleteBefore = ExpiresAt + CompleteWindow` (1 ч).
+- **`ConfirmUpload(ctx, id, owner, by)`** — до транзакции владельца: билета нет (прикреплён/строки нет) или билет на
+  другого владельца или от другого загрузившего — `nil` без HEAD (чужой неотличим от несуществующего, отказ даст
+  `AttachInTx`; `TestConfirmUploadForeign`); `now ≥ expires_at + 1 ч` — `ErrUploadExpired`; HEAD `ErrNotFound` —
+  `ErrUploadIncomplete`. **`Stage`** — тип из входов,
   `LimitReader(MaxBytes+1)`, пусто/больше — `ErrTooLarge`, `Put` во `in` по новому `id.New()`, базы нет.
 - **Чтение:** `Image`/`Images` — `media_read_objects`; `PrivateURL` — только `private` + `ready` + вариант есть, иначе
   `ErrObjectUnavailable` (у публичного — тоже); `PresignGet(5 мин, "private, no-store")`.
@@ -154,7 +167,9 @@ paths:
 - **Сборка воркера** (`cmd/internal/workerhost`): `Prepare` читает `config.LoadBlob("WORKER_", environ)` (fs в
   прод-образе — отказ старта) и `blobopen.Open`; цели и проверка содержимого — только `mediapurposes.Registry()` /
   `Check()` (`cmd/internal/mediapurposes`: прод — пусто и `CheckOff`, тег `wf_e2e` — `mediatest.E2EPurposes` и
-  `MarkerCheck`); `media.NewRegistry` вне этого пакета, `mediatest` и тестов — `archtest.TestMediaPurposesOnlyFromRegistry`.
+  `MarkerCheck`); `media.NewRegistry` вне этого пакета, `mediatest` и тестов — `archtest.TestMediaPurposesOnlyFromRegistry`;
+  тот же страж запрещает импорт `mediatest` в файле, который собирается без тега `wf_e2e` (кроме `_test.go` и самого
+  `mediatest`; условие `//go:build` разбирается, `TestMediatestImports`).
   Встроенный режим с `none` — `TestEmbeddedWorkerWithNone`.
 
 ## Контракт, dev-пути, сборка api и admin-api (Task 11)
@@ -170,7 +185,8 @@ paths:
   POST: поля до файла, файл последним полем `file` (иначе 400), буфер файла ≤ максимум реестра + 1, `VerifyUpload`
   (подпись, ключ, тип из поля `Content-Type` формы, точный размер, срок) — до `Put`, отказ — 403 без записи; предел
   тела — `UploadLimit()` = максимум реестра + 64 КиБ (`httpx.BodyLimit`, R16); без сессии и CSRF, CORS — только
-  loopback-origin dev-фронтов. `GET /_media/pub/<id>/<вариант>` — тип из meta, `nosniff`, `public, max-age=86400`;
+  loopback-origin dev-фронтов. В `public` dev-пути — вне конвейера (свой роутер: peer, лимит тела, таймаут; прочее —
+  `Mount("/")`): `Authorization` и `Idempotency-Key` не читаются, как у S3 (`TestDevMediaOutsidePipeline`). `GET /_media/pub/<id>/<вариант>` — тип из meta, `nosniff`, `public, max-age=86400`;
   `GET /_media/priv/…?exp&sig` — `VerifyGet` (нет, чужая, истекла — 403), `private, no-store`; ключ без «/» (входящее)
   и обход каталога — 404. Стражи — `TestDevUploadForm`, `TestDevMediaHeaders`, `TestDevUploadCORS`.
 - **Сборка** (`cmd/api/media.go`, `cmd/admin-api/media.go`): `openBlob` — `config.LoadBlob("API_"|"ADMIN_")` (fs в
@@ -180,13 +196,15 @@ paths:
   и отдаёт `PublicBaseURL` в `admin.Options.MediaBaseURL` (origin — в `img-src` CSP статики, `none` — без него).
 - **Тестовые ручки** (`//go:build wf_e2e`, вне контракта, `/_e2e/media/…`) — пакет `cmd/internal/mediae2e` целиком под
   тегом (страж `TestProdBuildWithoutE2ETag` читает все его файлы), подключают `cmd/{api,admin-api}/media_e2e.go`;
-  прод — `media_prod.go` (`nil`, `TestProdBuildHasNoE2ERoutes` обходит маршруты `chi.Walk`). api (сессия игрока —
+  прод — `media_prod.go` (`nil`; маршруты обходит `chi.Walk`: api — `TestProdBuildHasNoE2ERoutes`, admin-api —
+  `TestAdminProdBuildHasNoE2ERoutes` на `newAdminHandler`, пара сборки wf_e2e — `TestAdminE2EBuildHasE2ERoutes`). api (сессия игрока —
   конвейер public, `Idempotency-Key` — его же): `POST uploads` → `NewUpload` (он сам — единственная `db.InTx` запроса:
   в свою `InTx` не оборачивать, иначе `errSecondTx` → 500), `POST objects` → `ConfirmUpload` до транзакции +
   `db.InTx(AttachInTx)`, `GET objects/{id}`, `GET objects/{id}/private?variant=` (ответы — `Cache-Control: no-store`).
   admin-api: звено сессии конвейера идёт только по маршрутам контракта — ручки сами грузят сотрудника (cookie,
   `active`, без `Reauth`) и ставят `idempotency.Middleware(Staff)`; CSRF и лимит тела — конвейер (`E2EBodyLimits`:
-  прямая загрузка 5 МиБ). `POST direct` (multipart, файл последним) → `Stage` + `db.InTx(CreateDirectInTx)`;
+  прямая загрузка 5 МиБ; сверх — 413 и с `Idempotency-Key`: `idempotency.Middleware` на `MaxBytesError` отвечает 413).
+  `POST direct` (multipart, файл последним; дубль поля и поле > 1 КиБ — 400) → `Stage` + `db.InTx(CreateDirectInTx)`;
   `POST objects/{id}/take-down` → `Label` до транзакции, `db.InTx(TakeDownInTx)` (причина `e2e.take_down`). Владелец —
   `e2e_owner` с `owner_id` из запроса. Стражи — `TestMediaE2E`, `TestNoPublicURLForPrivate` (`cmd/api`),
   `TestMediaE2EAdmin` (`cmd/admin-api`); в `backend:test` — команда `go test -tags wf_e2e -run …` по `cmd/api`,

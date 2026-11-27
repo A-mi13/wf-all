@@ -9,7 +9,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"wf/backend/internal/httpapi/public"
+	"wf/backend/internal/platform/auth"
+	"wf/backend/internal/platform/clock"
+	"wf/backend/internal/platform/keys"
+	"wf/backend/internal/platform/token"
 )
 
 // fakeDevMedia — dev-пути хранилища: читает тело целиком и отвечает 204 (чтение сверх лимита — 413).
@@ -66,5 +72,71 @@ func TestDevMediaMounted(t *testing.T) {
 		if got := serve(o, c.method, c.path, c.size); got != c.want {
 			t.Errorf("%s %s %d байт: %d, ждали %d", c.method, c.path, c.size, got, c.want)
 		}
+	}
+}
+
+// Ревью Task 11 m1: dev-пути fs — вне звеньев сессии и идемпотентности, как S3 (он Authorization и Idempotency-Key не
+// читает): клиент, вешающий их на все запросы к адресу api, получает ответ httpdev — и с живым Bearer и ключом (раньше
+// 500 «успех без транзакции»), и с просроченным или битым токеном (раньше 401). Ответ — от fakeDevMedia (204).
+func TestDevMediaOutsidePipeline(t *testing.T) {
+	t.Parallel()
+	o := testOptions(t)
+	seed, err := keys.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := token.ParseKeys([]string{seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := token.NewIssuer(k, clock.System)
+	uid, sid := uuid.New(), uuid.New()
+	o.Tokens = iss
+	o.Sessions = auth.SessionLoaderFunc(func(_ context.Context, s uuid.UUID) (*auth.Principal, error) {
+		if s != sid {
+			return nil, auth.ErrSessionInvalid
+		}
+		return &auth.Principal{UserID: uid, SessionID: sid, Status: "active"}, nil
+	})
+	o.Media = fakeDevMedia{limit: 1 << 20}
+	h, err := public.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, _, err := iss.Access(uid, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, method, path, authz, key string
+	}{
+		{"живой Bearer и ключ", http.MethodPost, "/_blob/in", "Bearer " + live, uuid.NewString()},
+		{"битый Bearer", http.MethodPost, "/_blob/in", "Bearer garbage", ""},
+		{"битый Bearer и ключ", http.MethodPost, "/_blob/in", "Bearer garbage", uuid.NewString()},
+		{"чтение, битый Bearer", http.MethodGet, "/_media/pub/x/thumb.webp", "Bearer garbage", ""},
+	} {
+		r := httptest.NewRequestWithContext(context.Background(), c.method, c.path, bytes.NewReader([]byte("x")))
+		r.Header.Set("Authorization", c.authz)
+		if c.key != "" {
+			r.Header.Set("Idempotency-Key", c.key)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("%s: %d %s — ждали 204 от dev-пути", c.name, rec.Code, rec.Body.String())
+		}
+	}
+	// прочие пути — по-прежнему за конвейером: битый Bearer на /_e2e/ (без маршрута контракта) — 401
+	o.E2E = fakeDevMedia{}
+	h, err = public.NewHandler(slog.New(slog.DiscardHandler), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/_e2e/media/uploads", nil)
+	r.Header.Set("Authorization", "Bearer garbage")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("/_e2e/ с битым Bearer: %d — конвейер должен остаться", rec.Code)
 	}
 }

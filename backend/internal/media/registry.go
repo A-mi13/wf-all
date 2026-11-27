@@ -21,7 +21,8 @@ var slug = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 
 // NewRegistry — реестр из целей. Пустой список допустим. Ошибка (отказ старта) — дубль или негодное имя, видимость
 // вне public | private, пустые или неизвестные входы, Lottie вместе с растром, MaxBytes ≤ 0, растр без MaxPixels,
-// пустые варианты, имя варианта не слаг или дубль, MaxSide < 0, Quality вне 0–100, пустые типы владельца.
+// пустые варианты, имя варианта не слаг или дубль, MaxSide < 0, Quality вне 0–100 (у Lossy — вне 1–100: при 0
+// кодировщик с потерями выдаёт мусор), пустые типы владельца.
 func NewRegistry(ps ...Purpose) (*Registry, error) {
 	r := &Registry{byName: make(map[string]Purpose, len(ps)), names: make([]string, 0, len(ps))}
 	for _, p := range ps {
@@ -81,6 +82,8 @@ func validate(p Purpose) error {
 			return fmt.Errorf("вариант %q: MaxSide < 0", v.Name)
 		case v.Quality < 0 || v.Quality > 100:
 			return fmt.Errorf("вариант %q: Quality вне 0–100", v.Name)
+		case v.Lossy && v.Quality == 0:
+			return fmt.Errorf("вариант %q: Lossy с Quality 0 — нужен 1–100", v.Name)
 		}
 		seen[v.Name] = true
 	}

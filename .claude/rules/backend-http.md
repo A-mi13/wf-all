@@ -37,8 +37,13 @@ peer → склейка строк заголовка `Accept-Language` (`httpx.
 - Вне контракта на роутере public (как `/.well-known`): `Options.Media` (`public.DevMedia` = `*httpdev.Handler`, только
   при `*_BLOB_BACKEND=fs`) — `/_blob/in` со своим пределом тела (`httpx.LimitBody(n, BodyLimit{Method, Prefix, Max})`:
   метод и путь до «/» или конца, R16 плана media) и `/_media/*`; `Options.E2E` — тестовые ручки сборки `wf_e2e` под
-  `/_e2e/*` (nil в прод-сборке). Оба за общим конвейером: `auth.Middleware` и `idempotency.Middleware` работают и без
-  маршрута контракта (стражи `TestDevMediaMounted`, `TestProdBuildHasNoE2ERoutes`; `backend-media.md`, Task 11).
+  `/_e2e/*` (nil в прод-сборке). `/_e2e/*` — за общим конвейером: `auth.Middleware` и `idempotency.Middleware` работают
+  и без маршрута контракта. Dev-пути — вне него, как S3: верхний `chi`-роутер отдаёт `/_blob/in` и `/_media/*` своему
+  `httpx.NewRouter` (peer, лимит тела, таймаут), остальное — `Mount("/")` конвейера; `Authorization` и `Idempotency-Key`
+  там не читаются (стражи `TestDevMediaMounted`, `TestDevMediaOutsidePipeline`, `TestProdBuildHasNoE2ERoutes`;
+  `backend-media.md`, Task 11).
+- `idempotency.Middleware` читает тело до ручки: `http.MaxBytesError` — `413 request.too_large` (как без ключа), прочая
+  ошибка чтения — `400 request.invalid` (`TestBodyTooLargeIs413`).
 - Сессии игроков — `identity.NewSessionLoader(pool, clock)` под `auth.NewCachedLoader` (5 с) в `cmd/api`: отзыв,
   бан и истечение доходят до запросов не позже чем через 5 с (`TestAccessAfterLogout`).
 - Нестроковый или пустой `x-rate-limit` — ошибка старта (`ratelimit.UnknownClasses`), а не тихий `default`.

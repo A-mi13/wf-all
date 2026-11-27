@@ -119,7 +119,7 @@ func TestNewUploadNone(t *testing.T) {
 	if _, err := e.svc.NewUpload(ctx, mediatest.PurposeImage, newOwner(), player(), png(10)); !errors.Is(err, media.ErrUnavailable) {
 		t.Fatalf("NewUpload: %v", err)
 	}
-	if err := e.svc.ConfirmUpload(ctx, uuid.New()); !errors.Is(err, media.ErrUnavailable) {
+	if err := e.svc.ConfirmUpload(ctx, uuid.New(), newOwner(), player()); !errors.Is(err, media.ErrUnavailable) {
 		t.Fatalf("ConfirmUpload: %v", err)
 	}
 	if _, err := e.svc.PrivateURL(ctx, uuid.New(), "full"); !errors.Is(err, media.ErrUnavailable) {
@@ -280,41 +280,159 @@ func TestNewUploadStaffSkipsPlayerLimits(t *testing.T) {
 	}
 }
 
-// denyLimiter — отказывает и запоминает ключ и политику.
-type denyLimiter struct {
-	mu   sync.Mutex
-	keys []string
-	pols []ratelimit.Policy
+// fakeLimiter — Over отвечает over (запоминая ключ и политику), Add — addErr (считая вызовы); Allow сервис не зовёт.
+type fakeLimiter struct {
+	mu     sync.Mutex
+	over   bool
+	addErr error
+	keys   []string
+	pols   []ratelimit.Policy
+	adds   int
 }
 
-func (d *denyLimiter) Allow(_ context.Context, key string, p ratelimit.Policy) (ratelimit.Result, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.keys, d.pols = append(d.keys, key), append(d.pols, p)
-	return ratelimit.Result{RetryAfter: 90 * time.Second}, nil
+func (f *fakeLimiter) Allow(context.Context, string, ratelimit.Policy) (ratelimit.Result, error) {
+	return ratelimit.Result{}, errors.New("Allow не ждали: счёт — Over до транзакции и Add после коммита")
 }
-func (*denyLimiter) Add(context.Context, string, ratelimit.Policy) error          { return nil }
-func (*denyLimiter) Over(context.Context, string, ratelimit.Policy) (bool, error) { return false, nil }
 
-// R19: 100 билетов в сутки — счёт Limiter по ключу субъекта класса media_upload_day; отказ — 429 ratelimit.exceeded с
-// Retry-After, объекта нет.
+func (f *fakeLimiter) Add(context.Context, string, ratelimit.Policy) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.adds++
+	return f.addErr
+}
+
+func (f *fakeLimiter) Over(_ context.Context, key string, p ratelimit.Policy) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keys, f.pols = append(f.keys, key), append(f.pols, p)
+	return f.over, nil
+}
+
+// R19: 100 билетов в сутки — счёт Limiter по ключу субъекта класса media_upload_day; исчерпан — 429 ratelimit.exceeded
+// с Retry-After = интервал политики (24 ч / 100 = 864 с: следующий билет — не позже), объекта нет, счёт не тратится.
 func TestNewUploadDayCount(t *testing.T) {
 	t.Parallel()
-	lim := &denyLimiter{}
+	lim := &fakeLimiter{over: true}
 	e := newSvc(t, func(d *media.Deps) { d.Limiter = lim })
 	by := player()
 	_, err := e.svc.NewUpload(context.Background(), mediatest.PurposeImage, newOwner(), by, png(10))
 	var pe interface{ Problem() httpx.Problem }
-	if !errors.As(err, &pe) || pe.Problem().Code != httpx.CodeRateLimited || pe.Problem().RetryAfter != 90 {
+	if !errors.As(err, &pe) || pe.Problem().Code != httpx.CodeRateLimited || pe.Problem().RetryAfter != 864 {
 		t.Fatalf("ошибка: %v", err)
 	}
 	want := ratelimit.Policy{Limit: 100, Period: 24 * time.Hour}
-	if len(lim.keys) != 1 || lim.keys[0] != "user:media_upload_day:"+by.UserID.String() || lim.pols[0] != want {
-		t.Fatalf("лимитер: %v %v", lim.keys, lim.pols)
+	if len(lim.keys) != 1 || lim.keys[0] != "user:media_upload_day:"+by.UserID.String() || lim.pols[0] != want || lim.adds != 0 {
+		t.Fatalf("лимитер: %v %v, Add %d", lim.keys, lim.pols, lim.adds)
 	}
 	if n := countRows(t, e.pools.Owner, `SELECT count(*) FROM media_objects`); n != 0 {
 		t.Fatalf("строк: %d", n)
 	}
+}
+
+// Ревью Task 6 m3: отказ too_many_pending не тратит суточный счёт — билет считается только после коммита. Предел 6 в
+// сутки: 5 билетов, отказ шестого по незавершённым, через 15 мин (билеты истекли) шестой проходит, седьмой — 429.
+func TestNewUploadRefusalKeepsDayCount(t *testing.T) {
+	t.Parallel()
+	rules, err := ratelimit.ParseRules("media_upload_day.user=6/24h", ratelimit.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newSvc(t, func(d *media.Deps) { d.Rules = rules })
+	ctx := context.Background()
+	by := player()
+	up := func() error {
+		_, err := e.svc.NewUpload(ctx, mediatest.PurposeImage, newOwner(), by, png(10))
+		return err
+	}
+	for i := range 5 {
+		if err := up(); err != nil {
+			t.Fatalf("%d: %v", i, err)
+		}
+	}
+	for range 3 {
+		if err := up(); !errors.Is(err, media.ErrTooManyPending) {
+			t.Fatalf("шестой при 5 незавершённых: %v", err)
+		}
+	}
+	e.clk.Advance(15 * time.Minute)
+	if err := up(); err != nil {
+		t.Fatalf("шестой после отказов: %v (отказы потратили счёт)", err)
+	}
+	if err := up(); problemCode(err) != httpx.CodeRateLimited {
+		t.Fatalf("седьмой: %v", err)
+	}
+}
+
+// Ревью Task 6 m3: сбой Add после коммита (база лимитов, отмена) — билет выдан, сбой только в журнал.
+func TestNewUploadAddFailureKeepsTicket(t *testing.T) {
+	t.Parallel()
+	lim := &fakeLimiter{addErr: errors.New("лимиты недоступны")}
+	e := newSvc(t, func(d *media.Deps) { d.Limiter = lim })
+	tk, err := e.svc.NewUpload(context.Background(), mediatest.PurposeImage, newOwner(), player(), png(10))
+	if err != nil || tk.UploadID == uuid.Nil || lim.adds != 1 {
+		t.Fatalf("билет: %v %v, Add %d", tk.UploadID, err, lim.adds)
+	}
+}
+
+// Ревью Task 6 m4: суточные пределы media подчиняются API_RATE_LIMITS (Deps.Rules, nil — умолчания): 1 билет в сутки и
+// 100 байт; отказ по объёму счёт билетов не тратит. off у media_bytes_day — объём не считается.
+func TestNewUploadRulesOverride(t *testing.T) {
+	t.Parallel()
+	rules, err := ratelimit.ParseRules("media_upload_day.user=1/24h,media_bytes_day.user=100/24h", ratelimit.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newSvc(t, func(d *media.Deps) { d.Rules = rules })
+	ctx := context.Background()
+	by := player()
+	up := func(n int64) error {
+		_, err := e.svc.NewUpload(ctx, mediatest.PurposeImage, newOwner(), by, png(n))
+		return err
+	}
+	if err := up(101); !errors.Is(err, media.ErrQuotaExceeded) {
+		t.Fatalf("101 байт при пределе 100: %v", err)
+	}
+	if err := up(100); err != nil {
+		t.Fatalf("ровно предел: %v", err)
+	}
+	if err := up(1); problemCode(err) != httpx.CodeRateLimited {
+		t.Fatalf("второй билет за сутки при пределе 1: %v", err)
+	}
+
+	off, err := ratelimit.ParseRules("media_bytes_day.user=off", ratelimit.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e = newSvc(t, func(d *media.Deps) { d.Rules = off })
+	by = player()
+	// off — нулевая политика (Limit 0): это «без предела», а не «предел 0 байт»
+	if _, err := e.svc.NewUpload(ctx, mediatest.PurposeImage, newOwner(), by, png(mediatest.MaxBytes)); err != nil {
+		t.Fatalf("off: %v", err)
+	}
+}
+
+// Правила без класса media_upload_day или media_bytes_day — отказ сборки, а не молча выключенный предел.
+func TestNewRulesMissingClass(t *testing.T) {
+	t.Parallel()
+	for _, class := range []string{"media_upload_day", "media_bytes_day"} {
+		rules := ratelimit.DefaultRules()
+		delete(rules, class)
+		e := newSvc(t)
+		d := media.Deps{Pool: e.pools.As, Clock: e.clk, Registry: mustRegistry(t), Blob: e.blob, Limiter: ratelimit.Unlimited,
+			Log: mediatest.Discard(), Rules: rules}
+		if _, err := media.New(d); err == nil || !strings.Contains(err.Error(), class) {
+			t.Fatalf("без %s: %v", class, err)
+		}
+	}
+}
+
+func mustRegistry(t *testing.T) *media.Registry {
+	t.Helper()
+	reg, err := mediatest.Registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reg
 }
 
 // R19: объём по declared_bytes за сутки ≤ 200 МиБ — ровно предел можно, сверх — quota_exceeded (объекта нет); через
@@ -375,21 +493,21 @@ func TestConfirmUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.ConfirmUpload(ctx, tk.UploadID); !errors.Is(err, media.ErrUploadIncomplete) {
+	if err := e.svc.ConfirmUpload(ctx, tk.UploadID, o, by); !errors.Is(err, media.ErrUploadIncomplete) {
 		t.Fatalf("без файла: %v", err)
 	}
 	if err := e.blob.Buckets.In.Put(ctx, tk.UploadID.String(), bytes.NewReader([]byte("abc")), blob.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.ConfirmUpload(ctx, tk.UploadID); err != nil {
+	if err := e.svc.ConfirmUpload(ctx, tk.UploadID, o, by); err != nil {
 		t.Fatalf("с файлом: %v", err)
 	}
 	e.clk.Set(tk.ExpiresAt.Add(time.Hour - time.Nanosecond))
-	if err := e.svc.ConfirmUpload(ctx, tk.UploadID); err != nil {
+	if err := e.svc.ConfirmUpload(ctx, tk.UploadID, o, by); err != nil {
 		t.Fatalf("окно − 1 нс: %v", err)
 	}
 	e.clk.Set(tk.ExpiresAt.Add(time.Hour))
-	if err := e.svc.ConfirmUpload(ctx, tk.UploadID); !errors.Is(err, media.ErrUploadExpired) {
+	if err := e.svc.ConfirmUpload(ctx, tk.UploadID, o, by); !errors.Is(err, media.ErrUploadExpired) {
 		t.Fatalf("окно: %v", err)
 	}
 	// прикреплён (билета нет) и строки нет — nil без HEAD
@@ -400,12 +518,49 @@ func TestConfirmUpload(t *testing.T) {
 	}
 	before := e.in.heads.Load()
 	for _, id := range []uuid.UUID{attached, uuid.New()} {
-		if err := e.svc.ConfirmUpload(ctx, id); err != nil {
+		if err := e.svc.ConfirmUpload(ctx, id, o, by); err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
 	}
 	if got := e.in.heads.Load(); got != before {
 		t.Fatalf("HEAD у не pending_upload: %d", got-before)
+	}
+}
+
+// Ревью Task 6 m5: чужой билет (другой намеченный владелец или другой загрузивший) неотличим от несуществующего — nil
+// без HEAD, даже когда у своего было бы upload_incomplete или upload_expired; отказ даст AttachInTx
+// (object_unavailable), как и у несуществующего.
+func TestConfirmUploadForeign(t *testing.T) {
+	t.Parallel()
+	e := newSvc(t)
+	ctx := context.Background()
+	o, by := newOwner(), player()
+	tk, err := e.svc.NewUpload(ctx, mediatest.PurposeImage, o, by, png(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	staff := media.Uploader{StaffID: by.UserID}
+	check := func(when string) {
+		t.Helper()
+		before := e.in.heads.Load()
+		for name, c := range map[string]struct {
+			owner media.OwnerRef
+			by    media.Uploader
+		}{"другой владелец": {newOwner(), by}, "другой игрок": {o, player()}, "сотрудник с тем же id": {o, staff},
+			"система": {o, media.Uploader{}}, "другой тип владельца": {media.OwnerRef{Type: "other", ID: o.ID}, by}} {
+			if err := e.svc.ConfirmUpload(ctx, tk.UploadID, c.owner, c.by); err != nil {
+				t.Errorf("%s, %s: %v — ждали nil, как у несуществующего", when, name, err)
+			}
+		}
+		if got := e.in.heads.Load(); got != before {
+			t.Errorf("%s: HEAD по чужому билету: %d", when, got-before)
+		}
+	}
+	check("файла нет")
+	e.clk.Set(tk.ExpiresAt.Add(time.Hour))
+	check("окно прошло")
+	if err := e.svc.ConfirmUpload(ctx, tk.UploadID, o, by); !errors.Is(err, media.ErrUploadExpired) {
+		t.Fatalf("свой после окна: %v", err)
 	}
 }
 

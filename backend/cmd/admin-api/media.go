@@ -47,7 +47,8 @@ type mediaKit struct {
 }
 
 // newMedia — сборка на пуле admin-api: клиент River только для вставки (тот же, что у staff и geo: media.process и
-// media.purge в транзакции владельца), лимитер сотрудников (суточные лимиты media — только у игроков, R19).
+// media.purge в транзакции владельца), лимитер сотрудников (суточные лимиты media — только у игроков, R19, поэтому
+// media.Deps.Rules не задаётся — умолчания: ADMIN_RATE_LIMITS на них не влияет, сотрудник их не считает).
 // intx.Deps.PublicBaseURL — то же значение из blobopen.Open, что у сервиса.
 func newMedia(log *slog.Logger, pool *pgxpool.Pool, b blob.Opened, reg *media.Registry, clk clock.Clock,
 	limiter ratelimit.Limiter, ins *river.Client[pgx.Tx]) (mediaKit, error) {

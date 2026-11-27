@@ -50,14 +50,16 @@ type mediaKit struct {
 }
 
 // newMedia — сборка на пуле api: клиент River только для вставки (media.process в транзакции «завершить»), лимитер
-// игроков (суточный счёт билетов, R19). intx.Deps.PublicBaseURL — то же значение из blobopen.Open, что у сервиса.
+// игроков и правила лимитов процесса (суточный счёт билетов и объём, R19: API_RATE_LIMITS действует и на них).
+// intx.Deps.PublicBaseURL — то же значение из blobopen.Open, что у сервиса.
 func newMedia(log *slog.Logger, pool *pgxpool.Pool, b blob.Opened, reg *media.Registry, clk clock.Clock,
-	limiter ratelimit.Limiter) (mediaKit, error) {
+	limiter ratelimit.Limiter, rules ratelimit.Rules) (mediaKit, error) {
 	ins, err := river.NewClient(riverpgxv5.New(pool), queue.InsertConfig(log))
 	if err != nil {
 		return mediaKit{}, err
 	}
-	svc, err := media.New(media.Deps{Pool: pool, Clock: clk, Registry: reg, Blob: b, Limiter: limiter, River: ins, Log: log})
+	svc, err := media.New(media.Deps{Pool: pool, Clock: clk, Registry: reg, Blob: b, Limiter: limiter, Rules: rules,
+		River: ins, Log: log})
 	if err != nil {
 		return mediaKit{}, err
 	}

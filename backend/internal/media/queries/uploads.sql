@@ -7,6 +7,14 @@ VALUES (@object_id, @intended_owner_type, @intended_owner_id, @method, @max_byte
 -- name: GetUpload :one
 SELECT * FROM media_uploads WHERE object_id = @object_id;
 
+-- name: GetUploadWithUploader :one
+-- ConfirmUpload: билет и загрузивший — чужой билет (другой намеченный владелец или загрузивший) неотличим от
+-- несуществующего (ревью Task 6 m5)
+SELECT u.intended_owner_type, u.intended_owner_id, u.expires_at, o.uploaded_by_user, o.uploaded_by_staff
+  FROM media_uploads u
+  JOIN media_objects o ON o.id = u.object_id
+ WHERE u.object_id = @object_id;
+
 -- name: DeleteUpload :exec
 DELETE FROM media_uploads WHERE object_id = @object_id;
 

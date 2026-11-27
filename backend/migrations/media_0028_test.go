@@ -102,6 +102,13 @@ func TestMediaSchemaChecks(t *testing.T) {
 		{"ready_at on processing", "media_objects_ready_at", validMedia("processing").with(func(r *mediaRow) { r.readyAt = mediaAt })},
 		{"ready_at on rejected", "media_objects_ready_at", validMedia("rejected").with(func(r *mediaRow) { r.readyAt = mediaAt })},
 		{"ready_at on pending", "media_objects_ready_at", validMedia("pending_upload").with(func(r *mediaRow) { r.readyAt = mediaAt })},
+		{"uploaded_at on pending", "media_objects_uploaded_at", validMedia("pending_upload").with(func(r *mediaRow) { r.uploadedAt = mediaAt })},
+		{"uploaded_at missing uploaded", "media_objects_uploaded_at", validMedia("uploaded").with(func(r *mediaRow) { r.uploadedAt = nil })},
+		{"uploaded_at missing processing", "media_objects_uploaded_at", validMedia("processing").with(func(r *mediaRow) { r.uploadedAt = nil })},
+		{"uploaded_at missing ready", "media_objects_uploaded_at", validMedia("ready").with(func(r *mediaRow) { r.uploadedAt = nil })},
+		{"uploaded_at missing rejected", "media_objects_uploaded_at", validMedia("rejected").with(func(r *mediaRow) { r.uploadedAt = nil })},
+		{"uploaded_at missing detached", "media_objects_uploaded_at", validMedia("detached").with(func(r *mediaRow) { r.uploadedAt = nil })},
+		{"uploaded_at missing taken_down", "media_objects_uploaded_at", validMedia("taken_down").with(func(r *mediaRow) { r.uploadedAt = nil })},
 		{"width zero", "media_objects_size", validMedia("ready").with(func(r *mediaRow) { r.width = 0 })},
 		{"height negative", "media_objects_size", validMedia("ready").with(func(r *mediaRow) { r.height = -1 })},
 	}

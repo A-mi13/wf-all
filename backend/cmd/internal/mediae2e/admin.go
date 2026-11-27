@@ -27,6 +27,9 @@ const DirectMax = 5 << 20
 // DirectPath — путь прямой загрузки (для httpx.BodyLimit сборки admin-api).
 const DirectPath = "/_e2e/media/direct"
 
+// maxField — предел поля формы прямой загрузки (кроме файла).
+const maxField = 1 << 10
+
 // takeDownReason — причина снятия тестовой ручкой (код, не текст: intx.TakeDownInTx).
 const takeDownReason = "e2e.take_down"
 
@@ -100,9 +103,18 @@ func (d AdminDeps) direct(w http.ResponseWriter, r *http.Request) {
 		}
 		name := part.FormName()
 		if name != "file" {
-			v, err := io.ReadAll(io.LimitReader(part, 1<<10))
+			// как httpdev.readForm: дубль поля и поле длиннее предела — 400, а не перезапись и обрезка
+			if _, dup := fields[name]; dup {
+				httpx.WriteError(d.Log, w, r, errBadRequest)
+				return
+			}
+			v, err := io.ReadAll(io.LimitReader(part, maxField+1))
 			if err != nil {
 				httpx.WriteError(d.Log, w, r, readErr(err))
+				return
+			}
+			if len(v) > maxField {
+				httpx.WriteError(d.Log, w, r, errBadRequest)
 				return
 			}
 			fields[name] = strings.TrimSpace(string(v))

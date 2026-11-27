@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"wf/backend/internal/media/internal/store/mediadb"
+	"wf/backend/internal/platform/ratelimit"
 )
 
 // checkPlayerLimits — в транзакции «начать» под замком игрока (m5): живых незавершённых билетов (срок позже now) не
@@ -24,6 +25,10 @@ func (s *service) checkPlayerLimits(ctx context.Context, q *mediadb.Queries, use
 	}
 	if n >= maxPending {
 		return ErrTooManyPending
+	}
+	if s.bytesDay == (ratelimit.Policy{}) {
+		// media_bytes_day.user=off — объём не ограничен
+		return nil
 	}
 	total, err := q.SumDeclaredBytesByUser(ctx, mediadb.SumDeclaredBytesByUserParams{UploadedByUser: user,
 		Since: now.Add(-s.bytesDay.Period)})

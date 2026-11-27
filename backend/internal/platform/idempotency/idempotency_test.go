@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -715,4 +717,36 @@ func TestUnknownTablePanics(t *testing.T) {
 		}
 	}()
 	idempotency.Middleware(dbtest.NewPool(t), idempotency.Config{Table: idempotency.Table(99)}, slog.New(slog.DiscardHandler))
+}
+
+// Ревью финала C m2: тело сверх предела звена лимита (http.MaxBytesReader) с ключом — 413 request.too_large, как без
+// ключа, а не 400: ручка не вызывается, ключ не занят — повтор с тем же ключом и годным телом исполняется. Прочая
+// ошибка чтения тела — по-прежнему 400 request.invalid.
+func TestBodyTooLargeIs413(t *testing.T) {
+	t.Parallel()
+	e := setup(t)
+	send := func(body io.Reader, limit int64) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(asUser(e.user)(context.Background()), http.MethodPost, "/v1/things", body)
+		r.Header.Set(idempotency.Header, key)
+		rec := httptest.NewRecorder()
+		if limit > 0 {
+			r.Body = http.MaxBytesReader(rec, r.Body, limit)
+		}
+		e.h.ServeHTTP(rec, r)
+		return rec
+	}
+	if rec := send(strings.NewReader(strings.Repeat("x", 11)), 10); rec.Code != http.StatusRequestEntityTooLarge ||
+		code(t, rec) != httpx.CodeRequestTooLarge {
+		t.Fatalf("сверх предела: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := send(iotest.ErrReader(errors.New("обрыв")), 0); rec.Code != http.StatusBadRequest ||
+		code(t, rec) != httpx.CodeRequestInvalid {
+		t.Fatalf("обрыв чтения: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := e.probe.calls.Load(); n != 0 || e.keys(t, "idempotency_keys") != 0 {
+		t.Fatalf("ручка вызвана %d раз, ключей %d", n, e.keys(t, "idempotency_keys"))
+	}
+	if rec := send(strings.NewReader(`{}`), 10); rec.Code != http.StatusCreated {
+		t.Fatalf("повтор с годным телом: %d %s", rec.Code, rec.Body.String())
+	}
 }

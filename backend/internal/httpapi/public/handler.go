@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wf/backend/internal/geo"
@@ -59,6 +60,9 @@ const defaultRequestTimeout = 15 * time.Second
 
 // devUploadPath — форма загрузки dev-хранилища (httpdev.UploadPath).
 const devUploadPath = "/_blob/in"
+
+// devMediaPrefix — чтение файлов dev-хранилища (httpdev).
+const devMediaPrefix = "/_media/"
 
 // bodyLimits — исключения из общего лимита тела (R16): форма загрузки dev-хранилища при fs.
 func bodyLimits(o Options) []httpx.BodyLimit {
@@ -143,15 +147,10 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		// /.well-known/* не в контракте: как /docs — мимо валидатора (маршрута контракта нет) и без лимитов auth
 		router.Handle(identityhttp.WellKnownPrefix+"*", o.WellKnown)
 	}
-	if o.Media != nil {
-		// dev-пути fs не в контракте: как /docs — мимо валидатора, без сессии (подпись — единственная защита)
-		router.Handle(devUploadPath, o.Media)
-		router.Handle("/_media/*", o.Media)
-	}
 	if o.E2E != nil {
 		router.Handle("/_e2e/*", o.E2E)
 	}
-	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
+	h := oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
 		BaseRouter: router,
 		// без маршрута контракта (пустой сегмент {param}) хендлер недостижим: RequireRoute — на хендлере,
 		// NotFoundWithoutRoute — на ошибке биндинга параметра. RequireRoute — защита в глубину:
@@ -161,5 +160,24 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		// ErrorHandlerFunc — ошибки биндинга параметров в chi-обёртке; по умолчанию oapi-codegen
 		// отвечает text/plain с текстом ошибки
 		ErrorHandlerFunc: httpx.NotFoundWithoutRoute(requestErr),
-	}), nil
+	})
+	if o.Media == nil {
+		return h, nil
+	}
+	// dev-пути fs не в контракте и вне звеньев сессии и идемпотентности, как у S3: он Authorization и Idempotency-Key
+	// не читает, а здесь живой Bearer с ключом дал бы 500 «успех без транзакции», просроченный — 401 (ревью Task 11 m1).
+	// Свой роутер: peer, лимит тела (форма загрузки — свой предел, R16) и таймаут; прочее — в конвейер (Mount "/").
+	// Подпись — единственная защита.
+	dev := httpx.NewRouter(log,
+		peer.Middleware(o.Peer),
+		httpx.LimitBody(httpx.MaxBodyBytes, bodyLimits(o)...),
+		httpx.Timeout(timeout),
+	)
+	dev.Handle(devUploadPath, o.Media)
+	dev.Handle(devMediaPrefix+"*", o.Media)
+	top := chi.NewRouter()
+	top.Handle(devUploadPath, dev)
+	top.Handle(devMediaPrefix+"*", dev)
+	top.Mount("/", h)
+	return top, nil
 }

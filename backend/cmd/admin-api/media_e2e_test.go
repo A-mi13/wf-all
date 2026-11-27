@@ -47,6 +47,29 @@ func directForm(t *testing.T, purpose string, ownerID uuid.UUID, data []byte, fi
 	return &buf, w.FormDataContentType()
 }
 
+// fieldsForm — форма прямой загрузки с полями fields по порядку (дубли и длина — как заданы), файл последним.
+func fieldsForm(t *testing.T, fields [][2]string, data []byte) (*bytes.Buffer, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for _, kv := range fields {
+		if err := w.WriteField(kv[0], kv[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fw, err := w.CreateFormFile("file", "asset.png")
+	if err == nil {
+		_, err = fw.Write(data)
+	}
+	if err == nil {
+		err = w.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &buf, w.FormDataContentType()
+}
+
 // send — запрос к поднятому admin-api с cookie сотрудника; csrf — Origin и X-WF-Admin.
 func (e *testEnv) send(method, path, tok string, body io.Reader, ct, idemKey string, csrf bool) (int, http.Header, string) {
 	e.t.Helper()
@@ -116,10 +139,36 @@ func TestMediaE2EAdmin(t *testing.T) {
 	if code, _, b := e.send(http.MethodPost, "/_e2e/media/direct", tok, big, bigCT, "", true); code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("больше 5 МиБ: %d %s", code, b)
 	}
+	// ревью финала C m2: с Idempotency-Key — тоже 413 (идемпотентность читает тело до ручки)
+	big, bigCT = directForm(t, mediatest.PurposeImage, owner, make([]byte, 5<<20), true)
+	if code, _, b := e.send(http.MethodPost, "/_e2e/media/direct", tok, big, bigCT, uuid.NewString(), true); code != http.StatusRequestEntityTooLarge ||
+		!strings.Contains(b, "request.too_large") {
+		t.Fatalf("больше 5 МиБ с ключом: %d %s", code, b)
+	}
 	body, ct = directForm(t, mediatest.PurposeImage, owner, data, false)
 	if code, _, b := e.send(http.MethodPost, "/_e2e/media/direct", tok, body, ct, "", true); code != http.StatusBadRequest {
 		t.Fatalf("файл не последним: %d %s", code, b)
 	}
+	// ревью Task 11 m3: поле длиннее 1 КиБ и дубль поля — 400, а не обрезка и перезапись
+	for name, fields := range map[string][][2]string{
+		"поле длиннее 1 КиБ": {{"purpose", mediatest.PurposeImage}, {"owner_id", owner.String()},
+			{"content_type", "image/png" + strings.Repeat(" ", 1<<10)}},
+		"дубль поля": {{"purpose", mediatest.PurposeImage}, {"owner_id", uuid.NewString()}, {"owner_id", owner.String()},
+			{"content_type", "image/png"}},
+	} {
+		body, ct := fieldsForm(t, fields, data)
+		if code, _, b := e.send(http.MethodPost, "/_e2e/media/direct", tok, body, ct, "", true); code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", name, code, b)
+		}
+	}
+	// ровно 1 КиБ — можно (граница)
+	body, ct = fieldsForm(t, [][2]string{{"purpose", mediatest.PurposeImage}, {"owner_id", owner.String()},
+		{"content_type", "image/png" + strings.Repeat(" ", 1<<10-len("image/png"))}}, data)
+	if code, _, b := e.send(http.MethodPost, "/_e2e/media/direct", tok, body, ct, "", true); code != http.StatusCreated {
+		t.Fatalf("поле ровно 1 КиБ: %d %s", code, b)
+	}
+	e.exec(`DELETE FROM river_job WHERE kind = 'media.process'`)
+	e.exec(`DELETE FROM media_objects`)
 	if n := e.count(`SELECT count(*) FROM media_objects`); n != 0 {
 		t.Fatalf("отказы создали объектов: %d", n)
 	}
@@ -161,5 +210,14 @@ func TestMediaE2EAdmin(t *testing.T) {
 	}
 	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'media.object_taken_down' AND object_id = $1`, oid); n != 1 {
 		t.Fatalf("аудит снятия: %d", n)
+	}
+}
+
+// Пара TestAdminProdBuildHasNoE2ERoutes: в сборке wf_e2e тот же обход видит тестовые ручки — страж прод-сборки не
+// вхолостую.
+func TestAdminE2EBuildHasE2ERoutes(t *testing.T) {
+	t.Parallel()
+	if e2e, v1 := adminRoutes(t); e2e == 0 || v1 == 0 {
+		t.Fatalf("маршрутов /_e2e: %d (ждали > 0), /v1/: %d", e2e, v1)
 	}
 }

@@ -179,7 +179,8 @@ TakeDownInTx(ctx, tx, objectID uuid.UUID, actor media.Actor, reason string) erro
 5. До транзакции, только если объект ещё `pending_upload`: `HEAD` входящего — файла нет → `409
    media.upload_incomplete` (m1: у уже прикреплённого `HEAD` не нужен — повтор идемпотентен). «Завершить» принимается
    до `expires_at + 1 ч` (окно медленной загрузки, начатой до срока; сравнение строгое, `clock.Clock`), позже — `410
-   media.upload_expired` (m2).
+   media.upload_expired` (m2). Билет на другого владельца или от другого загрузившего неотличим от несуществующего:
+   без `HEAD` и без `409`/`410`, отказ `409 media.object_unavailable` даёт `AttachInTx` **(план media, 26.11)**.
 6. Ответ владельца — его ресурс с `MediaImage` в состоянии `processing`; готовность клиент видит при следующем чтении.
 
 Веб (`apps/web`) грузит так же: «начать» и «завершить» — через BFF, байты — из браузера по билету (CORS входящего —
@@ -350,6 +351,11 @@ HEIC/HEIF: клиент переводит в JPEG до загрузки; най
 | объём | игрок | ≤ 200 МБ в сутки по `declared_bytes` выданных билетов (`429 media.quota_exceeded`) |
 | ассеты сотрудника | сотрудник | общий класс admin-api |
 
+Суточные пределы игрока — классы `media_upload_day` и `media_bytes_day` (`ratelimit.DefaultRules`), и
+`API_RATE_LIMITS` действует на них так же, как на классы конвейера. Суточный билет засчитывается только после
+коммита: отказы (`429` по незавершённым, квоте или самому счёту) его не тратят. Параллельные «начать» у границы
+превышают суточный счёт не больше чем на 4 (незавершённых ≤ 5) **(план media, 26.11)**.
+
 Диск своего хранилища: тревога при заполнении тома > 80 % — в `deploy/server/README.md` (порядок проверки) и в
 наблюдаемости, когда она появится.
 
@@ -369,13 +375,15 @@ CreateDirectInTx ──▶ uploaded
 шагов 2–7). Из `uploaded` — ещё `rejected`, `detached`, `taken_down`; из `ready` — `detached`, `taken_down`.
 
 Переходы проверяет `domain`; CHECK базы — на допустимые пары «состояние — заполненные поля» (`owner_*` заданы у всех,
-кроме `pending_upload`; `ended_at` — у `detached`/`taken_down`/`rejected`; `reject_code` — только у `rejected`).
+кроме `pending_upload`; `ended_at` — у `detached`/`taken_down`/`rejected`; `reject_code` — только у `rejected`;
+`uploaded_at` — у всех, кроме `pending_upload` **(план media, 26.11)**).
 
 ## 5. Модель данных
 
 ### 5.1. Миграция
 
-`00NN_media.sql` (номер — в плане): типы, таблицы, индексы, права, представление. Колонки владельцев не трогаются.
+`0028_media.sql` **(план media, 26.11)**: таблицы, индексы, CHECK, представление; права ролей — ветка media в
+`internal/platform/grants/grants.sql`. Колонки владельцев не трогаются.
 
 ### 5.2. Таблицы
 
@@ -521,7 +529,7 @@ Dev, PublicBaseURL, Available}`. CDN не подключён (R10): `NoopPurger`
 
 ## 7. Контракт
 
-### 7.1. Общие схемы (`contracts/openapi/public/media.yaml`, `components`)
+### 7.1. Общие схемы (`contracts/openapi/{public,admin}/media/schemas.yaml` **(план media, 26.11)**, `components`)
 
 - `UploadRequest`: `content_type`, `bytes`.
 - `UploadTicket`: `upload_id`, `method` (`PUT` | `POST`), `url`, `headers`, `fields` (для `POST`), `expires_at`,
@@ -531,7 +539,8 @@ Dev, PublicBaseURL, Available}`. CDN не подключён (R10): `NoopPurger`
 - `PrivateMediaLink`: `url`, `expires_at`.
 
 Своих операций у `media` в публичном и админском контракте нет — ручки у владельцев со ссылками на эти схемы
-(`contracts/openapi/admin/media.yaml` — схемы и `multipart`). Тестовые ручки цели `e2e_image` — вне контракта, только в
+(в admin — те же схемы и `MediaDirectUpload`: `multipart`, поля до файла, файл последним, 5 МиБ; копии в public и admin
+равны — `contracts.test.mjs`) **(план media, 26.11)**. Тестовые ручки цели `e2e_image` — вне контракта, только в
 сборке `wf_e2e` (§12a).
 
 ### 7.2. Коды ошибок

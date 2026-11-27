@@ -124,7 +124,7 @@ func run(ctx context.Context, environ []string, logOut io.Writer) error {
 		if err != nil {
 			return nil, err
 		}
-		mk, err := newMedia(log, pool, blobs, purposes, clock.System, limiter)
+		mk, err := newMedia(log, pool, blobs, purposes, clock.System, limiter, rules)
 		if err != nil {
 			return nil, err
 		}

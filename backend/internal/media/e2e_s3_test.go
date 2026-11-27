@@ -262,7 +262,7 @@ func (k *s3Kit) upload(t *testing.T, purpose string, data []byte) (media.Ticket,
 	if status, msg := postTicket(t, tk, data); status != http.StatusNoContent {
 		t.Fatalf("загрузка по билету: %d %s", status, msg)
 	}
-	if err := k.api.svc.ConfirmUpload(ctx, tk.UploadID); err != nil {
+	if err := k.api.svc.ConfirmUpload(ctx, tk.UploadID, owner, by); err != nil {
 		t.Fatalf("ConfirmUpload: %v", err)
 	}
 	err = db.InTx(ctx, k.api.pool, func(ctx context.Context, tx pgx.Tx) error {

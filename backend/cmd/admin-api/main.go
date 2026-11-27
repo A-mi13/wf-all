@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -168,34 +169,7 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 			if err != nil {
 				return server.Service{}, err
 			}
-			e2e, e2eLimits := mediaE2E(mk, a, admin.CookieName(cfg.CookieSecure), pool, log)
-			h, err := admin.NewHandler(log, admin.Options{
-				Docs:           cfg.HTTP.DocsEnabled,
-				RequestTimeout: cfg.HTTP.RequestTimeout,
-				Peer:           pc,
-				DB:             pool,
-				Limiter:        a.deps.Limiter,
-				RateRules:      rules,
-				Origin:         cfg.Origin,
-				IPAllowlist:    cfg.IPAllowlist,
-				CookieSecure:   cfg.CookieSecure,
-				StaticDir:      cfg.StaticDir,
-				Sessions:       a.staff.Sessions(),
-				Staff:          a.staff,
-				// тот же сервис, в котором staff зарегистрировал действия (ревью 10b: два сервиса — approve 500)
-				Approvals: a.approvals,
-				// geo собран в assemble: его действия подтверждения — в том же реестре и сервисе (Task 16)
-				Geo: a.geo,
-				// identity (сброс 2FA поддержкой, план I-2 Task 17): действие identity.mfa_reset — в том же реестре
-				Identity: a.identity,
-				Clock:    a.deps.Clock,
-				// побудка wf-api (dev-стенд): команды оператора её не получают
-				Wake: admin.NewWaker(cfg.WakeAPIURL, nil, log),
-				// домен медиа — в img-src CSP статики (none — без него); тестовые ручки — только сборка wf_e2e
-				MediaBaseURL:  mk.blob.PublicBaseURL,
-				E2E:           e2e,
-				E2EBodyLimits: e2eLimits,
-			})
+			h, err := newAdminHandler(log, pool, cfg, pc, rules, a, mk)
 			if err != nil {
 				return server.Service{}, err
 			}
@@ -587,4 +561,38 @@ func riverConfig(workers *river.Workers, log *slog.Logger) *river.Config {
 // staffQueues — очереди исполняющего клиента admin-api: только staff (у воркера её нет — TestAdminKindsQueues).
 func staffQueues() map[string]river.QueueConfig {
 	return map[string]river.QueueConfig{queue.Staff: {MaxWorkers: staffMailWorkers}}
+}
+
+// newAdminHandler — HTTP-хендлер admin-api на собранных сценариях и media (как в run; страж прод-сборки
+// TestAdminProdBuildHasNoE2ERoutes обходит его маршруты).
+func newAdminHandler(log *slog.Logger, pool *pgxpool.Pool, cfg config.Admin, pc peer.Config, rules ratelimit.Rules,
+	a assembly, mk mediaKit) (http.Handler, error) {
+	e2e, e2eLimits := mediaE2E(mk, a, admin.CookieName(cfg.CookieSecure), pool, log)
+	return admin.NewHandler(log, admin.Options{
+		Docs:           cfg.HTTP.DocsEnabled,
+		RequestTimeout: cfg.HTTP.RequestTimeout,
+		Peer:           pc,
+		DB:             pool,
+		Limiter:        a.deps.Limiter,
+		RateRules:      rules,
+		Origin:         cfg.Origin,
+		IPAllowlist:    cfg.IPAllowlist,
+		CookieSecure:   cfg.CookieSecure,
+		StaticDir:      cfg.StaticDir,
+		Sessions:       a.staff.Sessions(),
+		Staff:          a.staff,
+		// тот же сервис, в котором staff зарегистрировал действия (ревью 10b: два сервиса — approve 500)
+		Approvals: a.approvals,
+		// geo собран в assemble: его действия подтверждения — в том же реестре и сервисе (Task 16)
+		Geo: a.geo,
+		// identity (сброс 2FA поддержкой, план I-2 Task 17): действие identity.mfa_reset — в том же реестре
+		Identity: a.identity,
+		Clock:    a.deps.Clock,
+		// побудка wf-api (dev-стенд): команды оператора её не получают
+		Wake: admin.NewWaker(cfg.WakeAPIURL, nil, log),
+		// домен медиа — в img-src CSP статики (none — без него); тестовые ручки — только сборка wf_e2e
+		MediaBaseURL:  mk.blob.PublicBaseURL,
+		E2E:           e2e,
+		E2EBodyLimits: e2eLimits,
+	})
 }

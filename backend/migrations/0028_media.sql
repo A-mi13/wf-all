@@ -47,6 +47,9 @@ CREATE TABLE media_objects (
     CONSTRAINT media_objects_ready_at CHECK (CASE WHEN state = 'ready' THEN ready_at IS NOT NULL
                                                   WHEN state IN ('detached', 'taken_down') THEN true
                                                   ELSE ready_at IS NULL END),
+    -- загружен у всех, кроме pending_upload: из pending_upload выходит только прикрепление (ставит uploaded_at), прямая
+    -- загрузка вставляет uploaded сразу с ним; StaleProcessing (uploaded_at < before) на NULL молча не сработал бы
+    CONSTRAINT media_objects_uploaded_at CHECK ((uploaded_at IS NULL) = (state = 'pending_upload')),
     CONSTRAINT media_objects_size CHECK ((width IS NULL OR width > 0) AND (height IS NULL OR height > 0))
 );
 

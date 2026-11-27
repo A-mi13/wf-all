@@ -70,7 +70,7 @@ const (
 )
 
 // Variant — вариант цели: ключ хранилища <object_id>/<Name>.webp. MaxSide 0 — «как есть» (Lottie, share_card);
-// Lossy и Quality (1–100) — параметры WebP.
+// Lossy и Quality — параметры WebP: у Lossy Quality 1–100, без потерь — 0–100 (NewRegistry).
 type Variant struct {
 	Name    string
 	MaxSide int
@@ -182,9 +182,10 @@ type Service interface {
 	// NewUpload — «начать загрузку» (§3.1 п. 2): ранние проверки заявленного, лимиты игрока (§3.11), объект
 	// pending_upload и билет одной транзакцией, затем подпись. Неизвестная цель или тип владельца — ошибка программиста.
 	NewUpload(ctx context.Context, purpose string, owner OwnerRef, by Uploader, d Declared) (Ticket, error)
-	// ConfirmUpload — до транзакции владельца «завершить» (§3.1 п. 5): объект не pending_upload — nil (повтор);
-	// окно прошло — ErrUploadExpired; файла во входящем нет — ErrUploadIncomplete.
-	ConfirmUpload(ctx context.Context, uploadID uuid.UUID) error
+	// ConfirmUpload — до транзакции владельца «завершить» (§3.1 п. 5): объект не pending_upload или билет не на
+	// owner/by — nil (повтор; чужой неотличим от несуществующего, отказ даст AttachInTx); окно прошло —
+	// ErrUploadExpired; файла во входящем нет — ErrUploadIncomplete.
+	ConfirmUpload(ctx context.Context, uploadID uuid.UUID, owner OwnerRef, by Uploader) error
 	// Stage — прямая загрузка (§2.3, §3.6, §3.7): байты во входящее по ключу нового object_id, без записи в базу.
 	Stage(ctx context.Context, purpose string, r io.Reader, d Declared) (Staged, error)
 	// Image — объект для ответа владельца; нет строки — (Image{}, false, nil).
@@ -198,13 +199,16 @@ type Service interface {
 }
 
 // Deps — зависимости Service. Blob.Available = false — режим none. River — клиент только для вставки (задачи
-// воркера), Service сам задач не ставит. Limiter — суточный счёт билетов игрока (R19).
+// воркера), Service сам задач не ставит. Limiter — суточный счёт билетов игрока (R19). Rules — правила лимитов
+// процесса (API_RATE_LIMITS поверх ratelimit.DefaultRules): из них суточные пределы media_upload_day и
+// media_bytes_day (off — без предела); nil — ratelimit.DefaultRules().
 type Deps struct {
 	Pool     *pgxpool.Pool
 	Clock    clock.Clock
 	Registry *Registry
 	Blob     blob.Opened
 	Limiter  ratelimit.Limiter
+	Rules    ratelimit.Rules
 	River    *river.Client[pgx.Tx]
 	Log      *slog.Logger
 }

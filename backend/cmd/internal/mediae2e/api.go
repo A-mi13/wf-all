@@ -90,7 +90,7 @@ func (d Deps) completeUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	// HEAD входящего — сеть, до транзакции владельца (§3.1 п. 5)
-	if err := d.Service.ConfirmUpload(ctx, in.UploadID); err != nil {
+	if err := d.Service.ConfirmUpload(ctx, in.UploadID, owner(in.OwnerID), player(ctx)); err != nil {
 		httpx.WriteError(d.Log, w, r, err)
 		return
 	}

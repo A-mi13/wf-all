@@ -45,6 +45,9 @@ func TestRegistryValidation(t *testing.T) {
 	}
 	if _, err := media.NewRegistry(photo("pitch_photo"), animation(), edit(photo("dispute_evidence"), func(p *media.Purpose) {
 		p.Visibility = media.VisibilityPrivate
+	}), edit(photo("lossless"), func(p *media.Purpose) {
+		// без потерь Quality 0 допустим (усилие сжатия), с потерями — граница 1 и 100
+		p.Variants = []media.Variant{{Name: "full"}, {Name: "q1", Lossy: true, Quality: 1}, {Name: "q100", Lossy: true, Quality: 100}}
 	})); err != nil {
 		t.Fatalf("допустимые цели: %v", err)
 	}
@@ -76,6 +79,12 @@ func TestRegistryValidation(t *testing.T) {
 		{"MaxSide < 0", []media.Purpose{edit(photo("p"), func(p *media.Purpose) { p.Variants = []media.Variant{{Name: "full", MaxSide: -1}} })}, "MaxSide"},
 		{"Quality > 100", []media.Purpose{edit(photo("p"), func(p *media.Purpose) {
 			p.Variants = []media.Variant{{Name: "full", Lossy: true, Quality: 101}}
+		})}, "Quality"},
+		{"Lossy Quality 0", []media.Purpose{edit(photo("p"), func(p *media.Purpose) {
+			p.Variants = []media.Variant{{Name: "full", Lossy: true}}
+		})}, "Quality"},
+		{"Quality < 0", []media.Purpose{edit(photo("p"), func(p *media.Purpose) {
+			p.Variants = []media.Variant{{Name: "full", Quality: -1}}
 		})}, "Quality"},
 		{"без типов владельца", []media.Purpose{edit(photo("p"), func(p *media.Purpose) { p.OwnerTypes = nil })}, "владельц"},
 		{"пустой тип владельца", []media.Purpose{edit(photo("p"), func(p *media.Purpose) { p.OwnerTypes = []string{""} })}, "владельц"},

@@ -19,9 +19,12 @@ import (
 )
 
 // NewUpload — «начать загрузку» (§3.1 п. 2, §3.11, R3, R19). Порядок: режим none — ErrUnavailable; цель и тип
-// владельца (ошибка программиста); заявленные тип и размер — 422; у игрока — суточный счёт билетов Limiter
-// (429 ratelimit.exceeded); одна транзакция: PendingLock игрока, живых незавершённых ≥ 5 — ErrTooManyPending, объём за
-// сутки сверх предела — ErrQuotaExceeded, объект pending_upload и билет; после коммита — подпись POST. Сбой подписи
+// владельца (ошибка программиста); заявленные тип и размер — 422; у игрока — суточный счёт билетов Limiter.Over без
+// расхода (исчерпан — 429 ratelimit.exceeded); одна транзакция: PendingLock игрока, живых незавершённых ≥ 5 —
+// ErrTooManyPending, объём за сутки сверх предела — ErrQuotaExceeded, объект pending_upload и билет; после коммита —
+// Limiter.Add (отказы счёт не тратят, ревью Task 6 m3) и подпись POST. Over и Add — не под замком игрока (лимитер на
+// своём соединении, второе соединение внутри транзакции грозит исчерпанием пула): параллельные «начать» у границы
+// превышают предел не больше чем на maxPending − 1 (незавершённых больше 5 замок не пустит) — принято. Сбой подписи
 // оставляет pending_upload без билета клиенту — его уберёт чистка окна (принято).
 func (s *service) NewUpload(ctx context.Context, purpose string, owner OwnerRef, by Uploader, d Declared) (Ticket, error) {
 	if !s.Available() {
@@ -41,14 +44,14 @@ func (s *service) NewUpload(ctx context.Context, purpose string, owner OwnerRef,
 		return Ticket{}, err
 	}
 	player := by.UserID != uuid.Nil
+	dayKey := ratelimit.SubjectKey(classUploadDay, auth.Subject{Kind: auth.SubjectUser, ID: by.UserID})
 	if player {
-		key := ratelimit.SubjectKey(classUploadDay, auth.Subject{Kind: auth.SubjectUser, ID: by.UserID})
-		res, err := s.d.Limiter.Allow(ctx, key, s.uploadDay)
+		over, err := s.d.Limiter.Over(ctx, dayKey, s.uploadDay)
 		if err != nil {
 			return Ticket{}, fmt.Errorf("media: суточный счёт билетов: %w", err)
 		}
-		if !res.Allowed {
-			return Ticket{}, httpx.NewError(http.StatusTooManyRequests, httpx.CodeRateLimited).WithRetryAfter(res.RetryAfter)
+		if over {
+			return Ticket{}, httpx.NewError(http.StatusTooManyRequests, httpx.CodeRateLimited).WithRetryAfter(s.dayRetryAfter())
 		}
 	}
 	now := s.d.Clock.Now()
@@ -76,6 +79,12 @@ func (s *service) NewUpload(ctx context.Context, purpose string, owner OwnerRef,
 	})
 	if err != nil {
 		return Ticket{}, err
+	}
+	if player {
+		// билет закоммичен — расход суточного счёта; сбой (база лимитов, отмена) — недосчёт одного билета, не отказ
+		if err := s.d.Limiter.Add(context.WithoutCancel(ctx), dayKey, s.uploadDay); err != nil {
+			s.d.Log.ErrorContext(ctx, "media: расход суточного счёта билетов", "object_id", objectID.String(), "err", err)
+		}
 	}
 	form, err := s.d.Blob.Presigner.PresignUpload(ctx, blob.UploadSpec{Key: objectID.String(), ContentType: d.ContentType,
 		Bytes: d.Bytes, TTL: expires.Sub(now)})
