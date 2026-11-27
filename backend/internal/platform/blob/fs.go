@@ -140,7 +140,7 @@ func (s *FS) Get(_ context.Context, key string) (io.ReadCloser, Info, error) {
 		return nil, Info{}, err
 	}
 	p := s.path(key)
-	raw, err := os.ReadFile(p)
+	raw, err := os.ReadFile(p) //nolint:gosec // ключ прошёл ValidKey, путь — внутри корня хранилища
 	if err != nil {
 		if notExist(err) {
 			return nil, Info{}, ErrNotFound

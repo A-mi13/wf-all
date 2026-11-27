@@ -206,7 +206,7 @@ func TestFSFoundationLeftovers(t *testing.T) {
 		s, _ := newFS(t)
 		put(t, s, "obj", "data", "text/plain")
 		path := blob.FSObjectPath(s, "obj")
-		good, err := os.ReadFile(path)
+		good, err := os.ReadFile(path) //nolint:gosec // файл объекта во временном каталоге теста
 		if err != nil {
 			t.Fatal(err)
 		}
