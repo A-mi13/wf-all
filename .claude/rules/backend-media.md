@@ -62,7 +62,8 @@ paths:
   (цикл). Транзакционные операции — `media/intx` напрямую на `mediadb`/`domain`/`jobs`. Общие правила показа —
   `domain/view.go` (`ClientState`: `uploaded` → `processing`; `ShowVariants` — только `ready`; `VariantURL` — у
   закрытого пусто). Аргументы задач — `media/jobs/args.go` (`ProcessArgs`, `PurgeArgs`, `Bucket{In,Pub,Priv}`,
-  `ProcessInsertOpts` — уникальность по аргументам, `PurgeInsertOpts`).
+  `ProcessInsertOpts` — уникальность по аргументам, priority 2; `PurgeInsertOpts` — priority 1: в общей очереди `media`
+  удаление выбирается раньше обработки, `TestPurgeBeforeProcess`).
 - **`NewUpload`:** `none` → `ErrUnavailable`; цель/тип владельца/два загрузивших — ошибка программиста (500); тип —
   точное совпадение с MIME входов (`AcceptedTypes`), размер 1…`MaxBytes` (422). Игрок: `Limiter.Over`
   `SubjectKey("media_upload_day")` без расхода (100/сутки; исчерпан — 429 `ratelimit.exceeded` + Retry-After = интервал
@@ -124,15 +125,24 @@ paths:
   `processing`) и ошибка River (падением не считается); `job.Attempt ≥ MaxAttempts` — `rejected(processing_failed)`.
   Входящего нет (`ErrNotFound`) — перечитать строку: не `uploaded|processing` — успех без изменений (сняли, открепили,
   опубликовал другой), иначе обычная ошибка. Паника исполнителя оставляет `processing` — засчитывается как падение.
+  Последняя попытка: WARN «объект отклонён» — только если отклонил этот вызов (`rejectFailed` → `rejected`); застал
+  конечное или строки нет — «уже не в обработке — не отклонялся».
 - **`media.purge` (§3.8):** `Delete` каждого ключа (идемпотентно), затем `Purger.Purge(PublicURLs)`; сбой — повтор
   (25 попыток); неизвестный бакет и `blob.ErrBadKey` — `JobCancel`.
 - **Lottie** (`internal/lottie`, Task 8): схема-разрешение LAC 1.0.1 в `allow.go` (дата сверки в комментарии; новые
   поля — только со сверкой со схемой), текстовые слои отклоняются целиком, слоты не допускаются, вшитые картинки —
   через `ImageFunc` после обхода; отказы — `ErrUnsafe`/`ErrCorrupt`; выход совместим с lottie-web (`st`, `td`, `hasMask`).
+  Доработка до мержа (27.11): `w`/`h` — число в диапазоне float64, у слоя обязательны `ip`/`op`/`ks`, ассет с
+  `"layers": null` — `ErrCorrupt`; `td` — bool или число. Граф ссылок (`precomp.go`, `checkPrecomps`, после обхода и до
+  перекодирования картинок; только достижимое от корня, как разворачивает lottie-web; первый ассет с id): цикл, `ty` 0 или
+  `ty` 2 без `refId`, ссылка `ty` 0 не на прекомпозицию, `ty` 2 не на картинку — `ErrUnsafe`; развёрнутые копии слоёв
+  прекомпозиций ≤ `Limits.MaxExpandedBytes` (4 МиБ байт выхода, сумма насыщается — `TestExpandedBytesSaturates`), сумма
+  пикселей всех картинок ≤ `MaxTotalImagePixels` (16 Мп). Новый тип узла — перед `nKindEnd` (`TestEveryNodeKindHandled`).
 - **Стражи** — `media/jobs`: `TestSecondExecutorOnReady`, `TestTakeDownBetweenWriteAndPublish` (снятие из хука `Put`:
   запись под замком строки дала бы взаимную блокировку), `TestCrashCountsAttempts`, `TestStoreErrorsDoNotCountAsCrash`,
   `TestRollbackUsesWithoutCancel`, `TestUniqueWhileRetryable`, `TestProcessWaitsForRowLock`,
-  `TestProcessInputGoneAfterTakeDown`, `TestProcessTooLargeAfterReupload`, `TestProcessRejectCodes`.
+  `TestProcessInputGoneAfterTakeDown`, `TestProcessTooLargeAfterReupload`, `TestProcessRejectCodes`,
+  `TestPurgeBeforeProcess`.
 
 ## Чистка, сверка, подписчик (Task 10)
 
@@ -232,13 +242,22 @@ paths:
 
 - **До декодирования**, кроме пикселей и стороны: у JPEG — сканов ≤ `maxScans` (100; больше — `ErrUnsupported`,
   `unsupported_type`; `walkJPEG` проходит весь файл как `image/jpeg` — энтропийные данные до маркера, FF DA внутри
-  COM/APPn сканом не считается) и байты декодера `decodeBytes` ≤ `MaxPixels × decodeBytesPerPixel` (8; больше —
-  `ErrTooManyPixels`, `too_many_pixels`). `decodeBytes` повторяет выделения `image/jpeg` Go 1.27 (плоскости на сетке MCU,
-  чёрный канал, RGBA/CMYK на выходе — APP0/APP14 по всему файлу, коэффициенты прогрессивного 256 Б на блок); обновили Go
-  или формулу — `TestDecodeBytesMatchesDecoder` (сверка с `TotalAlloc` декодера). Стражи — `TestProgressiveCoeffBomb`,
-  `TestDecodeBudgetBoundary`, `TestScanLimit`, граница WebP 16383/16384 — `TestVariantSideLimit`.
+  COM/APPn сканом не считается) и, у JPEG и PNG, байты декодера `decodeBytes` ≤ `MaxPixels × decodeBytesPerPixel` (8;
+  больше — `ErrTooManyPixels`, `too_many_pixels`). `jpegBytes` повторяет выделения `image/jpeg` Go 1.27 (плоскости на
+  сетке MCU, чёрный канал, RGBA/CMYK на выходе — APP0/APP14 по всему файлу, коэффициенты прогрессивного 256 Б на блок),
+  `pngBytes` — `image/png` (тип картинки по IHDR и tRNS до IDAT: 1/2/4/8 Б/пикс., у Adam7 + наибольший проход; доработка
+  до мержа, 27.11); обновили Go или формулу — `TestDecodeBytesMatchesDecoder`, `TestPNGDecodeBytesMatchesDecoder`
+  (сверка с `TotalAlloc` декодера). Стражи — `TestProgressiveCoeffBomb`, `TestDecodeBudgetBoundary`, `TestScanLimit`,
+  `TestPNGAdam7Bomb`, `TestPNGDecodeBudgetBoundary`, полоса — `TestStripBomb` (порог памяти решающий), граница WebP
+  16383/16384 — `TestVariantSideLimit`.
+- **Декодеры — только явно по типу** (`decode`, `inspect`); `image.Decode`/`DecodeConfig` в модуле `backend` запрещены
+  (зарегистрированные чужие декодеры прошли бы мимо типа и бюджета) — `TestNoGenericImageDecode` (AST всех `.go`).
+- **Битый профиль — как отсутствующий** (доработка до мержа, 27.11): битый ICC JPEG/WebP, битое `desc` и битый `iCCP`
+  PNG (заголовок, метод, zlib) — картинка принимается без профиля (`TestBrokenICCPIgnored`); `corrupt` — только `iCCP`
+  больше 1 МиБ после распаковки (`TestCorrupt`).
 - **ICC `desc` (mluc)** — записей ≤ 64, запись ≤ 512 Б, всего ≤ 4 КиБ; нарушение — профиль не P3 (как битый: картинка
   не отклоняется, варианты без профиля). Стражи — `TestICCDescLimits`, `TestICCDescBomb`.
-- Генераторы злых входов (`zeroJPEG`, `progScans`, `eobRuns`, `mlucBomb`, `p3WithDesc`) — `helpers_test.go`; тесты на
-  `TotalAlloc` — `// serial`. Пик кучи на 40 Мп — комментарий `Process` и `deploy/server/README.md` («Память воркера»).
+- Генераторы злых входов (`zeroJPEG`, `zeroPNG`, `progScans`, `eobRuns`, `mlucBomb`, `p3WithDesc`) — `helpers_test.go`;
+  тесты на `TotalAlloc` — `// serial`. Пик на 40 Мп (два разом ≈ 1,49 ГиБ, PNG 16 бит; воркеру ≥ 2 ГиБ при
+  `WORKER_QUEUE_MEDIA=2`) — комментарий `Process` и `deploy/server/README.md` («Память воркера»).
 - **Intx:** повтор «завершить» к `detached`/`taken_down` — `ErrObjectUnavailable` (`TestAttachRights`).
