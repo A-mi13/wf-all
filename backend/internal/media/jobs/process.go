@@ -439,10 +439,15 @@ func (w *ProcessWorker) fail(ctx context.Context, job *river.Job[ProcessArgs], o
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
 	defer cancel()
 	if job.Attempt >= job.MaxAttempts {
-		if err := w.rejectFailed(bg, o.ID); err != nil {
+		rejected, err := w.rejectFailed(bg, o.ID)
+		if err != nil {
 			return errors.Join(cause, fmt.Errorf("media/jobs: отклонение после последней попытки: %w", err))
 		}
-		w.d.Log.WarnContext(ctx, "media: обработка не удалась, объект отклонён", "object_id", o.ID, "err", cause)
+		msg := "media: обработка не удалась, объект отклонён"
+		if !rejected { // уже конечный (удаление вариантов поставлено) или строки нет — ревью Task 10, m3
+			msg = "media: обработка не удалась на последней попытке, объект уже не в обработке — не отклонялся"
+		}
+		w.d.Log.WarnContext(ctx, msg, "object_id", o.ID, "err", cause)
 		return cause
 	}
 	if err := w.release(bg, o.ID); err != nil {
@@ -451,10 +456,11 @@ func (w *ProcessWorker) fail(ctx context.Context, job *river.Job[ProcessArgs], o
 	return cause
 }
 
-// rejectFailed — последняя попытка River: rejected(processing_failed) под замком строки; конечное состояние —
-// media.purge всех ключей цели, как у release (m-r1-1 на последней попытке).
-func (w *ProcessWorker) rejectFailed(ctx context.Context, objectID uuid.UUID) error {
-	return db.InTx(ctx, w.d.Pool, func(ctx context.Context, tx pgx.Tx) error {
+// rejectFailed — последняя попытка River: rejected(processing_failed) под замком строки (rejected = true после
+// коммита); конечное состояние — media.purge всех ключей цели, как у release (m-r1-1 на последней попытке); строки
+// нет — ничего.
+func (w *ProcessWorker) rejectFailed(ctx context.Context, objectID uuid.UUID) (rejected bool, err error) {
+	err = db.InTx(ctx, w.d.Pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := mediadb.New(tx)
 		o, ok, err := lock(ctx, q, objectID)
 		if err != nil || !ok {
@@ -463,8 +469,10 @@ func (w *ProcessWorker) rejectFailed(ctx context.Context, objectID uuid.UUID) er
 		if domain.IsFinal(media.State(o.State)) {
 			return w.purgeEnded(ctx, tx, o)
 		}
+		rejected = true
 		return w.rejectTx(ctx, tx, q, o, media.RejectProcessingFailed)
 	})
+	return rejected && err == nil, err
 }
 
 // purgeEnded — объект стал конечным во время обработки (сняли, открепили, отклонили): media.purge всех ключей цели в

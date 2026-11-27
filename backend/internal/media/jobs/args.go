@@ -26,11 +26,20 @@ type ProcessArgs struct {
 
 func (ProcessArgs) Kind() string { return "media.process" }
 
+// Приоритеты очереди media: River выбирает по priority (1 — первым), затем scheduled_at, id. Удаление файлов (снятие,
+// открепление, §3.8) не ждёт волны загрузок в той же очереди (финальное ревью A, n1; TestPurgeBeforeProcess).
+const (
+	priorityPurge   = 1
+	priorityProcess = 2
+)
+
 // ProcessInsertOpts — по объекту одна живая задача (§3.3): уникальность по аргументам среди ждущих, повторяемых и
-// исполняемых — повтор «завершить» и перезапуск чисткой дубля не ставят; завершённая не мешает.
+// исполняемых — повтор «завершить» и перезапуск чисткой дубля не ставят; завершённая не мешает. Приоритет ниже
+// media.purge.
 func ProcessInsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       queue.Media,
+		Priority:    priorityProcess,
 		MaxAttempts: 10,
 		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
 			rivertype.JobStateAvailable, rivertype.JobStateScheduled, rivertype.JobStatePending,
@@ -80,7 +89,7 @@ func PublicURLs(base string, keys []string) []string {
 	return urls
 }
 
-// PurgeInsertOpts — очередь media, до 25 попыток (сбой хранилища повторяется River).
+// PurgeInsertOpts — очередь media, первой из её задач (priorityPurge), до 25 попыток (сбой хранилища повторяется River).
 func PurgeInsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: queue.Media, MaxAttempts: 25}
+	return river.InsertOpts{Queue: queue.Media, Priority: priorityPurge, MaxAttempts: 25}
 }

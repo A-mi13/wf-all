@@ -12,6 +12,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,6 +40,28 @@ func assets(list ...string) string { return `,"assets":[` + strings.Join(list, "
 
 func imageAsset(id, p string) string {
 	return `{"id":"` + id + `","w":10,"h":10,"u":"","p":"` + p + `","e":1}`
+}
+
+func precompAsset(id string, layers ...string) string {
+	return `{"id":"` + id + `","layers":[` + strings.Join(layers, ",") + `]}`
+}
+
+func precompLayer(refID string) string {
+	return `{"ty":0,"refId":"` + refID + `","w":100,"h":100,"ip":0,"op":60,"ks":{}}`
+}
+
+// precompChain — depth прекомпозиций c0…c(depth−1), в каждой fan слоёв на следующую (в последней — baseLayer), в корне
+// fan слоёв на c0: документ в килобайты, развёрнутых слоёв — fan^(depth+1).
+func precompChain(depth, fan int) []byte {
+	list := make([]string, depth)
+	for i := range depth {
+		inner := baseLayer
+		if i < depth-1 {
+			inner = precompLayer("c" + strconv.Itoa(i+1))
+		}
+		list[i] = precompAsset("c"+strconv.Itoa(i), slices.Repeat([]string{inner}, fan)...)
+	}
+	return anim(assets(list...), slices.Repeat([]string{precompLayer("c0")}, fan)...)
 }
 
 func imageLayer(refID string) string {
@@ -200,6 +223,33 @@ func TestSanitizeRejects(t *testing.T) {
 		{"bad_base64", anim(assets(imageAsset("img", "data:image/png;base64,@@@@"))), DefaultLimits, ErrCorrupt},
 		{"png_declared_jpeg_bytes", anim(assets(imageAsset("img", dataURL("image/png", jpegWithEXIF(t))))), DefaultLimits, ErrCorrupt},
 		{"webp_declared_png_bytes", anim(assets(imageAsset("img", dataURL("image/webp", png10)))), DefaultLimits, ErrCorrupt},
+		// ревью Task 8, m2: ip, op, ks обязательны у видимого слоя (без ip/op lottie-web не рисует слой: NaN)
+		{"layer_without_ip", anim("", `{"ty":4,"op":60,"ks":{},"shapes":[]}`), DefaultLimits, ErrCorrupt},
+		{"layer_without_op", anim("", `{"ty":4,"ip":0,"ks":{},"shapes":[]}`), DefaultLimits, ErrCorrupt},
+		{"layer_without_ks", anim("", `{"ty":4,"ip":0,"op":60,"shapes":[]}`), DefaultLimits, ErrCorrupt},
+		{"layer_ip_null", anim("", `{"ty":3,"ip":null,"op":60,"ks":{}}`), DefaultLimits, ErrCorrupt},
+		{"precomp_layer_without_ks", anim(assets(precompAsset("p", `{"ty":3,"ip":0,"op":60}`)), precompLayer("p")), DefaultLimits, ErrCorrupt},
+		{"precomp_asset_layers_null", anim(assets(`{"id":"p","layers":null}`)), DefaultLimits, ErrCorrupt},
+		// финальное ревью D, m1: размеры, которые не читаются числом float64, — corrupt, а не повторы задачи
+		{"w_out_of_range", []byte(`{"fr":30,"ip":0,"op":60,"w":1e400,"h":100,"layers":[` + baseLayer + `]}`), DefaultLimits, ErrCorrupt},
+		{"h_out_of_range", []byte(`{"fr":30,"ip":0,"op":60,"w":100,"h":-1e400,"layers":[` + baseLayer + `]}`), DefaultLimits, ErrCorrupt},
+		// граф refId прекомпозиций: цикл, ссылка мимо прекомпозиции, раздувание копиями (lottie-web копирует слои
+		// ассета на каждое повторное использование), общий предел пикселей вшитых картинок
+		{"precomp_cycle_self", anim(assets(precompAsset("a", precompLayer("a"))), precompLayer("a")), DefaultLimits, ErrUnsafe},
+		{"precomp_cycle_two", anim(assets(precompAsset("a", precompLayer("b")), precompAsset("b", precompLayer("a"))), precompLayer("a")), DefaultLimits, ErrUnsafe},
+		{"precomp_ref_missing", anim("", precompLayer("nope")), DefaultLimits, ErrUnsafe},
+		{"precomp_without_refId", anim("", `{"ty":0,"w":100,"h":100,"ip":0,"op":60,"ks":{}}`), DefaultLimits, ErrUnsafe},
+		{"precomp_ref_image", anim(assets(imageAsset("img", dataURL("image/png", png10))), precompLayer("img")), DefaultLimits, ErrUnsafe},
+		{"precomp_ref_first_id_is_image", anim(assets(imageAsset("x", dataURL("image/png", png10)), precompAsset("x", baseLayer)), precompLayer("x")), DefaultLimits, ErrUnsafe},
+		{"precomp_blowup", precompChain(10, 10), DefaultLimits, ErrUnsafe},
+		// слой-картинка ty 2: refId — на первый ассет-картинку с этим id (lottie-web getAssetData), иначе TypeError или
+		// запрос images/undefined у клиента
+		{"image_layer_ref_missing", anim("", imageLayer("nope")), DefaultLimits, ErrUnsafe},
+		{"image_layer_ref_precomp", anim(assets(precompAsset("p", baseLayer)), imageLayer("p")), DefaultLimits, ErrUnsafe},
+		{"image_layer_ref_first_id_is_precomp", anim(assets(precompAsset("x", baseLayer), imageAsset("x", dataURL("image/png", png10))), imageLayer("x")), DefaultLimits, ErrUnsafe},
+		{"image_layer_without_refId", anim("", `{"ty":2,"ip":0,"op":60,"ks":{}}`), DefaultLimits, ErrUnsafe},
+		{"image_layer_in_precomp_ref_missing", anim(assets(precompAsset("p", imageLayer("nope"))), precompLayer("p")), DefaultLimits, ErrUnsafe},
+		{"images_total_pixels", anim(assets(imageAsset("a", dataURL("image/png", png10)), imageAsset("b", dataURL("image/png", png10)))), lim(func(l *Limits) { l.MaxTotalImagePixels = 199 }), ErrUnsafe},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -233,6 +283,11 @@ func TestSanitizeAcceptsAtLimits(t *testing.T) {
 		{"duration_10s", timing("60", "0", "600"), DefaultLimits},
 		{"image_bytes_exactly_max", anim(assets(imageAsset("img", dataURL("image/png", png10)))), lim(func(l *Limits) { l.MaxImageBytes = len(png10) })},
 		{"image_pixels_exactly_max", anim(assets(imageAsset("img", dataURL("image/png", png10)))), lim(func(l *Limits) { l.MaxImagePixels = 100 })},
+		{"images_total_pixels_exactly_max", anim(assets(imageAsset("a", dataURL("image/png", png10)), imageAsset("b", dataURL("image/png", png10)))), lim(func(l *Limits) { l.MaxTotalImagePixels = 200 })},
+		// lottie-web разворачивает только то, на что ссылается корень: цикл и битые ссылки в неиспользуемых ассетах
+		// плееру не вредят
+		{"unreferenced_cycle", anim(assets(precompAsset("a", precompLayer("b")), precompAsset("b", precompLayer("a")))), DefaultLimits},
+		{"precomp_reused_chain", precompChain(3, 3), DefaultLimits},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -426,7 +481,8 @@ func TestSanitizeKeepsAllowed(t *testing.T) {
 	in := `{"v":"5.7.4","ver":10001,"nm":"all","fr":30,"ip":0,"op":60,"w":100,"h":100,` +
 		`"assets":[{"id":"pc","nm":"pre","layers":[{"nm":"n","hd":false,"ty":3,"ind":1,"parent":2,"ip":0,"op":60,"st":0,` +
 		`"ks":{"a":{"a":0,"k":[0,0]},"p":{"a":1,"k":[{"t":0,"s":[0,0],"i":{"x":0.5,"y":0.5},"o":{"x":0.5,"y":0.5},"ti":[0,0],"to":[1,1],"h":0},{"t":60,"s":[10,10]}]},` +
-		`"r":{"a":0,"k":0},"s":{"a":0,"k":[100,100]},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0}},"ao":0}]}],` +
+		`"r":{"a":0,"k":0},"s":{"a":0,"k":[100,100]},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0}},"ao":0}]},` +
+		`{"id":"img","nm":"i","w":10,"h":10,"p":"` + dataURL("image/webp", webpVP8L(10, 10)) + `","e":1}],` +
 		`"markers":[{"cm":"m","tm":0,"dr":10}],"layers":[` +
 		`{"ty":0,"refId":"pc","w":100,"h":100,"sr":1,"st":0,"tm":{"a":0,"k":0},"ip":0,"op":60,"ks":{},"tt":1,"tp":2,` +
 		`"masksProperties":[{"mode":"a","o":{"a":0,"k":100},"pt":{"a":1,"k":[{"t":0,"s":[{"c":true,"i":[[0,0]],"o":[[0,0]],"v":[[0,0]]}]},{"t":60}]}}],"hasMask":true},` +
@@ -443,8 +499,10 @@ func TestSanitizeKeepsAllowed(t *testing.T) {
 		`{"ty":"el","p":{"a":0,"k":[0,0],"sid":"pos"},"s":{"a":0,"k":[5,5]}},` +
 		`{"ty":"sh","ks":{"a":0,"k":{"c":false,"i":[[0,0],[1,1]],"o":[[0,0],[1,1]],"v":[[0,0],[5,5]]}}},` +
 		`{"ty":"fl","c":{"a":0,"k":[1,1,1]},"r":2}]},` +
-		`{"ty":2,"refId":"pc","ip":0,"op":60,"st":-5.5,"ks":{"p":{"s":false,"a":0,"k":[0,0]}}}]}`
-	out, err := Sanitize(context.Background(), []byte(in), DefaultLimits, (&stubImg{}).fn)
+		`{"ty":2,"refId":"img","ip":0,"op":60,"st":-5.5,"ks":{"p":{"s":false,"a":0,"k":[0,0]}}}]}`
+	// картинка «перекодируется» в те же байты: выход обязан совпасть со входом
+	same := func(_ context.Context, b []byte) ([]byte, error) { return b, nil }
+	out, err := Sanitize(context.Background(), []byte(in), DefaultLimits, same)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -454,7 +512,7 @@ func TestSanitizeKeepsAllowed(t *testing.T) {
 }
 
 // TestSanitizeLottieWebCompat — поля вне LAC 1.0.1, без которых lottie-web рисует неверно: st у каждого слоя
-// (нет — 0), td переносится, hasMask — по факту масок в выходе, вход не учитывается.
+// (нет — 0), td переносится (число или boolean — ревью Task 8, m3: lottie-web проверяет истинность), hasMask — по факту масок в выходе, вход не учитывается.
 func TestSanitizeLottieWebCompat(t *testing.T) {
 	t.Parallel()
 	mask := `{"mode":"a","pt":{"a":0,"k":{"c":true,"i":[[0,0]],"o":[[0,0]],"v":[[1,2]]}}}`
@@ -465,6 +523,7 @@ func TestSanitizeLottieWebCompat(t *testing.T) {
 		`{"ty":4,"ip":0,"op":60,"st":0,"hasMask":true,"ks":{},"masksProperties":[],"shapes":[]}`,
 		`{"ty":4,"td":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
 		`{"ty":4,"tt":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
+		`{"ty":4,"td":true,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}`,
 		`{"ty":4,"ip":0,"op":60,"st":"5","ks":{},"shapes":[]}`,
 	)
 	_, err := Sanitize(context.Background(), in, DefaultLimits, (&stubImg{}).fn)
@@ -482,16 +541,63 @@ func TestSanitizeLottieWebCompat(t *testing.T) {
 		`{"ty":4,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]},` +
 		`{"ty":4,"ip":0,"op":60,"st":0,"ks":{},"masksProperties":[],"shapes":[]},` +
 		`{"ty":4,"td":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]},` +
-		`{"ty":4,"tt":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}]}`
+		`{"ty":4,"tt":1,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]},` +
+		`{"ty":4,"td":true,"ip":0,"op":60,"st":0,"ks":{},"shapes":[]}]}`
 	if string(out) != want {
 		t.Fatalf("выход:\n%s\nожидалось:\n%s", out, want)
 	}
 }
 
-// TestEveryNodeKindHandled — у каждого типа узла есть таблица или разбор (node не паникует).
+// TestSanitizePrecompExpansionLimit — граница предела развёрнутых слоёв: прекомпозиция p (слои — L байт выхода) три
+// раза в корне — 3L; предел 3L проходит, 3L − 1 — ErrUnsafe.
+func TestSanitizePrecompExpansionLimit(t *testing.T) {
+	t.Parallel()
+	in := anim(assets(precompAsset("p", baseLayer, baseLayer)), precompLayer("p"), precompLayer("p"), precompLayer("p"))
+	out, err := Sanitize(context.Background(), in, DefaultLimits, (&stubImg{}).fn)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	var doc struct {
+		Assets []struct {
+			Layers json.RawMessage `json:"layers"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil || len(doc.Assets) != 1 {
+		t.Fatalf("выход: %v %s", err, out)
+	}
+	expanded := 3 * int64(len(doc.Assets[0].Layers))
+	if _, err := Sanitize(context.Background(), in, lim(func(l *Limits) { l.MaxExpandedBytes = expanded }), (&stubImg{}).fn); err != nil {
+		t.Fatalf("ровно на пределе %d: %v", expanded, err)
+	}
+	_, err = Sanitize(context.Background(), in, lim(func(l *Limits) { l.MaxExpandedBytes = expanded - 1 }), (&stubImg{}).fn)
+	if !errors.Is(err, ErrUnsafe) {
+		t.Fatalf("предел − 1: err = %v, want ErrUnsafe", err)
+	}
+}
+
+// TestExpandedBytesSaturates — цепочка 30 уровней по 10 слоёв (10^31 копий) не переполняет int64: сумма насыщается
+// на пределе + 1 (переполнение могло бы дать число меньше предела и пропустить бомбу).
+func TestExpandedBytesSaturates(t *testing.T) {
+	t.Parallel()
+	root, err := parse(precompChain(30, 10), DefaultLimits.MaxDepth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := (&sanitizer{lim: DefaultLimits}).animation(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const limit = 1 << 20
+	if n, err := expandedBytes(out, limit); err != nil || n != limit+1 {
+		t.Fatalf("expandedBytes = %d, %v; ждали %d", n, err, limit+1)
+	}
+}
+
+// TestEveryNodeKindHandled — у каждого типа узла есть таблица или разбор (node не паникует). Корень (nAnimation)
+// разбирает animation, а не node; граница — nKindEnd, новый тип перед ней обходится сам.
 func TestEveryNodeKindHandled(t *testing.T) {
 	t.Parallel()
-	for k := nAsset; k <= nKfBezier; k++ {
+	for k := nAnimation + 1; k < nKindEnd; k++ {
 		s := &sanitizer{lim: DefaultLimits}
 		_, _ = s.node(k, &jvalue{k: jObj}, "test") // отказ допустим (слой без ty), паника — нет
 	}

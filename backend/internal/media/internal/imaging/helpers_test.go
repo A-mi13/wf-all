@@ -203,6 +203,52 @@ func iccpChunk(t testing.TB, profile []byte) []byte {
 	return pngChunk("iCCP", append([]byte("ICC Profile\x00\x00"), zlibBytes(t, profile)...))
 }
 
+// zeroPNG — PNG w×h из нулевых пикселей: глубина depth, тип цвета ct (0 серый, 2 RGB, 3 палитра — PLTE добавляется,
+// 4 серый с альфой, 6 RGBA), adam7 — чересстрочная развёртка (проходы как в png/reader.go interlacing); chunks — до
+// IDAT (после PLTE). Строки нулей сжимаются в сотни байт на мегапиксель.
+func zeroPNG(t testing.TB, w, h int, depth, ct byte, adam7 bool, chunks ...[]byte) []byte {
+	t.Helper()
+	bits := int(depth) * map[byte]int{0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ct]
+	ihdr := binary.BigEndian.AppendUint32(nil, u32(w))
+	ihdr = binary.BigEndian.AppendUint32(ihdr, u32(h))
+	passes := [][4]int{{0, 0, 1, 1}}
+	ihdr = append(ihdr, depth, ct, 0, 0, 0)
+	if adam7 {
+		ihdr[12] = 1
+		passes = [][4]int{{0, 0, 8, 8}, {4, 0, 8, 8}, {0, 4, 4, 8}, {2, 0, 4, 4}, {0, 2, 2, 4}, {1, 0, 2, 2}, {0, 1, 1, 2}}
+	}
+	var z bytes.Buffer
+	zw, err := zlib.NewWriterLevel(&z, zlib.BestSpeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range passes {
+		pw, ph := (w-p[0]+p[2]-1)/p[2], (h-p[1]+p[3]-1)/p[3]
+		if pw <= 0 || ph <= 0 {
+			continue
+		}
+		row := make([]byte, 1+(pw*bits+7)/8)
+		for range ph {
+			if _, err := zw.Write(row); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out := []byte("\x89PNG\r\n\x1a\n")
+	out = append(out, pngChunk("IHDR", ihdr)...)
+	if ct == 3 {
+		out = append(out, pngChunk("PLTE", []byte{0, 0, 0})...)
+	}
+	for _, c := range chunks {
+		out = append(out, c...)
+	}
+	out = append(out, pngChunk("IDAT", z.Bytes())...)
+	return append(out, pngChunk("IEND", nil)...)
+}
+
 // jpegICC — профиль в APP2 «ICC_PROFILE», разрезанный на parts сегментов; reverse — сегменты в обратном порядке
 // (склейка обязана идти по номеру, а не по порядку в файле).
 func jpegICC(profile []byte, parts int, reverse bool) [][]byte {

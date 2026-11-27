@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"image/jpeg"
+	"image/png"
 	"runtime"
 	"testing"
 )
@@ -125,6 +126,106 @@ func TestDecodeBytesMatchesDecoder(t *testing.T) {
 			}
 			// сверх оценки — только мелочь декодера (таблицы, буфер чтения): ≤ 64 КиБ
 			if g := float64(got); g < float64(est) || g > float64(est+64<<10) { // float64: точен до 2^53, без G115
+				t.Fatalf("оценка %d Б, декодер выделил %d Б", est, got)
+			}
+		})
+	}
+}
+
+// Перепроверка финального ревью media, W1: PNG 16 бит Adam7 на 40 Мп (файл в сотни КБ) держит итог и проход разом —
+// ≈ 12 Б/пикс., два таких вызова поднимали память до 1,84 ГиБ. PNG — в том же байтовом бюджете, что JPEG: отказ до
+// декодирования.
+// serial: TotalAlloc — счётчик процесса, параллельные тесты исказили бы рост.
+func TestPNGAdam7Bomb(t *testing.T) {
+	lim := Limits{MaxPixels: 40_000_000, Inputs: allInputs}
+	in := zeroPNG(t, 7744, 5164, 16, 6, true)
+	if len(in) > 1<<20 {
+		t.Fatalf("файл-бомба должен быть маленьким, %d байт", len(in))
+	}
+	var err error
+	grew := allocDuring(func() { _, _, err = Process(context.Background(), in, lim, threeVariants, nil) })
+	if !errors.Is(err, ErrTooManyPixels) {
+		t.Fatalf("ошибка = %v, ждали ErrTooManyPixels", err)
+	}
+	if grew >= 8<<20 {
+		t.Fatalf("за вызов выделено %d байт (≥ 8 МБ): декодер запущен до проверки бюджета", grew)
+	}
+}
+
+// Граница бюджета у PNG: 16 бит RGBA Adam7 64×64 — итог 64×64×8 + наибольший проход (7-й, 64×32) × 8 = 49152 Б;
+// MaxPixels 6144 даёт ровно 49152 — проходит, 6143 — отказ. Обычные PNG проходят на пределе пикселей.
+func TestPNGDecodeBudgetBoundary(t *testing.T) {
+	t.Parallel()
+	adam7 := zeroPNG(t, 64, 64, 16, 6, true)
+	for _, tc := range []struct {
+		name string
+		in   []byte
+		max  int64
+		ok   bool
+	}{
+		{"16 бит Adam7 ровно на бюджете", adam7, 6144, true},
+		{"16 бит Adam7 бюджет − 8 Б", adam7, 6143, false},
+		{"16 бит Adam7 на пределе пикселей (12 Б/пикс.)", adam7, 64 * 64, false},
+		{"16 бит RGBA на пределе пикселей (8 Б/пикс.)", zeroPNG(t, 1024, 1024, 16, 6, false), 1 << 20, true},
+		{"8 бит RGBA Adam7 на пределе пикселей (6 Б/пикс.)", zeroPNG(t, 1024, 1024, 8, 6, true), 1 << 20, true},
+		{"скриншот: 8 бит RGBA Go-кодировщика на пределе пикселей", encPNG(t, noisy(1024, 768)), 1024 * 768, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := Process(context.Background(), tc.in, Limits{MaxPixels: tc.max, Inputs: allInputs}, oneFull, nil)
+			if tc.ok && err != nil {
+				t.Fatalf("ошибка = %v, ждали успех", err)
+			}
+			if !tc.ok && !errors.Is(err, ErrTooManyPixels) {
+				t.Fatalf("ошибка = %v, ждали ErrTooManyPixels", err)
+			}
+		})
+	}
+}
+
+// Оценка бюджета PNG совпадает с выделениями image/png: тип картинки по типу цвета, глубине и tRNS (серый и RGB с
+// tRNS — NRGBA/NRGBA64), палитра — 1 Б/пикс. У Adam7 оценка — итог и наибольший проход (живут разом); декодер
+// выделяет ещё остальные проходы (мусор к моменту следующего), всего ≈ 2 итога — не больше оценки × 4/3.
+// serial: TotalAlloc — счётчик процесса, параллельные тесты исказили бы рост.
+func TestPNGDecodeBytesMatchesDecoder(t *testing.T) {
+	trns2, trns6 := pngChunk("tRNS", []byte{0, 0}), pngChunk("tRNS", make([]byte, 6))
+	for _, tc := range []struct {
+		name      string
+		in        []byte
+		interlace bool
+	}{
+		{"серый 1 бит", zeroPNG(t, 1000, 700, 1, 0, false), false},
+		{"серый 8 бит", zeroPNG(t, 1000, 700, 8, 0, false), false},
+		{"серый 8 бит с tRNS", zeroPNG(t, 1000, 700, 8, 0, false, trns2), false},
+		{"серый 16 бит", zeroPNG(t, 1000, 700, 16, 0, false), false},
+		{"серый 16 бит с tRNS", zeroPNG(t, 1000, 700, 16, 0, false, trns2), false},
+		{"палитра 8 бит с tRNS", zeroPNG(t, 1000, 700, 8, 3, false, pngChunk("tRNS", []byte{0})), false},
+		{"RGB 8 бит", zeroPNG(t, 1000, 700, 8, 2, false), false},
+		{"RGB 8 бит с tRNS", zeroPNG(t, 1000, 700, 8, 2, false, trns6), false},
+		{"серый с альфой 8 бит", zeroPNG(t, 1000, 700, 8, 4, false), false},
+		{"RGBA 8 бит", zeroPNG(t, 1000, 700, 8, 6, false), false},
+		{"RGB 16 бит", zeroPNG(t, 1000, 700, 16, 2, false), false},
+		{"RGBA 16 бит", zeroPNG(t, 1000, 700, 16, 6, false), false},
+		{"RGBA 16 бит Adam7", zeroPNG(t, 1000, 700, 16, 6, true), true},
+		{"серый 8 бит Adam7", zeroPNG(t, 1000, 700, 8, 0, true), true},
+		{"палитра 4 бита Adam7", zeroPNG(t, 1000, 700, 4, 3, true), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in, err := inspect(tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			est := decodeBytes(in)
+			var derr error
+			got := allocDuring(func() { _, derr = png.Decode(bytes.NewReader(tc.in)) })
+			if derr != nil {
+				t.Fatalf("декодер: %v", derr)
+			}
+			hi := est + 128<<10 // сверх оценки — zlib и буферы строк
+			if tc.interlace {
+				hi = est*4/3 + 128<<10
+			}
+			if g := float64(got); g < float64(est) || g > float64(hi) { // float64: точен до 2^53, без G115
 				t.Fatalf("оценка %d Б, декодер выделил %d Б", est, got)
 			}
 		})

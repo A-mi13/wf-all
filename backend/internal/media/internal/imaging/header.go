@@ -20,6 +20,13 @@ type info struct {
 	icc         []byte // профиль JPEG (склеенный APP2) или WebP (ICCP); только для распознавания P3
 	iccp        []byte // данные чанка iCCP PNG (сжаты, распаковываются с пределом в Process)
 	jpeg        jpegMarkers
+	png         pngIHDR
+}
+
+// pngIHDR — то, по чему image/png выбирает тип картинки: глубина, тип цвета, Adam7 (IHDR) и tRNS до IDAT.
+type pngIHDR struct {
+	depth, colorType byte
+	adam7, trns      bool
 }
 
 // jpegMarkers — то, по чему image/jpeg выделяет память и тратит время: первый кадр SOF0/1/2, число сканов, признаки
@@ -51,7 +58,7 @@ func inspect(b []byte) (info, error) {
 		in.orientation = exifOrientation(exif)
 		cfg, err = jpeg.DecodeConfig(r)
 	case KindPNG:
-		in.Animated, in.iccp = walkPNG(b)
+		in.Animated, in.iccp, in.png = walkPNG(b)
 		cfg, err = png.DecodeConfig(r)
 	case KindWebP:
 		in.Animated, in.icc = walkWebP(b)
@@ -153,15 +160,58 @@ func sofComps(p []byte) []jpegComp {
 	return cs
 }
 
-// decodeBytes — сколько байт выделит image/jpeg на этот файл (не JPEG — 0), по маркерам до декодирования: плоскости
+// decodeBytes — сколько байт декодер держит разом на этот файл, по заголовку до декодирования: JPEG — jpegBytes,
+// PNG — pngBytes; WebP — 0 (x/image/webp: YCbCr и альфа или NRGBA — не больше 4 Б/пикс.).
+func decodeBytes(in info) int64 {
+	switch in.Kind {
+	case KindJPEG:
+		return jpegBytes(in)
+	case KindPNG:
+		return pngBytes(in)
+	}
+	return 0
+}
+
+// adam7 — проходы чересстрочной развёртки (смещение x, y и шаг x, y), как interlacing в image/png.
+var adam7 = [7][4]int64{{0, 0, 8, 8}, {4, 0, 8, 8}, {0, 4, 4, 8}, {2, 0, 4, 4}, {0, 2, 2, 4}, {1, 0, 2, 2}, {0, 1, 1, 2}}
+
+// pngBytes — картинка image/png Go 1.27 (reader.go readImagePass): палитра и серый до 8 бит — 1 Б/пикс., серый с
+// tRNS, серый с альфой, RGB и RGBA 8 бит — 4 (NRGBA/RGBA), серый 16 бит — 2, с tRNS и прочие 16 бит — 8 (NRGBA64/
+// RGBA64). У Adam7 декодер держит итог и проход разом (проходы выделяются по одному): + наибольший проход. Буферы
+// строк и zlib — десятки КиБ, не считаются. Сверка с декодером — TestPNGDecodeBytesMatchesDecoder.
+func pngBytes(in info) int64 {
+	var bpp int64
+	switch p := in.png; {
+	case p.colorType == 3, p.colorType == 0 && p.depth <= 8 && !p.trns:
+		bpp = 1
+	case p.colorType == 0 && p.depth == 16 && !p.trns:
+		bpp = 2
+	case p.depth <= 8:
+		bpp = 4
+	default:
+		bpp = 8
+	}
+	w, h := int64(in.rawW), int64(in.rawH)
+	total := w * h * bpp
+	if in.png.adam7 {
+		var pass int64
+		for _, p := range adam7 {
+			pass = max(pass, (w-p[0]+p[2]-1)/p[2]*((h-p[1]+p[3]-1)/p[3]))
+		}
+		total += pass * bpp
+	}
+	return total
+}
+
+// jpegBytes — сколько байт выделит image/jpeg на этот файл, по маркерам до декодирования: плоскости
 // на сетке MCU (серый — 1 Б/пикс.; YCbCr — яркость и цветность по выборке, нестандартная выборка — цветность
 // полная), чёрный канал у 4 компонент, картинка на выходе у CMYK/YCCK и RGB (RGBA/CMYK, 4 Б/пикс.), у прогрессивного —
 // коэффициенты всех компонент (блок 8×8 — 64 × int32 = 256 Б), которые живут до конца декодирования. Формулы —
 // image/jpeg Go 1.27 (scan.go makeImg, processSOS; reader.go applyBlack, convertToRGB); сверка с декодером —
 // TestDecodeBytesMatchesDecoder. Кадр уже проверен DecodeConfig (факторы 1, 2, 4; делят максимум).
-func decodeBytes(in info) int64 {
+func jpegBytes(in info) int64 {
 	cs := in.jpeg.comps
-	if in.Kind != KindJPEG || len(cs) == 0 {
+	if len(cs) == 0 {
 		return 0
 	}
 	w, h := int64(in.rawW), int64(in.rawH)
@@ -222,8 +272,10 @@ func joinICC(parts [][]byte) []byte {
 	return bytes.Join(ordered, nil)
 }
 
-// walkPNG — чанки до IDAT: acTL до IDAT — APNG (после IDAT браузеры его не видят), первый iCCP.
-func walkPNG(b []byte) (animated bool, iccp []byte) {
+// walkPNG — чанки до IDAT: acTL до IDAT — APNG (после IDAT браузеры его не видят), первый iCCP, первый IHDR (второй
+// декодер отвергает) и tRNS (декодер принимает его только до IDAT; битый отвергает).
+func walkPNG(b []byte) (animated bool, iccp []byte, hdr pngIHDR) {
+	seenIHDR := false
 	for i := len(sigPNG); i+8 <= len(b); {
 		n := int(binary.BigEndian.Uint32(b[i:]))
 		if n > len(b)-i-8 {
@@ -232,7 +284,14 @@ func walkPNG(b []byte) (animated bool, iccp []byte) {
 		data := b[i+8 : i+8+n]
 		switch string(b[i+4 : i+8]) {
 		case "IDAT":
-			return animated, iccp
+			return animated, iccp, hdr
+		case "IHDR":
+			if !seenIHDR && n == 13 {
+				seenIHDR = true
+				hdr.depth, hdr.colorType, hdr.adam7 = data[8], data[9], data[12] == 1
+			}
+		case "tRNS":
+			hdr.trns = true
 		case "acTL":
 			animated = true
 		case "iCCP":
@@ -242,7 +301,7 @@ func walkPNG(b []byte) (animated bool, iccp []byte) {
 		}
 		i += 12 + n
 	}
-	return animated, iccp
+	return animated, iccp, hdr
 }
 
 // walkWebP — чанки RIFF: флаг анимации в VP8X (x/image/webp анимацию не декодирует и не сообщает о ней) и ICCP.

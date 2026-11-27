@@ -143,23 +143,30 @@ func mustPrimaries(p []byte) [3][3]float64 {
 	return prim
 }
 
-// inflateICCP — профиль из чанка iCCP: имя (1–79 байт), NUL, метод сжатия 0, zlib. Распаковка — не больше
-// maxICC; больше или битые данные — ErrCorrupt.
+// inflateICCP — профиль из чанка iCCP: имя (1–79 байт), NUL, метод сжатия 0, zlib. Распаковка — не больше maxICC;
+// больше — ErrCorrupt (zip-бомба). Битый заголовок или zlib — профиля нет (nil без ошибки), как у битого профиля
+// JPEG/WebP: image/png iCCP не читает, браузеры такие PNG показывают без профиля (ревью Task 7, m1).
 func inflateICCP(d []byte) ([]byte, error) {
 	z := bytes.IndexByte(d, 0)
 	if z < 1 || z > 79 || z+2 > len(d) || d[z+1] != 0 {
-		return nil, fmt.Errorf("%w: заголовок iCCP", ErrCorrupt)
+		return nil, nil
 	}
-	zr, err := zlib.NewReader(bytes.NewReader(d[z+2:]))
-	if err != nil {
-		return nil, fmt.Errorf("%w: iCCP: %w", ErrCorrupt, err)
-	}
-	p, err := io.ReadAll(io.LimitReader(zr, maxICC+1))
-	if err != nil {
-		return nil, fmt.Errorf("%w: iCCP: %w", ErrCorrupt, err)
+	p, ok := inflateLimited(d[z+2:])
+	if !ok {
+		return nil, nil
 	}
 	if len(p) > maxICC {
 		return nil, fmt.Errorf("%w: iCCP больше %d байт", ErrCorrupt, maxICC)
 	}
 	return p, nil
+}
+
+// inflateLimited — zlib не больше maxICC+1 байт; битые или обрезанные данные, неверная контрольная сумма — ok=false.
+func inflateLimited(z []byte) (p []byte, ok bool) {
+	zr, err := zlib.NewReader(bytes.NewReader(z))
+	if err != nil {
+		return nil, false
+	}
+	p, err = io.ReadAll(io.LimitReader(zr, maxICC+1))
+	return p, err == nil
 }

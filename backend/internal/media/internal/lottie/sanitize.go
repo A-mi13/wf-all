@@ -22,15 +22,20 @@ import (
 
 // Limits — пределы анимации (спека §3.6). Все границы включительно: отказ — строго больше предела.
 type Limits struct {
-	MaxBytes       int     // размер JSON
-	MaxDepth       int     // вложенность объектов и массивов, корень — 1
-	MaxSeconds     float64 // (op − ip) / fr
-	MaxImageBytes  int     // вшитая картинка после base64
-	MaxImagePixels int64   // ширина × высота вшитой картинки по заголовку
+	MaxBytes            int     // размер JSON
+	MaxDepth            int     // вложенность объектов и массивов, корень — 1
+	MaxSeconds          float64 // (op − ip) / fr
+	MaxImageBytes       int     // вшитая картинка после base64
+	MaxImagePixels      int64   // ширина × высота вшитой картинки по заголовку
+	MaxTotalImagePixels int64   // сумма ширина × высота всех вшитых картинок
+	MaxExpandedBytes    int64   // слои прекомпозиций, развёрнутые по refId от корня (байты выхода)
 }
 
-// DefaultLimits — пределы спеки §3.6.
-var DefaultLimits = Limits{MaxBytes: 1 << 20, MaxDepth: 64, MaxSeconds: 10, MaxImageBytes: 256 << 10, MaxImagePixels: 4_000_000}
+// DefaultLimits — пределы спеки §3.6; сумма пикселей картинок (4 картинки предела) и развёрнутые прекомпозиции
+// (4 документа предела) — доработка media (ревью Task 8, финальное D): одна картинка и одна копия слоёв ограничены и
+// раньше, а плеер загружает все картинки и копирует слои на каждое использование.
+var DefaultLimits = Limits{MaxBytes: 1 << 20, MaxDepth: 64, MaxSeconds: 10, MaxImageBytes: 256 << 10, MaxImagePixels: 4_000_000,
+	MaxTotalImagePixels: 16_000_000, MaxExpandedBytes: 4 << 20}
 
 // ImageFunc — перекодирование вшитого растра (png, jpeg или webp по заголовку) в WebP без метаданных
 // (Task 9 подставляет imaging.Process).
@@ -45,7 +50,8 @@ var (
 )
 
 // Sanitize разбирает in по схеме-разрешению и возвращает компактный JSON. Порядок: размер → разбор с подсчётом
-// глубины → обход по таблице (все отказы) → перекодирование картинок (дорогое — только для прошедшего обход).
+// глубины → обход по таблице (все отказы) → граф прекомпозиций (checkPrecomps) → перекодирование картинок (дорогое —
+// только для прошедшего проверки).
 // Ошибка img возвращается обёрнутой (%w): её код решает вызывающий; отмена ctx — ctx.Err().
 func Sanitize(ctx context.Context, in []byte, lim Limits, img ImageFunc) ([]byte, error) {
 	if len(in) > lim.MaxBytes {
@@ -58,6 +64,9 @@ func Sanitize(ctx context.Context, in []byte, lim Limits, img ImageFunc) ([]byte
 	s := &sanitizer{lim: lim}
 	out, err := s.animation(root)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkPrecomps(out, lim.MaxExpandedBytes); err != nil {
 		return nil, err
 	}
 	for i, im := range s.images {
@@ -212,6 +221,7 @@ type pendingImage struct {
 type sanitizer struct {
 	lim    Limits
 	images []*pendingImage
+	pixels int64 // сумма пикселей вшитых картинок
 }
 
 func corruptAt(path, what string) error { return fmt.Errorf("%w: %s: %s", ErrCorrupt, path, what) }
@@ -255,10 +265,14 @@ func (s *sanitizer) animation(root *jvalue) (*jvalue, error) {
 	if d := (op - ip) / fr; d > s.lim.MaxSeconds || math.IsNaN(d) {
 		return nil, unsafeAt("op", fmt.Sprintf("длительность больше %g с", s.lim.MaxSeconds))
 	}
-	for _, k := range []string{"w", "h", "layers"} {
-		if v, ok := root.get(k); !ok || v.k == jNull {
-			return nil, corruptAt(k, "обязательное поле")
+	// размеры читает и воркер (float64): литерал вне диапазона — corrupt здесь, а не повторы задачи (ревью D, m1)
+	for _, k := range []string{"w", "h"} {
+		if _, err := number(root, k); err != nil {
+			return nil, err
 		}
+	}
+	if v, ok := root.get("layers"); !ok || v.k == jNull {
+		return nil, corruptAt("layers", "обязательное поле")
 	}
 	return s.object(animationFields, root, "")
 }
@@ -401,7 +415,10 @@ func (s *sanitizer) node(kind nodeKind, v *jvalue, path string) (*jvalue, error)
 		}
 		return s.object(tbl, v, path)
 	case nAsset:
-		if _, ok := v.get("layers"); ok {
+		if l, ok := v.get("layers"); ok {
+			if l.k == jNull { // lottie-web считает ассет прекомпозицией и падает на layers.__used
+				return nil, corruptAt(path+".layers", "прекомпозиция без слоёв")
+			}
 			return s.object(precompAssetFields, v, path)
 		}
 		return s.imageAsset(v, path)
@@ -475,6 +492,13 @@ func (s *sanitizer) layer(v *jvalue, path string) (*jvalue, error) {
 	if err != nil {
 		return nil, err
 	}
+	// обязательные поля видимого слоя LAC (ревью Task 8, m2): без ip/op lottie-web не рисует слой (NaN в
+	// checkLayerLimits), без ks — нет трансформа
+	for _, k := range []string{"ip", "op", "ks"} {
+		if _, ok := out.get(k); !ok {
+			return nil, corruptAt(path+"."+k, "обязательное поле слоя")
+		}
+	}
 	// совместимость с плеерами (allow.go, layerPlayerCompat): st обязателен, hasMask — по выходу, не по входу
 	if _, ok := out.get("st"); !ok {
 		out.add("st", &jvalue{k: jNum, s: "0"})
@@ -520,6 +544,10 @@ func (s *sanitizer) imageAsset(v *jvalue, path string) (*jvalue, error) {
 	}
 	if int64(w)*int64(h) > s.lim.MaxImagePixels {
 		return nil, unsafeAt(path+".p", fmt.Sprintf("картинка больше %d пикселей", s.lim.MaxImagePixels))
+	}
+	// все картинки ассетов перекодирует воркер и загружает плеер (lottie-web — и неиспользуемые)
+	if s.pixels += int64(w) * int64(h); s.pixels > s.lim.MaxTotalImagePixels {
+		return nil, unsafeAt(path+".p", fmt.Sprintf("картинок больше %d пикселей в сумме", s.lim.MaxTotalImagePixels))
 	}
 	out, err := s.object(imageAssetFields, v, path)
 	if err != nil {

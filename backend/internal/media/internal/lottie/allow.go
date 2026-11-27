@@ -57,6 +57,8 @@ const (
 	nKfVector                         // properties/vector-keyframe (и color-, gradient-keyframe: s — числа)
 	nKfPosition                       // properties/position-keyframe
 	nKfBezier                         // properties/bezier-keyframe
+
+	nKindEnd // граница: новый тип — перед ней (TestEveryNodeKindHandled обходит все до неё)
 )
 
 type field struct {
@@ -112,9 +114,10 @@ var markerFields = fields{"cm": str, "tm": num, "dr": num}
 // createContainerElements, DataManager.js completeLayers). Только числа, ни ссылок, ни выражений.
 //   - `st` — время начала слоя: без него время слоя — NaN и слой не рисуется; нет на входе — пишется 0 (sanitize.go);
 //   - `td` — слой — источник track matte (уходит в <defs>); без него мат рисуется видимым, слой под матом пропадает;
+//     int-boolean или boolean: lottie-web проверяет истинность (`if (this.data.td)`);
 //   - `hasMask` — не из входа: выставляется true, если в выходе непустой masksProperties (sanitize.go); без него
 //     касательные контура маски не переводятся в абсолютные.
-var layerPlayerCompat = fields{"st": num, "td": num}
+var layerPlayerCompat = fields{"st": num, "td": bln}
 
 // Слои: layers/layer + layers/visual-layer + поля совместимости + поля типа.
 var (

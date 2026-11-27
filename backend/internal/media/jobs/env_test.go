@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -161,6 +162,31 @@ type env struct {
 type envOpt struct {
 	extra []media.Purpose
 	check media.ContentCheck
+	log   *recLog // nil — журнал в никуда
+}
+
+// recLog — журнал исполнителей, запоминающий «УРОВЕНЬ сообщение».
+type recLog struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (r *recLog) Enabled(context.Context, slog.Level) bool { return true }
+
+func (r *recLog) Handle(_ context.Context, rec slog.Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.msgs = append(r.msgs, rec.Level.String()+" "+rec.Message)
+	return nil
+}
+
+func (r *recLog) WithAttrs([]slog.Attr) slog.Handler { return r }
+func (r *recLog) WithGroup(string) slog.Handler      { return r }
+
+func (r *recLog) got() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.msgs)
 }
 
 // newEnv — исполнители под ролью worker на памяти с перехватами бакетов.
@@ -184,7 +210,11 @@ func newEnv(t *testing.T, o envOpt) *env {
 	if check == nil {
 		check = media.CheckOff
 	}
-	e.deps = jobs.WorkerDeps{Pool: pools.As, Clock: clk, Registry: reg, Blob: opened, Check: check, Log: mediatest.Discard()}
+	log := mediatest.Discard()
+	if o.log != nil {
+		log = slog.New(o.log)
+	}
+	e.deps = jobs.WorkerDeps{Pool: pools.As, Clock: clk, Registry: reg, Blob: opened, Check: check, Log: log}
 	if e.pw, err = jobs.NewProcessWorker(e.deps); err != nil {
 		t.Fatal(err)
 	}

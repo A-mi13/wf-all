@@ -126,6 +126,39 @@ func TestICCNotCopied(t *testing.T) {
 	}
 }
 
+// Ревью Task 7, m1: битый iCCP (заголовок, метод сжатия, zlib) — профиль считается отсутствующим, как битый профиль
+// JPEG/WebP и битое описание (браузеры такие PNG показывают, профиль в выход не идёт). Отказ — только профиль больше
+// 1 МиБ (zip-бомба, TestCorrupt).
+func TestBrokenICCPIgnored(t *testing.T) {
+	t.Parallel()
+	p := encPNG(t, noisy(48, 32))
+	z := zlibBytes(t, buildICC(iccOpts{desc: "Display P3", prim: appleP3}))
+	badSum := append([]byte{}, z...)
+	badSum[len(badSum)-1] ^= 0xFF
+	iccp := func(head string, data []byte) []byte { return pngChunk("iCCP", append([]byte(head), data...)) }
+	for name, chunk := range map[string][]byte{
+		"не zlib":                iccp("x\x00\x00", []byte("garbage")),
+		"имя пустое":             iccp("\x00\x00", z),
+		"имя 80 байт":            iccp(strings.Repeat("a", 80)+"\x00\x00", z),
+		"без NUL после имени":    iccp("ICC Profile", nil),
+		"метод сжатия 1":         iccp("ICC Profile\x00\x01", z),
+		"zlib обрезан":           iccp("ICC Profile\x00\x00", z[:len(z)/2]),
+		"контрольная сумма zlib": iccp("ICC Profile\x00\x00", badSum),
+		"нет байта метода":       iccp("ICC Profile\x00", nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			outs, _, err := Process(context.Background(), withPNGChunks(p, chunk), Limits{MaxPixels: 1 << 20, Inputs: allInputs}, oneFull, nil)
+			if err != nil {
+				t.Fatalf("ошибка = %v, ждали успех без профиля", err)
+			}
+			if icc := chunkData(riffChunks(t, outs[0].Data), "ICCP"); icc != nil {
+				t.Fatalf("в варианте профиль %d байт, ждали без профиля", len(icc))
+			}
+		})
+	}
+}
+
 // Финальное ревью media, D-C1: разбор desc (mluc) ограничен — записей ≤ 64, запись ≤ 512 Б, всего ≤ 4 КиБ; больше —
 // описание не читается и профиль не P3 (как любой битый профиль: варианты без профиля, картинка не отклоняется).
 func TestICCDescLimits(t *testing.T) {

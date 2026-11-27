@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"wf/backend/internal/media"
@@ -143,6 +144,8 @@ func TestProcessRejectCodes(t *testing.T) {
 		{"content_rejected", mediatest.PurposeImage, encPNG(t, mediatest.MarkerSide, mediatest.MarkerSide), media.RejectContentRejected},
 		{"unsafe_animation", purposeAnim, []byte(`{"v":"5.7.4","fr":30,"ip":0,"op":60,"w":100,"h":100,"layers":[{"ty":4,"ip":0,"op":60,"ks":{"o":{"a":0,"k":100,"x":"var $bm_rt = time;"}},"shapes":[]}]}`), media.RejectUnsafeAnimation},
 		{"corrupt_lottie", purposeAnim, []byte(`{"v":`), media.RejectCorrupt},
+		// финальное ревью D, m1: размер, который не читается float64, — corrupt, а не 10 повторов и processing_failed
+		{"corrupt_lottie_size", purposeAnim, []byte(`{"v":"5.7.4","fr":30,"ip":0,"op":60,"w":1e400,"h":100,"layers":[]}`), media.RejectCorrupt},
 		{"too_large", purposeTiny, bytes.Repeat([]byte{1}, 4097), media.RejectTooLarge},
 	}
 	for _, c := range cases {
@@ -470,7 +473,8 @@ func TestLastAttemptOnEndedPurgesVariants(t *testing.T) {
 // попытки задачи (MaxAttempts = 10). После media.purge в pub нет ни одного <id>/, Purger получил оба адреса.
 func endedDuringWrite(t *testing.T, attempt int) {
 	t.Helper()
-	e := newEnv(t, envOpt{})
+	rl := &recLog{}
+	e := newEnv(t, envOpt{log: rl})
 	ctx := context.Background()
 	x := newIntx(t, e)
 	oid := e.seed(t, mediatest.PurposeImage, media.StateUploaded, encPNG(t, 640, 480))
@@ -517,7 +521,17 @@ func endedDuringWrite(t *testing.T, attempt int) {
 	if !slices.Equal(slices.Compact(urls), want) {
 		t.Fatalf("Purger: %v, ждали %v", urls, want)
 	}
+	// ревью Task 10, m3: снятый на последней попытке объект не отклоняется — журнал не пишет «объект отклонён»
+	if attempt == 10 && (!slices.Contains(rl.got(), "WARN "+lastAttemptEnded) || slices.Contains(rl.got(), "WARN "+lastAttemptRejected)) {
+		t.Fatalf("журнал: %q", rl.got())
+	}
 }
+
+// Сообщения журнала последней попытки (process.go fail).
+const (
+	lastAttemptRejected = "media: обработка не удалась, объект отклонён"
+	lastAttemptEnded    = "media: обработка не удалась на последней попытке, объект уже не в обработке — не отклонялся"
+)
 
 // R2-I1: второй исполнитель на ready ничего не пишет и не удаляет. При захвате — хранилище не трогается вовсе; при
 // публикации (другой опубликовал, пока этот писал те же ключи) — ни media.purge, ни второй вставки вариантов.
@@ -648,7 +662,8 @@ var errBlink = errors.New("хранилище моргнуло")
 // River — rejected(processing_failed).
 func TestStoreErrorsDoNotCountAsCrash(t *testing.T) {
 	t.Parallel()
-	e := newEnv(t, envOpt{})
+	rl := &recLog{}
+	e := newEnv(t, envOpt{log: rl})
 	ctx := context.Background()
 	oid := e.seed(t, mediatest.PurposeImage, media.StateUploaded, encPNG(t, 64, 64))
 	e.in.get = func(context.Context, string) (io.ReadCloser, blob.Info, error) { return nil, blob.Info{}, errBlink }
@@ -676,6 +691,9 @@ func TestStoreErrorsDoNotCountAsCrash(t *testing.T) {
 	if len(e.purgeJobs(t, oid)) == 0 {
 		t.Fatal("нет media.purge")
 	}
+	if !slices.Contains(rl.got(), "WARN "+lastAttemptRejected) {
+		t.Fatalf("журнал: %q", rl.got())
+	}
 }
 
 // cancelCheck — проверка содержимого, отменяющая ctx задачи (остановка воркера посреди обработки).
@@ -702,6 +720,42 @@ func TestRollbackUsesWithoutCancel(t *testing.T) {
 	}
 	if got := keys(t, e.mem.Pub, oid); len(got) != 0 {
 		t.Fatalf("после отмены записаны: %v", got)
+	}
+}
+
+// Финальное ревью A, n1: media.purge и media.process — одна очередь media, а снятый файл должен уйти сразу (§3.8), а не
+// после волны загрузок. River выбирает по priority (1 — первым), scheduled_at, id: purge, вставленная последней, выходит
+// первой. Выборка — тем же запросом драйвера, что у производителя очереди.
+func TestPurgeBeforeProcess(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, envOpt{})
+	ctx := context.Background()
+	drv := riverpgxv5.New(e.pools.As)
+	c, err := river.NewClient(drv, queue.InsertConfig(mediatest.Discard()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	popts, gopts := jobs.ProcessInsertOpts(), jobs.PurgeInsertOpts()
+	for range 3 {
+		if _, err := c.Insert(ctx, jobs.ProcessArgs{V: 1, ObjectID: uuid.Must(uuid.NewV7())}, &popts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.Insert(ctx, jobs.PurgeArgs{V: 1, Bucket: jobs.BucketIn, Keys: []string{uuid.Must(uuid.NewV7()).String()}}, &gopts); err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for range 4 {
+		res, err := drv.GetExecutor().JobGetAvailable(ctx, &riverdriver.JobGetAvailableParams{
+			ClientID: "test", MaxAttemptedBy: 10, MaxToLock: 1, Queue: queue.Media,
+		})
+		if err != nil || len(res.Jobs) != 1 {
+			t.Fatalf("выборка: %v %+v", err, res)
+		}
+		kinds = append(kinds, res.Jobs[0].Kind)
+	}
+	if want := []string{"media.purge", "media.process", "media.process", "media.process"}; !slices.Equal(kinds, want) {
+		t.Fatalf("порядок выборки %v, ждали %v", kinds, want)
 	}
 }
 

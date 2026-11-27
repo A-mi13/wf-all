@@ -218,21 +218,20 @@ func TestPixelBomb(t *testing.T) {
 }
 
 // Полоса 1×L проходит MaxPixels, но ресайз x/image/draw тратит память пропорционально длинной стороне (веса и
-// буфер): длинная сторона ограничена отдельно, по заголовку.
+// буфер): длинная сторона ограничена отдельно, по заголовку. Порог памяти решающий (ревью Task 7, r1-m1): одно
+// декодирование полосы 1×5 000 000 серого — 5 МБ (≈ 4,8 МиБ), больше порога 4 МиБ, то есть проверка стороны после
+// декодирования покраснела бы и при той же ошибке.
 // serial: TotalAlloc — счётчик процесса, параллельные тесты исказили бы рост.
 func TestStripBomb(t *testing.T) {
 	lim := Limits{MaxPixels: 40_000_000, Inputs: allInputs}
-	in := encPNG(t, image.NewGray(image.Rect(0, 0, 1, 70_000)))
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	_, _, err := Process(context.Background(), in, lim, threeVariants, nil)
-	runtime.ReadMemStats(&after)
+	in := zeroPNG(t, 1, 5_000_000, 8, 0, false)
+	var err error
+	grew := allocDuring(func() { _, _, err = Process(context.Background(), in, lim, threeVariants, nil) })
 	if !errors.Is(err, ErrTooManyPixels) {
 		t.Fatalf("ошибка = %v, ждали ErrTooManyPixels", err)
 	}
-	if grew := after.TotalAlloc - before.TotalAlloc; grew >= 8<<20 {
-		t.Fatalf("за вызов выделено %d байт (≥ 8 МБ)", grew)
+	if grew >= 4<<20 {
+		t.Fatalf("за вызов выделено %d байт (≥ 4 МиБ): полоса декодирована до проверки стороны", grew)
 	}
 	t.Run("ровно 65535 — проходит", func(t *testing.T) {
 		in := encPNG(t, image.NewGray(image.Rect(0, 0, 1, 65_535)))
@@ -288,7 +287,6 @@ func TestCorrupt(t *testing.T) {
 		"обрезанный JPEG":              j[:len(j)*6/10],
 		"обрезанный PNG":               p[:len(p)*6/10],
 		"PNG с iCCP больше 1 МиБ":      withPNGChunks(encPNG(t, gradient(8, 8)), bomb),
-		"PNG с iCCP — не zlib":         withPNGChunks(encPNG(t, gradient(8, 8)), pngChunk("iCCP", []byte("x\x00\x00garbage"))),
 		"WebP с обрезанным VP8":        encWebP(t, noisy(64, 64), webp.DefaultOptions())[:200],
 		"JPEG: длина сегмента за файл": append([]byte{0xFF, 0xD8, 0xFF, 0xE1, 0xFF, 0xF0}, make([]byte, 16)...),
 	} {
