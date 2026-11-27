@@ -12,42 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const allKeys = `-- name: AllKeys :many
-SELECT k::text AS key
-  FROM (SELECT id::text AS k FROM media_objects
-        UNION ALL
-        SELECT blob_key FROM media_variants) s
- WHERE k > $1::text
- ORDER BY k
- LIMIT $2
-`
-
-type AllKeysParams struct {
-	After string
-	Lim   int32
-}
-
-// сверка хранилища: известные ключи (входящее — <id>, варианты — blob_key) по порядку, страницами после after
-func (q *Queries) AllKeys(ctx context.Context, arg AllKeysParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, allKeys, arg.After, arg.Lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		items = append(items, key)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const clearUploadedByUser = `-- name: ClearUploadedByUser :execrows
 UPDATE media_objects SET uploaded_by_user = NULL WHERE uploaded_by_user = $1::uuid
 `
@@ -117,7 +81,7 @@ func (q *Queries) DeletePendingByUser(ctx context.Context, uploadedByUser uuid.U
 }
 
 const endedBefore = `-- name: EndedBefore :many
-SELECT id
+SELECT id, purpose, visibility
   FROM media_objects
  WHERE state = $1 AND ended_at < $2
  ORDER BY ended_at
@@ -131,21 +95,27 @@ type EndedBeforeParams struct {
 	Lim    int32
 }
 
+type EndedBeforeRow struct {
+	ID         uuid.UUID
+	Purpose    string
+	Visibility string
+}
+
 // конечные строки старше срока своего состояния (detached/taken_down — 24 ч, rejected — 30 сут: вызывающий
-// передаёт состояние и границу)
-func (q *Queries) EndedBefore(ctx context.Context, arg EndedBeforeParams) ([]uuid.UUID, error) {
+// передаёт состояние и границу); цель и видимость — ключи вариантов и бакет для удаления файлов
+func (q *Queries) EndedBefore(ctx context.Context, arg EndedBeforeParams) ([]EndedBeforeRow, error) {
 	rows, err := q.db.Query(ctx, endedBefore, arg.State, arg.Before, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []EndedBeforeRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i EndedBeforeRow
+		if err := rows.Scan(&i.ID, &i.Purpose, &i.Visibility); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -155,38 +125,87 @@ func (q *Queries) EndedBefore(ctx context.Context, arg EndedBeforeParams) ([]uui
 
 const expiredPending = `-- name: ExpiredPending :many
 
-SELECT o.id
+SELECT o.id, o.created_at
   FROM media_objects o
   JOIN media_uploads u ON u.object_id = o.id
- WHERE o.state = 'pending_upload' AND u.expires_at < $1
- ORDER BY u.expires_at
- LIMIT $2
+ WHERE o.state = 'pending_upload' AND u.expires_at < $1 AND o.id > $2::uuid
+ ORDER BY o.id
+ LIMIT $3
    FOR UPDATE OF o SKIP LOCKED
 `
 
 type ExpiredPendingParams struct {
 	Before time.Time
+	After  uuid.UUID
 	Lim    int32
+}
+
+type ExpiredPendingRow struct {
+	ID        uuid.UUID
+	CreatedAt time.Time
 }
 
 // Чистка и удаление аккаунта (спека media §3.9, §3.10): пачками SKIP LOCKED — чистка уступает сценарию; граница
 // строгая.
 // pending_upload, окно «завершить» прошло: вызывающий передаёт before = now − 1 ч (окно expires_at + 1 ч, §3.1 п. 5).
-// Замок + JOIN: SKIP LOCKED не ждёт, а строку, прикреплённую после снимка, перепроверка READ COMMITTED отсекает по
-// o.state (билет прикрепление удаляет в той же tx)
-func (q *Queries) ExpiredPending(ctx context.Context, arg ExpiredPendingParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, expiredPending, arg.Before, arg.Lim)
+// Страницами по id после after: строку моложе суток чистка оставляет (квота байт считается по строкам) — без курсора
+// она занимала бы пачку на каждом проходе. Замок + JOIN: SKIP LOCKED не ждёт, а строку, прикреплённую после снимка,
+// перепроверка READ COMMITTED отсекает по o.state (билет прикрепление удаляет в той же tx)
+func (q *Queries) ExpiredPending(ctx context.Context, arg ExpiredPendingParams) ([]ExpiredPendingRow, error) {
+	rows, err := q.db.Query(ctx, expiredPending, arg.Before, arg.After, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []ExpiredPendingRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ExpiredPendingRow
+		if err := rows.Scan(&i.ID, &i.CreatedAt); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readyVariantKeys = `-- name: ReadyVariantKeys :many
+SELECT v.object_id, o.visibility, v.blob_key
+  FROM media_variants v
+  JOIN media_objects o ON o.id = v.object_id
+ WHERE o.state = 'ready' AND v.blob_key > $1::text
+ ORDER BY v.blob_key
+ LIMIT $2
+`
+
+type ReadyVariantKeysParams struct {
+	After string
+	Lim   int32
+}
+
+type ReadyVariantKeysRow struct {
+	ObjectID   uuid.UUID
+	Visibility string
+	BlobKey    string
+}
+
+// сверка хранилища (worker media reconcile): ключи вариантов опубликованных объектов и видимость (бакет) по порядку
+// ключа, страницами после after; варианты одного объекта идут подряд (ключ начинается с id)
+func (q *Queries) ReadyVariantKeys(ctx context.Context, arg ReadyVariantKeysParams) ([]ReadyVariantKeysRow, error) {
+	rows, err := q.db.Query(ctx, readyVariantKeys, arg.After, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReadyVariantKeysRow
+	for rows.Next() {
+		var i ReadyVariantKeysRow
+		if err := rows.Scan(&i.ObjectID, &i.Visibility, &i.BlobKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -197,20 +216,21 @@ func (q *Queries) ExpiredPending(ctx context.Context, arg ExpiredPendingParams) 
 const staleProcessing = `-- name: StaleProcessing :many
 SELECT id
   FROM media_objects
- WHERE state IN ('uploaded', 'processing') AND uploaded_at < $1
- ORDER BY uploaded_at
- LIMIT $2
+ WHERE state IN ('uploaded', 'processing') AND uploaded_at < $1 AND id > $2::uuid
+ ORDER BY id
+ LIMIT $3
 `
 
 type StaleProcessingParams struct {
 	Before *time.Time
+	After  uuid.UUID
 	Lim    int32
 }
 
 // зависшие uploaded/processing (uploaded_at < before = now − 1 ч): media.process вставляется заново (UniqueOpts —
-// дубля нет), замок не нужен
+// дубля нет), замок не нужен; страницами по id после after (состояние вставка не меняет)
 func (q *Queries) StaleProcessing(ctx context.Context, arg StaleProcessingParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, staleProcessing, arg.Before, arg.Lim)
+	rows, err := q.db.Query(ctx, staleProcessing, arg.Before, arg.After, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

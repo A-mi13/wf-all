@@ -12,6 +12,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"wf/backend/cmd/internal/mediapurposes"
 	geojobs "wf/backend/internal/geo/jobs"
 	"wf/backend/internal/identity"
 	identityjobs "wf/backend/internal/identity/jobs"
@@ -47,17 +48,17 @@ func names(lists ...[]queue.Kind) []string {
 // настоящих исполнителей; исполняющий клиент знает и виды admin-api (заглушки) — объединение обоих списков.
 func TestWorkerKinds(t *testing.T) {
 	t.Parallel()
-	reg, err := Subscriptions()
-	if err != nil {
-		t.Fatal(err)
-	}
 	log := slog.New(slog.DiscardHandler)
-	idd := lazyIdentityDeps(t)
-	own, err := realWorkers(nil, reg, geojobs.Config{}, log, nil, idd)
+	reg, err := Subscriptions(log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mediaUntilAssembled(own)
+	idd := lazyIdentityDeps(t)
+	md := lazyMediaDeps(t, idd)
+	own, err := realWorkers(nil, reg, geojobs.Config{}, log, nil, idd, md)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := rivertest.Kinds(own), names(queue.WorkerKinds()); !slices.Equal(got, want) {
 		t.Fatalf("исполнители воркера %v, queue.WorkerKinds %v", got, want)
 	}
@@ -75,6 +76,7 @@ func TestWorkerKinds(t *testing.T) {
 		"identity.mfa_reset_execute": (&identityjobs.MfaResetWorker{}).Timeout(nil),
 		"media.process":              (&mediajobs.ProcessWorker{}).Timeout(nil),
 		"media.purge":                (&mediajobs.PurgeWorker{}).Timeout(nil),
+		"media.cleanup":              (&mediajobs.CleanupWorker{}).Timeout(nil),
 	}
 	for _, k := range queue.WorkerKinds() {
 		d, ok := timeouts[k.Name]
@@ -82,11 +84,10 @@ func TestWorkerKinds(t *testing.T) {
 			t.Errorf("%s: срок в queue.WorkerKinds %s, у исполнителя %s (есть в таблице теста: %v)", k.Name, k.Timeout, d, ok)
 		}
 	}
-	all, err := allWorkers(nil, reg, geojobs.Config{}, log, nil, idd)
+	all, err := allWorkers(nil, reg, geojobs.Config{}, log, nil, idd, md)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mediaUntilAssembled(all)
 	if got, want := rivertest.Kinds(all), names(queue.WorkerKinds(), queue.AdminKinds()); !slices.Equal(got, want) {
 		t.Fatalf("исполняющий клиент воркера знает %v, ждали %v", got, want)
 	}
@@ -113,7 +114,7 @@ func TestWorkerKindsQueues(t *testing.T) {
 		humancheck.CleanupArgs{}, idempotency.CleanupArgs{}, geojobs.ImportArgs{}, mail.SendArgs{},
 		identityjobs.MaintenanceArgs{}, identityjobs.AnonymizeArgs{}, identityjobs.MfaResetExecuteArgs{},
 		withOpts{mediajobs.ProcessArgs{}, mediajobs.ProcessInsertOpts()},
-		withOpts{mediajobs.PurgeArgs{}, mediajobs.PurgeInsertOpts()})
+		withOpts{mediajobs.PurgeArgs{}, mediajobs.PurgeInsertOpts()}, mediajobs.CleanupArgs{})
 	c := defaultWorker(t)
 	if !c.GeoImportEnabled {
 		t.Fatal("по умолчанию импорт выключен")
@@ -171,14 +172,6 @@ type withOpts struct {
 
 func (a withOpts) InsertOpts() river.InsertOpts { return a.opts }
 
-// mediaUntilAssembled — исполнители media в реестре до сборки воркера: их зависимости (хранилище WORKER_BLOB_*,
-// реестр целей) подключает Task 10 плана media в realWorkers — тогда эта функция удаляется. Пока виды media есть в
-// queue.WorkerKinds (заглушки admin-api), а исполнителей у воркера ещё нет.
-func mediaUntilAssembled(w *river.Workers) {
-	river.AddWorker(w, &mediajobs.ProcessWorker{})
-	river.AddWorker(w, &mediajobs.PurgeWorker{})
-}
-
 // queuesOf — очередь каждого вида по аргументам: вид — args.Kind().
 func queuesOf(args ...argsWithQueue) map[string]string {
 	out := make(map[string]string, len(args))
@@ -199,7 +192,7 @@ func TestWorkerRiverMaintenance(t *testing.T) {
 		t.Fatalf("настройки River воркера мимо queue.MaintenanceConfig: %v", d)
 	}
 	if c.Workers != workers || c.Queues[queue.Events].MaxWorkers != 3 ||
-		len(c.PeriodicJobs) != len(periodic.Jobs())+len(identityjobs.Periodic()) {
+		len(c.PeriodicJobs) != len(periodic.Jobs())+len(identityjobs.Periodic())+len(mediajobs.Periodic()) {
 		t.Fatalf("поля воркера: %+v", c)
 	}
 }
@@ -216,13 +209,13 @@ func periodicIDs(jobs []*river.PeriodicJob) []string {
 }
 
 // R7 плана I-2: лидер River ставит периодику по своему списку, лидером бывает и admin-api — списки двух бинарников
-// равны общему: платформа + identity. Зеркало — TestPeriodicSameInBothBinaries в cmd/admin-api (оба сверяются с
+// равны общему: платформа + identity + media (план media, Task 10). Зеркало — TestPeriodicSameInBothBinaries в cmd/admin-api (оба сверяются с
 // одним эталоном, значит, и между собой).
 func TestPeriodicSameInBothBinaries(t *testing.T) {
 	t.Parallel()
 	c := riverConfig(queue.Config(config.Queues{Maintenance: 1}), river.NewWorkers(), slog.New(slog.DiscardHandler))
-	want := periodicIDs(append(periodic.Jobs(), identityjobs.Periodic()...))
-	if got := periodicIDs(c.PeriodicJobs); !slices.Equal(got, want) || len(want) != 7 {
+	want := periodicIDs(append(append(periodic.Jobs(), identityjobs.Periodic()...), mediajobs.Periodic()...))
+	if got := periodicIDs(c.PeriodicJobs); !slices.Equal(got, want) || len(want) != 8 {
 		t.Fatalf("периодика воркера %v, ждали %v", got, want)
 	}
 }
@@ -253,6 +246,28 @@ func lazyIdentityDeps(t *testing.T) identity.WorkerDeps {
 		t.Fatal(err)
 	}
 	return identity.WorkerDeps{Pool: pool, Clock: clocktest.New(time.Now()), Secrets: ring, River: ins, Catalog: cat, Log: log}
+}
+
+// lazyMediaDeps — зависимости media без подключения к базе (пул ленивый) и с хранилищем none: для сверки реестров.
+func lazyMediaDeps(t *testing.T, idd identity.WorkerDeps) mediajobs.WorkerDeps {
+	t.Helper()
+	reg, err := mediapurposes.Registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mediajobs.WorkerDeps{Pool: idd.Pool, Clock: idd.Clock, Registry: reg, Check: mediapurposes.Check(), Log: idd.Log}
+}
+
+// Подписчики воркера: media на удаление аккаунта (спека media §3.10) — в реестре relay и переигровки.
+func TestWorkerSubscriptions(t *testing.T) {
+	t.Parallel()
+	reg, err := Subscriptions(slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get("media.uploaders", "identity.user_deleted"); !ok {
+		t.Fatal("подписки media.uploaders на identity.user_deleted нет в реестре воркера")
+	}
 }
 
 // Письма identity — в реестре воркера (mails): без них задача mail.send вида identity.* падала бы «неизвестный вид».

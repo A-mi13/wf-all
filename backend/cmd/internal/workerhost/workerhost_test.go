@@ -8,19 +8,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	geojobs "wf/backend/internal/geo/jobs"
+	"wf/backend/internal/media"
+	"wf/backend/internal/media/mediatest"
 	"wf/backend/internal/platform/queue"
 	"wf/backend/internal/platform/testkit/dbtest"
 )
 
-// serviceEnv — почта и кольцо identity, обязательные режиму воркера; SMTP — адрес, на котором никто не слушает.
-// Кольцо — 32 нулевых байта в base64, только для тестов.
+// serviceEnv — почта, кольцо identity и хранилище, обязательные режиму воркера; SMTP — адрес, на котором никто не
+// слушает; хранилище — none. Кольцо — 32 нулевых байта в base64, только для тестов.
 var serviceEnv = []string{"WORKER_MAIL_SMTP_ADDR=127.0.0.1:1", "WORKER_MAIL_FROM=WF <noreply@wf.local>",
-	"WORKER_MAIL_SMTP_TLS=none", "WORKER_IDENTITY_SECRET_KEYS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+	"WORKER_MAIL_SMTP_TLS=none", "WORKER_IDENTITY_SECRET_KEYS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+	"WORKER_BLOB_BACKEND=none"}
 
 // unreachableDB — адрес базы, на котором никто не слушает: проверка, сработавшая до базы, отличима от ошибки подключения.
 const unreachableDB = "WORKER_DATABASE_URL=postgres://w@127.0.0.1:1/wf?connect_timeout=1"
@@ -60,6 +64,122 @@ func TestPrepareRejectsZeroQueues(t *testing.T) {
 	}
 	if _, err := prepare(t, unreachableDB, "WORKER_GEO_IMPORT_ENABLED=false", "WORKER_QUEUE_IMPORT=0"); err != nil {
 		t.Fatalf("импорт выключен, очередь import 0: %v", err)
+	}
+}
+
+// devKey — ключ подписи fs для тестов: 32 нулевых байта в base64.
+const devKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+// Хранилище воркера (Task 10 плана media): WORKER_BLOB_* читает Prepare через config.LoadBlob — отказ до базы с
+// именем ключа: нет WORKER_BLOB_BACKEND; fs без корня; fs в прод-образе (WF_BUILD_KIND=prod, R15 — blobopen.Open
+// признак образа не проверяет). fs вне прод-образа и none — открываются, реестр целей и проверка — из mediapurposes.
+func TestPrepareBlob(t *testing.T) {
+	t.Parallel()
+	fsEnv := []string{"WORKER_BLOB_BACKEND=fs", "WORKER_BLOB_FS_ROOT=" + t.TempDir(),
+		"WORKER_BLOB_FS_BASE_URL=http://127.0.0.1:8080", "WORKER_BLOB_DEV_SIGN_KEY=" + devKey}
+	var base []string
+	for _, kv := range serviceEnv {
+		if !strings.HasPrefix(kv, "WORKER_BLOB_BACKEND=") {
+			base = append(base, kv)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		env  []string
+		key  string
+	}{
+		{"нет ключа", nil, "WORKER_BLOB_BACKEND"},
+		{"fs без корня", []string{"WORKER_BLOB_BACKEND=fs", "WORKER_BLOB_FS_BASE_URL=http://127.0.0.1:8080",
+			"WORKER_BLOB_DEV_SIGN_KEY=" + devKey}, "WORKER_BLOB_FS_ROOT"},
+		{"fs в прод-образе", append([]string{"WF_BUILD_KIND=prod"}, fsEnv...), "WORKER_BLOB_BACKEND"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := append(append(append([]string{}, base...), unreachableDB), tc.env...)
+			b, err := Load(env, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Prepare(b, env, slog.New(slog.DiscardHandler)); err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("err = %v, ждали ошибку с %s", err, tc.key)
+			}
+		})
+	}
+	p, err := prepare(t, append([]string{unreachableDB}, fsEnv...)...)
+	if err != nil || !p.media.Blob.Available {
+		t.Fatalf("fs: %v, открыто %v", err, p.media.Blob.Available)
+	}
+	if p, err = prepare(t, unreachableDB); err != nil || p.media.Blob.Available || p.media.Registry == nil || p.media.Check == nil {
+		t.Fatalf("none: %v %+v", err, p.media)
+	}
+}
+
+// I-1 спеки media: воркер с хранилищем none и тестовой целью стартует; чистка (media.cleanup, RunOnStart) отрабатывает
+// по строкам — конечная строка старше суток удалена; очередь media пуста (none не перезапускает обработку зависших).
+func TestEmbeddedWorkerWithNone(t *testing.T) {
+	t.Parallel()
+	url := dbtest.NewURL(t)
+	pool := openPool(t, url)
+	p, err := prepare(t, "WORKER_DATABASE_URL="+url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.media.Registry, err = mediatest.Registry(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	old := time.Now().Add(-48 * time.Hour)
+	seed := func(st media.State) uuid.UUID {
+		t.Helper()
+		oid, err := mediatest.SeedObject(ctx, pool, mediatest.Seed{Purpose: mediatest.PurposeImage,
+			Visibility: media.VisibilityPublic, State: st, Owner: media.OwnerRef{Type: mediatest.OwnerType, ID: uuid.Must(uuid.NewV7())},
+			By: media.Uploader{UserID: uuid.Must(uuid.NewV7())}, At: old})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return oid
+	}
+	ended, stale := seed(media.StateDetached), seed(media.StateUploaded)
+	rctx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() { done <- Run(rctx, p, pool, slog.New(slog.DiscardHandler), ServiceStop) }()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'media.cleanup' AND state = 'completed'`).
+			Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("воркер остановился: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("media.cleanup не выполнилась за 60 с")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var rows, jobs int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM media_objects WHERE id = $1),
+		(SELECT count(*) FROM river_job WHERE queue = $2)`, ended, queue.Media).Scan(&rows, &jobs); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 || jobs != 0 {
+		t.Fatalf("none: конечная строка %d (ждали 0), задач в очереди media %d (ждали 0; зависший %s)", rows, jobs, stale)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("остановка: %v", err)
+		}
+	case <-time.After(40 * time.Second):
+		t.Fatal("Run не остановился")
 	}
 }
 

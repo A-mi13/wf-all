@@ -27,7 +27,7 @@ paths:
   admin-api — лидер River один на схему и ставит периодику по своему списку (P27), исполняет воркер (River не проверяет
   исполнителя у периодической вставки; страж `TestLeaderWithoutWorkersEnqueuesPlatformJobs` под ролью `admin`). Новая
   чистка платформы — в `Jobs()`, не в `cmd/worker`. Периодика модуля — его `jobs.Periodic()`, у обоих бинарников:
-  `append(periodic.Jobs(), identityjobs.Periodic()...)` в `cmd/internal/workerhost` и `cmd/admin-api` (платформа модули не
+  `append(periodic.Jobs(), identityjobs.Periodic()...)` (и `mediajobs.Periodic()`) в `cmd/internal/workerhost` и `cmd/admin-api` (платформа модули не
   импортирует, поэтому `TestLeaderWithoutWorkers…` её не видит; страж — `TestPeriodicSameInBothBinaries` в
   `workerhost` и `cmd/admin-api` против общего эталона; план I-2, R7). Чистки, которым нужны права `admin` (`staff_*`, `approvals`,
   `staff_idempotency_keys`, `staff_rate_limits`), — не River, а тикер в процессе admin-api (`staff/jobs.Cleaner`: `Tick` = `App.Cleanup` +

@@ -28,7 +28,7 @@ type WorkerDeps struct {
 	Log      *slog.Logger
 }
 
-// AddWorkers — исполнители media.process и media.purge (очередь media). Нет пула, часов, реестра, проверки или
+// AddWorkers — исполнители media.process и media.purge (очередь media) и media.cleanup (maintenance). Нет пула, часов, реестра, проверки или
 // журнала, у открытого хранилища нет бакета или Purger — ошибка сборки (отказ старта).
 func AddWorkers(w *river.Workers, d WorkerDeps) error {
 	p, err := NewProcessWorker(d)
@@ -39,8 +39,13 @@ func AddWorkers(w *river.Workers, d WorkerDeps) error {
 	if err != nil {
 		return err
 	}
+	c, err := NewCleanupWorker(d)
+	if err != nil {
+		return err
+	}
 	river.AddWorker(w, p)
 	river.AddWorker(w, g)
+	river.AddWorker(w, c)
 	return nil
 }
 

@@ -74,7 +74,7 @@ func TestWorkerClearsUploaderPassesCheck(t *testing.T) {
 }
 
 // Граница окна строгая (§3.9): билет со сроком ровно before не берётся, раньше — берётся; живые и чужие состояния —
-// нет; лимит соблюдается.
+// нет; лимит соблюдается; порядок — по id, курсор after пропускает взятые.
 func TestExpiredPendingStrictBoundary(t *testing.T) {
 	t.Parallel()
 	p := dbtest.NewPoolsAs(t, "worker")
@@ -90,15 +90,22 @@ func TestExpiredPendingStrictBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	got, err := mediadb.New(tx).ExpiredPending(context.Background(), mediadb.ExpiredPendingParams{Before: before, Lim: 10})
+	rows, err := mediadb.New(tx).ExpiredPending(context.Background(), mediadb.ExpiredPendingParams{Before: before, Lim: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []uuid.UUID{earlier, early}; !slices.Equal(got, want) {
+	got := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		got[i] = r.ID
+	}
+	if want := []uuid.UUID{early, earlier}; !slices.Equal(got, want) {
 		t.Fatalf("ExpiredPending = %v, ждали %v", got, want)
 	}
-	if got, err := mediadb.New(tx).ExpiredPending(context.Background(), mediadb.ExpiredPendingParams{Before: before, Lim: 1}); err != nil || len(got) != 1 {
+	if got, err := mediadb.New(tx).ExpiredPending(context.Background(), mediadb.ExpiredPendingParams{Before: before, Lim: 1}); err != nil || len(got) != 1 || got[0].ID != early {
 		t.Fatalf("лимит 1: %v, %v", got, err)
+	}
+	if got, err := mediadb.New(tx).ExpiredPending(context.Background(), mediadb.ExpiredPendingParams{Before: before, After: early, Lim: 10}); err != nil || len(got) != 1 || got[0].ID != earlier {
+		t.Fatalf("после курсора: %v, %v", got, err)
 	}
 }
 

@@ -451,6 +451,74 @@ func TestTakeDownBetweenWriteAndPublish(t *testing.T) {
 	}
 }
 
+// Ревью Task 9, m-r1-1: снятие во время обработки, его media.purge прошёл раньше записи первого варианта, следующий
+// Put упал — откат (release) застаёт конечное состояние и обязан поставить media.purge по всем ключам цели с
+// публичными адресами, иначе записанный после снятия вариант остаётся в pub навсегда.
+func TestReleaseOnEndedPurgesVariants(t *testing.T) {
+	t.Parallel()
+	endedDuringWrite(t, 1)
+}
+
+// То же на последней попытке River (контроллер, доработка Task 10): fail идёт не в release, а в отклонение
+// processing_failed — на конечном состоянии оно обязано так же поставить media.purge всех ключей цели.
+func TestLastAttemptOnEndedPurgesVariants(t *testing.T) {
+	t.Parallel()
+	endedDuringWrite(t, 10)
+}
+
+// endedDuringWrite — снятие перед первой записью варианта (его purge исполнен), второй Put падает; attempt — номер
+// попытки задачи (MaxAttempts = 10). После media.purge в pub нет ни одного <id>/, Purger получил оба адреса.
+func endedDuringWrite(t *testing.T, attempt int) {
+	t.Helper()
+	e := newEnv(t, envOpt{})
+	ctx := context.Background()
+	x := newIntx(t, e)
+	oid := e.seed(t, mediatest.PurposeImage, media.StateUploaded, encPNG(t, 640, 480))
+	errPut := errors.New("сбой хранилища")
+	e.pub.before = func(ctx context.Context, _ string, n int) error {
+		if n == 2 {
+			return errPut
+		}
+		if n != 1 {
+			return nil
+		}
+		tctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := db.InTx(tctx, e.pools.Owner, func(ctx context.Context, tx pgx.Tx) error {
+			return x.TakeDownInTx(ctx, tx, oid, media.Actor{StaffID: uuid.Must(uuid.NewV7()), Role: "moderator", Label: "Модератор"},
+				"test.takedown")
+		}); err != nil {
+			t.Errorf("снятие: %v", err)
+		}
+		// media.purge снятия исполнился раньше записи первого варианта
+		e.runPurges(t, oid)
+		if _, err := e.pools.Owner.Exec(ctx, `DELETE FROM river_job WHERE kind = 'media.purge'`); err != nil {
+			t.Error(err)
+		}
+		return nil
+	}
+	if err := e.pw.Work(ctx, job(oid, attempt)); !errors.Is(err, errPut) {
+		t.Fatalf("Work: %v, ждали сбой записи", err)
+	}
+	if o := e.object(t, oid); o.State != "taken_down" {
+		t.Fatalf("объект: %+v", o)
+	}
+	if got := keys(t, e.mem.Pub, oid); len(got) != 1 {
+		t.Fatalf("после снятия записан один вариант, в pub: %v", got)
+	}
+	n0 := len(e.purger.got()) // адреса media.purge снятия
+	e.runPurges(t, oid)
+	if got := keys(t, e.mem.Pub, oid); len(got) != 0 {
+		t.Fatalf("после отката на снятом остались файлы: %v", got)
+	}
+	urls := e.purger.got()[n0:]
+	slices.Sort(urls)
+	want := []string{mediatest.PublicBaseURL + mediatest.VariantKey(oid, "full"), mediatest.PublicBaseURL + mediatest.VariantKey(oid, "thumb")}
+	if !slices.Equal(slices.Compact(urls), want) {
+		t.Fatalf("Purger: %v, ждали %v", urls, want)
+	}
+}
+
 // R2-I1: второй исполнитель на ready ничего не пишет и не удаляет. При захвате — хранилище не трогается вовсе; при
 // публикации (другой опубликовал, пока этот писал те же ключи) — ни media.purge, ни второй вставки вариантов.
 func TestSecondExecutorOnReady(t *testing.T) {
@@ -711,7 +779,7 @@ func TestArgsVersion(t *testing.T) {
 	}
 }
 
-// AddWorkers: оба вида; без зависимостей — ошибка сборки.
+// AddWorkers: три вида; без зависимостей — ошибка сборки.
 func TestAddWorkers(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOpt{})
@@ -719,7 +787,7 @@ func TestAddWorkers(t *testing.T) {
 	if err := jobs.AddWorkers(w, e.deps); err != nil {
 		t.Fatal(err)
 	}
-	if got := rivertest.Kinds(w); !slices.Equal(got, []string{"media.process", "media.purge"}) {
+	if got := rivertest.Kinds(w); !slices.Equal(got, []string{"media.cleanup", "media.process", "media.purge"}) {
 		t.Fatalf("виды: %v", got)
 	}
 	for name, mod := range map[string]func(*jobs.WorkerDeps){

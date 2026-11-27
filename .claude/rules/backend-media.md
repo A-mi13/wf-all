@@ -120,3 +120,39 @@ paths:
   запись под замком строки дала бы взаимную блокировку), `TestCrashCountsAttempts`, `TestStoreErrorsDoNotCountAsCrash`,
   `TestRollbackUsesWithoutCancel`, `TestUniqueWhileRetryable`, `TestProcessWaitsForRowLock`,
   `TestProcessInputGoneAfterTakeDown`, `TestProcessTooLargeAfterReupload`, `TestProcessRejectCodes`.
+
+## Чистка, сверка, подписчик (Task 10)
+
+- **`media.cleanup`** (`jobs/cleanup.go`, очередь `maintenance`, 5 попыток, уникальность 10 мин; `jobs.Periodic()` —
+  раз в 10 мин, `RunOnStart`, у воркера и admin-api; срок 10 мин в `queue.WorkerKinds`). Один проход на одном «сейчас»,
+  строки — пачками по 100 со `SKIP LOCKED` (строку под замком сценария пропускает, не ждёт), пачка — своя tx, файлы —
+  после коммита (`Delete` идемпотентен; сбой хранилища не прерывает проход — ошибка River в конце). Границы строгие:
+  `pending_upload` с `expires_at + 1 ч < now` — `Delete(in, id)` сразу, строка (билет каскадом) — только при
+  `created_at < now − 24 ч` (суточная квота байт считается по строкам); `ExpiredPending` идёт курсором по id —
+  оставленные строки не занимают пачку (входящее таких строк удаляется повторно каждым проходом до суток — `Delete`
+  идемпотентен). timestamptz хранит микросекунды: граница окна различима с точностью 1 мкс (чистка отстаёт в
+  безопасную сторону). `uploaded|processing` с `uploaded_at < now − 1 ч` — `media.process` заново (`ProcessInsertOpts`,
+  дубля нет; `StaleProcessing` — курсором по id). `detached|taken_down` — `ended_at < now − 24 ч`, `rejected` —
+  `< now − 30 сут`: строки, затем `Delete` всех ключей цели `VariantKeys` в бакете видимости (цели нет в реестре —
+  ключи строк `media_variants`). Входящее без строки старше суток (время UUIDv7 ключа; чужой ключ не трогается) —
+  `Delete` после обхода `List`. Режим `none` — только строки: хранилище не трогается, `media.process` не ставится.
+  Стражи — `TestCleanupExpiredPending`, `…Pages`, `TestCleanupRestartsStale`, `TestCleanupYieldsToScenario`,
+  `TestCleanupFinalStates`, `TestCleanupInboxOrphans`, `TestCleanupNone`.
+- **Откат на конечном** (ревью Task 9, m-r1-1): `release` (обычная ошибка шагов 2–7) и `rejectFailed` (последняя
+  попытка River), заставшие `detached|taken_down|rejected`, ставят `media.purge` всех ключей цели (`purgeEnded`, +
+  `PublicURLs` у `pub`) — purge снятия мог пройти раньше записи варианта этой попыткой
+  (`TestReleaseOnEndedPurgesVariants`, `TestLastAttemptOnEndedPurgesVariants`).
+- **Подписчик** `media.uploaders` (`subscribers`, `identity.user_deleted`, `EveryEvent`; имя — ключ `event_inbox`, не
+  менять): в tx доставки `DeletePendingByUser`, затем `ClearUploadedByUser` (I-6); входящее удалённых билетов уберут
+  жизненный цикл и чистка. Регистрация — `workerhost.Subscriptions(log)`. Страж — `TestSubscriberUserDeleted` (relay +
+  River под ролью `worker`).
+- **Сверка** `worker media reconcile [--fix]` (`reconcile.Run`, роль `worker`, хранилище — `config.LoadBlob("WORKER_")`,
+  `none` — «хранилище выключено», код 0): строки `ready` без файла варианта — в отчёт (правки нет: из `ready` в
+  `rejected` перехода нет — решает оператор); файлы `pub`/`priv`, чей `<id>` не принадлежит строке `media_objects`, —
+  в отчёт, с `--fix` — `Delete` (файл объекта со строкой, в том числе в обработке, сиротой не считается). Вывод — только
+  id и ключи. Запрос — `ReadyVariantKeys` (курсор по ключу).
+- **Сборка воркера** (`cmd/internal/workerhost`): `Prepare` читает `config.LoadBlob("WORKER_", environ)` (fs в
+  прод-образе — отказ старта) и `blobopen.Open`; цели и проверка содержимого — только `mediapurposes.Registry()` /
+  `Check()` (`cmd/internal/mediapurposes`: прод — пусто и `CheckOff`, тег `wf_e2e` — `mediatest.E2EPurposes` и
+  `MarkerCheck`); `media.NewRegistry` вне этого пакета, `mediatest` и тестов — `archtest.TestMediaPurposesOnlyFromRegistry`.
+  Встроенный режим с `none` — `TestEmbeddedWorkerWithNone`.

@@ -439,7 +439,7 @@ func (w *ProcessWorker) fail(ctx context.Context, job *river.Job[ProcessArgs], o
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
 	defer cancel()
 	if job.Attempt >= job.MaxAttempts {
-		if err := w.reject(bg, o.ID, media.RejectProcessingFailed); err != nil {
+		if err := w.rejectFailed(bg, o.ID); err != nil {
 			return errors.Join(cause, fmt.Errorf("media/jobs: отклонение после последней попытки: %w", err))
 		}
 		w.d.Log.WarnContext(ctx, "media: обработка не удалась, объект отклонён", "object_id", o.ID, "err", cause)
@@ -451,13 +451,48 @@ func (w *ProcessWorker) fail(ctx context.Context, job *river.Job[ProcessArgs], o
 	return cause
 }
 
-// release — processing → uploaded под замком строки (иначе ничего: объект сняли, отклонили или опубликовали).
+// rejectFailed — последняя попытка River: rejected(processing_failed) под замком строки; конечное состояние —
+// media.purge всех ключей цели, как у release (m-r1-1 на последней попытке).
+func (w *ProcessWorker) rejectFailed(ctx context.Context, objectID uuid.UUID) error {
+	return db.InTx(ctx, w.d.Pool, func(ctx context.Context, tx pgx.Tx) error {
+		q := mediadb.New(tx)
+		o, ok, err := lock(ctx, q, objectID)
+		if err != nil || !ok {
+			return err
+		}
+		if domain.IsFinal(media.State(o.State)) {
+			return w.purgeEnded(ctx, tx, o)
+		}
+		return w.rejectTx(ctx, tx, q, o, media.RejectProcessingFailed)
+	})
+}
+
+// purgeEnded — объект стал конечным во время обработки (сняли, открепили, отклонили): media.purge всех ключей цели в
+// бакете видимости (+ PublicURLs у pub). purge того сценария мог пройти раньше записи варианта этой попыткой, а до
+// публикации (которая удалила бы записанное) она не дошла (ревью Task 9, m-r1-1).
+func (w *ProcessWorker) purgeEnded(ctx context.Context, tx pgx.Tx, o mediadb.MediaObject) error {
+	p, _ := w.d.Registry.Get(o.Purpose)
+	_, bucket := w.bucketOf(o)
+	a := PurgeArgs{V: 1, Bucket: bucket, Keys: VariantKeys(o.ID, p)}
+	if bucket == BucketPub {
+		a.PublicURLs = PublicURLs(w.d.Blob.PublicBaseURL, a.Keys)
+	}
+	return w.insertPurges(ctx, tx, a)
+}
+
+// release — processing → uploaded под замком строки; конечное состояние — purgeEnded; иначе ничего.
 func (w *ProcessWorker) release(ctx context.Context, objectID uuid.UUID) error {
 	return db.InTx(ctx, w.d.Pool, func(ctx context.Context, tx pgx.Tx) error {
 		q := mediadb.New(tx)
 		o, ok, err := lock(ctx, q, objectID)
-		if err != nil || !ok || media.State(o.State) != media.StateProcessing {
+		if err != nil || !ok {
 			return err
+		}
+		if domain.IsFinal(media.State(o.State)) {
+			return w.purgeEnded(ctx, tx, o)
+		}
+		if media.State(o.State) != media.StateProcessing {
+			return nil
 		}
 		if err := domain.Transition(media.StateProcessing, media.StateUploaded); err != nil {
 			return err

@@ -318,9 +318,13 @@ func TestAttachVsExpiredCleanup(t *testing.T) {
 			cleanErr = db.InTx(context.Background(), e.pools.Owner, func(ctx context.Context, tx pgx.Tx) error {
 				<-start
 				q := mediadb.New(tx)
-				ids, err := q.ExpiredPending(ctx, mediadb.ExpiredPendingParams{Before: expires.Add(time.Nanosecond), Lim: 100})
-				if err != nil || len(ids) == 0 {
+				rows, err := q.ExpiredPending(ctx, mediadb.ExpiredPendingParams{Before: expires.Add(time.Nanosecond), Lim: 100})
+				if err != nil || len(rows) == 0 {
 					return err
+				}
+				ids := make([]uuid.UUID, len(rows))
+				for i, r := range rows {
+					ids[i] = r.ID
 				}
 				deleted, err = q.DeleteObjects(ctx, ids)
 				return err

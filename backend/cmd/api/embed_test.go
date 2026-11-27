@@ -31,9 +31,9 @@ import (
 const unreachableAPI = "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1"
 
 // workerEnvNoDB — окружение встроенного воркера без базы: почта на адресе, где никто не слушает (TLS none — петля),
-// кольцо identity — testSeed, как у api.
+// кольцо identity — testSeed, как у api; хранилище — none (как у стенда).
 var workerEnvNoDB = []string{"WORKER_MAIL_SMTP_ADDR=127.0.0.1:1", "WORKER_MAIL_FROM=WF <noreply@wf.local>",
-	"WORKER_MAIL_SMTP_TLS=none", "WORKER_IDENTITY_SECRET_KEYS=" + testSeed}
+	"WORKER_MAIL_SMTP_TLS=none", "WORKER_IDENTITY_SECRET_KEYS=" + testSeed, "WORKER_BLOB_BACKEND=none"}
 
 // apiBase — обязательное окружение api (без базы и адреса).
 func apiBase() []string {

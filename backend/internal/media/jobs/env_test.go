@@ -80,6 +80,8 @@ type hookStore struct {
 	calls map[string]int
 	get   func(ctx context.Context, key string) (io.ReadCloser, blob.Info, error)
 	put   func(ctx context.Context, key string, n int) // после успешного Put, n — номер вызова
+	// before — до записи Put (n — номер вызова); ошибка — Put не пишет и возвращает её
+	before func(ctx context.Context, key string, n int) error
 }
 
 func wrap(s blob.Store) *hookStore { return &hookStore{Store: s, calls: map[string]int{}} }
@@ -109,6 +111,11 @@ func (h *hookStore) total() int {
 
 func (h *hookStore) Put(ctx context.Context, key string, r io.Reader, o blob.PutOptions) error {
 	n := h.inc("put")
+	if h.before != nil {
+		if err := h.before(ctx, key, n); err != nil {
+			return err
+		}
+	}
 	if err := h.Store.Put(ctx, key, r, o); err != nil {
 		return err
 	}
@@ -148,6 +155,7 @@ type env struct {
 	deps   jobs.WorkerDeps
 	pw     *jobs.ProcessWorker
 	gw     *jobs.PurgeWorker
+	cw     *jobs.CleanupWorker
 }
 
 type envOpt struct {
@@ -181,6 +189,9 @@ func newEnv(t *testing.T, o envOpt) *env {
 		t.Fatal(err)
 	}
 	if e.gw, err = jobs.NewPurgeWorker(e.deps); err != nil {
+		t.Fatal(err)
+	}
+	if e.cw, err = jobs.NewCleanupWorker(e.deps); err != nil {
 		t.Fatal(err)
 	}
 	return e

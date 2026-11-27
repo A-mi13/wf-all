@@ -38,9 +38,10 @@ func WorkerKinds() []Kind {
 		{Name: "identity.maintenance", Timeout: 10 * time.Minute},
 		{Name: "identity.anonymize", Timeout: 10 * time.Minute},
 		{Name: "identity.mfa_reset_execute", Timeout: 10 * time.Minute},
-		// media (план media, Task 9): обработка загрузки и удаление файлов — media/jobs
+		// media (план media, Task 9, 10): обработка загрузки, удаление файлов, чистка — media/jobs
 		{Name: "media.process", Timeout: 2 * time.Minute},
 		{Name: "media.purge", Timeout: time.Minute},
+		{Name: "media.cleanup", Timeout: 10 * time.Minute},
 	}
 }
 

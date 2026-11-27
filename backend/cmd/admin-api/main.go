@@ -31,6 +31,7 @@ import (
 	"wf/backend/internal/identity"
 	identityadmin "wf/backend/internal/identity/admin"
 	identityjobs "wf/backend/internal/identity/jobs"
+	mediajobs "wf/backend/internal/media/jobs"
 	"wf/backend/internal/platform/approvals"
 	"wf/backend/internal/platform/clock"
 	"wf/backend/internal/platform/config"
@@ -561,11 +562,12 @@ func checkKeys(ctx context.Context, h *staffadmin.Handler, keysLost bool, errOut
 }
 
 // riverConfig — исполняющий клиент admin-api: обслуживание — общее с воркером (queue.ClientConfig от
-// queue.MaintenanceConfig, страж TestAdminRiverMaintenance), очередь — только staff, периодика — платформа и identity,
-// как у воркера (R7 плана I-2: став лидером, admin-api ставит и чистку, анонимизацию, сбросы 2FA identity — исполняет
+// queue.MaintenanceConfig, страж TestAdminRiverMaintenance), очередь — только staff, периодика — платформа, identity
+// и media, как у воркера (R7 плана I-2: став лидером, admin-api ставит и чистку, анонимизацию, сбросы 2FA identity — исполняет
 // воркер; страж TestPeriodicSameInBothBinaries).
 func riverConfig(workers *river.Workers, log *slog.Logger) *river.Config {
-	return queue.ClientConfig(staffQueues(), workers, append(periodic.Jobs(), identityjobs.Periodic()...), log)
+	return queue.ClientConfig(staffQueues(), workers, append(append(periodic.Jobs(), identityjobs.Periodic()...),
+		mediajobs.Periodic()...), log)
 }
 
 // staffQueues — очереди исполняющего клиента admin-api: только staff (у воркера её нет — TestAdminKindsQueues).
