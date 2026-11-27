@@ -15,6 +15,7 @@ import (
 	geojobs "wf/backend/internal/geo/jobs"
 	"wf/backend/internal/identity"
 	identityjobs "wf/backend/internal/identity/jobs"
+	mediajobs "wf/backend/internal/media/jobs"
 	"wf/backend/internal/platform/config"
 	"wf/backend/internal/platform/events"
 	"wf/backend/internal/platform/humancheck"
@@ -56,6 +57,7 @@ func TestWorkerKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mediaUntilAssembled(own)
 	if got, want := rivertest.Kinds(own), names(queue.WorkerKinds()); !slices.Equal(got, want) {
 		t.Fatalf("исполнители воркера %v, queue.WorkerKinds %v", got, want)
 	}
@@ -71,6 +73,8 @@ func TestWorkerKinds(t *testing.T) {
 		"identity.maintenance":       (&identityjobs.MaintenanceWorker{}).Timeout(nil),
 		"identity.anonymize":         (&identityjobs.AnonymizeWorker{}).Timeout(nil),
 		"identity.mfa_reset_execute": (&identityjobs.MfaResetWorker{}).Timeout(nil),
+		"media.process":              (&mediajobs.ProcessWorker{}).Timeout(nil),
+		"media.purge":                (&mediajobs.PurgeWorker{}).Timeout(nil),
 	}
 	for _, k := range queue.WorkerKinds() {
 		d, ok := timeouts[k.Name]
@@ -82,6 +86,7 @@ func TestWorkerKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mediaUntilAssembled(all)
 	if got, want := rivertest.Kinds(all), names(queue.WorkerKinds(), queue.AdminKinds()); !slices.Equal(got, want) {
 		t.Fatalf("исполняющий клиент воркера знает %v, ждали %v", got, want)
 	}
@@ -106,7 +111,9 @@ func TestWorkerKindsQueues(t *testing.T) {
 	// вид — из самих аргументов (Kind), а не строкой таблицы: перепутанная пара вида и аргументов не пройдёт (m-r5)
 	got := queuesOf(queue.PingArgs{}, events.DeliverArgs{}, events.CleanupArgs{}, ratelimit.CleanupArgs{},
 		humancheck.CleanupArgs{}, idempotency.CleanupArgs{}, geojobs.ImportArgs{}, mail.SendArgs{},
-		identityjobs.MaintenanceArgs{}, identityjobs.AnonymizeArgs{}, identityjobs.MfaResetExecuteArgs{})
+		identityjobs.MaintenanceArgs{}, identityjobs.AnonymizeArgs{}, identityjobs.MfaResetExecuteArgs{},
+		withOpts{mediajobs.ProcessArgs{}, mediajobs.ProcessInsertOpts()},
+		withOpts{mediajobs.PurgeArgs{}, mediajobs.PurgeInsertOpts()})
 	c := defaultWorker(t)
 	if !c.GeoImportEnabled {
 		t.Fatal("по умолчанию импорт выключен")
@@ -153,6 +160,23 @@ func TestQueuesImportFlag(t *testing.T) {
 type argsWithQueue interface {
 	river.JobArgs
 	river.JobArgsWithInsertOpts
+}
+
+// withOpts — аргументы, чьи опции вставки — функция пакета, а не метод (media: ProcessInsertOpts, PurgeInsertOpts —
+// их передаёт intx явно); вид — из самих аргументов.
+type withOpts struct {
+	river.JobArgs
+	opts river.InsertOpts
+}
+
+func (a withOpts) InsertOpts() river.InsertOpts { return a.opts }
+
+// mediaUntilAssembled — исполнители media в реестре до сборки воркера: их зависимости (хранилище WORKER_BLOB_*,
+// реестр целей) подключает Task 10 плана media в realWorkers — тогда эта функция удаляется. Пока виды media есть в
+// queue.WorkerKinds (заглушки admin-api), а исполнителей у воркера ещё нет.
+func mediaUntilAssembled(w *river.Workers) {
+	river.AddWorker(w, &mediajobs.ProcessWorker{})
+	river.AddWorker(w, &mediajobs.PurgeWorker{})
 }
 
 // queuesOf — очередь каждого вида по аргументам: вид — args.Kind().

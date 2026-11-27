@@ -82,3 +82,38 @@ paths:
   `PublicURLs` — только у снятия публичного, `intx.Deps.PublicBaseURL`).
 - **Тестовые помощники** — `mediatest`: `E2EPurposes` (`e2e_image`, `e2e_image_private`, владелец `e2e_owner`),
   `MarkerCheck` (R20), `MemoryBlob(clock)` (Memory + `DevSigner`), `Registry`, `SeedObject` (посев по CHECK 0028).
+
+## Конвейер (Task 9)
+
+- **Исполнители** — `media/jobs`: `AddWorkers(w, WorkerDeps{Pool, Clock, Registry, Blob, Check, Log})` (без зависимости
+  или с открытым хранилищем без бакета/`Purger` — отказ старта); клиент River только для вставки `media.purge` — на том
+  же пуле (роль `worker`). Виды и сроки — `queue.WorkerKinds` (`media.process` 2 мин, `media.purge` 1 мин), у
+  admin-api — заглушки `AddForeign`. `V != 1` — обычная ошибка; режим `none` (`!Blob.Available`) —
+  `river.JobCancel(media.ErrUnavailable)` у обеих.
+- **`media.process` (§3.3).** Захват — короткая tx `LockObject` (ждать): не `uploaded|processing`/нет строки — успех без
+  действий (хранилище не трогается); `SetProcessing`; `process_attempts ≥ 3` (третий захват, заставший `processing`)
+  — `rejected(processing_failed)` в той же tx. Шаги 2–6 — без транзакций: `Get(in)` + `LimitReader(MaxBytes+1)`
+  (больше — `too_large`), растр — `imaging.Process` (входы и пиксели цели, порт проверки при `ContentCheck`), Lottie —
+  `lottie.Sanitize` с вшитыми картинками через `imaging.Process` (`full` без масштаба, ≤ 4 Мп, WebP q 85). Коды:
+  `lottie.ErrUnsafe` → `unsafe_animation`, `imaging.ErrContentRejected` → `content_rejected`, `ErrUnsupported` →
+  `unsupported_type`, `ErrTooManyPixels` → `too_many_pixels`, `ErrCorrupt` (оба пакета) → `corrupt`; прочее — обычная
+  ошибка. Ключи — `<id>/<вариант>.webp`, Lottie — `<id>/anim.json` (`application/json`, имя строки — вариант цели);
+  бакет — по `visibility` строки; `Cache-Control` `public, max-age=86400` / `private, no-store`.
+- **Публикация** — tx `LockObject`: `processing` — `InsertVariant` × N, `SetReady` (размеры исходника после ориентации;
+  у Lottie — `w`/`h` анимации), `media.object_ready`; `ready` — ничего; `detached|taken_down|rejected` или строки нет —
+  `media.purge` записанных ключей (+ `PublicURLs` у `pub`); `uploaded` — обычная ошибка. После коммита — `Delete(in)`
+  (сбой — WARN, не повтор). **Отклонение** — tx: только из `uploaded|processing` — `rejected`, `ended_at`,
+  `media.object_rejected`, `media.purge` входящего и ключей (после падения/последней попытки — все ключи цели).
+- **Ошибки.** Обычная ошибка шагов 2–7 — `context.WithoutCancel` + 5 с: `processing → uploaded` (только из
+  `processing`) и ошибка River (падением не считается); `job.Attempt ≥ MaxAttempts` — `rejected(processing_failed)`.
+  Входящего нет (`ErrNotFound`) — перечитать строку: не `uploaded|processing` — успех без изменений (сняли, открепили,
+  опубликовал другой), иначе обычная ошибка. Паника исполнителя оставляет `processing` — засчитывается как падение.
+- **`media.purge` (§3.8):** `Delete` каждого ключа (идемпотентно), затем `Purger.Purge(PublicURLs)`; сбой — повтор
+  (25 попыток); неизвестный бакет и `blob.ErrBadKey` — `JobCancel`.
+- **Lottie** (`internal/lottie`, Task 8): схема-разрешение LAC 1.0.1 в `allow.go` (дата сверки в комментарии; новые
+  поля — только со сверкой со схемой), текстовые слои отклоняются целиком, слоты не допускаются, вшитые картинки —
+  через `ImageFunc` после обхода; отказы — `ErrUnsafe`/`ErrCorrupt`; выход совместим с lottie-web (`st`, `td`, `hasMask`).
+- **Стражи** — `media/jobs`: `TestSecondExecutorOnReady`, `TestTakeDownBetweenWriteAndPublish` (снятие из хука `Put`:
+  запись под замком строки дала бы взаимную блокировку), `TestCrashCountsAttempts`, `TestStoreErrorsDoNotCountAsCrash`,
+  `TestRollbackUsesWithoutCancel`, `TestUniqueWhileRetryable`, `TestProcessWaitsForRowLock`,
+  `TestProcessInputGoneAfterTakeDown`, `TestProcessTooLargeAfterReupload`, `TestProcessRejectCodes`.
