@@ -16,9 +16,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivertype"
 
 	"wf/backend/internal/media"
-	"wf/backend/internal/media/internal/store/mediadb"
 	"wf/backend/internal/media/intx"
 	"wf/backend/internal/media/jobs"
 	"wf/backend/internal/media/mediatest"
@@ -292,57 +292,133 @@ func TestAttachConcurrent(t *testing.T) {
 	}
 }
 
-// «Завершить» ∥ чистка окна (§3.9: ExpiredPending SKIP LOCKED + DeleteObjects в своей транзакции): ровно один исход
-// на каждом объекте — прикреплён (чистка его не тронула) или удалён (прикрепление — object_unavailable).
+// workerPool — пул той же базы под ролью worker (исполнители чистки и обработки).
+func (e env) workerPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	cfg := e.pools.Owner.Config().Copy()
+	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
+		_, err := c.Exec(ctx, "SET ROLE worker")
+		return err
+	}
+	p, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(p.Close)
+	return p
+}
+
+// «Завершить» ∥ чистка окна настоящим исполнителем media.cleanup (§3.9, спека §12 «Гонки»; ревью Task 10, m2): строку
+// pending_upload чистка удаляет только через сутки от created_at, входящее — сразу после окна. Часы api и воркера
+// расходятся: у прикрепления окно ещё живо (последняя наносекунда), у чистки уже прошло. Строка моложе суток —
+// прикрепление проходит в каждом раунде, входящее удалено или нет — по тому, кто первым взял строку. Порядок «чистка,
+// затем прикрепление» оставляет объект без входящего: media.process на последней попытке — rejected(processing_failed);
+// на одних часах это недостижимо.
 func TestAttachVsExpiredCleanup(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, "api")
 	a, by := newOwner(), player()
 	expires := at.Add(15 * time.Minute)
-	// у прикрепления окно ещё живо (последняя наносекунда), чистка уже считает его прошедшим
 	e.clk.Set(expires.Add(time.Hour - time.Nanosecond))
-	for round := range 8 {
-		id := e.seed(t, mediatest.Seed{State: media.StatePendingUpload, Intended: a, By: by, ExpiresAt: expires})
-		start := make(chan struct{})
-		var wg sync.WaitGroup
-		var attachErr, cleanErr error
-		var deleted []uuid.UUID
-		wg.Go(func() {
-			attachErr = e.inTx(func(ctx context.Context, tx pgx.Tx) error {
-				<-start
-				_, err := e.x.AttachInTx(ctx, tx, id, a, by)
-				return err
-			})
-		})
-		wg.Go(func() {
-			cleanErr = db.InTx(context.Background(), e.pools.Owner, func(ctx context.Context, tx pgx.Tx) error {
-				<-start
-				q := mediadb.New(tx)
-				rows, err := q.ExpiredPending(ctx, mediadb.ExpiredPendingParams{Before: expires.Add(time.Nanosecond), Lim: 100})
-				if err != nil || len(rows) == 0 {
-					return err
-				}
-				ids := make([]uuid.UUID, len(rows))
-				for i, r := range rows {
-					ids[i] = r.ID
-				}
-				deleted, err = q.DeleteObjects(ctx, ids)
-				return err
-			})
-		})
-		close(start)
-		wg.Wait()
-		if cleanErr != nil {
-			t.Fatalf("раунд %d: чистка: %v", round, cleanErr)
-		}
-		r, exists := object(t, e.pools.Owner, id)
-		switch {
-		case attachErr == nil && exists && r.State == "uploaded" && !slices.Contains(deleted, id):
-		case errors.Is(attachErr, media.ErrObjectUnavailable) && !exists && slices.Contains(deleted, id):
-		default:
-			t.Fatalf("раунд %d: прикрепление %v, строка %v %+v, удалены %v", round, attachErr, exists, r, deleted)
-		}
+	// timestamptz хранит микросекунды: чистка видит окно прошедшим через 1 мкс
+	wclk := clocktest.New(expires.Add(time.Hour + time.Microsecond))
+	ob, err := mediatest.MemoryBlob(wclk)
+	if err != nil {
+		t.Fatal(err)
 	}
+	reg, err := mediatest.Registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := jobs.WorkerDeps{Pool: e.workerPool(t), Clock: wclk, Registry: reg, Blob: ob, Check: mediatest.MarkerCheck,
+		Log: mediatest.Discard()}
+	cw, err := jobs.NewCleanupWorker(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clean := func() error {
+		return cw.Work(context.Background(), &river.Job[jobs.CleanupArgs]{JobRow: &rivertype.JobRow{ID: 1, Attempt: 1,
+			MaxAttempts: 5, Kind: "media.cleanup"}, Args: jobs.CleanupArgs{V: 1}})
+	}
+	seed := func(t *testing.T) uuid.UUID {
+		t.Helper()
+		id := e.seed(t, mediatest.Seed{State: media.StatePendingUpload, Intended: a, By: by, ExpiresAt: expires})
+		if err := ob.Buckets.In.Put(context.Background(), id.String(), strings.NewReader("png"),
+			blob.PutOptions{ContentType: "image/png"}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	attach := func(id uuid.UUID) error {
+		return e.inTx(func(ctx context.Context, tx pgx.Tx) error {
+			_, err := e.x.AttachInTx(ctx, tx, id, a, by)
+			return err
+		})
+	}
+	inboxGone := func(t *testing.T, id uuid.UUID) bool {
+		t.Helper()
+		_, err := ob.Buckets.In.Head(context.Background(), id.String())
+		if err != nil && !errors.Is(err, blob.ErrNotFound) {
+			t.Fatal(err)
+		}
+		return err != nil
+	}
+
+	t.Run("race", func(t *testing.T) {
+		for round := range 8 {
+			id := seed(t)
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			var attachErr, cleanErr error
+			wg.Go(func() {
+				<-start
+				attachErr = attach(id)
+			})
+			wg.Go(func() {
+				<-start
+				cleanErr = clean()
+			})
+			close(start)
+			wg.Wait()
+			if cleanErr != nil {
+				t.Fatalf("раунд %d: чистка: %v", round, cleanErr)
+			}
+			if r, exists := object(t, e.pools.Owner, id); attachErr != nil || !exists || r.State != "uploaded" {
+				t.Fatalf("раунд %d: прикрепление %v, строка %v %+v (входящее удалено: %v)", round, attachErr, exists, r,
+					inboxGone(t, id))
+			}
+		}
+	})
+
+	t.Run("cleanup_first", func(t *testing.T) {
+		id := seed(t)
+		if err := clean(); err != nil {
+			t.Fatal(err)
+		}
+		if r, exists := object(t, e.pools.Owner, id); !exists || r.State != "pending_upload" || !inboxGone(t, id) {
+			t.Fatalf("после чистки: строка %v %+v, входящее удалено %v", exists, r, inboxGone(t, id))
+		}
+		if err := attach(id); err != nil {
+			t.Fatalf("прикрепление после чистки: %v", err)
+		}
+		pw, err := jobs.NewProcessWorker(deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := &river.Job[jobs.ProcessArgs]{JobRow: &rivertype.JobRow{ID: 2, Attempt: 10, MaxAttempts: 10,
+			Kind: "media.process"}, Args: jobs.ProcessArgs{V: 1, ObjectID: id}}
+		if err := pw.Work(context.Background(), last); err == nil {
+			t.Fatal("media.process без входящего: ждали ошибку попытки")
+		}
+		var state, code string
+		if err := e.pools.Owner.QueryRow(context.Background(), `SELECT state, coalesce(reject_code, '') FROM media_objects
+			WHERE id = $1`, id).Scan(&state, &code); err != nil {
+			t.Fatal(err)
+		}
+		if state != "rejected" || code != string(media.RejectProcessingFailed) {
+			t.Fatalf("последняя попытка без входящего: %s %s", state, code)
+		}
+	})
 }
 
 // I-2: CreateDirectInTx в транзакции, которую вызывающий откатывает, — ни строки, ни задачи; файл во входящем остаётся

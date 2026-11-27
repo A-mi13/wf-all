@@ -1,7 +1,9 @@
 # Спека модуля `media`
 
 Дата: 2026-11-18. Статус: редакция 3 — ревью спеки пройдено (3 раунда, Approved) (`.superpowers/sdd/2026-11-18-media-spec/review.md`,
-I-1…I-10, m1…m11); утверждена пользователем 18.11 в редакции 1. Этап: спека → план → код.
+I-1…I-10, m1…m11); утверждена пользователем 18.11 в редакции 1. Этап: план `media`
+(`docs/superpowers/plans/2026-11-26-media.md`) выполнен — механизм, S3-реализация, FS-эмуляция, режим `none`,
+`deploy/server`; правки по решениям плана (R1–R20) и итогам ревью задач помечены **(план media, 26.11)**.
 Основа — спека бэкенда `docs/superpowers/specs/2026-10-01-backend-architecture-design.md` (дальше «спека бэкенда»:
 §4.1 владение `media_objects`, §6.9 `platform/blob`, §9.1 очередь `media`, §11 ссылки владельцев), формат — спеки
 `geo`, сотрудников и `identity`. Решения пользователя — брейнсторминг 18.11.2026 (§0); решения, которых пользователь
@@ -185,15 +187,16 @@ TakeDownInTx(ctx, tx, objectID uuid.UUID, actor media.Actor, reason string) erro
 
 ### 3.2. Предел размера при прямой загрузке
 
-- Если сервер хранилища поддерживает подписанный `POST` с политикой `content-length-range` — билет выдаётся им,
-  диапазон **ровно** `[declared_bytes, declared_bytes]` (клиент называет точный размер; иначе квота по
-  `declared_bytes` обходилась бы заявкой «1 байт», m2-6);
-- иначе подписанный `PUT` с `Content-Length` в подписанных заголовках (клиент обязан назвать размер; тело другого
-  размера хранилище отвергает);
-- в любом случае воркер читает файл одним `Get` через `LimitReader(max+1)`: больше предела — `rejected(too_large)`
-  (m3: `HEAD` до чтения — только ранний отказ, клиент мог перезалить файл по живому билету).
-
-Что из этого умеет выбранный сервер и SDK (включает ли SDK `Content-Length` в `SignedHeaders`) — §13 п. 1.
+- Билет — **только подписанный `POST`** с политикой `content-length-range` **ровно** `[declared_bytes,
+  declared_bytes]` (клиент называет точный размер; иначе квота по `declared_bytes` обходилась бы заявкой «1 байт»,
+  m2-6) и `Content-Type` условием политики. Подписанный `PUT` не используется ни в S3, ни в FS — у клиентов одна
+  дорога; `UploadTicket.method` в контракте остаётся открытым enum `PUT | POST`, сервер выдаёт `POST` **(план media,
+  26.11, R3: Garage соблюдает `content-length-range`, `PUT` с подписанным `Content-Length` не документирован ни у
+  кого)**;
+- воркер читает файл одним `Get` через `LimitReader(max+1)`: больше предела — `rejected(too_large)` (m3: `HEAD` до
+  чтения — только ранний отказ, клиент мог перезалить файл по живому билету). На S3 перезаливку другого размера по
+  живому билету отвергает хранилище; предел воркера держит и обход политики ключом с записью во входящее (у api и
+  admin она есть, R2) — `TestMediaE2ES3/size` **(план media, 26.11)**.
 
 ### 3.3. Обработка (задача `media.process`, очередь `media`)
 
@@ -221,6 +224,12 @@ TakeDownInTx(ctx, tx, objectID uuid.UUID, actor media.Actor, reason string) erro
    вписывается **наш эталонный профиль P3** из сборки, иначе фото выцветает; прочие профили — как sRGB (редкость,
    принят сдвиг цвета). Перевода в sRGB без CMS на чистом Go нет (§13 п. 2) (решение автора спеки). Ключи — `<object_id>/<вариант>.webp` в бакете
    видимости (публичный или закрытый). Запись с `Cache-Control` (§6.2).
+   **(План media, 26.11, R6, R8.)** Кодировщик WebP — `github.com/deepteams/webp` (MIT, чистый Go, с потерями и
+   альфой, поле ICC; запасной — `gen2brain/vpx` + ручной чанк `ICCP`, последний запасной — §13 п. 2). Ориентация EXIF
+   (тег `0x0112` в APP1) и ICC (JPEG APP2 `ICC_PROFILE` с многочастными сегментами, PNG `iCCP`, WebP `ICCP`) —
+   **свой разбор** в `media/internal/imaging`: живых библиотек на чистом Go нет. P3 распознаётся по тегу `desc`
+   (`Display P3`, без учёта регистра) **и** первичным координатам `rXYZ/gXYZ/bXYZ` в допуске ±0.002 от эталона;
+   эталонный профиль — CC0-файл `media/internal/imaging/icc/display-p3.icc` (источник и лицензия — `icc/LICENSE`).
 7. **Публикация** — транзакция: строка `FOR UPDATE`:
    - `processing` — строки вариантов, `ready`, событие `media.object_ready`;
    - `ready` (другой исполнитель успел раньше; ключи и байты те же) — ничего, задача завершается;
@@ -235,11 +244,15 @@ TakeDownInTx(ctx, tx, objectID uuid.UUID, actor media.Actor, reason string) erro
 вариантов вставляются только на шаге 7 вместе со сменой состояния.
 
 HEIC/HEIF: клиент переводит в JPEG до загрузки; найдётся рабочий декодер без cgo (§13 п. 2) — HEIC добавляется во входы
-`pitch_photo` и закрытых целей (по М12 сервер всё равно хранит WebP).
+`pitch_photo` и закрытых целей (по М12 сервер всё равно хранит WebP). **(План media, 26.11, R7.)** HEIC **не
+принимается**: единственный декодер на чистом Go (`gen2brain/h265`) несёт вопрос патентов HEVC — к юристу; до ответа
+вход HEIC в целях не объявляется.
 
 Память: пик ≈ (пиксели × 4 Б × 2 на ресайз) × исполнители очереди `media`; `WORKER_QUEUE_MEDIA` выбирается так, чтобы
 пик при 40 Мп укладывался в память воркера (критерий §13 п. 2; стенд — встроенный воркер, очередь `media` там пуста
-при `none`).
+при `none`). **(План media, 26.11, спайк Task 1.)** Формула занижает пик в 1,4–2,4 раза (промежуточный буфер ресайза
+`x/image/draw`); замер — пик ≈ 1,8 ГиБ при `WORKER_QUEUE_MEDIA=2` на 40 Мп: воркеру своего сервера — не меньше 2 ГиБ
+памяти.
 
 ### 3.4. Отдача
 
@@ -255,12 +268,21 @@ HEIC/HEIF: клиент переводит в JPEG до загрузки; най
   `media.Service.PrivateURL(ctx, objectID, variant)` → подписанный `GET` на 5 минут на **адрес хранилища** (не домен
   медиа и не CDN, §6.5) с `response-cache-control=private, no-store`. Ответ ручки — `Cache-Control: no-store`.
 - Аудит чтения закрытого — у владельца (`audit.WriteRead`).
+- **(План media, 26.11, ревью Task 11.)** CSP админки (`img-src`) содержит только origin домена медиа
+  (`*_MEDIA_PUBLIC_BASE_URL`), но не адрес хранилища: при `s3` закрытые картинки в админке по подписанной ссылке не
+  покажутся (при `fs` адрес api и домен медиа совпадают). Добавить origin `ADMIN_BLOB_S3_PUBLIC_ENDPOINT` в `img-src` —
+  требование к первому владельцу закрытых картинок в админке (модерация, поддержка), не к плану `media`.
 
 ### 3.6. Ассеты сотрудников (admin-api)
 
 - Операция владельца в admin-api (например «ассет предмета»): `multipart/form-data`, предел 5 МБ (у операции —
   исключение из общего `httpx.MaxBodyBytes` 1 МиБ, m6). Ход: `media.Service.Stage(ctx, purpose, r, declared)` кладёт
   байты во «входящее» без записи в базу → транзакция владельца с `CreateDirectInTx` (I-2). Тот же конвейер §3.3.
+  **(План media, 26.11, R16.)** Исключение из лимита тела — `httpx.LimitBody(n, except ...httpx.BodyLimit)`,
+  `BodyLimit{Method, Prefix, Max}`: совпали метод и префикс пути — свой предел, иначе общий (`chi` запрещает `Use`
+  после маршрутов, поэтому не middleware на маршруте). Пользуются FS-путь `POST /_blob/in` (максимум реестра + 64 КиБ на
+  поля формы) и тестовая прямая загрузка admin-api (5 МиБ); операции владельцев (ассеты `economy`) добавят свой
+  `BodyLimit` в своих планах.
 - Причина не грузить из браузера напрямую: CSP admin-api (`connect-src 'self'`, `httpapi/admin/static.go`) и
   маленькие файлы. Показ ассетов в админке — `img-src` с доменом медиа (правка CSP в плане).
 - «Заменить» фото поля модератором: `Stage` + в транзакции решения `TakeDownInTx` старого и `CreateDirectInTx` нового
@@ -270,7 +292,10 @@ HEIC/HEIF: клиент переводит в JPEG до загрузки; най
   `unsafe_animation`, если:
   - есть выражения (поле `x` у свойств — JavaScript);
   - есть ссылки на внешние файлы: `assets[].u`/`p` не `data:`, `fonts.list[].fPath`/`origin`, аудио-слои (`ty` 6);
-  - текстовые слои, которым нужен шрифт: допускается только текст глифами из `chars` (контуры вшиты);
+  - ~~текстовые слои, которым нужен шрифт: допускается только текст глифами из `chars` (контуры вшиты)~~ —
+    **(план media, 26.11, Task 8)** строже: любой текстовый слой (`ty` 5) — отказ (в схеме LAC 1.0.1 текста нет);
+    `fonts` и `chars` не переносятся, ссылка на файл шрифта (`fonts.list[].fPath`/`origin`) — отказ; текст в анимации —
+    только формами (переводится в контуры при экспорте);
   - `fr ≤ 0`, длительность `(op − ip) / fr` > 10 с, глубина JSON > 64, размер > 1 МБ.
   
   Вшитые картинки (`data:image/png|jpeg|webp`) декодируются и **перекодируются в WebP** тем же конвейером (пределы —
@@ -297,7 +322,7 @@ HEIC/HEIF: клиент переводит в JPEG до загрузки; най
 
 | Что | Срок | Действие |
 | --- | --- | --- |
-| `pending_upload`, окно «завершить» прошло (`expires_at + 1 ч`) | сразу после окна | строки объекта и билета удаляются, входящее — `Delete` |
+| `pending_upload`, окно «завершить» прошло (`expires_at + 1 ч`) | входящее — сразу после окна; строка — через 24 ч от `created_at` | входящее — `Delete`; строки объекта и билета удаляются только у строки старше суток: суточная квота байт считается по строкам, ранняя чистка вернула бы её **(план media, 26.11, Task 6, 10)** |
 | `uploaded`/`processing` дольше 1 ч | — | `media.process` вставляется заново (`UniqueOpts` — дубля нет); `process_attempts` ограничивает круги (§3.3) |
 | `detached`, `taken_down` | 24 ч после `ended_at` | строки удаляются (файлы уже удалил `media.purge`; сверка ключей — `Delete` идемпотентен) |
 | `rejected` | 30 сут после `ended_at` | строки удаляются (владелец успевает показать «не принято» и открепить; ссылка владельца без FK — §2.4) |
@@ -334,6 +359,10 @@ pending_upload ──AttachInTx──▶ uploaded ──▶ processing ──▶
    удалён        DetachInTx / TakeDownInTx из uploaded | processing | ready ──▶ detached | taken_down
 CreateDirectInTx ──▶ uploaded
 ```
+
+**(План media, 26.11, Task 5.)** Кроме диаграммы: `processing → processing` (захват, заставший `processing`, —
+прошлый исполнитель упал, `process_attempts + 1`, §3.3 п. 1) и `processing → uploaded` (откат после обычной ошибки
+шагов 2–7). Из `uploaded` — ещё `rejected`, `detached`, `taken_down`; из `ready` — `detached`, `taken_down`.
 
 Переходы проверяет `domain`; CHECK базы — на допустимые пары «состояние — заполненные поля» (`owner_*` заданы у всех,
 кроме `pending_upload`; `ended_at` — у `detached`/`taken_down`/`rejected`; `reject_code` — только у `rejected`).
@@ -381,21 +410,34 @@ CreateDirectInTx ──▶ uploaded
   responseCacheControl)`;
 - `Purger`: `Purge(ctx, publicURLs)`; `NoopPurger` — без CDN и в dev.
 
+**(План media, 26.11, R3.)** В коде: `blob.Buckets{In, Pub, Priv}` (три `Store`) вместо `Bucket(name)`; `Store` —
+`Put`/`Get`/`Head`/`Delete`/`List`; `PresignUpload(ctx, UploadSpec{Key, ContentType, Bytes, TTL})` → `UploadForm{URL,
+Fields, ExpiresAt, MaxBytes}` — только `POST` (§3.2), файл — последним полем формы `file`; `PresignGet(ctx, key, ttl,
+responseCacheControl)` — только бакет `priv`. Открытое хранилище процесса — `blob.Opened{Buckets, Presigner, Purger,
+Dev, PublicBaseURL, Available}`. CDN не подключён (R10): `NoopPurger` во всех бинарниках, вызов из `media.purge` есть.
+
 ### 6.2. Реализации
 
 - **S3-совместимая** (свой сервер, М15): бакеты `in` (закрытый, жизненный цикл 1 сутки), `pub` (чтение без подписи
   только через домен медиа, §6.5), `priv` (закрытый). Клиент — SDK или совместимая библиотека на чистом Go, последняя
-  стабильная; выбор — в плане.
+  стабильная; выбор — в плане. **(План media, 26.11, R9.)** `aws-sdk-go-v2/service/s3` + `PresignClient`
+  (`PresignPostObject`, `PresignGetObject`), `UsePathStyle=true`, `BaseEndpoint`, `RequestChecksumCalculation` и
+  `ResponseChecksumValidation` — `WhenRequired` (иначе S3-совместимые серверы ломают `Put`/`Delete`); подписанные
+  ссылки — отдельным клиентом с `BaseEndpoint = *_BLOB_S3_PUBLIC_ENDPOINT` (SigV4 включает хост). Пакет `blob/s3`.
 - **FS** (dev, e2e): существующая + бакеты-каталоги + эмуляция подписи (§6.3). Остатки фундамента (коллизии
   meta-путей, имена Windows, `Put` поверх каталога, сегмент > 255, `ENOTDIR` на Linux) закрываются в плане `media`.
 - **Memory** (тесты): + `Head`, бакеты, подпись — как у FS.
 
 ### 6.3. dev и e2e без облака
 
-При `*_BLOB_BACKEND=fs` api отдаёт вне контракта:
-- `PUT /_blob/in/<ключ>?exp=…&max=…&sig=…` — приём файла по «подписанной» ссылке (HMAC `*_BLOB_DEV_SIGN_KEY`, срок,
-  предел; у пути — своё исключение из `MaxBodyBytes`);
+При `*_BLOB_BACKEND=fs` api отдаёт вне контракта (**план media, 26.11, R4**: FS повторяет S3 `POST`, клиенты dev и
+прода идут одной дорогой; пакет `media/httpdev`):
+- ~~`PUT /_blob/in/<ключ>?exp=…&max=…&sig=…`~~ → `POST /_blob/in` — `multipart/form-data` с полями билета (`key`,
+  `Content-Type`, `policy`, `x-wf-signature`) и файлом последним полем `file`; подпись — HMAC-SHA256
+  `*_BLOB_DEV_SIGN_KEY` над политикой (ключ, тип, точный размер, срок); у пути — своё исключение из лимита тела
+  (`httpx.BodyLimit`, §3.6);
 - `GET /_media/pub/<ключ>` — публичные варианты; `GET /_media/priv/<ключ>?exp=…&sig=…` — закрытые.
+Внешний адрес api, на котором живут эти пути, — `*_BLOB_FS_BASE_URL` (R17, §6.4).
 При `s3` и `none` этих путей нет. В прод-образе `fs` не принимается: `backend/Dockerfile` задаёт `WF_BUILD_KIND=prod` (имя `WF_IMAGE` занято
 переменной compose с тегом образа), конфиг с `WF_BUILD_KIND=prod` отвергает `fs` (страж — тест конфига и строка в Dockerfile, как `TestProdBuildWithoutE2ETag`;
 механизм — решение автора спеки, правится в плане).
@@ -413,6 +455,12 @@ CreateDirectInTx ──▶ uploaded
 `*_BLOB_S3_PUBLIC_ENDPOINT` (внешний адрес хранилища для подписанных ссылок — подпись SigV4 включает хост),
 `*_BLOB_S3_REGION`, `*_BLOB_S3_BUCKET_{IN,PUB,PRIV}`, `*_BLOB_S3_ACCESS_KEY`, `*_BLOB_S3_SECRET_KEY`,
 `*_MEDIA_PUBLIC_BASE_URL`. Новый ключ — сразу в конфиг, `.env.example` и `.env`.
+**(План media, 26.11, R17.)** Плюс `*_BLOB_FS_BASE_URL` (только `fs`): внешний адрес api, на котором живут `/_blob` и
+`/_media` (dev — `http://127.0.0.1:8080`); у admin-api и воркера — тот же адрес (admin подписывает ссылки на api).
+`*_MEDIA_PUBLIC_BASE_URL` при `fs` — пусто или ровно `<FS_BASE_URL>/_media/pub/`.
+**(План media, 26.11, Task 4.)** Ключи читает отдельный `config.LoadBlob(prefix, environ)` (как `Mail` у воркера): он же
+проверяет набор ключей режима и отвергает `fs` при `WF_BUILD_KIND=prod`; хранилище открывает фабрика
+`blobopen.Open` — отдельный пакет, а не `blob.Open`: `blob/s3` импортирует `blob`, обратный импорт дал бы цикл.
 
 Права ключей хранилища выведены из сценариев (I-9; удаление — только задачами воркера):
 
@@ -425,11 +473,26 @@ CreateDirectInTx ──▶ uploaded
 | `Put`/`Delete`/`List` в `pub`, `priv` (`List` — сверка `reconcile`) | — | да | — |
 | подпись `GET` в `priv` | да | — | да |
 
+**(План media, 26.11, R2.)** В Garage права — «ключ × бакет × {read, write, owner}»: `write` включает удаление, `read` —
+листинг. Ключи: **api** — `in` {read, write}, `priv` {read}; **admin** — `in` {read, write}, `priv` {read}; **worker** —
+`in`, `pub`, `priv` {read, write}; `owner` — ни у кого. Отступление от таблицы выше (принято): api и admin технически
+могут удалять и листать во `in` и листать `priv` — процессы доверенные, записи и удаления в `pub`/`priv` у них нет,
+клиентам выдаются подписи, а не ключи. Страж — `TestMediaS3KeyRights` (`internal/media`, dev-Garage): каждая операция
+таблицы своим ключом проходит, запрещённое R2 (запись и удаление в `pub`/`priv`, любой доступ к `pub` у api и admin) —
+403; весь путь на трёх ключах — `TestMediaE2ES3`.
+
 ### 6.5. Развёртывание (М15)
 
 - **Свой сервер** (`deploy/server`): сервис S3-совместимого хранилища в compose со своим томом; при первом старте —
   бакеты, правило жизненного цикла `in`, пользователи с политиками по таблице §6.4. Какой сервер (MinIO, Garage,
   SeaweedFS или другой) — §13 п. 1 с проверкой лицензии и поставки образа **(решение автора спеки)**.
+  **(План media, 26.11, R1, Task 12.)** Сервер — **Garage** (`dxflrs/garage:v2.6.0`, AGPLv3, отдельный сервис без
+  изменений; лицензия — вопрос юристу) — сервисы `storage` и `storage-init` в `deploy/server/compose.yaml`; MinIO снят
+  (репозиторий в архиве, образа нет), SeaweedFS — запасной. Бакеты `wf-in`, `wf-pub`, `wf-priv`. Ключи процессов
+  генерирует оператор (`GK` + 24 hex, секрет 64 hex) в `*.env` процессов, `storage-init` импортирует их (`ImportKey`
+  admin API Garage) и приводит права к R2; ключа с правом `owner` нет — жизненный цикл `wf-in` (1 сутки), сайт `wf-pub`
+  и CORS `wf-in` `storage-init` ставит через admin API (`GARAGE_ADMIN_TOKEN` — только у `storage` и `storage-init`).
+  Порядок — `deploy/server/README.md`, «Хранилище файлов». Dev и CI — `bash scripts/s3.sh up` (тот же образ, права R2).
 - **Два внешних адреса** (I-7):
   - **домен медиа** (`*_MEDIA_PUBLIC_BASE_URL`, может стоять за CDN): Caddy пропускает **только `GET`/`HEAD` к бакету
     `pub`**, всё прочее — 404; `nosniff`;
@@ -437,6 +500,12 @@ CreateDirectInTx ──▶ uploaded
     `priv`; Caddy проксирует без переписывания пути (подпись включает хост и путь), листинг и админка сервера
     хранилища наружу не открыты.
   Страж файлов: Caddyfile — `/priv`, `/in`, `/` и не-`GET` на домене медиа → отказ.
+  **(План media, 26.11, R5.)** Публичное чтение — website-эндпоинт Garage (`[s3_web]`, сайт бакета `wf-pub`): Caddy на
+  домене медиа пропускает `GET`/`HEAD` на web-порт Garage с `header_up Host <имя сайта бакета>`; корень, `/wf-in`,
+  `/wf-priv` — 404, прочие методы — 405; `X-Content-Type-Options: nosniff` ставит Caddy (Garage его не ставит),
+  `Cache-Control` и `Content-Type` — метаданные объекта от воркера. Адрес хранилища: `POST`/`OPTIONS` на `/wf-in` и
+  подписанные `GET`/`HEAD` в `/wf-priv/*` — `reverse_proxy` в S3-порт Garage без подмены Host (HTTP-апстрим), прочее —
+  404. Стражи — тесты `deploy/server` и job server CI.
 - **CDN** — только перед доменом медиа, держит копии публичного; закрытое и входящее через него не идут; сброс —
   `Purger`; без CDN — отдача прямо с сервера.
 - **Бэкапы — свои:** том хранилища копируется по расписанию; после восстановления — сверка «строка без файла / файл
@@ -505,6 +574,13 @@ CreateDirectInTx ──▶ uploaded
 в `archtest.IntxPairs` и §4.4 спеки бэкенда. Реестр целей заполняют владельцы в `cmd/*`; набор одинаков у трёх
 бинарников (страж).
 
+**(План media, 26.11, R11, R12.)** Пары `{владелец, media}` в `archtest.IntxPairs` добавляют **планы владельцев**
+вместе со своим кодом (первый — `economy`); после плана `media` пар нет. Тестовый владелец `e2e_owner` живёт в `cmd/*`
+(не модуль) — пара ему не нужна. «Поддержки» в `archtest.Layers` нет — её место решает её спека. Реестр — пакет
+`backend/cmd/internal/mediapurposes`: общий список прода (пока пуст), под тегом `wf_e2e` — цели `e2e_image`,
+`e2e_image_private`; `cmd/api`, `cmd/admin-api` и воркер (`workerhost`) зовут только `mediapurposes.Registry()`;
+`media.NewRegistry` вне этого пакета, `mediatest` и тестов — `archtest.TestMediaPurposesOnlyFromRegistry`.
+
 ## 12. Тесты и стражи (каждый — подсадкой бага)
 
 - Тип по содержимому: заявлен JPEG, внутри PNG/HTML/полиглот/анимированный WebP — отказ или перекодирование; заявленный
@@ -513,7 +589,10 @@ CreateDirectInTx ──▶ uploaded
   попадает в вариант байт в байт: у P3 — эталонный профиль сборки, у прочих — нет профиля.
 - Бомба: заголовок 30000×30000 → `too_many_pixels` без выделения памяти под пиксели.
 - Размер: тело больше предела → `too_large` (FS-эмуляция и S3-совместимый тестовый сервер); перезаливка по живому
-  билету между `HEAD` и `Get` не обходит предел.
+  билету между `HEAD` и `Get` не обходит предел. **(План media, 26.11.)** FS — `TestProcessTooLargeAfterReupload`
+  (`media/jobs`), `TestDevUploadForm` (`media/httpdev`); S3 — `TestS3UploadExactSize` (`blob/s3`: N ± 1 байт, чужой
+  тип, срок), `TestMediaE2ES3/size` (`internal/media`: ровно предел — `ready`; перезаливка по живому билету телом
+  больше — отказ хранилища; обход политики ключом с записью во входящее — `too_large`).
 - Права (I-5): билет на владельца A, прикрепление к B → `object_unavailable`; чужой загрузивший → то же.
 - Транзакции (I-2): ручка с `Idempotency-Key` и `CreateDirectInTx`/`TakeDownInTx` — 2xx, одна закоммиченная tx; откат
   транзакции владельца не оставляет строк.
@@ -521,6 +600,12 @@ CreateDirectInTx ──▶ uploaded
   между записью вариантов и публикацией → в хранилище нет `<id>/`, `Purger` вызван; второй исполнитель на `ready`
   не трогает файлы; задача в `retryable` + перезапуск чисткой → дубля нет; три падения процесса →
   `rejected(processing_failed)`, а три обычные ошибки хранилища — нет; «прикрепление ∥ чистка» — ровно один исход.
+  **(План media, 26.11, ревью Task 10, m2.)** Чистка строку `pending_upload` моложе суток оставляет и удаляет только
+  входящее (§3.9), поэтому «прикрепление ∥ чистка» всегда кончается прикреплением; при расхождении часов api и воркера
+  (у api окно ещё живо, у чистки прошло) прикрепление после удаления входящего доводит объект до
+  `rejected(processing_failed)` (входящего нет — обычная ошибка до последней попытки). На одних часах (свой сервер,
+  стенд) недостижимо. Страж — `TestAttachVsExpiredCleanup` (`media/intx`: настоящий `media.cleanup` на смещённых часах,
+  гонка и порядок «чистка, затем прикрепление»).
 - Удаление аккаунта (I-6): обнуление `uploaded_by_user` под ролью `worker` проходит CHECK.
 - Lottie (I-8): выражение, внешний `fPath`, аудио-слой, `fr = 0`, `data:image/svg+xml` → `unsafe_animation`;
   `data:image/jpeg` с GPS → в выходе WebP без EXIF; неизвестные поля выброшены.
@@ -528,6 +613,9 @@ CreateDirectInTx ──▶ uploaded
   медиа режет `/priv`, `/in`, не-`GET` (I-7).
 - Режим `none` (I-1): сборка со встроенным воркером и тестовой целью стартует, «начать» → 503.
 - Ключи хранилища (I-9): тест на S3-совместимом сервере с политиками §6.4 — каждый сценарий проходит своим ключом.
+  **(План media, 26.11, R13.)** `TestMediaS3KeyRights` и `TestMediaE2ES3` (`internal/media`), `TestS3KeyRights`
+  (`blob/s3`) на dev-Garage: `bash scripts/s3.sh up` и `eval "$(bash scripts/s3.sh env)"` (переменные
+  `WF_TEST_S3_*`); без них тесты пропускаются, при `CI=true` — падают; в CI — шаг backend-job «Garage для тестов».
 - dev-пути `/_blob`, `/_media` отсутствуют при `s3`/`none`; `fs` в прод-образе не принимается.
 - Набор целей одинаков у трёх бинарников; `media.process`/`media.purge` — в списках видов и заглушках.
 
@@ -546,11 +634,17 @@ CreateDirectInTx ──▶ uploaded
 
 1. **Сервер хранилища** (М15): лицензия и поставка образа; подписанный `POST` с `content-length-range` или `PUT` с
    `Content-Length` в `SignedHeaders` (через выбранный SDK); правила жизненного цикла; политики по пользователям;
-   работа за Caddy с внешним адресом подписи; сброс кэша выбранного CDN по адресу.
+   работа за Caddy с внешним адресом подписи; сброс кэша выбранного CDN по адресу. **Итог (план media, 26.11, R1–R5,
+   R9):** Garage 2.6.0 (AGPLv3 — к юристу); подписанный `POST` с `content-length-range` соблюдается, `PUT` не
+   используется; lifecycle и CORS — admin API Garage; права ключей — «ключ × бакет × {read, write, owner}» (R2);
+   подпись за Caddy — отдельный клиент на внешнем адресе, Caddy Host не меняет; CDN не подключён (R10), `Purger` — при
+   подключении.
 2. **Библиотеки на чистом Go** (без cgo; допускается libwebp/libheif в WASM): кодирование WebP с потерями и с
    прозрачностью и запись ICC-чанка (эталонный P3); распознавание sRGB/P3 по профилю; декодирование HEIC; ресайз с приемлемым качеством; память и время на 40 Мп;
    `WORKER_QUEUE_MEDIA` по пиковой памяти. Нет надёжного кодировщика WebP — запасной вариант: JPEG для фото и PNG для
-   прозрачного (правка §2.2, контракт не меняется).
+   прозрачного (правка §2.2, контракт не меняется). **Итог (план media, 26.11, R6–R8, Task 1):** WebP —
+   `deepteams/webp` (запасной — `gen2brain/vpx` + чанк `ICCP`), ресайз и декодер WebP — `golang.org/x/image`; sRGB/P3 —
+   свой разбор ICC и эталонный P3 (§3.3 п. 6); HEIC не принимается до ответа юриста (R7); память — §3.3 «Память».
 3. **Клиент Flutter** (с нативщиком): HEIC → JPEG до загрузки; загрузка по `PUT`/`POST`-билету; пакет Lottie играет
    наши ассеты; lottie-web в админке без `unsafe-eval`.
 
@@ -560,6 +654,8 @@ CreateDirectInTx ──▶ uploaded
 - `docs/02-архитектура.md` — домен медиа и адрес хранилища.
 - `.claude/rules/backend-media.md` — цели, `intx`, конвейер, стражи; `backend-platform.md` — `blob` и `none`.
 - `docs/deploy-dev.md` — стенд `none`; `deploy/server/README.md` — хранилище, ключи, Caddy, бэкап, сверка, тревога диска.
+
+Сделано планом `media` (Task 12, 13; 26–27.11.2026).
 
 ## 15. Открытые вопросы
 

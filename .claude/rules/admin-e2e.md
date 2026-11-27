@@ -35,6 +35,13 @@ paths:
   `ADMIN_*`/`WORKER_*`/`MIGRATOR_*` и любая `*_DATABASE_URL` вне `WF_E2E_*` (`cleanEnv`: `./task ci` грузит
   `backend/.env` целиком — 17.11 dev-строка мигратора доходила до api; новая роль базы не утечёт молча). Клиент — `e2e/api.ts` (`PublicApi` на `APIRequestContext`: `device` android в теле, Bearer, ключ
   идемпотентности на мутациях с замком, `403 humancheck.required` — решает PoW и повторяет, политику не ослабляет).
+- Файлы (план media, Task 11): **все три** бинарника — `admin-api`, `api` и воркер — собираются с тегом `wf_e2e`
+  (тестовые цели `e2e_image`, `e2e_image_private` из `cmd/internal/mediapurposes/e2e.go` одинаковы у трёх, ручки
+  `/_e2e/media/*`); хранилище прогона — `fs` у трёх (`blobEnv` в `e2e/env.ts`: общий корень `.tools/e2e/blob`, один
+  одноразовый ключ подписи, `*_BLOB_FS_BASE_URL` = адрес публичного api 18184). dev-пути `POST /_blob/in` и
+  `GET /_media/{pub,priv}/…` отдаёт api прогона; CSP статики `prod` получает origin api в `img-src`. Сценария загрузки в
+  Playwright пока нет (тестовые ручки проверяют `TestMediaE2E`, `TestMediaE2EAdmin` в `backend:test`); живой прогон
+  ловит старт воркера с тегом и хранилищем (`media_storage=true` в строке «воркер запущен»).
 - Лимиты admin-api в прогоне — умолчания (`ADMIN_RATE_LIMITS` пустой у всех пар, страж `env.test.ts`): обход разделов
   `prod.spec` — живой страж `ratelimit.AdminRules` и класса фоновых `staff_background` (`backend-http.md`); расширенный
   лимит прогона спрятал бы их поломку (итоговое ревью I-4, I1).

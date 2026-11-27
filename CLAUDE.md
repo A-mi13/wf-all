@@ -16,10 +16,10 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
 8. Версии — последние стабильные; отклонение только с записью в исключения `docs/versions.md`.
 
 ## File structure
-- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc,geofixture}` (`permdoc` — кодогенерация таблицы прав, в образ не входит; `geofixture` — HTTPS-фикстура GeoNames для живого e2e, тоже вне образа), `cmd/internal/workerhost` (код воркера: отдельный `worker` и встроенный режим `api` — только dev-стенд), `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
+- `backend/` — Go-монолит: `cmd/{api,admin-api,worker,migrate,permdoc,geofixture}` (`permdoc` — кодогенерация таблицы прав, в образ не входит; `geofixture` — HTTPS-фикстура GeoNames для живого e2e, тоже вне образа), `cmd/internal/workerhost` (код воркера: отдельный `worker` и встроенный режим `api` — только dev-стенд), `cmd/internal/mediapurposes` (реестр целей файлов, одинаковый у трёх бинарников), `internal/media` (файлы: билеты загрузки, обработка в WebP, отдача, чистка; хранилище — `internal/platform/blob`: fs, S3, `none`), `internal/platform/*` (общее), `internal/httpapi/{public,admin}`, `migrations/`
 - `contracts/` — OpenAPI: исходники `openapi/{public,admin}/` по модулям, бандлы `openapi/{public,admin}.yaml` (сгенерированы) — источник истины; `tokens/tokens.json`
 - `apps/web`, `apps/admin` — фронты; `packages/` — `@wf/config`, `@wf/tokens`, `@wf/i18n`, `@wf/icons`
-- `deploy/dev/` — роли и расширения БД; dev-стенд (Neon + Render, фон — встроенный в `wf-api`): `backend/Dockerfile`, `render.yaml`, `docs/deploy-dev.md`; `deploy/server/` — свой сервер (`docker compose`: migrate, api, admin-api, worker, Caddy; `README.md`); `scripts/` — `bootstrap.sh`, `pg.sh`, `doctor.sh`, `check-format.sh` (pre-commit)
+- `deploy/dev/` — роли и расширения БД; dev-стенд (Neon + Render, фон — встроенный в `wf-api`): `backend/Dockerfile`, `render.yaml`, `docs/deploy-dev.md`; `deploy/server/` — свой сервер (`docker compose`: migrate, api, admin-api, worker, хранилище Garage, Caddy; `README.md`); `scripts/` — `bootstrap.sh`, `pg.sh`, `s3.sh` (dev-хранилище Garage в Docker), `doctor.sh`, `check-format.sh` (pre-commit)
 - `design/` — бриф, `screens/*.dc.html`, `tools/extract-export.mjs`; `product/` — «почему так»
 - Доки: `docs/01-домен-и-правила.md`, `docs/02-архитектура.md`, `docs/04-принципы-архитектуры.md`,
   `docs/05-ролевая-модель.md` (роли игроков и сотрудников, матрица прав — генерируется `./task gen`)
@@ -98,5 +98,6 @@ Go 1.27 (chi, pgx + sqlc, goose, River) · PostgreSQL 18 + PostGIS · Next.js 16
   -f compose.ci.yaml config` / `up -d --wait` / `down -v` (встроенный режим — плюс `-f compose.ci-embed.yaml`); проект —
   только свой `-p wf-srv`; рабочие `*.env` и `root.crt` после проверки удалить. Быстрый страж файлов без Docker —
   `TestServerComposeNoEmbeddedWorker`, `TestServerEnvExamplesKnownKeys` (`config`).
+- Интеграционные тесты S3 (`blob/s3`, `internal/media`: `TestMediaE2ES3`, `TestMediaS3KeyRights`) — на dev-Garage в Docker: `bash scripts/s3.sh up` (127.0.0.1:13900, бакеты и ключи процессов с правами плана media R2; повтор безопасен), затем `eval "$(bash scripts/s3.sh env)"` в той же оболочке, что `go test`; без `WF_TEST_S3_*` тесты пропускаются (`./task backend:test` локально — тоже), при `CI=true` — падают; `bash scripts/s3.sh down` — удалить контейнер и том.
 - Локальный Postgres 18 + PostGIS без Docker: `bash scripts/pg.sh install|init|start|stop|status|psql|port` → 127.0.0.1:`WF_PG_PORT` из `deploy/dev/.env` (по умолчанию 15432, `.tools/pg`).
 - `node --test` — только с глобом в кавычках: `node --test "dir/*.test.mjs"` (каталог на этой Node не сканируется).

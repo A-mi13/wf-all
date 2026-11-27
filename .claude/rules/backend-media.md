@@ -192,3 +192,20 @@ paths:
   `TestMediaE2EAdmin` (`cmd/admin-api`); в `backend:test` — команда `go test -tags wf_e2e -run …` по `cmd/api`,
   `cmd/admin-api`, `cmd/worker`, `cmd/internal/mediapurposes` (страж `TestE2ECaptainChecksTestInCI`); воркер живого e2e
   собирается с тегом (`scripts/e2e-admin.sh`).
+
+## Живой путь на S3 и сверка (Task 13)
+
+- **Интеграция с dev-Garage** (R13) — `internal/media/e2e_s3_test.go`: `TestMediaE2ES3` — весь путь `TestMediaE2E` на
+  трёх ключах процессов по R2 через `blobopen.Open` (api — `NewUpload`, `ConfirmUpload`/HEAD, `PrivateURL`; admin —
+  `Stage` + `CreateDirectInTx`, `PrivateURL`; worker — `media.process`); публичное читается сайтом бакета `wf-pub`
+  (`http://wf-pub.web.localhost:<WF_S3_WEB_PORT>/`, соединение — на 127.0.0.1 с исходным Host), «Размер»: ровно
+  `MaxBytes` — `ready`, перезаливка по живому билету телом больше — отказ хранилища, обход политики ключом с записью во
+  входящее — `too_large`. `TestMediaS3KeyRights` — операции таблицы §6.4 своим ключом проходят, запрещённое R2 (запись
+  и удаление в `pub`/`priv`, любой доступ к `pub` у api и admin) — 403 (`smithyhttp.ResponseError`, у HEAD тела нет).
+  Расширенные права R2 (api и admin удаляют и листают во `in`, листают `priv`) тест не проверяет ни на успех, ни на
+  отказ. Запуск — `bash scripts/s3.sh up` + `eval "$(bash scripts/s3.sh env)"`, без переменных — пропуск, `CI=true` —
+  падение.
+- **Прикрепление ∥ чистка** — `TestAttachVsExpiredCleanup` (`media/intx`) гоняет настоящий `CleanupWorker` на часах
+  воркера, смещённых вперёд (у api окно ещё живо, у чистки прошло): строка моложе суток остаётся, прикрепление
+  проходит всегда; порядок «чистка, затем прикрепление» — объект без входящего, последняя попытка `media.process` —
+  `rejected(processing_failed)` (спека §12 «Гонки»). На одних часах недостижимо.

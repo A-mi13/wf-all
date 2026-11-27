@@ -20,7 +20,7 @@ paths:
   `staff/jobs.Cleaner.Tick`). Операция с `x-idempotency: no-store` (ответ с секретами) хранит только хэш и статус: повтор —
   `409 idempotency.replay_unavailable`; `Cache-Control: no-store` ставит хендлер.
 - События — только id и непрофильные значения, без персональных данных; у агрегата `version`, подписчик в режиме `LatestState` отбрасывает устаревшие версии (§6.5).
-- Подписчик события — `events.Subscription` с явным `Delivery` (`EveryEvent` | `LatestState`), регистрируется в `Subscriptions()` в `cmd/internal/workerhost/registry.go`; обработчик идемпотентен по `event_inbox` сам собой, пишет только в своей транзакции `tx`. Доставка на подписку, которой нет в реестре этого воркера (воркер другого релиза при выкатке), — обычная ошибка с повтором, а затем «мёртвая» задача (видна, переигрывается), не отмена; отменяется только задача на событие, уже удалённое чисткой. Переигровка — `worker events replay --type T --subscriber S --since RFC3339`.
+- Подписчик события — `events.Subscription` с явным `Delivery` (`EveryEvent` | `LatestState`), регистрируется в `Subscriptions(log)` в `cmd/internal/workerhost/registry.go` (журнал — подписчикам, которым он нужен, например `media.uploaders`); обработчик идемпотентен по `event_inbox` сам собой, пишет только в своей транзакции `tx`. Доставка на подписку, которой нет в реестре этого воркера (воркер другого релиза при выкатке), — обычная ошибка с повтором, а затем «мёртвая» задача (видна, переигрывается), не отмена; отменяется только задача на событие, уже удалённое чисткой. Переигровка — `worker events replay --type T --subscriber S --since RFC3339`.
   Импорт городов оператором — `worker geo import --country RU`: синхронно в процессе, без задачи River, под ролью `worker`; время журнала — часы машины оператора со сдвигом к `now()` базы (`geojobs.OperatorClock`), не `clock.System` ноутбука; задача `geo.import` ставится только через `jobs.NewImportArgs`.
 - Задача River объявляет очередь из `platform/queue` (`events`, `lifecycle`, `notify`, `mail`, `stats`, `media`, `maintenance`, `import` — импорт GeoNames, до 30 мин: не держит слоты `maintenance`; `WORKER_GEO_IMPORT_ENABLED=false` — очереди нет в карте River, вид зарегистрирован, задача ждёт) в `InsertOpts`; очереди `default` нет. Аргументы — с полем версии `V`, без ПД, уникальность — `UniqueOpts`. River в воркере работает на неотменяемом ctx: по SIGTERM сначала останавливается relay, затем `queue.Stop` — мягкая остановка (15 с, `WorkerRiverSoftStop`) и, не уложившись, `StopAndCancel` (5 с): relay 5 + 15 + 5 = 25 с ≤ `StopBudget` между SIGTERM и SIGKILL. `WORKER_RELAY_BATCH` ≥ 1 и `WORKER_RELAY_POLL` > 0 проверяются на старте воркера.
 - Периодика платформы — только `platform/periodic.Jobs()` (новый срез и новые задачи на вызов): её подключают и воркер, и
@@ -253,3 +253,30 @@ paths:
 - **Чистка** — тикер admin-api (`staff/jobs.Cleaner.Tick`, раз в час): `ExpireDue` (порции `SKIP LOCKED`, своя транзакция на порцию; у истёкшего
   `decided_at = expires_at` — и у тика, и у клика approve/reject/cancel, как в списках) и
   `PurgeDecided(ctx, approvals.DecidedRetention)` (решённые старше 180 суток; `pending` не трогает).
+
+## Хранилище файлов (`platform/blob`, спека media §6, план media 26.11)
+
+- **Модель.** `blob.Buckets{In, Pub, Priv}` — три `Store` (`Put`/`Get`/`Head`/`Delete`/`List`; `Delete` отсутствующего
+  — не ошибка, `Get`/`Head` нет ключа — `blob.ErrNotFound`); ключ — `blob.ValidKey` (нижний регистр, цифры, `/._-`, до
+  400 символов: предел LMDB у Garage), префикс `List` — `ValidPrefix`. `Presigner`: `PresignUpload(UploadSpec{Key,
+  ContentType, Bytes, TTL})` → `UploadForm{URL, Fields, ExpiresAt, MaxBytes}` — только подписанный `POST` с политикой
+  точного размера и типа, файл последним полем `file` (R3; `PUT` нет ни в S3, ни в FS); `PresignGet(key, ttl,
+  responseCacheControl)` — только бакет `priv`. `Purger` — сброс CDN, пока везде `blob.NoopPurger` (R10).
+- **Открытие.** Ключи `*_BLOB_*` и `*_MEDIA_PUBLIC_BASE_URL` процесса — `config.LoadBlob(prefix, environ)` (проверка
+  набора ключей режима, `fs` при `WF_BUILD_KIND=prod` — ошибка старта с именем ключа); хранилище — `blobopen.Open(ctx,
+  config.Blob, clock)` → `blob.Opened{Buckets, Presigner, Purger, Dev, PublicBaseURL, Available}`, в сеть не ходит.
+  `blobopen` — отдельный пакет, а не `blob.Open`: `blob/s3` импортирует `blob`, обратный импорт — цикл. Режимы:
+  `fs` (dev, e2e: `NewFSBuckets(root)` с каталогами `in|pub|priv` и `DevSigner` — HMAC `*_BLOB_DEV_SIGN_KEY`, пути
+  `/_blob/in`, `/_media/*` на `*_BLOB_FS_BASE_URL`, их отдаёт `media/httpdev`), `s3` (`blob/s3`: `aws-sdk-go-v2`,
+  `UsePathStyle`, контрольные суммы `WhenRequired`, подписи — отдельным клиентом на `*_BLOB_S3_PUBLIC_ENDPOINT`: SigV4
+  включает хост; R9), `none` (`Available=false`, бакетов нет — модуль отвечает `503 media.unavailable`, задачи файлов
+  отменяются). Memory (`NewMemoryBuckets`) — только тесты.
+- **Ключи процессов S3** (R2): api и admin — `in` {read, write}, `priv` {read}; worker — все три {read, write}; `owner` —
+  ни у кого. Писать и удалять в `pub`/`priv` может только воркер. Dev и CI — `bash scripts/s3.sh up` (Garage, те же
+  права) и `eval "$(bash scripts/s3.sh env)"`; интеграционные тесты берут `blobtest.S3Env(t)` (нет `WF_TEST_S3_ENDPOINT`
+  — пропуск, при `CI=true` — падение, R13). Контракт `Store` — `blobtest.Contract` для всех реализаций.
+- **Лимит тела** (R16): `httpx.LimitBody(n, except ...httpx.BodyLimit)`, `BodyLimit{Method, Prefix, Max}` — совпали метод
+  и префикс пути (до «/» или конца) — свой предел, иначе `n`; `chi` запрещает `Use` после маршрутов, поэтому исключения
+  передаются списком в общий конвейер, а не middleware маршрута. Сейчас: FS `POST /_blob/in` (максимум реестра целей +
+  64 КиБ) и тестовая прямая загрузка admin-api (5 МиБ, `E2EBodyLimits`); операции владельцев (ассеты `economy`) добавят
+  свой `BodyLimit` в своих планах.
