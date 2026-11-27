@@ -399,7 +399,7 @@ describe('окружение e2e', () => {
     for (const [build, tags] of [
       ['./cmd/worker', '-tags wf_e2e '],
       ['./cmd/geofixture', ''],
-    ]) {
+    ] as const) {
       const at = sh.indexOf(`go build ${tags}-o "../.tools/e2e/${build.slice(6)}$exe" ${build}`);
       expect(at, build).toBeGreaterThan(-1);
       expect(run).toBeGreaterThan(at);
