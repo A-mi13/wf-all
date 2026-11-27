@@ -3182,6 +3182,162 @@ export interface components {
              */
             phone?: string;
         };
+        /** @description Заявка «начать загрузку» (спека media §3.1): тип и точный размер файла. Это только ранний отказ — итог решает сервер по байтам файла: заявленный тип не из accepted_types цели — 422 media.unsupported_type, размер больше предела цели — 422 media.too_large. Размер подписывается в билете точно: файл другого размера хранилище отвергнет */
+        UploadRequest: {
+            /**
+             * @description MIME-тип файла (image/jpeg, image/png, image/webp; у анимаций — application/json)
+             * @example image/jpeg
+             */
+            content_type: string;
+            /**
+             * Format: int64
+             * @description Точный размер файла в байтах — ровно столько хранилище примет по билету
+             * @example 2457600
+             */
+            bytes: number;
+        };
+        /** @description Билет загрузки (спека media §3.1, §3.2): клиент отправляет файл прямо в хранилище по url, затем вызывает «завершить» владельца с upload_id. Ссылка и поля — секрет на срок билета (15 минут): не логировать и не сохранять. Сейчас метод всегда POST — форма multipart/form-data: сначала все поля fields как есть, файл — последним полем с именем file, Content-Type формы ставит клиент; ответ хранилища 204 — файл принят, 403 — подпись, тип, размер или срок не совпали */
+        UploadTicket: {
+            /**
+             * Format: uuid
+             * @description Id загрузки — его передают в «завершить» владельца; он же — id будущего изображения
+             * @example 019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42
+             */
+            upload_id: string;
+            /**
+             * @description HTTP-метод отправки файла в хранилище. Сервер выдаёт POST (форма с полями fields и файлом последним); PUT оставлен на будущее — тогда файл уходит телом запроса с заголовками headers
+             * @enum {string}
+             */
+            method: "PUT" | "POST";
+            /**
+             * Format: uri
+             * @description Адрес хранилища для отправки файла (не адрес API; в dev — /_blob/in на api)
+             * @example https://storage.wherefootball.example/wf-in
+             */
+            url: string;
+            /**
+             * @description Обязательные заголовки запроса к хранилищу (у POST — пусто, Content-Type формы ставит клиент)
+             * @example {}
+             */
+            headers: {
+                [key: string]: string;
+            };
+            /**
+             * @description Поля формы POST — отправить все как есть, в любом порядке, но до поля file; у PUT — пусто
+             * @example {
+             *       "key": "019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42",
+             *       "Content-Type": "image/jpeg",
+             *       "policy": "eyJleHBpcmF0aW9uIjoiMjAyNi0xMS0yN1QxMjoxNTowMFoifQ==",
+             *       "x-amz-signature": "4f1c2a9b7e"
+             *     }
+             */
+            fields: {
+                [key: string]: string;
+            };
+            /**
+             * Format: date-time
+             * @description До этого момента (UTC) хранилище принимает файл по билету
+             * @example 2026-11-27T12:15:00Z
+             */
+            expires_at: string;
+            /**
+             * Format: date-time
+             * @description До этого момента (UTC, expires_at + 1 ч) владелец принимает «завершить» — окно медленной загрузки, начатой до expires_at; позже — 410 media.upload_expired
+             * @example 2026-11-27T13:15:00Z
+             */
+            complete_before: string;
+            /**
+             * Format: int64
+             * @description Размер файла, который примет хранилище, — ровно заявленный bytes
+             * @example 2457600
+             */
+            max_bytes: number;
+            /**
+             * @description MIME-типы, которые принимает цель загрузки
+             * @example [
+             *       "image/jpeg",
+             *       "image/png",
+             *       "image/webp"
+             *     ]
+             */
+            accepted_types: string[];
+        };
+        /** @description Изображение в ответе владельца (спека media §3.4, §7.1). Варианты есть только у ready; у processing и rejected — пустой объект. Готовность клиент видит при следующем чтении ресурса владельца. У закрытого изображения адресов в вариантах нет — ссылку на 5 минут выдаёт ручка показа владельца (PrivateMediaLink) */
+        MediaImage: {
+            /**
+             * Format: uuid
+             * @description Id изображения (= upload_id билета)
+             * @example 019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42
+             */
+            id: string;
+            /**
+             * @description processing — файл принят и обрабатывается; ready — варианты готовы; rejected — файл отклонён, причина — reject_code
+             * @enum {string}
+             */
+            state: "processing" | "ready" | "rejected";
+            /**
+             * @description Причина отклонения — только у rejected (иначе null): too_large — больше предела, unsupported_type — формат не из входов цели, too_many_pixels — слишком большое разрешение, corrupt — файл не читается, content_rejected — не прошёл проверку содержимого, unsafe_animation — анимация с запрещёнными элементами, processing_failed — обработка не удалась
+             * @enum {string|null}
+             */
+            reject_code: "too_large" | "unsupported_type" | "too_many_pixels" | "corrupt" | "content_rejected" | "unsafe_animation" | "processing_failed" | null;
+            /**
+             * @description Варианты по имени (thumb, full, …): url — адрес варианта (только у публичного изображения; у закрытого поля нет), width и height — размеры в пикселях, content_type — тип файла варианта (image/webp, у анимации — application/json)
+             * @example {
+             *       "thumb": {
+             *         "url": "https://media.wherefootball.example/019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42/thumb.webp",
+             *         "width": 256,
+             *         "height": 192,
+             *         "content_type": "image/webp"
+             *       },
+             *       "full": {
+             *         "url": "https://media.wherefootball.example/019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42/full.webp",
+             *         "width": 2048,
+             *         "height": 1536,
+             *         "content_type": "image/webp"
+             *       }
+             *     }
+             */
+            variants: {
+                [key: string]: {
+                    /**
+                     * Format: uri
+                     * @description Публичный адрес варианта; у закрытого изображения поля нет
+                     * @example https://media.wherefootball.example/019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42/thumb.webp
+                     */
+                    url?: string;
+                    /**
+                     * @description Ширина варианта в пикселях
+                     * @example 256
+                     */
+                    width: number;
+                    /**
+                     * @description Высота варианта в пикселях
+                     * @example 192
+                     */
+                    height: number;
+                    /**
+                     * @description MIME-тип файла варианта
+                     * @example image/webp
+                     */
+                    content_type: string;
+                };
+            };
+        };
+        /** @description Подписанная ссылка на вариант закрытого изображения (спека media §3.5): действует 5 минут, ведёт на адрес хранилища; ответ по ней не кэшируется. Ответ ручки показа — Cache-Control no-store */
+        PrivateMediaLink: {
+            /**
+             * Format: uri
+             * @description Подписанная ссылка на файл варианта — секрет на срок ссылки, не сохранять
+             * @example https://storage.wherefootball.example/wf-priv/019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42/full.webp?X-Amz-Expires=300
+             */
+            url: string;
+            /**
+             * Format: date-time
+             * @description Момент (UTC), после которого ссылка не действует — запросить новую
+             * @example 2026-11-27T12:05:00Z
+             */
+            expires_at: string;
+        };
     };
     responses: {
         /** @description Ошибка в формате RFC 9457 */

@@ -136,6 +136,11 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 	if cmd != nil {
 		return runCommand(ctx, *cmd, cfg, ring, cat, out, logOut)
 	}
+	// хранилище и цели media — только серверу и до базы: fs в прод-образе, негодные ключи или цель — отказ старта
+	blobs, purposes, err := openBlob(ctx, environ, clock.System)
+	if err != nil {
+		return err
+	}
 	// журнал предупреждений старта — тот же формат и вывод, что у сервиса (RunService создаёт свой позже)
 	startLog := logx.New(logOut, cfg.Log).With("service", "admin-api")
 	// SMTP — только серверу (письма шлёт фон): битый адрес — отказ старта до базы
@@ -159,6 +164,11 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 			if err != nil {
 				return server.Service{}, err
 			}
+			mk, err := newMedia(log, pool, blobs, purposes, a.deps.Clock, a.deps.Limiter, a.deps.River)
+			if err != nil {
+				return server.Service{}, err
+			}
+			e2e, e2eLimits := mediaE2E(mk, a, admin.CookieName(cfg.CookieSecure), pool, log)
 			h, err := admin.NewHandler(log, admin.Options{
 				Docs:           cfg.HTTP.DocsEnabled,
 				RequestTimeout: cfg.HTTP.RequestTimeout,
@@ -181,6 +191,10 @@ func run(ctx context.Context, args, environ []string, out, logOut io.Writer) err
 				Clock:    a.deps.Clock,
 				// побудка wf-api (dev-стенд): команды оператора её не получают
 				Wake: admin.NewWaker(cfg.WakeAPIURL, nil, log),
+				// домен медиа — в img-src CSP статики (none — без него); тестовые ручки — только сборка wf_e2e
+				MediaBaseURL:  mk.blob.PublicBaseURL,
+				E2E:           e2e,
+				E2EBodyLimits: e2eLimits,
 			})
 			if err != nil {
 				return server.Service{}, err

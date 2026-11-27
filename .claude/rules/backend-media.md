@@ -156,3 +156,39 @@ paths:
   `Check()` (`cmd/internal/mediapurposes`: прод — пусто и `CheckOff`, тег `wf_e2e` — `mediatest.E2EPurposes` и
   `MarkerCheck`); `media.NewRegistry` вне этого пакета, `mediatest` и тестов — `archtest.TestMediaPurposesOnlyFromRegistry`.
   Встроенный режим с `none` — `TestEmbeddedWorkerWithNone`.
+
+## Контракт, dev-пути, сборка api и admin-api (Task 11)
+
+- **Схемы** (§7.1) — `contracts/openapi/{public,admin}/media/schemas.yaml`: `UploadRequest`, `UploadTicket` (`method` —
+  открытый enum `PUT|POST`, сервер выдаёт `POST`), `MediaImage` (`state` — `processing|ready|rejected`, `reject_code` —
+  `null` кроме `rejected`, `variants` — объект по имени, у закрытого без `url`), `PrivateMediaLink`; в admin — ещё
+  `MediaDirectUpload` (multipart, файл последним, 5 МиБ). Копии в public и admin равны (`contracts.test.mjs`). Своих
+  операций нет — ссылаются операции владельцев; `pending_upload`/`detached`/`taken_down` владелец показывает как
+  «изображения нет».
+- **dev-пути fs** (§6.3, R4) — `media/httpdev`: `New(blob.Opened, реестр, журнал)` — `nil` при `s3`/`none`
+  (`TestDevPathsOnlyInFS`), `cmd/api` передаёт `public.Options.Media` только не-nil. `POST /_blob/in` — форма как S3
+  POST: поля до файла, файл последним полем `file` (иначе 400), буфер файла ≤ максимум реестра + 1, `VerifyUpload`
+  (подпись, ключ, тип из поля `Content-Type` формы, точный размер, срок) — до `Put`, отказ — 403 без записи; предел
+  тела — `UploadLimit()` = максимум реестра + 64 КиБ (`httpx.BodyLimit`, R16); без сессии и CSRF, CORS — только
+  loopback-origin dev-фронтов. `GET /_media/pub/<id>/<вариант>` — тип из meta, `nosniff`, `public, max-age=86400`;
+  `GET /_media/priv/…?exp&sig` — `VerifyGet` (нет, чужая, истекла — 403), `private, no-store`; ключ без «/» (входящее)
+  и обход каталога — 404. Стражи — `TestDevUploadForm`, `TestDevMediaHeaders`, `TestDevUploadCORS`.
+- **Сборка** (`cmd/api/media.go`, `cmd/admin-api/media.go`): `openBlob` — `config.LoadBlob("API_"|"ADMIN_")` (fs в
+  прод-образе — отказ до базы, `TestRunRejectsFSInProdImage` у обоих), `mediapurposes.Registry()`, `blobopen.Open`;
+  `newMedia` — `media.New` + `intx.New` с `PublicBaseURL` из того же `blob.Opened` (клиент River только для вставки:
+  у api — свой, у admin-api — `staff.Deps.River`). admin-api читает хранилище только сервером (команды оператора — нет)
+  и отдаёт `PublicBaseURL` в `admin.Options.MediaBaseURL` (origin — в `img-src` CSP статики, `none` — без него).
+- **Тестовые ручки** (`//go:build wf_e2e`, вне контракта, `/_e2e/media/…`) — пакет `cmd/internal/mediae2e` целиком под
+  тегом (страж `TestProdBuildWithoutE2ETag` читает все его файлы), подключают `cmd/{api,admin-api}/media_e2e.go`;
+  прод — `media_prod.go` (`nil`, `TestProdBuildHasNoE2ERoutes` обходит маршруты `chi.Walk`). api (сессия игрока —
+  конвейер public, `Idempotency-Key` — его же): `POST uploads` → `NewUpload` (он сам — единственная `db.InTx` запроса:
+  в свою `InTx` не оборачивать, иначе `errSecondTx` → 500), `POST objects` → `ConfirmUpload` до транзакции +
+  `db.InTx(AttachInTx)`, `GET objects/{id}`, `GET objects/{id}/private?variant=` (ответы — `Cache-Control: no-store`).
+  admin-api: звено сессии конвейера идёт только по маршрутам контракта — ручки сами грузят сотрудника (cookie,
+  `active`, без `Reauth`) и ставят `idempotency.Middleware(Staff)`; CSRF и лимит тела — конвейер (`E2EBodyLimits`:
+  прямая загрузка 5 МиБ). `POST direct` (multipart, файл последним) → `Stage` + `db.InTx(CreateDirectInTx)`;
+  `POST objects/{id}/take-down` → `Label` до транзакции, `db.InTx(TakeDownInTx)` (причина `e2e.take_down`). Владелец —
+  `e2e_owner` с `owner_id` из запроса. Стражи — `TestMediaE2E`, `TestNoPublicURLForPrivate` (`cmd/api`),
+  `TestMediaE2EAdmin` (`cmd/admin-api`); в `backend:test` — команда `go test -tags wf_e2e -run …` по `cmd/api`,
+  `cmd/admin-api`, `cmd/worker`, `cmd/internal/mediapurposes` (страж `TestE2ECaptainChecksTestInCI`); воркер живого e2e
+  собирается с тегом (`scripts/e2e-admin.sh`).

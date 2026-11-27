@@ -40,9 +40,33 @@ type Options struct {
 	Identity identityhttp.Handler
 	// WellKnown — файлы /.well-known до веба (identityhttp.WellKnown, R14 плана I-2); nil — каталога нет (404)
 	WellKnown http.Handler
+	// Media — dev-пути хранилища fs вне контракта (media/httpdev, спека media §6.3): POST /_blob/in со своим пределом
+	// тела (R16) и GET /_media/*; nil — путей нет (s3, none). Задаёт cmd/api только при fs.
+	Media DevMedia
+	// E2E — тестовые ручки сборки wf_e2e под /_e2e/ (cmd/api/media_e2e.go), вне контракта, за общим конвейером
+	// (сессия игрока, идемпотентность); nil — прод-сборка: маршрута нет.
+	E2E http.Handler
+}
+
+// DevMedia — dev-пути хранилища fs (*httpdev.Handler; httpapi импортирует у модуля только корень, httpapi и admin).
+type DevMedia interface {
+	http.Handler
+	// UploadLimit — предел тела POST /_blob/in: файл цели и поля формы (R16).
+	UploadLimit() int64
 }
 
 const defaultRequestTimeout = 15 * time.Second
+
+// devUploadPath — форма загрузки dev-хранилища (httpdev.UploadPath).
+const devUploadPath = "/_blob/in"
+
+// bodyLimits — исключения из общего лимита тела (R16): форма загрузки dev-хранилища при fs.
+func bodyLimits(o Options) []httpx.BodyLimit {
+	if o.Media == nil {
+		return nil
+	}
+	return []httpx.BodyLimit{{Method: http.MethodPost, Prefix: devUploadPath, Max: o.Media.UploadLimit()}}
+}
 
 // NewHandler собирает публичный API на общей HTTP-платформе: конвейер спеки §6.1 стоит до
 // strict-хендлера. Забытая зависимость или класс x-rate-limit без правила — отказ старта.
@@ -98,7 +122,7 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		// несколько строк Accept-Language — одна (RFC 9110 §5.3): сгенерированный код принимает у
 		// заголовка-параметра ровно одну строку, на вторую ответил бы 400
 		httpx.CombineHeaders("Accept-Language"),
-		httpx.LimitBody(httpx.MaxBodyBytes),
+		httpx.LimitBody(httpx.MaxBodyBytes, bodyLimits(o)...),
 		httpx.Timeout(timeout),
 		routes,
 		auth.Middleware(o.Tokens, o.Sessions, log),
@@ -118,6 +142,14 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	if o.WellKnown != nil {
 		// /.well-known/* не в контракте: как /docs — мимо валидатора (маршрута контракта нет) и без лимитов auth
 		router.Handle(identityhttp.WellKnownPrefix+"*", o.WellKnown)
+	}
+	if o.Media != nil {
+		// dev-пути fs не в контракте: как /docs — мимо валидатора, без сессии (подпись — единственная защита)
+		router.Handle(devUploadPath, o.Media)
+		router.Handle("/_media/*", o.Media)
+	}
+	if o.E2E != nil {
+		router.Handle("/_e2e/*", o.E2E)
 	}
 	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
 		BaseRouter: router,

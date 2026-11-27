@@ -37,7 +37,8 @@ var workerEnvNoDB = []string{"WORKER_MAIL_SMTP_ADDR=127.0.0.1:1", "WORKER_MAIL_F
 
 // apiBase — обязательное окружение api (без базы и адреса).
 func apiBase() []string {
-	return append([]string{"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed}, identityEnv...)
+	return append([]string{"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_BLOB_BACKEND=none"},
+		identityEnv...)
 }
 
 // without — env без ключа key.

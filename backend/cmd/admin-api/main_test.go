@@ -31,7 +31,7 @@ func offlineEnv(extra ...string) []string {
 		"ADMIN_ORIGIN=http://127.0.0.1:5173",
 		// 32 нулевых байта: годный ключ без энтропии (gitleaks не примет за секрет)
 		"ADMIN_STAFF_SECRET_KEYS=" + strings.Repeat("A", 43) + "=",
-		"ADMIN_MAIL_SMTP_ADDR=127.0.0.1:1", "ADMIN_MAIL_FROM=WF <noreply@wf.local>"}, extra...)
+		"ADMIN_MAIL_SMTP_ADDR=127.0.0.1:1", "ADMIN_MAIL_FROM=WF <noreply@wf.local>", "ADMIN_BLOB_BACKEND=none"}, extra...)
 }
 
 // Заголовок CDN без прокси хостинга — отказ старта до подключения к базе: ADMIN_CLIENT_IP_HEADER
@@ -337,7 +337,7 @@ func (e *testEnv) startServer() (context.CancelFunc, <-chan error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.t.Cleanup(cancel)
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, nil, e.environ(), io.Discard, io.Discard) }()
+	go func() { done <- run(ctx, nil, e.environ(e.extra...), io.Discard, io.Discard) }()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if code, _ := e.tryGet("/healthz"); code == http.StatusOK {
@@ -612,5 +612,35 @@ func TestRunRejectsBadWakeURL(t *testing.T) {
 	err := run(context.Background(), nil, offlineEnv("ADMIN_WAKE_API_URL=http://x"), io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "ADMIN_WAKE_API_URL") {
 		t.Fatalf("err = %v, ждали отказ с ADMIN_WAKE_API_URL", err)
+	}
+}
+
+// R15, спека media §6.3: в прод-образе (WF_BUILD_KIND=prod) ADMIN_BLOB_BACKEND=fs не стартует — отказ до базы с именем
+// ключа; без ADMIN_BLOB_BACKEND — тоже; без признака те же ключи принимаются (ошибка — уже о базе). Команды оператора
+// ключей хранилища не читают.
+func TestRunRejectsFSInProdImage(t *testing.T) {
+	t.Parallel()
+	fsEnv := []string{"ADMIN_BLOB_BACKEND=fs", "ADMIN_BLOB_FS_ROOT=" + t.TempDir(),
+		"ADMIN_BLOB_FS_BASE_URL=http://127.0.0.1:8080", "ADMIN_BLOB_DEV_SIGN_KEY=" + strings.Repeat("A", 43) + "="}
+	err := run(context.Background(), nil, offlineEnv(append([]string{"WF_BUILD_KIND=prod"}, fsEnv...)...), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "ADMIN_BLOB_BACKEND=fs") {
+		t.Fatalf("fs в прод-образе: err = %v", err)
+	}
+	var noBlob []string
+	for _, kv := range offlineEnv() {
+		if !strings.HasPrefix(kv, "ADMIN_BLOB_BACKEND=") {
+			noBlob = append(noBlob, kv)
+		}
+	}
+	if err := run(context.Background(), nil, noBlob, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "ADMIN_BLOB_BACKEND") {
+		t.Fatalf("без ADMIN_BLOB_BACKEND: err = %v", err)
+	}
+	err = run(context.Background(), nil, offlineEnv(fsEnv...), io.Discard, io.Discard)
+	if err == nil || strings.Contains(err.Error(), "BLOB") || !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("fs вне прод-образа: err = %v, ждали ошибку подключения к базе", err)
+	}
+	err = run(context.Background(), []string{"staff", "disable", "--email", "x@wf.local"}, noBlob, io.Discard, io.Discard)
+	if err == nil || strings.Contains(err.Error(), "BLOB") {
+		t.Fatalf("команда оператора читает ADMIN_BLOB_*: err = %v", err)
 	}
 }

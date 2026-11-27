@@ -153,12 +153,14 @@ INSERT INTO city_names (city_id, locale, name)
 SELECT c.id, 'ru', c.name FROM cities c WHERE c.slug LIKE 'flagtest-%';
 SQL
 
-# 4. admin-api, api, воркер и фикстура GeoNames. admin-api и api — с тегом wf_e2e (план I-4, Task 11; спека identity
-# §10.3, К1): тестовые порты условий капитанства «выполнено» (cmd/{api,admin-api}/captaincy_e2e.go) — только в
-# бинарниках живого e2e; прод-образ собирается без тега (страж TestProdBuildWithoutE2ETag, config)
+# 4. admin-api, api, воркер и фикстура GeoNames. admin-api, api и воркер — с тегом wf_e2e (план I-4, Task 11; спека
+# identity §10.3, К1; план media Task 11): тестовые порты условий капитанства «выполнено»
+# (cmd/{api,admin-api}/captaincy_e2e.go), тестовые цели media (cmd/internal/mediapurposes/e2e.go — одинаковы у трёх) и
+# ручки /_e2e/media/* — только в бинарниках живого e2e; прод-образ собирается без тега (страж TestProdBuildWithoutE2ETag,
+# config)
 (cd backend && go build -tags wf_e2e -o "../.tools/e2e/admin-api$exe" ./cmd/admin-api)
 (cd backend && go build -tags wf_e2e -o "../.tools/e2e/api$exe" ./cmd/api)
-(cd backend && go build -o "../.tools/e2e/worker$exe" ./cmd/worker)
+(cd backend && go build -tags wf_e2e -o "../.tools/e2e/worker$exe" ./cmd/worker)
 (cd backend && go build -o "../.tools/e2e/geofixture$exe" ./cmd/geofixture)
 # PEM прошлого прогона не должен сойти за свежий: фикстура пишет новый корень при старте
 rm -f .tools/e2e/geofixture-ca.pem

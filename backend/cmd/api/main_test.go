@@ -131,3 +131,25 @@ func TestRunRejectsBadWellKnownAndroid(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// R15, спека media §6.3: в прод-образе (WF_BUILD_KIND=prod) API_BLOB_BACKEND=fs не стартует — отказ до базы с именем
+// ключа; без признака те же ключи принимаются (ошибка — уже о базе). Без API_BLOB_BACKEND — отказ с именем ключа.
+func TestRunRejectsFSInProdImage(t *testing.T) {
+	t.Parallel()
+	fsEnv := append([]string{"API_HTTP_ADDR=127.0.0.1:0", "API_DATABASE_URL=postgres://a@127.0.0.1:1/wf?connect_timeout=1",
+		"API_JWT_SEEDS=" + testSeed, "API_HUMANCHECK_KEYS=" + testSeed, "API_BLOB_BACKEND=fs",
+		"API_BLOB_FS_ROOT=" + t.TempDir(), "API_BLOB_FS_BASE_URL=http://127.0.0.1:8080", "API_BLOB_DEV_SIGN_KEY=" + testSeed},
+		identityEnv...)
+	err := run(context.Background(), append([]string{"WF_BUILD_KIND=prod"}, fsEnv...), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "API_BLOB_BACKEND=fs") {
+		t.Fatalf("fs в прод-образе: err = %v", err)
+	}
+	err = run(context.Background(), without(fsEnv, "API_BLOB_BACKEND"), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "API_BLOB_BACKEND") {
+		t.Fatalf("без API_BLOB_BACKEND: err = %v", err)
+	}
+	err = run(context.Background(), fsEnv, io.Discard)
+	if err == nil || strings.Contains(err.Error(), "BLOB") || !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("fs вне прод-образа: err = %v, ждали ошибку подключения к базе", err)
+	}
+}

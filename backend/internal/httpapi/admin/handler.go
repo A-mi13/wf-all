@@ -60,6 +60,14 @@ type Options struct {
 	Approvals ApprovalService
 	// Wake — побудка api после успешных мутаций (ADMIN_WAKE_API_URL, NewWaker); nil — выключена.
 	Wake *Waker
+	// MediaBaseURL — адрес публичных вариантов хранилища (blob.Opened.PublicBaseURL: s3 — ADMIN_MEDIA_PUBLIC_BASE_URL, fs —
+	// <ADMIN_BLOB_FS_BASE_URL>/_media/pub/): его origin — в img-src CSP статики (спека media §3.6); пусто — режим none.
+	MediaBaseURL string
+	// E2E — тестовые ручки сборки wf_e2e под /_e2e/ (cmd/admin-api/media_e2e.go), вне контракта, за общим конвейером
+	// (аллоулист, CSRF); сессию сотрудника и идемпотентность ручки ставят сами (звено сессии — только маршруты
+	// контракта). nil — прод-сборка: маршрута нет. E2EBodyLimits — их исключения из лимита тела (R16).
+	E2E           http.Handler
+	E2EBodyLimits []httpx.BodyLimit
 }
 
 // ApprovalService — решения и списки подтверждений вдвоём (реализует *approvals.Service; интерфейс —
@@ -140,9 +148,13 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 	if err != nil {
 		return nil, err
 	}
+	// адрес медиа проверяется и без статики: негодный — отказ старта, а не CSP, который не грузит ни одной картинки
+	if _, err := staticCSP(o.MediaBaseURL); err != nil {
+		return nil, err
+	}
 	var static http.Handler
 	if o.StaticDir != "" {
-		if static, err = newStatic(o.StaticDir, log); err != nil {
+		if static, err = newStatic(o.StaticDir, o.MediaBaseURL, log); err != nil {
 			return nil, err
 		}
 	}
@@ -187,7 +199,7 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 		// несколько строк Accept-Language — одна (RFC 9110 §5.3): сгенерированный код принимает у
 		// заголовка-параметра ровно одну строку, на вторую ответил бы 400
 		httpx.CombineHeaders("Accept-Language"),
-		httpx.LimitBody(httpx.MaxBodyBytes),
+		httpx.LimitBody(httpx.MaxBodyBytes, o.E2EBodyLimits...),
 		httpx.Timeout(timeout),
 		routes,
 		noStore,
@@ -214,6 +226,9 @@ func newHandler(log *slog.Logger, o Options, spec *openapi3.T) (http.Handler, er
 			return nil, fmt.Errorf("admin: контракт: %w", err)
 		}
 		apidocs.Mount(router, title, specJSON)
+	}
+	if o.E2E != nil {
+		router.Handle("/_e2e/*", o.E2E)
 	}
 	if static != nil {
 		// всё, что не нашёл роутер: вне /v1 — сборка админки, /v1/* — 404 Problem

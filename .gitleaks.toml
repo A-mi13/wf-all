@@ -28,3 +28,7 @@ regexes = [
   '''UmVzdG9yZS10b2tlbi0yNTYtYml0cy1iYXNlNjR1cmwtYWJj''',
   '''Qm9vdHN0cmFwLW1mYS10b2tlbi0yNTYtYml0cy1iYXNlNjR1''',
 ]
+
+[[allowlists]]
+description = "пример media (план media, Task 11): поле формы key — id объекта (UUIDv7), не секрет"
+regexes = ['''019a8f2e-4c1d-7b3a-9e21-5f0c8d7a6b42''']

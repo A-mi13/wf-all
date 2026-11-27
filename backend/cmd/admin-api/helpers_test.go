@@ -132,8 +132,9 @@ type testEnv struct {
 	key   string        // ADMIN_STAFF_SECRET_KEYS
 	ring  *keys.Ring
 	smtp  *smtpStub
-	dbURL string // строка admin-api: тот же сервер и база, роль admin
-	addr  string // ADMIN_HTTP_ADDR
+	dbURL string   // строка admin-api: тот же сервер и база, роль admin
+	addr  string   // ADMIN_HTTP_ADDR
+	extra []string // переменные сервера startServer поверх environ (хранилище fs и т. п.)
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -165,7 +166,7 @@ func (e *testEnv) environ(extra ...string) []string {
 	return append([]string{
 		"ADMIN_HTTP_ADDR=" + e.addr, "ADMIN_DATABASE_URL=" + e.dbURL, "ADMIN_ORIGIN=" + testOrigin,
 		"ADMIN_STAFF_SECRET_KEYS=" + e.key, "ADMIN_MAIL_SMTP_ADDR=" + e.smtp.addr(), "ADMIN_MAIL_FROM=WF <noreply@wf.local>",
-		"ADMIN_MAIL_SMTP_TLS=none", "ADMIN_LOG_FORMAT=text", "ADMIN_SHUTDOWN_TIMEOUT=10s",
+		"ADMIN_MAIL_SMTP_TLS=none", "ADMIN_LOG_FORMAT=text", "ADMIN_SHUTDOWN_TIMEOUT=10s", "ADMIN_BLOB_BACKEND=none",
 	}, extra...)
 }
 
